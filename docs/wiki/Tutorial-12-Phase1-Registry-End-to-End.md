@@ -108,7 +108,8 @@ edition year. Missing `edition`, `compatibility_profile_hash`,
 `dependencies`, `status`, or `yanked`, an unknown schema identifier, or a
 mismatched nested identity is rejected. The production Registry deployed this
 as its initial schema on 2026-07-31; `0001_initial.sql` is now frozen and later
-schema changes require additive migrations.
+schema changes require additive migrations. `0002_verification_jobs.sql` is the
+first such migration and adds the automatic queue without rewriting history.
 
 `source_published` means the signed source snapshot was admitted; it does not
 mean the build or deployment was verified. The generic admin endpoint cannot
@@ -116,6 +117,15 @@ promote an entry to `verified_build`, `deployed`, or `on_chain_attested`.
 Those labels require the ordered evidence endpoint. Each step stores
 hash-addressed evidence, validates the package/build identity, and binds the
 next step to the preceding evidence reference.
+
+The baseline `verified_build` step is automatic. Publish creates a verification
+job in the same database transaction as the version. A leased worker then
+authenticates the immutable generated snapshot, compiles it with the current
+CellScript compiler, verifies the canonical manifest and resolved-profile
+hashes, commits evidence/status atomically, and refreshes the static version
+object. Queue attempts are bounded; rejected builds dead-letter, while
+operators can inspect metrics and audit an explicit requeue. Admission therefore
+returns `verification: queued`, never a synchronous verification claim.
 
 ## Consumer Flow
 
@@ -133,6 +143,10 @@ source snapshot. It verifies the snapshot descriptor's SHA-256, rejects opaque
 or path-escaping content, verifies every file's BLAKE2b digest, reconstructs the
 source tree atomically, and checks `Cell.toml`, source hash, Edition 2026, and
 compatibility-profile identity.
+The default package list/search follows the same baseline and shows only
+`verified_build`, `deployed`, or `on_chain_attested`. Direct package/version
+URLs and an explicit `?status=source_published` query remain available for
+auditing an admitted version before verification completes.
 For a direct `source_published` or `indexed_pending` install, pass
 `--allow-unverified`; incident review of a quarantined entry additionally needs
 `--allow-quarantined`. `cellc install` persists these acknowledgements on that

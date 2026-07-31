@@ -11,6 +11,7 @@
 //! Resolution priority: path > git > registry
 
 use crate::error::{CompileError, Result};
+use crate::package::PackageManifest;
 #[cfg(feature = "cli")]
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -36,6 +37,38 @@ pub const AUTHORIZE_CAPABILITY_ACTION: &str = "authorize_capability";
 pub const REVOKE_CAPABILITY_ACTION: &str = "revoke_capability";
 pub const REGISTRY_PUBLISH_PROTOCOL: &str = "cellscript-registry-publish-v1";
 pub const PUBLISH_ACTION: &str = "publish";
+
+/// Compute the cross-process identity of a parsed package manifest.
+///
+/// `PackageManifest` contains hash maps, so serializing it directly can emit a
+/// different key order in another process. Registry identities must instead
+/// hash recursively key-sorted JSON so the publisher and isolated verifier
+/// agree for the same `Cell.toml`.
+pub fn compute_package_manifest_hash(manifest: &PackageManifest) -> Result<String> {
+    let value = serde_json::to_value(manifest)
+        .map_err(|error| CompileError::without_span(format!("failed to serialize package manifest for digest: {error}")))?;
+    let bytes = serde_json::to_vec(&canonical_json_value(&value))
+        .map_err(|error| CompileError::without_span(format!("failed to serialize canonical package manifest: {error}")))?;
+    Ok(crate::hex_encode(&crate::ckb_blake2b256(&bytes)))
+}
+
+fn canonical_json_value(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Array(items) => serde_json::Value::Array(items.iter().map(canonical_json_value).collect()),
+        serde_json::Value::Object(object) => {
+            let mut keys = object.keys().collect::<Vec<_>>();
+            keys.sort_unstable();
+            let mut canonical = serde_json::Map::new();
+            for key in keys {
+                if let Some(item) = object.get(key) {
+                    canonical.insert(key.clone(), canonical_json_value(item));
+                }
+            }
+            serde_json::Value::Object(canonical)
+        }
+        other => other.clone(),
+    }
+}
 
 /// Effective discovery index URL.
 ///
@@ -290,13 +323,7 @@ pub fn materialize_public_source_snapshot(
     let target = cache_root.join(format!("{name}-snapshot-{cache_suffix}"));
     let temporary = unique_snapshot_temp_dir(cache_root, name)?;
     let materialized = (|| {
-        unpack_generated_source_snapshot(&bytes, &temporary, namespace, name, version)?;
-        let computed_source_hash = compute_source_hash(&temporary)?;
-        if computed_source_hash != expected_source_hash {
-            return Err(CompileError::without_span(format!(
-                "public registry source snapshot for '{namespace}/{name}@{version}' has source_hash '{computed_source_hash}', expected '{expected_source_hash}'"
-            )));
-        }
+        materialize_generated_source_snapshot_bytes(&bytes, &temporary, namespace, name, version, expected_source_hash)?;
         remove_cache_entry(&target)?;
         std::fs::rename(&temporary, &target).map_err(|error| {
             CompileError::without_span(format!(
@@ -311,6 +338,33 @@ pub fn materialize_public_source_snapshot(
         let _ = std::fs::remove_dir_all(&temporary);
     }
     materialized
+}
+
+/// Authenticate and materialize the generated JSON source-snapshot profile
+/// into a caller-owned, non-existent directory. This is shared by dependency
+/// resolution and the isolated Registry build-verification worker so both
+/// paths enforce identical identity, path, per-file hash, size, and whole-tree
+/// source-hash checks.
+#[cfg(feature = "cli")]
+pub fn materialize_generated_source_snapshot_bytes(
+    bytes: &[u8],
+    destination: &Path,
+    namespace: &str,
+    name: &str,
+    version: &str,
+    expected_source_hash: &str,
+) -> Result<()> {
+    if destination.exists() {
+        return Err(CompileError::without_span(format!("source snapshot destination '{}' already exists", destination.display())));
+    }
+    unpack_generated_source_snapshot(bytes, destination, namespace, name, version)?;
+    let computed_source_hash = compute_source_hash(destination)?;
+    if computed_source_hash != expected_source_hash {
+        return Err(CompileError::without_span(format!(
+            "public registry source snapshot for '{namespace}/{name}@{version}' has source_hash '{computed_source_hash}', expected '{expected_source_hash}'"
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(not(feature = "cli"))]
@@ -1259,6 +1313,44 @@ mod ckb_blake2b256_stream {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn package_manifest_hash_is_independent_of_map_insertion_order() {
+        let first: PackageManifest = toml::from_str(
+            r#"[package]
+edition = "2026"
+name = "demo"
+version = "1.2.3"
+
+[dependencies]
+alpha = "1"
+beta = "2"
+
+[metadata]
+left = "a"
+right = "b"
+"#,
+        )
+        .unwrap();
+        let second: PackageManifest = toml::from_str(
+            r#"[package]
+edition = "2026"
+name = "demo"
+version = "1.2.3"
+
+[dependencies]
+beta = "2"
+alpha = "1"
+
+[metadata]
+right = "b"
+left = "a"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(compute_package_manifest_hash(&first).unwrap(), compute_package_manifest_hash(&second).unwrap());
+    }
 
     #[test]
     fn public_registry_status_overrides_publisher_claim() {

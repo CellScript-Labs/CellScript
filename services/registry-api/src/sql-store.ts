@@ -19,6 +19,9 @@ import {
   type ReservedNamespaceRecord,
   type RegistryStore,
   type SnapshotRecord,
+  type VerificationJobRecord,
+  type VerificationJobStatus,
+  type VerificationQueueMetrics,
 } from "./store";
 import { ApiError, capabilityKeyId, canonicalJson, sha256Hex, type CapabilityAuthorisationPayload, type RegistryEntryStatus } from "./domain";
 
@@ -452,6 +455,7 @@ export class SqlRegistryStore implements RegistryStore {
          where ($1::text is null or pv.namespace = $1)
            and ($2::text is null or pv.name = $2)
            and ($3::text is null or pv.status = $3)
+           and ($7::text[] is null or pv.status = any($7::text[]))
            and (
              $4::text is null
              or pv.namespace ilike '%' || $4 || '%'
@@ -462,7 +466,15 @@ export class SqlRegistryStore implements RegistryStore {
            )
          order by pv.created_at desc, pv.namespace, pv.name, pv.version desc
          limit $5 offset $6`,
-        [input.namespace ?? null, input.name ?? null, input.status ?? null, input.query ?? null, input.limit, input.offset],
+        [
+          input.namespace ?? null,
+          input.name ?? null,
+          input.status ?? null,
+          input.query ?? null,
+          input.limit,
+          input.offset,
+          input.statuses ?? null,
+        ],
       );
       return result.rows.map(packageVersionFromRow);
     });
@@ -558,6 +570,12 @@ export class SqlRegistryStore implements RegistryStore {
         if (insertedVersion.rowCount !== 1) {
           throw new ApiError(409, "package_version_exists", "package version already exists and cannot be overwritten");
         }
+        await client.query(
+          `insert into verification_jobs(namespace, name, version)
+           values ($1, $2, $3)
+           on conflict (namespace, name, version) do nothing`,
+          [input.version.namespace, input.version.name, input.version.version],
+        );
         await client.query("update capabilities set last_used_at = now() where key_id = $1", [input.capability_usage.key_id]);
         await client.query(
           `insert into audit_events(
@@ -1048,6 +1066,349 @@ export class SqlRegistryStore implements RegistryStore {
     });
   }
 
+  async claimVerificationJob(input: {
+    worker_id: string;
+    lease_seconds: number;
+    now_iso: string;
+  }): Promise<VerificationJobRecord | null> {
+    return this.withClient(async (client) => {
+      const result = await client.query(
+        `with candidate as (
+           select id
+           from verification_jobs
+           where (
+             status in ('queued', 'retry_wait') and available_at <= $3
+           ) or (
+             status in ('running', 'publishing') and lease_expires_at <= $3
+           )
+           order by available_at, created_at
+           for update skip locked
+           limit 1
+         ), claimed as (
+           update verification_jobs job
+           set status = case when job.evidence_hash is null then 'running' else 'publishing' end,
+               attempt_count = job.attempt_count + 1,
+               lease_owner = $1,
+               lease_expires_at = $3::timestamptz + make_interval(secs => $2),
+               started_at = coalesce(job.started_at, $3::timestamptz),
+               updated_at = $3::timestamptz
+           from candidate
+           where job.id = candidate.id
+           returning job.*
+         )
+         select claimed.*,
+                pv.source_hash, pv.manifest_hash, pv.compatibility_profile_hash, pv.snapshot_hash,
+                ss.r2_key as snapshot_object_key, ss.size_bytes as snapshot_size_bytes,
+                ss.content_type as snapshot_content_type
+         from claimed
+         join package_versions pv using (namespace, name, version)
+         join source_snapshots ss on ss.snapshot_hash = pv.snapshot_hash`,
+        [input.worker_id, input.lease_seconds, input.now_iso],
+      );
+      return result.rows[0] ? verificationJobFromRow(result.rows[0]) : null;
+    });
+  }
+
+  async promoteVerifiedBuildForJob(input: {
+    job_id: string;
+    worker_id: string;
+    evidence_hash: string;
+    evidence: Record<string, unknown>;
+    request_id: string;
+    admin_actor: string;
+  }): Promise<{ job: VerificationJobRecord; version: PackageVersionRecord; evidence: PackageEvidenceRecord }> {
+    return this.withClient(async (client) => {
+      await client.query("begin");
+      try {
+        const locked = await client.query(
+          `select job.namespace, job.name, job.version,
+                  pv.status, pv.source_hash, pv.manifest_hash, pv.edition,
+                  pv.compatibility_profile_hash, pv.capability_key_id,
+                  pv.principal_type, pv.principal_id, pv.registry_entry,
+                  pv.snapshot_hash, pv.direct_url, pv.created_at
+           from verification_jobs job
+           join package_versions pv using (namespace, name, version)
+           where job.id = $1
+             and job.status = 'running'
+             and job.lease_owner = $2
+             and job.lease_expires_at > now()
+           for update of job, pv`,
+          [input.job_id, input.worker_id],
+        );
+        const currentRow = locked.rows[0];
+        if (!currentRow) {
+          throw new ApiError(409, "verification_job_lease_lost", "verification job lease is no longer owned by this worker");
+        }
+        const current = packageVersionFromRow(currentRow);
+        assertPromotionTransition(current.status, "verified_build");
+        await client.query(
+          `insert into package_version_evidence(
+             namespace, name, version, kind, evidence_hash, evidence,
+             request_id, admin_actor
+           ) values ($1, $2, $3, 'verified_build', $4, $5::jsonb, $6, $7)
+           on conflict (namespace, name, version, kind, evidence_hash) do nothing`,
+          [
+            current.namespace,
+            current.name,
+            current.version,
+            input.evidence_hash,
+            JSON.stringify(input.evidence),
+            input.request_id,
+            input.admin_actor,
+          ],
+        );
+        const updatedVersion = await client.query(
+          `update package_versions
+           set status = 'verified_build',
+               indexed_at = coalesce(indexed_at, now()),
+               verified_at = coalesce(verified_at, now())
+           where namespace = $1 and name = $2 and version = $3
+           returning namespace, name, version, status, source_hash, manifest_hash,
+                     edition, compatibility_profile_hash, capability_key_id,
+                     principal_type, principal_id, registry_entry, snapshot_hash,
+                     direct_url, created_at`,
+          [current.namespace, current.name, current.version],
+        );
+        await client.query(
+          `update verification_jobs
+           set status = 'publishing', evidence_hash = $3, evidence = $4::jsonb,
+               updated_at = now()
+           where id = $1 and lease_owner = $2`,
+          [input.job_id, input.worker_id, input.evidence_hash, JSON.stringify(input.evidence)],
+        );
+        await client.query(
+          `insert into audit_events(
+             request_id, event_type, principal_type, principal_id, capability_key_id,
+             namespace, name, version, data
+           ) values ($1, 'evidence.verified_build.accepted', $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+          [
+            input.request_id,
+            current.principal_type,
+            current.principal_id,
+            current.capability_key_id,
+            current.namespace,
+            current.name,
+            current.version,
+            JSON.stringify({ admin_actor: input.admin_actor, evidence_hash: input.evidence_hash, job_id: input.job_id }),
+          ],
+        );
+        const evidenceResult = await client.query(
+          `select namespace, name, version, kind, evidence_hash, evidence,
+                  request_id, admin_actor, created_at
+           from package_version_evidence
+           where namespace = $1 and name = $2 and version = $3
+             and kind = 'verified_build' and evidence_hash = $4`,
+          [current.namespace, current.name, current.version, input.evidence_hash],
+        );
+        const job = await this.verificationJobById(client, input.job_id);
+        await client.query("commit");
+        return {
+          job,
+          version: packageVersionFromRow(updatedVersion.rows[0]),
+          evidence: packageEvidenceFromRow(evidenceResult.rows[0]),
+        };
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      }
+    });
+  }
+
+  async completeVerificationJob(input: { job_id: string; worker_id: string }): Promise<VerificationJobRecord> {
+    return this.withClient(async (client) => {
+      await client.query("begin");
+      try {
+        const updated = await client.query(
+          `update verification_jobs
+           set status = 'succeeded', lease_owner = null, lease_expires_at = null,
+               completed_at = now(), updated_at = now(),
+               last_error_code = null, last_error_message = null
+           where id = $1 and status = 'publishing' and lease_owner = $2
+             and lease_expires_at > now()
+           returning namespace, name, version, attempt_count, evidence_hash`,
+          [input.job_id, input.worker_id],
+        );
+        const row = updated.rows[0];
+        if (!row) {
+          throw new ApiError(409, "verification_job_lease_lost", "verification job lease is no longer owned by this worker");
+        }
+        await client.query(
+          `insert into audit_events(request_id, event_type, namespace, name, version, data)
+           values ($1, 'verification.succeeded', $2, $3, $4, $5::jsonb)`,
+          [
+            `verification:${input.job_id}`,
+            row.namespace,
+            row.name,
+            row.version,
+            JSON.stringify({ job_id: input.job_id, attempt_count: row.attempt_count, evidence_hash: row.evidence_hash }),
+          ],
+        );
+        const job = await this.verificationJobById(client, input.job_id);
+        await client.query("commit");
+        return job;
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      }
+    });
+  }
+
+  async failVerificationJob(input: {
+    job_id: string;
+    worker_id: string;
+    error_code: string;
+    error_message: string;
+    retryable: boolean;
+    retry_after_seconds: number;
+    request_id: string;
+  }): Promise<VerificationJobRecord> {
+    return this.withClient(async (client) => {
+      await client.query("begin");
+      try {
+        const updated = await client.query(
+          `update verification_jobs
+           set status = case
+                 when $3::boolean and attempt_count < max_attempts
+                   then 'retry_wait'
+                 else 'dead_letter'
+               end,
+               available_at = now() + make_interval(secs => case
+                 when $3::boolean and attempt_count < max_attempts then $4
+                 else 0
+               end),
+               lease_owner = null,
+               lease_expires_at = null,
+               last_error_code = $5,
+               last_error_message = $6,
+               updated_at = now()
+           where id = $1 and lease_owner = $2
+             and status in ('running', 'publishing')
+             and lease_expires_at > now()
+           returning namespace, name, version, status, attempt_count`,
+          [
+            input.job_id,
+            input.worker_id,
+            input.retryable,
+            input.retry_after_seconds,
+            input.error_code,
+            input.error_message,
+          ],
+        );
+        const row = updated.rows[0];
+        if (!row) {
+          throw new ApiError(409, "verification_job_lease_lost", "verification job lease is no longer owned by this worker");
+        }
+        const retry = row.status === "retry_wait";
+        await client.query(
+          `insert into audit_events(request_id, event_type, namespace, name, version, data)
+           values ($1, $2, $3, $4, $5, $6::jsonb)`,
+          [
+            input.request_id,
+            retry ? "verification.retry_scheduled" : "verification.dead_lettered",
+            row.namespace,
+            row.name,
+            row.version,
+            JSON.stringify({
+              job_id: input.job_id,
+              attempt_count: row.attempt_count,
+              error_code: input.error_code,
+              retry_after_seconds: retry ? input.retry_after_seconds : null,
+            }),
+          ],
+        );
+        const job = await this.verificationJobById(client, input.job_id);
+        await client.query("commit");
+        return job;
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      }
+    });
+  }
+
+  async retryVerificationJob(input: {
+    job_id: string;
+    request_id: string;
+    admin_actor: string;
+  }): Promise<VerificationJobRecord> {
+    return this.withClient(async (client) => {
+      await client.query("begin");
+      try {
+        const updated = await client.query(
+          `update verification_jobs
+           set status = 'queued', attempt_count = 0, available_at = now(),
+               lease_owner = null, lease_expires_at = null,
+               last_error_code = null, last_error_message = null,
+               updated_at = now()
+           where id = $1 and status = 'dead_letter'
+           returning namespace, name, version`,
+          [input.job_id],
+        );
+        const row = updated.rows[0];
+        if (!row) {
+          const exists = await client.query("select status from verification_jobs where id = $1", [input.job_id]);
+          if (!exists.rows[0]) throw new ApiError(404, "verification_job_not_found", "verification job was not found");
+          throw new ApiError(409, "verification_job_not_dead_letter", "only dead-letter verification jobs can be retried manually");
+        }
+        await client.query(
+          `insert into audit_events(request_id, event_type, namespace, name, version, data)
+           values ($1, 'verification.requeued', $2, $3, $4, $5::jsonb)`,
+          [input.request_id, row.namespace, row.name, row.version, JSON.stringify({ job_id: input.job_id, admin_actor: input.admin_actor })],
+        );
+        const job = await this.verificationJobById(client, input.job_id);
+        await client.query("commit");
+        return job;
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      }
+    });
+  }
+
+  async getVerificationQueueMetrics(): Promise<VerificationQueueMetrics> {
+    return this.withClient(async (client) => {
+      const result = await client.query(
+        `select status, count(*)::integer as count,
+                min(available_at) filter (where status in ('queued', 'retry_wait')) as oldest_available_at,
+                min(updated_at) filter (where status = 'dead_letter') as oldest_dead_letter_at
+         from verification_jobs
+         group by status`,
+      );
+      const counts: Record<VerificationJobStatus, number> = {
+        queued: 0,
+        running: 0,
+        publishing: 0,
+        retry_wait: 0,
+        succeeded: 0,
+        dead_letter: 0,
+      };
+      let oldestAvailable: string | null = null;
+      let oldestDeadLetter: string | null = null;
+      for (const row of result.rows) {
+        counts[row.status as VerificationJobStatus] = Number(row.count);
+        if (row.oldest_available_at) oldestAvailable = new Date(row.oldest_available_at).toISOString();
+        if (row.oldest_dead_letter_at) oldestDeadLetter = new Date(row.oldest_dead_letter_at).toISOString();
+      }
+      return { counts, oldest_available_at: oldestAvailable, oldest_dead_letter_at: oldestDeadLetter };
+    });
+  }
+
+  private async verificationJobById(client: Client, jobId: string): Promise<VerificationJobRecord> {
+    const result = await client.query(
+      `select job.*,
+              pv.source_hash, pv.manifest_hash, pv.compatibility_profile_hash, pv.snapshot_hash,
+              ss.r2_key as snapshot_object_key, ss.size_bytes as snapshot_size_bytes,
+              ss.content_type as snapshot_content_type
+       from verification_jobs job
+       join package_versions pv using (namespace, name, version)
+       join source_snapshots ss on ss.snapshot_hash = pv.snapshot_hash
+       where job.id = $1`,
+      [jobId],
+    );
+    if (!result.rows[0]) throw new ApiError(404, "verification_job_not_found", "verification job was not found");
+    return verificationJobFromRow(result.rows[0]);
+  }
+
   async cleanupExpiredState(input: {
     now_iso: string;
     quota_events_before_iso: string;
@@ -1106,6 +1467,39 @@ function packageEvidenceFromRow(row: any): PackageEvidenceRecord {
     request_id: row.request_id,
     admin_actor: row.admin_actor,
     created_at: new Date(row.created_at).toISOString(),
+  };
+}
+
+function verificationJobFromRow(row: any): VerificationJobRecord {
+  if (!row) {
+    throw new ApiError(500, "verification_job_record_missing", "verification job write did not return a readable record");
+  }
+  return {
+    id: String(row.id),
+    namespace: String(row.namespace),
+    name: String(row.name),
+    version: String(row.version),
+    status: row.status as VerificationJobStatus,
+    attempt_count: Number(row.attempt_count),
+    max_attempts: Number(row.max_attempts),
+    available_at: new Date(row.available_at).toISOString(),
+    lease_owner: row.lease_owner ? String(row.lease_owner) : null,
+    lease_expires_at: row.lease_expires_at ? new Date(row.lease_expires_at).toISOString() : null,
+    evidence_hash: row.evidence_hash ? String(row.evidence_hash) : null,
+    evidence: row.evidence && typeof row.evidence === "object" && !Array.isArray(row.evidence) ? row.evidence : null,
+    last_error_code: row.last_error_code ? String(row.last_error_code) : null,
+    last_error_message: row.last_error_message ? String(row.last_error_message) : null,
+    created_at: new Date(row.created_at).toISOString(),
+    updated_at: new Date(row.updated_at).toISOString(),
+    started_at: row.started_at ? new Date(row.started_at).toISOString() : null,
+    completed_at: row.completed_at ? new Date(row.completed_at).toISOString() : null,
+    source_hash: String(row.source_hash),
+    manifest_hash: String(row.manifest_hash),
+    compatibility_profile_hash: String(row.compatibility_profile_hash),
+    snapshot_hash: String(row.snapshot_hash),
+    snapshot_object_key: String(row.snapshot_object_key),
+    snapshot_size_bytes: Number(row.snapshot_size_bytes),
+    snapshot_content_type: String(row.snapshot_content_type),
   };
 }
 

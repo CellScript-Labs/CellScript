@@ -134,7 +134,7 @@ Daily publish uses the capability key:
 cellc publish
   -> sign publish payload with capability private key
   -> registry checks signature, nonce, expiry, origin, revocation, ACL, quota
-  -> registry admits the entry as source_published / indexed_pending
+  -> registry admits the entry as source_published and queues verification
 ```
 
 JoyID only participates when creating, renewing, or revoking a capability. It
@@ -240,6 +240,7 @@ The deployed production stack is:
 ```text
 HTTPS Portal for ACME/TLS and reverse proxying
 Node 22 Registry adapter + Postgres 17 for the authoritative write path
+Bounded Node/Rust verifier worker for authenticated source/build verification
 Persistent object volume for immutable snapshots and exported static indexes
 Read-only nginx for version-addressed `/packages/*` objects
 ```
@@ -266,6 +267,10 @@ application core supports both deployment adapters:
 - filesystem and R2 source snapshot writers;
 - filesystem and R2 static package-version JSON writers before
   package-version admission;
+- transactional Postgres verification jobs, leased with `FOR UPDATE SKIP
+  LOCKED`, plus queue metrics and audited dead-letter requeue;
+- a self-hosted verifier worker that uses the current CellScript compiler and
+  shares the source-snapshot materialization contract with the resolver;
 - JoyID `verifySignature` authorisation check;
 - canonical challenge binding for capability creation;
 - one-time nonce consumption for capability creation, capability revocation, and
@@ -310,10 +315,11 @@ Production must store an immutable source snapshot or mirror object for each
 accepted package version. Git URL and tag are audit and fallback fields only.
 They are not availability guarantees.
 
-The source snapshot and the static package-version JSON object must both be
-persisted before the version is accepted into the registry store. If the direct
-read object cannot be written, the publish must fail without recording an
-accepted package version.
+The source snapshot and the initial `source_published` static package-version
+JSON object must both be persisted before the version is accepted into the
+registry store. If either direct-read object cannot be written, publish fails
+without recording an accepted package version. Admission and creation of its
+verification job then commit in one database transaction.
 
 The package-version object exposes the snapshot URL, object SHA-256, source
 hash, size, and semantic content type. Production clients install the current
@@ -380,6 +386,54 @@ Default resolver policy:
   only entries that passed the required baseline checks;
 - exact pins keep reproducibility, but warning and explicit-allow policy must
   make risk visible to the caller.
+
+## Automatic Verification Queue
+
+Publish success means admission, not build verification. The API returns
+`verification: queued` and the new version remains `source_published`. A
+separate worker performs the baseline promotion:
+
+```text
+publish transaction
+  -> queued job
+  -> leased claim
+  -> authenticate immutable snapshot
+  -> compile with the current CellScript compiler
+  -> check canonical manifest + compatibility-profile identities
+  -> atomic verified_build evidence/status/publishing checkpoint
+  -> refresh version-addressed static JSON
+  -> succeeded
+```
+
+Queue requirements:
+
+- the job and package version share a unique coordinate and are inserted in the
+  same transaction;
+- claims use row locks with `SKIP LOCKED`, an owner token, and an expiring lease
+  so multiple consumers do not process the same live attempt;
+- the generated JSON snapshot is the only automatic input profile; identity,
+  safe paths, decoded size, per-file CKB BLAKE2b, whole-tree source hash,
+  canonical manifest hash, and resolved compatibility-profile hash all fail
+  closed;
+- verifier execution has a wall-clock timeout, bounded stdout/stderr, and
+  container CPU, memory, process, capability, filesystem, and temporary-storage
+  limits;
+- build or identity rejection dead-letters immediately; infrastructure and
+  static publication retry with exponential delay, bounded by three attempts;
+- evidence insertion, status promotion, and the `publishing` checkpoint are one
+  transaction. A crash after it cannot rebuild or duplicate evidence: lease
+  recovery repeats only static publication;
+- manual requeue accepts only a dead-letter job, resets its attempt budget, and
+  records the admin actor;
+- production API readiness requires a fresh worker heartbeat, while queue
+  counts and oldest available/dead-letter timestamps are operator-visible;
+- default public search/list remains limited to `verified_build`, `deployed`,
+  and `on_chain_attested`; direct URLs and explicit status queries preserve the
+  audit trail for unverified entries.
+
+The manifest identity is computed from recursively key-sorted canonical JSON.
+Direct serialization of the parsed manifest is forbidden because its hash maps
+do not have a cross-process iteration order.
 
 ## Yank, Quarantine, Deprecation, And Deletion
 

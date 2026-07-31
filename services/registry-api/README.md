@@ -22,9 +22,10 @@ service is intentionally separate from Postgres and the write API so accepted
 package URLs remain available during a database or API incident.
 
 The self-hosted production slice was deployed on 2026-07-31. From that point,
-`migrations/0001_initial.sql` is the frozen deployed baseline; future schema
-changes must be additive numbered migrations rather than edits to the initial
-migration. Readiness and the public/static surfaces are available at:
+`migrations/0001_initial.sql` is the frozen deployed baseline; schema changes
+use additive numbered migrations. `0002_verification_jobs.sql` adds the leased
+automatic verification queue without rewriting that baseline. Readiness and
+the public/static surfaces are available at:
 
 ```text
 https://api.registry.cellscript.dev/health
@@ -74,10 +75,24 @@ https://registry.cellscript.dev/health
   with immutable caching, allowing `cellc install` to verify and materialize
   source without cloning Git.
 - Initial package-version status: `source_published`.
+- Transactional verification-job creation in the same Postgres commit as
+  package-version admission.
+- An independent Rust/Node verifier service that authenticates the generated
+  source snapshot, compiles it with the current CellScript compiler, verifies
+  the canonical manifest and compatibility-profile hashes, atomically records
+  `verified_build` evidence, and then refreshes the static version object.
+- Leased Postgres queue claims using `FOR UPDATE SKIP LOCKED`, bounded
+  three-attempt retry/dead-letter handling, crash recovery, and static-only
+  retry after evidence has already committed.
+- Verifier subprocess timeout and output limits plus container CPU, memory,
+  process, capability, filesystem, and temporary-storage bounds.
 - Per-IP, per-ASN, per-principal, per-capability, and per-package quota hooks.
 - Future `policy_hooks` and `bond_policy_hooks` tables for later bond or
   refundable-deposit policies; no on-chain fee or bond is enforced now.
 - Public package index, search, package-detail, and evidence read endpoints.
+  Default list/search includes only `verified_build`, `deployed`, and
+  `on_chain_attested`; direct detail URLs and explicit `?status=` filters retain
+  audit access to unverified entries.
 - Token-gated admin operations for reserved namespaces, namespace review
   status, and conservative package-version status transitions. Generic admin
   status changes cannot claim production assurance states.
@@ -90,6 +105,7 @@ https://registry.cellscript.dev/health
   status, so public reads fail conservative during incident response.
 - Token-gated audit-event read path for review, incident response, and
   production debugging.
+- Token-gated verification queue metrics and audited dead-letter requeue.
 - Audit/event log records for capability, namespace, auth failure, rate-limit,
   and publish transitions, including admin review/quarantine/yank overrides.
 - Successful capability use updates `last_used_at` and writes a
@@ -111,6 +127,8 @@ POST /v1/capabilities/:key_id/revoke
 POST /v1/namespaces/claim
 POST /v1/packages/:namespace/:name/versions
 GET  /v1/admin/audit-events
+GET  /v1/admin/verification-queue
+POST /v1/admin/verification-jobs/:job_id/retry
 POST /v1/admin/reserved-namespaces
 POST /v1/admin/namespaces/:namespace/status
 POST /v1/admin/packages/:namespace/:name/versions/:version/status
@@ -119,9 +137,10 @@ POST /v1/admin/packages/:namespace/:name/versions/:version/promote
 
 ## Self-hosted Production Deployment
 
-The checked-in production stack uses Postgres 17, the Node 22 adapter, a shared
-object volume, and a read-only nginx service for
-`registry.cellscript.dev`. It expects the external Docker network
+The checked-in production stack uses Postgres 17, the Node 22 adapter, an
+isolated verification worker built from the current Rust compiler, a shared
+object volume, and a read-only nginx service for `registry.cellscript.dev`. It
+expects the external Docker network
 `stack-network` to provide the TLS reverse proxy. Production TLS is terminated
 by HTTPS Portal; its API-domain configuration must allow an 8 MiB request body
 so the 5 MiB snapshot plus base64/JSON overhead reaches the Node adapter.
@@ -129,15 +148,19 @@ so the 5 MiB snapshot plus base64/JSON overhead reaches the Node adapter.
 ```bash
 cp deploy/.env.example deploy/.env
 # Generate and insert independent high-entropy database and admin secrets.
+# If this service directory is deployed outside the repository checkout, set
+# CELLSCRIPT_REGISTRY_SOURCE_ROOT to the absolute CellScript source directory.
 chmod 600 deploy/.env
 docker compose --env-file deploy/.env -f deploy/docker-compose.production.yml config
 docker compose --env-file deploy/.env -f deploy/docker-compose.production.yml up -d --build
 ```
 
 The API container applies tracked migrations before it starts accepting
-traffic. Postgres is reachable only on the internal network. The API and static
-services run with read-only root filesystems, bounded temporary filesystems,
-health checks, log rotation, and `no-new-privileges`.
+traffic. Postgres is reachable only on the internal network. The API, verifier,
+and static services run with read-only root filesystems, bounded temporary
+filesystems, health checks, log rotation, and `no-new-privileges`. Production
+API readiness requires a fresh verifier heartbeat, so a missing or wedged
+consumer cannot present the write path as ready.
 
 Production validation performed at deployment includes trusted TLS for both
 domains, dependency-aware readiness, a 2 MiB request reaching application JSON
@@ -153,6 +176,7 @@ REGISTRY_OBJECTS_DIR
 REGISTRY_ADMIN_TOKEN
 REGISTRY_ORIGIN
 STATIC_REGISTRY_ORIGIN
+CELLSCRIPT_REGISTRY_SOURCE_ROOT  # Compose build context when deployed out of tree
 ```
 
 `MAX_INCOMING_BODY_BYTES` limits the Node adapter before the request reaches
@@ -244,8 +268,9 @@ object-adapter checks, including write access to both managed
 `source-snapshots` and `packages` prefixes, and returns `503` until every
 required dependency and the admin token are ready. The production volume
 initializer repairs ownership and directory/file modes recursively before the
-API starts. `NAMESPACE_CLAIM_COOLDOWN_SECONDS` defaults to `3600`; lower it
-only for controlled staging tests.
+API starts. With `REQUIRE_REGISTRY_VERIFIER_READY=true`, readiness also requires
+a fresh heartbeat in the shared object volume. `NAMESPACE_CLAIM_COOLDOWN_SECONDS`
+defaults to `3600`; lower it only for controlled staging tests.
 
 ## Admin Governance Boundary
 
@@ -265,8 +290,11 @@ quarantined
 ```
 
 `verified_build`, `deployed`, and `on_chain_attested` are accepted only through
-the evidence endpoint. A verified build binds source, manifest, compatibility
-profile, artifact, metadata, and compiler version. Deployment evidence must
+the evidence path. Normal `verified_build` promotion is performed by the
+automatic verifier; the token-gated evidence endpoint remains an attributable
+operator/recovery path. A verified build binds source, canonical manifest,
+compatibility profile, snapshot, artifact, metadata, and compiler version.
+Deployment evidence must
 reference that verified-build evidence and prove the same artifact is live at
 a concrete CKB out point. On-chain attestation must in turn reference the
 accepted deployment evidence and record a confirmed attestation transaction.
@@ -280,6 +308,18 @@ GET /v1/admin/audit-events?event_type=namespace.claimed&namespace=cellscript&lim
 The endpoint requires the same admin token and supports filters for
 `event_type`, `principal_type`, `principal_id`, `namespace`, `name`, `version`,
 `before`, and `limit`. `limit` is capped at 200.
+
+Queue health and dead-letter recovery use:
+
+```text
+GET  /v1/admin/verification-queue
+POST /v1/admin/verification-jobs/:job_id/retry
+```
+
+The retry endpoint accepts only a dead-letter job, resets its bounded attempt
+counter, preserves any already committed verified evidence, and records the
+admin actor. If evidence exists, the worker retries only static publication; it
+does not rebuild or create a second evidence record.
 
 ## Capability Registration And Revocation
 
@@ -346,7 +386,8 @@ The API rejects a publish unless:
 - the signed publish nonce has not already been consumed;
 - the package version does not already exist;
 - a source snapshot is provided and persisted to the configured object store;
-- a static package-version JSON object is persisted for the read-only path.
+- an initial static package-version JSON object is persisted for the read-only
+  direct path.
 
 Clients that need safe retry semantics should send an `Idempotency-Key` header
 with at least 16 visible token characters. The key is not an auth credential; it
@@ -362,8 +403,17 @@ If publish admission fails before the package version is accepted, the write API
 releases both the matching `processing` idempotency reservation and the nonce
 record created by that request. The exact signed request can therefore be
 retried safely. Package, snapshot, version, capability-use, acceptance-audit,
-and completed-idempotency records commit in one database transaction; immutable
-object writes happen before that transaction and may be repeated safely.
+completed-idempotency, and verification-job records commit in one database
+transaction; immutable object writes happen before that transaction and may be
+repeated safely. The API returns `verification: queued`; it does not claim that
+synchronous JSON validation is a verified build.
+
+The worker later authenticates the immutable snapshot and compiles it in an
+isolated process. Database promotion, evidence insertion, and the job's
+`publishing` checkpoint commit atomically. Static-object refresh follows that
+commit. A crash at that boundary is safe: the leased job is reclaimed and only
+the static object is retried. Default public list/search visibility begins at
+`verified_build`, not at admission.
 
 Successful publish returns a direct static read URL shaped as:
 
@@ -408,7 +458,12 @@ the same HTTP submission.
 npm run check
 npm test
 npm run build
+npm run build:node
+cargo test --locked --manifest-path ../registry-verifier/Cargo.toml
+cargo clippy --locked --manifest-path ../registry-verifier/Cargo.toml --all-targets -- -D warnings
 ```
 
 `npm run build` performs a wrangler dry-run bundle against the example
-configuration. It does not deploy.
+configuration. `npm run build:node` bundles both the Node API and verifier
+worker. The Rust commands exercise the same compiler binary built into the
+production verifier image. None of these commands deploys.

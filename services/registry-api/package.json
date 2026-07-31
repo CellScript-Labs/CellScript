@@ -7,8 +7,11 @@
     "check": "tsc --noEmit",
     "test": "vitest run",
     "build": "wrangler deploy --dry-run --config wrangler.example.toml --outdir dist",
-    "build:node": "esbuild src/node-server.ts --bundle --platform=node --format=esm --packages=external --target=node22 --sourcemap --outfile=dist-node/server.mjs",
+    "build:node": "npm run build:node:server && npm run build:node:verifier",
+    "build:node:server": "esbuild src/node-server.ts --bundle --platform=node --format=esm --packages=external --target=node22 --sourcemap --outfile=dist-node/server.mjs",
+    "build:node:verifier": "esbuild src/verification-worker.ts --bundle --platform=node --format=esm --packages=external --target=node22 --sourcemap --outfile=dist-node/verification-worker.mjs",
     "start:node": "node dist-node/server.mjs",
+    "start:verifier": "node dist-node/verification-worker.mjs",
     "migrate": "node scripts/migrate.mjs",
     "deploy": "wrangler deploy --config wrangler.toml"
   },

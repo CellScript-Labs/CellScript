@@ -804,7 +804,10 @@ Non-CellScript artifact profiles still fail closed.
   CCC-backed JoyID submit flow, not the display address.
   After the same payload is signed through JoyID/CCC, `cellc auth capability
   submit --payload capability-payload.json --joyid-signature
-  joyid-signature.json` registers the delegated key with the write API. Bare
+  joyid-signature.json` registers the delegated key with the write API.
+  `cellc auth namespace claim --namespace <namespace> --payload
+  capability-payload.json --joyid-signature joyid-signature.json` then
+  establishes the required namespace ownership. Bare
   `cellc publish` then signs the concrete publish payload and submits the
   source snapshot to the public registry.
 - `cellc auth capability revoke --principal-id <principal_id>
@@ -819,8 +822,11 @@ Non-CellScript artifact profiles still fail closed.
   <signature>`, or by setting `CELLSCRIPT_CAPABILITY_PRIVATE_KEY_PKCS8_B64`.
 - The production write API lives under
   [`services/registry-api`](services/registry-api/README.md). The deployed slice
-  uses Node 22, Postgres 17, a persistent filesystem object store, and a
-  separate read-only nginx static path behind trusted TLS. The same typed app
+  uses Node 22, Postgres 17, a bounded real-compiler verification worker, a
+  persistent filesystem object store, and a separate read-only nginx static
+  path behind trusted TLS. Publish transactionally queues source/build
+  verification; default search/list visibility begins at `verified_build`, and
+  direct URLs preserve admitted `source_published` history. The same typed app
   retains a Cloudflare Worker/Hyperdrive/R2 deployment option. Both paths share
   JoyID capability authorisation, namespace ACLs, quota hooks, ordered evidence
   promotion, and audit events.

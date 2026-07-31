@@ -1,0 +1,30 @@
+FROM rust:1.97.1-bookworm AS rust-build
+
+WORKDIR /source
+COPY . .
+RUN cargo build --locked --release --manifest-path services/registry-verifier/Cargo.toml
+
+FROM node:22-bookworm-slim AS node-build
+
+WORKDIR /app
+COPY services/registry-api/package.json services/registry-api/package-lock.json ./
+RUN npm ci
+COPY services/registry-api/tsconfig.json ./
+COPY services/registry-api/src ./src
+RUN npm run check && npm run build:node:verifier
+
+FROM node:22-bookworm-slim AS runtime
+
+ENV NODE_ENV=production \
+    NODE_OPTIONS=--enable-source-maps \
+    REGISTRY_VERIFIER_BINARY=/usr/local/bin/cellscript-registry-verify \
+    HOME=/tmp/verifier-home \
+    XDG_CACHE_HOME=/tmp/verifier-cache
+WORKDIR /app
+COPY services/registry-api/package.json services/registry-api/package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+COPY --from=node-build /app/dist-node/verification-worker.mjs* ./dist-node/
+COPY --from=rust-build /source/services/registry-verifier/target/release/cellscript-registry-verify /usr/local/bin/cellscript-registry-verify
+
+USER 1000:101
+CMD ["node", "dist-node/verification-worker.mjs"]

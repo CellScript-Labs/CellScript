@@ -32,7 +32,19 @@
   volume initialization repairs their ownership and modes recursively.
   Explicit unverified/quarantined install acknowledgements are persisted in
   dependency tables, preventing lock refreshes and later builds from losing the
-  caller's risk policy.
+  caller's risk policy. Publish admission now transactionally creates a leased,
+  bounded verification job. A separate least-privilege worker authenticates the
+  immutable snapshot, compiles it with the current CellScript compiler, checks
+  the signed manifest and compatibility-profile identities, atomically records
+  `verified_build` evidence, and then converges the static version object.
+  PostgreSQL `FOR UPDATE SKIP LOCKED` claims, expiring leases, three-attempt
+  retry/dead-letter handling, operator queue metrics/requeue endpoints, bounded
+  subprocess time/output/memory, and API readiness tied to the worker heartbeat
+  make the formerly documented asynchronous queue real. Public search/list now
+  excludes `source_published` and `indexed_pending` by default while preserving
+  explicit status queries and direct audit URLs. Package-manifest identity uses
+  canonical recursively sorted JSON, eliminating cross-process `HashMap` order
+  drift between publisher and verifier.
 - Close the 0.23 syntax-audit consistency gaps: canonical type declarations
   now use comma-terminated fields, syntax-combination gates cover canonical and
   comma-free compatibility input, checked example mirrors use named `U64_MAX`

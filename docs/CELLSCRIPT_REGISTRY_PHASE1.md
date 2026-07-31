@@ -43,7 +43,8 @@ The public registry policy has two operational paths:
 1. **Write path** — `cellc publish` authenticates the publisher, checks
    namespace/package permissions, validates metadata and hashes, admits the
    package into the registry, and returns a canonical registry URL. The entry is
-   immediately addressable, usually as `source_published` or `indexed_pending`.
+   immediately addressable as `source_published`, with automatic verification
+   queued in the same transaction.
 2. **Read path** — the public website, JSON index, source mirrors, and package
    metadata are served through static/CDN-friendly files. Consumers still verify
    source hashes, build hashes, and deployment facts instead of trusting the
@@ -318,7 +319,7 @@ cellc auth namespace claim --namespace namespace --payload capability-payload.js
 cellc publish
   -> CLI signs the publish payload with the local publisher credential
   -> registry verifies the signature, nonce, expiry, and ACL scope
-  -> registry accepts the package entry into source_published / indexed_pending
+  -> registry accepts the package entry as source_published and queues verification
 ```
 
 The JoyID signature must bind the capability, not a vague login message:
@@ -394,6 +395,10 @@ registry service:
   can be retried; admission metadata then commits in one database transaction;
 - build verification, artifact checks, deployment checks, chain RPC reads, and
   search indexing run asynchronously in bounded queues;
+- source/build verification is a concrete Postgres-backed queue rather than a
+  future placeholder: admission creates the job transactionally, workers use
+  `SKIP LOCKED` leases, and three failed attempts end in an operator-visible
+  dead letter;
 - rate limits apply per IP, ASN, JoyID principal, credential, namespace, and
   package;
 - principal-scoped quota and namespace-claim cooldown are counted only after
@@ -476,7 +481,12 @@ reads build artifacts for their hashes, signs the concrete publish payload with
 the capability key, uploads an immutable source snapshot, and submits the
 version entry to the registry. A successful publish returns the canonical
 package URL and creates an entry that is immediately addressable, usually with
-`source_published` or `indexed_pending` visibility.
+`source_published` visibility. The same database transaction queues automatic
+verification. The worker authenticates the snapshot, compiles it with the
+current compiler, checks the canonical manifest and resolved profile hashes,
+records `verified_build` evidence, and refreshes the static object. Default
+public search/list visibility begins only after that promotion; the direct URL
+and explicit `?status=source_published` query remain available for audit.
 
 Revocation uses the same challenge/submit boundary:
 
@@ -612,6 +622,13 @@ cache materialisation. Explicit `--allow-unverified` / `--allow-quarantined`
 installs persist the chosen risk policy in the dependency table so later lock
 refreshes and builds enforce the same auditable choice.
 
+**Automatic verification**: transactional job admission, single-owner leased
+claims, expired-lease recovery, bounded retry/dead-letter behavior, static-only
+resume after evidence commit, admin metrics/requeue, deterministic canonical
+manifest hashing, and a real-compiler generated-snapshot test. An isolated
+production Compose smoke also runs `cellc publish` through `verified_build` and
+the version-addressed static object.
+
 **Package/build identity**: namespace initialization, build lockfile identity,
 package verification, artifact/metadata/schema/ABI/constraints hash recording,
 and fail-closed mismatch cases.
@@ -626,8 +643,9 @@ devnet scenarios. Those are valuable 0.20 candidates, but live RPC /
 ## What Comes Next
 
 Phase 1 is deliberately minimal. The public registry now has a deployed
-JoyID-rooted publish write path, a static/cacheable source metadata read path,
-the three-file separation, and the three-layer identity model. The checked-in
+JoyID-rooted publish write path, a bounded source/build verification worker, a
+static/cacheable source metadata read path, the three-file separation, and the
+three-layer identity model. The checked-in
 local/offline fixture exercises the same metadata shape through `registry.json`
 and Git tags strictly as a mirror, audit trail, and explicit fallback.
 

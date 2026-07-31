@@ -254,6 +254,7 @@ the credential expires or is revoked:
 ```bash
 cellc auth capability create --principal-id <principal_id> --scope publish:cellscript/amm_pool --expires 90d --json > capability-payload.json
 cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json
+cellc auth namespace claim --namespace cellscript --payload capability-payload.json --joyid-signature joyid-signature.json
 ```
 
 This generates a local capability key, stores the private key in the OS
@@ -263,7 +264,11 @@ browser/CCC/JoyID flow signs that exact payload, binding the local capability
 public key, requested scopes, expiry, and principal id. It does not create a
 separate registry account.
 
-Then run the toolchain's `publish` command. It does five things:
+Namespace ownership is explicit and must be active before the first publish;
+capability registration alone does not claim it. Reserved namespaces may
+require operator review.
+
+Then run the toolchain's `publish` command. The request does six things:
 
 1. Recomputes the source hash from the current working tree and the
    current manifest, so the published hash matches the source you
@@ -273,8 +278,17 @@ Then run the toolchain's `publish` command. It does five things:
 3. Signs the publish payload with the local publisher credential.
 4. Uploads an immutable source snapshot.
 5. Submits the version entry to the registry write API.
-6. Receives a canonical registry URL and an initial visibility state such as
-   `source_published` or `indexed_pending`.
+6. Receives a canonical registry URL, `source_published`, and
+   `verification: queued`.
+
+The version and its verification job commit in one transaction. A separate
+leased worker then authenticates the generated source snapshot, compiles it
+with the current CellScript compiler, verifies the canonical manifest and
+resolved compatibility-profile hashes, atomically records `verified_build`
+evidence, and refreshes the version-addressed static object. Attempts are
+bounded and operator-visible. Default search and normal resolution include the
+package only after this baseline passes; the direct version URL and explicit
+unverified policy remain available for audit.
 
 You should still commit the mirrored metadata file, tag the commit, and push
 both. That mirror travels with the source: every clone of your repo at that tag
@@ -312,6 +326,11 @@ dependency:
 
 The resolver writes a snapshot of the resolved graph into the
 lockfile so subsequent builds do not need network access.
+
+Normal resolution accepts `verified_build`, `deployed`, and
+`on_chain_attested`. An exact `source_published` or `indexed_pending` version
+requires `--allow-unverified`; a quarantined version requires the stronger
+`--allow-quarantined`. These acknowledgements persist in the dependency table.
 
 ### Step 3 — Build
 

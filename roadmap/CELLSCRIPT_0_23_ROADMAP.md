@@ -144,10 +144,12 @@ Source documents:
 
 ## Pillar 1: Public Registry Production Deployment
 
-**Status (2026-07-31): production infrastructure, public reads, website, CLI
-resolution, and evidence promotion are deployed. The first publisher-owned
-positive JoyID publication and clean-machine install remain the final adoption
-checkpoint.**
+**Status (2026-08-01): production infrastructure, public reads, website, CLI
+resolution, evidence promotion, and the bounded automatic source/build
+verification pipeline are implemented. Deployment of the new verifier worker
+and its production smoke are the current operational step. The first
+publisher-owned positive JoyID publication and clean-machine install remain the
+final adoption checkpoint.**
 
 The registry is the largest 0.23 feature. The write API
 (`services/registry-api`) implements the boundary described in
@@ -202,6 +204,14 @@ alternative deployment, not a claim about the current topology.
   `/v1/namespaces/claim` admission boundary.
 - [x] Implement and expose public search/detail/evidence reads plus ordered
   evidence promotions.
+- [x] Make publish admission enqueue a transactional verification job; claim it
+  with Postgres leases and `SKIP LOCKED`; authenticate and compile the immutable
+  snapshot in a bounded, least-privilege worker; atomically promote it to
+  `verified_build`; converge the static version object; and expose queue
+  metrics, dead letters, and audited manual requeue.
+- [x] Keep unverified versions available by direct URL and explicit status
+  query, while limiting the default public list/search and resolver to
+  `verified_build`, `deployed`, and `on_chain_attested`.
 - [ ] Complete a publisher-owned JoyID capability, namespace claim, publication,
   replay, revocation, and first clean-machine install against production.
 
@@ -228,7 +238,12 @@ alternative deployment, not a claim about the current topology.
 
 Production-readiness evidence currently proves:
 
-- all API type checks and 25 admission/state-machine tests pass;
+- all API type checks and 26 admission/state-machine tests pass;
+- the independent Rust verifier compiles a generated snapshot with the real
+  compiler and rejects source, manifest, and compatibility-profile drift;
+- an isolated production Compose topology completed a real `cellc publish` from
+  queue admission through leased compilation, evidence persistence,
+  `verified_build`, default-list visibility, and static-object publication;
 - live health/readiness checks cover Postgres, the object volume, runtime, and
   admin configuration;
 - the proxy admits a 2 MiB body to application validation and the Node adapter
@@ -253,11 +268,12 @@ the positive publisher-owned JoyID flow and install its first accepted source
 package on a clean machine. Unit-test signatures or direct database seeding do
 not satisfy that checkpoint.
 
-The existing `services/registry-api` typecheck, unit suite, Node build, and
-dry-run Worker build run in the unified `ci` gate as the local contract
-baseline. Deployed end-to-end coverage still belongs in a staging scenario
-harness; local compiler CI is not evidence for either the self-hosted runtime
-or the optional Cloudflare/R2/Hyperdrive/Neon adapter.
+The existing `services/registry-api` typecheck, unit suite, Node API/verifier
+builds, dry-run Worker build, and the independent Rust verifier tests/clippy run
+in the unified `ci` gate as the local contract baseline. `dev` checks the Rust
+verifier crate. Deployed end-to-end coverage still belongs in a staging
+scenario harness; local compiler CI is not evidence for either the self-hosted
+runtime or the optional Cloudflare/R2/Hyperdrive/Neon adapter.
 
 ### Non-Goals
 

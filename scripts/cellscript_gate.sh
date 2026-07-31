@@ -391,6 +391,10 @@ run_registry_api_check() {
     run npm --prefix services/registry-api run check
     run npm --prefix services/registry-api test
     run npm --prefix services/registry-api run build
+    run npm --prefix services/registry-api run build:node
+    run cargo fmt --manifest-path services/registry-verifier/Cargo.toml -- --check
+    run cargo test --locked --manifest-path services/registry-verifier/Cargo.toml
+    run cargo clippy --locked --manifest-path services/registry-verifier/Cargo.toml --all-targets -- -D warnings
 }
 
 check_wasm_release_bundle() {
@@ -427,12 +431,14 @@ run_dev_gate() {
     require_cmd rg
 
     cargo_fmt_workspace
+    run cargo fmt --manifest-path services/registry-verifier/Cargo.toml
     run cargo check --locked -p cellscript --all-targets
     run cargo check --locked -p cellscript-fiber-adapter --all-targets
     run cargo check --locked -p cellscript-ckb-adapter --all-targets
     run cargo check --locked -p cellscript-wasm --all-targets --features wasm
     run cargo check --locked -p cellscript-ckb-sdk-builder-example --all-targets
     run cargo check --locked -p cellscript-tools --all-targets
+    run cargo check --locked --manifest-path services/registry-verifier/Cargo.toml --all-targets
     check_canonical_cellscript_format
     check_example_u64_boundaries
     run ./scripts/cellscript_strict_backend_audit.sh quick

@@ -50,12 +50,15 @@ services:
       DATABASE_URL: postgresql://cellscript_registry:${REGISTRY_DB_PASSWORD}@postgres:5432/cellscript_registry
       REGISTRY_OBJECTS_DIR: /objects
       REGISTRY_ADMIN_TOKEN: ${REGISTRY_ADMIN_TOKEN:?REGISTRY_ADMIN_TOKEN is required}
-      REGISTRY_ORIGIN: https://api.registry.cellscript.dev
-      STATIC_REGISTRY_ORIGIN: https://registry.cellscript.dev
+      REGISTRY_ORIGIN: ${REGISTRY_ORIGIN:-https://api.registry.cellscript.dev}
+      STATIC_REGISTRY_ORIGIN: ${STATIC_REGISTRY_ORIGIN:-https://registry.cellscript.dev}
       ENVIRONMENT: production
       MAX_INCOMING_BODY_BYTES: "7340032"
       MAX_JSON_BODY_BYTES: "6291456"
       MAX_SNAPSHOT_BYTES: "5242880"
+      REQUIRE_REGISTRY_VERIFIER_READY: "true"
+      REGISTRY_VERIFIER_SHARED_HEARTBEAT: /objects/.health/verifier-ready
+      REGISTRY_VERIFIER_HEARTBEAT_MAX_AGE_SECONDS: "120"
       VIRTUAL_HOST: api.registry.cellscript.dev
       VIRTUAL_PORT: "8787"
     expose:
@@ -75,6 +78,53 @@ services:
       interval: 15s
       timeout: 5s
       retries: 10
+      start_period: 30s
+    logging: *logging
+
+  verifier:
+    build:
+      context: ${CELLSCRIPT_REGISTRY_SOURCE_ROOT:-../../..}
+      dockerfile: services/registry-api/Dockerfile.verifier
+    restart: unless-stopped
+    init: true
+    depends_on:
+      api:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      object-store-init:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://cellscript_registry:${REGISTRY_DB_PASSWORD}@postgres:5432/cellscript_registry
+      REGISTRY_OBJECTS_DIR: /objects
+      STATIC_REGISTRY_ORIGIN: ${STATIC_REGISTRY_ORIGIN:-https://registry.cellscript.dev}
+      CELLSCRIPT_REGISTRY_API_URL: ${REGISTRY_ORIGIN:-https://api.registry.cellscript.dev}
+      ENVIRONMENT: production
+      REGISTRY_VERIFIER_POLL_INTERVAL_MS: "2000"
+      REGISTRY_VERIFIER_JOB_TIMEOUT_SECONDS: "240"
+      REGISTRY_VERIFIER_LEASE_SECONDS: "300"
+      REGISTRY_VERIFIER_HEALTH_FILE: /tmp/registry-verifier-ready
+      REGISTRY_VERIFIER_SHARED_HEARTBEAT: /objects/.health/verifier-ready
+    volumes:
+      - registry-objects:/objects
+    networks:
+      - registry-internal
+      - stack-network
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 1.0
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "node", "-e", "const s=require('node:fs').statSync('/tmp/registry-verifier-ready');if(Date.now()-s.mtimeMs>120000)process.exit(1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
       start_period: 30s
     logging: *logging
 

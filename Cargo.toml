@@ -8,6 +8,7 @@ members = [
     "examples/ckb-sdk-builder",
 ]
 exclude = [
+    "services/registry-verifier",
     "proposals/novaseal/agreement-profile-v0/harness/ckb_vm",
     "proposals/novaseal/v0-mvp-skeleton/harness/ckb_vm",
     "proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier",
@@ -30,6 +31,7 @@ exclude = [
     ".audit-report*.md",
     ".cap/",
     ".codex/",
+    ".dockerignore",
     ".gitignore",
     ".gitmodules",
     ".idea/",

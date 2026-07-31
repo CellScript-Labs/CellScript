@@ -61,6 +61,7 @@ export interface PackageVersionQuery {
   namespace?: string;
   name?: string;
   status?: RegistryEntryStatus;
+  statuses?: RegistryEntryStatus[];
   limit: number;
   offset: number;
 }
@@ -106,6 +107,48 @@ export interface MaintenanceResult {
   used_nonces_deleted: number;
   idempotency_keys_deleted: number;
   quota_events_deleted: number;
+}
+
+export type VerificationJobStatus =
+  | "queued"
+  | "running"
+  | "publishing"
+  | "retry_wait"
+  | "succeeded"
+  | "dead_letter";
+
+export interface VerificationJobRecord {
+  id: string;
+  namespace: string;
+  name: string;
+  version: string;
+  status: VerificationJobStatus;
+  attempt_count: number;
+  max_attempts: number;
+  available_at: string;
+  lease_owner?: string | null;
+  lease_expires_at?: string | null;
+  evidence_hash?: string | null;
+  evidence?: Record<string, unknown> | null;
+  last_error_code?: string | null;
+  last_error_message?: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  source_hash: string;
+  manifest_hash: string;
+  compatibility_profile_hash: string;
+  snapshot_hash: string;
+  snapshot_object_key: string;
+  snapshot_size_bytes: number;
+  snapshot_content_type: string;
+}
+
+export interface VerificationQueueMetrics {
+  counts: Record<VerificationJobStatus, number>;
+  oldest_available_at?: string | null;
+  oldest_dead_letter_at?: string | null;
 }
 
 export type IdempotencyReservation =
@@ -301,6 +344,42 @@ export interface RegistryStore {
     now_iso: string;
     quota_events_before_iso: string;
   }): Promise<MaintenanceResult>;
+  claimVerificationJob(input: {
+    worker_id: string;
+    lease_seconds: number;
+    now_iso: string;
+  }): Promise<VerificationJobRecord | null>;
+  promoteVerifiedBuildForJob(input: {
+    job_id: string;
+    worker_id: string;
+    evidence_hash: string;
+    evidence: Record<string, unknown>;
+    request_id: string;
+    admin_actor: string;
+  }): Promise<{
+    job: VerificationJobRecord;
+    version: PackageVersionRecord;
+    evidence: PackageEvidenceRecord;
+  }>;
+  completeVerificationJob(input: {
+    job_id: string;
+    worker_id: string;
+  }): Promise<VerificationJobRecord>;
+  failVerificationJob(input: {
+    job_id: string;
+    worker_id: string;
+    error_code: string;
+    error_message: string;
+    retryable: boolean;
+    retry_after_seconds: number;
+    request_id: string;
+  }): Promise<VerificationJobRecord>;
+  retryVerificationJob(input: {
+    job_id: string;
+    request_id: string;
+    admin_actor: string;
+  }): Promise<VerificationJobRecord>;
+  getVerificationQueueMetrics(): Promise<VerificationQueueMetrics>;
 }
 
 const DEFAULT_RESERVED_NAMESPACES: ReservedNamespaceRecord[] = [
@@ -342,6 +421,7 @@ export class MemoryRegistryStore implements RegistryStore {
     created_at: string;
   }>();
   idempotencyKeys = new Map<string, IdempotencyRecord>();
+  verificationJobs = new Map<string, VerificationJobRecord>();
 
   async healthCheck(): Promise<void> {}
 
@@ -550,6 +630,7 @@ export class MemoryRegistryStore implements RegistryStore {
       .filter((record) => !input.namespace || record.namespace === input.namespace)
       .filter((record) => !input.name || record.name === input.name)
       .filter((record) => !input.status || record.status === input.status)
+      .filter((record) => !input.statuses || input.statuses.includes(record.status))
       .filter((record) => {
         if (!query) return true;
         return `${record.namespace}/${record.name}@${record.version} ${JSON.stringify(record.registry_entry)}`
@@ -585,6 +666,7 @@ export class MemoryRegistryStore implements RegistryStore {
     await this.ensurePackage(input.package);
     await this.recordSnapshot(input.snapshot);
     await this.recordPackageVersion(input.version);
+    this.enqueueVerificationJob(input.version, input.snapshot);
     await this.recordCapabilityUsage(input.capability_usage);
     await this.appendAuditEvent(input.audit_event);
     if (input.idempotency) {
@@ -867,6 +949,236 @@ export class MemoryRegistryStore implements RegistryStore {
       idempotency_keys_deleted: idempotencyKeysDeleted,
       quota_events_deleted: quotaBefore - this.quotaEvents.length,
     };
+  }
+
+  async claimVerificationJob(input: {
+    worker_id: string;
+    lease_seconds: number;
+    now_iso: string;
+  }): Promise<VerificationJobRecord | null> {
+    const now = Date.parse(input.now_iso);
+    const candidate = [...this.verificationJobs.values()]
+      .filter((job) => {
+        if ((job.status === "queued" || job.status === "retry_wait") && Date.parse(job.available_at) <= now) return true;
+        if ((job.status === "running" || job.status === "publishing") && job.lease_expires_at) {
+          return Date.parse(job.lease_expires_at) <= now;
+        }
+        return false;
+      })
+      .sort((left, right) => left.available_at.localeCompare(right.available_at) || left.created_at.localeCompare(right.created_at))[0];
+    if (!candidate) return null;
+
+    const hasEvidence = !!candidate.evidence_hash && !!candidate.evidence;
+    const claimed: VerificationJobRecord = {
+      ...candidate,
+      status: hasEvidence ? "publishing" : "running",
+      attempt_count: candidate.attempt_count + 1,
+      lease_owner: input.worker_id,
+      lease_expires_at: new Date(now + input.lease_seconds * 1_000).toISOString(),
+      started_at: candidate.started_at ?? input.now_iso,
+      updated_at: input.now_iso,
+    };
+    this.verificationJobs.set(claimed.id, claimed);
+    return claimed;
+  }
+
+  async promoteVerifiedBuildForJob(input: {
+    job_id: string;
+    worker_id: string;
+    evidence_hash: string;
+    evidence: Record<string, unknown>;
+    request_id: string;
+    admin_actor: string;
+  }): Promise<{ job: VerificationJobRecord; version: PackageVersionRecord; evidence: PackageEvidenceRecord }> {
+    const job = this.requireOwnedVerificationJob(input.job_id, input.worker_id, "running");
+    const promoted = await this.promotePackageVersion({
+      namespace: job.namespace,
+      name: job.name,
+      version: job.version,
+      kind: "verified_build",
+      evidence_hash: input.evidence_hash,
+      evidence: input.evidence,
+      request_id: input.request_id,
+      admin_actor: input.admin_actor,
+    });
+    const updated: VerificationJobRecord = {
+      ...job,
+      status: "publishing",
+      evidence_hash: input.evidence_hash,
+      evidence: input.evidence,
+      updated_at: nowIso(),
+    };
+    this.verificationJobs.set(job.id, updated);
+    return { job: updated, ...promoted };
+  }
+
+  async completeVerificationJob(input: { job_id: string; worker_id: string }): Promise<VerificationJobRecord> {
+    const job = this.requireOwnedVerificationJob(input.job_id, input.worker_id, "publishing");
+    const completedAt = nowIso();
+    const completed: VerificationJobRecord = {
+      ...job,
+      status: "succeeded",
+      lease_owner: null,
+      lease_expires_at: null,
+      completed_at: completedAt,
+      updated_at: completedAt,
+      last_error_code: null,
+      last_error_message: null,
+    };
+    this.verificationJobs.set(job.id, completed);
+    await this.appendAuditEvent({
+      request_id: `verification:${job.id}`,
+      event_type: "verification.succeeded",
+      namespace: job.namespace,
+      name: job.name,
+      version: job.version,
+      data: { job_id: job.id, attempt_count: job.attempt_count, evidence_hash: job.evidence_hash },
+    });
+    return completed;
+  }
+
+  async failVerificationJob(input: {
+    job_id: string;
+    worker_id: string;
+    error_code: string;
+    error_message: string;
+    retryable: boolean;
+    retry_after_seconds: number;
+    request_id: string;
+  }): Promise<VerificationJobRecord> {
+    const job = this.requireOwnedVerificationJob(input.job_id, input.worker_id);
+    const retry = input.retryable && job.attempt_count < job.max_attempts;
+    const now = new Date();
+    const failed: VerificationJobRecord = {
+      ...job,
+      status: retry ? "retry_wait" : "dead_letter",
+      available_at: new Date(now.getTime() + (retry ? input.retry_after_seconds : 0) * 1_000).toISOString(),
+      lease_owner: null,
+      lease_expires_at: null,
+      last_error_code: input.error_code,
+      last_error_message: input.error_message,
+      updated_at: now.toISOString(),
+    };
+    this.verificationJobs.set(job.id, failed);
+    await this.appendAuditEvent({
+      request_id: input.request_id,
+      event_type: retry ? "verification.retry_scheduled" : "verification.dead_lettered",
+      namespace: job.namespace,
+      name: job.name,
+      version: job.version,
+      data: {
+        job_id: job.id,
+        attempt_count: job.attempt_count,
+        error_code: input.error_code,
+        retry_after_seconds: retry ? input.retry_after_seconds : null,
+      },
+    });
+    return failed;
+  }
+
+  async retryVerificationJob(input: {
+    job_id: string;
+    request_id: string;
+    admin_actor: string;
+  }): Promise<VerificationJobRecord> {
+    const job = this.verificationJobs.get(input.job_id);
+    if (!job) throw new ApiError(404, "verification_job_not_found", "verification job was not found");
+    if (job.status !== "dead_letter") {
+      throw new ApiError(409, "verification_job_not_dead_letter", "only dead-letter verification jobs can be retried manually");
+    }
+    const now = nowIso();
+    const retried: VerificationJobRecord = {
+      ...job,
+      status: "queued",
+      attempt_count: 0,
+      available_at: now,
+      lease_owner: null,
+      lease_expires_at: null,
+      last_error_code: null,
+      last_error_message: null,
+      updated_at: now,
+    };
+    this.verificationJobs.set(job.id, retried);
+    await this.appendAuditEvent({
+      request_id: input.request_id,
+      event_type: "verification.requeued",
+      namespace: job.namespace,
+      name: job.name,
+      version: job.version,
+      data: { job_id: job.id, admin_actor: input.admin_actor },
+    });
+    return retried;
+  }
+
+  async getVerificationQueueMetrics(): Promise<VerificationQueueMetrics> {
+    const counts: Record<VerificationJobStatus, number> = {
+      queued: 0,
+      running: 0,
+      publishing: 0,
+      retry_wait: 0,
+      succeeded: 0,
+      dead_letter: 0,
+    };
+    let oldestAvailable: string | undefined;
+    let oldestDeadLetter: string | undefined;
+    for (const job of this.verificationJobs.values()) {
+      counts[job.status] += 1;
+      if ((job.status === "queued" || job.status === "retry_wait") && (!oldestAvailable || job.available_at < oldestAvailable)) {
+        oldestAvailable = job.available_at;
+      }
+      if (job.status === "dead_letter" && (!oldestDeadLetter || job.updated_at < oldestDeadLetter)) {
+        oldestDeadLetter = job.updated_at;
+      }
+    }
+    return {
+      counts,
+      oldest_available_at: oldestAvailable ?? null,
+      oldest_dead_letter_at: oldestDeadLetter ?? null,
+    };
+  }
+
+  private enqueueVerificationJob(version: PackageVersionRecord, snapshot: SnapshotRecord): void {
+    const existing = [...this.verificationJobs.values()].find(
+      (job) => job.namespace === version.namespace && job.name === version.name && job.version === version.version,
+    );
+    if (existing) return;
+    const createdAt = nowIso();
+    const job: VerificationJobRecord = {
+      id: crypto.randomUUID(),
+      namespace: version.namespace,
+      name: version.name,
+      version: version.version,
+      status: "queued",
+      attempt_count: 0,
+      max_attempts: 3,
+      available_at: createdAt,
+      created_at: createdAt,
+      updated_at: createdAt,
+      source_hash: version.source_hash,
+      manifest_hash: version.manifest_hash,
+      compatibility_profile_hash: version.compatibility_profile_hash,
+      snapshot_hash: snapshot.snapshot_hash,
+      snapshot_object_key: snapshot.r2_key,
+      snapshot_size_bytes: snapshot.size_bytes,
+      snapshot_content_type: snapshot.content_type,
+    };
+    this.verificationJobs.set(job.id, job);
+  }
+
+  private requireOwnedVerificationJob(
+    jobId: string,
+    workerId: string,
+    requiredStatus?: "running" | "publishing",
+  ): VerificationJobRecord {
+    const job = this.verificationJobs.get(jobId);
+    if (!job) throw new ApiError(404, "verification_job_not_found", "verification job was not found");
+    if (job.lease_owner !== workerId || !job.lease_expires_at || Date.parse(job.lease_expires_at) <= Date.now()) {
+      throw new ApiError(409, "verification_job_lease_lost", "verification job lease is no longer owned by this worker");
+    }
+    if (requiredStatus ? job.status !== requiredStatus : job.status !== "running" && job.status !== "publishing") {
+      throw new ApiError(409, "verification_job_state_conflict", "verification job is not in an active worker state");
+    }
+    return job;
   }
 
   private reservedNamespaceFor(namespace: string): ReservedNamespaceRecord | undefined {

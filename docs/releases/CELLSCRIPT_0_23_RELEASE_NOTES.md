@@ -3,7 +3,7 @@
 **Status**: Development release notes for `nightly-0.23`; not a stable release
 certificate.
 
-**Updated**: 2026-07-31.
+**Updated**: 2026-08-01.
 
 CellScript 0.23 makes its source semantics and compatibility axes explicit.
 Edition 2026 is the first and only CellScript source-semantics epoch. The
@@ -28,6 +28,7 @@ the Off-Chain Session Runtime profile remain roadmap work.
 | Registry contract | The deployed publish contract requires Edition 2026 plus its compatibility-profile hash from CLI signature through API, Postgres, version-addressed JSON, and website; assurance states require ordered evidence. |
 | Registry operations | `api.registry.cellscript.dev` and `registry.cellscript.dev` run as an isolated self-hosted Postgres/Node/object-volume/read-only-nginx stack behind trusted TLS. |
 | Registry retry safety | Pre-admission failures release only the failed request's nonce and retry reservation; accepted metadata commits transactionally, and readiness covers the actual managed object prefixes. |
+| Registry verification | Publish transactionally queues a leased, bounded real-compiler verification job; verified evidence/status commit atomically before crash-safe static-index convergence, and default search stays hidden until the baseline passes. |
 | Registry install policy | Explicit unverified/quarantined install acknowledgements persist per dependency, so lock refresh and subsequent builds retain the same auditable risk choice. |
 | Tooling | CLI, LSP, WASM, website bindings, examples, and package tooling use the same edition contract. |
 | Syntax audit | Canonical type fields use trailing commas, checked examples use named `u64` boundaries, and compatibility plus CKB-VM regressions cover both source and witness placement. |
@@ -139,6 +140,26 @@ entry through indexing, but cannot label it `verified_build`, `deployed`, or
 `on_chain_attested`. The ordered evidence-promotion endpoint validates
 identity-bound evidence and the preceding evidence reference for each of those
 states.
+
+The first additive migration, `0002_verification_jobs.sql`, closes the gap
+between the API's `verification: queued` response and actual execution. Publish
+admission inserts the job in the same transaction as the version. A separate
+least-privilege worker claims jobs with Postgres `SKIP LOCKED` leases,
+authenticates the generated snapshot, compiles it with the current CellScript
+compiler, verifies canonical manifest and resolved-profile identities, and
+atomically records `verified_build` evidence. Static version JSON is refreshed
+after that commit; lease recovery resumes only static publication if the
+evidence already exists. Three attempts, exponential delay, dead letters,
+admin metrics/requeue, bounded process resources/output/time, and a worker
+heartbeat in API readiness make the queue operationally fail-closed. Default
+public list/search now shows only `verified_build`, `deployed`, and
+`on_chain_attested`; direct URLs and explicit status filters preserve admitted
+history.
+
+Manifest hashes are now computed from recursively key-sorted canonical JSON.
+This removes the previous cross-process nondeterminism caused by serializing
+`HashMap` fields directly and gives the publisher and isolated verifier one
+stable identity.
 
 ## CLI, LSP, WASM, And Website
 
@@ -273,6 +294,14 @@ install/check/build, capability revocation, and rejection of a later publish.
 Its exact database and live object records were removed after the test; the six
 object files remain in the server's isolated recovery directory rather than the
 served object volume.
+
+On 2026-08-01, an isolated production Compose topology completed a real
+`cellc publish` through transactional queue admission, leased snapshot
+authentication and compilation, evidence persistence, `verified_build`,
+default-list visibility, and the version-addressed static object. The exact
+containers, volumes, package rows, objects, and test credential were removed
+afterward. This is deployment-mechanics evidence, not publisher-owned JoyID
+evidence.
 
 These endpoints prove the deployed service boundary, not a publisher-owned
 JoyID signature or first-package install. That interactive positive flow

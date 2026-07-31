@@ -190,6 +190,22 @@ async function routeRequest(
     return handleAdminAuditEvents(request, env, store, requestId, headers);
   }
 
+  if (request.method === "GET" && url.pathname === "/v1/admin/verification-queue") {
+    return handleAdminVerificationQueue(request, env, store, requestId, headers);
+  }
+
+  const adminVerificationRetryMatch = url.pathname.match(/^\/v1\/admin\/verification-jobs\/([^/]+)\/retry$/);
+  if (request.method === "POST" && adminVerificationRetryMatch) {
+    return handleAdminVerificationRetry(
+      request,
+      env,
+      store,
+      requestId,
+      headers,
+      decodeURIComponent(adminVerificationRetryMatch[1] ?? ""),
+    );
+  }
+
   const adminNamespaceStatusMatch = url.pathname.match(/^\/v1\/admin\/namespaces\/([^/]+)\/status$/);
   if (request.method === "POST" && adminNamespaceStatusMatch) {
     return handleAdminNamespaceStatus(request, env, store, requestId, headers, decodeURIComponent(adminNamespaceStatusMatch[1] ?? ""));
@@ -311,6 +327,7 @@ async function handleListPackages(
     ...(query ? { query } : {}),
     ...(namespace ? { namespace } : {}),
     ...(status ? { status } : {}),
+    ...(!status ? { statuses: ["verified_build", "deployed", "on_chain_attested"] as PackageVersionRecord["status"][] } : {}),
     limit: Math.min(limit * 4, 400),
     offset,
   });
@@ -535,6 +552,40 @@ async function handleAdminAuditEvents(
     200,
     headers,
   );
+}
+
+async function handleAdminVerificationQueue(
+  request: Request,
+  env: Env,
+  store: RegistryStore,
+  requestId: string,
+  headers: Headers,
+): Promise<Response> {
+  requireAdminActor(request, env);
+  const metrics = await store.getVerificationQueueMetrics();
+  return json(
+    {
+      schema: "cellscript-registry-verification-queue-v1",
+      request_id: requestId,
+      ...metrics,
+    },
+    200,
+    headers,
+  );
+}
+
+async function handleAdminVerificationRetry(
+  request: Request,
+  env: Env,
+  store: RegistryStore,
+  requestId: string,
+  headers: Headers,
+  jobIdFromPath: string,
+): Promise<Response> {
+  const adminActor = requireAdminActor(request, env);
+  const jobId = requireUuid(jobIdFromPath, "verification_job_id");
+  const job = await store.retryVerificationJob({ job_id: jobId, request_id: requestId, admin_actor: adminActor });
+  return json({ request_id: requestId, job }, 200, headers);
 }
 
 async function handleAdminNamespaceStatus(
@@ -1160,6 +1211,25 @@ async function writeStaticRegistryVersionObject(
   });
 }
 
+export async function syncStaticRegistryVersionObject(
+  env: Env,
+  deps: Pick<AppDeps, "snapshotWriter">,
+  store: RegistryStore,
+  version: PackageVersionRecord,
+  staticOrigin: string,
+): Promise<void> {
+  const snapshot = await requireSnapshot(store, version);
+  const evidence = await store.listPackageEvidence(version.namespace, version.name, version.version);
+  await writeStaticRegistryVersionObject(
+    env,
+    deps,
+    { ...version, direct_url: staticPackageVersionUrl(staticOrigin, version.namespace, version.name, version.version) },
+    snapshot,
+    staticOrigin,
+    evidence,
+  );
+}
+
 type SnapshotPackageVersionRecord = Awaited<ReturnType<RegistryStore["recordPackageVersion"]>>;
 
 function staticRegistryVersionPayload(
@@ -1495,6 +1565,13 @@ function requireNonEmptyAdminString(value: unknown, field: string): string {
   return value.trim();
 }
 
+function requireUuid(value: string, field: string): string {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+    throw new ApiError(400, `invalid_${field}`, `${field} must be a UUID`);
+  }
+  return value.toLowerCase();
+}
+
 function requireOneOf<const T extends readonly string[]>(value: string, allowed: T, code: string): T[number] {
   if (!allowed.includes(value)) {
     throw new ApiError(400, code, `value must be one of: ${allowed.join(", ")}`);
@@ -1568,7 +1645,7 @@ function publicRegistryStatus(value: string): PackageVersionRecord["status"] {
   ) as PackageVersionRecord["status"];
 }
 
-function validatePromotionEvidence(
+export function validatePromotionEvidence(
   value: unknown,
   kind: PackageEvidenceKind,
   version: PackageVersionRecord,

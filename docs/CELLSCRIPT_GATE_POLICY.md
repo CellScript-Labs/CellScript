@@ -14,8 +14,8 @@ deciding whether a change is ready.
 
 | Mode | When to run | Evidence boundary |
 |---|---|---|
-| `dev` | Local development before pushing | Rust formatting, canonical CellScript example formatting, all workspace-package Rust checks (including `cellscript-tools`), strict backend quick audit, syntax-combination quick audit, parity-gated skill-pack freshness, README-linked CellScript doc Status freshness, local markdown link check, whitespace diff check |
-| `ci` | Pull requests, pushes, and routine merge readiness | Canonical CellScript example formatting; tests and clippy for the compiler, Fiber adapter, CKB adapter, WASM crate, CKB SDK builder example, and `cellscript-tools`; registry API typecheck/tests/dry-run Worker build; strict backend CI audit; package verification; parity-gated skill-pack/doc freshness; local-link and script syntax checks |
+| `dev` | Local development before pushing | Rust formatting, canonical CellScript example formatting, all workspace-package Rust checks (including `cellscript-tools`) plus the independent Registry verifier crate, strict backend quick audit, syntax-combination quick audit, parity-gated skill-pack freshness, README-linked CellScript doc Status freshness, local markdown link check, whitespace diff check |
+| `ci` | Pull requests, pushes, and routine merge readiness | Canonical CellScript example formatting; tests and clippy for the compiler, Fiber adapter, CKB adapter, WASM crate, CKB SDK builder example, `cellscript-tools`, and the Registry verifier; Registry API typecheck/tests, Node API/verifier bundles, and dry-run Worker build; strict backend CI audit; package verification; parity-gated skill-pack/doc freshness; local-link and script syntax checks |
 | `backend` | Changes touching IR, codegen, assembler, ABI, ELF, or RISC-V behavior | Full Rust tests, clippy, and strict backend full audit, including stateful CKB scenarios |
 | `release` | Nightly/stable release candidates and any production CKB claim | Clean tagged source plus `ci`, a fresh size-gated website WASM rebuild, tooling/docs and VS Code checks, pinned-CKB acceptance harnesses, public builder-contract generation, and mandatory stateful scenario/action coverage |
 | `release-quick` | Wrapper compatibility and local compile-only preflight | `ci` plus compile-only production acceptance; not external live/devnet evidence |
@@ -55,10 +55,12 @@ source changes require complete frontend closure. Independently versioned ABI
 changes require the `backend` gate in addition to ordinary `dev` and `ci`
 coverage.
 
-The `ci` gate also typechecks, tests, and performs a Wrangler dry-run build of
-`services/registry-api`. This pins the current publish contract and initial
-database/static-object shape to the compiler-generated registry entry. It is
-local service coverage, not evidence
+The `ci` gate also typechecks/tests `services/registry-api`, builds both Node
+entrypoints, performs its Wrangler dry-run build, and runs tests and clippy for
+the independent real-compiler Registry verifier crate. `dev` at least checks that
+verifier crate. This pins the publish contract, additive queue migration,
+worker boundary, and database/static-object shape to the compiler-generated
+registry entry. It is local service coverage, not evidence
 that Cloudflare, R2, Hyperdrive, Neon, DNS, or a production deployment works.
 The CLI coverage includes the explicit first-publish admission sequence:
 `cellc auth capability submit`, `cellc auth namespace claim`, then

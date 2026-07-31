@@ -343,6 +343,111 @@ describe("registry api", () => {
     expect(store.capabilities.get(capability.key_id)?.last_used_at).toBeTruthy();
     expect(store.auditEvents.some((event) => event.event_type === "capability.used" && event.capability_key_id === capability.key_id)).toBe(true);
     expect(store.auditEvents.some((event) => event.event_type === "publish.accepted")).toBe(true);
+    expect([...store.verificationJobs.values()]).toHaveLength(1);
+    expect([...store.verificationJobs.values()][0]?.status).toBe("queued");
+  });
+
+  it("leases verification jobs once, dead-letters terminal failures, and resumes static sync without rebuilding", async () => {
+    const { app, store } = testApp();
+    const payload = authPayload();
+    const capabilityResponse = await post(app, "/v1/capabilities", {
+      payload,
+      joyid_signature: joyidSignature(payload),
+    });
+    const capability = await capabilityResponse.json() as any;
+    store.namespaces.set("cellscript", {
+      namespace: "cellscript",
+      status: "active",
+      owner_principal_type: "joyid_ckb",
+      owner_principal_id: payload.principal_id,
+    });
+    const publish = await publishPayload(capability.key_id);
+    const publishResponse = await post(app, "/v1/packages/cellscript/demo/versions", {
+      payload: publish,
+      capability_signature: { algorithm: "p256-sha256", signature: "sig" },
+      source_snapshot: {
+        content_base64: base64("source snapshot"),
+        content_type: "application/vnd.cellscript.source-snapshot+json",
+        size_bytes: "source snapshot".length,
+        source_hash: publish.source_hash,
+      },
+    });
+    expect(publishResponse.status).toBe(202);
+
+    const claimTime = new Date().toISOString();
+    const first = await store.claimVerificationJob({ worker_id: "worker-a", lease_seconds: 300, now_iso: claimTime });
+    expect(first).toMatchObject({ status: "running", attempt_count: 1, lease_owner: "worker-a" });
+    expect(await store.claimVerificationJob({ worker_id: "worker-b", lease_seconds: 300, now_iso: claimTime })).toBeNull();
+
+    const dead = await store.failVerificationJob({
+      job_id: first!.id,
+      worker_id: "worker-a",
+      error_code: "compile_rejected",
+      error_message: "package does not compile",
+      retryable: false,
+      retry_after_seconds: 5,
+      request_id: "verification:test:1",
+    });
+    expect(dead.status).toBe("dead_letter");
+
+    const adminEnv = { REGISTRY_ADMIN_TOKEN: "secret" };
+    const adminHeaders = { authorization: "Bearer secret", "x-registry-admin-actor": "release-bot" };
+    const queue = await get(app, "/v1/admin/verification-queue", adminEnv, adminHeaders);
+    expect(queue.status).toBe(200);
+    expect(await queue.json()).toMatchObject({ counts: { dead_letter: 1, running: 0 } });
+    const retry = await post(app, `/v1/admin/verification-jobs/${first!.id}/retry`, {}, adminEnv, adminHeaders);
+    expect(retry.status).toBe(200);
+    expect((await retry.json() as any).job.status).toBe("queued");
+
+    const second = await store.claimVerificationJob({
+      worker_id: "worker-b",
+      lease_seconds: 300,
+      now_iso: new Date(Date.now() + 1_000).toISOString(),
+    });
+    expect(second).toMatchObject({ status: "running", attempt_count: 1, lease_owner: "worker-b" });
+    const evidence = {
+      schema: "cellscript-registry-evidence-v1",
+      kind: "verified_build",
+      producer: "test-verifier",
+      generated_at: new Date().toISOString(),
+      verification_status: "passed",
+      source_hash: publish.source_hash,
+      manifest_hash: publish.manifest_hash,
+      compatibility_profile_hash: publish.registry_entry.versions[0].compatibility_profile_hash,
+      artifact_hash: `0x${"31".repeat(32)}`,
+      metadata_hash: `0x${"32".repeat(32)}`,
+      compiler_version: "0.23.0",
+    };
+    const promoted = await store.promoteVerifiedBuildForJob({
+      job_id: second!.id,
+      worker_id: "worker-b",
+      evidence_hash: `sha256:${"11".repeat(32)}`,
+      evidence,
+      request_id: "verification:test:2",
+      admin_actor: "verification-worker:test",
+    });
+    expect(promoted.job.status).toBe("publishing");
+    expect(promoted.version.status).toBe("verified_build");
+
+    const staticRetry = await store.failVerificationJob({
+      job_id: second!.id,
+      worker_id: "worker-b",
+      error_code: "static_sync_failed",
+      error_message: "object store unavailable",
+      retryable: true,
+      retry_after_seconds: 5,
+      request_id: "verification:test:2",
+    });
+    expect(staticRetry).toMatchObject({ status: "retry_wait", attempt_count: 1, evidence_hash: `sha256:${"11".repeat(32)}` });
+    const resumed = await store.claimVerificationJob({
+      worker_id: "worker-c",
+      lease_seconds: 300,
+      now_iso: new Date(Date.now() + 10_000).toISOString(),
+    });
+    expect(resumed).toMatchObject({ status: "publishing", attempt_count: 2, lease_owner: "worker-c" });
+    const completed = await store.completeVerificationJob({ job_id: resumed!.id, worker_id: "worker-c" });
+    expect(completed.status).toBe("succeeded");
+    expect((await store.getVerificationQueueMetrics()).counts.succeeded).toBe(1);
   });
 
   it("serves package-version JSON from the static registry read path without the write store", async () => {
@@ -742,6 +847,13 @@ describe("registry api", () => {
     expect(publicIndex.status).toBe(200);
     expect(await publicIndex.json()).toMatchObject({
       schema: "cellscript-public-registry-index-v1",
+      count: 0,
+      packages: [],
+    });
+    const explicitlyUnverified = await get(app, "/v1/packages?q=demo&status=source_published&limit=10");
+    expect(explicitlyUnverified.status).toBe(200);
+    expect(await explicitlyUnverified.json()).toMatchObject({
+      schema: "cellscript-public-registry-index-v1",
       count: 1,
       packages: [{
         coordinate: "cellscript/demo",
@@ -858,6 +970,13 @@ describe("registry api", () => {
     );
     expect(attested.status).toBe(200);
     expect((await attested.json() as any).status).toBe("on_chain_attested");
+
+    const acceptedIndex = await get(app, "/v1/packages?q=demo&limit=10");
+    expect(acceptedIndex.status).toBe(200);
+    expect(await acceptedIndex.json()).toMatchObject({
+      count: 1,
+      packages: [{ coordinate: "cellscript/demo", status: "on_chain_attested" }],
+    });
 
     const detail = await get(app, "/v1/packages/cellscript/demo");
     expect(detail.status).toBe(200);

@@ -1,60 +1,21 @@
 import { constants as fsConstants } from "node:fs";
-import { access, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { access, mkdir, stat } from "node:fs/promises";
 import { createServer } from "node:http";
-import { dirname, resolve, sep } from "node:path";
+import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 
-import { createApp, type Env, type RegistryObjectRead, type RegistryObjectReader, type SnapshotWriter } from "./index";
-import { sha256Hex } from "./domain";
+import { createApp, type Env } from "./index";
+import { FilesystemObjectStore } from "./filesystem-object-store";
 import { SqlRegistryStore } from "./sql-store";
-
-class FilesystemObjectStore implements SnapshotWriter, RegistryObjectReader {
-  constructor(private readonly root: string) {}
-
-  async put(key: string, body: Uint8Array, _options: { contentType: string; metadata: Record<string, string> }): Promise<void> {
-    const path = this.pathFor(key);
-    await mkdir(dirname(path), { recursive: true, mode: 0o750 });
-    const temporary = `${path}.tmp-${randomUUID()}`;
-    try {
-      await writeFile(temporary, body, { mode: 0o640, flag: "wx" });
-      await rename(temporary, path);
-    } catch (error) {
-      await unlink(temporary).catch(() => undefined);
-      throw error;
-    }
-  }
-
-  async get(key: string): Promise<RegistryObjectRead | null> {
-    try {
-      const body = await readFile(this.pathFor(key));
-      return {
-        body,
-        contentType: contentTypeFor(key),
-        etag: `"sha256-${await sha256Hex(body)}"`,
-      };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-      throw error;
-    }
-  }
-
-  private pathFor(key: string): string {
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,1023}$/.test(key) || key.split("/").includes("..")) {
-      throw new Error("registry object key is invalid");
-    }
-    const path = resolve(this.root, key);
-    if (path !== this.root && !path.startsWith(`${this.root}${sep}`)) {
-      throw new Error("registry object key escapes the configured root");
-    }
-    return path;
-  }
-}
 
 const port = integerEnv("PORT", 8787, 1, 65_535);
 const databaseUrl = requiredEnv("DATABASE_URL");
 const objectRoot = resolve(requiredEnv("REGISTRY_OBJECTS_DIR"));
 const adminToken = requiredEnv("REGISTRY_ADMIN_TOKEN");
 const maxIncomingBodyBytes = integerEnv("MAX_INCOMING_BODY_BYTES", 7 * 1024 * 1024, 1_024, 64 * 1024 * 1024);
+const requireVerifierReady = process.env["REQUIRE_REGISTRY_VERIFIER_READY"] === "true";
+const verifierHeartbeatPath = resolve(process.env["REGISTRY_VERIFIER_SHARED_HEARTBEAT"] ?? `${objectRoot}/.health/verifier-ready`);
+const verifierHeartbeatMaxAgeSeconds = integerEnv("REGISTRY_VERIFIER_HEARTBEAT_MAX_AGE_SECONDS", 120, 30, 600);
 
 await mkdir(objectRoot, { recursive: true, mode: 0o750 });
 const managedObjectPrefixes = ["source-snapshots", "packages"].map((prefix) => resolve(objectRoot, prefix));
@@ -89,7 +50,15 @@ const app = createApp({
     for (const prefix of managedObjectPrefixes) {
       await access(prefix, fsConstants.R_OK | fsConstants.W_OK);
     }
-    return { object_store: "ready", runtime: "ready" };
+    const checks: Record<string, string> = { object_store: "ready", runtime: "ready" };
+    if (requireVerifierReady) {
+      const heartbeat = await stat(verifierHeartbeatPath);
+      if (!heartbeat.isFile() || Date.now() - heartbeat.mtimeMs > verifierHeartbeatMaxAgeSeconds * 1_000) {
+        throw new Error("registry verifier heartbeat is stale");
+      }
+      checks["verifier"] = "ready";
+    }
+    return checks;
   },
 });
 
@@ -192,13 +161,6 @@ async function readIncomingBody(request: import("node:http").IncomingMessage, ma
 
 function firstHeader(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
-}
-
-function contentTypeFor(key: string): string {
-  if (key.endsWith(".json")) return "application/json; charset=utf-8";
-  if (key.endsWith(".tar.gz")) return "application/gzip";
-  if (key.endsWith(".tar")) return "application/x-tar";
-  return "application/octet-stream";
 }
 
 function requiredEnv(name: string): string {
