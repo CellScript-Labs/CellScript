@@ -8,11 +8,12 @@ choices, source constants, header/runtime rules, artifact packaging, metadata
 policy, and verification boundaries.
 
 Edition and target profile are related, but they are not duplicate settings.
-`edition = "2026"` selects the complete language and ABI rule bundle. The
-target profile is an input to that bundle: `ckb` selects the CKB-facing runtime
-rules inside Edition 2026. Changing the profile cannot opt out of the edition,
-and passing `--target-profile ckb` cannot repair a package with a missing or
-non-2026 edition.
+`edition = "2026"` selects source-language semantics. The independently
+versioned `ckb` target profile selects CKB-facing runtime rules. The resolved
+compatibility profile combines both identities with primitive assurance,
+metadata schemas, and wire ABIs. Changing the target cannot opt out of the
+edition, and passing `--target-profile ckb` cannot repair a package with a
+missing or non-2026 edition.
 
 ## What You Will Learn
 
@@ -118,11 +119,13 @@ The lock-boundary keywords from the previous chapter also matter here.
 which values come from witness data. `lock_args` tells readers which values come
 from CKB `Script.args`. None of them silently verifies a signature.
 
-Under Edition 2026, CellScript entry parameters are not decoded from arbitrary
-raw witness bytes. The wrapper selects `GroupInput#0`, or `GroupOutput#0` for an
-output-only script group, parses a Molecule `WitnessArgs`, and reads
-`input_type`. Raw `CSARGv1`, malformed tables, absent `input_type`, and placement
-in `lock` or `output_type` fail closed. See the
+Under placement ABI `cellscript-witnessargs-input-type-v2`, CellScript entry
+parameters are not decoded from arbitrary raw witness bytes. The wrapper
+selects `GroupInput#0`, or `GroupOutput#0` for an output-only script group,
+parses a Molecule `WitnessArgs`, and reads `input_type`. Raw `CSARGv1`, malformed
+tables, absent `input_type`, and placement in `lock` or `output_type` fail
+closed. Edition 2026 is recorded alongside this independently versioned ABI in
+the resolved compatibility profile. See the
 [Entry Witness ABI](../CELLSCRIPT_ENTRY_WITNESS_ABI.md).
 
 Capacity has the same boundary discipline. `with_capacity_floor(...)` is a

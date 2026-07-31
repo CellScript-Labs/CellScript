@@ -42,10 +42,11 @@ therefore named `place_entry_witness_payload_before_signing`, accepts a lock
 placeholder, validates the `CSARGv1\0` payload magic, and must run before the
 SDK unlock/sign step.
 
-Edition 2026 has no raw-payload compatibility path. The selected group-relative
-witness must be a canonical `WitnessArgs`; a raw `CSARGv1\0` payload, malformed
-table, absent `input_type`, or payload placed in `lock`/`output_type` fails
-closed with runtime error `25 entry-witness-abi-invalid`.
+Placement ABI `cellscript-witnessargs-input-type-v2` has no raw-payload
+compatibility path. The selected group-relative witness must be a canonical
+`WitnessArgs`; a raw `CSARGv1\0` payload, malformed table, absent `input_type`,
+or payload placed in `lock`/`output_type` fails closed with runtime error
+`25 entry-witness-abi-invalid`.
 
 ## Payload Envelope v1
 
@@ -57,10 +58,11 @@ Every parameterized entry payload that has witness-backed arguments starts with:
 
 This is the ASCII magic `CSARGv1\0`.
 
-The magic remains necessary even though Edition 2026 selects this ABI: the
-edition is a compile/tooling rule bundle, while the magic identifies the
-runtime bytes inside `input_type`. It prevents unrelated protocol bytes from
-being decoded as CellScript positional arguments.
+The magic remains necessary even though the resolved compatibility profile
+records this ABI: Edition 2026 identifies source semantics, the placement ABI
+identifies the witness location, and the magic identifies runtime bytes inside
+`input_type`. It prevents unrelated protocol bytes from being decoded as
+CellScript positional arguments.
 
 Wrong magic, missing bytes, malformed Molecule, or unsupported parameter
 placement fails closed with runtime error `25 entry-witness-abi-invalid`.

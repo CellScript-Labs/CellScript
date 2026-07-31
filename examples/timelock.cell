@@ -2,6 +2,8 @@ module cellscript::timelock
 
 use cellscript::fungible_token::Token
 
+const U64_MAX: u64 = 18446744073709551615
+
 const MIN_LOCK_PERIOD: u64 = 10
 
 const MAX_LOCK_PERIOD: u64 = 2628000
@@ -52,7 +54,7 @@ receipt EmergencyRelease has create, consume, replace, burn {
 action create_absolute_lock(lock_id: Hash, owner: Address, unlock_height: u64) -> created_lock: TimeLock {
     verification
         let current_height = env::current_timepoint()
-        require current_height <= 18446744073706923615, "Lock range overflow"
+        require current_height <= U64_MAX - MAX_LOCK_PERIOD, "Lock range overflow"
         require unlock_height > current_height + MIN_LOCK_PERIOD, "Unlock height too close"
         require unlock_height <= current_height + MAX_LOCK_PERIOD, "Unlock height too far"
         create created_lock = TimeLock { lock_id, owner, lock_type: LockType::Absolute, unlock_height, created_at: current_height }
@@ -63,7 +65,7 @@ action create_relative_lock(lock_id: Hash, owner: Address, lock_period: u64) -> 
         let current_height = env::current_timepoint()
         require lock_period >= MIN_LOCK_PERIOD, "Lock period too short"
         require lock_period <= MAX_LOCK_PERIOD, "Lock period too long"
-        require lock_period <= 18446744073709551615 - current_height, "Unlock height overflow"
+        require lock_period <= U64_MAX - current_height, "Unlock height overflow"
         create created_lock = TimeLock { lock_id, owner, lock_type: LockType::Relative, unlock_height: current_height + lock_period, created_at: current_height }
 
 }
@@ -145,9 +147,9 @@ action extend_lock(time_lock_before: TimeLock, additional_period: u64, owner: Ad
         let current_height = env::current_timepoint()
         require time_lock_before.owner == owner, "Not the owner"
         require !can_unlock(&time_lock_before, current_height), "Already unlocked"
-        require additional_period <= 18446744073709551615 - time_lock_before.unlock_height, "Unlock height overflow"
+        require additional_period <= U64_MAX - time_lock_before.unlock_height, "Unlock height overflow"
         let new_unlock_height = time_lock_before.unlock_height + additional_period
-        require current_height <= 18446744073706923615, "Lock range overflow"
+        require current_height <= U64_MAX - MAX_LOCK_PERIOD, "Lock range overflow"
         require new_unlock_height <= current_height + MAX_LOCK_PERIOD, "New unlock height too far"
         preserve time_lock_after from time_lock_before {
             lock_id
@@ -161,7 +163,7 @@ action extend_lock(time_lock_before: TimeLock, additional_period: u64, owner: Ad
 action batch_create_locks(lock_ids: [Hash; 4], owners: [Address; 4], unlock_heights: [u64; 4]) -> (lock0: TimeLock, lock1: TimeLock, lock2: TimeLock, lock3: TimeLock) {
     verification
         let current_height = env::current_timepoint()
-        require current_height <= 18446744073706923615, "Lock range overflow"
+        require current_height <= U64_MAX - MAX_LOCK_PERIOD, "Lock range overflow"
         require unlock_heights[0] > current_height + MIN_LOCK_PERIOD, "Unlock height too close"
         require unlock_heights[1] > current_height + MIN_LOCK_PERIOD, "Unlock height too close"
         require unlock_heights[2] > current_height + MIN_LOCK_PERIOD, "Unlock height too close"

@@ -62,8 +62,9 @@ my_lib = { path = "../my_lib" }
 
 Read the manifest as a build promise:
 
-- `edition = "2026"` selects the complete language and CKB ABI contract. It is
-  mandatory; CellScript does not infer, migrate, or accept any other edition;
+- `edition = "2026"` selects the source-language semantic epoch. It is
+  mandatory; CellScript does not infer, migrate, or accept any other edition,
+  and the year does not imply an annual release cadence;
 - `entry` tells the compiler where the package starts;
 - `source_roots` tells the compiler which package directories contain `.cell`
   modules;
@@ -79,9 +80,17 @@ Registry source-package resolution is implemented for packages that provide
 development workflow, and non-CellScript registry artifact profiles still fail
 closed until they have their own resolver contracts.
 
-The edition is also part of the emitted compatibility profile and every
-downstream build/deployment identity. See
+The edition is one input to the emitted compatibility profile. Target,
+primitive assurance, metadata schemas, and wire ABIs keep independent version
+identities, so they can advance without creating a new source edition. The
+profile hash commits to the complete combination in every downstream
+build/deployment identity. See
 [CellScript Edition Policy](../CELLSCRIPT_EDITION_POLICY.md).
+
+As a rule of thumb, compiler SemVer answers “which implementation produced
+this output?”, Edition answers “how is this source understood?”, and the
+resolved compatibility profile answers “which complete source/target/ABI/schema
+contract was used?”.
 
 ## Multi-file Packages
 

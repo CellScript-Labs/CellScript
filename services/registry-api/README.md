@@ -35,8 +35,10 @@ API contract; there is no deployed schema or compatibility reader to preserve.
 - Publish admission path for source packages.
 - Single-shape `cellscript-registry-publish-v1` admission: the signed
   `registry_entry` must contain exactly the published version and explicitly
-  bind Edition 2026, its compatibility-profile hash, dependencies, status, and
-  yank state.
+  bind Edition 2026 source semantics, its independently resolved
+  compatibility-profile hash, dependencies, status, and yank state. The API
+  never derives target, primitive assurance, metadata schema, or wire ABI from
+  the edition year.
 - Namespace owner ACL check before publish admission.
 - P-256 capability-signature verification for daily publish payloads.
 - One-time signed nonce consumption for capability creation, capability
@@ -218,7 +220,8 @@ The API rejects a publish unless:
 - the capability principal owns the namespace;
 - the signed nested registry entry uses the current schema, names the same package/version
   and source hash, and records `edition = "2026"` plus a 32-byte
-  `compatibility_profile_hash`;
+  `compatibility_profile_hash`; edition identifies source semantics, while the
+  hash commits to the complete target/assurance/ABI/schema combination;
 - the signed manifest hash is present;
 - the capability signature verifies;
 - the signed publish nonce has not already been consumed;
@@ -251,7 +254,8 @@ The route is served from R2 and sets short CDN cache headers. It does not
 require Hyperdrive or the write store, so ordinary package reads stay isolated
 from authenticated write-path dependencies. Its JSON object repeats `edition`
 and `compatibility_profile_hash` at the top level so consumers do not need to
-trust an untyped nested blob.
+trust an untyped nested blob and do not have to overload the edition label with
+ABI or schema meaning.
 
 CLI publish has two supported signing shapes:
 

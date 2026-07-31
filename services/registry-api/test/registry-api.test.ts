@@ -10,6 +10,7 @@ import {
   canonicalJson,
   capabilityKeyId,
   joyidPrincipalIdFromBinding,
+  validatePublishPayload,
   type CapabilityAuthorisationPayload,
   type CapabilityRevocationPayload,
   type PublishPayload,
@@ -175,6 +176,20 @@ async function get(
 }
 
 describe("registry api", () => {
+  it("treats edition and compatibility profile as independent registry axes", async () => {
+    const first = await publishPayload("profile-axis-test");
+    const second = structuredClone(first);
+    second.registry_entry.versions[0].compatibility_profile_hash = "12".repeat(32);
+
+    const firstValidated = validatePublishPayload(first, DEFAULT_REGISTRY_ORIGIN, now);
+    const secondValidated = validatePublishPayload(second, DEFAULT_REGISTRY_ORIGIN, now);
+
+    expect(firstValidated.registry_entry.versions[0].edition).toBe("2026");
+    expect(secondValidated.registry_entry.versions[0].edition).toBe("2026");
+    expect(secondValidated.registry_entry.versions[0].compatibility_profile_hash)
+      .not.toBe(firstValidated.registry_entry.versions[0].compatibility_profile_hash);
+  });
+
   it("reports readiness only when production bindings are configured", async () => {
     const app = createApp();
     const missing = await get(app, "/ready");

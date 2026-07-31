@@ -36,7 +36,8 @@ After that, the wiki continues outward:
   collections, payload enums, validity predicates, borrow regions, stable
   `E2xxx` diagnostics, and bounded Fiber interoperability extend that evidence
   without hiding builder or chain obligations;
-- v0.23 makes Edition 2026 the single compiler/tooling contract and places
+- v0.23 makes Edition 2026 the single source-semantics epoch, composes it with
+  independently versioned target/assurance/ABI/schema axes, and places
   CellScript entry payloads only in canonical `WitnessArgs.input_type`;
 - production evidence proves more than compiler success;
 - editor tooling shortens the local loop;

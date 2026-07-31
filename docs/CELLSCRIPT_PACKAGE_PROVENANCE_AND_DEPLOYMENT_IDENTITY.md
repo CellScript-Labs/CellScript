@@ -76,11 +76,13 @@ Resolution is profile-specific.
 No resolver may coerce one profile into another.
 ```
 
-Edition 2026 does not infer a missing compatibility profile. Current
-CellScript source packages must declare `edition = "2026"` and registry,
-lockfile, deployment, and builder records must bind the resulting profile
-hash. A future registry proxy or discovery index may expose multiple profiles
-for the same `namespace/name`, but the selected profile must remain explicit.
+Edition 2026 does not infer a missing compatibility profile. It identifies
+source semantics only. Current CellScript source packages must declare
+`edition = "2026"`, while registry, lockfile, deployment, and builder records
+bind the resolved profile hash across the independent target, primitive,
+metadata-schema, and entry/witness ABI axes. A future registry proxy or
+discovery index may expose multiple profiles for the same `namespace/name`,
+but the selected profile must remain explicit.
 
 ## Publisher Identity Model
 
@@ -416,7 +418,7 @@ source_hash = "blake2b:0xabcd..."
 
 [package_build]
 edition = "2026"
-compatibility_profile_hash = "blake2b:0xedition..."
+compatibility_profile_hash = "blake2b:0xprofile..."
 compiler_version = "0.21.0"
 target_profile = "ckb"
 artifact_hash = "blake2b:0x1234..."
@@ -592,7 +594,7 @@ source_hash = "blake2b:0xabcd..."
 
 [build]
 edition = "2026"
-compatibility_profile_hash = "blake2b:0xedition..."
+compatibility_profile_hash = "blake2b:0xprofile..."
 compiler_version = "0.21.0"
 artifact_hash = "blake2b:0x1234..."
 metadata_hash = "blake2b:0x5678..."
@@ -602,7 +604,7 @@ constraints_hash = "blake2b:0x1111..."
 
 [[deployments]]
 edition = "2026"
-compatibility_profile_hash = "blake2b:0xedition..."
+compatibility_profile_hash = "blake2b:0xprofile..."
 network = "aggron4"
 chain_id = "ckb-testnet"
 script_role = "type"
@@ -624,7 +626,7 @@ hash_type = "type"
 
 [[deployments]]
 edition = "2026"
-compatibility_profile_hash = "blake2b:0xedition..."
+compatibility_profile_hash = "blake2b:0xprofile..."
 network = "ckb-mainnet"
 chain_id = "ckb-mainnet"
 script_role = "type"
@@ -721,7 +723,7 @@ source_hash = "blake2b:0xabcd..."
 
 [package_build]
 edition = "2026"
-compatibility_profile_hash = "blake2b:0xedition..."
+compatibility_profile_hash = "blake2b:0xprofile..."
 compiler_version = "0.21.0"
 target_profile = "ckb"
 artifact_hash = "blake2b:0x1234..."
@@ -856,7 +858,7 @@ source_hash = "blake2b:0xabcd..."
 
 [build]
 edition = "2026"
-compatibility_profile_hash = "blake2b:0xedition..."
+compatibility_profile_hash = "blake2b:0xprofile..."
 compiler_version = "0.21.0"
 artifact_hash = "blake2b:0x1234..."
 metadata_hash = "blake2b:0x5678..."
@@ -866,7 +868,7 @@ constraints_hash = "blake2b:0x1111..."
 
 [[deployments]]
 edition = "2026"
-compatibility_profile_hash = "blake2b:0xedition..."
+compatibility_profile_hash = "blake2b:0xprofile..."
 network = "aggron4"
 chain_id = "ckb-testnet"
 script_role = "type"
@@ -1122,10 +1124,12 @@ alongside `Cell.toml`, for audit and offline use:
 }
 ```
 
-This is the registry's initial Edition 2026 shape. The registry has not been
-deployed, so the original schema identifier is retained while the definition
-is updated in place. Every non-optional field shown above is required; readers
-do not fill in omitted `dependencies`, `status`, or `yanked` values.
+This is the registry's initial source-edition/profile shape. `edition` must not
+be used to infer a target or ABI; `compatibility_profile_hash` binds those
+independent choices. The registry has not been deployed, so the original schema
+identifier is retained while the definition is updated in place. Every
+non-optional field shown above is required; readers do not fill in omitted
+`dependencies`, `status`, or `yanked` values.
 
 The `tag` field maps each version to a git tag in the source repository.
 This allows `cellc install` to clone the exact commit without needing
@@ -1422,7 +1426,8 @@ verifying that two independent builds of the same source produce the same
 - Replace any `HashMap` with `BTreeMap` for key ordering
 - Pin the `serde_json` serialization to compact output with sorted keys
 
-These hashes are deterministic within the Edition 2026 schema.
+These hashes are deterministic within their explicitly versioned schemas and
+the resolved compatibility profile; they are not derived from the edition year.
 
 ### Edition 2026 Breaking Boundary
 

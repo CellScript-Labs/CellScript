@@ -2,6 +2,8 @@ module cellscript::nft
 
 use cellscript::fungible_token::Token
 
+const U64_MAX: u64 = 18446744073709551615
+
 const MAX_SUPPLY: u64 = 10000
 
 const ROYALTY_BASIS_POINTS: u16 = 250
@@ -108,11 +110,11 @@ action buy_from_listing(nft_before: NFT, listing: Listing, buyer: Address, royal
         require listing.collection_id == nft_before.collection_id, "Collection mismatch"
         require listing.token_id == nft_before.token_id, "Token mismatch"
         require listing.seller == nft_before.owner, "Seller is not current owner"
-        require seller_payment.amount <= 18446744073709551615 - royalty_payment.amount, "Payment overflow"
+        require seller_payment.amount <= U64_MAX - royalty_payment.amount, "Payment overflow"
         require royalty_payment.amount + seller_payment.amount == listing.price, "Payment must equal listing price"
         require royalty_payment.symbol == seller_payment.symbol, "Payment token mismatch"
         require nft_before.royalty_bps <= 1000, "Royalty too high"
-        require nft_before.royalty_bps == 0 || listing.price <= 18446744073709551615 / nft_before.royalty_bps as u64, "Royalty overflow"
+        require nft_before.royalty_bps == 0 || listing.price <= U64_MAX / nft_before.royalty_bps as u64, "Royalty overflow"
         let royalty_amount = listing.price * nft_before.royalty_bps as u64 / 10000
         require royalty_payment.amount == royalty_amount, "Incorrect royalty payment"
         require seller_payment.amount == listing.price - royalty_amount, "Incorrect seller payment"
@@ -147,12 +149,12 @@ action accept_offer(nft_before: NFT, offer: Offer, royalty_payment: Token, selle
         require now < offer.expires_at, "Offer expired"
         require offer.collection_id == nft_before.collection_id, "Collection mismatch"
         require offer.token_id == nft_before.token_id, "Token mismatch"
-        require seller_payment.amount <= 18446744073709551615 - royalty_payment.amount, "Payment overflow"
+        require seller_payment.amount <= U64_MAX - royalty_payment.amount, "Payment overflow"
         require royalty_payment.amount + seller_payment.amount == offer.price, "Payment must equal offer price"
         require royalty_payment.symbol == offer.payment_symbol, "Wrong royalty payment token"
         require seller_payment.symbol == offer.payment_symbol, "Wrong seller payment token"
         require nft_before.royalty_bps <= 1000, "Royalty too high"
-        require nft_before.royalty_bps == 0 || offer.price <= 18446744073709551615 / nft_before.royalty_bps as u64, "Royalty overflow"
+        require nft_before.royalty_bps == 0 || offer.price <= U64_MAX / nft_before.royalty_bps as u64, "Royalty overflow"
         let royalty_amount = offer.price * nft_before.royalty_bps as u64 / 10000
         require royalty_payment.amount == royalty_amount, "Incorrect royalty payment"
         require seller_payment.amount == offer.price - royalty_amount, "Incorrect seller payment"

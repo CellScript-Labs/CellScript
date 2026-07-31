@@ -12,13 +12,19 @@ explanation: source identity, target profile, artifact hash, schema layout,
 runtime requirements, scheduler information, and verifier obligations.
 
 On the 0.23 line it also carries mandatory `edition = "2026"` and the fully
-resolved compatibility profile. The profile binds source semantics, target and
-primitive-assurance choices, entry payload ABI, and `WitnessArgs.input_type`
-placement. Verification rejects a sidecar whose profile does not resolve from
-those inputs; it never guesses another contract. Current outputs use metadata
-schema 56, source schema 2, artifact schema 1, and constraints schema 2.
-Registry, lock, deployment, receipt, and generated-builder readers require the
-same resolved-profile identity.
+resolved compatibility profile. Edition contributes source semantics only.
+The profile combines that with independently versioned target,
+primitive-assurance, entry payload, witness placement, and metadata-schema
+axes. Verification rejects a sidecar whose profile does not resolve from those
+inputs; it never guesses another contract. Current outputs use metadata schema
+57, source schema 2, artifact schema 1, and constraints schema 2. Registry,
+lock, deployment, receipt, and generated-builder readers require the same
+resolved-profile identity.
+
+The distinction matters during review: compiler SemVer can advance for
+compatible implementation work, and a wire ABI or metadata schema can advance
+for an urgent fix, without forcing a new calendar-year source edition. A new
+Edition is reserved for a change to the meaning of existing source.
 
 This chapter is about trust boundaries. It teaches you what compiler evidence
 can prove, and where you still need CKB transaction evidence.
@@ -439,6 +445,11 @@ For CellScript releases, `quick` is part of the pre-push gate and `ci` runs
 before builder-backed CKB acceptance. A direct CKB acceptance run does not
 replace this preflight because it only proves selected concrete transactions.
 
+The required syntax origins include both comma-terminated canonical type
+fields and comma-free compatibility input. The formatter must converge both to
+the comma-terminated form; lifecycle field blocks remain newline-separated
+field names without commas.
+
 ## Unified Gate Entry Points
 
 For repository work, use the unified gate wrapper instead of hand-picking
@@ -456,6 +467,13 @@ component scripts:
 IR/codegen/RISC-V changes. `release` is the production CKB evidence gate.
 `release-quick` is a compile-only release preflight, not external live/devnet
 evidence. See `docs/CELLSCRIPT_GATE_POLICY.md` for the exact command contract.
+
+In `dev` and `ci`, the wrapper also checks that
+`examples/language/canonical_style.cell` is already formatter-clean and that
+the checked atomic-swap, NFT, timelock, and multi-phase-DAO example pairs use
+named `U64_MAX` boundary expressions. CI's CKB-VM integration tests encode
+CellScript entry payloads in canonical `WitnessArgs.input_type`; a raw
+`CSARGv1` witness is a negative ABI case, not a valid test shortcut.
 
 Fiber's no-profile compatibility harness is deliberately separate from these
 unified gates:

@@ -1251,7 +1251,7 @@ impl CodeGenerator {
             "# cellscript entry abi: {} loads GroupInput#0 witness args for {} and falls back to GroupOutput#0",
             ENTRY_WITNESS_LABEL, target
         ));
-        self.emit("# cellscript entry abi: edition 2026 requires CSARGv1 inside WitnessArgs.input_type");
+        self.emit("# cellscript entry abi: placement profile requires CSARGv1 inside WitnessArgs.input_type");
         self.emit_large_addi("sp", "sp", -(ENTRY_WITNESS_FRAME_SIZE as i64));
         self.emit_stack_store("ra", ENTRY_WITNESS_RA_OFFSET);
         if has_lock_args {
@@ -1560,7 +1560,7 @@ impl CodeGenerator {
         Ok(())
     }
 
-    /// Normalize the Edition 2026 entry placement ABI into the payload buffer
+    /// Normalize the selected entry placement ABI into the payload buffer
     /// shape consumed by the positional decoder.
     ///
     /// The wrapper requires a canonical CKB `WitnessArgs` from the current
@@ -1573,7 +1573,7 @@ impl CodeGenerator {
         let copy_loop_label = self.fresh_label("entry_witness_v2_copy_loop");
         let copy_done_label = self.fresh_label("entry_witness_v2_copy_done");
 
-        self.emit("# cellscript edition 2026 entry placement: validate the exact three-field WitnessArgs table");
+        self.emit("# cellscript entry placement profile: validate the exact three-field WitnessArgs table");
         self.emit_stack_load("t0", ENTRY_WITNESS_SIZE_OFFSET);
         self.emit("li t1, 16");
         self.emit(format!("bltu t0, t1, {}", fail_label));

@@ -153,10 +153,12 @@ The extension contributes commands for the local compiler and builder loop:
 | `CellScript: Verify Live Registry` | `cellc registry verify --live --json` |
 | `CellScript: Show Production Report` | compiler version + metadata + constraints + release-audit boundary |
 
-Entry-witness commands report the Edition 2026 placement contract:
+Entry-witness commands report placement ABI
+`cellscript-witnessargs-input-type-v2` within the resolved compatibility profile:
 `CSARGv1` is stored in Molecule `WitnessArgs.input_type` on the selected
 script-group witness. Tooling must preserve `lock` and `output_type`; it must
-not emit the entry payload as raw witness bytes.
+not emit the entry payload as raw witness bytes. Edition 2026 independently
+identifies how the source was understood.
 
 `CellScript: Show Production Report` is useful while editing because it displays
 compiler version, metadata, constraints, and release-audit boundaries.

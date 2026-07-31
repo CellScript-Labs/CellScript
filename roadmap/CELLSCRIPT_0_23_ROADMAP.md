@@ -1,7 +1,8 @@
 # CellScript 0.23 Roadmap
 
 **Status**: Draft, pending release-line coordination before adoption
-**Scope**: one Edition 2026 compatibility contract, canonical CKB
+**Scope**: one Edition 2026 source-semantics epoch, an independently resolved
+compatibility profile, canonical CKB
 `WitnessArgs.input_type` entry placement, public registry production deployment
 on `cellscript.dev`, completed native test/fixture tooling, deeper RGB++ / Fiber
 integration, and a Myelin-aligned Off-Chain Session Runtime profile with initial
@@ -30,7 +31,7 @@ This is a draft roadmap, not an implementation contract. It must be matched
 against `CHANGELOG.md`, the release gate, and any in-flight branch before
 adoption.
 
-## Completed Release-Line Foundation: Edition 2026 And Entry Witness ABI
+## Completed Release-Line Foundation: Source Edition And Compatibility Axes
 
 Before the four operational pillars, 0.23 closes two compiler-wide contracts
 that every later package and builder depends on.
@@ -40,13 +41,18 @@ that every later package and builder depends on.
 Edition 2026 is the first and only CellScript edition. Every package declares
 `edition = "2026"`; missing or different values fail during manifest parsing.
 There is no migration command, implicit alternate edition, or compatibility
-parser because no published CellScript ecosystem needs one.
+parser because no published CellScript ecosystem needs one. `2026` is a
+long-lived source-semantics epoch label, not a promise to mint one edition per
+year.
 
-The edition resolves a complete compatibility profile from source semantics,
-the selected target profile, primitive assurance, entry-payload encoding, and
-CKB witness placement. The compiler emits that profile in metadata and hashes
-it into registry records, `Cell.lock`, `Deployed.toml`, compile receipts, and
-generated action builders. A tool cannot change one part of the contract while
+The edition owns source-language meaning: syntax ambiguity, name resolution,
+type/coercion behavior, desugaring, and source-observable semantics. Target
+profile, primitive assurance, entry-payload encoding, CKB witness placement,
+metadata schemas, and compiler SemVer are independent version axes. The
+compiler composes all compatibility-relevant axes except compiler SemVer into
+`cellscript-resolved-compatibility-profile-v1`, emits it in metadata, and
+hashes it into registry records, `Cell.lock`, `Deployed.toml`, compile
+receipts, and generated action builders. A tool cannot change one axis while
 continuing to claim the same build identity.
 
 The same edition value crosses every compiler consumer:
@@ -61,8 +67,8 @@ The same edition value crosses every compiler consumer:
 ### Canonical Entry Witness Placement
 
 The entry payload keeps the self-identifying `cellscript-entry-witness-v1`
-format (`CSARGv1\0` plus positional arguments), but Edition 2026 gives it one
-CKB placement:
+format (`CSARGv1\0` plus positional arguments). The independently versioned
+placement ABI gives it one CKB location:
 
 ```mermaid
 flowchart LR
@@ -88,7 +94,7 @@ CellScript-specific replacement for CKB's shared Witness convention.
 Because no ecosystem migration is required, 0.23 accepts only the new identity
 set:
 
-- compile metadata schema 56 with source schema 2, artifact schema 1, and
+- compile metadata schema 57 with source schema 2, artifact schema 1, and
   constraints schema 2;
 - `Cell.lock` version 2;
 - `Deployed.toml` version 2 with
@@ -97,7 +103,7 @@ set:
 - registry build records with a required compatibility-profile hash.
 
 Readers reject missing, mismatched, or superseded identities. They do not
-reinterpret them under Edition 2026.
+infer ABI or metadata versions from Edition 2026.
 
 ### Acceptance Boundary
 
@@ -111,6 +117,23 @@ devnet constructors must use the same placement rather than maintaining a
 release-only raw-witness path. Routine merge evidence is `dev` and `ci`; because
 witness placement changes generated RISC-V, the clean-tree `backend` gate
 remains required before a production claim.
+
+The 2026-07-31 syntax audit also closed the source-level consistency slice of
+this foundation:
+
+- comma-terminated type fields are the formatter's canonical output, while
+  comma-free fields remain accepted compatibility input;
+- quick, CI, and deep syntax-combination matrices require both field forms;
+- the checked atomic-swap, NFT, timelock, and multi-phase-DAO example pairs use
+  local `U64_MAX` constants instead of opaque maximum or `MAX - delta`
+  literals; and
+- CKB-VM crypto primitive fixtures place `CSARGv1` in
+  `WitnessArgs.input_type`, so they exercise placement ABI v2 rather than the
+  retired raw-witness alias.
+
+The `dev` and `ci` gates enforce the canonical example and integer-boundary
+rules. This closure does not add syntax, relax the entry ABI, or expand the
+production example matrix.
 
 Source documents:
 
@@ -130,7 +153,8 @@ path, idempotent publish, and admin-gated status transitions. The 0.23 work
 is to actually deploy it on `cellscript.dev` and to wire the frontend and CLI
 into the same trust model.
 
-The Edition 2026 contract slice is complete across the Rust publisher/reader,
+The Edition 2026 plus resolved-profile contract slice is complete across the
+Rust publisher/reader,
 API validation, initial Postgres schema, R2 package-version object, checked-in
 registry fixture, and website data model. The registry has not been deployed,
 so these surfaces are updated directly and accept one complete entry shape;

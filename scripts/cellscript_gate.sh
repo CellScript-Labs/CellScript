@@ -46,6 +46,33 @@ cargo_fmt_workspace() {
         "$@"
 }
 
+check_canonical_cellscript_format() {
+    run cargo run --quiet --locked -p cellscript --bin cellc -- \
+        fmt --check "$ROOT_DIR/examples/language/canonical_style.cell"
+}
+
+check_example_u64_boundaries() {
+    local example_files=(
+        "examples/atomic_swap.cell"
+        "examples/atomic_swap/src/main.cell"
+        "examples/multi_phase_dao.cell"
+        "examples/multi_phase_dao/src/main.cell"
+        "examples/nft.cell"
+        "examples/nft/src/main.cell"
+        "examples/timelock.cell"
+        "examples/timelock/src/main.cell"
+    )
+
+    if rg -n '18446744073709551615' "${example_files[@]}" | rg -v 'const U64_MAX: u64 = 18446744073709551615'; then
+        printf '\nRaw u64 maximum found outside a U64_MAX declaration.\n' >&2
+        exit 1
+    fi
+    if rg -n '18446744073709551515|18446744073706923615' "${example_files[@]}"; then
+        printf '\nRaw MAX-delta boundary found in a checked CellScript example.\n' >&2
+        exit 1
+    fi
+}
+
 check_trailing_whitespace() {
     local tracked_rust_files=()
     local tracked_rust_file
@@ -406,6 +433,8 @@ run_dev_gate() {
     run cargo check --locked -p cellscript-wasm --all-targets --features wasm
     run cargo check --locked -p cellscript-ckb-sdk-builder-example --all-targets
     run cargo check --locked -p cellscript-tools --all-targets
+    check_canonical_cellscript_format
+    check_example_u64_boundaries
     run ./scripts/cellscript_strict_backend_audit.sh quick
     run ./scripts/cellscript_syntax_combo_audit.sh quick
     run cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
@@ -428,6 +457,8 @@ run_ci_gate() {
 
     printf '{"status":"not-generated","reason":"test suite did not reach backend shape report generation"}\n' >"$CELLSCRIPT_BACKEND_SHAPE_REPORT"
     cargo_fmt_workspace --check
+    check_canonical_cellscript_format
+    check_example_u64_boundaries
     run cargo test --locked -p cellscript -- --test-threads=1
     run cargo test --locked -p cellscript-fiber-adapter -- --test-threads=1
     run cargo test --locked -p cellscript-ckb-adapter -- --test-threads=1

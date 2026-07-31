@@ -325,7 +325,9 @@ pub struct RegistryVersion {
     pub tag: String,
     pub source_hash: String,
     pub cellscript_version: String,
+    /// Long-lived source-language semantics epoch.
     pub edition: crate::CellScriptEdition,
+    /// Hash of the resolved source/target/assurance/ABI/schema profile.
     pub compatibility_profile_hash: String,
     pub dependencies: BTreeMap<String, RegistryDependencyRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

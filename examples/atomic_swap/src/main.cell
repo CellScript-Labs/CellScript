@@ -8,6 +8,8 @@ use cellscript::fungible_token::Token
 // exercises consume/create/destroy, witness binding, hash commitments, and
 // time-point guards across a multi-action business flow.
 
+const U64_MAX: u64 = 18446744073709551615
+
 const REFUND_LOCK_PERIOD: u64 = 100
 
 enum SwapState {
@@ -60,7 +62,7 @@ action initiate_swap(
         let now = env::current_timepoint()
         require token.amount > 0, "zero amount"
         require timeout_timepoint > now, "timeout is not in the future"
-        require timeout_timepoint <= 18446744073709551515, "refund timeout overflow"
+        require timeout_timepoint <= U64_MAX - REFUND_LOCK_PERIOD, "refund timeout overflow"
         consume token
         create swap_lock = SwapLock { swap_id, initiator, participant, hashlock, timeout_timepoint, token_symbol: token.symbol, amount: token.amount, state: SwapState::Pending } with_lock(initiator)
 

@@ -72,7 +72,9 @@ export interface RegistryVersionEntry {
   tag: string;
   source_hash: string;
   cellscript_version: string;
+  /** Source-language semantics only; target/ABI/schema identity is separate. */
   edition: typeof CELLSCRIPT_EDITION;
+  /** Hash of the resolved edition + target + assurance + ABI + schema axes. */
   compatibility_profile_hash: string;
   dependencies: Record<string, { namespace: string; version: string }>;
   status: "source_published";

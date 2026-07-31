@@ -734,11 +734,15 @@ deny_ckb_runtime = false
 deny_runtime_obligations = false
 ```
 
-`edition = "2026"` is mandatory and is the only supported edition. It binds
-the source, ABI, metadata, lockfile, deployment, receipt, and builder contract;
-older or missing editions are rejected rather than migrated. Command-line
-flags can tighten policy checks for a build or CI job. The full contract is in
-the [edition policy](docs/CELLSCRIPT_EDITION_POLICY.md).
+`edition = "2026"` is mandatory and is the only supported source-semantics
+edition. The year is a long-lived epoch label, not an annual release cadence.
+Target profile, primitive assurance, metadata schemas, and entry/witness ABIs
+remain independently versioned; the resolved compatibility profile combines
+those axes with the edition and is bound into lock, deployment, receipt,
+registry, and builder identities. Older or missing persisted identities are
+rejected rather than migrated. Command-line flags can tighten policy checks
+for a build or CI job. The full contract is in the
+[edition policy](docs/CELLSCRIPT_EDITION_POLICY.md).
 
 ### Package Workflow
 

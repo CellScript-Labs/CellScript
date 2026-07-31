@@ -46,11 +46,13 @@ no Python runtime dependency and reject tracked Python source files.
 
 The 0.23 line also has one edition contract: every package declares
 `edition = "2026"`, and all emitted evidence binds the resolved compatibility
-profile. Missing/non-2026 editions and superseded lock, deployment, receipt,
-builder, or raw-witness placement identities are rejected rather than
-migrated. See
+profile. The edition owns source semantics only; target, primitive assurance,
+metadata schemas, and entry/witness ABIs remain independent profile axes.
+Missing/non-2026 editions and superseded lock, deployment, receipt, builder, or
+raw-witness placement identities are rejected rather than migrated. See
 [`CELLSCRIPT_EDITION_POLICY.md`](CELLSCRIPT_EDITION_POLICY.md). Edition-owned
-ABI changes require the `backend` gate in addition to ordinary `dev` and `ci`
+source changes require complete frontend closure. Independently versioned ABI
+changes require the `backend` gate in addition to ordinary `dev` and `ci`
 coverage.
 
 The `ci` gate also typechecks, tests, and performs a Wrangler dry-run build of

@@ -147,6 +147,24 @@ Compound assignment is a write boundary. `target += rhs` is valid only when
 arithmetic and ordering remain unsupported except for explicitly implemented
 `u128` delta or equality paths.
 
+### Named Integer Boundaries
+
+When an overflow guard needs the maximum `u64`, name it locally and keep the
+relationship visible:
+
+```cellscript
+const U64_MAX: u64 = 18446744073709551615
+const MAX_LOCK_PERIOD: u64 = 2628000
+
+require current_height <= U64_MAX - MAX_LOCK_PERIOD,
+    "lock range overflow"
+```
+
+Do not replace `U64_MAX - delta` with its precomputed decimal value. The named
+expression documents the proof obligation and prevents top-level examples from
+drifting away from their package `src/main.cell` mirrors. `u64::MAX` is not a
+CellScript built-in in this release.
+
 `Signature` is not a built-in scalar. If a contract needs to carry a signature,
 model it explicitly:
 

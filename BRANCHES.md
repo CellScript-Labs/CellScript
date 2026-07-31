@@ -9,7 +9,8 @@ discussions. Do not use that historical baseline to describe the current
 ## nightly-0.23
 
 `nightly-0.23` is the active edition and native-release-tooling line. It has one
-mandatory source/ABI contract, `edition = "2026"`, and deliberately rejects
+mandatory source-semantics epoch, `edition = "2026"`, plus an independently
+resolved target/assurance/ABI/schema profile, and deliberately rejects
 older package, lock, deployment, receipt, builder, and raw entry-witness
 identities rather than migrating them. Treat the line as merge-ready only when
 the edition/profile identity is consistent across compiler, metadata, WASM,

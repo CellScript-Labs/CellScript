@@ -43,7 +43,9 @@ export interface PackageVersionRecord {
   status: RegistryEntryStatus;
   source_hash: string;
   manifest_hash: string;
+  /** Source-language semantics, not a compiler or wire-ABI version. */
   edition: "2026";
+  /** Complete resolved compatibility identity across independent axes. */
   compatibility_profile_hash: string;
   capability_key_id: string;
   principal_type: string;

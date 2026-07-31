@@ -5,9 +5,10 @@ certificate.
 
 **Updated**: 2026-07-31.
 
-CellScript 0.23 makes its language and CKB entry ABI one explicit contract.
-Edition 2026 is the first and only CellScript edition, and CellScript entry
-arguments now have one canonical location:
+CellScript 0.23 makes its source semantics and compatibility axes explicit.
+Edition 2026 is the first and only CellScript source-semantics epoch. The
+independently versioned placement ABI gives CellScript entry arguments one
+canonical location:
 `WitnessArgs.input_type` on the selected script-group witness.
 
 This document records completed 0.23 work. Registry deployment, broader
@@ -18,12 +19,13 @@ work until their implementation and evidence boundaries are complete.
 
 | Area | What changes |
 | --- | --- |
-| Edition | Every package declares `edition = "2026"`; no other edition, inference, or migration path is accepted. |
+| Edition | Every package declares the long-lived source-semantics epoch `edition = "2026"`; no other edition, inference, or migration path is accepted. |
 | Entry witness | `CSARGv1` is decoded only from canonical Molecule `WitnessArgs.input_type`. |
 | Failure mode | Raw payloads, malformed tables, absent `input_type`, wrong placement, and mismatched identities fail closed. |
-| Build identity | The resolved compatibility profile is bound into metadata, registry, lock, deployment, receipt, and builder records. |
+| Build identity | The resolved profile independently combines edition, target, primitive assurance, metadata schemas, and entry/witness ABIs, then binds them into metadata, registry, lock, deployment, receipt, and builder records. |
 | Registry contract | The initial publish contract requires Edition 2026 plus its compatibility-profile hash from CLI signature through API, database, CDN JSON, and website. |
 | Tooling | CLI, LSP, WASM, website bindings, examples, and package tooling use the same edition contract. |
+| Syntax audit | Canonical type fields use trailing commas, checked examples use named `u64` boundaries, and compatibility plus CKB-VM regressions cover both source and witness placement. |
 | Native gate | Active test, fixture, evidence, and release tooling is Rust, shell, or Node; repository policy rejects Python source reintroduction. |
 
 ## Edition 2026
@@ -35,14 +37,25 @@ work until their implementation and evidence boundaries are complete.
 edition = "2026"
 ```
 
-Edition 2026 selects the complete CellScript compatibility contract rather
-than acting as a parser-only label. It resolves:
+Edition 2026 selects source-language semantics rather than acting as an annual
+compiler release or complete ABI bundle. It owns rules that could change the
+meaning of the same source: syntax ambiguities, name resolution, typing and
+coercion, desugaring, flow/resource semantics, and migration diagnostics.
+
+The resolved compatibility profile separately composes:
 
 - source-language semantics;
 - target-profile behavior;
 - primitive-assurance mode;
 - entry-payload encoding; and
-- CKB witness placement and script-group source.
+- CKB witness placement and script-group source;
+- metadata, source, artifact, and constraints schema versions.
+
+Compiler SemVer remains another independent identity. Compatible diagnostics,
+formatter, optimizer, and additive-language work can ship in ordinary compiler
+releases. Wire ABIs and metadata schemas can also advance without waiting for a
+new calendar year. A new edition is reserved for an intentional break in the
+meaning of existing source.
 
 The resolved profile is emitted in compile metadata. Its hash is required by
 registry build records, `Cell.lock` version 2, `Deployed.toml` version 2,
@@ -82,9 +95,9 @@ flowchart LR
     IN --> ENTRY["CellScript entry wrapper"]
 ```
 
-Edition 2026 does not accept `CSARGv1` as a raw witness alias. A raw payload,
-malformed Molecule table, missing `input_type`, or payload in `lock` or
-`output_type` fails with runtime error
+Placement ABI `cellscript-witnessargs-input-type-v2` does not accept `CSARGv1`
+as a raw witness alias. A raw payload, malformed Molecule table, missing
+`input_type`, or payload in `lock` or `output_type` fails with runtime error
 `25 entry-witness-abi-invalid`.
 
 Generated builders parse or create `WitnessArgs`, preserve `lock` and
@@ -99,7 +112,8 @@ The 0.23 identity set is:
 
 | Surface | Required identity |
 | --- | --- |
-| Compile metadata | metadata 56, source 2, artifact 1, constraints 2 |
+| Compile metadata | metadata 57, source 2, artifact 1, constraints 2 |
+| Compatibility profile | `cellscript-resolved-compatibility-profile-v1` with independent source/target/assurance/ABI/schema axes |
 | `Cell.lock` | version 2 |
 | `Deployed.toml` | version 2 and `cellscript-deployed-v0.23-edition-2026` |
 | Compile receipt | edition and resolved compatibility profile |
@@ -127,7 +141,8 @@ future evidence-specific promotion endpoint.
 - The playground worker and TypeScript declarations pass that edition into the
   WASM boundary and include it in compiler-output provenance.
 - Registry pages reject incomplete fixture data and display each package
-  version's edition and compatibility-profile hash.
+  version's source edition and separate compatibility-profile hash; consumers
+  do not infer ABI or schema versions from the edition year.
 - Entry-witness reports, ABI reports, action plans, and generated builders
   expose canonical `WitnessArgs.input_type` placement.
 - NovaSeal core, agreement, and planned-profile devnet transaction constructors
@@ -150,6 +165,28 @@ cannot inherit stale `target/` reports from a developer machine.
 This changes the tooling implementation, not the meaning of production
 evidence. iCKB equivalence, NovaSeal pinning, stateful CKB scenarios, and
 website/WASM checks retain their separate evidence boundaries.
+
+## Syntax And Example Audit Closure
+
+The 0.23 syntax audit found no reason to redesign actions, `verification`,
+invariants, destruction policies, parameter sources, or registry namespaces.
+It did close two checked-in consistency gaps:
+
+- type declarations now use the formatter's canonical comma-terminated field
+  form in `examples/language/canonical_style.cell`; the parser still accepts
+  comma-free fields as compatibility input;
+- syntax-combination quick, CI, and deep modes require both canonical and
+  compatibility field seeds;
+- atomic-swap, NFT, timelock, and multi-phase-DAO examples and their package
+  mirrors define `U64_MAX` locally and express overflow guards as named
+  arithmetic; and
+- `dev` and `ci` reject formatter drift and reintroduction of the cleaned raw
+  boundary literals.
+
+The merge-readiness pass also exposed four crypto-primitive CKB-VM fixtures
+that still supplied raw `CSARGv1` witnesses. They now use the adapter's
+placement ABI v2 path and keep the runtime's error-25 rejection of raw or
+malformed entry witnesses intact.
 
 ## Deliberate Boundaries
 
@@ -175,6 +212,10 @@ Merge-readiness validation:
 ```bash
 ./scripts/cellscript_gate.sh ci
 ```
+
+The syntax-audit closure is additionally covered by the canonical formatter
+check, the syntax-combination matrix, the bundled example tests, and the
+`crypto_primitives` CKB-VM integration test included in these unified gates.
 
 ABI and generated RISC-V validation:
 

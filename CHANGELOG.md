@@ -2,18 +2,28 @@
 
 ## Unreleased
 
+- Close the 0.23 syntax-audit consistency gaps: canonical type declarations
+  now use comma-terminated fields, syntax-combination gates cover canonical and
+  comma-free compatibility input, checked example mirrors use named `U64_MAX`
+  overflow expressions, and `dev` / `ci` reject regressions. CKB-VM crypto
+  primitive fixtures now place `CSARGv1` through the current
+  `WitnessArgs.input_type` adapter path instead of the retired raw-witness
+  alias.
 - Make `edition = "2026"` the single mandatory CellScript package contract.
-  The resolved edition profile now binds source semantics, target and primitive
-  assurance, entry payload ABI, and group-relative
-  `WitnessArgs.input_type` placement across metadata, cache keys, registry
-  records, `Cell.lock` v2, `Deployed.toml` v2, compile receipts v2, generated
-  builders, native APIs, WASM, LSP, and the playground. Missing or different
-  editions and older persisted schemas are rejected; no migration or
-  compatibility reader is provided. Generated CKB entries also remove the
-  raw-`CSARGv1` witness fallback, so Edition 2026 accepts the payload only
-  inside canonical `WitnessArgs.input_type`. The not-yet-deployed public
-  registry is defined by one current contract: signed entries, the initial
-  database schema, CDN JSON, and the website all require Edition 2026 and the
+  Edition is now explicitly a long-lived source-semantics epoch rather than an
+  annual release or complete ABI bundle. The resolved compatibility profile
+  independently composes source semantics, target, primitive assurance, entry
+  payload and placement ABIs, and metadata schemas under
+  `cellscript-resolved-compatibility-profile-v1`. Metadata schema 57 carries
+  those axes, and their hash remains bound across cache keys, registry records,
+  `Cell.lock` v2, `Deployed.toml` v2, compile receipts v2, generated builders,
+  native APIs, WASM, LSP, and the playground. Missing or different editions
+  and older persisted schemas are rejected; no migration or compatibility
+  reader is provided. Generated CKB entries also remove the raw-`CSARGv1`
+  witness fallback, so placement ABI v2 accepts the payload only inside
+  canonical `WitnessArgs.input_type`. The not-yet-deployed public registry is
+  defined by one current contract: signed entries, the initial database
+  schema, CDN JSON, and the website require both Edition 2026 and the separate
   compatibility-profile hash, with no fallback reader for incomplete entries.
   The generic admin API can no longer manufacture `verified_build` or
   `deployed` claims without an evidence-specific path. See the

@@ -44,7 +44,9 @@ pub mod types;
 pub mod wasm;
 
 pub use assumptions::{BuilderAssumptionMetadata, TxValidationReport, TxValidationViolation};
-pub use edition::{CellScriptEdition, ResolvedCompatibilityProfile, CURRENT_EDITION};
+pub use edition::{
+    resolve_compatibility_profile, CellScriptEdition, ResolvedCompatibilityProfile, COMPATIBILITY_PROFILE_SCHEMA, CURRENT_EDITION,
+};
 pub use proof_plan::soundness::{ProofPlanSoundnessIssue, ProofPlanSoundnessReport};
 pub use proof_plan::{EvidenceTier, ProofPlanDiagnosticMetadata, ProofPlanMetadata, ProofPlanSourceSpanMetadata};
 
@@ -209,7 +211,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
 const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v9-edition";
-pub const METADATA_SCHEMA_VERSION: u32 = 56;
+pub const METADATA_SCHEMA_VERSION: u32 = 57;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 2;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const CONSTRAINTS_METADATA_SCHEMA_VERSION: u32 = 2;
@@ -1119,10 +1121,10 @@ pub fn validate_compile_metadata(metadata: &CompileMetadata, artifact_format: Ar
     let primitive_assurance = (metadata.compatibility_profile.primitive_assurance != "default")
         .then_some(metadata.compatibility_profile.primitive_assurance.as_str());
     let expected_compatibility_profile =
-        metadata.edition.resolve_compatibility_profile(&metadata.target_profile.name, primitive_assurance);
+        resolve_compatibility_profile(metadata.edition, &metadata.target_profile.name, primitive_assurance);
     if metadata.compatibility_profile != expected_compatibility_profile {
         return Err(CompileError::without_span(format!(
-            "metadata compatibility_profile '{}' does not match edition {} and target profile '{}'",
+            "metadata compatibility_profile '{}' does not match the resolved compatibility axes for edition {} and target profile '{}'",
             metadata.compatibility_profile.id, metadata.edition, metadata.target_profile.name
         )));
     }
@@ -6271,7 +6273,7 @@ fn incremental_cache_key(cache_units: &[SourceUnitMetadata], options: &CompileOp
     key_input.push_str(&format!("-{}", options.target_profile.as_deref().unwrap_or("default")));
     key_input.push_str(&format!("-edition-{}", options.edition));
     let target_profile = options.target_profile.as_deref().unwrap_or(DEFAULT_TARGET_PROFILE);
-    let compatibility_profile = options.edition.resolve_compatibility_profile(target_profile, options.primitive_compat.as_deref());
+    let compatibility_profile = resolve_compatibility_profile(options.edition, target_profile, options.primitive_compat.as_deref());
     key_input.push_str(&format!("-compatibility-profile-{}", compatibility_profile.id));
     key_input.push_str(&format!("-debug{}", options.debug));
     key_input.push_str(&format!("-primitive-{}", options.primitive_compat.as_deref().unwrap_or("default")));
@@ -6633,7 +6635,7 @@ fn compile_metadata_from_ir(
     let transaction_view_handles = transaction_view_handle_metadata(ir);
     let borrow_regions = borrow_region_metadata(ir);
     let capability_proofs = capability_proof_metadata(ir);
-    let compatibility_profile = edition.resolve_compatibility_profile(target_profile.name(), primitive_assurance);
+    let compatibility_profile = resolve_compatibility_profile(edition, target_profile.name(), primitive_assurance);
     let mut metadata = CompileMetadata {
         metadata_schema_version: METADATA_SCHEMA_VERSION,
         source_metadata_schema_version: SOURCE_METADATA_SCHEMA_VERSION,
@@ -26222,6 +26224,15 @@ action inspect() -> u64 {
             compile(SIMPLE_PROGRAM, CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() }).unwrap();
 
         assert_eq!(result.metadata.edition, crate::CURRENT_EDITION);
+        assert_eq!(result.metadata.compatibility_profile.schema, crate::COMPATIBILITY_PROFILE_SCHEMA);
+        assert_eq!(result.metadata.compatibility_profile.source_semantics, crate::CURRENT_EDITION.source_semantics());
+        assert_eq!(result.metadata.compatibility_profile.metadata_schema_version, crate::METADATA_SCHEMA_VERSION);
+        assert_eq!(result.metadata.compatibility_profile.source_metadata_schema_version, crate::SOURCE_METADATA_SCHEMA_VERSION);
+        assert_eq!(result.metadata.compatibility_profile.artifact_metadata_schema_version, crate::ARTIFACT_METADATA_SCHEMA_VERSION);
+        assert_eq!(
+            result.metadata.compatibility_profile.constraints_metadata_schema_version,
+            crate::CONSTRAINTS_METADATA_SCHEMA_VERSION
+        );
         assert_eq!(result.metadata.compatibility_profile.entry_witness_payload_abi, crate::ENTRY_WITNESS_ABI);
         assert_eq!(result.metadata.compatibility_profile.entry_witness_placement_abi, crate::ENTRY_WITNESS_PLACEMENT_ABI);
         assert_eq!(result.metadata.compatibility_profile.entry_witness_placement_field, crate::ENTRY_WITNESS_PLACEMENT_FIELD);
@@ -26234,6 +26245,16 @@ action inspect() -> u64 {
     fn compile_result_validation_rejects_tampered_compatibility_profile() {
         let mut result = compile(SIMPLE_PROGRAM, CompileOptions::default()).unwrap();
         result.metadata.compatibility_profile.entry_witness_placement_source = "global-input-0".to_string();
+
+        let err = result.validate().unwrap_err();
+
+        assert!(err.message.contains("compatibility_profile"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_result_validation_rejects_tampered_profile_schema_axis() {
+        let mut result = compile(SIMPLE_PROGRAM, CompileOptions::default()).unwrap();
+        result.metadata.compatibility_profile.metadata_schema_version -= 1;
 
         let err = result.validate().unwrap_err();
 
@@ -31287,7 +31308,7 @@ action spend(amount: u64) -> u64 {
             asm
         );
         assert!(
-            asm.contains("# cellscript edition 2026 entry placement: validate the exact three-field WitnessArgs table")
+            asm.contains("# cellscript entry placement profile: validate the exact three-field WitnessArgs table")
                 && asm.contains("# cellscript entry placement v2: copy input_type payload over the table envelope")
                 && !asm.contains("detect raw-v1"),
             "entry wrapper did not expose the versioned WitnessArgs.input_type placement ABI:\n{}",

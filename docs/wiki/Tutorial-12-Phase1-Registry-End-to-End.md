@@ -64,7 +64,7 @@ cellc publish --json
 The public write API admits package metadata, but consumers still verify the
 source and build identity locally.
 
-## Edition 2026 Registry Contract
+## Source Edition And Compatibility Profile Contract
 
 Public publishing uses the registry's single current publish contract. The
 signed payload contains one complete version entry, and the API checks that
@@ -81,10 +81,12 @@ identity. The entry must also contain:
 }
 ```
 
-These are not website labels. `edition` identifies the selected language and
-CKB ABI rule bundle; `compatibility_profile_hash` binds the resolved details of
-that bundle. The API stores both as typed fields and exposes them in its static
-package-version JSON. Missing `edition`, `compatibility_profile_hash`,
+These are not website labels. `edition` identifies source-language semantics;
+`compatibility_profile_hash` separately binds the complete combination of
+edition, target, primitive assurance, metadata schemas, and entry/witness ABI.
+The API stores both as typed fields and exposes them in its static
+package-version JSON. Consumers must not derive ABI or schema versions from the
+edition year. Missing `edition`, `compatibility_profile_hash`,
 `dependencies`, `status`, or `yanked`, an unknown schema identifier, or a
 mismatched nested identity is rejected. Because the registry has not been
 deployed, this is the initial shape rather than an upgrade or migration story.
