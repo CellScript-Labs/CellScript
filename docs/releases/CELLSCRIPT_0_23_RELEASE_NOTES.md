@@ -27,6 +27,8 @@ the Off-Chain Session Runtime profile remain roadmap work.
 | Build identity | The resolved profile independently combines edition, target, primitive assurance, metadata schemas, and entry/witness ABIs, then binds them into metadata, registry, lock, deployment, receipt, and builder records. |
 | Registry contract | The deployed publish contract requires Edition 2026 plus its compatibility-profile hash from CLI signature through API, Postgres, version-addressed JSON, and website; assurance states require ordered evidence. |
 | Registry operations | `api.registry.cellscript.dev` and `registry.cellscript.dev` run as an isolated self-hosted Postgres/Node/object-volume/read-only-nginx stack behind trusted TLS. |
+| Registry retry safety | Pre-admission failures release only the failed request's nonce and retry reservation; accepted metadata commits transactionally, and readiness covers the actual managed object prefixes. |
+| Registry install policy | Explicit unverified/quarantined install acknowledgements persist per dependency, so lock refresh and subsequent builds retain the same auditable risk choice. |
 | Tooling | CLI, LSP, WASM, website bindings, examples, and package tooling use the same edition contract. |
 | Syntax audit | Canonical type fields use trailing commas, checked examples use named `u64` boundaries, and compatibility plus CKB-VM regressions cover both source and witness placement. |
 | Native gate | Active test, fixture, evidence, and release tooling is Rust, shell, or Node; repository policy rejects Python source reintroduction. |
@@ -151,6 +153,10 @@ states.
   compatibility-profile hash, and use the checked-in fixture only as an
   explicitly labelled read-only mirror during API failure. The Coming Soon
   surface is removed.
+- `cellc auth namespace claim` and the submit page's **Claim namespace** action
+  expose the namespace-ownership admission step required before a package's
+  first public publish. Capability registration no longer appears to imply a
+  claim that the write API never created.
 - Production operations include dependency-aware readiness, bounded proxy and
   application request bodies, persistent Postgres/object volumes, and a daily
   systemd backup. The first backup passed SHA-256 checks plus non-destructive
@@ -259,6 +265,14 @@ curl --fail --silent --show-error 'https://api.registry.cellscript.dev/v1/packag
 curl --fail --silent --show-error https://registry.cellscript.dev/health
 curl --fail --silent --show-error https://cellscript.dev/registry/ > /dev/null
 ```
+
+On 2026-07-31, a disposable cryptographically valid WebAuthn-shaped P-256
+fixture completed capability registration, namespace claim, signed publish,
+same-request idempotent replay, static snapshot reads, a fresh-directory
+install/check/build, capability revocation, and rejection of a later publish.
+Its exact database and live object records were removed after the test; the six
+object files remain in the server's isolated recovery directory rather than the
+served object volume.
 
 These endpoints prove the deployed service boundary, not a publisher-owned
 JoyID signature or first-package install. That interactive positive flow

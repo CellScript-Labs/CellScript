@@ -28,7 +28,7 @@ services:
 
   object-store-init:
     image: alpine:3.22
-    command: ["sh", "-c", "chown -R 1000:101 /objects && chmod 2750 /objects"]
+    command: ["sh", "-c", "chown -R 1000:101 /objects && find /objects -type d -exec chmod 2750 '{}' ';' && find /objects -type f -exec chmod 0640 '{}' ';'"]
     volumes:
       - registry-objects:/objects
     restart: "no"

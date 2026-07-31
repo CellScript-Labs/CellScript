@@ -135,6 +135,7 @@ pub enum Command {
     AuthCapabilityCreate(AuthCapabilityArgs),
     AuthCapabilitySubmit(AuthCapabilitySubmitArgs),
     AuthCapabilityRevoke(AuthCapabilityRevokeArgs),
+    AuthNamespaceClaim(AuthNamespaceClaimArgs),
 }
 
 #[derive(Debug, Default)]
@@ -597,6 +598,15 @@ pub struct AuthCapabilityRevokeArgs {
 }
 
 #[derive(Debug, Default)]
+pub struct AuthNamespaceClaimArgs {
+    pub api_url: Option<String>,
+    pub namespace: String,
+    pub payload: PathBuf,
+    pub joyid_signature: PathBuf,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
 pub struct RegistryVerifyArgs {
     pub json: bool,
     pub live: bool,
@@ -800,6 +810,7 @@ impl CommandExecutor {
             Command::AuthLogin(args) | Command::AuthCapabilityCreate(args) => Self::auth_capability(args),
             Command::AuthCapabilitySubmit(args) => Self::auth_capability_submit(args),
             Command::AuthCapabilityRevoke(args) => Self::auth_capability_revoke(args),
+            Command::AuthNamespaceClaim(args) => Self::auth_namespace_claim(args),
             Command::RegistryVerify(args) => Self::registry_verify(args),
             Command::PackageVerify(args) => Self::package_verify(args),
             Command::RegistryAdd(args) => Self::registry_add(args),
@@ -3709,8 +3720,8 @@ impl CommandExecutor {
                     .or_else(|| std::env::var("CELLSCRIPT_CAPABILITY_KEY_ID").ok())
                     .ok_or_else(|| {
                         crate::error::CompileError::without_span(format!(
-                            "capability key id is required for public publish; connect JoyID through the registry submit page to derive <principal_id>, run `cellc auth capability create --principal-id <principal_id> --scope publish:{}/{} --expires 90d --json > capability-payload.json`, sign that payload with JoyID through CCC, then run `cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json`; after registration, pass --capability-key-id or set CELLSCRIPT_CAPABILITY_KEY_ID",
-                            namespace, manifest.package.name
+                            "capability key id is required for public publish; connect JoyID through the registry submit page to derive <principal_id>, run `cellc auth capability create --principal-id <principal_id> --scope publish:{}/{} --expires 90d --json > capability-payload.json`, sign that payload with JoyID through CCC, submit it with `cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json`, then claim the namespace with `cellc auth namespace claim --namespace {} --payload capability-payload.json --joyid-signature joyid-signature.json`; after registration and an active namespace claim, pass --capability-key-id or set CELLSCRIPT_CAPABILITY_KEY_ID",
+                            namespace, manifest.package.name, namespace
                         ))
                     })?;
                 let issued_at = current_utc_timestamp();
@@ -3806,6 +3817,8 @@ impl CommandExecutor {
                 optional: false,
                 features: Vec::new(),
                 default_features: true,
+                allow_unverified: false,
+                allow_quarantined: false,
             };
 
             pm.resolve_from_git(&crate_name, git_url, &dep)?;
@@ -3833,6 +3846,8 @@ impl CommandExecutor {
                 optional: false,
                 features: Vec::new(),
                 default_features: true,
+                allow_unverified: false,
+                allow_quarantined: false,
             };
 
             let manifest_for_check = pm.read_manifest()?;
@@ -3881,7 +3896,7 @@ impl CommandExecutor {
                 },
             )?;
 
-            let dep = if resolved_namespace.is_some() {
+            let dep = if resolved_namespace.is_some() || args.allow_unverified || args.allow_quarantined {
                 Dependency::Detailed(DetailedDependency {
                     version,
                     namespace: resolved_namespace.clone(),
@@ -3893,6 +3908,8 @@ impl CommandExecutor {
                     optional: false,
                     features: Vec::new(),
                     default_features: true,
+                    allow_unverified: args.allow_unverified,
+                    allow_quarantined: args.allow_quarantined,
                 })
             } else {
                 Dependency::Simple(version)
@@ -4080,6 +4097,46 @@ impl CommandExecutor {
             }
             if let Some(status) = response.get("status").and_then(serde_json::Value::as_str) {
                 println!("  Status: {}", status);
+            }
+        }
+        Ok(())
+    }
+
+    fn auth_namespace_claim(args: AuthNamespaceClaimArgs) -> Result<()> {
+        let api_base = resolve_registry_api_base(args.api_url)?;
+        let registry_origin = registry_origin_from_api_base(&api_base)?;
+        let namespace = args.namespace.trim();
+        if namespace.is_empty() {
+            return Err(crate::error::CompileError::without_span("namespace is required for registry namespace claim"));
+        }
+        let payload = read_capability_authorisation_payload(&args.payload)?;
+        if payload.registry_origin != registry_origin {
+            return Err(crate::error::CompileError::without_span(format!(
+                "namespace claim payload registry_origin '{}' does not match API origin '{}'",
+                payload.registry_origin, registry_origin
+            )));
+        }
+        let namespace_scope_prefix = format!("publish:{namespace}/");
+        if !payload.requested_scopes.iter().any(|scope| scope.starts_with(&namespace_scope_prefix)) {
+            return Err(crate::error::CompileError::without_span(format!(
+                "namespace claim payload has no publish scope for namespace '{namespace}'"
+            )));
+        }
+        let joyid_signature = read_json_value(&args.joyid_signature)?;
+        let body = serde_json::json!({
+            "namespace": namespace,
+            "payload": payload,
+            "joyid_signature": joyid_signature,
+        });
+        let endpoint = format!("{}/v1/namespaces/claim", api_base.trim_end_matches('/'));
+        let response = submit_registry_json_request(&endpoint, &body, "Claimed registry namespace", args.json)?;
+        if !args.json {
+            if let Some(status) = response.get("status").and_then(serde_json::Value::as_str) {
+                println!("  Namespace: {namespace}");
+                println!("  Status: {status}");
+                if status != "active" {
+                    println!("  Publishing remains blocked until registry review activates the namespace.");
+                }
             }
         }
         Ok(())
@@ -9922,6 +9979,8 @@ fn dependency_from_add_args(args: &AddArgs) -> Dependency {
             optional: false,
             features: Vec::new(),
             default_features: true,
+            allow_unverified: false,
+            allow_quarantined: false,
         }),
         (_, Some(path)) => Dependency::Detailed(DetailedDependency {
             version: "*".to_string(),
@@ -9934,6 +9993,8 @@ fn dependency_from_add_args(args: &AddArgs) -> Dependency {
             optional: false,
             features: Vec::new(),
             default_features: true,
+            allow_unverified: false,
+            allow_quarantined: false,
         }),
         _ => Dependency::Simple("*".to_string()),
     }
@@ -9955,6 +10016,16 @@ fn auth_capability_args_from_matches(m: &clap::ArgMatches) -> AuthCapabilityArgs
 fn auth_capability_submit_args_from_matches(m: &clap::ArgMatches) -> AuthCapabilitySubmitArgs {
     AuthCapabilitySubmitArgs {
         api_url: m.get_one::<String>("api-url").cloned(),
+        payload: m.get_one::<String>("payload").map(PathBuf::from).expect("required payload"),
+        joyid_signature: m.get_one::<String>("joyid-signature").map(PathBuf::from).expect("required joyid-signature"),
+        json: json_output(m),
+    }
+}
+
+fn auth_namespace_claim_args_from_matches(m: &clap::ArgMatches) -> AuthNamespaceClaimArgs {
+    AuthNamespaceClaimArgs {
+        api_url: m.get_one::<String>("api-url").cloned(),
+        namespace: m.get_one::<String>("namespace").cloned().expect("required namespace"),
         payload: m.get_one::<String>("payload").map(PathBuf::from).expect("required payload"),
         joyid_signature: m.get_one::<String>("joyid-signature").map(PathBuf::from).expect("required joyid-signature"),
         json: json_output(m),
@@ -13293,6 +13364,49 @@ impl CliParser {
                                             .help("Emit machine-readable capability revocation output"),
                                     ),
                             ),
+                    )
+                    .subcommand(
+                        ClapCommand::new("namespace")
+                            .about("Manage Registry namespace ownership")
+                            .subcommand_required(true)
+                            .arg_required_else_help(true)
+                            .subcommand(
+                                ClapCommand::new("claim")
+                                    .about("Claim a namespace with a JoyID-signed capability authorisation payload")
+                                    .arg(
+                                        Arg::new("api-url")
+                                            .long("api-url")
+                                            .value_name("URL")
+                                            .help("Registry write API base URL; defaults to CELLSCRIPT_REGISTRY_API_URL"),
+                                    )
+                                    .arg(
+                                        Arg::new("namespace")
+                                            .long("namespace")
+                                            .value_name("NAMESPACE")
+                                            .required(true)
+                                            .help("Namespace to claim; the signed payload must contain a matching publish scope"),
+                                    )
+                                    .arg(
+                                        Arg::new("payload")
+                                            .long("payload")
+                                            .value_name("FILE")
+                                            .required(true)
+                                            .help("Capability authorisation payload JSON created by auth capability create"),
+                                    )
+                                    .arg(
+                                        Arg::new("joyid-signature")
+                                            .long("joyid-signature")
+                                            .value_name("FILE")
+                                            .required(true)
+                                            .help("JoyID signature JSON whose challenge is the canonical capability payload"),
+                                    )
+                                    .arg(
+                                        Arg::new("json")
+                                            .long("json")
+                                            .action(ArgAction::SetTrue)
+                                            .help("Emit machine-readable namespace claim output"),
+                                    ),
+                            ),
                     ),
             )
             .subcommand(
@@ -13874,6 +13988,10 @@ impl CliParser {
                     Some(("create", create)) => Command::AuthCapabilityCreate(auth_capability_args_from_matches(create)),
                     Some(("submit", submit)) => Command::AuthCapabilitySubmit(auth_capability_submit_args_from_matches(submit)),
                     Some(("revoke", revoke)) => Command::AuthCapabilityRevoke(auth_capability_revoke_args_from_matches(revoke)),
+                    _ => unreachable!(),
+                },
+                Some(("namespace", namespace)) => match namespace.subcommand() {
+                    Some(("claim", claim)) => Command::AuthNamespaceClaim(auth_namespace_claim_args_from_matches(claim)),
                     _ => unreachable!(),
                 },
                 _ => unreachable!(),

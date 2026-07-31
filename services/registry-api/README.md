@@ -240,9 +240,12 @@ Cloudflare bindings/secrets.
 it is safe; already-applied migration files are skipped.
 
 `GET /health` is a process liveness check. `GET /ready` performs live store and
-object-adapter checks and returns `503` until every required dependency and the
-admin token are ready. `NAMESPACE_CLAIM_COOLDOWN_SECONDS` defaults to `3600`;
-lower it only for controlled staging tests.
+object-adapter checks, including write access to both managed
+`source-snapshots` and `packages` prefixes, and returns `503` until every
+required dependency and the admin token are ready. The production volume
+initializer repairs ownership and directory/file modes recursively before the
+API starts. `NAMESPACE_CLAIM_COOLDOWN_SECONDS` defaults to `3600`; lower it
+only for controlled staging tests.
 
 ## Admin Governance Boundary
 
@@ -288,11 +291,16 @@ is submitted to the write API:
 cellc auth capability create --principal-id <principal_id> --scope publish:ns/pkg --expires 90d --json > capability-payload.json
 # Sign capability-payload.json with the production JoyID path exposed through CCC.
 cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json
+cellc auth namespace claim --namespace ns --payload capability-payload.json --joyid-signature joyid-signature.json
 ```
 
 The registry submit page can sign the same payload through the CCC JoyID CKB
 signer and submit it directly to `/v1/capabilities`. The signed response can
 also be copied as `joyid-signature.json` for the CLI submit path.
+The separate **Claim namespace** action, or `cellc auth namespace claim`, sends
+the same signed authorisation to `/v1/namespaces/claim`. A first publish is
+intentionally rejected until that claim is active; reserved namespaces may
+remain pending for administrator review.
 
 The submit page derives the preferred `principal_id` from the connected JoyID
 signer and exposes a copy action. The API verifies that the JoyID signature's
@@ -351,9 +359,11 @@ request. It can be pinned with `--idempotency-key` or
 same request.
 
 If publish admission fails before the package version is accepted, the write API
-releases the matching `processing` idempotency reservation. The signed publish
-nonce may already have been consumed, so a later retry with the same CI retry key
-must use a freshly generated publish payload and capability signature.
+releases both the matching `processing` idempotency reservation and the nonce
+record created by that request. The exact signed request can therefore be
+retried safely. Package, snapshot, version, capability-use, acceptance-audit,
+and completed-idempotency records commit in one database transaction; immutable
+object writes happen before that transaction and may be repeated safely.
 
 Successful publish returns a direct static read URL shaped as:
 

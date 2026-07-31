@@ -157,6 +157,17 @@ pub struct DetailedDependency {
     pub features: Vec<String>,
     #[serde(default = "default_true")]
     pub default_features: bool,
+    /// Persisted acknowledgement that this dependency may resolve from a
+    /// source_published or indexed_pending Registry entry.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub allow_unverified: bool,
+    /// Persisted incident-review acknowledgement for quarantined entries.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub allow_quarantined: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 fn default_true() -> bool {
@@ -538,7 +549,10 @@ dist/
                         name,
                         &detailed.version,
                         ns,
-                        registry::RegistryResolutionPolicy::default(),
+                        registry::RegistryResolutionPolicy {
+                            allow_unverified: detailed.allow_unverified,
+                            allow_quarantined: detailed.allow_quarantined,
+                        },
                     )?;
                     (resolved, manifest.dependencies)
                 }

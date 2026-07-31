@@ -71,8 +71,13 @@ flow, then publish:
 ```bash
 cellc auth capability create --principal-id <principal_id> --scope publish:cellscript/amm_pool --expires 90d --json > capability-payload.json
 cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json
+cellc auth namespace claim --namespace cellscript --payload capability-payload.json --joyid-signature joyid-signature.json
 cellc publish --json
 ```
+
+Namespace ownership is an explicit admission step, not a side effect of
+capability registration. The claim must be `active` before the first publish;
+reserved namespaces may return a pending review status.
 
 The public write API admits package metadata, but consumers still verify the
 source and build identity locally.
@@ -128,6 +133,11 @@ source snapshot. It verifies the snapshot descriptor's SHA-256, rejects opaque
 or path-escaping content, verifies every file's BLAKE2b digest, reconstructs the
 source tree atomically, and checks `Cell.toml`, source hash, Edition 2026, and
 compatibility-profile identity.
+For a direct `source_published` or `indexed_pending` install, pass
+`--allow-unverified`; incident review of a quarantined entry additionally needs
+`--allow-quarantined`. `cellc install` persists these acknowledgements on that
+dependency's `Cell.toml` table, so lock refreshes and later builds retain the
+same explicit policy.
 `CELLSCRIPT_REGISTRY_URL` is an explicit Git/offline override, not an automatic
 fallback from a failed production lookup. Registry packages otherwise use the
 same fail-closed principle as path and Git dependencies: the selected source

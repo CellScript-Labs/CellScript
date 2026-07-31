@@ -15,6 +15,7 @@ import {
   type PackageVersionRecord,
   type PackageVersionQuery,
   type PromotePackageVersionInput,
+  type PublishAdmissionInput,
   type ReservedNamespaceRecord,
   type RegistryStore,
   type SnapshotRecord,
@@ -503,6 +504,126 @@ export class SqlRegistryStore implements RegistryStore {
     return input;
   }
 
+  async admitPackageVersion(input: PublishAdmissionInput): Promise<PackageVersionRecord> {
+    await this.withClient(async (client) => {
+      await client.query("begin");
+      try {
+        await client.query(
+          `insert into packages(namespace, name, source_repo)
+           values ($1, $2, $3)
+           on conflict (namespace, name)
+           do update set source_repo = coalesce(excluded.source_repo, packages.source_repo),
+                         updated_at = now()`,
+          [input.package.namespace, input.package.name, input.package.source_repo ?? null],
+        );
+        await client.query(
+          `insert into source_snapshots(snapshot_hash, r2_key, source_hash, size_bytes, content_type)
+           values ($1, $2, $3, $4, $5)
+           on conflict (snapshot_hash) do nothing`,
+          [
+            input.snapshot.snapshot_hash,
+            input.snapshot.r2_key,
+            input.snapshot.source_hash,
+            input.snapshot.size_bytes,
+            input.snapshot.content_type,
+          ],
+        );
+        const insertedVersion = await client.query(
+          `insert into package_versions(
+             namespace, name, version, status, source_hash, manifest_hash,
+             edition, compatibility_profile_hash,
+             capability_key_id, principal_type, principal_id, registry_entry,
+             snapshot_hash, direct_url
+           )
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14)
+           on conflict (namespace, name, version) do nothing
+           returning namespace`,
+          [
+            input.version.namespace,
+            input.version.name,
+            input.version.version,
+            input.version.status,
+            input.version.source_hash,
+            input.version.manifest_hash,
+            input.version.edition,
+            input.version.compatibility_profile_hash,
+            input.version.capability_key_id,
+            input.version.principal_type,
+            input.version.principal_id,
+            JSON.stringify(input.version.registry_entry),
+            input.version.snapshot_hash,
+            input.version.direct_url,
+          ],
+        );
+        if (insertedVersion.rowCount !== 1) {
+          throw new ApiError(409, "package_version_exists", "package version already exists and cannot be overwritten");
+        }
+        await client.query("update capabilities set last_used_at = now() where key_id = $1", [input.capability_usage.key_id]);
+        await client.query(
+          `insert into audit_events(
+             request_id, event_type, principal_type, principal_id, capability_key_id,
+             namespace, name, version, data
+           )
+           values ($1, 'capability.used', $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+          [
+            input.capability_usage.request_id,
+            input.capability_usage.principal_type,
+            input.capability_usage.principal_id,
+            input.capability_usage.key_id,
+            input.capability_usage.namespace ?? null,
+            input.capability_usage.name ?? null,
+            input.capability_usage.version ?? null,
+            JSON.stringify({ action: input.capability_usage.action }),
+          ],
+        );
+        await client.query(
+          `insert into audit_events(
+             request_id, event_type, principal_type, principal_id, capability_key_id,
+             namespace, name, version, ip_hash, user_agent, data
+           )
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)`,
+          [
+            input.audit_event.request_id,
+            input.audit_event.event_type,
+            input.audit_event.principal_type ?? null,
+            input.audit_event.principal_id ?? null,
+            input.audit_event.capability_key_id ?? null,
+            input.audit_event.namespace ?? null,
+            input.audit_event.name ?? null,
+            input.audit_event.version ?? null,
+            input.audit_event.ip_hash ?? null,
+            input.audit_event.user_agent ?? null,
+            JSON.stringify(input.audit_event.data ?? {}),
+          ],
+        );
+        if (input.idempotency) {
+          const completed = await client.query(
+            `update idempotency_keys
+             set status = 'completed',
+                 response_status = $3,
+                 response = $4::jsonb,
+                 completed_at = now()
+             where key = $1 and request_hash = $2 and status = 'processing'`,
+            [
+              input.idempotency.key,
+              input.idempotency.request_hash,
+              input.idempotency.response_status,
+              JSON.stringify(input.idempotency.response_body),
+            ],
+          );
+          if (completed.rowCount !== 1) {
+            throw new ApiError(409, "idempotency_key_conflict", "idempotency key is reserved for another request");
+          }
+        }
+        await client.query("commit");
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      }
+    });
+    return input.version;
+  }
+
   async listPackageEvidence(namespace: string, name: string, version: string): Promise<PackageEvidenceRecord[]> {
     return this.withClient(async (client) => {
       const result = await client.query(
@@ -823,6 +944,16 @@ export class SqlRegistryStore implements RegistryStore {
         ],
       );
       return result.rowCount === 1;
+    });
+  }
+
+  async releaseNonce(input: { nonce_key: string; request_id: string }): Promise<void> {
+    await this.withClient(async (client) => {
+      await client.query(
+        `delete from used_nonces
+         where nonce_key = $1 and request_id = $2`,
+        [input.nonce_key, input.request_id],
+      );
     });
   }
 

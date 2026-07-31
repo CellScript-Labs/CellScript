@@ -471,6 +471,7 @@ pub fn run(root: &Path) -> Result<()> {
             "registry package '{}/{}@{}' has no source_hash in registry.json",
             "public registry package '{}/{}@{}' has no immutable source snapshot",
             "source_hash mismatch for '{}/{}@{}': expected '{}', got '{}'",
+            "allow_unverified: detailed.allow_unverified",
             "Git { url: String, revision: String }",
             "pub fn consistency_issues(&self, manifest: &PackageManifest) -> Vec<String>",
             "pub fn replace_with_resolved(&mut self, resolved: &HashMap<String, ResolvedPackage>)",
@@ -482,6 +483,7 @@ pub fn run(root: &Path) -> Result<()> {
         &[
             "cellc_rejects_registry_dependency_without_namespace",
             "cellc_build_resolves_registry_dependency_and_writes_phase1_lockfile",
+            "cellc_auth_namespace_claim_posts_signed_capability_payload_to_registry_api",
             "cellc_install_path_updates_lockfile_and_remove_prunes_it",
             "cellc_fmt_subcommand_formats_sources",
             "cellc_run_subcommand_executes_pure_elf_package",
@@ -494,6 +496,7 @@ pub fn run(root: &Path) -> Result<()> {
         "tests/registry.rs",
         &[
             "package_manager_resolves_registry_dependency_with_source_hash_from_local_git_fixture",
+            "package_manager_persists_unverified_registry_policy_in_dependency_manifest",
             "package_manager_rejects_registry_source_hash_mismatch",
             "lockfile_consistency_accepts_matching_registry_source",
         ],

@@ -22,6 +22,17 @@
   `CELLSCRIPT_REGISTRY_URL` Git/offline override, and the website renders the
   live Registry with a clearly labelled read-only bundled mirror only when the
   API is unavailable. The former Registry Coming Soon surface is removed.
+  First-publish admission is now user-reachable end to end: `cellc auth
+  namespace claim` and the submit page's **Claim namespace** action explicitly
+  establish namespace ownership between capability registration and publish.
+  Publish admission now commits package, snapshot, version, capability-use,
+  acceptance-audit, and completed-idempotency state in one database transaction;
+  pre-admission failures release the request-owned nonce and retry reservation,
+  while production readiness verifies both managed object-store prefixes and
+  volume initialization repairs their ownership and modes recursively.
+  Explicit unverified/quarantined install acknowledgements are persisted in
+  dependency tables, preventing lock refreshes and later builds from losing the
+  caller's risk policy.
 - Close the 0.23 syntax-audit consistency gaps: canonical type declarations
   now use comma-terminated fields, syntax-combination gates cover canonical and
   comma-free compatibility input, checked example mirrors use named `U64_MAX`

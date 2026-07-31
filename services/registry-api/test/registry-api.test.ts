@@ -568,7 +568,7 @@ describe("registry api", () => {
     expect(store.auditEvents.some((event) => event.event_type === "nonce.replay_blocked")).toBe(true);
   });
 
-  it("releases publish idempotency reservation when static registry object write fails before admission", async () => {
+  it("releases publish nonce and idempotency reservation when an object write fails before admission", async () => {
     const store = new MemoryRegistryStore();
     const writes: Array<{ key: string; body: Uint8Array; contentType: string }> = [];
     let failStaticWrites = true;
@@ -607,6 +607,7 @@ describe("registry api", () => {
       source_hash: publish.source_hash,
     };
     const idempotencyKey = "publish-key-static-fail";
+    const noncesBeforePublish = store.usedNonces.size;
     const response = await post(app, "/v1/packages/cellscript/demo/versions", {
       payload: publish,
       capability_signature: { algorithm: "p256-sha256", signature: "sig" },
@@ -620,14 +621,14 @@ describe("registry api", () => {
     expect(store.snapshots.size).toBe(0);
     expect(store.packageVersions.has("cellscript/demo@1.2.3")).toBe(false);
     expect(store.idempotencyKeys.has(`publish:${idempotencyKey}`)).toBe(false);
+    expect(store.usedNonces.size).toBe(noncesBeforePublish);
     expect(store.capabilities.get(capability.key_id)?.last_used_at).toBeFalsy();
     expect(store.auditEvents.some((event) => event.event_type === "capability.used")).toBe(false);
     expect(store.auditEvents.some((event) => event.event_type === "publish.accepted")).toBe(false);
 
     failStaticWrites = false;
-    const retryPublish = { ...publish, nonce: "0x4444444444444444" };
     const retry = await post(app, "/v1/packages/cellscript/demo/versions", {
-      payload: retryPublish,
+      payload: publish,
       capability_signature: { algorithm: "p256-sha256", signature: "sig" },
       source_snapshot: sourceSnapshot,
     }, {}, { "idempotency-key": idempotencyKey });

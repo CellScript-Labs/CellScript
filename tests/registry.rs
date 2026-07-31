@@ -11,7 +11,7 @@
 
 use cellscript::package::registry::{
     compute_source_hash, DiscoveryEntry, DiscoveryIndex, RegistryAuditInfo, RegistryDependencyRef, RegistryEntryStatus, RegistryIndex,
-    RegistryResolutionPolicy, RegistryVersion,
+    RegistryVersion,
 };
 use cellscript::package::{
     DeployedBuildInfo, DeployedManifest, DeployedPackageInfo, DeploymentCellDep, DeploymentRecord, DeploymentStatus, LockedBuildInfo,
@@ -973,7 +973,7 @@ namespace = "cellscript"
 }
 
 #[test]
-fn package_manager_allows_unverified_registry_entry_with_explicit_policy() {
+fn package_manager_persists_unverified_registry_policy_in_dependency_manifest() {
     let temp = tempfile::tempdir().unwrap();
 
     let source_repo = temp.path().join("source-repo");
@@ -1032,22 +1032,20 @@ edition = "2026"
 name = "consumer"
 version = "0.1.0"
 namespace = "app"
+
+[dependencies.token]
+version = "0.3.0"
+namespace = "cellscript"
+allow_unverified = true
 "#,
     )
     .unwrap();
     std::fs::write(consumer.join("src/main.cell"), "module consumer;\n").unwrap();
 
     let _env = RegistryEnvGuard::new(&registry_repo);
-    let manager = PackageManager::new(&consumer);
-    let resolved = manager
-        .resolve_from_registry_with_namespace_and_policy(
-            "token",
-            "0.3.0",
-            Some("cellscript"),
-            RegistryResolutionPolicy { allow_unverified: true, allow_quarantined: false },
-        )
-        .unwrap();
-    assert_eq!(resolved.source_hash.as_deref(), Some(source_hash.as_str()));
+    let mut manager = PackageManager::new(&consumer);
+    manager.resolve_dependencies().unwrap();
+    assert_eq!(manager.get_resolved()["token"].source_hash.as_deref(), Some(source_hash.as_str()));
 }
 
 #[test]

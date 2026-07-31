@@ -57,6 +57,11 @@ const adminToken = requiredEnv("REGISTRY_ADMIN_TOKEN");
 const maxIncomingBodyBytes = integerEnv("MAX_INCOMING_BODY_BYTES", 7 * 1024 * 1024, 1_024, 64 * 1024 * 1024);
 
 await mkdir(objectRoot, { recursive: true, mode: 0o750 });
+const managedObjectPrefixes = ["source-snapshots", "packages"].map((prefix) => resolve(objectRoot, prefix));
+for (const prefix of managedObjectPrefixes) {
+  await mkdir(prefix, { recursive: true, mode: 0o750 });
+  await access(prefix, fsConstants.R_OK | fsConstants.W_OK);
+}
 
 const store = new SqlRegistryStore({ connectionString: databaseUrl });
 const objectStore = new FilesystemObjectStore(objectRoot);
@@ -81,6 +86,9 @@ const app = createApp({
   registryObjectReader: objectStore,
   readinessCheck: async () => {
     await access(objectRoot, fsConstants.R_OK | fsConstants.W_OK);
+    for (const prefix of managedObjectPrefixes) {
+      await access(prefix, fsConstants.R_OK | fsConstants.W_OK);
+    }
     return { object_store: "ready", runtime: "ready" };
   },
 });

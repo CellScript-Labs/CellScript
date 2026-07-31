@@ -133,6 +133,36 @@ export interface AuditEventRecord extends AuditEventInput {
   created_at: string;
 }
 
+export interface PublishAdmissionInput {
+  package: {
+    namespace: string;
+    name: string;
+    principal_type: string;
+    principal_id: string;
+    source_repo?: string;
+    request_id: string;
+  };
+  snapshot: SnapshotRecord;
+  version: PackageVersionRecord;
+  capability_usage: {
+    key_id: string;
+    principal_type: string;
+    principal_id: string;
+    request_id: string;
+    action: string;
+    namespace?: string;
+    name?: string;
+    version?: string;
+  };
+  audit_event: AuditEventInput;
+  idempotency?: {
+    key: string;
+    request_hash: string;
+    response_status: number;
+    response_body: Record<string, unknown>;
+  };
+}
+
 export interface ListAuditEventsInput {
   event_type?: string;
   principal_type?: string;
@@ -205,6 +235,7 @@ export interface RegistryStore {
   getPackageVersion(namespace: string, name: string, version: string): Promise<PackageVersionRecord | null>;
   listPackageVersions(input: PackageVersionQuery): Promise<PackageVersionRecord[]>;
   recordPackageVersion(input: PackageVersionRecord): Promise<PackageVersionRecord>;
+  admitPackageVersion(input: PublishAdmissionInput): Promise<PackageVersionRecord>;
   listPackageEvidence(namespace: string, name: string, version: string): Promise<PackageEvidenceRecord[]>;
   listPackageEvidenceForPackage(namespace: string, name: string): Promise<PackageEvidenceRecord[]>;
   promotePackageVersion(input: PromotePackageVersionInput): Promise<{
@@ -245,6 +276,10 @@ export interface RegistryStore {
     principal_id?: string;
     capability_key_id?: string;
   }): Promise<boolean>;
+  releaseNonce(input: {
+    nonce_key: string;
+    request_id: string;
+  }): Promise<void>;
   reserveIdempotencyKey(input: {
     key: string;
     request_hash: string;
@@ -535,6 +570,29 @@ export class MemoryRegistryStore implements RegistryStore {
     return input;
   }
 
+  async admitPackageVersion(input: PublishAdmissionInput): Promise<PackageVersionRecord> {
+    const versionKey = `${input.version.namespace}/${input.version.name}@${input.version.version}`;
+    if (this.packageVersions.has(versionKey)) {
+      throw new ApiError(409, "package_version_exists", "package version already exists and cannot be overwritten");
+    }
+    if (input.idempotency) {
+      const reservation = this.idempotencyKeys.get(input.idempotency.key);
+      if (reservation?.status !== "processing" || reservation.request_hash !== input.idempotency.request_hash) {
+        throw new ApiError(409, "idempotency_key_conflict", "idempotency key is reserved for another request");
+      }
+    }
+
+    await this.ensurePackage(input.package);
+    await this.recordSnapshot(input.snapshot);
+    await this.recordPackageVersion(input.version);
+    await this.recordCapabilityUsage(input.capability_usage);
+    await this.appendAuditEvent(input.audit_event);
+    if (input.idempotency) {
+      await this.completeIdempotencyKey(input.idempotency);
+    }
+    return input.version;
+  }
+
   async listPackageEvidence(namespace: string, name: string, version: string): Promise<PackageEvidenceRecord[]> {
     const prefix = `${namespace}/${name}@${version}:`;
     return [...this.packageEvidence.entries()]
@@ -707,6 +765,13 @@ export class MemoryRegistryStore implements RegistryStore {
     };
     this.usedNonces.set(input.nonce_key, record);
     return true;
+  }
+
+  async releaseNonce(input: { nonce_key: string; request_id: string }): Promise<void> {
+    const existing = this.usedNonces.get(input.nonce_key);
+    if (existing?.request_id === input.request_id) {
+      this.usedNonces.delete(input.nonce_key);
+    }
   }
 
   async reserveIdempotencyKey(input: {

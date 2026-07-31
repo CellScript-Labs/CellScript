@@ -709,7 +709,7 @@ async function handleCreateCapability(
   const signature = requireJoyidSignature(body["joyid_signature"]);
   await verifyJoyidAuthorisationPayload(payload, signature, deps.joyidVerifier ?? productionJoyidVerifier(),);
   await throttle(store, requestId, `principal:${payload.principal_type}:${payload.principal_id}`, "capability", 8, 60 * 60, now);
-  await consumeSignedNonce(store, requestId, {
+  const nonceKey = await consumeSignedNonce(store, requestId, {
     protocol: payload.protocol,
     action: `${payload.action}:capability_create`,
     nonce: payload.nonce,
@@ -717,7 +717,13 @@ async function handleCreateCapability(
     principal_type: payload.principal_type,
     principal_id: payload.principal_id,
   });
-  const capability = await store.recordCapability({ payload, joyid_signature: signature, request_id: requestId });
+  let capability;
+  try {
+    capability = await store.recordCapability({ payload, joyid_signature: signature, request_id: requestId });
+  } catch (error) {
+    await store.releaseNonce({ nonce_key: nonceKey, request_id: requestId });
+    throw error;
+  }
   return json(
     {
       request_id: requestId,
@@ -809,7 +815,7 @@ async function handleRevokeCapability(
   const signature = requireJoyidSignature(body["joyid_signature"]);
   await verifyJoyidPayloadSignature(payload, signature, deps.joyidVerifier ?? productionJoyidVerifier());
   await throttle(store, requestId, `principal:${payload.principal_type}:${payload.principal_id}`, "capability_revoke", 8, 60 * 60, now);
-  await consumeSignedNonce(store, requestId, {
+  const nonceKey = await consumeSignedNonce(store, requestId, {
     protocol: payload.protocol,
     action: payload.action,
     nonce: payload.nonce,
@@ -819,13 +825,19 @@ async function handleRevokeCapability(
     capability_key_id: capability.key_id,
   });
   const reason = typeof body["reason"] === "string" ? body["reason"] : undefined;
-  const revoked = await store.revokeCapability({
-    key_id: capability.key_id,
-    principal_type: payload.principal_type,
-    principal_id: payload.principal_id,
-    request_id: requestId,
-    ...(reason ? { reason } : {}),
-  });
+  let revoked;
+  try {
+    revoked = await store.revokeCapability({
+      key_id: capability.key_id,
+      principal_type: payload.principal_type,
+      principal_id: payload.principal_id,
+      request_id: requestId,
+      ...(reason ? { reason } : {}),
+    });
+  } catch (error) {
+    await store.releaseNonce({ nonce_key: nonceKey, request_id: requestId });
+    throw error;
+  }
   return json(
     {
       request_id: requestId,
@@ -923,8 +935,9 @@ async function handlePublishVersion(
     idempotencyReserved = true;
   }
 
+  let consumedNonceKey: string | undefined;
   try {
-    await consumeSignedNonce(store, requestId, {
+    consumedNonceKey = await consumeSignedNonce(store, requestId, {
       protocol: payload.protocol,
       action: payload.action,
       nonce: payload.nonce,
@@ -936,14 +949,14 @@ async function handlePublishVersion(
 
     const snapshotRecord = await writeSnapshot(env, deps, payload.namespace, payload.name, payload.version, snapshot);
     const sourceRepo = typeof payload.registry_entry["repository"] === "string" ? payload.registry_entry["repository"] : undefined;
-    await store.ensurePackage({
+    const packageInput = {
       namespace: payload.namespace,
       name: payload.name,
       principal_type: capability.principal_type,
       principal_id: capability.principal_id,
       ...(sourceRepo ? { source_repo: sourceRepo } : {}),
       request_id: requestId,
-    });
+    };
     const directUrl = staticPackageVersionUrl(staticOrigin, payload.namespace, payload.name, payload.version);
     const publishedRegistryVersion = payload.registry_entry.versions[0];
     const versionInput = {
@@ -964,9 +977,7 @@ async function handlePublishVersion(
       created_at: now.toISOString(),
     } as const;
     await writeStaticRegistryVersionObject(env, deps, versionInput, snapshotRecord, staticOrigin);
-    await store.recordSnapshot(snapshotRecord);
-    const recordedVersion = await store.recordPackageVersion(versionInput);
-    await store.recordCapabilityUsage({
+    const capabilityUsage = {
       key_id: capability.key_id,
       principal_type: capability.principal_type,
       principal_id: capability.principal_id,
@@ -975,10 +986,10 @@ async function handlePublishVersion(
       namespace: payload.namespace,
       name: payload.name,
       version: payload.version,
-    });
+    };
     const ipHash = await requestIpHash(request);
     const userAgent = request.headers.get("user-agent") ?? undefined;
-    await store.appendAuditEvent({
+    const auditEvent = {
       request_id: requestId,
       event_type: "publish.accepted",
       principal_type: capability.principal_type,
@@ -989,25 +1000,37 @@ async function handlePublishVersion(
       version: payload.version,
       ...(ipHash ? { ip_hash: ipHash } : {}),
       ...(userAgent ? { user_agent: userAgent } : {}),
-      data: { status: recordedVersion.status, snapshot_hash: snapshotRecord.snapshot_hash, direct_url: directUrl },
-    });
+      data: { status: versionInput.status, snapshot_hash: snapshotRecord.snapshot_hash, direct_url: directUrl },
+    };
     const responseBody = {
       request_id: requestId,
-      status: recordedVersion.status,
+      status: versionInput.status,
       direct_url: directUrl,
       snapshot_hash: snapshotRecord.snapshot_hash,
       verification: "queued",
     };
-    if (idempotencyKey) {
-      await store.completeIdempotencyKey({
-        key: idempotencyKey,
-        request_hash: requestHash,
-        response_status: 202,
-        response_body: responseBody,
-      });
-    }
+    await store.admitPackageVersion({
+      package: packageInput,
+      snapshot: snapshotRecord,
+      version: versionInput,
+      capability_usage: capabilityUsage,
+      audit_event: auditEvent,
+      ...(idempotencyKey
+        ? {
+            idempotency: {
+              key: idempotencyKey,
+              request_hash: requestHash,
+              response_status: 202,
+              response_body: responseBody,
+            },
+          }
+        : {}),
+    });
     return json(responseBody, 202, headers);
   } catch (error) {
+    if (consumedNonceKey) {
+      await store.releaseNonce({ nonce_key: consumedNonceKey, request_id: requestId });
+    }
     if (idempotencyKey && idempotencyReserved) {
       await store.releaseProcessingIdempotencyKey({ key: idempotencyKey, request_hash: requestHash });
     }
@@ -1075,7 +1098,7 @@ async function consumeSignedNonce(
     principal_id?: string;
     capability_key_id?: string;
   },
-): Promise<void> {
+): Promise<string> {
   const nonceKey = `nonce_${await sha256Hex(canonicalJson({
     protocol: input.protocol,
     action: input.action,
@@ -1110,6 +1133,7 @@ async function consumeSignedNonce(
     });
     throw new ApiError(409, "nonce_replay", "signed nonce has already been used");
   }
+  return nonceKey;
 }
 
 async function writeStaticRegistryVersionObject(

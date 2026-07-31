@@ -197,6 +197,9 @@ alternative deployment, not a claim about the current topology.
   mirror used only when the API is unavailable.
 - [x] Keep the CCC/JoyID submit page on the same canonical
   `cellscript-registry-auth-v1` capability protocol.
+- [x] Expose namespace ownership as an explicit first-publish step through
+  `cellc auth namespace claim` and the submit page, matching the deployed
+  `/v1/namespaces/claim` admission boundary.
 - [x] Implement and expose public search/detail/evidence reads plus ordered
   evidence promotions.
 - [ ] Complete a publisher-owned JoyID capability, namespace claim, publication,
@@ -212,8 +215,8 @@ alternative deployment, not a claim about the current topology.
   key persistence in the OS keychain, and CI signing via
   `CELLSCRIPT_CAPABILITY_PRIVATE_KEY_PKCS8_B64`.
 - Confirm idempotency (`Idempotency-Key`, `x-idempotency-status: replayed`),
-  nonce consumption ordering, and the fail-fast-before-object-storage rule
-  against the live write service.
+  request-owned nonce release on pre-admission failure, transactional admission,
+  and the fail-fast-before-object-storage rule against the live write service.
 - `cellc install`/`cellc update` now query
   `api.registry.cellscript.dev` by default, select only accepted public
   statuses, then download the version's immutable Registry snapshot and verify
@@ -239,6 +242,11 @@ Production-readiness evidence currently proves:
 - the daily systemd backup produces checksum-verified Postgres and object-store
   archives, and both archive formats pass non-destructive restore inspection;
 - the website serves the live Registry and contains no Coming Soon surface.
+- a cryptographically valid WebAuthn-shaped P-256 fixture completes capability
+  registration, explicit namespace claim, signed publish, idempotent replay,
+  API/static/snapshot reads, and a fresh-directory install/check/build against
+  production; this proves deployment mechanics but is not publisher-owned
+  JoyID evidence.
 
 The remaining release checkpoint is intentionally narrower but real: complete
 the positive publisher-owned JoyID flow and install its first accepted source

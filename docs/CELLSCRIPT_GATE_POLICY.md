@@ -60,6 +60,13 @@ The `ci` gate also typechecks, tests, and performs a Wrangler dry-run build of
 database/static-object shape to the compiler-generated registry entry. It is
 local service coverage, not evidence
 that Cloudflare, R2, Hyperdrive, Neon, DNS, or a production deployment works.
+The CLI coverage includes the explicit first-publish admission sequence:
+`cellc auth capability submit`, `cellc auth namespace claim`, then
+`cellc publish`. Capability registration does not silently claim a namespace;
+the claim response must be `active` before the write API accepts a version.
+Explicit `--allow-unverified` and `--allow-quarantined` install choices are
+persisted per dependency so the lock refresh and later builds exercise the
+same auditable resolver policy.
 
 The full gate reads `scripts/ckb_acceptance_pin.json` and rejects a CKB checkout
 whose revision or worktree differs from the pin. Its report binds the CKB

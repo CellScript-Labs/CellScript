@@ -158,9 +158,9 @@ The CLI sends an `Idempotency-Key` on publish; it can derive the key from the
 exact request or accept `--idempotency-key` /
 `CELLSCRIPT_REGISTRY_IDEMPOTENCY_KEY`. If admission fails after reserving the
 key but before the package version is accepted, the registry releases that
-`processing` reservation. Because the signed publish nonce may already be
-consumed, retrying with the same CI retry key requires a new publish payload and
-capability signature.
+`processing` reservation and the nonce row owned by that failed request, so the
+same signed request can be retried. Package, snapshot, version, capability-use,
+acceptance-audit, and completed-idempotency records are committed atomically.
 
 ## CI Publishing
 
@@ -215,13 +215,13 @@ Current production abuse controls:
 - principal-scoped quota and namespace-claim cooldown are counted only after
   the JoyID signature has been verified, so forged payloads cannot burn another
   publisher's principal quota;
-- signed publish nonces are consumed before object storage writes, so replayed
-  publish payloads fail before expensive work;
+- signed publish nonces are reserved before object storage writes, so replayed
+  publish payloads fail before expensive work; a failed pre-admission request
+  releases only its own nonce row so the exact request remains safely retryable;
 - `Idempotency-Key` is supported for publish retries: the same logical request
   replays the stored response, while the same key with different payload content
   is rejected; failed pre-admission writes release a matching `processing`
-  reservation so CI can retry with the same retry key and a newly signed publish
-  payload;
+  reservation and request-owned nonce so CI can retry the same signed payload;
 - request body, metadata field, source snapshot, and artifact sizes are capped;
 - duplicate source/manifest hashes are deduplicated or throttled;
 - existing package versions are rejected before source snapshot writes;
@@ -373,6 +373,9 @@ Default resolver policy:
   `--allow-unverified`;
 - quarantined entries require a stronger explicit flag such as
   `--allow-quarantined`;
+- `cellc install` persists either acknowledgement on that dependency's
+  `Cell.toml` table, so lock refreshes and later builds preserve the explicit
+  choice instead of silently dropping it;
 - default search, recommendations, and production-visible package lists show
   only entries that passed the required baseline checks;
 - exact pins keep reproducibility, but warning and explicit-allow policy must

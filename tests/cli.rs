@@ -1246,6 +1246,7 @@ fn cellc_publish_default_requires_capability_inputs_without_writing_registry_jso
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("capability key id is required for public publish"), "unexpected stderr: {stderr}");
     assert!(stderr.contains("cellc auth capability create --principal-id <principal_id>"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("cellc auth namespace claim --namespace cellscript"), "unexpected stderr: {stderr}");
     assert!(!temp.path().join("registry.json").exists(), "default public publish must not silently write offline registry.json");
 }
 
@@ -1511,6 +1512,76 @@ fn cellc_auth_capability_submit_posts_joyid_signature_to_registry_api() {
     let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(response["status"], "active");
     let request = request_rx.recv_timeout(Duration::from_secs(5)).expect("capability request");
+    assert_eq!(request["payload"], payload);
+    assert_eq!(request["joyid_signature"]["signature"], "sig");
+}
+
+#[test]
+fn cellc_auth_namespace_claim_posts_signed_capability_payload_to_registry_api() {
+    let temp = tempfile::tempdir().unwrap();
+    let (api_url, request_rx) = start_mock_registry_api_expect_path(
+        "/v1/namespaces/claim",
+        serde_json::json!({
+            "request_id": "req_namespace",
+            "namespace": "exampleorg",
+            "status": "active"
+        }),
+    );
+    let create = cellc_command()
+        .arg("auth")
+        .arg("capability")
+        .arg("create")
+        .arg("--registry-origin")
+        .arg(&api_url)
+        .arg("--principal-id")
+        .arg("0x1111111111111111111111111111111111111111")
+        .arg("--capability-pubkey")
+        .arg("p256-spki:test")
+        .arg("--scope")
+        .arg("publish:exampleorg/demo")
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(create.status.success(), "stderr: {}", String::from_utf8_lossy(&create.stderr));
+    let payload: serde_json::Value = serde_json::from_slice(&create.stdout).unwrap();
+    let payload_path = temp.path().join("capability-payload.json");
+    let signature_path = temp.path().join("joyid-signature.json");
+    std::fs::write(&payload_path, serde_json::to_vec_pretty(&payload).unwrap()).unwrap();
+    std::fs::write(
+        &signature_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "challenge": serde_json::to_string(&payload).unwrap(),
+            "signature": "sig",
+            "message": "message",
+            "pubkey": "pubkey",
+            "keyType": "main_key",
+            "alg": -7
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let output = cellc_command()
+        .arg("auth")
+        .arg("namespace")
+        .arg("claim")
+        .arg("--api-url")
+        .arg(&api_url)
+        .arg("--namespace")
+        .arg("exampleorg")
+        .arg("--payload")
+        .arg(&payload_path)
+        .arg("--joyid-signature")
+        .arg(&signature_path)
+        .arg("--json")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(response["status"], "active");
+    let request = request_rx.recv_timeout(Duration::from_secs(5)).expect("namespace claim request");
+    assert_eq!(request["namespace"], "exampleorg");
     assert_eq!(request["payload"], payload);
     assert_eq!(request["joyid_signature"]["signature"], "sig");
 }

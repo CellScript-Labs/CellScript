@@ -311,6 +311,9 @@ cellc auth capability create --principal-id <principal_id> --scope publish:names
 cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json
   -> signed payload is submitted to the registry write API
   -> registry records the key's scope, expiry, principal_type, and principal_id
+cellc auth namespace claim --namespace namespace --payload capability-payload.json --joyid-signature joyid-signature.json
+  -> the same JoyID authorisation proves ownership of the namespace named by the publish scope
+  -> reserved namespaces remain pending until administrator review activates them
 
 cellc publish
   -> CLI signs the publish payload with the local publisher credential
@@ -386,9 +389,9 @@ registry service:
   `--idempotency-key` or `CELLSCRIPT_REGISTRY_IDEMPOTENCY_KEY` when retrying the
   same signed publish request;
 - if publish admission fails after reserving the retry key but before accepting
-  the package version, the registry releases that `processing` reservation; the
-  consumed signed nonce still cannot be reused, so retry with a fresh publish
-  payload/signature and the same CI retry key;
+  the package version, the registry releases that `processing` reservation and
+  only the nonce row created by the failed request, so the exact signed request
+  can be retried; admission metadata then commits in one database transaction;
 - build verification, artifact checks, deployment checks, chain RPC reads, and
   search indexing run asynchronously in bounded queues;
 - rate limits apply per IP, ASN, JoyID principal, credential, namespace, and
@@ -458,14 +461,17 @@ mirrored `registry.json` and tag path.
 ```bash
 cellc auth capability create --principal-id <principal_id> --scope publish:cellscript/amm_pool --expires 90d --json > capability-payload.json
 cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json
+cellc auth namespace claim --namespace cellscript --payload capability-payload.json --joyid-signature joyid-signature.json
 cellc publish
 ```
 
 If `--capability-pubkey` is omitted, `cellc auth capability create` generates a
 local P-256 capability key and stores the private key in the OS keychain. The
 printed payload is the exact JoyID challenge to sign and submit to the registry
-write API through `cellc auth capability submit`. Once the capability is
-registered, `cellc publish` computes a source hash from the current source tree,
+write API through `cellc auth capability submit`. The namespace must then be
+claimed with `cellc auth namespace claim`; a reserved claim may need operator
+review before it becomes active. Once the capability and namespace ownership
+are active, `cellc publish` computes a source hash from the current source tree,
 reads build artifacts for their hashes, signs the concrete publish payload with
 the capability key, uploads an immutable source snapshot, and submits the
 version entry to the registry. A successful publish returns the canonical
@@ -602,7 +608,9 @@ source-hash mismatch rejection.
 **Production snapshot resolution**: public status authority, required snapshot
 descriptors, bounded no-redirect download, object SHA-256, safe unique paths,
 per-file BLAKE2b, package-coordinate checks, whole-tree source hash, and atomic
-cache materialisation.
+cache materialisation. Explicit `--allow-unverified` / `--allow-quarantined`
+installs persist the chosen risk policy in the dependency table so later lock
+refreshes and builds enforce the same auditable choice.
 
 **Package/build identity**: namespace initialization, build lockfile identity,
 package verification, artifact/metadata/schema/ABI/constraints hash recording,
