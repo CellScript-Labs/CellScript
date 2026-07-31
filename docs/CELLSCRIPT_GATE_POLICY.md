@@ -14,14 +14,22 @@ deciding whether a change is ready.
 
 | Mode | When to run | Evidence boundary |
 |---|---|---|
-| `dev` | Local development before pushing | Formatting, all workspace-package Rust checks (including `cellscript-tools`), strict backend quick audit, syntax-combination quick audit, parity-gated skill-pack freshness, README-linked CellScript doc Status freshness, local markdown link check, whitespace diff check |
-| `ci` | Pull requests, pushes, and routine merge readiness | Tests and clippy for the compiler, Fiber adapter, CKB adapter, WASM crate, CKB SDK builder example, and `cellscript-tools`; strict backend CI audit; package verification; parity-gated skill-pack/doc freshness; local-link and script syntax checks |
+| `dev` | Local development before pushing | Rust formatting, canonical CellScript example formatting, all workspace-package Rust checks (including `cellscript-tools`), strict backend quick audit, syntax-combination quick audit, parity-gated skill-pack freshness, README-linked CellScript doc Status freshness, local markdown link check, whitespace diff check |
+| `ci` | Pull requests, pushes, and routine merge readiness | Canonical CellScript example formatting; tests and clippy for the compiler, Fiber adapter, CKB adapter, WASM crate, CKB SDK builder example, and `cellscript-tools`; strict backend CI audit; package verification; parity-gated skill-pack/doc freshness; local-link and script syntax checks |
 | `backend` | Changes touching IR, codegen, assembler, ABI, ELF, or RISC-V behavior | Full Rust tests, clippy, and strict backend full audit, including stateful CKB scenarios |
 | `release` | Nightly/stable release candidates and any production CKB claim | Clean tagged source plus `ci`, a fresh size-gated website WASM rebuild, tooling/docs and VS Code checks, pinned-CKB acceptance harnesses, public builder-contract generation, and mandatory stateful scenario/action coverage |
 | `release-quick` | Wrapper compatibility and local compile-only preflight | `ci` plus compile-only production acceptance; not external live/devnet evidence |
 
 `release-quick` is kept for `scripts/cellscript_ckb_release_gate.sh quick`.
 Use `release` for any production or external live/devnet claim.
+
+`dev` and `ci` run `cellc fmt --check` against
+`examples/language/canonical_style.cell`. The formatter's comma-terminated
+field form is the canonical checked-in surface; the parser may continue to
+accept comma-free fields as compatibility input. The same modes reject raw
+`u64` maximum and `MAX - delta` magic literals in the checked NFT, timelock,
+atomic-swap, and multi-phase-DAO example pairs; boundary arithmetic must use
+their local `U64_MAX` constants.
 
 Both release modes fail before doing expensive work unless the CellScript tree
 is completely clean, including untracked files. CI additionally requires the
@@ -35,6 +43,15 @@ syntax-combination, skill-pack, tooling-release, CKB production-evidence,
 NovaSeal, and Evolving-DOB gate logic. Website data generation is implemented
 by Node scripts in `website/scripts/`. Dev, CI, backend, and release gates have
 no Python runtime dependency and reject tracked Python source files.
+
+The 0.23 line also has one edition contract: every package declares
+`edition = "2026"`, and all emitted evidence binds the resolved compatibility
+profile. Missing/non-2026 editions and superseded lock, deployment, receipt,
+builder, or raw-witness placement identities are rejected rather than
+migrated. See
+[`CELLSCRIPT_EDITION_POLICY.md`](CELLSCRIPT_EDITION_POLICY.md). Edition-owned
+ABI changes require the `backend` gate in addition to ordinary `dev` and `ci`
+coverage.
 
 The full gate reads `scripts/ckb_acceptance_pin.json` and rejects a CKB checkout
 whose revision or worktree differs from the pin. Its report binds the CKB

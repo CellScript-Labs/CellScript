@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{bail, Context, Result};
+use ckb_jsonrpc_types::Transaction as JsonTransaction;
+use ckb_types::{packed, prelude::Entity};
 use serde_json::{json, Map, Value};
 
 use crate::ckb_acceptance::{self, ArtifactRecord, CompileEvidence};
@@ -299,6 +301,9 @@ fn invalidate_action(tx: &Value, fixture: &Value, old_hash: &str) -> Result<Valu
 fn measured_constraints(template: &Value, tx: &Value, dry_run: &Value) -> Result<Value> {
     let mut measured = template.clone();
     let cycles = parse_hex_u64(&dry_run["cycles"])?;
+    let json_tx: JsonTransaction =
+        serde_json::from_value(tx.clone()).context("transaction recipe is not valid CKB transaction JSON")?;
+    let packed_tx: packed::Transaction = json_tx.into();
     let outputs = tx["outputs"].as_array().context("transaction outputs missing")?;
     let outputs_data = tx["outputs_data"].as_array().context("transaction outputs_data missing")?;
     if outputs.len() != outputs_data.len() {
@@ -342,6 +347,8 @@ fn measured_constraints(template: &Value, tx: &Value, dry_run: &Value) -> Result
         .sum::<usize>();
     measured["measured_cycles"] = json!(cycles);
     measured["cycles_status"] = json!("dry-run-measured");
+    measured["consensus_serialized_tx_size_bytes"] = json!(packed_tx.as_bytes().len());
+    measured["json_envelope_size_bytes"] = json!(serde_json::to_vec(tx)?.len());
     measured["input_count"] = json!(tx["inputs"].as_array().map_or(0, Vec::len));
     measured["output_count"] = json!(outputs.len());
     measured["cell_dep_count"] = json!(tx["cell_deps"].as_array().map_or(0, Vec::len));
@@ -751,4 +758,41 @@ pub(crate) fn run(
         replayer.devnet.stop();
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use ckb_types::{packed::WitnessArgs, prelude::*};
+
+    use super::*;
+
+    fn assert_entry_witnesses(transaction: &Value, label: &str, count: &mut usize) {
+        for witness in transaction["witnesses"].as_array().expect("transaction witnesses") {
+            let encoded = decode_hex(witness.as_str().expect("hex witness")).expect("valid witness hex");
+            if encoded.is_empty() {
+                continue;
+            }
+            let args = WitnessArgs::from_slice(&encoded)
+                .unwrap_or_else(|error| panic!("{label} witness must be Molecule WitnessArgs: {error}"));
+            assert!(args.lock().to_opt().is_none(), "{label} entry witness must not occupy lock");
+            assert!(args.output_type().to_opt().is_none(), "{label} entry witness must not occupy output_type");
+            let payload =
+                args.input_type().to_opt().unwrap_or_else(|| panic!("{label} entry witness must occupy input_type")).raw_data();
+            assert!(payload.starts_with(b"CSARGv1\0"), "{label} input_type must contain a CSARG payload");
+            *count += 1;
+        }
+    }
+
+    #[test]
+    fn acceptance_recipes_use_canonical_witness_args_input_type() {
+        let fixture: Value = serde_json::from_str(RECIPES).expect("valid acceptance fixture");
+        let mut count = 0;
+        for (hash, transaction) in fixture["transactions"].as_object().expect("transactions") {
+            assert_entry_witnesses(transaction, hash, &mut count);
+        }
+        for case in fixture["lock_cases"].as_array().expect("lock cases") {
+            assert_entry_witnesses(&case["invalid_tx"], case["name"].as_str().expect("lock case name"), &mut count);
+        }
+        assert_eq!(count, 123, "the complete Edition 2026 acceptance witness matrix must be covered");
+    }
 }

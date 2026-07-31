@@ -242,15 +242,15 @@ fn pointer(value: Option<&Value>, pointer: Option<&str>) -> Value {
     value.zip(pointer).and_then(|(value, pointer)| value.pointer(pointer)).cloned().unwrap_or(Value::Null)
 }
 
-fn build_case(root: &Path, profile: &ProfileCase, action_case: &ActionCase) -> Result<Value> {
+fn build_case(root: &Path, evidence_root: &Path, profile: &ProfileCase, action_case: &ActionCase) -> Result<Value> {
     let profile_root = root.join(profile.root);
     let fixture_path = profile_root.join("fixtures").join(action_case.fixture);
     let fixture = read_json(&fixture_path)?;
     let source_hash = file_set_hash(root, &matching_files(&profile_root.join("src"), "cell")?)?;
     let schema_hash = file_set_hash(root, &matching_files(&profile_root.join("schemas"), "schema")?)?;
     let proof_hash = json_file_hash(&profile_root.join("proofs/invariant_matrix.json"))?;
-    let live_report = optional_json(root, profile.live_report)?;
-    let fiber_report = optional_json(root, profile.fiber_report)?;
+    let live_report = optional_json(evidence_root, profile.live_report)?;
+    let fiber_report = optional_json(evidence_root, profile.fiber_report)?;
     let live_tx_hash = pointer(live_report.as_ref(), action_case.tx_pointer);
     let public_btc_anchor = pointer(live_report.as_ref(), profile.public_btc_anchor);
     let public_btc_required =
@@ -359,11 +359,11 @@ fn build_case(root: &Path, profile: &ProfileCase, action_case: &ActionCase) -> R
     }))
 }
 
-fn build_report(root: &Path) -> Result<Value> {
+fn build_report(root: &Path, evidence_root: &Path) -> Result<Value> {
     let mut cases = Vec::new();
     for profile in PROFILE_CASES {
         for action_case in profile.cases {
-            cases.push(build_case(root, profile, action_case)?);
+            cases.push(build_case(root, evidence_root, profile, action_case)?);
         }
     }
     let profiles: BTreeSet<&str> = cases.iter().filter_map(|case| case["profile"].as_str()).collect();
@@ -386,10 +386,10 @@ fn build_report(root: &Path) -> Result<Value> {
     }))
 }
 
-pub fn run(root: &Path, output: Option<&Path>, pretty: bool) -> Result<i32> {
+pub fn run(root: &Path, evidence_root: Option<&Path>, output: Option<&Path>, pretty: bool) -> Result<i32> {
     let default_output = root.join("target/novaseal-profile-operator-fixtures.json");
     let output = lexical_path(output.unwrap_or(&default_output));
-    let report = build_report(root)?;
+    let report = build_report(root, evidence_root.unwrap_or(root))?;
     let parent = output.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent).with_context(|| format!("failed to create {}", parent.display()))?;
     fs::write(&output, format!("{}\n", stable_json_pretty(&report)?))

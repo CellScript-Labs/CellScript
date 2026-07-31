@@ -37,6 +37,102 @@ impl Drop for TestDir {
     }
 }
 
+fn write_json(root: &Path, relative: &str, value: &serde_json::Value) {
+    let path = root.join(relative);
+    fs::create_dir_all(path.parent().expect("evidence path must have a parent")).expect("evidence directory must be creatable");
+    fs::write(path, serde_json::to_vec(value).expect("test evidence must serialize")).expect("test evidence must be writable");
+}
+
+fn hex32(byte: u8) -> String {
+    format!("0x{}", format!("{byte:02x}").repeat(32))
+}
+
+fn write_operator_evidence(root: &Path) {
+    let tx_hash = hex32(0x11);
+    write_json(
+        root,
+        "target/novaseal-fungible-xudt-devnet-stateful-live.json",
+        &serde_json::json!({
+            "status": "passed",
+            "issue": {"commit": {"tx_hash": tx_hash}},
+            "transfer": {"commit": {"tx_hash": tx_hash}},
+            "settle": {"commit": {"tx_hash": tx_hash}},
+        }),
+    );
+    write_json(
+        root,
+        "target/novaseal-rwa-receipt-devnet-stateful-live.json",
+        &serde_json::json!({
+            "status": "passed",
+            "materialize": {"commit": {"tx_hash": tx_hash}},
+            "claim": {"commit": {"tx_hash": tx_hash}},
+            "settle": {"commit": {"tx_hash": tx_hash}},
+        }),
+    );
+    write_json(
+        root,
+        "target/novaseal-btc-transaction-commitment-devnet-stateful-live.json",
+        &serde_json::json!({
+            "status": "passed",
+            "commit_transaction": {
+                "commit": {"tx_hash": tx_hash},
+                "public_btc_anchor": {
+                    "kind": "btc_transaction_commitment",
+                    "anchor_source": "isolated-test-evidence",
+                    "btc_txid": hex32(0x21),
+                    "btc_wtxid": hex32(0x22),
+                    "btc_output_index": 0,
+                    "btc_amount_sats": 1,
+                    "ckb_btc_commitment_hash": hex32(0x23),
+                },
+            },
+        }),
+    );
+    for (relative, action, kind) in [
+        ("target/novaseal-btc-utxo-seal-devnet-stateful-live.json", "close_utxo_seal", "btc_utxo_spend"),
+        ("target/novaseal-dual-seal-devnet-stateful-live.json", "finalize_dual_seal", "dual_seal_btc_closure"),
+    ] {
+        write_json(
+            root,
+            relative,
+            &serde_json::json!({
+                "status": "passed",
+                (action): {
+                    "commit": {"tx_hash": tx_hash},
+                    "public_btc_anchor": {
+                        "kind": kind,
+                        "anchor_source": "isolated-test-evidence",
+                        "sealed_btc_txid": hex32(0x31),
+                        "sealed_btc_vout_index": 0,
+                        "sealed_btc_amount_sats": 1,
+                        "script_pubkey_hash": hex32(0x32),
+                        "btc_txid": hex32(0x33),
+                        "btc_wtxid": hex32(0x34),
+                        "spend_input_index": 0,
+                        "ckb_btc_commitment_hash": hex32(0x35),
+                        "sealed_utxo_commitment_hash": hex32(0x36),
+                    },
+                },
+            }),
+        );
+    }
+    write_json(
+        root,
+        "target/novaseal-fiber-candidate-devnet-stateful-live.json",
+        &serde_json::json!({
+            "status": "passed",
+            "settle_fiber_candidate": {"commit": {"tx_hash": tx_hash}},
+        }),
+    );
+    write_json(
+        root,
+        "target/novaseal-fiber-node-experiments.json",
+        &serde_json::json!({
+            "workflow_coverage": {"all_required_workflows_executed_passed": true},
+        }),
+    );
+}
+
 #[test]
 fn repository_policy_commands_pass_without_an_interpreter() {
     let root = repo_root();
@@ -55,9 +151,14 @@ fn repository_policy_commands_pass_without_an_interpreter() {
 fn fixture_generators_emit_complete_rust_reports() {
     let root = repo_root();
     let temp = TestDir::new("fixtures");
+    let evidence = temp.0.join("evidence");
     let operator = temp.0.join("operator.json");
     let service = temp.0.join("service.json");
-    let operator_output = run(&root, &["profile-operator-fixtures", "--output", operator.to_str().unwrap()]);
+    write_operator_evidence(&evidence);
+    let operator_output = run(
+        &root,
+        &["profile-operator-fixtures", "--evidence-root", evidence.to_str().unwrap(), "--output", operator.to_str().unwrap()],
+    );
     assert!(operator_output.status.success(), "operator generator failed: {}", String::from_utf8_lossy(&operator_output.stderr));
     let service_output = run(
         &root,

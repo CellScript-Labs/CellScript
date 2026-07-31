@@ -179,9 +179,13 @@ fn signed_multisig_v2_lock_and_cellscript_type_execute_in_ckb_vm() -> Result<(),
 }
 
 #[test]
-fn raw_v1_group_input_payload_remains_compatible() {
+fn raw_v1_group_input_payload_is_rejected_by_edition_2026() {
     let result = execute_on_second_group_input(raw_entry_payload(42));
-    assert_eq!(result.exit_code, 0, "raw-v1 compatibility failed: {:?}", result.captured_debug);
+    assert_eq!(
+        result.exit_code, 25,
+        "Edition 2026 must require WitnessArgs.input_type instead of accepting a raw payload alias: {:?}",
+        result.captured_debug
+    );
 }
 
 #[test]

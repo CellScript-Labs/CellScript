@@ -8,9 +8,9 @@ use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
 use crate::ckb_devnet::{
-    always_success_dep, always_success_lock, ckb_hash, deploy_code, funding_cells, hex0x, packed_hash, provenance, resolve_ckb_bin,
-    schnorr_sign, transaction, u16_bytes, u32_bytes, u64_bytes, u8_bytes, xonly_pubkey, CkbDevnet, RECEIPT_CAPACITY, STATE_CAPACITY,
-    TEST_AUX_RAND, TEST_SECRET_KEY, ZERO_HASH,
+    always_success_dep, always_success_lock, ckb_hash, deploy_code, entry_witness_input_type_hex, funding_cells, hex0x, packed_hash,
+    provenance, resolve_ckb_bin, schnorr_sign, transaction, u16_bytes, u32_bytes, u64_bytes, u8_bytes, xonly_pubkey, CkbDevnet,
+    RECEIPT_CAPACITY, STATE_CAPACITY, TEST_AUX_RAND, TEST_SECRET_KEY, ZERO_HASH,
 };
 use crate::shared::{stable_json_pretty, stable_json_spaced};
 
@@ -272,7 +272,7 @@ fn witness(
             signed,
         ],
     );
-    Ok(hex0x(&payload))
+    Ok(entry_witness_input_type_hex(&payload))
 }
 
 fn compile(root: &Path, output: &Path) -> Result<()> {

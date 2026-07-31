@@ -531,8 +531,11 @@ Cell in the current script group whose spend is guarded by this lock
 invocation. It is not an output Cell, not a transaction-wide scan, and not all
 same-type Cells unless the language explicitly adds such multiplicity syntax.
 
-`witness Address` means decoded transaction witness data only. It is not a
-signer or ownership proof.
+`witness Address` means decoded transaction witness data only. Under Edition
+2026 the entry wrapper obtains it from the `CSARGv1` payload inside
+`WitnessArgs.input_type` on `GroupInput#0`, or `GroupOutput#0` for an
+output-only script group. It does not mean an arbitrary raw witness, and it is
+not a signer or ownership proof.
 
 ## Lock Boundary Primitives
 
@@ -542,7 +545,7 @@ of hiding it behind account-style authorization language.
 | Primitive | Meaning in CellScript | CKB-facing interpretation |
 |---|---|---|
 | `protected T` | Typed view of the Cell state guarded by this lock invocation. | One selected input Cell in the current script group, not an output Cell and not a transaction-wide scan. |
-| `witness T` | Typed value decoded from transaction witness data. | User-supplied witness bytes decoded by the entry ABI. It is not a signer proof. |
+| `witness T` | Typed value decoded from transaction witness data. | A value decoded from the `CSARGv1` payload in canonical `WitnessArgs.input_type`. It is not a signer proof. |
 | `require expr` / `require expr, "message"` | Action or lock verifier guard. | If `expr` is false, the current script validation fails. The optional string message is kept for source readability and tooling. |
 | `lock_args T` | Typed fixed-width value decoded from the executing script args. | CKB `Script.args` data for this lock invocation. It is not a signer proof. |
 
@@ -596,6 +599,11 @@ visible, and `witness::lock(input)` makes the witness field visible, but the
 example above is still a boundary-classification example. Treat `Address`,
 `lock_args Address`, and `witness Address` as data unless an explicit verifier
 result and key-to-authority binding prove otherwise.
+
+These are two distinct witness uses. Entry parameters such as `claimed_owner`
+come from `WitnessArgs.input_type`; `witness::lock(input)` explicitly reads the
+`lock` field. Sharing one serialized `WitnessArgs` does not make the fields
+interchangeable.
 
 `lock_args Address` is already bound to the executing lock script's typed
 `Script.args` bytes. That makes it a stable script-argument value, but it still

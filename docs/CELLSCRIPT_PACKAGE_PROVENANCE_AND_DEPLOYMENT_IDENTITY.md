@@ -76,12 +76,11 @@ Resolution is profile-specific.
 No resolver may coerce one profile into another.
 ```
 
-For backward compatibility, a registry record without an explicit future
-profile is interpreted by current `cellc` commands as a CellScript source
-package candidate and must still satisfy the existing `Cell.toml`,
-`registry.json`, source-hash, build-identity, and deployment-identity checks.
-A future registry proxy or discovery index may expose multiple profiles for the
-same `namespace/name`, but the lockfile must record which profile was selected.
+Edition 2026 does not infer a missing compatibility profile. Current
+CellScript source packages must declare `edition = "2026"` and registry,
+lockfile, deployment, and builder records must bind the resulting profile
+hash. A future registry proxy or discovery index may expose multiple profiles
+for the same `namespace/name`, but the selected profile must remain explicit.
 
 ## Publisher Identity Model
 
@@ -197,7 +196,7 @@ verification scope:
 │  Build Identity                                             │
 │  compiler_version / metadata_schema / schema_hash /        │
 │  abi_hash / artifact_hash / constraints_hash                │
-│  Carrier: Cell.lock [package.build]                        │
+│  Carrier: Cell.lock [package_build]                        │
 │  Verified: build time                                       │
 ├─────────────────────────────────────────────────────────────┤
 │  Deployment Identity                                        │
@@ -406,15 +405,18 @@ registry source type with git provenance.
 **Lockfile schema**:
 
 ```toml
-version = 1
+version = 2
 
 [package]
+edition = "2026"
 name = "amm_pool"
 version = "1.2.0"
 namespace = "cellscript"
 source_hash = "blake2b:0xabcd..."
 
-[package.build]
+[package_build]
+edition = "2026"
+compatibility_profile_hash = "blake2b:0xedition..."
 compiler_version = "0.21.0"
 target_profile = "ckb"
 artifact_hash = "blake2b:0x1234..."
@@ -493,9 +495,10 @@ checks that it matches the actual `Deployed.toml` entry; if absent, the
 verification step is skipped with a warning. Future phases may require
 `record_hash` for production packages.
 
-**Backward compatibility**: The lockfile uses a single version 1 schema.
-The `[package.build]` and `[deployment.*]` sections are optional; their absence
-simply means the package has not been built or deployed yet.
+**No backward compatibility**: readers accept only lockfile version 2.
+`[package]` is required. When `[package_build]` exists, both `edition` and
+`compatibility_profile_hash` are required fields; readers do not infer them.
+The `[deployment.*]` sections may remain absent until a deployment exists.
 
 **Key invariants**:
 
@@ -578,14 +581,18 @@ re-deployment or upgrade produces a new `[[deployments]]` entry with a distinct
 set of chain facts, not an edit to an existing entry.
 
 ```toml
-version = 1
+version = 2
+schema = "cellscript-deployed-v0.23-edition-2026"
 
 [package]
+edition = "2026"
 name = "amm_pool"
 version = "1.2.0"
 source_hash = "blake2b:0xabcd..."
 
 [build]
+edition = "2026"
+compatibility_profile_hash = "blake2b:0xedition..."
 compiler_version = "0.21.0"
 artifact_hash = "blake2b:0x1234..."
 metadata_hash = "blake2b:0x5678..."
@@ -594,6 +601,8 @@ abi_hash = "blake2b:0xdef0..."
 constraints_hash = "blake2b:0x1111..."
 
 [[deployments]]
+edition = "2026"
+compatibility_profile_hash = "blake2b:0xedition..."
 network = "aggron4"
 chain_id = "ckb-testnet"
 script_role = "type"
@@ -614,6 +623,8 @@ dep_type = "dep_group"
 hash_type = "type"
 
 [[deployments]]
+edition = "2026"
+compatibility_profile_hash = "blake2b:0xedition..."
 network = "ckb-mainnet"
 chain_id = "ckb-mainnet"
 script_role = "type"
@@ -632,10 +643,11 @@ status = "candidate"
 - `status` — deployment lifecycle state
 - The full `[build]` section — binding the deployment to build identity
 
-The adapter crate's `load_deployment_manifest` /
-`parse_deployment_manifest` functions should be extended to support the new
-schema while maintaining backward compatibility with the existing
-`cellscript-ckb-deployment-manifest-v0.19` schema.
+The adapter crate's `DeploymentManifest` is a separate transaction-adapter
+configuration format. Package `Deployed.toml` readers accept only version 2
+with schema `cellscript-deployed-v0.23-edition-2026`; they do not reinterpret
+the adapter's historical `cellscript-ckb-deployment-manifest-v0.19` identity as
+a package deployment record.
 
 ## End-to-End Package Lifecycle
 
@@ -698,15 +710,18 @@ Running `cellc build` triggers dependency resolution:
 Generated `Cell.lock`:
 
 ```toml
-version = 1
+version = 2
 
 [package]
+edition = "2026"
 name = "amm_pool"
 version = "0.1.0"
 namespace = "cellscript"
 source_hash = "blake2b:0xabcd..."
 
-[package.build]
+[package_build]
+edition = "2026"
+compatibility_profile_hash = "blake2b:0xedition..."
 compiler_version = "0.21.0"
 target_profile = "ckb"
 artifact_hash = "blake2b:0x1234..."
@@ -830,14 +845,18 @@ This triggers the existing headless deployment pipeline:
 Generated `Deployed.toml`:
 
 ```toml
-version = 1
+version = 2
+schema = "cellscript-deployed-v0.23-edition-2026"
 
 [package]
+edition = "2026"
 name = "amm_pool"
 version = "1.2.0"
 source_hash = "blake2b:0xabcd..."
 
 [build]
+edition = "2026"
+compatibility_profile_hash = "blake2b:0xedition..."
 compiler_version = "0.21.0"
 artifact_hash = "blake2b:0x1234..."
 metadata_hash = "blake2b:0x5678..."
@@ -846,6 +865,8 @@ abi_hash = "blake2b:0xdef0..."
 constraints_hash = "blake2b:0x1111..."
 
 [[deployments]]
+edition = "2026"
+compatibility_profile_hash = "blake2b:0xedition..."
 network = "aggron4"
 chain_id = "ckb-testnet"
 script_role = "type"
@@ -1279,10 +1300,10 @@ production transaction:
 ```
 cellc build
   → generates artifact, metadata, schema, abi, constraints
-  → writes Cell.lock [package.build]
+  → writes Cell.lock [package_build]
 
 cellc deploy plan
-  → reads Cell.lock [package.build]
+  → reads Cell.lock [package_build]
   → reads Cell.toml [deploy.ckb] intent
   → produces deployment plan JSON
 
@@ -1342,7 +1363,7 @@ transaction.
 | `PackageInfo` | In `src/package/mod.rs`, no `namespace` field | Add `namespace: String` with `#[serde(default)]`. Required for `cellc publish`; absent means local-only package. |
 | `DetailedDependency` | In `src/package/mod.rs`, no `namespace` field | Add `namespace: Option<String>` with `#[serde(default, skip_serializing_if = "Option::is_none")]`. Used for explicit registry resolution. |
 | `PackageManifest` | `Cell.toml` schema | Unchanged structure. `[deploy.ckb]` already supported. `namespace` flows through `PackageInfo`. |
-| `Lockfile` | `version/dependencies` only | Extend with `[package.build]`, `[deployment.*]`, `namespace`, `source_hash` on dependencies. |
+| `Lockfile` | `version/dependencies` only | Extend with `[package_build]`, `[deployment.*]`, `namespace`, `source_hash` on dependencies. |
 | `LockedDependency` | `version` + `source` only | Add `namespace: Option<String>`, `source_hash: Option<String>`, `build: Option<LockedBuildInfo>`. All with `#[serde(default)]`. |
 | `LockedSource::Registry` | `{ name, version }` only | Extend to `{ namespace, name, version, url, revision }`. The `url` and `revision` fields carry git provenance from the discovery index. |
 | `DeploymentManifest` | In `crates/cellscript-ckb-adapter/src/lib.rs` | Extend to `Deployed.toml` schema: add `network`, `chain_id`, `script_role`, `data_hash`, `status`, `[build]` section. |
@@ -1393,61 +1414,20 @@ verifying that two independent builds of the same source produce the same
 - Replace any `HashMap` with `BTreeMap` for key ordering
 - Pin the `serde_json` serialization to compact output with sorted keys
 
-These changes are backward-compatible: they only affect the hash computation,
-not the schema. A Phase 2 migration can compute both the old and new hashes
-to bridge the transition.
+These hashes are deterministic within the Edition 2026 schema.
 
-### Backward Compatibility
+### Edition 2026 Breaking Boundary
 
-- `Cell.lock` uses a single version 1 schema from the start. The `[package.build]`
-  and `[deployment.*]` sections are optional; their absence simply means the
-  package has not been built or deployed yet.
-- The `Deployed.toml` format uses a distinct schema identifier
-  (`cellscript-deployed-v0.19`) to avoid confusion with the existing deployment
-  manifest schema.
-- The `LockedDependency` type gains `source_hash` and `build` fields with
-  `#[serde(default)]` to maintain deserialization compatibility.
-- All new fields on `DeploymentRef` use `Option<String>` type (not typed
-  structs like `H256` or enums), consistent with the existing `DeploymentRef`
-  which stores `code_hash`, `hash_type`, `args`, `dep_type`, and `out_point` as
-  plain `String` values. Each new field uses `#[serde(default,
-  skip_serializing_if = "Option::is_none")]` so that existing
-  `DeploymentManifest` JSON files with the
-  `cellscript-ckb-deployment-manifest-v0.19` schema continue to parse without
-  error. Typed field wrappers (e.g., `H256`, `ScriptRole`, `DeploymentStatus`)
-  are a Phase 2 concern; Phase 1 keeps everything as `Option<String>` for
-  maximum serialization compatibility.
-- The validation logic in `parse_deployment_manifest` is extended to check
-  for the new schema identifier. Old-format manifests (without the new fields)
-  parse successfully with `None` for all new fields. New-format manifests must
-  have the required fields populated; missing required fields in the new format
-  are rejected, but missing optional fields are accepted.
-
-### Non-Breaking Approach
-
-The implementation should follow this ordering:
-
-1. Add `Deployed.toml` parsing as a new capability alongside existing
-   `DeploymentManifest` parsing. New fields on `DeploymentRef` use
-   `Option<String>` with `#[serde(default, skip_serializing_if = "Option::is_none")]`
-   so existing manifests continue to parse.
-2. Extend `Lockfile` with optional `[package.build]` and `[deployment.*]` fields.
-   New `record_hash` field on `[deployment.*]` entries is optional in Phase 1;
-   computed via canonical JSON serialization (not canonical TOML) to match
-   the existing `metadata_hash` convention.
-3. Add `constraints_hash` to `cellc build` output using the same method as
-   `metadata_hash`: `ckb_blake2b256(serde_json::to_vec(&constraints))`. Same-version
-   determinism is sufficient for Phase 1; Phase 2 adds Vec sorting for
-   cross-build determinism.
-4. Extend `build_deployment_manifest_from_evidence` to populate the new
-   `DeploymentRef` fields (`network`, `chain_id`, `data_hash`, `type_id`,
-   `status`, and the `[build]` section) from the existing `ResolvedDeployEvidence`
-   and adapter configuration.
-5. Implement `resolve_from_registry` without changing existing path/git
-   resolution.
-6. Add `cellc package verify` and `cellc registry verify` as new subcommands.
-7. Defer wiring the `registry-client` module into the generated Action Builder
-   pipeline to 0.20; 0.19 consumes it from package/build verification.
+- `Cell.lock` version 2 records the package edition. A present
+  `[package_build]` must use the same edition and a non-empty compatibility
+  profile hash.
+- `Deployed.toml` version 2 uses
+  `cellscript-deployed-v0.23-edition-2026`. Package, build, and every deployment
+  record must agree on edition and compatibility profile.
+- Readers reject version 1 and the old deployment schema. They do not migrate,
+  fill defaults, or compute both old and new hashes.
+- Registry versions and generated builders bind the same edition/profile
+  identity, so a partial upgrade fails closed before transaction construction.
 
 ## Version Control Audit
 
@@ -1491,11 +1471,9 @@ this. No code change needed; the document should reference this convention.
 **Gap**: `version = 1` and `lock_schema = "cellscript-lock-v1"` are redundant.
 No migration path is defined between lockfile schema generations.
 
-**Resolution**: Remove `lock_schema`. The `version` field is sufficient —
-it is an integer that increments on breaking schema changes. Migration
-strategy: when `cellc` reads a lockfile with an older version, it writes
-a new lockfile preserving all compatible fields. The `version` field alone
-is the schema identifier.
+**Resolution**: `Cell.lock` version 2 is the sole accepted lock generation.
+Readers reject older versions and never rewrite them implicitly. Edition and
+compatibility profile are part of the build identity.
 
 #### 3. Deployed.toml Schema — Dual Version Identifier
 
@@ -1504,11 +1482,11 @@ overlapping purposes. The `schema` string ties the format to a specific
 cellscript version, but format evolution is independent of compiler
 version.
 
-**Resolution**: Keep `version = 1` as the schema identifier (integer,
-stable). Remove `schema = "cellscript-deployed-v0.19"`. The relationship
-to the existing `cellscript-ckb-deployment-manifest-v0.19` schema is:
-`Deployed.toml` version 1 is a superset of the existing manifest schema.
-The parser accepts both; the `version` field distinguishes them.
+**Resolution**: Package deployment records require both `version = 2` and
+`schema = "cellscript-deployed-v0.23-edition-2026"`. The redundancy is
+intentional fail-closed evidence: one identifies the structural generation and
+the other the semantic edition boundary. The adapter's historical deployment
+manifest is a different format and is not accepted as `Deployed.toml`.
 
 #### 4. registry.json Dependencies Missing Namespace
 
@@ -1734,7 +1712,7 @@ implications from the audit above.
 | 6 | Remove `schema` string from Deployed.toml; keep `version = 1` | Single version identifier; parser accepts both old manifest and new Deployed.toml | #3 |
 | 7 | Define canonical network table (mainnet/aggron4/devnet) | `cellc deploy --network aggron4` writes correct `network` + `chain_id` | #12 |
 | 8 | Add `_schema.json` to discovery index repository | `{ "schema_version": 1 }` at repo root | #11 |
-| 9 | `Cell.lock` with `[package.build]` hash section | `cellc build` writes artifact/metadata/schema/abi/constraints hashes to lockfile | — |
+| 9 | `Cell.lock` with `[package_build]` hash section | `cellc build` writes artifact/metadata/schema/abi/constraints hashes to lockfile | — |
 | 10 | `Deployed.toml` format definition and parsing | Adapter crate can load and validate `Deployed.toml` records | — |
 | 11 | Implement `resolve_from_registry` with two-tier resolution | Discovery index lookup → source repo clone → `registry.json` verification → `Cell.toml` parsing | — |
 | 12 | Define semver compatibility rules and unified version resolution | `cellc build` fails on unsatisfiable version constraints; `"0.3.0"` means `^0.3.0` | #1, #10 |

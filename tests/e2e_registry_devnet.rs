@@ -142,7 +142,7 @@ fn git_config_user(repo_dir: &Path) {
 fn create_package(dir: &Path, name: &str, version: &str, namespace: Option<&str>) {
     std::fs::create_dir_all(dir.join("src")).unwrap();
 
-    let mut toml = String::from("[package]\n");
+    let mut toml = String::from("[package]\nedition = \"2026\"\n");
     toml.push_str(&format!("name = \"{}\"\n", name));
     toml.push_str(&format!("version = \"{}\"\n", version));
     if let Some(ns) = namespace {
@@ -166,7 +166,7 @@ fn create_package_with_dep(
 ) {
     std::fs::create_dir_all(dir.join("src")).unwrap();
 
-    let mut toml = String::from("[package]\n");
+    let mut toml = String::from("[package]\nedition = \"2026\"\n");
     toml.push_str(&format!("name = \"{}\"\n", name));
     toml.push_str(&format!("version = \"{}\"\n", version));
     if let Some(ns) = namespace {
@@ -189,6 +189,8 @@ fn init_source_repo(repo_dir: &Path, name: &str, version: &str, namespace: &str)
     let source_hash = compute_source_hash(repo_dir).unwrap();
 
     let version_entry = RegistryVersion {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         version: version.to_string(),
         tag: format!("v{}", version),
         source_hash: source_hash.clone(),
@@ -248,6 +250,8 @@ fn sample_deployment_record(
     out_point: &str,
 ) -> DeploymentRecord {
     DeploymentRecord {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         network: network.to_string(),
         chain_id: chain_id.to_string(),
         tx_hash: tx_hash.to_string(),
@@ -383,6 +387,7 @@ fn e2e_publish_install_verify_offline_git() {
 
     let mut lockfile = Lockfile::new();
     lockfile.package = LockfilePackageInfo {
+        edition: cellscript::CURRENT_EDITION,
         name: "app".to_string(),
         version: "0.1.0".to_string(),
         namespace: Some("cellscript".to_string()),
@@ -439,6 +444,8 @@ fn e2e_multi_package_dependency_chain() {
 
     // Build registry entry for lib-b with dependency reference
     let version_entry_b = RegistryVersion {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         version: "0.1.0".to_string(),
         tag: "v0.1.0".to_string(),
         source_hash: hash_b.clone(),
@@ -521,6 +528,7 @@ fn e2e_multi_package_dependency_chain() {
 
     let mut lockfile = Lockfile::new();
     lockfile.package = LockfilePackageInfo {
+        edition: cellscript::CURRENT_EDITION,
         name: "app".to_string(),
         version: "0.1.0".to_string(),
         namespace: Some("cellscript".to_string()),
@@ -605,6 +613,8 @@ fn publish_version_with_deps(
     deps: &[(String, String, String)], // (dep_name, dep_namespace, dep_version)
 ) {
     let version_entry = RegistryVersion {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         version: version.to_string(),
         tag: format!("v{}", version),
         source_hash: source_hash.to_string(),
@@ -692,7 +702,7 @@ fn e2e_diamond_dependency_compatible_versions_unify() {
     // ── 4. Consumer "app" depends on both amm and vesting (the diamond) ──
     let app_dir = temp.path().join("consumer-app");
     std::fs::create_dir_all(app_dir.join("src")).unwrap();
-    let mut toml = String::from("[package]\nname = \"app\"\nversion = \"0.1.0\"\nnamespace = \"cellscript\"\n");
+    let mut toml = String::from("[package]\nedition = \"2026\"\nname = \"app\"\nversion = \"0.1.0\"\nnamespace = \"cellscript\"\n");
     toml.push_str("\n[dependencies.amm]\nversion = \"0.1.0\"\nnamespace = \"cellscript\"\n");
     toml.push_str("\n[dependencies.vesting]\nversion = \"0.1.0\"\nnamespace = \"cellscript\"\n");
     std::fs::write(app_dir.join("Cell.toml"), toml).unwrap();
@@ -765,7 +775,7 @@ fn e2e_diamond_dependency_conflicting_versions_fails_closed() {
     // ── 4. Consumer "app" forms the conflicting diamond ──
     let app_dir = temp.path().join("consumer-app");
     std::fs::create_dir_all(app_dir.join("src")).unwrap();
-    let mut toml = String::from("[package]\nname = \"app\"\nversion = \"0.1.0\"\nnamespace = \"cellscript\"\n");
+    let mut toml = String::from("[package]\nedition = \"2026\"\nname = \"app\"\nversion = \"0.1.0\"\nnamespace = \"cellscript\"\n");
     toml.push_str("\n[dependencies.amm]\nversion = \"0.1.0\"\nnamespace = \"cellscript\"\n");
     toml.push_str("\n[dependencies.vesting]\nversion = \"0.1.0\"\nnamespace = \"cellscript\"\n");
     std::fs::write(app_dir.join("Cell.toml"), toml).unwrap();
@@ -873,6 +883,8 @@ fn e2e_version_upgrade_yank_semver() {
     let hash_010 = compute_source_hash(&repo).unwrap();
 
     let v010 = RegistryVersion {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         version: "0.1.0".to_string(),
         tag: "v0.1.0".to_string(),
         source_hash: hash_010.clone(),
@@ -903,6 +915,8 @@ fn e2e_version_upgrade_yank_semver() {
     assert_ne!(hash_010, hash_020, "source hash must change when code changes");
 
     let v020 = RegistryVersion {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         version: "0.2.0".to_string(),
         tag: "v0.2.0".to_string(),
         source_hash: hash_020.clone(),
@@ -931,6 +945,8 @@ fn e2e_version_upgrade_yank_semver() {
     assert_ne!(hash_020, hash_030);
 
     let v030 = RegistryVersion {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         version: "0.3.0".to_string(),
         tag: "v0.3.0".to_string(),
         source_hash: hash_030.clone(),
@@ -968,6 +984,8 @@ fn e2e_version_upgrade_yank_semver() {
 
     // ── 6. Yank v0.2.0 (critical security issue) ──
     let v020_yanked = RegistryVersion {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         version: "0.2.0".to_string(),
         tag: "v0.2.0".to_string(),
         source_hash: hash_020.clone(),
@@ -1094,14 +1112,17 @@ fn e2e_headless_deploy_deployed_toml_three_layer_identity() {
 
     // ── 4. Write Deployed.toml with deployment facts ──
     let deployed = DeployedManifest {
-        version: 1,
-        schema: Some(DEPLOYED_MANIFEST_SCHEMA.to_string()),
+        version: DeployedManifest::CURRENT_VERSION,
+        schema: DEPLOYED_MANIFEST_SCHEMA.to_string(),
         package: DeployedPackageInfo {
+            edition: cellscript::CURRENT_EDITION,
             name: "my-contract".to_string(),
             version: "0.1.0".to_string(),
             source_hash: Some(source_hash.clone()),
         },
         build: Some(DeployedBuildInfo {
+            edition: cellscript::CURRENT_EDITION,
+            compatibility_profile_hash: "test-compatibility-profile".to_string(),
             compiler_version: Some("0.19.0".to_string()),
             artifact_hash: Some(artifact_hash_hex.clone()),
             metadata_hash: None,
@@ -1111,6 +1132,8 @@ fn e2e_headless_deploy_deployed_toml_three_layer_identity() {
             constraints_hash: None,
         }),
         deployments: vec![DeploymentRecord {
+            edition: cellscript::CURRENT_EDITION,
+            compatibility_profile_hash: "test-compatibility-profile".to_string(),
             network: "aggron4".to_string(),
             chain_id: "ckb-testnet".to_string(),
             tx_hash: tx_hash_hex.clone(),
@@ -1142,6 +1165,7 @@ fn e2e_headless_deploy_deployed_toml_three_layer_identity() {
     // ── 5. Write Cell.lock with build identity ──
     let mut lockfile = Lockfile::new();
     lockfile.package = LockfilePackageInfo {
+        edition: cellscript::CURRENT_EDITION,
         name: "my-contract".to_string(),
         version: "0.1.0".to_string(),
         namespace: Some("cellscript".to_string()),
@@ -1149,6 +1173,8 @@ fn e2e_headless_deploy_deployed_toml_three_layer_identity() {
         compiler_source_hash: None,
     };
     lockfile.package_build = Some(LockedBuildInfo {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         compiler_version: Some("0.19.0".to_string()),
         target_profile: Some("ckb-release".to_string()),
         artifact_hash: Some(artifact_hash_hex.clone()),
@@ -1224,6 +1250,8 @@ fn e2e_headless_deploy_with_cell_deps_and_multi_network() {
     let _secp256k1_data_out_point = format!("{}:2", secp256k1_data_tx_hash);
 
     let mainnet_record = DeploymentRecord {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         network: "ckb-mainnet".to_string(),
         chain_id: "ckb-mainnet".to_string(),
         tx_hash: "0xaaaa0000111122223333444455556666777788889999000011112222333344445555".to_string(),
@@ -1258,6 +1286,8 @@ fn e2e_headless_deploy_with_cell_deps_and_multi_network() {
     };
 
     let testnet_record = DeploymentRecord {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         network: "aggron4".to_string(),
         chain_id: "ckb-testnet".to_string(),
         tx_hash: "0xeeee3333444455556666777788889999000011112222333344445555666677778888".to_string(),
@@ -1305,14 +1335,17 @@ fn e2e_headless_deploy_with_cell_deps_and_multi_network() {
     // ── 2. Write Deployed.toml with both deployments ──
     let source_hash = compute_source_hash(&pkg_dir).unwrap();
     let deployed = DeployedManifest {
-        version: 1,
-        schema: Some(DEPLOYED_MANIFEST_SCHEMA.to_string()),
+        version: DeployedManifest::CURRENT_VERSION,
+        schema: DEPLOYED_MANIFEST_SCHEMA.to_string(),
         package: DeployedPackageInfo {
+            edition: cellscript::CURRENT_EDITION,
             name: "multi-deploy".to_string(),
             version: "0.2.0".to_string(),
             source_hash: Some(source_hash.clone()),
         },
         build: Some(DeployedBuildInfo {
+            edition: cellscript::CURRENT_EDITION,
+            compatibility_profile_hash: "test-compatibility-profile".to_string(),
             compiler_version: Some("0.19.0".to_string()),
             artifact_hash: Some("artifact_hash_mainnet".to_string()),
             metadata_hash: None,
@@ -1328,6 +1361,7 @@ fn e2e_headless_deploy_with_cell_deps_and_multi_network() {
     // ── 3. Write Cell.lock with both network deployment refs ──
     let mut lockfile = Lockfile::new();
     lockfile.package = LockfilePackageInfo {
+        edition: cellscript::CURRENT_EDITION,
         name: "multi-deploy".to_string(),
         version: "0.2.0".to_string(),
         namespace: Some("cellscript".to_string()),
@@ -1335,6 +1369,8 @@ fn e2e_headless_deploy_with_cell_deps_and_multi_network() {
         compiler_source_hash: None,
     };
     lockfile.package_build = Some(LockedBuildInfo {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         compiler_version: Some("0.19.0".to_string()),
         target_profile: Some("ckb-release".to_string()),
         artifact_hash: Some("artifact_hash_mainnet".to_string()),
@@ -1407,6 +1443,7 @@ fn e2e_fail_closed_three_layer_identity_verification() {
     // ── 1. Write correct Cell.lock + Deployed.toml ──
     let mut lockfile = Lockfile::new();
     lockfile.package = LockfilePackageInfo {
+        edition: cellscript::CURRENT_EDITION,
         name: "fail-closed".to_string(),
         version: "0.1.0".to_string(),
         namespace: Some("cellscript".to_string()),
@@ -1414,6 +1451,8 @@ fn e2e_fail_closed_three_layer_identity_verification() {
         compiler_source_hash: None,
     };
     lockfile.package_build = Some(LockedBuildInfo {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         compiler_version: Some("0.19.0".to_string()),
         artifact_hash: Some(artifact_hash.clone()),
         ..Default::default()
@@ -1431,14 +1470,17 @@ fn e2e_fail_closed_three_layer_identity_verification() {
     lockfile.write_to_root(&pkg_dir).unwrap();
 
     let deployed = DeployedManifest {
-        version: 1,
-        schema: Some(DEPLOYED_MANIFEST_SCHEMA.to_string()),
+        version: DeployedManifest::CURRENT_VERSION,
+        schema: DEPLOYED_MANIFEST_SCHEMA.to_string(),
         package: DeployedPackageInfo {
+            edition: cellscript::CURRENT_EDITION,
             name: "fail-closed".to_string(),
             version: "0.1.0".to_string(),
             source_hash: Some(source_hash.clone()),
         },
         build: Some(DeployedBuildInfo {
+            edition: cellscript::CURRENT_EDITION,
+            compatibility_profile_hash: "test-compatibility-profile".to_string(),
             compiler_version: Some("0.19.0".to_string()),
             artifact_hash: Some(artifact_hash.clone()),
             ..Default::default()
@@ -1983,6 +2025,7 @@ fn e2e_live_devnet_deploy_and_verify() {
         pkg_dir.join("Cell.toml"),
         r#"
 [package]
+edition = "2026"
 name = "devnet-contract"
 version = "0.1.0"
 namespace = "cellscript"
@@ -2133,14 +2176,17 @@ action ping(value: u64) -> u64 {
     let data_hash_hex = computed_data_hash_hex.clone();
 
     let deployed = DeployedManifest {
-        version: 1,
-        schema: Some(DEPLOYED_MANIFEST_SCHEMA.to_string()),
+        version: DeployedManifest::CURRENT_VERSION,
+        schema: DEPLOYED_MANIFEST_SCHEMA.to_string(),
         package: DeployedPackageInfo {
+            edition: cellscript::CURRENT_EDITION,
             name: "devnet-contract".to_string(),
             version: "0.1.0".to_string(),
             source_hash: Some(source_hash.clone()),
         },
         build: Some(DeployedBuildInfo {
+            edition: cellscript::CURRENT_EDITION,
+            compatibility_profile_hash: "test-compatibility-profile".to_string(),
             compiler_version: Some(cellscript::VERSION.to_string()),
             artifact_hash: Some(artifact_hash_hex.clone()),
             metadata_hash: None,
@@ -2150,6 +2196,8 @@ action ping(value: u64) -> u64 {
             constraints_hash: None,
         }),
         deployments: vec![DeploymentRecord {
+            edition: cellscript::CURRENT_EDITION,
+            compatibility_profile_hash: "test-compatibility-profile".to_string(),
             network: "ckb-devnet".to_string(),
             chain_id: "ckb-integration".to_string(),
             tx_hash: tx_hash.clone(),
@@ -2180,6 +2228,7 @@ action ping(value: u64) -> u64 {
     // ── 14. Write Cell.lock ──
     let mut lockfile = Lockfile::new();
     lockfile.package = LockfilePackageInfo {
+        edition: cellscript::CURRENT_EDITION,
         name: "devnet-contract".to_string(),
         version: "0.1.0".to_string(),
         namespace: Some("cellscript".to_string()),
@@ -2187,6 +2236,8 @@ action ping(value: u64) -> u64 {
         compiler_source_hash: None,
     };
     lockfile.package_build = Some(LockedBuildInfo {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         compiler_version: Some(cellscript::VERSION.to_string()),
         target_profile: Some("ckb".to_string()),
         artifact_hash: Some(artifact_hash_hex.clone()),
@@ -2255,6 +2306,7 @@ fn e2e_live_devnet_publish_deploy_verify_full_lifecycle() {
         app_repo.join("Cell.toml"),
         r#"
 [package]
+edition = "2026"
 name = "app-contract"
 version = "0.1.0"
 namespace = "cellscript"
@@ -2281,6 +2333,8 @@ action verify(amount: u64) -> u64 {
     let hash_app = compute_source_hash(&app_repo).unwrap();
 
     let version_entry_app = RegistryVersion {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         version: "0.1.0".to_string(),
         tag: "v0.1.0".to_string(),
         source_hash: hash_app.clone(),
@@ -2427,6 +2481,7 @@ action verify(amount: u64) -> u64 {
     // ── 11. Write Cell.lock with real on-chain facts ──
     let mut lockfile = Lockfile::new();
     lockfile.package = LockfilePackageInfo {
+        edition: cellscript::CURRENT_EDITION,
         name: "app-contract".to_string(),
         version: "0.1.0".to_string(),
         namespace: Some("cellscript".to_string()),
@@ -2434,6 +2489,8 @@ action verify(amount: u64) -> u64 {
         compiler_source_hash: None,
     };
     lockfile.package_build = Some(LockedBuildInfo {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         compiler_version: Some(cellscript::VERSION.to_string()),
         target_profile: Some("ckb".to_string()),
         artifact_hash: Some(artifact_hash_hex.clone()),
@@ -2453,10 +2510,17 @@ action verify(amount: u64) -> u64 {
 
     // ── 12. Write Deployed.toml with on-chain facts ──
     let deployed = DeployedManifest {
-        version: 1,
-        schema: Some(DEPLOYED_MANIFEST_SCHEMA.to_string()),
-        package: DeployedPackageInfo { name: "app-contract".to_string(), version: "0.1.0".to_string(), source_hash: Some(hash_app) },
+        version: DeployedManifest::CURRENT_VERSION,
+        schema: DEPLOYED_MANIFEST_SCHEMA.to_string(),
+        package: DeployedPackageInfo {
+            edition: cellscript::CURRENT_EDITION,
+            name: "app-contract".to_string(),
+            version: "0.1.0".to_string(),
+            source_hash: Some(hash_app),
+        },
         build: Some(DeployedBuildInfo {
+            edition: cellscript::CURRENT_EDITION,
+            compatibility_profile_hash: "test-compatibility-profile".to_string(),
             compiler_version: Some(cellscript::VERSION.to_string()),
             artifact_hash: Some(artifact_hash_hex),
             metadata_hash: None,
@@ -2466,6 +2530,8 @@ action verify(amount: u64) -> u64 {
             constraints_hash: None,
         }),
         deployments: vec![DeploymentRecord {
+            edition: cellscript::CURRENT_EDITION,
+            compatibility_profile_hash: "test-compatibility-profile".to_string(),
             network: "ckb-devnet".to_string(),
             chain_id: "ckb-integration".to_string(),
             tx_hash: tx_hash.clone(),
@@ -2604,6 +2670,7 @@ fn e2e_source_hash_cross_platform_determinism() {
     std::fs::write(
         pkg_dir.join("Cell.toml"),
         r#"[package]
+edition = "2026"
 name = "multi-file"
 version = "0.1.0"
 namespace = "cellscript"
@@ -2632,6 +2699,7 @@ namespace = "cellscript"
     std::fs::write(
         pkg_dir.join("Cell.toml"),
         r#"[package]
+edition = "2026"
 name = "multi-file"
 version = "0.2.0"
 namespace = "cellscript"
@@ -2653,6 +2721,7 @@ namespace = "cellscript"
     std::fs::write(
         pkg_dir2.join("Cell.toml"),
         r#"[package]
+edition = "2026"
 name = "det-check"
 version = "0.1.0"
 "#,
@@ -2681,6 +2750,8 @@ fn e2e_registry_json_append_update_idempotency() {
 
     // ── 1. Append first version ──
     let v1 = RegistryVersion {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         version: "0.1.0".to_string(),
         tag: "v0.1.0".to_string(),
         source_hash: "hash_v1".to_string(),
@@ -2705,6 +2776,8 @@ fn e2e_registry_json_append_update_idempotency() {
 
     // ── 2. Append second version ──
     let v2 = RegistryVersion {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         version: "0.2.0".to_string(),
         tag: "v0.2.0".to_string(),
         source_hash: "hash_v2".to_string(),
@@ -2728,6 +2801,8 @@ fn e2e_registry_json_append_update_idempotency() {
 
     // ── 3. Re-append v0.1.0 (update semantics — should replace, not duplicate) ──
     let v1_updated = RegistryVersion {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         version: "0.1.0".to_string(),
         tag: "v0.1.0".to_string(),
         source_hash: "hash_v1_updated".to_string(),
@@ -2814,6 +2889,7 @@ fn e2e_package_manager_registry_resolution_with_local_git() {
 
     let mut lockfile = Lockfile::new();
     lockfile.package = LockfilePackageInfo {
+        edition: cellscript::CURRENT_EDITION,
         name: "consumer".to_string(),
         version: "0.1.0".to_string(),
         namespace: Some("cellscript".to_string()),

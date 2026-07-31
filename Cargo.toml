@@ -40,6 +40,7 @@ exclude = [
     "AGENTS.md",
     "BRANCHES.md",
     "README_REVIEW.md",
+    "audits/",
     "cellscript-*.png",
     "docs/",
     "docs/wiki/",

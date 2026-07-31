@@ -7,9 +7,17 @@ For CKB work, the answer should be explicit. The CKB profile controls syscall
 choices, source constants, header/runtime rules, artifact packaging, metadata
 policy, and verification boundaries.
 
+Edition and target profile are related, but they are not duplicate settings.
+`edition = "2026"` selects the complete language and ABI rule bundle. The
+target profile is an input to that bundle: `ckb` selects the CKB-facing runtime
+rules inside Edition 2026. Changing the profile cannot opt out of the edition,
+and passing `--target-profile ckb` cannot repair a package with a missing or
+non-2026 edition.
+
 ## What You Will Learn
 
 - how to use the `ckb` profile consistently;
+- how Edition 2026 and the CKB profile combine;
 - why unsupported CKB assumptions fail closed;
 - which commands check assembly and ELF-compatible paths;
 - which CKB details deserve review before deployment.
@@ -37,7 +45,8 @@ The profile checks and records:
 - CKB source constants;
 - CKB header ABI restrictions;
 - raw ELF packaging without ABI trailer;
-- Molecule-facing schema, entry witness metadata, and typed lock args ABI;
+- Molecule-facing schema, canonical `WitnessArgs.input_type` entry placement,
+  and typed lock args ABI;
 - CKB Blake2b release/deployment hash helper support;
 - `args_parts` lock-args partition metadata for typed builders;
 - manifest-level `hash_type`, CellDep, and DepGroup reporting;
@@ -96,6 +105,10 @@ from the beginning:
 - record CKB `hash_type`, CellDeps, and DepGroups in `Cell.toml`;
 - inspect `cellc constraints --target-profile ckb --json` before deployment;
 - inspect witness layout with `cellc abi` or `cellc entry-witness`;
+- place the reported `CSARGv1` entry payload in
+  `WitnessArgs.input_type` on the first witness of the active script group;
+- preserve `WitnessArgs.lock` and `output_type` when constructing or signing a
+  transaction;
 - avoid scheduler witness ABI unless you are deliberately using that surface;
 - avoid unsupported signature/hash helper syscalls;
 - use metadata and `verify-artifact` to confirm target profile and packaging.
@@ -104,6 +117,13 @@ The lock-boundary keywords from the previous chapter also matter here.
 `protected` tells readers which input Cell is guarded. `witness` tells readers
 which values come from witness data. `lock_args` tells readers which values come
 from CKB `Script.args`. None of them silently verifies a signature.
+
+Under Edition 2026, CellScript entry parameters are not decoded from arbitrary
+raw witness bytes. The wrapper selects `GroupInput#0`, or `GroupOutput#0` for an
+output-only script group, parses a Molecule `WitnessArgs`, and reads
+`input_type`. Raw `CSARGv1`, malformed tables, absent `input_type`, and placement
+in `lock` or `output_type` fail closed. See the
+[Entry Witness ABI](../CELLSCRIPT_ENTRY_WITNESS_ABI.md).
 
 Capacity has the same boundary discipline. `with_capacity_floor(...)` is a
 source-level floor, and `occupied_capacity("TypeName")` makes capacity policy

@@ -45,9 +45,9 @@ A minimal manifest looks like this:
 
 ```toml
 [package]
+edition = "2026"
 name = "my_contract"
 version = "0.1.0"
-edition = "2021"
 entry = "src/main.cell"
 source_roots = ["src"]
 
@@ -62,6 +62,8 @@ my_lib = { path = "../my_lib" }
 
 Read the manifest as a build promise:
 
+- `edition = "2026"` selects the complete language and CKB ABI contract. It is
+  mandatory; CellScript does not infer, migrate, or accept any other edition;
 - `entry` tells the compiler where the package starts;
 - `source_roots` tells the compiler which package directories contain `.cell`
   modules;
@@ -76,6 +78,10 @@ Registry source-package resolution is implemented for packages that provide
 `source_hash`. Local path dependencies remain the fastest repeatable
 development workflow, and non-CellScript registry artifact profiles still fail
 closed until they have their own resolver contracts.
+
+The edition is also part of the emitted compatibility profile and every
+downstream build/deployment identity. See
+[CellScript Edition Policy](../CELLSCRIPT_EDITION_POLICY.md).
 
 ## Multi-file Packages
 

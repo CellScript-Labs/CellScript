@@ -828,6 +828,7 @@ impl CommandExecutor {
         let opt_level = if args.release { 3 } else { 1 };
         let input = Utf8Path::new(".");
         let options = CompileOptions {
+            edition: crate::CURRENT_EDITION,
             opt_level,
             output: None,
             debug: false,
@@ -954,6 +955,7 @@ impl CommandExecutor {
 
         for member_dir in &members {
             let options = CompileOptions {
+                edition: crate::CURRENT_EDITION,
                 opt_level,
                 output: None,
                 debug: false,
@@ -1080,6 +1082,7 @@ impl CommandExecutor {
             compile_path(
                 ".",
                 CompileOptions {
+                    edition: crate::CURRENT_EDITION,
                     opt_level: 0,
                     output: None,
                     debug: false,
@@ -1132,6 +1135,7 @@ impl CommandExecutor {
             let result = compile_path(
                 utf8,
                 CompileOptions {
+                    edition: crate::CURRENT_EDITION,
                     opt_level: 0,
                     output: None,
                     debug: false,
@@ -1239,7 +1243,15 @@ impl CommandExecutor {
         let modules = load_modules_for_input(".")?;
         let compile_result = compile_path(
             ".",
-            CompileOptions { opt_level: 0, output: None, debug: false, target: None, target_profile: None, primitive_compat: None },
+            CompileOptions {
+                edition: crate::CURRENT_EDITION,
+                opt_level: 0,
+                output: None,
+                debug: false,
+                target: None,
+                target_profile: None,
+                primitive_compat: None,
+            },
         )?;
         let mut generator = DocGenerator::new(args.output_format);
         for module in &modules {
@@ -1536,6 +1548,7 @@ impl CommandExecutor {
 
         for target in targets {
             let compile_options = CompileOptions {
+                edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
                 debug: false,
@@ -1656,6 +1669,7 @@ impl CommandExecutor {
             let compile_result = compile_path(
                 member_dir,
                 CompileOptions {
+                    edition: crate::CURRENT_EDITION,
                     opt_level: 0,
                     output: None,
                     debug: false,
@@ -1718,6 +1732,7 @@ impl CommandExecutor {
         let input = Utf8Path::from_path(&input_path)
             .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
         let options = CompileOptions {
+            edition: crate::CURRENT_EDITION,
             opt_level: 0,
             output: None,
             debug: false,
@@ -1755,6 +1770,7 @@ impl CommandExecutor {
         let input = Utf8Path::from_path(&input_path)
             .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
         let options = CompileOptions {
+            edition: crate::CURRENT_EDITION,
             opt_level: 0,
             output: None,
             debug: false,
@@ -1795,6 +1811,7 @@ impl CommandExecutor {
         let result = compile_path(
             input,
             CompileOptions {
+                edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
                 debug: false,
@@ -1867,7 +1884,7 @@ impl CommandExecutor {
             "placement_abi": ENTRY_WITNESS_PLACEMENT_ABI,
             "witness_args_field": ENTRY_WITNESS_PLACEMENT_FIELD,
             "witness_source": ENTRY_WITNESS_PLACEMENT_SOURCE,
-            "raw_v1_compatible": true,
+            "raw_v1_compatible": false,
             "target_profile": result.metadata.target_profile.name,
             "entry_kind": selected.kind,
             "entry": selected.name,
@@ -1899,6 +1916,7 @@ impl CommandExecutor {
         let result = compile_path(
             input,
             CompileOptions {
+                edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
                 debug: false,
@@ -2095,7 +2113,7 @@ impl CommandExecutor {
                 "final_witness_args_owner": "adapter",
                 "default_action_payload_field": ENTRY_WITNESS_PLACEMENT_FIELD,
                 "runtime_source": ENTRY_WITNESS_PLACEMENT_SOURCE,
-                "raw_v1_compatible": true,
+                "raw_v1_compatible": false,
                 "lock_signature_policy": "explicit-adapter-owned-do-not-overwrite",
                 "placement_requires_deployment_role": true,
                 "ckb_reference": "ckb_types::packed::WitnessArgs",
@@ -2173,6 +2191,7 @@ impl CommandExecutor {
         let result = compile_path(
             input,
             CompileOptions {
+                edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
                 debug: false,
@@ -2214,6 +2233,7 @@ impl CommandExecutor {
         let result = compile_cli_input(
             args.input.as_ref(),
             CompileOptions {
+                edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
                 debug: false,
@@ -2272,6 +2292,7 @@ impl CommandExecutor {
         let result = compile_cli_input(
             args.input.as_ref(),
             CompileOptions {
+                edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
                 debug: false,
@@ -2326,6 +2347,7 @@ impl CommandExecutor {
         let result = compile_cli_input(
             args.input.as_ref(),
             CompileOptions {
+                edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
                 debug: false,
@@ -2370,6 +2392,7 @@ impl CommandExecutor {
         let result = compile_cli_input(
             args.input.as_ref(),
             CompileOptions {
+                edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
                 debug: false,
@@ -2395,6 +2418,7 @@ impl CommandExecutor {
         let result = compile_cli_input(
             args.input.as_ref(),
             CompileOptions {
+                edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
                 debug: false,
@@ -2427,6 +2451,7 @@ impl CommandExecutor {
         let result = compile_cli_input(
             args.input.as_ref(),
             CompileOptions {
+                edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
                 debug: false,
@@ -2470,6 +2495,7 @@ impl CommandExecutor {
         let result = compile_path(
             input,
             CompileOptions {
+                edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
                 debug: false,
@@ -2518,6 +2544,7 @@ impl CommandExecutor {
         let result = compile_path(
             input,
             CompileOptions {
+                edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
                 debug: false,
@@ -2560,6 +2587,7 @@ impl CommandExecutor {
             let result = compile_path(
                 input,
                 CompileOptions {
+                    edition: crate::CURRENT_EDITION,
                     opt_level,
                     output: None,
                     debug: false,
@@ -2717,6 +2745,7 @@ impl CommandExecutor {
         let result = compile_path(
             input,
             CompileOptions {
+                edition: crate::CURRENT_EDITION,
                 opt_level: 1,
                 output: None,
                 debug: false,
@@ -2855,7 +2884,7 @@ impl CommandExecutor {
                 "final_witness_args_owner": "adapter",
                 "default_action_payload_field": ENTRY_WITNESS_PLACEMENT_FIELD,
                 "runtime_source": ENTRY_WITNESS_PLACEMENT_SOURCE,
-                "raw_v1_compatible": true,
+                "raw_v1_compatible": false,
                 "lock_signature_policy": "explicit-adapter-owned-do-not-overwrite",
                 "placement_requires_deployment_role": true,
             },
@@ -2967,6 +2996,7 @@ impl CommandExecutor {
             compile_path(
                 input,
                 CompileOptions {
+                    edition: crate::CURRENT_EDITION,
                     opt_level: 1,
                     output: None,
                     debug: false,
@@ -3037,6 +3067,7 @@ impl CommandExecutor {
         let result = compile_path(
             input,
             CompileOptions {
+                edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
                 debug: false,
@@ -3113,7 +3144,7 @@ impl CommandExecutor {
                 "placement_abi": ENTRY_WITNESS_PLACEMENT_ABI,
                 "witness_args_field": ENTRY_WITNESS_PLACEMENT_FIELD,
                 "witness_source": ENTRY_WITNESS_PLACEMENT_SOURCE,
-                "raw_v1_compatible": true,
+                "raw_v1_compatible": false,
                 "entry_kind": selected.kind,
                 "entry": selected.name,
                 "witness_hex": witness_hex,
@@ -3134,7 +3165,12 @@ impl CommandExecutor {
         let input_path = resolve_input_path(input)?;
         let compile_result = compile_path(
             &input_path,
-            CompileOptions { target: args.target.clone(), target_profile: args.target_profile.clone(), ..CompileOptions::default() },
+            CompileOptions {
+                edition: crate::CURRENT_EDITION,
+                target: args.target.clone(),
+                target_profile: args.target_profile.clone(),
+                ..CompileOptions::default()
+            },
         )?;
         let receipt = compile_receipt_json(&compile_result.metadata)?;
         if let Some(parent) = args.output.parent() {
@@ -3433,6 +3469,7 @@ impl CommandExecutor {
         let compile_result = compile_path(
             ".",
             CompileOptions {
+                edition: crate::CURRENT_EDITION,
                 opt_level,
                 output: None,
                 debug: false,
@@ -4168,6 +4205,12 @@ impl CommandExecutor {
                 lockfile.package.version, deployed.package.version
             ));
         }
+        if lockfile.package.edition != deployed.package.edition {
+            violations.push(format!(
+                "package edition mismatch: Cell.lock has '{}', Deployed.toml has '{}'",
+                lockfile.package.edition, deployed.package.edition
+            ));
+        }
         if let (Some(lock_hash), Some(deployed_hash)) = (&lockfile.package.source_hash, &deployed.package.source_hash) {
             if lock_hash != deployed_hash {
                 violations.push(format!("source_hash mismatch: Cell.lock has '{}', Deployed.toml has '{}'", lock_hash, deployed_hash));
@@ -4186,6 +4229,18 @@ impl CommandExecutor {
         }
 
         if let (Some(build), Some(deployed_build)) = (&lockfile.package_build, &deployed.build) {
+            if build.edition != deployed_build.edition {
+                violations.push(format!(
+                    "build edition mismatch: Cell.lock has '{}', Deployed.toml has '{}'",
+                    build.edition, deployed_build.edition
+                ));
+            }
+            if build.compatibility_profile_hash != deployed_build.compatibility_profile_hash {
+                violations.push(format!(
+                    "compatibility_profile_hash mismatch: Cell.lock has '{}', Deployed.toml has '{}'",
+                    build.compatibility_profile_hash, deployed_build.compatibility_profile_hash
+                ));
+            }
             compare_optional_build_field(
                 "compiler_version",
                 &build.compiler_version,
@@ -4358,6 +4413,12 @@ impl CommandExecutor {
             violations.push(format!(
                 "package version mismatch: Cell.toml has '{}', Cell.lock has '{}'",
                 manifest.package.version, lockfile.package.version
+            ));
+        }
+        if lockfile.package.edition != manifest.package.edition {
+            violations.push(format!(
+                "package edition mismatch: Cell.toml has '{}', Cell.lock has '{}'",
+                manifest.package.edition, lockfile.package.edition
             ));
         }
         if lockfile.package.namespace != manifest.package.namespace {
@@ -4850,6 +4911,8 @@ fn build_publish_registry_version(
         tag: format!("v{}", manifest.package.version),
         source_hash: source_hash.to_string(),
         cellscript_version: result.metadata.compiler_version.clone(),
+        edition: result.metadata.edition,
+        compatibility_profile_hash: hash_json_value("compatibility_profile", &result.metadata.compatibility_profile)?,
         dependencies: deps,
         abi_index: Some(metadata_abi_hash(&result.metadata)?),
         schema_hash: Some(result.metadata.molecule_schema_manifest.manifest_hash.clone()),
@@ -5691,17 +5754,22 @@ fn read_lockfile_path(path: &Path) -> Result<Lockfile> {
     let content = std::fs::read_to_string(path).map_err(|error| {
         crate::error::CompileError::without_span(format!("failed to read lockfile '{}': {}", path.display(), error))
     })?;
-    toml::from_str(&content)
-        .map_err(|error| crate::error::CompileError::without_span(format!("failed to parse lockfile '{}': {}", path.display(), error)))
+    let lockfile: Lockfile = toml::from_str(&content).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to parse lockfile '{}': {}", path.display(), error))
+    })?;
+    lockfile.validate_schema()?;
+    Ok(lockfile)
 }
 
 fn read_deployed_manifest_path(path: &Path) -> Result<crate::package::DeployedManifest> {
     let content = std::fs::read_to_string(path).map_err(|error| {
         crate::error::CompileError::without_span(format!("failed to read deployed manifest '{}': {}", path.display(), error))
     })?;
-    toml::from_str(&content).map_err(|error| {
+    let manifest: crate::package::DeployedManifest = toml::from_str(&content).map_err(|error| {
         crate::error::CompileError::without_span(format!("failed to parse deployed manifest '{}': {}", path.display(), error))
-    })
+    })?;
+    manifest.validate_schema()?;
+    Ok(manifest)
 }
 
 fn verify_builder_lockfile_identity(
@@ -5712,6 +5780,12 @@ fn verify_builder_lockfile_identity(
     let lockfile = read_lockfile_path(lockfile_path)?;
     let expected_build = locked_build_info_from_metadata(metadata)?;
     let mut violations = Vec::new();
+    if lockfile.package.edition != metadata.edition {
+        violations.push(format!(
+            "edition mismatch: Cell.lock package has '{}' but metadata has '{}'",
+            lockfile.package.edition, metadata.edition
+        ));
+    }
 
     let locked_compiler_source_hash = lockfile.package.compiler_source_hash.as_ref().or(lockfile.package.source_hash.as_ref());
     let locked_source_label = if lockfile.package.compiler_source_hash.is_some() { "compiler_source_hash" } else { "source_hash" };
@@ -5726,6 +5800,18 @@ fn verify_builder_lockfile_identity(
     match &lockfile.package_build {
         Some(build) => {
             push_missing_locked_build_identity("Cell.lock [package.build]", build, &mut violations);
+            if build.edition != metadata.edition {
+                violations.push(format!(
+                    "edition mismatch: Cell.lock build has '{}' but metadata has '{}'",
+                    build.edition, metadata.edition
+                ));
+            }
+            if build.compatibility_profile_hash != expected_build.compatibility_profile_hash {
+                violations.push(format!(
+                    "compatibility_profile_hash mismatch: Cell.lock has '{}', metadata has '{}'",
+                    build.compatibility_profile_hash, expected_build.compatibility_profile_hash
+                ));
+            }
             compare_builder_identity_field(
                 "compiler_version",
                 &build.compiler_version,
@@ -5766,6 +5852,8 @@ fn verify_builder_lockfile_identity(
         "build": lockfile.package_build,
         "verified_fields": [
             locked_source_label,
+            "edition",
+            "compatibility_profile_hash",
             "compiler_version",
             "target_profile",
             "artifact_hash",
@@ -5789,6 +5877,11 @@ fn verify_builder_deployment_identity(
     let deployed = read_deployed_manifest_path(deployed_path)?;
     let expected_build = locked_build_info_from_metadata(metadata)?;
     let mut violations = Vec::new();
+    for (label, edition) in [("Cell.lock package", lockfile.package.edition), ("Deployed.toml package", deployed.package.edition)] {
+        if edition != metadata.edition {
+            violations.push(format!("edition mismatch: {} has '{}' but metadata has '{}'", label, edition, metadata.edition));
+        }
+    }
 
     match (&lockfile.package.source_hash, &deployed.package.source_hash) {
         (Some(locked), Some(deployed_hash)) if locked == deployed_hash => {}
@@ -5812,6 +5905,18 @@ fn verify_builder_deployment_identity(
     match &deployed.build {
         Some(build) => {
             push_missing_deployed_build_identity("Deployed.toml [build]", build, &mut violations);
+            if build.edition != metadata.edition {
+                violations.push(format!(
+                    "edition mismatch: Deployed.toml build has '{}' but metadata has '{}'",
+                    build.edition, metadata.edition
+                ));
+            }
+            if build.compatibility_profile_hash != expected_build.compatibility_profile_hash {
+                violations.push(format!(
+                    "compatibility_profile_hash mismatch: Deployed.toml has '{}', metadata has '{}'",
+                    build.compatibility_profile_hash, expected_build.compatibility_profile_hash
+                ));
+            }
             compare_builder_deployed_field(
                 "compiler_version",
                 &build.compiler_version,
@@ -5844,6 +5949,18 @@ fn verify_builder_deployment_identity(
             continue;
         }
         push_deployment_status_violation(deployment, &mut violations);
+        if deployment.edition != metadata.edition {
+            violations.push(format!(
+                "edition mismatch for network '{}': deployment has '{}' but metadata has '{}'",
+                deployment.network, deployment.edition, metadata.edition
+            ));
+        }
+        if deployment.compatibility_profile_hash != expected_build.compatibility_profile_hash {
+            violations.push(format!(
+                "compatibility_profile_hash mismatch for network '{}': Deployed.toml has '{}', metadata has '{}'",
+                deployment.network, deployment.compatibility_profile_hash, expected_build.compatibility_profile_hash
+            ));
+        }
         compare_builder_deployment_record_field(
             "artifact_hash",
             &deployment.artifact_hash,
@@ -5962,6 +6079,8 @@ fn verify_builder_deployment_identity(
         "verified_fields": [
             "source_hash",
             "compiler_source_hash",
+            "edition",
+            "compatibility_profile_hash",
             "compiler_version",
             "artifact_hash",
             "metadata_hash",
@@ -6254,11 +6373,13 @@ fn typescript_builder_manifest(
     deployment_identity: Option<&serde_json::Value>,
 ) -> serde_json::Value {
     serde_json::json!({
-        "schema": "cellscript-generated-action-builder-v0.20",
+        "schema": "cellscript-generated-action-builder-v0.23-edition-2026",
         "target": "typescript",
         "package_name": package_name,
         "module": metadata.module,
         "compiler_version": metadata.compiler_version,
+        "edition": metadata.edition,
+        "compatibility_profile": metadata.compatibility_profile,
         "metadata_schema_version": metadata.metadata_schema_version,
         "metadata_schema_versions": metadata_schema_versions_json(metadata),
         "metadata_hash": metadata_hash,
@@ -6370,7 +6491,7 @@ fn typescript_builder_index(
     let metadata_json = json_string_pretty("metadata", metadata)?;
 
     let mut ts = String::new();
-    ts.push_str("export const CELLSCRIPT_BUILDER_SCHEMA = \"cellscript-generated-action-builder-v0.20\" as const;\n");
+    ts.push_str("export const CELLSCRIPT_BUILDER_SCHEMA = \"cellscript-generated-action-builder-v0.23-edition-2026\" as const;\n");
     ts.push_str("export const ACTION_SCAN_SELECTORS_SCHEMA = \"cellscript-action-scan-selectors-v0.21\" as const;\n");
     ts.push_str(&format!("export const builderManifest = {manifest_json} as const;\n"));
     ts.push_str(&format!("export const metadata = {metadata_json} as const;\n"));
@@ -6400,6 +6521,7 @@ fn typescript_builder_index(
            script_field?: string | null;\n\
          };\n\n\
          export interface CellScriptLockfilePackage {\n\
+           edition: \"2026\";\n\
            name?: string;\n\
            version?: string;\n\
            namespace?: string | null;\n\
@@ -6407,6 +6529,8 @@ fn typescript_builder_index(
            compiler_source_hash?: string | null;\n\
          }\n\n\
          export interface CellScriptLockfileBuild {\n\
+           edition: \"2026\";\n\
+           compatibility_profile_hash: string;\n\
            compiler_version?: string | null;\n\
            target_profile?: string | null;\n\
            artifact_hash?: string | null;\n\
@@ -6429,6 +6553,7 @@ fn typescript_builder_index(
            deployment?: Record<string, CellScriptLockfileDeployment | null | undefined>;\n\
          }\n\n\
          export interface CellScriptDeploymentRecord {\n\
+           edition: \"2026\";\n\
            network: string;\n\
            chain_id: string;\n\
            tx_hash: string;\n\
@@ -6445,6 +6570,7 @@ fn typescript_builder_index(
            abi_hash?: string | null;\n\
            constraints_hash?: string | null;\n\
            compiler_version?: string | null;\n\
+           compatibility_profile_hash: string;\n\
            type_id?: string | null;\n\
            status?: string | null;\n\
            audit_report_hash?: string | null;\n\
@@ -6575,6 +6701,8 @@ fn typescript_builder_index(
          const GENERATED_ARTIFACT_HASH: string | null = {};\n\
          const GENERATED_SOURCE_HASH: string | null = {};\n\
          const GENERATED_COMPILER_VERSION = {};\n\
+         const GENERATED_EDITION = {};\n\
+         const GENERATED_COMPATIBILITY_PROFILE_HASH = {};\n\
          const GENERATED_TARGET_PROFILE = {};\n\
          const GENERATED_SCHEMA_HASH = {};\n\
          const GENERATED_CELL_DATA_CODEC_MANIFEST_HASH = {};\n\
@@ -6587,6 +6715,8 @@ fn typescript_builder_index(
         metadata.artifact_hash.as_deref().map(typescript_string_literal).unwrap_or_else(|| "null".to_string()),
         metadata.source_hash.as_deref().map(typescript_string_literal).unwrap_or_else(|| "null".to_string()),
         typescript_string_literal(&metadata.compiler_version),
+        typescript_string_literal(metadata.edition.as_str()),
+        typescript_string_literal(&hash_json_value("compatibility_profile", &metadata.compatibility_profile,)?),
         typescript_string_literal(&metadata.target_profile.name),
         typescript_string_literal(&metadata.molecule_schema_manifest.manifest_hash),
         typescript_string_literal(&metadata.cell_data_codec_manifest.manifest_hash),
@@ -6719,12 +6849,15 @@ fn typescript_builder_index(
            if (!pkg) {\n\
              violations.push(\"Cell.lock has no [package]\");\n\
            } else {\n\
+             compareRequiredIdentity(\"edition\", pkg.edition, GENERATED_EDITION, violations);\n\
              compareRequiredIdentity(\"compiler_source_hash\", pkg.compiler_source_hash ?? pkg.source_hash, GENERATED_SOURCE_HASH, violations);\n\
            }\n\
            const build = lockfile.package_build;\n\
            if (!build) {\n\
              violations.push(\"Cell.lock has no [package.build]\");\n\
            } else {\n\
+             compareRequiredIdentity(\"edition\", build.edition, GENERATED_EDITION, violations);\n\
+             compareRequiredIdentity(\"compatibility_profile_hash\", build.compatibility_profile_hash, GENERATED_COMPATIBILITY_PROFILE_HASH, violations);\n\
              compareRequiredIdentity(\"compiler_version\", build.compiler_version, GENERATED_COMPILER_VERSION, violations);\n\
              compareRequiredIdentity(\"target_profile\", build.target_profile, GENERATED_TARGET_PROFILE, violations);\n\
              compareRequiredIdentity(\"artifact_hash\", build.artifact_hash, GENERATED_ARTIFACT_HASH, violations);\n\
@@ -6757,6 +6890,8 @@ fn typescript_builder_index(
              return violations;\n\
            }\n\
            violations.push(...validateCellScriptDeploymentTrust(deployment, trustPolicy));\n\
+           compareDeploymentIdentity(\"edition\", deployment.edition, GENERATED_EDITION, violations);\n\
+           compareDeploymentIdentity(\"compatibility_profile_hash\", deployment.compatibility_profile_hash, GENERATED_COMPATIBILITY_PROFILE_HASH, violations);\n\
            if (!deployment.status) {\n\
              violations.push(\"deployment record has no status; expected 'active'\");\n\
            } else if (deployment.status !== \"active\") {\n\
@@ -9912,6 +10047,7 @@ fn refresh_lockfile_deployment_refs(root: &Path, lockfile: &mut crate::package::
 
 fn lockfile_package_info(root: &Path, manifest: &crate::package::PackageManifest) -> Result<crate::package::LockfilePackageInfo> {
     Ok(crate::package::LockfilePackageInfo {
+        edition: manifest.package.edition,
         name: manifest.package.name.clone(),
         version: manifest.package.version.clone(),
         namespace: manifest.package.namespace.clone(),
@@ -9922,6 +10058,8 @@ fn lockfile_package_info(root: &Path, manifest: &crate::package::PackageManifest
 
 fn locked_build_info_from_metadata(metadata: &CompileMetadata) -> Result<crate::package::LockedBuildInfo> {
     Ok(crate::package::LockedBuildInfo {
+        edition: metadata.edition,
+        compatibility_profile_hash: hash_json_value("compatibility_profile", &metadata.compatibility_profile)?,
         compiler_version: Some(metadata.compiler_version.clone()),
         target_profile: Some(metadata.target_profile.name.clone()),
         artifact_hash: metadata.artifact_hash.clone(),
@@ -9946,6 +10084,8 @@ fn metadata_abi_hash(metadata: &CompileMetadata) -> Result<String> {
     let abi = serde_json::json!({
         "metadata_schema_version": metadata.metadata_schema_version,
         "metadata_schema_versions": metadata_schema_versions_json(metadata),
+        "edition": metadata.edition,
+        "compatibility_profile": &metadata.compatibility_profile,
         "target_profile": metadata.target_profile.name.as_str(),
         "types": &metadata.types,
         "actions": &metadata.actions,
@@ -9979,8 +10119,11 @@ fn compile_receipt_json(metadata: &CompileMetadata) -> Result<serde_json::Value>
         serde_json::Value::String(hash_json_value("template_layouts", &metadata.template_layouts)?)
     };
     Ok(serde_json::json!({
-        "schema": "cellscript-compile-receipt-v1",
+        "schema": "cellscript-compile-receipt-v2",
         "compiler_version": metadata.compiler_version,
+        "edition": metadata.edition,
+        "compatibility_profile": metadata.compatibility_profile,
+        "compatibility_profile_hash": hash_json_value("compatibility_profile", &metadata.compatibility_profile)?,
         "rust_toolchain": cellscript_rust_toolchain(),
         "target": metadata.artifact_format,
         "target_profile": metadata.target_profile.name,
@@ -10008,6 +10151,9 @@ fn verify_compile_receipt_against_metadata(
     let expected = compile_receipt_json(metadata)?;
     for pointer in [
         "/compiler_version",
+        "/edition",
+        "/compatibility_profile",
+        "/compatibility_profile_hash",
         "/rust_toolchain",
         "/target",
         "/target_profile",
@@ -10036,9 +10182,9 @@ fn verify_compile_receipt_against_metadata(
 
 fn validate_compile_receipt_schema(receipt: &serde_json::Value) -> Result<()> {
     match receipt.get("schema").and_then(serde_json::Value::as_str) {
-        Some("cellscript-compile-receipt-v1") => Ok(()),
+        Some("cellscript-compile-receipt-v2") => Ok(()),
         Some(schema) => Err(crate::error::CompileError::without_span(format!(
-            "unsupported compile receipt schema '{}'; expected cellscript-compile-receipt-v1",
+            "unsupported compile receipt schema '{}'; expected cellscript-compile-receipt-v2",
             schema
         ))),
         None => Err(crate::error::CompileError::without_span("compile receipt is missing schema")),
@@ -10462,6 +10608,9 @@ fn cellfabric_app_conflict_key_templates(app_namespace: &str, action: &crate::Ac
 }
 
 fn push_missing_locked_build_identity(label: &str, build: &crate::package::LockedBuildInfo, violations: &mut Vec<String>) {
+    if build.compatibility_profile_hash.is_empty() {
+        violations.push(format!("{} has no compatibility_profile_hash", label));
+    }
     if build.compiler_version.is_none() {
         violations.push(format!("{} has no compiler_version", label));
     }
@@ -10489,6 +10638,9 @@ fn push_missing_locked_build_identity(label: &str, build: &crate::package::Locke
 }
 
 fn push_missing_deployed_build_identity(label: &str, build: &crate::package::DeployedBuildInfo, violations: &mut Vec<String>) {
+    if build.compatibility_profile_hash.is_empty() {
+        violations.push(format!("{} has no compatibility_profile_hash", label));
+    }
     if build.compiler_version.is_none() {
         violations.push(format!("{} has no compiler_version", label));
     }

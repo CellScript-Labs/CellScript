@@ -6,7 +6,7 @@ and the locks that decide whether a Cell may be spent. The compiler then turns
 that `.cell` source into ckb-vm compatible RISC-V assembly or ELF artifacts, and
 writes metadata that explains what was built.
 
-Last updated: 2026-07-21 (CellScript 0.22.0).
+Last updated: 2026-07-31 (`nightly-0.23`).
 
 This wiki is a guided path. It starts with one compiled example, then slowly
 builds the mental model: source files, Cell effects, packages, the CKB profile,
@@ -36,6 +36,8 @@ After that, the wiki continues outward:
   collections, payload enums, validity predicates, borrow regions, stable
   `E2xxx` diagnostics, and bounded Fiber interoperability extend that evidence
   without hiding builder or chain obligations;
+- v0.23 makes Edition 2026 the single compiler/tooling contract and places
+  CellScript entry payloads only in canonical `WitnessArgs.input_type`;
 - production evidence proves more than compiler success;
 - editor tooling shortens the local loop;
 - bundled examples show the style in real contracts.

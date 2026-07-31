@@ -284,6 +284,7 @@ fn main() {
 
     let output = cli.output.clone();
     let options = CompileOptions {
+        edition: cellscript::CURRENT_EDITION,
         opt_level: cli.opt,
         output: output.clone(),
         debug: cli.debug,

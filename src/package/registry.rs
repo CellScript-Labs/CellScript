@@ -333,6 +333,8 @@ pub struct RegistryVersion {
     pub tag: String,
     pub source_hash: String,
     pub cellscript_version: String,
+    pub edition: crate::CellScriptEdition,
+    pub compatibility_profile_hash: String,
     #[serde(default)]
     pub dependencies: BTreeMap<String, RegistryDependencyRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -807,6 +809,8 @@ mod tests {
             namespace: "cellscript".to_string(),
             versions: vec![
                 RegistryVersion {
+                    edition: crate::CURRENT_EDITION,
+                    compatibility_profile_hash: "test-compatibility-profile".to_string(),
                     version: "0.1.0".to_string(),
                     tag: "v0.1.0".to_string(),
                     source_hash: "hash1".to_string(),
@@ -824,6 +828,8 @@ mod tests {
                     audit: None,
                 },
                 RegistryVersion {
+                    edition: crate::CURRENT_EDITION,
+                    compatibility_profile_hash: "test-compatibility-profile".to_string(),
                     version: "0.3.2".to_string(),
                     tag: "v0.3.2".to_string(),
                     source_hash: "hash2".to_string(),
@@ -841,6 +847,8 @@ mod tests {
                     audit: None,
                 },
                 RegistryVersion {
+                    edition: crate::CURRENT_EDITION,
+                    compatibility_profile_hash: "test-compatibility-profile".to_string(),
                     version: "0.3.0".to_string(),
                     tag: "v0.3.0".to_string(),
                     source_hash: "hash3".to_string(),
@@ -880,6 +888,8 @@ mod tests {
             name: "pkg".to_string(),
             namespace: "ns".to_string(),
             versions: vec![RegistryVersion {
+                edition: crate::CURRENT_EDITION,
+                compatibility_profile_hash: "test-compatibility-profile".to_string(),
                 version: "1.0.0".to_string(),
                 tag: "v1.0.0".to_string(),
                 source_hash: "h1".to_string(),
@@ -910,6 +920,8 @@ mod tests {
         // A yanked version with full Phase 2 metadata must survive JSON
         // serialization and also omit cleanly when the fields are absent.
         let yanked = RegistryVersion {
+            edition: crate::CURRENT_EDITION,
+            compatibility_profile_hash: "test-compatibility-profile".to_string(),
             version: "1.2.0".to_string(),
             tag: "v1.2.0".to_string(),
             source_hash: "h".to_string(),
@@ -935,7 +947,14 @@ mod tests {
 
         // The optional yank fields are omitted from JSON when absent, so older
         // registry.json files without them still parse (backward compatible).
-        let clean = RegistryVersion { yanked_at: None, yanked_reason: None, replaced_by: None, ..yanked };
+        let clean = RegistryVersion {
+            edition: crate::CURRENT_EDITION,
+            compatibility_profile_hash: "test-compatibility-profile".to_string(),
+            yanked_at: None,
+            yanked_reason: None,
+            replaced_by: None,
+            ..yanked
+        };
         let clean_json = serde_json::to_string(&clean).unwrap();
         assert!(!clean_json.contains("yanked_at"));
         assert!(!clean_json.contains("yanked_reason"));
@@ -950,6 +969,8 @@ mod tests {
             namespace: "cellscript".to_string(),
             versions: vec![
                 RegistryVersion {
+                    edition: crate::CURRENT_EDITION,
+                    compatibility_profile_hash: "test-compatibility-profile".to_string(),
                     version: "0.1.0".to_string(),
                     tag: "v0.1.0".to_string(),
                     source_hash: "hash-v010".to_string(),
@@ -967,6 +988,8 @@ mod tests {
                     audit: None,
                 },
                 RegistryVersion {
+                    edition: crate::CURRENT_EDITION,
+                    compatibility_profile_hash: "test-compatibility-profile".to_string(),
                     version: "0.2.0".to_string(),
                     tag: "v0.2.0".to_string(),
                     source_hash: "hash-v020".to_string(),
@@ -984,6 +1007,8 @@ mod tests {
                     audit: None,
                 },
                 RegistryVersion {
+                    edition: crate::CURRENT_EDITION,
+                    compatibility_profile_hash: "test-compatibility-profile".to_string(),
                     version: "0.3.0".to_string(),
                     tag: "v0.3.0".to_string(),
                     source_hash: "hash-v030".to_string(),
@@ -1031,6 +1056,8 @@ mod tests {
               "tag": "v1.0.0",
               "source_hash": "hash-v100",
               "cellscript_version": "0.20.0",
+              "edition": "2026",
+              "compatibility_profile_hash": "test-compatibility-profile",
               "dependencies": {},
               "yanked": false
             }
@@ -1070,6 +1097,8 @@ mod tests {
             name: "amm_pool".to_string(),
             namespace: "cellscript".to_string(),
             versions: vec![RegistryVersion {
+                edition: crate::CURRENT_EDITION,
+                compatibility_profile_hash: "test-compatibility-profile".to_string(),
                 version: "1.2.0".to_string(),
                 tag: "v1.2.0".to_string(),
                 source_hash: "blake2b:0xabcd".to_string(),

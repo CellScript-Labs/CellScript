@@ -398,6 +398,8 @@ version = "0.22.0"
 dependencies = [
  "anyhow",
  "blake2b-ref",
+ "ckb-jsonrpc-types",
+ "ckb-types",
  "clap",
  "hex",
  "hex-literal",

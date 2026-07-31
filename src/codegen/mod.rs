@@ -1251,7 +1251,7 @@ impl CodeGenerator {
             "# cellscript entry abi: {} loads GroupInput#0 witness args for {} and falls back to GroupOutput#0",
             ENTRY_WITNESS_LABEL, target
         ));
-        self.emit("# cellscript entry abi: v2 reads CSARGv1 from WitnessArgs.input_type; raw CSARGv1 remains compatible");
+        self.emit("# cellscript entry abi: edition 2026 requires CSARGv1 inside WitnessArgs.input_type");
         self.emit_large_addi("sp", "sp", -(ENTRY_WITNESS_FRAME_SIZE as i64));
         self.emit_stack_store("ra", ENTRY_WITNESS_RA_OFFSET);
         if has_lock_args {
@@ -1560,33 +1560,20 @@ impl CodeGenerator {
         Ok(())
     }
 
-    /// Normalize the versioned entry placement ABI into the legacy raw-v1
-    /// buffer shape consumed by the positional decoder.
+    /// Normalize the Edition 2026 entry placement ABI into the payload buffer
+    /// shape consumed by the positional decoder.
     ///
-    /// V2 loads a canonical CKB `WitnessArgs` from the current script group and
-    /// copies the `input_type` Bytes payload to the start of the local buffer.
-    /// A buffer already beginning with `CSARGv1\0` is left unchanged so
-    /// pre-v2 raw-v1 transactions remain valid.
+    /// The wrapper requires a canonical CKB `WitnessArgs` from the current
+    /// script group and copies its `input_type` Bytes payload to the start of
+    /// the local buffer. A raw `CSARGv1\0` witness is not a valid alias.
     fn emit_entry_normalize_witness_args_input_type_v2(&mut self, fail_label: &str) {
-        let witness_args_label = self.fresh_label("entry_witness_v2_witness_args");
-        let normalized_label = self.fresh_label("entry_witness_v2_normalized");
         let validate_loop_label = self.fresh_label("entry_witness_v2_validate_loop");
         let field_end_ready_label = self.fresh_label("entry_witness_v2_field_end_ready");
         let field_done_label = self.fresh_label("entry_witness_v2_field_done");
         let copy_loop_label = self.fresh_label("entry_witness_v2_copy_loop");
         let copy_done_label = self.fresh_label("entry_witness_v2_copy_done");
 
-        self.emit("# cellscript entry placement v2: detect raw-v1 before parsing WitnessArgs.input_type");
-        self.emit_stack_load("t0", ENTRY_WITNESS_SIZE_OFFSET);
-        self.emit(format!("li t1, {}", ENTRY_WITNESS_HEADER_SIZE));
-        self.emit(format!("bltu t0, t1, {}", witness_args_label));
-        self.emit_stack_load("t0", ENTRY_WITNESS_BUFFER_OFFSET);
-        self.emit(format!("li t1, {}", u64::from_le_bytes(*ENTRY_WITNESS_MAGIC)));
-        self.emit(format!("bne t0, t1, {}", witness_args_label));
-        self.emit(format!("j {}", normalized_label));
-
-        self.emit_label(&witness_args_label);
-        self.emit("# cellscript entry placement v2: validate the exact three-field WitnessArgs table");
+        self.emit("# cellscript edition 2026 entry placement: validate the exact three-field WitnessArgs table");
         self.emit_stack_load("t0", ENTRY_WITNESS_SIZE_OFFSET);
         self.emit("li t1, 16");
         self.emit(format!("bltu t0, t1, {}", fail_label));
@@ -1659,8 +1646,6 @@ impl CodeGenerator {
         self.emit(format!("j {}", copy_loop_label));
         self.emit_label(&copy_done_label);
         self.emit_stack_store("t1", ENTRY_WITNESS_SIZE_OFFSET);
-
-        self.emit_label(&normalized_label);
     }
 
     fn emit_entry_call_target(&mut self, target: &str, outgoing_stack_arg_bytes: usize) {

@@ -11,6 +11,15 @@ The artifact is executable RISC-V assembly or ELF. The metadata sidecar is the
 explanation: source identity, target profile, artifact hash, schema layout,
 runtime requirements, scheduler information, and verifier obligations.
 
+On the 0.23 line it also carries mandatory `edition = "2026"` and the fully
+resolved compatibility profile. The profile binds source semantics, target and
+primitive-assurance choices, entry payload ABI, and `WitnessArgs.input_type`
+placement. Verification rejects a sidecar whose profile does not resolve from
+those inputs; it never guesses another contract. Current outputs use metadata
+schema 56, source schema 2, artifact schema 1, and constraints schema 2.
+Registry, lock, deployment, receipt, and generated-builder readers require the
+same resolved-profile identity.
+
 This chapter is about trust boundaries. It teaches you what compiler evidence
 can prove, and where you still need CKB transaction evidence.
 

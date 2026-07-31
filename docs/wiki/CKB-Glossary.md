@@ -78,12 +78,17 @@ a standalone compiler proof.
 
 ## Witness
 
-Witness data is user-supplied transaction data. It can carry signatures,
-parameters, or other bytes, but the data itself is not automatically authority.
+At the transaction layer, each Witness is an arbitrary byte string. CKB does
+not require every Witness to have one global application schema. `WitnessArgs`
+is the standard Molecule convention that lets a Lock Script and input/output
+Type Scripts share one witness through the optional `lock`, `input_type`, and
+`output_type` fields.
 
 In CellScript, `witness T` means typed data decoded from the transaction witness
-surface. A `witness Address` is still just data unless a lock verifies a real
-signature binding.
+surface. Edition 2026 reads the `CSARGv1` entry payload from
+`WitnessArgs.input_type` on the selected script-group witness. A
+`witness Address` is still just data unless a lock verifies a real signature
+binding.
 
 ## Script Args
 

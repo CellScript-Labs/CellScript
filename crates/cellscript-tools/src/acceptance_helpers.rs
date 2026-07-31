@@ -181,7 +181,7 @@ pub fn scope_014(out_dir: &Path, metadata_paths: &[PathBuf]) -> Result<()> {
         for (field, expected) in [
             ("name", "ckb"),
             ("source_encoding", "ckb-source-group-high-bit"),
-            ("witness_abi", "ckb-molecule-witness-args-input-type-v2+cellscript-entry-witness-v1+raw-v1-compat"),
+            ("witness_abi", "ckb-molecule-witness-args-input-type-v2+cellscript-entry-witness-v1"),
             ("spawn_ipc_abi", "ckb-vm-v2-spawn-ipc-syscalls-2601-2608"),
             ("output_data_abi", "ckb-outputs-and-outputs-data-index-aligned"),
             ("type_id_abi", "ckb-type-id-v1"),

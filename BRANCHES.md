@@ -6,6 +6,16 @@ The 0.12-era work is the formal proposal baseline for grant-style acceptance
 discussions. Do not use that historical baseline to describe the current
 `main` branch state.
 
+## nightly-0.23
+
+`nightly-0.23` is the active edition and native-release-tooling line. It has one
+mandatory source/ABI contract, `edition = "2026"`, and deliberately rejects
+older package, lock, deployment, receipt, builder, and raw entry-witness
+identities rather than migrating them. Treat the line as merge-ready only when
+the edition/profile identity is consistent across compiler, metadata, WASM,
+builders, initialized submodules, docs, and the `dev`, `ci`, and `backend`
+gates.
+
 ## nightly-0.22
 
 `nightly-0.22` is the active implementation line for the 0.22 type-and-set

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Make `edition = "2026"` the single mandatory CellScript package contract.
+  The resolved edition profile now binds source semantics, target and primitive
+  assurance, entry payload ABI, and group-relative
+  `WitnessArgs.input_type` placement across metadata, cache keys, registry
+  records, `Cell.lock` v2, `Deployed.toml` v2, compile receipts v2, generated
+  builders, native APIs, WASM, LSP, and the playground. Missing or different
+  editions and older persisted schemas are rejected; no migration or
+  compatibility reader is provided. Generated CKB entries also remove the
+  raw-`CSARGv1` witness fallback, so Edition 2026 accepts the payload only
+  inside canonical `WitnessArgs.input_type`. See the
+  [0.23 development release notes](docs/releases/CELLSCRIPT_0_23_RELEASE_NOTES.md).
 - Complete the native-tooling cleanup: neutralize migration-era identifiers,
   remove tracked legacy traceback logs and cache exclusions, rename the native
   tooling integration suite, and add a repository-wide source-policy command
@@ -25,8 +36,8 @@
   parameterized CKB entries. Generated wrappers now resolve witnesses relative
   to the active script group, decode the `CSARGv1` payload from
   `WitnessArgs.input_type`, preserve wallet/multisig ownership of `lock`, reject
-  malformed or wrongly placed payloads, and retain group-relative raw-v1
-  compatibility. Builders place `input_type` before SDK signing because the
+  malformed or wrongly placed payloads, and reject group-relative raw-v1
+  placement. Builders place `input_type` before SDK signing because the
   complete `WitnessArgs` is signed. A canonical signed multisig-v2 CKB-VM
   regression covers a type group whose first input is not transaction input
   zero and rejects post-signing witness mutation. The Rust-native v0.23

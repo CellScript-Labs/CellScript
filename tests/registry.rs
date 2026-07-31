@@ -97,7 +97,7 @@ fn git_tag(repo_dir: &Path, tag: &str) {
 fn create_minimal_package(dir: &Path, name: &str, version: &str, namespace: Option<&str>) {
     std::fs::create_dir_all(dir.join("src")).unwrap();
 
-    let mut toml = String::from("[package]\n");
+    let mut toml = String::from("[package]\nedition = \"2026\"\n");
     toml.push_str(&format!("name = \"{}\"\n", name));
     toml.push_str(&format!("version = \"{}\"\n", version));
     if let Some(ns) = namespace {
@@ -161,6 +161,7 @@ fn compute_source_hash_includes_configured_source_roots() {
         temp.path().join("Cell.toml"),
         r#"
 [package]
+edition = "2026"
 name = "hash-test"
 version = "0.1.0"
 entry = "contracts/main.cell"
@@ -189,6 +190,8 @@ fn registry_index_write_read_round_trip() {
         name: "token".to_string(),
         namespace: "cellscript".to_string(),
         versions: vec![RegistryVersion {
+            edition: cellscript::CURRENT_EDITION,
+            compatibility_profile_hash: "test-compatibility-profile".to_string(),
             version: "0.3.0".to_string(),
             tag: "v0.3.0".to_string(),
             source_hash: "abcd1234".to_string(),
@@ -224,6 +227,8 @@ fn registry_index_append_version_creates_new_file() {
     let temp = tempfile::tempdir().unwrap();
 
     let version = RegistryVersion {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         version: "0.1.0".to_string(),
         tag: "v0.1.0".to_string(),
         source_hash: "hash_of_source".to_string(),
@@ -255,6 +260,8 @@ fn registry_index_append_version_updates_existing() {
     let temp = tempfile::tempdir().unwrap();
 
     let v1 = RegistryVersion {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         version: "0.1.0".to_string(),
         tag: "v0.1.0".to_string(),
         source_hash: "h1".to_string(),
@@ -274,6 +281,8 @@ fn registry_index_append_version_updates_existing() {
     RegistryIndex::append_version(temp.path(), "pkg", "ns", v1).unwrap();
 
     let v2 = RegistryVersion {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         version: "0.2.0".to_string(),
         tag: "v0.2.0".to_string(),
         source_hash: "h2".to_string(),
@@ -297,6 +306,8 @@ fn registry_index_append_version_updates_existing() {
 
     // Re-appending same version should update (not duplicate)
     let v1_updated = RegistryVersion {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         version: "0.1.0".to_string(),
         tag: "v0.1.0".to_string(),
         source_hash: "h1_updated".to_string(),
@@ -332,6 +343,8 @@ fn registry_index_with_dependencies_and_audit() {
     )]);
 
     let version = RegistryVersion {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         version: "1.0.0".to_string(),
         tag: "v1.0.0".to_string(),
         source_hash: "deadbeef".to_string(),
@@ -453,14 +466,17 @@ fn deployed_manifest_file_round_trip() {
     let temp = tempfile::tempdir().unwrap();
 
     let manifest = DeployedManifest {
-        version: 1,
-        schema: Some(DEPLOYED_MANIFEST_SCHEMA.to_string()),
+        version: DeployedManifest::CURRENT_VERSION,
+        schema: DEPLOYED_MANIFEST_SCHEMA.to_string(),
         package: DeployedPackageInfo {
+            edition: cellscript::CURRENT_EDITION,
             name: "token".to_string(),
             version: "1.0.0".to_string(),
             source_hash: Some("blake2b:0xabc".to_string()),
         },
         build: Some(DeployedBuildInfo {
+            edition: cellscript::CURRENT_EDITION,
+            compatibility_profile_hash: "test-compatibility-profile".to_string(),
             compiler_version: Some("0.19.0".to_string()),
             artifact_hash: Some("blake2b:0xdef".to_string()),
             metadata_hash: None,
@@ -470,6 +486,8 @@ fn deployed_manifest_file_round_trip() {
             constraints_hash: None,
         }),
         deployments: vec![DeploymentRecord {
+            edition: cellscript::CURRENT_EDITION,
+            compatibility_profile_hash: "test-compatibility-profile".to_string(),
             network: "aggron4".to_string(),
             chain_id: "ckb-testnet".to_string(),
             tx_hash: "0xaaaa1111".to_string(),
@@ -507,7 +525,7 @@ fn deployed_manifest_file_round_trip() {
     manifest.write_to_root(temp.path()).unwrap();
     let read_back = DeployedManifest::read_from_root(temp.path()).unwrap().unwrap();
 
-    assert_eq!(read_back.version, 1);
+    assert_eq!(read_back.version, DeployedManifest::CURRENT_VERSION);
     assert_eq!(read_back.package.name, "token");
     assert_eq!(read_back.package.version, "1.0.0");
     assert_eq!(read_back.package.source_hash.as_deref(), Some("blake2b:0xabc"));
@@ -521,13 +539,14 @@ fn deployed_manifest_file_round_trip() {
 }
 
 #[test]
-fn deployed_manifest_backward_compatible_minimal() {
+fn deployed_manifest_rejects_legacy_minimal() {
     let temp = tempfile::tempdir().unwrap();
 
     let toml_str = r#"
 version = 1
 
 [package]
+edition = "2026"
 name = "minimal"
 version = "0.1.0"
 
@@ -544,13 +563,12 @@ out_point = "0x1111:0"
 "#;
     std::fs::write(temp.path().join("Deployed.toml"), toml_str).unwrap();
 
-    let parsed = DeployedManifest::read_from_root(temp.path()).unwrap().unwrap();
-    assert_eq!(parsed.package.name, "minimal");
-    assert!(parsed.build.is_none());
-    assert_eq!(parsed.deployments.len(), 1);
-    assert!(parsed.deployments[0].type_id.is_none());
-    assert!(parsed.deployments[0].status.is_none());
-    assert!(parsed.deployments[0].cell_deps.is_empty());
+    let error = DeployedManifest::read_from_root(temp.path()).unwrap_err();
+    assert!(
+        error.message.contains("missing field") || error.message.contains("unsupported Deployed.toml identity"),
+        "unexpected error: {}",
+        error.message
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -563,6 +581,7 @@ fn lockfile_with_build_and_deployment_round_trip() {
 
     let mut lockfile = Lockfile::new();
     lockfile.package = LockfilePackageInfo {
+        edition: cellscript::CURRENT_EDITION,
         name: "amm_pool".to_string(),
         version: "1.0.0".to_string(),
         namespace: Some("cellscript".to_string()),
@@ -570,6 +589,8 @@ fn lockfile_with_build_and_deployment_round_trip() {
         compiler_source_hash: None,
     };
     lockfile.package_build = Some(LockedBuildInfo {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         compiler_version: Some("0.19.0".to_string()),
         target_profile: Some("ckb-release".to_string()),
         artifact_hash: Some("blake2b:0x1234".to_string()),
@@ -601,6 +622,8 @@ fn lockfile_with_build_and_deployment_round_trip() {
             },
             source_hash: Some("blake2b:0xaaaa".to_string()),
             build: Some(LockedBuildInfo {
+                edition: cellscript::CURRENT_EDITION,
+                compatibility_profile_hash: "test-compatibility-profile".to_string(),
                 artifact_hash: Some("blake2b:0xtoken".to_string()),
                 constraints_hash: Some("blake2b:0xtoken_constraints".to_string()),
                 ..Default::default()
@@ -636,6 +659,7 @@ fn lockfile_consistency_with_registry_source() {
     let manifest: PackageManifest = toml::from_str(
         r#"
 [package]
+edition = "2026"
 name = "app"
 version = "0.1.0"
 namespace = "cellscript"
@@ -683,6 +707,8 @@ fn publish_flow_computes_source_hash_and_writes_registry_json() {
     assert!(!source_hash.is_empty());
 
     let version = RegistryVersion {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         version: "0.1.0".to_string(),
         tag: "v0.1.0".to_string(),
         source_hash,
@@ -728,6 +754,8 @@ fn full_publish_install_verify_flow_with_local_git() {
     let source_hash = compute_source_hash(&source_repo).unwrap();
 
     let version = RegistryVersion {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         version: "0.3.0".to_string(),
         tag: "v0.3.0".to_string(),
         source_hash: source_hash.clone(),
@@ -797,6 +825,8 @@ fn package_manager_resolves_registry_dependency_with_source_hash_from_local_git_
         "token",
         "cellscript",
         RegistryVersion {
+            edition: cellscript::CURRENT_EDITION,
+            compatibility_profile_hash: "test-compatibility-profile".to_string(),
             version: "0.3.0".to_string(),
             tag: "v0.3.0".to_string(),
             source_hash: source_hash.clone(),
@@ -838,6 +868,7 @@ fn package_manager_resolves_registry_dependency_with_source_hash_from_local_git_
         consumer.join("Cell.toml"),
         r#"
 [package]
+edition = "2026"
 name = "consumer"
 version = "0.1.0"
 namespace = "app"
@@ -878,6 +909,8 @@ fn package_manager_rejects_unverified_registry_entry_by_default() {
         "token",
         "cellscript",
         RegistryVersion {
+            edition: cellscript::CURRENT_EDITION,
+            compatibility_profile_hash: "test-compatibility-profile".to_string(),
             version: "0.3.0".to_string(),
             tag: "v0.3.0".to_string(),
             source_hash,
@@ -919,6 +952,7 @@ fn package_manager_rejects_unverified_registry_entry_by_default() {
         consumer.join("Cell.toml"),
         r#"
 [package]
+edition = "2026"
 name = "consumer"
 version = "0.1.0"
 namespace = "app"
@@ -951,6 +985,8 @@ fn package_manager_allows_unverified_registry_entry_with_explicit_policy() {
         "token",
         "cellscript",
         RegistryVersion {
+            edition: cellscript::CURRENT_EDITION,
+            compatibility_profile_hash: "test-compatibility-profile".to_string(),
             version: "0.3.0".to_string(),
             tag: "v0.3.0".to_string(),
             source_hash: source_hash.clone(),
@@ -992,6 +1028,7 @@ fn package_manager_allows_unverified_registry_entry_with_explicit_policy() {
         consumer.join("Cell.toml"),
         r#"
 [package]
+edition = "2026"
 name = "consumer"
 version = "0.1.0"
 namespace = "app"
@@ -1025,6 +1062,8 @@ fn package_manager_rejects_registry_source_hash_mismatch() {
         "token",
         "cellscript",
         RegistryVersion {
+            edition: cellscript::CURRENT_EDITION,
+            compatibility_profile_hash: "test-compatibility-profile".to_string(),
             version: "0.3.0".to_string(),
             tag: "v0.3.0".to_string(),
             source_hash: "deliberately_wrong_hash".to_string(),
@@ -1066,6 +1105,7 @@ fn package_manager_rejects_registry_source_hash_mismatch() {
         consumer.join("Cell.toml"),
         r#"
 [package]
+edition = "2026"
 name = "consumer"
 version = "0.1.0"
 namespace = "app"
@@ -1100,6 +1140,7 @@ fn package_verify_detects_missing_source_hash() {
 
     let mut lockfile = Lockfile::new();
     lockfile.package = LockfilePackageInfo {
+        edition: cellscript::CURRENT_EDITION,
         name: "verify-test".to_string(),
         version: "0.1.0".to_string(),
         namespace: None,
@@ -1122,6 +1163,7 @@ fn lockfile_consistency_rejects_wrong_registry_namespace() {
     let manifest: PackageManifest = toml::from_str(
         r#"
 [package]
+edition = "2026"
 name = "app"
 version = "0.1.0"
 namespace = "cellscript"
@@ -1165,6 +1207,7 @@ fn lockfile_consistency_accepts_matching_registry_source() {
     let manifest: PackageManifest = toml::from_str(
         r#"
 [package]
+edition = "2026"
 name = "app"
 version = "0.1.0"
 namespace = "cellscript"
@@ -1206,12 +1249,19 @@ fn deployed_manifest_supports_multiple_deployments() {
     let temp = tempfile::tempdir().unwrap();
 
     let manifest = DeployedManifest {
-        version: 1,
-        schema: Some(DEPLOYED_MANIFEST_SCHEMA.to_string()),
-        package: DeployedPackageInfo { name: "token".to_string(), version: "1.0.0".to_string(), source_hash: None },
+        version: DeployedManifest::CURRENT_VERSION,
+        schema: DEPLOYED_MANIFEST_SCHEMA.to_string(),
+        package: DeployedPackageInfo {
+            edition: cellscript::CURRENT_EDITION,
+            name: "token".to_string(),
+            version: "1.0.0".to_string(),
+            source_hash: None,
+        },
         build: None,
         deployments: vec![
             DeploymentRecord {
+                edition: cellscript::CURRENT_EDITION,
+                compatibility_profile_hash: "test-compatibility-profile".to_string(),
                 network: "ckb-mainnet".to_string(),
                 chain_id: "ckb-mainnet".to_string(),
                 tx_hash: "0x1111".to_string(),
@@ -1237,6 +1287,8 @@ fn deployed_manifest_supports_multiple_deployments() {
                 cell_deps: vec![],
             },
             DeploymentRecord {
+                edition: cellscript::CURRENT_EDITION,
+                compatibility_profile_hash: "test-compatibility-profile".to_string(),
                 network: "aggron4".to_string(),
                 chain_id: "ckb-testnet".to_string(),
                 tx_hash: "0x4444".to_string(),

@@ -1,10 +1,11 @@
 # CellScript 0.23 Roadmap
 
 **Status**: Draft, pending release-line coordination before adoption
-**Scope**: public registry production deployment on `cellscript.dev`, completed
-native test/fixture tooling, deeper RGB++ / Fiber integration, and a
-Myelin-aligned Off-Chain Session Runtime profile with initial concurrency
-support
+**Scope**: one Edition 2026 compatibility contract, canonical CKB
+`WitnessArgs.input_type` entry placement, public registry production deployment
+on `cellscript.dev`, completed native test/fixture tooling, deeper RGB++ / Fiber
+integration, and a Myelin-aligned Off-Chain Session Runtime profile with initial
+concurrency support
 **Depends on**: the 0.22 typed transaction views, bounded collections, stable
 `E2xxx` diagnostics, the existing `cellscript-fiber-adapter` no-profile path,
 the implemented `services/registry-api` write boundary, the production
@@ -28,6 +29,95 @@ word must distinguish *deployed and observed* from *gated and certified*.
 This is a draft roadmap, not an implementation contract. It must be matched
 against `CHANGELOG.md`, the release gate, and any in-flight branch before
 adoption.
+
+## Completed Release-Line Foundation: Edition 2026 And Entry Witness ABI
+
+Before the four operational pillars, 0.23 closes two compiler-wide contracts
+that every later package and builder depends on.
+
+### One Edition Contract
+
+Edition 2026 is the first and only CellScript edition. Every package declares
+`edition = "2026"`; missing or different values fail during manifest parsing.
+There is no migration command, implicit alternate edition, or compatibility
+parser because no published CellScript ecosystem needs one.
+
+The edition resolves a complete compatibility profile from source semantics,
+the selected target profile, primitive assurance, entry-payload encoding, and
+CKB witness placement. The compiler emits that profile in metadata and hashes
+it into registry records, `Cell.lock`, `Deployed.toml`, compile receipts, and
+generated action builders. A tool cannot change one part of the contract while
+continuing to claim the same build identity.
+
+The same edition value crosses every compiler consumer:
+
+- CLI package commands read it from `Cell.toml`;
+- standalone and in-memory compiler calls use the current edition explicitly;
+- LSP-loaded modules carry the edition into compilation;
+- WASM exports require the caller to pass `"2026"`; and
+- the website worker and generated TypeScript bindings pass and report the same
+  value.
+
+### Canonical Entry Witness Placement
+
+The entry payload keeps the self-identifying `cellscript-entry-witness-v1`
+format (`CSARGv1\0` plus positional arguments), but Edition 2026 gives it one
+CKB placement:
+
+```mermaid
+flowchart LR
+    A["CKB witnesses: Bytes[]"] --> B["GroupInput#0<br/>or GroupOutput#0"]
+    B --> C["Molecule WitnessArgs"]
+    C --> L["lock: signer/Lock Script data"]
+    C --> I["input_type: CSARGv1 CellScript entry payload"]
+    C --> O["output_type: other Type Script data"]
+```
+
+The generated entry wrapper first loads `GroupInput#0`; for an output-only
+script group it uses `GroupOutput#0`. It validates the Molecule table and the
+`BytesOpt` field before decoding `input_type`. A raw `CSARGv1` payload, malformed
+table, absent `input_type`, or payload placed in `lock`/`output_type` fails
+closed with runtime error 25. Builders preserve the other two fields and reject
+an occupied `input_type` instead of silently overwriting it.
+
+This removes the former ambiguity between two byte layouts without inventing a
+CellScript-specific replacement for CKB's shared Witness convention.
+
+### Persisted Identity Cut
+
+Because no ecosystem migration is required, 0.23 accepts only the new identity
+set:
+
+- compile metadata schema 56 with source schema 2, artifact schema 1, and
+  constraints schema 2;
+- `Cell.lock` version 2;
+- `Deployed.toml` version 2 with
+  `cellscript-deployed-v0.23-edition-2026`;
+- edition-bound compile receipts and generated action builders; and
+- registry build records with a required compatibility-profile hash.
+
+Readers reject missing, mismatched, or superseded identities. They do not
+reinterpret them under Edition 2026.
+
+### Acceptance Boundary
+
+The foundation is complete only when manifest parsing, compile metadata,
+artifact verification, registry resolution, lock/deployment checks, CLI, LSP,
+WASM, website bindings, entry-wrapper codegen, builders, examples, and docs all
+agree. Valid and invalid CKB-VM fixtures must cover canonical
+`WitnessArgs.input_type`, malformed offsets, absent fields, raw-payload
+rejection, and output-only group selection. NovaSeal live and planned-profile
+devnet constructors must use the same placement rather than maintaining a
+release-only raw-witness path. Routine merge evidence is `dev` and `ci`; because
+witness placement changes generated RISC-V, the clean-tree `backend` gate
+remains required before a production claim.
+
+Source documents:
+
+- [0.23 development release notes](../docs/releases/CELLSCRIPT_0_23_RELEASE_NOTES.md)
+- [CellScript Edition Policy](../docs/CELLSCRIPT_EDITION_POLICY.md)
+- [Entry Witness ABI](../docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md)
+- [Metadata verification tutorial](../docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md)
 
 ## Pillar 1: Public Registry Production Deployment
 
@@ -151,6 +241,9 @@ the website's native Node runtime.
 - Evidence producers preserve their established JSON shape where it remains
   part of the release contract; implementation-origin fields now truthfully
   identify the Rust harness and transaction-recipe replay path.
+- Profile-operator fixture generation accepts an explicit evidence root, and
+  its integration coverage constructs isolated reports instead of depending
+  on stale developer-machine files below `target/`.
 
 ### Acceptance Boundary
 

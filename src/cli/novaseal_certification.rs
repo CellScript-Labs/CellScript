@@ -5493,7 +5493,7 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str, external_evidence
         let tx_checks = validate_btc_transaction_binding(profile, case, expected_binding);
         let mut checks = Map::new();
         macro_rules! check {
-            ($name:literal, $value:expr_2021) => {
+            ($name:literal, $value:expr) => {
                 checks.insert($name.to_string(), Value::Bool($value));
             };
         }

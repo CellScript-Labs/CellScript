@@ -121,6 +121,9 @@ enum Command {
     },
     /// Generate NovaSeal profile-operator fixtures.
     ProfileOperatorFixtures {
+        /// Read live and external evidence below this root instead of the repository root.
+        #[arg(long)]
+        evidence_root: Option<PathBuf>,
         #[arg(long)]
         output: Option<PathBuf>,
         #[arg(long)]
@@ -374,11 +377,13 @@ fn main() -> ExitCode {
                 Err(error) => failure(error),
             }
         }
-        Command::ProfileOperatorFixtures { output, pretty } => match profile_operator::run(&root, output.as_deref(), pretty) {
-            Ok(0) => ExitCode::SUCCESS,
-            Ok(_) => ExitCode::FAILURE,
-            Err(error) => failure(error),
-        },
+        Command::ProfileOperatorFixtures { evidence_root, output, pretty } => {
+            match profile_operator::run(&root, evidence_root.as_deref(), output.as_deref(), pretty) {
+                Ok(0) => ExitCode::SUCCESS,
+                Ok(_) => ExitCode::FAILURE,
+                Err(error) => failure(error),
+            }
+        }
         Command::WalletSigningVectors { core_vectors, output, pretty } => {
             match wallet_vectors::run(&root, core_vectors.as_deref(), output.as_deref(), pretty) {
                 Ok(0) => ExitCode::SUCCESS,

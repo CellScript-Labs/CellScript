@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use blake2b_ref::Blake2bBuilder;
+use ckb_types::{bytes::Bytes, packed::WitnessArgs, prelude::*};
 use k256::schnorr::SigningKey;
 use regex::Regex;
 use reqwest::blocking::{Client, ClientBuilder};
@@ -60,6 +61,11 @@ pub fn sha256_hex(data: &[u8]) -> String {
 
 pub fn hex0x(data: &[u8]) -> String {
     format!("0x{}", hex::encode(data))
+}
+
+pub fn entry_witness_input_type_hex(payload: &[u8]) -> String {
+    let witness = WitnessArgs::new_builder().input_type(Some(Bytes::copy_from_slice(payload)).pack()).build();
+    hex0x(witness.as_slice())
 }
 
 pub fn decode_hex(value: &str) -> Result<Vec<u8>> {
@@ -614,4 +620,20 @@ pub fn deploy_code(devnet: &mut CkbDevnet, name: &str, artifact: &[u8], always_d
     Ok(json!({"name": name, "artifact_size_bytes": artifact.len(), "data_hash": ckb_hash_hex(artifact),
         "cell_dep": {"out_point": out_point(commit["tx_hash"].as_str().unwrap(), 0), "dep_type": "code"},
         "valid_deploy_dry_run": dry_run, "commit": commit}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn entry_witness_helper_places_payload_in_input_type() {
+        let payload = b"CSARGv1\0payload";
+        let encoded = decode_hex(&entry_witness_input_type_hex(payload)).unwrap();
+        let witness = WitnessArgs::from_slice(&encoded).unwrap();
+
+        assert!(witness.lock().to_opt().is_none());
+        assert_eq!(witness.input_type().to_opt().unwrap().raw_data(), Bytes::from_static(payload));
+        assert!(witness.output_type().to_opt().is_none());
+    }
 }

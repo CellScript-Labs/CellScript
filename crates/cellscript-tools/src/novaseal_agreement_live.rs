@@ -8,9 +8,9 @@ use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
 use crate::ckb_devnet::{
-    always_success_dep, always_success_lock, ckb_hash, ckb_hash_hex, deploy_code, funding_cells, hex0x, provenance, resolve_ckb_bin,
-    schnorr_sign, transaction, u16_bytes, u32_bytes, u64_bytes, u8_bytes, xonly_pubkey, CkbDevnet, RECEIPT_CAPACITY, SHANNONS,
-    STATE_CAPACITY, TEST_AUX_RAND, TEST_SECRET_KEY, ZERO_HASH,
+    always_success_dep, always_success_lock, ckb_hash, ckb_hash_hex, deploy_code, entry_witness_input_type_hex, funding_cells, hex0x,
+    provenance, resolve_ckb_bin, schnorr_sign, transaction, u16_bytes, u32_bytes, u64_bytes, u8_bytes, xonly_pubkey, CkbDevnet,
+    RECEIPT_CAPACITY, SHANNONS, STATE_CAPACITY, TEST_AUX_RAND, TEST_SECRET_KEY, ZERO_HASH,
 };
 use crate::shared::{stable_json_pretty, stable_json_spaced};
 
@@ -362,7 +362,7 @@ fn witness(op: u64, terms: &[u8], active: &[u8], intent: &[u8], borrower: &[u8],
         payload.extend_from_slice(&u32_bytes(value.len()));
         payload.extend_from_slice(value);
     }
-    hex0x(&payload)
+    entry_witness_input_type_hex(&payload)
 }
 
 fn make_terms(now: u64, label: &str, expiry: Option<u64>) -> Result<Terms> {

@@ -502,7 +502,7 @@ fn docs_examples_cellscript_blocks_match_declared_compile_boundary() {
 
     let rejected_collections = write_wrapped_doc_snippet(&temp_root, "collections_rejected", &collections[2]);
     let rejected_source = std::fs::read_to_string(&rejected_collections).expect("rejected collection snippet should be readable");
-    let rejected_report = compile_metadata_with_diagnostics(&rejected_source, None);
+    let rejected_report = compile_metadata_with_diagnostics(&rejected_source, cellscript::CURRENT_EDITION, None);
     assert!(
         rejected_report.diagnostics.iter().any(|diagnostic| {
             diagnostic.message.contains("type 'Vec<Token>' cannot store a cell-backed resource")
