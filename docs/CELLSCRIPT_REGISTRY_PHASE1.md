@@ -4,11 +4,13 @@
 CellScript CKB profile. Policy decisions defer to
 [`CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md`](CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md).
 
-**Production update (2026-07-31)**: the public list/detail/evidence API is live
+**Production update (2026-08-01)**: the public list/detail/evidence API is live
 at `https://api.registry.cellscript.dev`, immutable package objects are served
 independently at `https://registry.cellscript.dev/packages/`, and the live-data
 website is at `https://cellscript.dev/registry/`. The deployed adapter is
-Node/Postgres/filesystem/read-only-nginx; Cloudflare remains an alternative.
+Node/Postgres/filesystem/read-only-nginx with a leased compiler-backed verifier;
+Cloudflare remains an alternative. The live publish-to-install smoke and a
+post-migration checksum-verified backup pass.
 The first publisher-owned JoyID publication and clean-machine install are still
 the final adoption checkpoint, so this walkthrough does not claim that
 interactive acceptance has already happened.

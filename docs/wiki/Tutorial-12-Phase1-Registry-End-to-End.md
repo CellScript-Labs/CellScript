@@ -127,6 +127,15 @@ object. Queue attempts are bounded; rejected builds dead-letter, while
 operators can inspect metrics and audit an explicit requeue. Admission therefore
 returns `verification: queued`, never a synchronous verification claim.
 
+The worker is live in the production topology as of 2026-08-01. Deployment
+acceptance used an explicitly seeded one-time smoke identity to exercise the
+normal external `cellc publish` path, queue lease, real compiler, evidence
+commit, static publication, default visibility, and a fresh consumer
+install/check/build without an unverified override. The test records and live
+objects were removed afterward, and the migrated clean state was backed up.
+This validates the deployed automation; it deliberately does not count as a
+publisher-owned JoyID capability registration or namespace claim.
+
 ## Consumer Flow
 
 Add a dependency, resolve it, and check the resulting package graph:

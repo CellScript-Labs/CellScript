@@ -12,10 +12,11 @@ canonical location:
 `WitnessArgs.input_type` on the selected script-group witness.
 
 This document records completed 0.23 work. The public Registry infrastructure,
-read/write domains, website, CLI read authority, and evidence chain are
-deployed; the first publisher-owned JoyID publication and clean-machine install
-remain the final Registry adoption checkpoint. Broader RGB++/Fiber evidence and
-the Off-Chain Session Runtime profile remain roadmap work.
+read/write domains, website, CLI read authority, and automatic compiler-backed
+evidence chain are deployed; the first publisher-owned JoyID publication and
+clean-machine install remain the final Registry adoption checkpoint. Broader
+RGB++/Fiber evidence and the Off-Chain Session Runtime profile remain roadmap
+work.
 
 ## At A Glance
 
@@ -302,6 +303,18 @@ default-list visibility, and the version-addressed static object. The exact
 containers, volumes, package rows, objects, and test credential were removed
 afterward. This is deployment-mechanics evidence, not publisher-owned JoyID
 evidence.
+
+The same automatic pipeline was then deployed to the live production topology
+from CellScript commit `4b1fdeec`. An explicitly seeded one-time smoke
+principal/capability/namespace completed external `cellc publish`, worker claim,
+real compilation, atomic evidence promotion, static convergence, default-list
+visibility, and a fresh consumer install/check/build without
+`--allow-unverified`. The exact database records were deleted transactionally;
+the two test objects were removed from the served volume and retained only in
+a checksum-verified recovery directory. All queue counts returned to zero, all
+four production containers remained healthy, and a checksum-verified backup
+captured the migrated, cleaned state. This proves the live worker boundary but
+still does not substitute for publisher-owned JoyID authorisation.
 
 These endpoints prove the deployed service boundary, not a publisher-owned
 JoyID signature or first-package install. That interactive positive flow

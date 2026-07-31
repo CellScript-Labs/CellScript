@@ -35,7 +35,7 @@ The current project direction is simple:
 | 0.21 planned scope | Semantic closure, authenticated compiler evidence, CLI UX reorganisation, dedicated MCP server and CellScript programming skills, derived cyclic graph views, type-level TemplateLayout metadata, and deferred optional template Merkleisation. | [0.21 roadmap](../docs/CELLSCRIPT_0_21_ROADMAP.md), [0.21 CLI UX plan](CELLSCRIPT_0_21_CLI_UX_PLAN.md) |
 | 0.22 release scope | Released typed transaction views, finite invariant quantifiers, bounded collections, capability entailment, concrete payload enums, validity blocks, borrow regions, stable `E2xxx` diagnostics, and metadata schema 55. | [0.22 release notes](../docs/releases/CELLSCRIPT_0_22_RELEASE_NOTES.md), [0.22 type/set roadmap](CELLSCRIPT_0_22_TYPE_AND_SET_THEORY_ROADMAP.md) |
 | 0.22 bounded Fiber interoperability | The dedicated `fungible-type-group-v1` compiler/adapter path and local-devnet scenarios are implemented. The pinned complete external lifecycle/negative matrix remains pending, so this is not a production-readiness claim. | [0.22 Fiber plan](CELLSCRIPT_0_22_FIBER_NATIVE_SUPPORT_PLAN.md), [operator guide](../examples/fiber/README.md) |
-| 0.23 active scope | The public Registry infrastructure, HTTPS read/write domains, live website browse/detail surfaces, accepted-status CLI resolution, evidence promotion, and native tooling migration are implemented. The first publisher-owned JoyID publication plus clean-machine install remains the Registry adoption checkpoint; RGB++/Fiber and Off-Chain Session Runtime work retain their explicit evidence boundaries. | [0.23 roadmap](CELLSCRIPT_0_23_ROADMAP.md) |
+| 0.23 active scope | The public Registry infrastructure, HTTPS read/write domains, live website browse/detail surfaces, accepted-status CLI resolution, evidence promotion, automatic compiler-backed verification worker, and native tooling migration are implemented and deployed. The live publish-to-install smoke and migrated backup pass; the first publisher-owned JoyID publication plus clean-machine install remains the Registry adoption checkpoint. RGB++/Fiber and Off-Chain Session Runtime work retain their explicit evidence boundaries. | [0.23 roadmap](CELLSCRIPT_0_23_ROADMAP.md) |
 | CKB language fit | CKB-first design is confirmed; remaining gaps are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB target profiles](../docs/wiki/Tutorial-05-CKB-Target-Profiles.md), [production gates](../docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md) |
 | Surface syntax | Low-risk syntax pass and 0.13.2 syntax-governance hardening are implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md), [Syntax-combination audit](../docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md) |
 | Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md) |
@@ -309,12 +309,13 @@ Detailed status:
 than language-theoretic. It turns the 0.22 compiler facts into running
 infrastructure and absorbs Myelin's off-chain needs into upstream:
 
-- **Public registry production deployment**: stand up the implemented
-  `services/registry-api` Cloudflare Worker on `cellscript.dev` with Neon
-  Postgres via Hyperdrive and R2 source snapshots; wire the Astro frontend
-  and `cellc publish` / `cellc auth capability *` to the live JoyID-rooted
-  write API; keep hash-first verification and the static
-  `/packages/*` read path as the read authority.
+- **Public registry production deployment**: the self-hosted Node/Postgres
+  write service, read-only static object service, live Astro frontend, and
+  compiler-backed verification worker are deployed on the public domains.
+  Hash-first resolution stays limited to accepted evidence states. The first
+  publisher-owned JoyID capability/publication/install is the remaining
+  interactive adoption checkpoint; Cloudflare/Hyperdrive/R2 stays an optional
+  alternative topology.
 - **Native tooling migration complete**: the gate-driving backend, syntax,
   production-evidence, tooling-release, NovaSeal, and Evolving-DOB tools now
   live in Rust crates; website data generation uses Node modules. Evidence

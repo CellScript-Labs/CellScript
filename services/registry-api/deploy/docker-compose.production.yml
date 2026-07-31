@@ -36,6 +36,7 @@ services:
       - no-new-privileges:true
 
   api:
+    image: ${REGISTRY_API_IMAGE:-cellscript-registry-api:latest}
     build:
       context: ..
       dockerfile: Dockerfile
@@ -82,6 +83,7 @@ services:
     logging: *logging
 
   verifier:
+    image: ${REGISTRY_VERIFIER_IMAGE:-cellscript-registry-verifier:latest}
     build:
       context: ${CELLSCRIPT_REGISTRY_SOURCE_ROOT:-../../..}
       dockerfile: services/registry-api/Dockerfile.verifier

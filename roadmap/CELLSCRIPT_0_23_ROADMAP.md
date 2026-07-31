@@ -146,8 +146,9 @@ Source documents:
 
 **Status (2026-08-01): production infrastructure, public reads, website, CLI
 resolution, evidence promotion, and the bounded automatic source/build
-verification pipeline are implemented. Deployment of the new verifier worker
-and its production smoke are the current operational step. The first
+verification pipeline are implemented and deployed. The live worker completed
+the full publish-to-install production smoke, and the migrated database/object
+state has a checksum-verified backup. The first
 publisher-owned positive JoyID publication and clean-machine install remain the
 final adoption checkpoint.**
 
@@ -244,6 +245,10 @@ Production-readiness evidence currently proves:
 - an isolated production Compose topology completed a real `cellc publish` from
   queue admission through leased compilation, evidence persistence,
   `verified_build`, default-list visibility, and static-object publication;
+- the live production topology repeated that path from external `cellc publish`
+  through real compiler verification and a fresh consumer install/check/build
+  without `--allow-unverified`; the explicitly seeded smoke identity and its
+  served rows/objects were removed afterward;
 - live health/readiness checks cover Postgres, the object volume, runtime, and
   admin configuration;
 - the proxy admits a 2 MiB body to application validation and the Node adapter
@@ -255,7 +260,8 @@ Production-readiness evidence currently proves:
   object-hash drift, or source-tree drift;
 - API restart recovery preserves the database, audit log, and object volumes;
 - the daily systemd backup produces checksum-verified Postgres and object-store
-  archives, and both archive formats pass non-destructive restore inspection;
+  archives, both archive formats pass non-destructive restore inspection, and
+  a post-`0002` backup captured the migrated, cleaned production state;
 - the website serves the live Registry and contains no Coming Soon surface.
 - a cryptographically valid WebAuthn-shaped P-256 fixture completes capability
   registration, explicit namespace claim, signed publish, idempotent replay,

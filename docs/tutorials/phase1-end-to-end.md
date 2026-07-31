@@ -20,6 +20,9 @@ The production surfaces are live at `https://cellscript.dev/registry/`,
 `https://api.registry.cellscript.dev`, and
 `https://registry.cellscript.dev`. The first publisher-owned JoyID publication
 and clean-machine install remain the final interactive adoption checkpoint.
+The automatic compiler-backed worker is deployed and has passed a live
+publish-to-install smoke; that one-time seeded identity is deployment evidence,
+not a substitute for the remaining publisher-owned JoyID flow.
 
 ## Audience
 

@@ -44,7 +44,14 @@
   excludes `source_published` and `indexed_pending` by default while preserving
   explicit status queries and direct audit URLs. Package-manifest identity uses
   canonical recursively sorted JSON, eliminating cross-process `HashMap` order
-  drift between publisher and verifier.
+  drift between publisher and verifier. Deploy that worker to the live
+  production topology and exercise external publish, queue claim, real
+  compilation, evidence promotion, static convergence, default visibility, and
+  a fresh consumer install/check/build without an unverified override. The
+  one-time seeded smoke identity and live objects were removed afterward, queue
+  counts returned to zero, and a checksum-verified backup captured the migrated
+  clean state. Production Compose now accepts explicit prebuilt API/verifier
+  image references so shared hosts can deploy with `--no-build`.
 - Close the 0.23 syntax-audit consistency gaps: canonical type declarations
   now use comma-terminated fields, syntax-combination gates cover canonical and
   comma-free compatibility input, checked example mirrors use named `U64_MAX`

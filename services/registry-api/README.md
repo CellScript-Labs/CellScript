@@ -148,12 +148,23 @@ so the 5 MiB snapshot plus base64/JSON overhead reaches the Node adapter.
 ```bash
 cp deploy/.env.example deploy/.env
 # Generate and insert independent high-entropy database and admin secrets.
-# If this service directory is deployed outside the repository checkout, set
-# CELLSCRIPT_REGISTRY_SOURCE_ROOT to the absolute CellScript source directory.
+# Pin REGISTRY_API_IMAGE and REGISTRY_VERIFIER_IMAGE to immutable prebuilt
+# linux/amd64 image tags or digests.
 chmod 600 deploy/.env
 docker compose --env-file deploy/.env -f deploy/docker-compose.production.yml config
-docker compose --env-file deploy/.env -f deploy/docker-compose.production.yml up -d --build
+docker compose --env-file deploy/.env -f deploy/docker-compose.production.yml up -d --no-build
 ```
+
+Build the API and verifier images in CI or on a dedicated build host, verify
+their architecture and image identities, then transfer them to the production
+Docker daemon before running the command above. Do not compile the Rust
+compiler/verifier image on a resource-shared production host: the build context
+is intentionally the full CellScript tree and can consume enough CPU and memory
+to interfere with unrelated workloads. `docker compose ... up -d --build`
+remains appropriate for an isolated development or staging host with adequate
+capacity. If Compose builds from a service directory copied out of the
+repository, set `CELLSCRIPT_REGISTRY_SOURCE_ROOT` to the absolute CellScript
+checkout first.
 
 The API container applies tracked migrations before it starts accepting
 traffic. Postgres is reachable only on the internal network. The API, verifier,
@@ -168,6 +179,16 @@ validation, a structured application 413 at 7 MiB + 1 byte, rejection of
 unauthorised admin writes and static POSTs, path-traversal rejection, API
 restart recovery, and persistent audit/database/object volumes.
 
+On 2026-08-01 the automatic verifier was deployed to the live production
+topology from CellScript commit `4b1fdeec`. A one-time, explicitly seeded smoke
+principal/capability/namespace drove the normal external `cellc publish` path
+through queue claim, real compilation, evidence persistence,
+`verified_build`, static publication, default-list visibility, and a fresh
+consumer install/check/build without `--allow-unverified`. The exact test rows
+were deleted transactionally afterward; its two object files were moved out of
+the served volume into a checksum-verified recovery directory. This is worker
+and deployment evidence, not publisher-owned JoyID authorisation evidence.
+
 Required runtime configuration:
 
 ```text
@@ -177,6 +198,8 @@ REGISTRY_ADMIN_TOKEN
 REGISTRY_ORIGIN
 STATIC_REGISTRY_ORIGIN
 CELLSCRIPT_REGISTRY_SOURCE_ROOT  # Compose build context when deployed out of tree
+REGISTRY_API_IMAGE               # immutable prebuilt API image tag or digest
+REGISTRY_VERIFIER_IMAGE          # immutable prebuilt verifier image tag or digest
 ```
 
 `MAX_INCOMING_BODY_BYTES` limits the Node adapter before the request reaches
