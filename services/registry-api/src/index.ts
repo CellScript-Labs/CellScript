@@ -1798,8 +1798,13 @@ function corsHeaders(requestId: string): Headers {
     "access-control-allow-headers": "content-type,authorization,idempotency-key,x-registry-admin-token,x-registry-admin-actor",
     "access-control-expose-headers": "x-request-id,x-idempotency-status",
     "cache-control": "no-store",
+    "content-security-policy": "default-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+    "permissions-policy": "camera=(), geolocation=(), microphone=()",
     "referrer-policy": "no-referrer",
+    "strict-transport-security": "max-age=31536000",
     "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "x-permitted-cross-domain-policies": "none",
     "x-request-id": requestId,
   });
 }

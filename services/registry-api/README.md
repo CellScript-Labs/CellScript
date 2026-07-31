@@ -106,6 +106,9 @@ https://registry.cellscript.dev/health
 - Token-gated audit-event read path for review, incident response, and
   production debugging.
 - Token-gated verification queue metrics and audited dead-letter requeue.
+- Consistent API and static-object response hardening: HSTS, anti-framing,
+  no-sniff, no-referrer, restrictive browser permissions, and a deny-all CSP
+  for JSON-only surfaces.
 - Audit/event log records for capability, namespace, auth failure, rate-limit,
   and publish transitions, including admin review/quarantine/yank overrides.
 - Successful capability use updates `last_used_at` and writes a
@@ -173,6 +176,11 @@ filesystems, health checks, log rotation, and `no-new-privileges`. Production
 API readiness requires a fresh verifier heartbeat, so a missing or wedged
 consumer cannot present the write path as ready.
 
+The API and read-only static service emit the same conservative transport and
+browser security boundary on success and error responses. The JSON-only CSP
+allows no executable or embedded content; CORS remains explicit for public
+CLI/browser reads and signed write requests.
+
 Production validation performed at deployment includes trusted TLS for both
 domains, dependency-aware readiness, a 2 MiB request reaching application JSON
 validation, a structured application 413 at 7 MiB + 1 byte, rejection of
@@ -232,6 +240,13 @@ systemctl daemon-reload
 systemctl enable --now cellscript-registry-backup.timer
 systemctl start cellscript-registry-backup.service
 ```
+
+The 2026-08-01 production recovery drill restored the post-`0002` custom dump
+into an isolated Postgres 17 container and extracted the object archive into an
+isolated Docker volume. Both migrations and all seven core Registry tables were
+present; the disposable container and volume were removed after verification.
+This exercise did not attach to or mutate the production database/object
+volume.
 
 Verify a backup before treating it as recoverable:
 

@@ -251,6 +251,8 @@ Production-readiness evidence currently proves:
   served rows/objects were removed afterward;
 - live health/readiness checks cover Postgres, the object volume, runtime, and
   admin configuration;
+- the website has a tracked read-only nginx/Compose deployment, and all three
+  public surfaces preserve their intended security headers through TLS;
 - the proxy admits a 2 MiB body to application validation and the Node adapter
   rejects 7 MiB + 1 byte with a structured 413;
 - unauthorised admin writes, invalid public queries, static POSTs, and traversal
@@ -260,8 +262,9 @@ Production-readiness evidence currently proves:
   object-hash drift, or source-tree drift;
 - API restart recovery preserves the database, audit log, and object volumes;
 - the daily systemd backup produces checksum-verified Postgres and object-store
-  archives, both archive formats pass non-destructive restore inspection, and
-  a post-`0002` backup captured the migrated, cleaned production state;
+  archives, and a post-`0002` backup captured the migrated, cleaned production
+  state; an isolated Postgres 17/object-volume drill restored both migrations,
+  all seven core tables, and the complete object archive;
 - the website serves the live Registry and contains no Coming Soon surface.
 - a cryptographically valid WebAuthn-shaped P-256 fixture completes capability
   registration, explicit namespace claim, signed publish, idempotent replay,

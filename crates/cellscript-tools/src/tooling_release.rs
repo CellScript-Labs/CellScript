@@ -387,7 +387,7 @@ pub fn run(root: &Path) -> Result<()> {
         "website/package.json",
         &[
             r#""prepare:registry": "node scripts/generate-registry-data.mjs""#,
-            r#""build": "npm run prepare:registry && astro check && astro build && npm run check:docs && npm run check:dist""#,
+            r#""build": "npm run prepare:registry && astro check && astro build && npm run check:docs && npm run check:dist && npm run check:deploy""#,
             r#""check:docs": "node scripts/check-doc-links.mjs""#,
             r#""check:dist": "node scripts/check-dist-regressions.mjs""#,
         ],

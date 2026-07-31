@@ -30,6 +30,7 @@ work.
 | Registry operations | `api.registry.cellscript.dev` and `registry.cellscript.dev` run as an isolated self-hosted Postgres/Node/object-volume/read-only-nginx stack behind trusted TLS. |
 | Registry retry safety | Pre-admission failures release only the failed request's nonce and retry reservation; accepted metadata commits transactionally, and readiness covers the actual managed object prefixes. |
 | Registry verification | Publish transactionally queues a leased, bounded real-compiler verification job; verified evidence/status commit atomically before crash-safe static-index convergence, and default search stays hidden until the baseline passes. |
+| Production HTTP boundary | API/static JSON responses use HSTS, deny-all content policy, anti-framing, no-sniff, and restrictive browser permissions; the website ships a reproducible read-only nginx deployment with health checks and bounded logs/temp storage. |
 | Registry install policy | Explicit unverified/quarantined install acknowledgements persist per dependency, so lock refresh and subsequent builds retain the same auditable risk choice. |
 | Tooling | CLI, LSP, WASM, website bindings, examples, and package tooling use the same edition contract. |
 | Syntax audit | Canonical type fields use trailing commas, checked examples use named `u64` boundaries, and compatibility plus CKB-VM regressions cover both source and witness placement. |
@@ -315,6 +316,21 @@ a checksum-verified recovery directory. All queue counts returned to zero, all
 four production containers remained healthy, and a checksum-verified backup
 captured the migrated, cleaned state. This proves the live worker boundary but
 still does not substitute for publisher-owned JoyID authorisation.
+
+The final production hardening pass makes the website deployment itself a
+tracked artifact instead of server-local configuration. Its nginx container
+runs read-only with bounded writable tmpfs mounts, health checks, log rotation,
+and `no-new-privileges`; the website, API, and static Registry preserve HSTS,
+anti-framing, no-sniff, cross-domain-policy, referrer, and permissions headers
+through the shared TLS proxy. JSON-only Registry responses additionally carry a
+deny-all content security policy.
+
+The post-migration backup is also restore-tested, not only checksum-tested. An
+isolated Postgres 17 container restored both numbered migrations and all seven
+core Registry tables, while an isolated object volume accepted the complete
+archive. Neither restore target shared the production database, object volume,
+network endpoint, or lifecycle; both temporary targets were removed after the
+drill.
 
 These endpoints prove the deployed service boundary, not a publisher-owned
 JoyID signature or first-package install. That interactive positive flow

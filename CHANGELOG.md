@@ -51,7 +51,16 @@
   one-time seeded smoke identity and live objects were removed afterward, queue
   counts returned to zero, and a checksum-verified backup captured the migrated
   clean state. Production Compose now accepts explicit prebuilt API/verifier
-  image references so shared hosts can deploy with `--no-build`.
+  image references so shared hosts can deploy with `--no-build`. Harden the API
+  and static Registry response boundary with HSTS, anti-framing, no-sniff,
+  permissions policy, cross-domain-policy denial, and a deny-all CSP for JSON
+  surfaces. Add a reproducible website production Compose/nginx contract with
+  a read-only root filesystem, bounded temporary filesystems, health checks,
+  log rotation, `no-new-privileges`, and matching browser security headers. A
+  production recovery drill restores the post-`0002` dump into an isolated
+  Postgres 17 container, extracts the object archive into an isolated volume,
+  verifies both migrations and all seven core Registry tables, and removes the
+  temporary restore resources afterward.
 - Close the 0.23 syntax-audit consistency gaps: canonical type declarations
   now use comma-terminated fields, syntax-combination gates cover canonical and
   comma-free compatibility input, checked example mirrors use named `U64_MAX`

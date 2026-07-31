@@ -211,6 +211,12 @@ describe("registry api", () => {
     });
     const ready = await get(readyApp, "/ready", { REGISTRY_ADMIN_TOKEN: "secret" });
     expect(ready.status).toBe(200);
+    expect(ready.headers.get("content-security-policy"))
+      .toBe("default-src 'none'; base-uri 'none'; frame-ancestors 'none'");
+    expect(ready.headers.get("permissions-policy")).toBe("camera=(), geolocation=(), microphone=()");
+    expect(ready.headers.get("strict-transport-security")).toBe("max-age=31536000");
+    expect(ready.headers.get("x-frame-options")).toBe("DENY");
+    expect(ready.headers.get("x-permitted-cross-domain-policies")).toBe("none");
     expect(await ready.json()).toMatchObject({
       status: "ready",
       checks: {
