@@ -5,6 +5,7 @@ import {
   type CapabilityAuthorisationPayload,
   type PublishPayload,
   type RegistryEntryStatus,
+  type RegistryIndexEntry,
 } from "./domain";
 
 export type NamespaceStatus = "active" | "review_pending" | "reserved" | "rejected" | "quarantined";
@@ -47,7 +48,7 @@ export interface PackageVersionRecord {
   capability_key_id: string;
   principal_type: string;
   principal_id: string;
-  registry_entry: Record<string, unknown>;
+  registry_entry: RegistryIndexEntry;
   snapshot_hash: string;
   direct_url: string;
   created_at: string;

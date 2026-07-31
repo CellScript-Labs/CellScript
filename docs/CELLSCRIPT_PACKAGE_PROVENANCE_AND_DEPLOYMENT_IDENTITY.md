@@ -1093,7 +1093,7 @@ alongside `Cell.toml`, for audit and offline use:
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 1,
   "name": "amm",
   "namespace": "cellscript",
   "versions": [
@@ -1122,9 +1122,10 @@ alongside `Cell.toml`, for audit and offline use:
 }
 ```
 
-The current Edition 2026 reader accepts only schema 2. The older schema-1
-shape described in the historical Phase 1 audit below is not a compatibility
-surface.
+This is the registry's initial Edition 2026 shape. The registry has not been
+deployed, so the original schema identifier is retained while the definition
+is updated in place. Every non-optional field shown above is required; readers
+do not fill in omitted `dependencies`, `status`, or `yanked` values.
 
 The `tag` field maps each version to a git tag in the source repository.
 This allows `cellc install` to clone the exact commit without needing
@@ -1181,9 +1182,9 @@ requires a stronger explicit flag such as `--allow-quarantined`. Default search,
 recommendations, and production-visible package lists only include entries that
 passed the required baseline checks.
 
-A mirrored `registry.json` version entry with no `status` is treated as
-`source_published`, not as verified. Public registry writes must emit an
-explicit status; legacy mirrors need explicit risk flags before direct install.
+A mirrored `registry.json` version entry with no `status`, `dependencies`, or
+`yanked` field is malformed. Public registry writes and offline mirrors emit
+the same complete entry shape.
 
 ### Installation Flow
 

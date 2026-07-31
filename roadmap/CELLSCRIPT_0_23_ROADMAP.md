@@ -130,12 +130,13 @@ path, idempotent publish, and admin-gated status transitions. The 0.23 work
 is to actually deploy it on `cellscript.dev` and to wire the frontend and CLI
 into the same trust model.
 
-The Edition 2026 contract slice is complete: publish protocol v2 and registry
-schema 2 are a hard cut across the Rust publisher/reader, API validation,
-Postgres schema, R2 package-version object, checked-in registry fixture, and
-website data model. There is no schema-1 compatibility path. Generic admin
-status changes cannot create `verified_build` or `deployed` claims; an
-evidence-specific promotion path remains production work.
+The Edition 2026 contract slice is complete across the Rust publisher/reader,
+API validation, initial Postgres schema, R2 package-version object, checked-in
+registry fixture, and website data model. The registry has not been deployed,
+so these surfaces are updated directly and accept one complete entry shape;
+there is no fallback reader for omitted fields. Generic admin status changes
+cannot create `verified_build` or `deployed` claims; an evidence-specific
+promotion path remains production work.
 
 ### Production Domains And Hosting
 

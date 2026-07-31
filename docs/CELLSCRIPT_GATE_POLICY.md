@@ -54,8 +54,9 @@ ABI changes require the `backend` gate in addition to ordinary `dev` and `ci`
 coverage.
 
 The `ci` gate also typechecks, tests, and performs a Wrangler dry-run build of
-`services/registry-api`. This pins the publish-protocol/schema contract to the
-compiler-generated registry entry. It is local service coverage, not evidence
+`services/registry-api`. This pins the current publish contract and initial
+database/static-object shape to the compiler-generated registry entry. It is
+local service coverage, not evidence
 that Cloudflare, R2, Hyperdrive, Neon, DNS, or a production deployment works.
 
 The full gate reads `scripts/ckb_acceptance_pin.json` and rejects a CKB checkout

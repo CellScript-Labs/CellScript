@@ -96,7 +96,7 @@ async function publishPayload(keyId: string): Promise<PublishPayload> {
     expires_at: "2026-06-23T12:10:00Z",
     cli_version: "cellc 0.23.0",
     registry_entry: {
-      schema_version: 2,
+      schema_version: 1,
       namespace: "cellscript",
       name: "demo",
       repository: "https://github.com/cellscript/demo",
@@ -316,7 +316,7 @@ describe("registry api", () => {
     expect(staticEntry).toBeTruthy();
     const staticBody = JSON.parse(utf8(staticEntry!.body)) as any;
     expect(staticBody.kind).toBe("cellscript.registry.package_version");
-    expect(staticBody.schema_version).toBe(2);
+    expect(staticBody.schema_version).toBe(1);
     expect(staticBody.coordinate).toBe("cellscript/demo@1.2.3");
     expect(staticBody.status).toBe("source_published");
     expect(staticBody.edition).toBe("2026");
@@ -333,7 +333,7 @@ describe("registry api", () => {
         async get(key) {
           expect(key).toBe("packages/cellscript/demo/versions/1.2.3.json");
           return {
-            body: JSON.stringify({ schema_version: 2, coordinate: "cellscript/demo@1.2.3", status: "source_published" }),
+            body: JSON.stringify({ schema_version: 1, coordinate: "cellscript/demo@1.2.3", status: "source_published" }),
             contentType: "application/json; charset=utf-8",
             etag: "\"static-entry\"",
           };
@@ -348,7 +348,7 @@ describe("registry api", () => {
     expect((await response.json() as any).coordinate).toBe("cellscript/demo@1.2.3");
   });
 
-  it("rejects pre-Edition registry schemas and mismatched nested identities", async () => {
+  it("rejects unknown schemas, incomplete entries, and mismatched nested identities", async () => {
     const { app } = testApp();
     const publish = await publishPayload("cap_11111111111111111111111111111111");
     const sourceSnapshot = {
@@ -364,12 +364,27 @@ describe("registry api", () => {
         source_snapshot: sourceSnapshot,
       });
 
-    const oldSchema = await submit({
+    const unknownSchema = await submit({
       ...publish,
-      registry_entry: { ...publish.registry_entry, schema_version: 1 },
+      registry_entry: { ...publish.registry_entry, schema_version: 2 },
     });
-    expect(oldSchema.status).toBe(400);
-    expect((await oldSchema.json() as any).error.code).toBe("unsupported_registry_schema");
+    expect(unknownSchema.status).toBe(400);
+    expect((await unknownSchema.json() as any).error.code).toBe("unsupported_registry_schema");
+
+    for (const [field, expectedCode] of [
+      ["dependencies", "invalid_registry_dependencies"],
+      ["status", "invalid_initial_registry_status"],
+      ["yanked", "invalid_initial_registry_status"],
+    ] as const) {
+      const incompleteVersion = { ...publish.registry_entry.versions[0] } as Record<string, unknown>;
+      delete incompleteVersion[field];
+      const incomplete = await submit({
+        ...publish,
+        registry_entry: { ...publish.registry_entry, versions: [incompleteVersion] },
+      });
+      expect(incomplete.status).toBe(400);
+      expect((await incomplete.json() as any).error.code).toBe(expectedCode);
+    }
 
     const wrongVersion = await submit({
       ...publish,

@@ -66,14 +66,14 @@ source and build identity locally.
 
 ## Edition 2026 Registry Contract
 
-Public publishing uses `cellscript-registry-publish-v2` and registry schema 2.
-The signed payload contains one complete version entry, and the API checks that
+Public publishing uses the registry's single current publish contract. The
+signed payload contains one complete version entry, and the API checks that
 its namespace, package name, version, and source hash equal the outer signed
 identity. The entry must also contain:
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 1,
   "versions": [{
     "edition": "2026",
     "compatibility_profile_hash": "<32-byte hex hash>"
@@ -84,8 +84,10 @@ identity. The entry must also contain:
 These are not website labels. `edition` identifies the selected language and
 CKB ABI rule bundle; `compatibility_profile_hash` binds the resolved details of
 that bundle. The API stores both as typed fields and exposes them in its static
-package-version JSON. Schema 1, a missing field, or a mismatched nested identity
-is rejected. There is no v1 migration or compatibility reader.
+package-version JSON. Missing `edition`, `compatibility_profile_hash`,
+`dependencies`, `status`, or `yanked`, an unknown schema identifier, or a
+mismatched nested identity is rejected. Because the registry has not been
+deployed, this is the initial shape rather than an upgrade or migration story.
 
 `source_published` means the signed source snapshot was admitted; it does not
 mean the build or deployment was verified. The generic admin endpoint cannot

@@ -15,6 +15,10 @@ It intentionally does not use D1 as the primary database. Runtime state is
 stored in Neon Postgres through Cloudflare Hyperdrive, while immutable source
 snapshots and static registry read objects are stored in R2.
 
+This service has not been deployed. `migrations/0001_initial.sql` is therefore
+the authoritative initial database definition and is edited in place with the
+API contract; there is no deployed schema or compatibility reader to preserve.
+
 ## Implemented Boundaries
 
 - JoyID-rooted capability authorisation with `@joyid/ckb` `verifySignature`.
@@ -29,9 +33,10 @@ snapshots and static registry read objects are stored in R2.
 - Namespace claim cooldown for newly claimed namespaces by the same JoyID
   principal; invalid JoyID signatures do not consume principal quota.
 - Publish admission path for source packages.
-- Hard-cut `cellscript-registry-publish-v2` admission: the signed
-  `registry_entry` must use registry schema 2, contain exactly the published
-  version, and bind Edition 2026 plus its compatibility-profile hash.
+- Single-shape `cellscript-registry-publish-v1` admission: the signed
+  `registry_entry` must contain exactly the published version and explicitly
+  bind Edition 2026, its compatibility-profile hash, dependencies, status, and
+  yank state.
 - Namespace owner ACL check before publish admission.
 - P-256 capability-signature verification for daily publish payloads.
 - One-time signed nonce consumption for capability creation, capability
@@ -201,7 +206,7 @@ cellscript-registry-auth-v1 / authorize_capability
 Daily publish signs the canonical JSON form of:
 
 ```text
-cellscript-registry-publish-v2 / publish
+cellscript-registry-publish-v1 / publish
 ```
 
 The API rejects a publish unless:
@@ -211,7 +216,7 @@ The API rejects a publish unless:
 - the capability scope covers `publish:namespace/package`;
 - the namespace exists and is active;
 - the capability principal owns the namespace;
-- the signed nested registry entry is schema 2, names the same package/version
+- the signed nested registry entry uses the current schema, names the same package/version
   and source hash, and records `edition = "2026"` plus a 32-byte
   `compatibility_profile_hash`;
 - the signed manifest hash is present;
@@ -244,9 +249,9 @@ https://registry.cellscript.dev/packages/:namespace/:name/versions/:version.json
 
 The route is served from R2 and sets short CDN cache headers. It does not
 require Hyperdrive or the write store, so ordinary package reads stay isolated
-from authenticated write-path dependencies. Its JSON object is also schema 2
-and repeats `edition` and `compatibility_profile_hash` at the top level so
-consumers do not need to trust an untyped nested blob.
+from authenticated write-path dependencies. Its JSON object repeats `edition`
+and `compatibility_profile_hash` at the top level so consumers do not need to
+trust an untyped nested blob.
 
 CLI publish has two supported signing shapes:
 

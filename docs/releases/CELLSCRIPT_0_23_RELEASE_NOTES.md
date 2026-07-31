@@ -22,7 +22,7 @@ work until their implementation and evidence boundaries are complete.
 | Entry witness | `CSARGv1` is decoded only from canonical Molecule `WitnessArgs.input_type`. |
 | Failure mode | Raw payloads, malformed tables, absent `input_type`, wrong placement, and mismatched identities fail closed. |
 | Build identity | The resolved compatibility profile is bound into metadata, registry, lock, deployment, receipt, and builder records. |
-| Registry contract | Publish protocol v2 and registry schema 2 require Edition 2026 plus its compatibility-profile hash from CLI signature through API, database, CDN JSON, and website. |
+| Registry contract | The initial publish contract requires Edition 2026 plus its compatibility-profile hash from CLI signature through API, database, CDN JSON, and website. |
 | Tooling | CLI, LSP, WASM, website bindings, examples, and package tooling use the same edition contract. |
 | Native gate | Active test, fixture, evidence, and release tooling is Rust, shell, or Node; repository policy rejects Python source reintroduction. |
 
@@ -105,13 +105,14 @@ The 0.23 identity set is:
 | Compile receipt | edition and resolved compatibility profile |
 | Generated action builder | `cellscript-generated-action-builder-v0.23-edition-2026` |
 | Registry build record | edition and compatibility-profile hash |
-| `registry.json` / public publish | schema 2 / `cellscript-registry-publish-v2` |
+| `registry.json` / public publish | one required entry shape with explicit edition, profile hash, status, dependencies, and yank state |
 
 Consumers reject other identities. Rebuild the artifact and regenerate its
 metadata, lock/deployment records, receipt, and builder together.
 
-The registry boundary has no v1 reader or migration path. The write API checks
-the complete signed nested entry instead of accepting an untyped JSON object,
+The registry has not been deployed, so its initial contract and
+`0001_initial.sql` definition are updated in place. The write API accepts one
+complete signed nested entry instead of an untyped or incomplete JSON object,
 persists edition/profile as typed columns, and repeats them in the CDN object.
 Generic admin status changes may quarantine, yank, deprecate, or move an entry
 through indexing, but cannot label it `verified_build` or `deployed` without a
@@ -125,7 +126,7 @@ future evidence-specific promotion endpoint.
   accept only `"2026"`.
 - The playground worker and TypeScript declarations pass that edition into the
   WASM boundary and include it in compiler-output provenance.
-- Registry pages reject stale schema-1 fixture data and display each package
+- Registry pages reject incomplete fixture data and display each package
   version's edition and compatibility-profile hash.
 - Entry-witness reports, ABI reports, action plans, and generated builders
   expose canonical `WitnessArgs.input_type` placement.

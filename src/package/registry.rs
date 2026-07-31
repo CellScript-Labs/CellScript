@@ -22,7 +22,7 @@ pub const DEFAULT_PUBLIC_REGISTRY_ORIGIN: &str = "https://api.registry.cellscrip
 pub const REGISTRY_AUTH_PROTOCOL: &str = "cellscript-registry-auth-v1";
 pub const AUTHORIZE_CAPABILITY_ACTION: &str = "authorize_capability";
 pub const REVOKE_CAPABILITY_ACTION: &str = "revoke_capability";
-pub const REGISTRY_PUBLISH_PROTOCOL: &str = "cellscript-registry-publish-v2";
+pub const REGISTRY_PUBLISH_PROTOCOL: &str = "cellscript-registry-publish-v1";
 pub const PUBLISH_ACTION: &str = "publish";
 
 /// Effective discovery index URL.
@@ -312,13 +312,6 @@ impl RegistryEntryStatus {
     }
 }
 
-/// Missing status in legacy registry mirrors is treated as unverified. Public
-/// registry writes must emit an explicit status, and old mirrors must opt in
-/// with `--allow-unverified` instead of being trusted as verified by default.
-fn default_registry_entry_status() -> RegistryEntryStatus {
-    RegistryEntryStatus::SourcePublished
-}
-
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RegistryResolutionPolicy {
     pub allow_unverified: bool,
@@ -334,7 +327,6 @@ pub struct RegistryVersion {
     pub cellscript_version: String,
     pub edition: crate::CellScriptEdition,
     pub compatibility_profile_hash: String,
-    #[serde(default)]
     pub dependencies: BTreeMap<String, RegistryDependencyRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub abi_index: Option<String>,
@@ -344,9 +336,7 @@ pub struct RegistryVersion {
     pub license: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub released_at: Option<String>,
-    #[serde(default = "default_registry_entry_status")]
     pub status: RegistryEntryStatus,
-    #[serde(default)]
     pub yanked: bool,
     /// When the version was yanked (ISO 8601 UTC). Present only when `yanked` is true.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -406,12 +396,12 @@ pub struct RegistryAuditInfo {
 }
 
 impl RegistryIndex {
-    pub const CURRENT_SCHEMA_VERSION: u32 = 2;
+    pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 
     fn ensure_current_schema(&self) -> Result<()> {
         if self.schema_version != Self::CURRENT_SCHEMA_VERSION {
             return Err(CompileError::without_span(format!(
-                "unsupported registry.json schema_version {}; Edition 2026 requires schema_version {}",
+                "unsupported registry.json schema_version {}; current registry contract requires schema_version {}",
                 self.schema_version,
                 Self::CURRENT_SCHEMA_VERSION,
             )));
@@ -1057,43 +1047,39 @@ mod tests {
     }
 
     #[test]
-    fn missing_registry_status_is_unverified_by_default() {
-        let json = r#"{
-          "schema_version": 2,
-          "name": "amm",
-          "namespace": "cellscript",
-          "versions": [
-            {
-              "version": "1.0.0",
-              "tag": "v1.0.0",
-              "source_hash": "hash-v100",
-              "cellscript_version": "0.20.0",
-              "edition": "2026",
-              "compatibility_profile_hash": "test-compatibility-profile",
-              "dependencies": {},
-              "yanked": false
-            }
-          ]
-        }"#;
-        let index: RegistryIndex = serde_json::from_str(json).unwrap();
-        assert_eq!(index.versions[0].status, RegistryEntryStatus::SourcePublished);
-        assert!(
-            index.find_matching_version_for_resolution("*", RegistryResolutionPolicy::default()).is_none(),
-            "entries missing status must not be selected by the default resolver",
-        );
-        let selected = index
-            .find_matching_version_for_resolution("*", RegistryResolutionPolicy { allow_unverified: true, allow_quarantined: false })
-            .expect("explicit unverified install may select a legacy mirror");
-        assert_eq!(selected.version, "1.0.0");
+    fn registry_index_rejects_missing_required_version_fields() {
+        let complete = serde_json::json!({
+            "schema_version": 1,
+            "name": "amm",
+            "namespace": "cellscript",
+            "versions": [{
+                "version": "1.0.0",
+                "tag": "v1.0.0",
+                "source_hash": "hash-v100",
+                "cellscript_version": "0.20.0",
+                "edition": "2026",
+                "compatibility_profile_hash": "test-compatibility-profile",
+                "dependencies": {},
+                "status": "source_published",
+                "yanked": false
+            }]
+        });
+
+        for field in ["dependencies", "status", "yanked"] {
+            let mut incomplete = complete.clone();
+            incomplete["versions"][0].as_object_mut().unwrap().remove(field);
+            let error = serde_json::from_value::<RegistryIndex>(incomplete).unwrap_err();
+            assert!(error.to_string().contains(&format!("missing field `{field}`")));
+        }
     }
 
     #[test]
-    fn registry_index_rejects_pre_edition_schema() {
+    fn registry_index_rejects_unknown_schema() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("registry.json"),
             r#"{
-              "schema_version": 1,
+              "schema_version": 2,
               "name": "amm",
               "namespace": "cellscript",
               "versions": [{
@@ -1112,7 +1098,7 @@ mod tests {
         .unwrap();
 
         let error = RegistryIndex::read_from_repo(dir.path()).unwrap_err();
-        assert!(error.to_string().contains("Edition 2026 requires schema_version 2"));
+        assert!(error.to_string().contains("current registry contract requires schema_version 1"));
     }
 
     #[test]
