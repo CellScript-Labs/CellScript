@@ -4,6 +4,15 @@
 CellScript CKB profile. Policy decisions defer to
 [`CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md`](CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md).
 
+**Production update (2026-07-31)**: the public list/detail/evidence API is live
+at `https://api.registry.cellscript.dev`, immutable package objects are served
+independently at `https://registry.cellscript.dev/packages/`, and the live-data
+website is at `https://cellscript.dev/registry/`. The deployed adapter is
+Node/Postgres/filesystem/read-only-nginx; Cloudflare remains an alternative.
+The first publisher-owned JoyID publication and clean-machine install are still
+the final adoption checkpoint, so this walkthrough does not claim that
+interactive acceptance has already happened.
+
 Publishing and consuming smart contract libraries should feel like a normal
 package workflow: `cellc publish` publishes a package, and the registry shows
 the new entry. The CellScript public registry policy therefore treats publish
@@ -40,12 +49,11 @@ The public registry policy has two operational paths:
    source hashes, build hashes, and deployment facts instead of trusting the
    transport.
 
-The registry data model still has two tiers:
+The public Registry data model has two read tiers:
 
-The first tier is a **discovery index** — a lightweight map from
-`namespace/name` to a source repository URL. Think of it as a phone book with
-overrides. It only changes when a package is first claimed or when ownership /
-source-location metadata changes.
+The first tier is the **public package API** — a map from `namespace/name` to
+accepted versions, status, provenance, evidence, and immutable snapshot
+descriptors. It is the normal resolver authority.
 
 The second tier is a **per-package version index** called `registry.json`. The
 registry service stores and mirrors the canonical entry, and the same shape can
@@ -54,10 +62,11 @@ offline fixtures. When you run `cellc publish`, it computes a source hash,
 reads build artifacts, signs the publish payload with a delegated publisher
 credential, and submits the version entry to the registry write API.
 
-The Go-style convention still matters for resolution: if no explicit discovery
-entry exists, `cellscript/amm` may resolve to the conventional source location.
-But the public registry's write authority is not "who can push to Git"; it is
-the namespace/package ACL enforced by registry credentials.
+The old Go-style Git convention is retained only by the explicit
+`CELLSCRIPT_REGISTRY_URL` offline/mirror authority. A missing or unavailable
+production package does not silently fall back to a conventional Git URL. The
+public registry's write authority is the namespace/package ACL enforced by
+registry credentials.
 
 Offline and bootstrap environments may still use the Git-only fixture path:
 generate `registry.json`, commit/tag/push the source, and resolve directly from
@@ -76,12 +85,12 @@ dependency resolution stays profile-specific and fail-closed.
 
 ```mermaid
 graph TB
-    subgraph "Resolution: Convention First"
-        Q["cellc install cellscript/amm"] --> C{"Discovery index\nhas entry?"}
-        C -->|Yes| E["Use explicit URL"]
-        C -->|No| F["Fallback: github.com/cellscript/amm"]
-        E --> S["Clone source repo"]
-        F --> S
+    subgraph "Production Resolution"
+        Q["cellc install cellscript/amm"] --> A["Query public API"]
+        A --> C{"Accepted version?"}
+        C -->|Yes| S["Download immutable snapshot"]
+        S --> V["Verify object, files, package and source hash"]
+        C -->|No| F["Fail closed"]
     end
 ```
 
@@ -106,7 +115,7 @@ graph TB
 
     CS -->|"explicit map"| SR1
     CA -->|"explicit map"| SR2
-    CONV["Convention fallback:\ngithub.com/<ns>/<name>"] -.->|"auto-resolve"| SR2
+    CONV["Explicit offline convention:\ngithub.com/<ns>/<name>"] -.->|"CELLSCRIPT_REGISTRY_URL only"| SR2
 ```
 
 ## Why This Works for Smart Contracts
@@ -173,7 +182,11 @@ Dependencies can be resolved from the registry (by namespace and version), from 
 
 ### Cell.lock — Build Identity
 
-`Cell.lock` is the cryptographic bind point between source and deployment. It records exact dependency versions, git revisions, source hashes, and build hashes. It's self-sufficient for re-verification — the `url` and `revision` fields let you re-clone the exact source commit without re-querying the discovery index.
+`Cell.lock` is the cryptographic bind point between source and deployment. It
+records exact dependency versions, source locations/revisions, source hashes,
+and build hashes. For public Registry dependencies, `url` names the immutable
+snapshot and `revision` records its `sha256:` identity. Explicit Git/offline
+dependencies retain a Git URL and commit revision.
 
 > **Hash format note**: the `blake2b:0x...` prefix shown in the examples below is
 > illustrative naming. The actual `source_hash`, `artifact_hash`, and other
@@ -359,7 +372,8 @@ registry service:
 
 - read traffic is static/CDN-backed and separated from the authenticated write
   API;
-- write requests pass WAF/rate-limit checks before any expensive work;
+- write requests pass proxy/body limits and application rate-limit checks
+  before any expensive work; an edge WAF is an optional additional control;
 - synchronous publish checks are limited to authentication, ACL, schema,
   request-size caps, metadata length caps, hash/manifest sanity,
   idempotency, quota, and deduplication;
@@ -425,15 +439,19 @@ When you build, the resolver kicks in:
 ```mermaid
 graph LR
     A["cellc build"] --> B["Read Cell.toml"]
-    B --> C["Query discovery index"]
-    C --> D["cellscript/token.json"]
-    D --> E["Clone source repo"]
-    E --> F["Read registry.json"]
-    F --> G["Verify source_hash"]
+    B --> C["Query production package API"]
+    C --> D["Select accepted version"]
+    D --> E["Download immutable snapshot"]
+    E --> F["Verify SHA-256 + per-file BLAKE2b"]
+    F --> G["Verify package + source_hash"]
     G --> H["Write Cell.lock"]
 ```
 
-The discovery index tells the resolver where to find the source. The `registry.json` inside the source repo provides version metadata. The `source_hash` in that metadata is verified against the actual source tree. If anything has been tampered with, the build fails.
+The public API tells the resolver which version is accepted and binds its
+immutable source descriptor. The resolver rejects redirecting, oversized,
+opaque, path-escaping, duplicate, or hash-mismatched snapshots before the tree
+enters the cache. The explicit Git/offline override continues to use the
+mirrored `registry.json` and tag path.
 
 ### Step 3: Publish
 
@@ -544,7 +562,7 @@ that the deployment record still names the build artifact that was compiled.
 0.20 adds the live-chain assertion that the on-chain cell contains the exact
 binary named by the deployment record.
 
-## Design Rationale: Why Git, Why GitHub, Why Now
+## Design Rationale: Why Immutable Snapshots, Why Keep Git
 
 A few design decisions deserve more explanation.
 
@@ -555,25 +573,23 @@ the public registry. The write API gives us one authoritative admission point
 for namespace ownership, scoped credentials, quotas, yanking, quarantine, and
 abuse handling.
 
-**Why keep Git/static metadata?** Because Git still solves distribution,
-auditing, mirroring, offline resolution, and historical inspection well. The
-public registry service is the write authority; static indexes, `registry.json`,
-source tags, and mirrors are the read/audit surface that clients can cache and
-verify. A monorepo index should not become a bottleneck for every version
-publish.
+**Why keep Git/static metadata?** Git remains useful for development,
+auditing, mirroring, explicit offline resolution, and historical inspection.
+The production download transport is the Registry's content-addressed snapshot;
+`registry.json`, source tags, and repositories remain provenance and mirror
+material. A monorepo index does not gate each public version publish.
 
-**Why GitHub examples?** We're not locked into GitHub. Discovery maps to source
-URLs, and those URLs can point to any Git host. GitHub appears in examples
-because much of the CKB ecosystem already develops there. Self-hosted sources
-remain valid when the registry entry carries a cloneable URL and verifiable
-hashes.
+**Why GitHub examples?** We're not locked into GitHub. Repository provenance can
+point to any Git host, while installation uses the separately authenticated
+snapshot. GitHub appears in examples because much of the CKB ecosystem develops
+there; it is not the package-availability boundary.
 
 **Why off-chain deployment records instead of on-chain?** CKB capacity costs make on-chain source-package storage unattractive. A 5KB RISC-V ELF binary requires about 541 CKB of capacity just for the code cell. Storing version metadata, schema manifests, and ABI indices on-chain would multiply that cost for no consensus benefit — these are developer artifacts, not runtime state. The chain should record compact deployment facts (CellDep, OutPoint, data_hash), not replace the entire source distribution system.
 
-**What about the proxy?** The public registry read path should already behave
-like a proxy: static JSON, immutable artifact URLs, CDN caching, and fallbacks to
-source Git when cache entries are unavailable. The proxy/cache must not rewrite
-identity or bypass source/build/deployment verification.
+**What about the proxy?** The public read path exposes static JSON and immutable
+snapshot URLs with cache headers. It fails when an object is absent rather than
+silently fetching mutable Git content. Any later CDN/cache must preserve object
+identity and cannot bypass source/build/deployment verification.
 
 ## The Test Suite
 
@@ -582,6 +598,11 @@ Phase 1 acceptance is covered by always-on CLI and registry tests:
 **Offline Git registry**: local publish/resolve, namespace isolation, tag-pinned
 source resolution, registry dependency loading, source-root hashing, and
 source-hash mismatch rejection.
+
+**Production snapshot resolution**: public status authority, required snapshot
+descriptors, bounded no-redirect download, object SHA-256, safe unique paths,
+per-file BLAKE2b, package-coordinate checks, whole-tree source hash, and atomic
+cache materialisation.
 
 **Package/build identity**: namespace initialization, build lockfile identity,
 package verification, artifact/metadata/schema/ABI/constraints hash recording,
@@ -596,11 +617,11 @@ devnet scenarios. Those are valuable 0.20 candidates, but live RPC /
 
 ## What Comes Next
 
-Phase 1 is deliberately minimal. The public registry policy has a JoyID-rooted
-publish write path, a static/cacheable source metadata read path, the
-three-file separation, and the three-layer identity model. The current
+Phase 1 is deliberately minimal. The public registry now has a deployed
+JoyID-rooted publish write path, a static/cacheable source metadata read path,
+the three-file separation, and the three-layer identity model. The checked-in
 local/offline fixture exercises the same metadata shape through `registry.json`
-and Git tags as a mirror, audit trail, and fallback.
+and Git tags strictly as a mirror, audit trail, and explicit fallback.
 
 The write service is the public admission authority for `cellc publish`,
 namespace/package claims, yanking, maintainer management, and entry quarantine.

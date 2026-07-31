@@ -1,23 +1,36 @@
 # CellScript Registry API
 
-Cloudflare Workers write API for the public CellScript registry.
+Production API for the public CellScript registry. The same typed application
+can run as a Cloudflare Worker or through the bundled Node.js HTTP adapter.
 
 This service is the production write boundary behind:
 
 - `https://api.registry.cellscript.dev` for authenticated writes;
-- `https://registry.cellscript.dev` for static/CDN reads.
+- `https://registry.cellscript.dev` for static/CDN package and source-snapshot
+  reads.
 
-The same Worker can also serve `https://registry.cellscript.dev/packages/*`
-directly from R2, while the rest of the website may stay on Pages/static
-hosting.
+The Cloudflare deployment option can serve `/packages/*` and
+`/source-snapshots/*` directly from R2. The current
+production deployment uses the Node adapter plus a separate read-only nginx
+container over the same object-store volume.
 
-It intentionally does not use D1 as the primary database. Runtime state is
-stored in Neon Postgres through Cloudflare Hyperdrive, while immutable source
-snapshots and static registry read objects are stored in R2.
+Postgres is the authoritative write store. Immutable source snapshots and
+version-addressed package JSON use either R2 or the production filesystem
+adapter. Package JSON is refreshed only by audited evidence/status transitions;
+the source snapshot itself is content-addressed and immutable. The static read
+service is intentionally separate from Postgres and the write API so accepted
+package URLs remain available during a database or API incident.
 
-This service has not been deployed. `migrations/0001_initial.sql` is therefore
-the authoritative initial database definition and is edited in place with the
-API contract; there is no deployed schema or compatibility reader to preserve.
+The self-hosted production slice was deployed on 2026-07-31. From that point,
+`migrations/0001_initial.sql` is the frozen deployed baseline; future schema
+changes must be additive numbered migrations rather than edits to the initial
+migration. Readiness and the public/static surfaces are available at:
+
+```text
+https://api.registry.cellscript.dev/health
+https://api.registry.cellscript.dev/ready
+https://registry.cellscript.dev/health
+```
 
 ## Implemented Boundaries
 
@@ -49,21 +62,29 @@ API contract; there is no deployed schema or compatibility reader to preserve.
   a publish key is reserved but before the version is accepted, the processing
   reservation is released.
 - Existing package versions are rejected before source snapshot writes.
-- Immutable R2 source snapshot and static package-version JSON writes before
-  package-version admission; if the static read object cannot be persisted, the
-  version is not accepted into the registry store.
+- Content-addressed source snapshot and version-addressed package JSON writes
+  before package-version admission; if the static read object cannot be
+  persisted, the version is not accepted into the registry store.
 - Static package-version JSON write to R2 at
   `/packages/:namespace/:name/versions/:version.json`; this is the direct URL
   served by `https://registry.cellscript.dev`.
+- Public package-version responses include the immutable snapshot descriptor:
+  URL, SHA-256 object identity, source hash, byte size, and semantic content
+  type. The self-hosted static service exposes `/source-snapshots/*` read-only
+  with immutable caching, allowing `cellc install` to verify and materialize
+  source without cloning Git.
 - Initial package-version status: `source_published`.
 - Per-IP, per-ASN, per-principal, per-capability, and per-package quota hooks.
 - Future `policy_hooks` and `bond_policy_hooks` tables for later bond or
   refundable-deposit policies; no on-chain fee or bond is enforced now.
+- Public package index, search, package-detail, and evidence read endpoints.
 - Token-gated admin operations for reserved namespaces, namespace review
   status, and conservative package-version status transitions. Generic admin
-  status changes cannot claim `verified_build` or `deployed`; those promotions
-  remain unavailable until an evidence-specific endpoint verifies and stores
-  the corresponding proof.
+  status changes cannot claim production assurance states.
+- Evidence-specific, ordered promotion from `source_published` to
+  `verified_build`, `deployed`, and `on_chain_attested`. Each transition stores
+  hash-addressed evidence and validates identity fields plus the preceding
+  evidence reference before the status can change.
 - Suppressive package-version admin transitions (`deprecated`, `yanked`,
   `quarantined`) update the static read object before changing the write-store
   status, so public reads fail conservative during incident response.
@@ -82,6 +103,9 @@ API contract; there is no deployed schema or compatibility reader to preserve.
 GET  /health
 GET  /ready
 GET  /packages/:namespace/:name/versions/:version.json
+GET  /v1/packages
+GET  /v1/packages/:namespace/:name
+GET  /v1/packages/:namespace/:name/versions/:version/evidence
 POST /v1/capabilities
 POST /v1/capabilities/:key_id/revoke
 POST /v1/namespaces/claim
@@ -90,9 +114,93 @@ GET  /v1/admin/audit-events
 POST /v1/admin/reserved-namespaces
 POST /v1/admin/namespaces/:namespace/status
 POST /v1/admin/packages/:namespace/:name/versions/:version/status
+POST /v1/admin/packages/:namespace/:name/versions/:version/promote
 ```
 
-## Deploy Setup
+## Self-hosted Production Deployment
+
+The checked-in production stack uses Postgres 17, the Node 22 adapter, a shared
+object volume, and a read-only nginx service for
+`registry.cellscript.dev`. It expects the external Docker network
+`stack-network` to provide the TLS reverse proxy. Production TLS is terminated
+by HTTPS Portal; its API-domain configuration must allow an 8 MiB request body
+so the 5 MiB snapshot plus base64/JSON overhead reaches the Node adapter.
+
+```bash
+cp deploy/.env.example deploy/.env
+# Generate and insert independent high-entropy database and admin secrets.
+chmod 600 deploy/.env
+docker compose --env-file deploy/.env -f deploy/docker-compose.production.yml config
+docker compose --env-file deploy/.env -f deploy/docker-compose.production.yml up -d --build
+```
+
+The API container applies tracked migrations before it starts accepting
+traffic. Postgres is reachable only on the internal network. The API and static
+services run with read-only root filesystems, bounded temporary filesystems,
+health checks, log rotation, and `no-new-privileges`.
+
+Production validation performed at deployment includes trusted TLS for both
+domains, dependency-aware readiness, a 2 MiB request reaching application JSON
+validation, a structured application 413 at 7 MiB + 1 byte, rejection of
+unauthorised admin writes and static POSTs, path-traversal rejection, API
+restart recovery, and persistent audit/database/object volumes.
+
+Required runtime configuration:
+
+```text
+DATABASE_URL
+REGISTRY_OBJECTS_DIR
+REGISTRY_ADMIN_TOKEN
+REGISTRY_ORIGIN
+STATIC_REGISTRY_ORIGIN
+```
+
+`MAX_INCOMING_BODY_BYTES` limits the Node adapter before the request reaches
+the application parser. Keep it slightly larger than `MAX_JSON_BODY_BYTES`,
+which must in turn cover the base64 representation of `MAX_SNAPSHOT_BYTES`.
+
+## Production Backups
+
+`deploy/backup.sh` creates one atomic backup directory containing:
+
+- a custom-format, owner-free Postgres dump;
+- a gzip archive of the object volume, captured after the database snapshot so
+  every object referenced by that database dump is present;
+- the Postgres image identity; and
+- SHA-256 checksums for all three files.
+
+The default destination is `/data/cellscript-registry/backups`, and only
+timestamp-shaped backup directories older than the bounded retention window are
+removed. The default retention is seven days and may be set from 1 to 365 with
+`REGISTRY_BACKUP_RETENTION_DAYS`.
+
+The checked-in systemd service/timer runs this backup daily with a randomized
+delay and a restricted filesystem view:
+
+```bash
+install -d -m 0750 /data/cellscript-registry/backups
+install -m 0644 deploy/cellscript-registry-backup.service /etc/systemd/system/
+install -m 0644 deploy/cellscript-registry-backup.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now cellscript-registry-backup.timer
+systemctl start cellscript-registry-backup.service
+```
+
+Verify a backup before treating it as recoverable:
+
+```bash
+(cd /data/cellscript-registry/backups/<timestamp> && sha256sum --check SHA256SUMS)
+docker run --rm --network none \
+  -v /data/cellscript-registry/backups/<timestamp>:/backup:ro \
+  postgres:17-alpine pg_restore --list /backup/postgres.dump > /dev/null
+tar -tzf /data/cellscript-registry/backups/<timestamp>/objects.tar.gz > /dev/null
+```
+
+A restore rehearsal uses new empty database/object volumes, restores the dump
+and object archive, then requires `/ready` plus static package reads before any
+traffic cut-over. Do not overwrite the live volumes as an untested restore.
+
+## Cloudflare Deployment
 
 1. Create a Neon Postgres database.
 2. Apply database migrations:
@@ -131,10 +239,10 @@ Cloudflare bindings/secrets.
 `npm run migrate` creates and uses a local `schema_migrations` table. Re-running
 it is safe; already-applied migration files are skipped.
 
-`GET /health` is a liveness check. `GET /ready` is the production readiness
-check and returns `503` until Hyperdrive, R2, and `REGISTRY_ADMIN_TOKEN` are all
-configured. `NAMESPACE_CLAIM_COOLDOWN_SECONDS` defaults to `3600`; lower it only
-for controlled staging tests.
+`GET /health` is a process liveness check. `GET /ready` performs live store and
+object-adapter checks and returns `503` until every required dependency and the
+admin token are ready. `NAMESPACE_CLAIM_COOLDOWN_SECONDS` defaults to `3600`;
+lower it only for controlled staging tests.
 
 ## Admin Governance Boundary
 
@@ -153,9 +261,12 @@ yanked
 quarantined
 ```
 
-`verified_build`, `deployed`, and `on_chain_attested` remain registry states,
-but this generic endpoint cannot create those claims. A future promotion path
-must validate evidence rather than accepting an operator-supplied label.
+`verified_build`, `deployed`, and `on_chain_attested` are accepted only through
+the evidence endpoint. A verified build binds source, manifest, compatibility
+profile, artifact, metadata, and compiler version. Deployment evidence must
+reference that verified-build evidence and prove the same artifact is live at
+a concrete CKB out point. On-chain attestation must in turn reference the
+accepted deployment evidence and record a confirmed attestation transaction.
 
 Audit events can be queried with:
 
@@ -226,8 +337,8 @@ The API rejects a publish unless:
 - the capability signature verifies;
 - the signed publish nonce has not already been consumed;
 - the package version does not already exist;
-- a source snapshot is provided and persisted to R2;
-- a static package-version JSON object is persisted to R2 for the CDN read path.
+- a source snapshot is provided and persisted to the configured object store;
+- a static package-version JSON object is persisted for the read-only path.
 
 Clients that need safe retry semantics should send an `Idempotency-Key` header
 with at least 16 visible token characters. The key is not an auth credential; it
@@ -250,12 +361,18 @@ Successful publish returns a direct static read URL shaped as:
 https://registry.cellscript.dev/packages/:namespace/:name/versions/:version.json
 ```
 
-The route is served from R2 and sets short CDN cache headers. It does not
-require Hyperdrive or the write store, so ordinary package reads stay isolated
+The route is served from the object store and sets short cache headers. It does
+not require Postgres or the write store, so ordinary package reads stay isolated
 from authenticated write-path dependencies. Its JSON object repeats `edition`
 and `compatibility_profile_hash` at the top level so consumers do not need to
 trust an untyped nested blob and do not have to overload the edition label with
 ABI or schema meaning.
+
+The same static origin serves the content-addressed `source_snapshot.url`
+reported in that JSON. Generated CellScript snapshots use
+`application/vnd.cellscript.source-snapshot+json`; the resolver rejects opaque
+archive types, unsafe/duplicate paths, incorrect per-file hashes, a wrong
+package coordinate, or a mismatched whole-tree source hash.
 
 CLI publish has two supported signing shapes:
 

@@ -1,0 +1,21 @@
+[Unit]
+Description=Back up the CellScript Registry database and object volume
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStartPre=/usr/bin/install -d -m 0750 /data/cellscript-registry/backups
+ExecStart=/data/cellscript-registry/app/deploy/backup.sh
+User=root
+Group=root
+UMask=0027
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/data/cellscript-registry
+ReadOnlyPaths=-/data/cellscript-registry/app -/data/cellscript-registry/releases

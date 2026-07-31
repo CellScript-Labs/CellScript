@@ -644,7 +644,7 @@ CKB cycle/capacity estimates.
 
 | Module | What it does |
 |---|---|
-| **Package workflow** (`package/`) | `Cell.toml` parsing, path/git/registry source-package dependency resolution, transitive `Cell.lock` reproducibility, `cellc init`/`add`/`remove`/`install --path`/`install namespace/pkg@version`/`update`/`info`. Registry source packages are resolved through discovery, tag-pinned Git provenance, `registry.json`, and verified `source_hash`; non-CellScript registry artifact profiles remain fail-closed. |
+| **Package workflow** (`package/`) | `Cell.toml` parsing, path/git/registry source-package dependency resolution, transitive `Cell.lock` reproducibility, `cellc init`/`add`/`remove`/`install --path`/`install namespace/pkg@version`/`update`/`info`. Registry source packages are selected from the production API's accepted status, then installed from a content-addressed Registry snapshot after descriptor SHA-256, per-file BLAKE2b, Edition/profile identity, and whole-tree `source_hash` verification; non-CellScript registry artifact profiles remain fail-closed. |
 | **Incremental compiler** (`incremental/`) | Dependency-graph-aware build cache — skips recompilation when inputs are unchanged. |
 | **Build integration** (`lib.rs`) | Resolves `Cell.toml` → `CellBuildConfig`, merges CLI + manifest options, selects entry scope, runs policy gates, writes artifacts + metadata. |
 
@@ -750,9 +750,11 @@ CellScript ships a local-first package workflow in `cellc`. Local packages,
 source roots, path/git/registry source-package dependencies, lockfile refresh,
 and package build/check/doc/fmt flows are production-style. Registry resolution
 is deliberately narrow: `cellc install`, `cellc build`, and `cellc update`
-accept CellScript source packages with `Cell.toml`, `registry.json`, tag-pinned
-Git provenance, and verified `source_hash`; non-CellScript artifact profiles
-still fail closed.
+query the public API for an accepted CellScript source-package version, then
+download its immutable Registry source snapshot, reject unsafe paths or opaque
+archive formats, and verify snapshot SHA-256, every file's BLAKE2b, `Cell.toml`
+identity, Edition/profile identity, and the whole-tree `source_hash`.
+Non-CellScript artifact profiles still fail closed.
 
 **Supported today:**
 
@@ -764,8 +766,9 @@ still fail closed.
 - `cellc install --path` and `cellc update` — resolve local path dependency
   graphs and refresh `Cell.lock`
 - `cellc install cellscript/pkg@1.2.0` — resolve a registry source-package
-  dependency through discovery, tag checkout, `registry.json`, and
-  `source_hash` verification
+  dependency through the production public API, accepted-status selection,
+  immutable snapshot materialisation, Edition/profile checks, and layered hash
+  verification
 - Local path dependencies are resolved recursively and included in module
   loading, source hashing, and metadata
 - `Cell.lock` — captures direct and transitive resolved dependency identity
@@ -814,16 +817,29 @@ still fail closed.
   `cellc publish --print-payload --json`, signing the `canonical_payload`
   externally, then submitting with `--payload <file> --capability-signature
   <signature>`, or by setting `CELLSCRIPT_CAPABILITY_PRIVATE_KEY_PKCS8_B64`.
-- The first write API implementation lives under
-  [`services/registry-api`](services/registry-api/README.md): Cloudflare
-  Workers, R2 source snapshots, Neon Postgres through Hyperdrive, JoyID
-  capability authorisation, namespace ACL checks, quota hooks, and audit events.
+- The production write API lives under
+  [`services/registry-api`](services/registry-api/README.md). The deployed slice
+  uses Node 22, Postgres 17, a persistent filesystem object store, and a
+  separate read-only nginx static path behind trusted TLS. The same typed app
+  retains a Cloudflare Worker/Hyperdrive/R2 deployment option. Both paths share
+  JoyID capability authorisation, namespace ACLs, quota hooks, ordered evidence
+  promotion, and audit events.
+- Public version responses bind a content-addressed source snapshot URL. The
+  read-only service exposes `/source-snapshots/*` independently of Postgres and
+  the API; the lockfile records that URL plus its `sha256:` revision so Registry
+  installs do not silently depend on Git availability.
 - Non-CellScript registry artifact profiles remain future-facing or fail-closed
 - Git dependencies are explicit remote source fetches; treat them as
   review-required inputs, not the registry production path
 
 **Registry resolver boundary:**
 
+- The default source-package authority is
+  `https://api.registry.cellscript.dev`; only publicly accepted statuses enter
+  ordinary version selection. `CELLSCRIPT_REGISTRY_API_URL` changes that API
+  origin, while `CELLSCRIPT_REGISTRY_URL` explicitly selects the legacy
+  Git/offline discovery authority. An unavailable production API does not
+  silently downgrade to Git discovery.
 - Registry discovery may grow to include CellScript packages, verifier
   artifacts, deployed artifact records, reproducible artifacts, and external
   CKB tooling artifacts. Dependency resolution stays narrower than discovery.

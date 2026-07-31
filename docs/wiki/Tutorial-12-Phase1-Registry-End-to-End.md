@@ -7,6 +7,19 @@ and the commands that bind them together.
 For the longer repository version, read
 [docs/tutorials/phase1-end-to-end.md](https://github.com/CellScript-Labs/CellScript/blob/main/docs/tutorials/phase1-end-to-end.md).
 
+The production surfaces are live:
+
+```text
+Website:      https://cellscript.dev/registry/
+Public API:   https://api.registry.cellscript.dev/v1/packages
+Write API:    https://api.registry.cellscript.dev
+Static reads: https://registry.cellscript.dev/packages/
+```
+
+Package browsing is live-data-first. If the API is unavailable, the website
+labels its bundled fixture as a read-only mirror; it is never the write or
+resolution authority.
+
 ## What Phase 1 Proves
 
 Phase 1 is not a chain acceptance test and not a trust oracle. It answers three
@@ -56,7 +69,7 @@ For public publishing, authorize a local publisher capability through the JoyID
 flow, then publish:
 
 ```bash
-cellc auth capability create --principal-id joyid:example --scope publish:cellscript/amm_pool --expires 90d --json > capability-payload.json
+cellc auth capability create --principal-id <principal_id> --scope publish:cellscript/amm_pool --expires 90d --json > capability-payload.json
 cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json
 cellc publish --json
 ```
@@ -88,27 +101,38 @@ The API stores both as typed fields and exposes them in its static
 package-version JSON. Consumers must not derive ABI or schema versions from the
 edition year. Missing `edition`, `compatibility_profile_hash`,
 `dependencies`, `status`, or `yanked`, an unknown schema identifier, or a
-mismatched nested identity is rejected. Because the registry has not been
-deployed, this is the initial shape rather than an upgrade or migration story.
+mismatched nested identity is rejected. The production Registry deployed this
+as its initial schema on 2026-07-31; `0001_initial.sql` is now frozen and later
+schema changes require additive migrations.
 
 `source_published` means the signed source snapshot was admitted; it does not
 mean the build or deployment was verified. The generic admin endpoint cannot
-promote an entry to `verified_build` or `deployed`. Those labels require a
-future evidence-specific verification flow.
+promote an entry to `verified_build`, `deployed`, or `on_chain_attested`.
+Those labels require the ordered evidence endpoint. Each step stores
+hash-addressed evidence, validates the package/build identity, and binds the
+next step to the preceding evidence reference.
 
 ## Consumer Flow
 
 Add a dependency, resolve it, and check the resulting package graph:
 
 ```bash
-cellc add math --git https://example.com/math.git
+cellc install namespace/package@1.2.3
 cellc install
 cellc package verify --json
 ```
 
-Registry packages use the same fail-closed principle as path and Git
-dependencies: the selected source must match the recorded identity before the
-compiler can treat it as part of the build.
+The default resolver queries the production public API, accepts only statuses
+eligible for normal resolution, then downloads the version's content-addressed
+source snapshot. It verifies the snapshot descriptor's SHA-256, rejects opaque
+or path-escaping content, verifies every file's BLAKE2b digest, reconstructs the
+source tree atomically, and checks `Cell.toml`, source hash, Edition 2026, and
+compatibility-profile identity.
+`CELLSCRIPT_REGISTRY_URL` is an explicit Git/offline override, not an automatic
+fallback from a failed production lookup. Registry packages otherwise use the
+same fail-closed principle as path and Git dependencies: the selected source
+must match the recorded identity before the compiler can treat it as part of
+the build.
 
 Then build and verify the artifact:
 

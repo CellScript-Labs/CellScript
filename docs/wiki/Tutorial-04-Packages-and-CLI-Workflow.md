@@ -74,11 +74,13 @@ Read the manifest as a build promise:
 - path, git, and registry source-package dependencies keep package inputs
   explicit and lockable.
 
-Registry source-package resolution is implemented for packages that provide
-`Cell.toml`, `registry.json`, tag-pinned Git provenance, and a verified
-`source_hash`. Local path dependencies remain the fastest repeatable
-development workflow, and non-CellScript registry artifact profiles still fail
-closed until they have their own resolver contracts.
+Production Registry source-package resolution selects an accepted version from
+the public API, downloads its immutable source snapshot, and verifies object
+SHA-256, safe paths, per-file BLAKE2b, `Cell.toml`, Edition/profile identity,
+and the whole-tree `source_hash`. `registry.json` plus tag-pinned Git remain the
+explicit offline/mirror authority. Local path dependencies remain the fastest
+repeatable development workflow, and non-CellScript registry artifact profiles
+still fail closed until they have their own resolver contracts.
 
 The edition is one input to the emitted compatibility profile. Target,
 primitive assurance, metadata schemas, and wire ABIs keep independent version
@@ -253,7 +255,7 @@ cellc deploy plan . --target-profile ckb --json
 cellc deploy verify --plan Deployed.toml --json
 cellc registry verify --json
 cellc package verify --json
-cellc auth capability create --principal-id joyid:example --scope publish:cellscript/my_contract --expires 90d --json
+cellc auth capability create --principal-id <principal_id> --scope publish:cellscript/my_contract --expires 90d --json
 cellc gen-builder . --target typescript --target-profile ckb --json
 ```
 

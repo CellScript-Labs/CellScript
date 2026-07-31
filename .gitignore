@@ -1,6 +1,7 @@
 /target/
 node_modules/
 dist/
+dist-node/
 services/registry-api/dist/
 editors/vscode-cellscript/dist/
 

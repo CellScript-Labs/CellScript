@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- Deploy the public Registry production slice at
+  `api.registry.cellscript.dev` and `registry.cellscript.dev`: Postgres 17 is
+  the authoritative write store, the Node 22 adapter persists source snapshots
+  and version-addressed JSON to an isolated object volume, and a read-only
+  nginx service exposes `/packages/*` independently of the API/database
+  process. The production stack adds live dependency-aware readiness, bounded
+  request bodies, structured logs, health checks, log rotation, generated
+  secrets, HTTPS, and an 8 MiB proxy admission limit sized for the 5 MiB source
+  snapshot contract. Public package search, package detail, and ordered
+  evidence promotion APIs are live. A daily systemd job writes atomic,
+  checksum-protected Postgres/object-store backups with bounded retention; its
+  first backup passed database and archive restore inspection. Public version
+  responses now expose immutable snapshot descriptors, the read-only service
+  serves those content-addressed snapshots, and the CLI verifies object SHA-256,
+  safe paths, per-file BLAKE2b, and the whole-tree source hash before atomically
+  materialising a dependency. The CLI uses the public API's accepted status as
+  the default resolution authority while retaining the explicit
+  `CELLSCRIPT_REGISTRY_URL` Git/offline override, and the website renders the
+  live Registry with a clearly labelled read-only bundled mirror only when the
+  API is unavailable. The former Registry Coming Soon surface is removed.
 - Close the 0.23 syntax-audit consistency gaps: canonical type declarations
   now use comma-terminated fields, syntax-combination gates cover canonical and
   comma-free compatibility input, checked example mirrors use named `U64_MAX`
@@ -21,12 +41,13 @@
   and older persisted schemas are rejected; no migration or compatibility
   reader is provided. Generated CKB entries also remove the raw-`CSARGv1`
   witness fallback, so placement ABI v2 accepts the payload only inside
-  canonical `WitnessArgs.input_type`. The not-yet-deployed public registry is
-  defined by one current contract: signed entries, the initial database
-  schema, CDN JSON, and the website require both Edition 2026 and the separate
-  compatibility-profile hash, with no fallback reader for incomplete entries.
-  The generic admin API can no longer manufacture `verified_build` or
-  `deployed` claims without an evidence-specific path. See the
+  canonical `WitnessArgs.input_type`. The deployed public registry uses one
+  current contract: signed entries, the production database schema,
+  version-addressed static JSON, and the website require both Edition 2026 and
+  the separate compatibility-profile hash, with no fallback reader for
+  incomplete entries. Generic admin status changes cannot manufacture
+  `verified_build`, `deployed`, or `on_chain_attested` claims; those states
+  require the ordered evidence-promotion path. See the
   [0.23 development release notes](docs/releases/CELLSCRIPT_0_23_RELEASE_NOTES.md).
 - Complete the native-tooling cleanup: neutralize migration-era identifiers,
   remove tracked legacy traceback logs and cache exclusions, rename the native

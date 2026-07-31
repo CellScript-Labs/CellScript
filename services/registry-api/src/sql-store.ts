@@ -1,19 +1,23 @@
 import { Client } from "pg";
-import type {
-  AuditEventInput,
-  AuditEventRecord,
-  CapabilityRecord,
-  IdempotencyRecord,
-  IdempotencyReservation,
-  ListAuditEventsInput,
-  MaintenanceResult,
-  NamespaceClaimResult,
-  NamespaceRecord,
-  NamespaceStatus,
-  PackageVersionRecord,
-  ReservedNamespaceRecord,
-  RegistryStore,
-  SnapshotRecord,
+import {
+  assertPromotionTransition,
+  type AuditEventInput,
+  type AuditEventRecord,
+  type CapabilityRecord,
+  type IdempotencyRecord,
+  type IdempotencyReservation,
+  type ListAuditEventsInput,
+  type MaintenanceResult,
+  type NamespaceClaimResult,
+  type NamespaceRecord,
+  type NamespaceStatus,
+  type PackageEvidenceRecord,
+  type PackageVersionRecord,
+  type PackageVersionQuery,
+  type PromotePackageVersionInput,
+  type ReservedNamespaceRecord,
+  type RegistryStore,
+  type SnapshotRecord,
 } from "./store";
 import { ApiError, capabilityKeyId, canonicalJson, sha256Hex, type CapabilityAuthorisationPayload, type RegistryEntryStatus } from "./domain";
 
@@ -23,6 +27,12 @@ export interface HyperdriveLike {
 
 export class SqlRegistryStore implements RegistryStore {
   constructor(private readonly hyperdrive: HyperdriveLike) {}
+
+  async healthCheck(): Promise<void> {
+    await this.withClient(async (client) => {
+      await client.query("select 1");
+    });
+  }
 
   private async withClient<T>(fn: (client: Client) => Promise<T>): Promise<T> {
     const client = new Client({ connectionString: this.hyperdrive.connectionString });
@@ -386,6 +396,33 @@ export class SqlRegistryStore implements RegistryStore {
     });
   }
 
+  async getSnapshot(snapshotHash: string): Promise<SnapshotRecord | null> {
+    return (await this.getSnapshots([snapshotHash])).get(snapshotHash) ?? null;
+  }
+
+  async getSnapshots(snapshotHashes: string[]): Promise<Map<string, SnapshotRecord>> {
+    const uniqueHashes = [...new Set(snapshotHashes)];
+    if (uniqueHashes.length === 0) return new Map();
+    return this.withClient(async (client) => {
+      const result = await client.query(
+        `select snapshot_hash, r2_key, source_hash, size_bytes, content_type
+         from source_snapshots
+         where snapshot_hash = any($1::text[]) and hidden_at is null`,
+        [uniqueHashes],
+      );
+      return new Map(result.rows.map((row) => {
+        const snapshot: SnapshotRecord = {
+          snapshot_hash: String(row.snapshot_hash),
+          r2_key: String(row.r2_key),
+          source_hash: String(row.source_hash),
+          size_bytes: Number(row.size_bytes),
+          content_type: String(row.content_type),
+        };
+        return [snapshot.snapshot_hash, snapshot];
+      }));
+    });
+  }
+
   async getPackageVersion(namespace: string, name: string, version: string): Promise<PackageVersionRecord | null> {
     return this.withClient(async (client) => {
       const result = await client.query(
@@ -399,6 +436,34 @@ export class SqlRegistryStore implements RegistryStore {
       );
       const row = result.rows[0];
       return row ? packageVersionFromRow(row) : null;
+    });
+  }
+
+  async listPackageVersions(input: PackageVersionQuery): Promise<PackageVersionRecord[]> {
+    return this.withClient(async (client) => {
+      const result = await client.query(
+        `select pv.namespace, pv.name, pv.version, pv.status, pv.source_hash, pv.manifest_hash,
+                pv.edition, pv.compatibility_profile_hash,
+                pv.capability_key_id, pv.principal_type, pv.principal_id, pv.registry_entry,
+                pv.snapshot_hash, pv.direct_url, pv.created_at
+         from package_versions pv
+         join packages p on p.namespace = pv.namespace and p.name = pv.name
+         where ($1::text is null or pv.namespace = $1)
+           and ($2::text is null or pv.name = $2)
+           and ($3::text is null or pv.status = $3)
+           and (
+             $4::text is null
+             or pv.namespace ilike '%' || $4 || '%'
+             or pv.name ilike '%' || $4 || '%'
+             or pv.version ilike '%' || $4 || '%'
+             or coalesce(p.source_repo, '') ilike '%' || $4 || '%'
+             or pv.registry_entry::text ilike '%' || $4 || '%'
+           )
+         order by pv.created_at desc, pv.namespace, pv.name, pv.version desc
+         limit $5 offset $6`,
+        [input.namespace ?? null, input.name ?? null, input.status ?? null, input.query ?? null, input.limit, input.offset],
+      );
+      return result.rows.map(packageVersionFromRow);
     });
   }
 
@@ -436,6 +501,122 @@ export class SqlRegistryStore implements RegistryStore {
       }
     });
     return input;
+  }
+
+  async listPackageEvidence(namespace: string, name: string, version: string): Promise<PackageEvidenceRecord[]> {
+    return this.withClient(async (client) => {
+      const result = await client.query(
+        `select namespace, name, version, kind, evidence_hash, evidence,
+                request_id, admin_actor, created_at
+         from package_version_evidence
+         where namespace = $1 and name = $2 and version = $3
+         order by created_at, kind`,
+        [namespace, name, version],
+      );
+      return result.rows.map(packageEvidenceFromRow);
+    });
+  }
+
+  async listPackageEvidenceForPackage(namespace: string, name: string): Promise<PackageEvidenceRecord[]> {
+    return this.withClient(async (client) => {
+      const result = await client.query(
+        `select namespace, name, version, kind, evidence_hash, evidence,
+                request_id, admin_actor, created_at
+         from package_version_evidence
+         where namespace = $1 and name = $2
+         order by created_at, version, kind`,
+        [namespace, name],
+      );
+      return result.rows.map(packageEvidenceFromRow);
+    });
+  }
+
+  async promotePackageVersion(input: PromotePackageVersionInput): Promise<{
+    version: PackageVersionRecord;
+    evidence: PackageEvidenceRecord;
+  }> {
+    return this.withClient(async (client) => {
+      await client.query("begin");
+      try {
+        const locked = await client.query(
+          `select namespace, name, version, status, source_hash, manifest_hash,
+                  edition, compatibility_profile_hash,
+                  capability_key_id, principal_type, principal_id, registry_entry,
+                  snapshot_hash, direct_url, created_at
+           from package_versions
+           where namespace = $1 and name = $2 and version = $3
+           for update`,
+          [input.namespace, input.name, input.version],
+        );
+        const currentRow = locked.rows[0];
+        if (!currentRow) {
+          throw new ApiError(404, "package_version_not_found", "package version is not known to the registry");
+        }
+        const current = packageVersionFromRow(currentRow);
+        assertPromotionTransition(current.status, input.kind);
+        await client.query(
+          `insert into package_version_evidence(
+             namespace, name, version, kind, evidence_hash, evidence,
+             request_id, admin_actor
+           ) values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)
+           on conflict (namespace, name, version, kind, evidence_hash) do nothing`,
+          [
+            input.namespace,
+            input.name,
+            input.version,
+            input.kind,
+            input.evidence_hash,
+            JSON.stringify(input.evidence),
+            input.request_id,
+            input.admin_actor,
+          ],
+        );
+        const updated = await client.query(
+          `update package_versions
+           set status = $4,
+               indexed_at = coalesce(indexed_at, now()),
+               verified_at = case when $4 in ('verified_build', 'deployed', 'on_chain_attested') then coalesce(verified_at, now()) else verified_at end
+           where namespace = $1 and name = $2 and version = $3
+           returning namespace, name, version, status, source_hash, manifest_hash,
+                     edition, compatibility_profile_hash,
+                     capability_key_id, principal_type, principal_id, registry_entry,
+                     snapshot_hash, direct_url, created_at`,
+          [input.namespace, input.name, input.version, input.kind],
+        );
+        await client.query(
+          `insert into audit_events(
+             request_id, event_type, principal_type, principal_id, capability_key_id,
+             namespace, name, version, data
+           ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)`,
+          [
+            input.request_id,
+            `evidence.${input.kind}.accepted`,
+            current.principal_type,
+            current.principal_id,
+            current.capability_key_id,
+            input.namespace,
+            input.name,
+            input.version,
+            JSON.stringify({ admin_actor: input.admin_actor, evidence_hash: input.evidence_hash }),
+          ],
+        );
+        const evidenceResult = await client.query(
+          `select namespace, name, version, kind, evidence_hash, evidence,
+                  request_id, admin_actor, created_at
+           from package_version_evidence
+           where namespace = $1 and name = $2 and version = $3 and kind = $4 and evidence_hash = $5`,
+          [input.namespace, input.name, input.version, input.kind, input.evidence_hash],
+        );
+        await client.query("commit");
+        return {
+          version: packageVersionFromRow(updated.rows[0]),
+          evidence: packageEvidenceFromRow(evidenceResult.rows[0]),
+        };
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      }
+    });
   }
 
   async recordCapabilityUsage(input: {
@@ -776,6 +957,23 @@ function packageVersionFromRow(row: any): PackageVersionRecord {
     registry_entry: row.registry_entry,
     snapshot_hash: row.snapshot_hash,
     direct_url: row.direct_url,
+    created_at: new Date(row.created_at).toISOString(),
+  };
+}
+
+function packageEvidenceFromRow(row: any): PackageEvidenceRecord {
+  if (!row) {
+    throw new ApiError(500, "evidence_record_missing", "package evidence write did not return a readable record");
+  }
+  return {
+    namespace: row.namespace,
+    name: row.name,
+    version: row.version,
+    kind: row.kind,
+    evidence_hash: row.evidence_hash,
+    evidence: row.evidence && typeof row.evidence === "object" && !Array.isArray(row.evidence) ? row.evidence : {},
+    request_id: row.request_id,
+    admin_actor: row.admin_actor,
     created_at: new Date(row.created_at).toISOString(),
   };
 }

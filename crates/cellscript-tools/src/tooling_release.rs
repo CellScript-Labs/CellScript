@@ -467,8 +467,9 @@ pub fn run(root: &Path) -> Result<()> {
         root,
         "src/package/mod.rs",
         &[
-            "failed to resolve registry dependency '{}/{}@{}' via discovery index '{}': {}",
+            "failed to resolve registry dependency '{}/{}@{}': {}",
             "registry package '{}/{}@{}' has no source_hash in registry.json",
+            "public registry package '{}/{}@{}' has no immutable source snapshot",
             "source_hash mismatch for '{}/{}@{}': expected '{}', got '{}'",
             "Git { url: String, revision: String }",
             "pub fn consistency_issues(&self, manifest: &PackageManifest) -> Vec<String>",

@@ -1,6 +1,7 @@
 # ADR: CellScript Registry Production Boundary
 
-**Status**: Accepted design note
+**Status**: Accepted design note; self-hosted production implementation live
+since 2026-07-31
 
 **Date**: 2026-06-23
 
@@ -10,6 +11,12 @@ visibility, and first production deployment boundary.
 
 **Out of scope**: Code implementation, dependency selection inside the
 repository, and on-chain deployment record submission.
+
+Implementation note: the deployed first slice uses the shared HTTPS Portal,
+the Node adapter in `services/registry-api`, Postgres 17, a persistent
+filesystem object volume, and a separate read-only nginx process. The
+Cloudflare Worker/Hyperdrive/R2 shape described below remains a supported edge
+deployment option, not a statement about the current host.
 
 ## Decision
 
@@ -199,7 +206,10 @@ refundable deposit rules through `policy_hooks` and `bond_policy_hooks` tables.
 Current production abuse controls:
 
 - read and write paths are separated;
-- write API sits behind WAF and edge rate limits;
+- write requests are bounded at the TLS proxy and Node adapter, while the
+  application enforces forwarded-client-IP, principal, capability, namespace,
+  package, and source-hash quotas before expensive work; an edge WAF remains an
+  optional additional control rather than a deployed dependency;
 - quotas apply per IP, ASN, JoyID principal, capability, namespace, package, and
   source hash;
 - principal-scoped quota and namespace-claim cooldown are counted only after
@@ -225,7 +235,16 @@ or build workers are invoked.
 
 ## Write API And Storage
 
-The preferred production stack is:
+The deployed production stack is:
+
+```text
+HTTPS Portal for ACME/TLS and reverse proxying
+Node 22 Registry adapter + Postgres 17 for the authoritative write path
+Persistent object volume for immutable snapshots and exported static indexes
+Read-only nginx for version-addressed `/packages/*` objects
+```
+
+The portable edge deployment option is:
 
 ```text
 Cloudflare Pages / Workers
@@ -239,12 +258,14 @@ constraints, audit queries, revocation checks, namespace ownership, quota
 accounting, and a publish state machine; those are better suited to Postgres for
 the first production implementation.
 
-The first write API implementation is `services/registry-api`:
+The first write API implementation is `services/registry-api`. Its typed
+application core supports both deployment adapters:
 
-- Cloudflare Worker entrypoint;
-- Hyperdrive-bound Neon Postgres store;
-- R2 source snapshot writer;
-- R2 static package-version JSON writer before package-version admission;
+- Node HTTP and Cloudflare Worker entrypoints;
+- direct and Hyperdrive-compatible Postgres stores;
+- filesystem and R2 source snapshot writers;
+- filesystem and R2 static package-version JSON writers before
+  package-version admission;
 - JoyID `verifySignature` authorisation check;
 - canonical challenge binding for capability creation;
 - one-time nonce consumption for capability creation, capability revocation, and
@@ -260,21 +281,28 @@ The first write API implementation is `services/registry-api`:
 Production domains:
 
 ```text
-registry.cellscript.dev      -> static/CDN read path backed by R2 registry objects
-api.registry.cellscript.dev  -> authenticated write API
+registry.cellscript.dev      -> read-only immutable package/snapshot objects
+api.registry.cellscript.dev  -> authenticated writes plus public query API
 ```
 
-Staging uses `staging-registry.cellscript.dev` or an equivalent staging subdomain.
+In the deployed self-hosted slice,
+`registry.cellscript.dev/packages/*` is served from the shared persistent object
+volume by read-only nginx, while `api.registry.cellscript.dev` reaches the Node
+adapter. An R2/CDN read path remains the portable edge equivalent.
+
+A future staging environment should use `staging-registry.cellscript.dev` or an
+equivalent staging subdomain. No staging hostname is part of the 2026-07-31
+production deployment.
 
 The read path serves website pages, package metadata, cached indexes, source
 mirrors, immutable snapshot URLs, and package status. It must not perform
 ordinary registry reads by calling chain RPC or write API internals.
-The `registry.cellscript.dev/packages/*` route is served from R2 registry
-objects with CDN cache headers; it does not require Hyperdrive or write-store
-access. The broader website can still be hosted as static Pages content.
+The `registry.cellscript.dev/packages/*` route is served from immutable
+registry objects with cache headers; it does not require Postgres or write-store
+access. The broader website remains static Astro content.
 
-DNS availability is operational state, not an architecture requirement. The
-registry design assumes the domains above once their records are live.
+DNS and trusted TLS for both production domains are live. Availability remains
+operational state rather than part of package identity or verification.
 
 ## Source Snapshot Requirement
 
@@ -286,6 +314,13 @@ The source snapshot and the static package-version JSON object must both be
 persisted before the version is accepted into the registry store. If the direct
 read object cannot be written, the publish must fail without recording an
 accepted package version.
+
+The package-version object exposes the snapshot URL, object SHA-256, source
+hash, size, and semantic content type. Production clients install the current
+CellScript source-package profile from that immutable object and verify the
+object, every source file, the package coordinate, and the whole-tree source
+hash before committing it to the dependency cache. Git remains provenance and
+an explicit offline-mirror path, not the default download transport.
 
 Minimum source metadata:
 

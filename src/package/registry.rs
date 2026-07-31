@@ -1,14 +1,24 @@
-//! Two-tier Git registry client for CellScript packages.
+//! Public registry and offline Git-mirror clients for CellScript packages.
 //!
-//! Model: Go-style + GitHub based
-//! - Discovery index: lightweight Git repo mapping `namespace/name` → source URL
-//! - Per-package version index: `registry.json` inside each source repository
+//! Production resolution reads accepted package state from the public registry
+//! API, then downloads and verifies the registry's immutable source snapshot.
+//! The repository URL and tag remain provenance/audit fields rather than an
+//! availability dependency. The historical Git discovery index remains
+//! available only through an explicit
+//! `CELLSCRIPT_REGISTRY_URL` override for tests, private mirrors, and offline
+//! workflows.
 //!
 //! Resolution priority: path > git > registry
 
 use crate::error::{CompileError, Result};
+#[cfg(feature = "cli")]
+use base64::Engine;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "cli")]
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+#[cfg(feature = "cli")]
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 // ---------------------------------------------------------------------------
@@ -19,6 +29,8 @@ use std::path::{Path, PathBuf};
 pub const DEFAULT_REGISTRY_URL: &str = "https://github.com/cellscript/cellscript-registry";
 pub const REGISTRY_URL_ENV: &str = "CELLSCRIPT_REGISTRY_URL";
 pub const DEFAULT_PUBLIC_REGISTRY_ORIGIN: &str = "https://api.registry.cellscript.dev";
+pub const REGISTRY_API_URL_ENV: &str = "CELLSCRIPT_REGISTRY_API_URL";
+pub const REGISTRY_ORIGIN_ENV: &str = "CELLSCRIPT_REGISTRY_ORIGIN";
 pub const REGISTRY_AUTH_PROTOCOL: &str = "cellscript-registry-auth-v1";
 pub const AUTHORIZE_CAPABILITY_ACTION: &str = "authorize_capability";
 pub const REVOKE_CAPABILITY_ACTION: &str = "revoke_capability";
@@ -38,12 +50,455 @@ pub fn default_registry_url() -> String {
         .unwrap_or_else(|| DEFAULT_REGISTRY_URL.to_string())
 }
 
+/// Effective production resolver URL.
+///
+/// `CELLSCRIPT_REGISTRY_URL` deliberately has highest priority as the legacy
+/// explicit Git-mirror override. Without that override, resolution uses the
+/// public API configured for publish/auth, then the production default.
+pub fn resolver_registry_url() -> String {
+    std::env::var(REGISTRY_URL_ENV)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| std::env::var(REGISTRY_API_URL_ENV).ok().map(|value| value.trim().to_string()).filter(|value| !value.is_empty()))
+        .or_else(|| std::env::var(REGISTRY_ORIGIN_ENV).ok().map(|value| value.trim().to_string()).filter(|value| !value.is_empty()))
+        .unwrap_or_else(|| DEFAULT_PUBLIC_REGISTRY_ORIGIN.to_string())
+}
+
 /// A single entry in the discovery index: maps `namespace/name` to a source repo URL.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiscoveryEntry {
     pub name: String,
     pub namespace: String,
     pub source: String,
+}
+
+pub struct RegistryResolution {
+    pub registry_url: String,
+    pub entry: DiscoveryEntry,
+    /// Accepted production statuses from the public API. Git-mirror overrides
+    /// leave this empty and continue to read `registry.json` from the source.
+    pub authoritative_index: Option<RegistryIndex>,
+    /// Immutable install snapshots keyed by package version. Git-mirror
+    /// overrides leave this empty.
+    pub source_snapshots: BTreeMap<String, PublicRegistrySourceSnapshot>,
+}
+
+/// Resolve package discovery through the production API unless the caller has
+/// explicitly selected the legacy Git discovery index.
+pub fn lookup_for_resolution(namespace: &str, name: &str, cache_dir: &Path) -> Result<RegistryResolution> {
+    if let Some(registry_url) =
+        std::env::var(REGISTRY_URL_ENV).ok().map(|value| value.trim().to_string()).filter(|value| !value.is_empty())
+    {
+        let entry = DiscoveryIndex::new(&registry_url, cache_dir).lookup(namespace, name)?;
+        return Ok(RegistryResolution { registry_url, entry, authoritative_index: None, source_snapshots: BTreeMap::new() });
+    }
+
+    let registry_url = resolver_registry_url();
+    let (entry, authoritative_index, source_snapshots) = lookup_public_registry(&registry_url, namespace, name)?;
+    Ok(RegistryResolution { registry_url, entry, authoritative_index: Some(authoritative_index), source_snapshots })
+}
+
+#[cfg(feature = "cli")]
+fn lookup_public_registry(
+    registry_url: &str,
+    namespace: &str,
+    name: &str,
+) -> Result<(DiscoveryEntry, RegistryIndex, BTreeMap<String, PublicRegistrySourceSnapshot>)> {
+    let url = format!("{}/v1/packages/{}/{}", registry_url.trim_end_matches('/'), namespace, name);
+    let response = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|error| CompileError::without_span(format!("failed to initialize public registry client: {error}")))?
+        .get(&url)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .header(reqwest::header::USER_AGENT, format!("cellc/{}", env!("CARGO_PKG_VERSION")))
+        .send()
+        .map_err(|error| CompileError::without_span(format!("public registry request '{}' failed: {error}", url)))?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err(CompileError::without_span(format!("package '{namespace}/{name}' is not present in the public registry")));
+    }
+    if !response.status().is_success() {
+        return Err(CompileError::without_span(format!("public registry request '{}' returned HTTP {}", url, response.status())));
+    }
+    let payload: PublicRegistryPackage = response
+        .json()
+        .map_err(|error| CompileError::without_span(format!("public registry response '{}' is invalid: {error}", url)))?;
+    payload.into_resolution(namespace, name)
+}
+
+#[cfg(not(feature = "cli"))]
+fn lookup_public_registry(
+    _registry_url: &str,
+    namespace: &str,
+    name: &str,
+) -> Result<(DiscoveryEntry, RegistryIndex, BTreeMap<String, PublicRegistrySourceSnapshot>)> {
+    Err(CompileError::without_span(format!("public registry resolution for '{namespace}/{name}' requires the 'cli' feature")))
+}
+
+#[cfg(feature = "cli")]
+#[derive(Debug, Deserialize)]
+struct PublicRegistryPackage {
+    schema: String,
+    namespace: String,
+    name: String,
+    repository: Option<String>,
+    versions: Vec<PublicRegistryVersion>,
+}
+
+#[cfg(feature = "cli")]
+#[derive(Debug, Deserialize)]
+struct PublicRegistryVersion {
+    version: String,
+    status: RegistryEntryStatus,
+    registry_entry: RegistryIndex,
+    source_snapshot: PublicRegistrySourceSnapshot,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PublicRegistrySourceSnapshot {
+    pub schema: String,
+    pub url: String,
+    pub snapshot_hash: String,
+    pub source_hash: String,
+    pub size_bytes: u64,
+    pub content_type: String,
+}
+
+#[cfg(feature = "cli")]
+impl PublicRegistryPackage {
+    fn into_resolution(
+        self,
+        expected_namespace: &str,
+        expected_name: &str,
+    ) -> Result<(DiscoveryEntry, RegistryIndex, BTreeMap<String, PublicRegistrySourceSnapshot>)> {
+        if self.schema != "cellscript-public-registry-package-v1" {
+            return Err(CompileError::without_span(format!("public registry returned unsupported schema '{}'", self.schema)));
+        }
+        if self.namespace != expected_namespace || self.name != expected_name {
+            return Err(CompileError::without_span(format!(
+                "public registry identity mismatch for '{expected_namespace}/{expected_name}': found '{}/{}'",
+                self.namespace, self.name
+            )));
+        }
+        let source = self.repository.filter(|value| !value.trim().is_empty()).unwrap_or_default();
+        let mut versions = Vec::with_capacity(self.versions.len());
+        let mut source_snapshots = BTreeMap::new();
+        for public_version in self.versions {
+            if public_version.registry_entry.schema_version != RegistryIndex::CURRENT_SCHEMA_VERSION
+                || public_version.registry_entry.namespace != expected_namespace
+                || public_version.registry_entry.name != expected_name
+            {
+                return Err(CompileError::without_span(format!(
+                    "public registry version '{}' contains mismatched registry identity",
+                    public_version.version
+                )));
+            }
+            let mut matching = public_version
+                .registry_entry
+                .versions
+                .into_iter()
+                .find(|version| version.version == public_version.version)
+                .ok_or_else(|| {
+                    CompileError::without_span(format!(
+                        "public registry version '{}' has no matching signed version entry",
+                        public_version.version
+                    ))
+                })?;
+            matching.status = public_version.status.clone();
+            matching.yanked = matches!(public_version.status, RegistryEntryStatus::Yanked);
+            if public_version.source_snapshot.schema != "cellscript-registry-source-snapshot-v1"
+                || public_version.source_snapshot.source_hash != matching.source_hash
+            {
+                return Err(CompileError::without_span(format!(
+                    "public registry version '{}' contains invalid source snapshot identity",
+                    public_version.version
+                )));
+            }
+            if source_snapshots.insert(public_version.version.clone(), public_version.source_snapshot).is_some() {
+                return Err(CompileError::without_span(format!(
+                    "public registry returned duplicate version '{}'",
+                    public_version.version
+                )));
+            }
+            versions.push(matching);
+        }
+        if versions.is_empty() {
+            return Err(CompileError::without_span(format!(
+                "public registry package '{expected_namespace}/{expected_name}' has no visible versions"
+            )));
+        }
+        Ok((
+            DiscoveryEntry { name: expected_name.to_string(), namespace: expected_namespace.to_string(), source },
+            RegistryIndex {
+                schema_version: RegistryIndex::CURRENT_SCHEMA_VERSION,
+                name: expected_name.to_string(),
+                namespace: expected_namespace.to_string(),
+                versions,
+            },
+            source_snapshots,
+        ))
+    }
+}
+
+#[cfg(feature = "cli")]
+const MAX_PUBLIC_SOURCE_SNAPSHOT_BYTES: u64 = 5 * 1024 * 1024;
+
+#[cfg(feature = "cli")]
+#[derive(Debug, Deserialize)]
+struct GeneratedSourceSnapshot {
+    schema: String,
+    package: GeneratedSourceSnapshotPackage,
+    files: Vec<GeneratedSourceSnapshotFile>,
+}
+
+#[cfg(feature = "cli")]
+#[derive(Debug, Deserialize)]
+struct GeneratedSourceSnapshotPackage {
+    namespace: Option<String>,
+    name: String,
+    version: String,
+}
+
+#[cfg(feature = "cli")]
+#[derive(Debug, Deserialize)]
+struct GeneratedSourceSnapshotFile {
+    path: String,
+    blake2b256: String,
+    content_base64: String,
+}
+
+/// Download, authenticate, and atomically materialize a public Registry source
+/// snapshot. The current source-package profile accepts only the generated JSON
+/// snapshot shape; opaque archives remain publish evidence but are not executed
+/// or unpacked by the dependency resolver.
+#[cfg(feature = "cli")]
+pub fn materialize_public_source_snapshot(
+    snapshot: &PublicRegistrySourceSnapshot,
+    cache_root: &Path,
+    namespace: &str,
+    name: &str,
+    version: &str,
+    expected_source_hash: &str,
+) -> Result<PathBuf> {
+    validate_public_source_snapshot_descriptor(snapshot, expected_source_hash)?;
+    let bytes = download_public_source_snapshot(snapshot)?;
+    std::fs::create_dir_all(cache_root).map_err(|error| {
+        CompileError::without_span(format!("failed to create source snapshot cache '{}': {error}", cache_root.display()))
+    })?;
+    let cache_suffix = snapshot.snapshot_hash.trim_start_matches("sha256:");
+    let target = cache_root.join(format!("{name}-snapshot-{cache_suffix}"));
+    let temporary = unique_snapshot_temp_dir(cache_root, name)?;
+    let materialized = (|| {
+        unpack_generated_source_snapshot(&bytes, &temporary, namespace, name, version)?;
+        let computed_source_hash = compute_source_hash(&temporary)?;
+        if computed_source_hash != expected_source_hash {
+            return Err(CompileError::without_span(format!(
+                "public registry source snapshot for '{namespace}/{name}@{version}' has source_hash '{computed_source_hash}', expected '{expected_source_hash}'"
+            )));
+        }
+        remove_cache_entry(&target)?;
+        std::fs::rename(&temporary, &target).map_err(|error| {
+            CompileError::without_span(format!(
+                "failed to commit source snapshot cache '{}' to '{}': {error}",
+                temporary.display(),
+                target.display()
+            ))
+        })?;
+        Ok(target.clone())
+    })();
+    if materialized.is_err() {
+        let _ = std::fs::remove_dir_all(&temporary);
+    }
+    materialized
+}
+
+#[cfg(not(feature = "cli"))]
+pub fn materialize_public_source_snapshot(
+    _snapshot: &PublicRegistrySourceSnapshot,
+    _cache_root: &Path,
+    namespace: &str,
+    name: &str,
+    version: &str,
+    _expected_source_hash: &str,
+) -> Result<PathBuf> {
+    Err(CompileError::without_span(format!(
+        "public registry source snapshot resolution for '{namespace}/{name}@{version}' requires the 'cli' feature"
+    )))
+}
+
+#[cfg(feature = "cli")]
+fn validate_public_source_snapshot_descriptor(snapshot: &PublicRegistrySourceSnapshot, expected_source_hash: &str) -> Result<()> {
+    if snapshot.schema != "cellscript-registry-source-snapshot-v1" {
+        return Err(CompileError::without_span(format!("unsupported public registry source snapshot schema '{}'", snapshot.schema)));
+    }
+    let digest = snapshot
+        .snapshot_hash
+        .strip_prefix("sha256:")
+        .ok_or_else(|| CompileError::without_span("public registry source snapshot hash must use the sha256:<hex> form"))?;
+    if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(CompileError::without_span("public registry source snapshot hash must contain 32 bytes of hex"));
+    }
+    if snapshot.source_hash != expected_source_hash {
+        return Err(CompileError::without_span("public registry source snapshot does not match the selected package source_hash"));
+    }
+    if snapshot.size_bytes == 0 || snapshot.size_bytes > MAX_PUBLIC_SOURCE_SNAPSHOT_BYTES {
+        return Err(CompileError::without_span(format!(
+            "public registry source snapshot size must be between 1 and {MAX_PUBLIC_SOURCE_SNAPSHOT_BYTES} bytes"
+        )));
+    }
+    if snapshot.content_type != "application/vnd.cellscript.source-snapshot+json" {
+        return Err(CompileError::without_span(format!(
+            "public registry dependency resolution does not support source snapshot content type '{}'",
+            snapshot.content_type
+        )));
+    }
+    let url = reqwest::Url::parse(&snapshot.url)
+        .map_err(|error| CompileError::without_span(format!("public registry source snapshot URL is invalid: {error}")))?;
+    if !matches!(url.scheme(), "http" | "https") || !url.username().is_empty() || url.password().is_some() || url.fragment().is_some()
+    {
+        return Err(CompileError::without_span(
+            "public registry source snapshot URL must be an HTTP(S) URL without credentials or a fragment",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "cli")]
+fn download_public_source_snapshot(snapshot: &PublicRegistrySourceSnapshot) -> Result<Vec<u8>> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| CompileError::without_span(format!("failed to initialize source snapshot client: {error}")))?;
+    let response = client
+        .get(&snapshot.url)
+        .header(reqwest::header::ACCEPT, snapshot.content_type.as_str())
+        .header(reqwest::header::USER_AGENT, format!("cellc/{}", env!("CARGO_PKG_VERSION")))
+        .send()
+        .map_err(|error| CompileError::without_span(format!("source snapshot request '{}' failed: {error}", snapshot.url)))?;
+    if !response.status().is_success() {
+        return Err(CompileError::without_span(format!(
+            "source snapshot request '{}' returned HTTP {}",
+            snapshot.url,
+            response.status()
+        )));
+    }
+    if response.content_length().is_some_and(|length| length != snapshot.size_bytes) {
+        return Err(CompileError::without_span("public registry source snapshot Content-Length does not match its descriptor"));
+    }
+    let mut bytes = Vec::with_capacity(snapshot.size_bytes as usize);
+    response
+        .take(snapshot.size_bytes + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| CompileError::without_span(format!("failed to read source snapshot '{}': {error}", snapshot.url)))?;
+    if bytes.len() as u64 != snapshot.size_bytes {
+        return Err(CompileError::without_span("downloaded public registry source snapshot size does not match its descriptor"));
+    }
+    let actual = format!("sha256:{}", hex::encode(Sha256::digest(&bytes)));
+    if actual != snapshot.snapshot_hash.to_ascii_lowercase() {
+        return Err(CompileError::without_span(format!(
+            "public registry source snapshot hash mismatch: expected '{}', got '{actual}'",
+            snapshot.snapshot_hash
+        )));
+    }
+    Ok(bytes)
+}
+
+#[cfg(feature = "cli")]
+fn unpack_generated_source_snapshot(bytes: &[u8], destination: &Path, namespace: &str, name: &str, version: &str) -> Result<()> {
+    let snapshot: GeneratedSourceSnapshot = serde_json::from_slice(bytes)
+        .map_err(|error| CompileError::without_span(format!("failed to parse public registry source snapshot: {error}")))?;
+    if snapshot.schema != "cellscript-source-snapshot-v1" {
+        return Err(CompileError::without_span(format!("unsupported generated source snapshot schema '{}'", snapshot.schema)));
+    }
+    if snapshot.package.namespace.as_deref() != Some(namespace) || snapshot.package.name != name || snapshot.package.version != version
+    {
+        return Err(CompileError::without_span(format!(
+            "public registry source snapshot identity does not match '{namespace}/{name}@{version}'"
+        )));
+    }
+    if snapshot.files.is_empty() || snapshot.files.len() > 4096 {
+        return Err(CompileError::without_span("public registry source snapshot must contain between 1 and 4096 files"));
+    }
+    std::fs::create_dir(destination).map_err(|error| {
+        CompileError::without_span(format!("failed to create source snapshot staging directory '{}': {error}", destination.display()))
+    })?;
+    let mut paths = std::collections::BTreeSet::new();
+    let mut decoded_bytes = 0_u64;
+    for file in snapshot.files {
+        let relative = validated_snapshot_path(&file.path)?;
+        if !paths.insert(relative.clone()) {
+            return Err(CompileError::without_span(format!("source snapshot contains duplicate path '{}'", file.path)));
+        }
+        let content = base64::engine::general_purpose::STANDARD.decode(&file.content_base64).map_err(|error| {
+            CompileError::without_span(format!("source snapshot file '{}' has invalid base64: {error}", file.path))
+        })?;
+        decoded_bytes = decoded_bytes.saturating_add(content.len() as u64);
+        if decoded_bytes > MAX_PUBLIC_SOURCE_SNAPSHOT_BYTES {
+            return Err(CompileError::without_span("decoded source snapshot exceeds the package size limit"));
+        }
+        let actual_file_hash = crate::hex_encode(&crate::ckb_blake2b256(&content));
+        if actual_file_hash != file.blake2b256.to_ascii_lowercase() {
+            return Err(CompileError::without_span(format!("source snapshot file '{}' failed its blake2b256 check", file.path)));
+        }
+        let output = destination.join(&relative);
+        if let Some(parent) = output.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut options = std::fs::OpenOptions::new();
+        options.create_new(true).write(true);
+        let mut handle = options.open(&output).map_err(|error| {
+            CompileError::without_span(format!("failed to create source snapshot file '{}': {error}", output.display()))
+        })?;
+        std::io::Write::write_all(&mut handle, &content)?;
+    }
+    if !destination.join("Cell.toml").is_file() {
+        return Err(CompileError::without_span("public registry source snapshot does not contain Cell.toml"));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "cli")]
+fn validated_snapshot_path(value: &str) -> Result<PathBuf> {
+    if value.is_empty() || value.len() > 1024 || value.starts_with('/') || value.ends_with('/') || value.contains('\\') {
+        return Err(CompileError::without_span(format!("source snapshot path '{value}' is unsafe")));
+    }
+    let segments: Vec<_> = value.split('/').collect();
+    if segments.len() > 32 || segments.iter().any(|segment| segment.is_empty() || *segment == "." || *segment == "..") {
+        return Err(CompileError::without_span(format!("source snapshot path '{value}' is unsafe")));
+    }
+    let allowed = value == "Cell.toml" || value == "Cell.lock" || value.ends_with(".cell");
+    if !allowed || segments.first().is_some_and(|segment| segment.starts_with('.')) {
+        return Err(CompileError::without_span(format!("source snapshot path '{value}' is outside the source-package profile")));
+    }
+    Ok(segments.iter().collect())
+}
+
+#[cfg(feature = "cli")]
+fn unique_snapshot_temp_dir(cache_root: &Path, name: &str) -> Result<PathBuf> {
+    for attempt in 0..100_u32 {
+        let candidate = cache_root.join(format!(".{name}-snapshot-{}-{attempt}.tmp", std::process::id()));
+        if std::fs::symlink_metadata(&candidate).is_err() {
+            return Ok(candidate);
+        }
+    }
+    Err(CompileError::without_span(format!("failed to allocate a source snapshot staging path in '{}'", cache_root.display())))
+}
+
+#[cfg(feature = "cli")]
+fn remove_cache_entry(path: &Path) -> Result<()> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
+        std::fs::remove_dir_all(path)?;
+    } else {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
 }
 
 /// Schema version file in the discovery index root.
@@ -804,6 +1259,166 @@ mod ckb_blake2b256_stream {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn public_registry_status_overrides_publisher_claim() {
+        let payload: PublicRegistryPackage = serde_json::from_value(serde_json::json!({
+            "schema": "cellscript-public-registry-package-v1",
+            "namespace": "cellscript",
+            "name": "demo",
+            "repository": "https://github.com/cellscript/demo",
+            "versions": [{
+                "version": "1.2.3",
+                "status": "deployed",
+                "registry_entry": {
+                    "schema_version": 1,
+                    "namespace": "cellscript",
+                    "name": "demo",
+                    "versions": [{
+                        "version": "1.2.3",
+                        "tag": "v1.2.3",
+                        "source_hash": "source-hash",
+                        "cellscript_version": "0.23.0",
+                        "edition": "2026",
+                        "compatibility_profile_hash": "profile-hash",
+                        "dependencies": {},
+                        "status": "source_published",
+                        "yanked": false
+                    }]
+                },
+                "source_snapshot": {
+                    "schema": "cellscript-registry-source-snapshot-v1",
+                    "url": "https://registry.cellscript.dev/source-snapshots/cellscript/demo/1.2.3/example.json",
+                    "snapshot_hash": format!("sha256:{}", "1".repeat(64)),
+                    "source_hash": "source-hash",
+                    "size_bytes": 123,
+                    "content_type": "application/vnd.cellscript.source-snapshot+json"
+                }
+            }]
+        }))
+        .unwrap();
+
+        let (entry, index, snapshots) = payload.into_resolution("cellscript", "demo").unwrap();
+        assert_eq!(entry.source, "https://github.com/cellscript/demo");
+        assert_eq!(index.versions.len(), 1);
+        assert_eq!(index.versions[0].status, RegistryEntryStatus::Deployed);
+        assert!(!index.versions[0].yanked);
+        assert_eq!(snapshots["1.2.3"].source_hash, "source-hash");
+    }
+
+    #[cfg(feature = "cli")]
+    #[test]
+    fn generated_source_snapshot_materialization_checks_paths_and_file_hashes() {
+        use base64::Engine as _;
+
+        let manifest = b"[package]\nname = \"demo\"\nversion = \"1.2.3\"\nnamespace = \"cellscript\"\nedition = \"2026\"\nentry = \"src/main.cell\"\n";
+        let source = b"script Demo {}\n";
+        let file = |path: &str, content: &[u8]| {
+            serde_json::json!({
+                "path": path,
+                "blake2b256": crate::hex_encode(&crate::ckb_blake2b256(content)),
+                "content_base64": base64::engine::general_purpose::STANDARD.encode(content),
+            })
+        };
+        let snapshot = serde_json::to_vec(&serde_json::json!({
+            "schema": "cellscript-source-snapshot-v1",
+            "package": { "namespace": "cellscript", "name": "demo", "version": "1.2.3" },
+            "files": [file("Cell.toml", manifest), file("src/main.cell", source)],
+        }))
+        .unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join("valid");
+        unpack_generated_source_snapshot(&snapshot, &destination, "cellscript", "demo", "1.2.3").unwrap();
+        assert_eq!(std::fs::read(destination.join("src/main.cell")).unwrap(), source);
+
+        let unsafe_snapshot = serde_json::to_vec(&serde_json::json!({
+            "schema": "cellscript-source-snapshot-v1",
+            "package": { "namespace": "cellscript", "name": "demo", "version": "1.2.3" },
+            "files": [file("../Cell.toml", manifest)],
+        }))
+        .unwrap();
+        let error = unpack_generated_source_snapshot(&unsafe_snapshot, &root.path().join("unsafe"), "cellscript", "demo", "1.2.3")
+            .unwrap_err();
+        assert!(error.to_string().contains("unsafe"));
+        assert!(!root.path().join("Cell.toml").exists());
+    }
+
+    #[cfg(feature = "cli")]
+    #[test]
+    fn public_snapshot_descriptor_rejects_opaque_archives() {
+        let snapshot = PublicRegistrySourceSnapshot {
+            schema: "cellscript-registry-source-snapshot-v1".to_string(),
+            url: "https://registry.cellscript.dev/source-snapshots/demo.tar".to_string(),
+            snapshot_hash: format!("sha256:{}", "1".repeat(64)),
+            source_hash: "source-hash".to_string(),
+            size_bytes: 42,
+            content_type: "application/x-tar".to_string(),
+        };
+        let error = validate_public_source_snapshot_descriptor(&snapshot, "source-hash").unwrap_err();
+        assert!(error.to_string().contains("does not support source snapshot content type"));
+    }
+
+    #[cfg(feature = "cli")]
+    #[test]
+    fn public_source_snapshot_download_is_hash_bound_and_materialized_without_git() {
+        use base64::Engine as _;
+        use std::io::Read as _;
+
+        let source_root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(source_root.path().join("src")).unwrap();
+        let manifest = b"[package]\nedition = \"2026\"\nname = \"demo\"\nnamespace = \"cellscript\"\nversion = \"1.2.3\"\nentry = \"src/main.cell\"\n";
+        let source = b"script Demo {}\n";
+        std::fs::write(source_root.path().join("Cell.toml"), manifest).unwrap();
+        std::fs::write(source_root.path().join("src/main.cell"), source).unwrap();
+        let source_hash = compute_source_hash(source_root.path()).unwrap();
+        let snapshot_file = |path: &str, content: &[u8]| {
+            serde_json::json!({
+                "path": path,
+                "blake2b256": crate::hex_encode(&crate::ckb_blake2b256(content)),
+                "content_base64": base64::engine::general_purpose::STANDARD.encode(content),
+            })
+        };
+        let bytes = serde_json::to_vec(&serde_json::json!({
+            "schema": "cellscript-source-snapshot-v1",
+            "package": { "namespace": "cellscript", "name": "demo", "version": "1.2.3" },
+            "files": [snapshot_file("Cell.toml", manifest), snapshot_file("src/main.cell", source)],
+        }))
+        .unwrap();
+        let snapshot_hash = format!("sha256:{}", hex::encode(Sha256::digest(&bytes)));
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let response_bytes = bytes.clone();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request).unwrap();
+            let headers = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n",
+                response_bytes.len()
+            );
+            std::io::Write::write_all(&mut stream, headers.as_bytes()).unwrap();
+            std::io::Write::write_all(&mut stream, &response_bytes).unwrap();
+        });
+        let descriptor = PublicRegistrySourceSnapshot {
+            schema: "cellscript-registry-source-snapshot-v1".to_string(),
+            url: format!("http://{address}/snapshot.json"),
+            snapshot_hash: snapshot_hash.clone(),
+            source_hash: source_hash.clone(),
+            size_bytes: bytes.len() as u64,
+            content_type: "application/vnd.cellscript.source-snapshot+json".to_string(),
+        };
+        let cache = tempfile::tempdir().unwrap();
+        let materialized =
+            materialize_public_source_snapshot(&descriptor, cache.path(), "cellscript", "demo", "1.2.3", &source_hash).unwrap();
+        server.join().unwrap();
+        assert_eq!(compute_source_hash(&materialized).unwrap(), source_hash);
+        assert_eq!(std::fs::read(materialized.join("src/main.cell")).unwrap(), source);
+        assert!(materialized
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .contains(snapshot_hash.trim_start_matches("sha256:").get(..16).unwrap()));
+    }
 
     #[test]
     fn registry_index_find_matching_version() {

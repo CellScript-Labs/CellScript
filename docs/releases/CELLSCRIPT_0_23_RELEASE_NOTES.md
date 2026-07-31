@@ -11,9 +11,11 @@ independently versioned placement ABI gives CellScript entry arguments one
 canonical location:
 `WitnessArgs.input_type` on the selected script-group witness.
 
-This document records completed 0.23 work. Registry deployment, broader
-RGB++/Fiber evidence, and the Off-Chain Session Runtime profile remain roadmap
-work until their implementation and evidence boundaries are complete.
+This document records completed 0.23 work. The public Registry infrastructure,
+read/write domains, website, CLI read authority, and evidence chain are
+deployed; the first publisher-owned JoyID publication and clean-machine install
+remain the final Registry adoption checkpoint. Broader RGB++/Fiber evidence and
+the Off-Chain Session Runtime profile remain roadmap work.
 
 ## At A Glance
 
@@ -23,7 +25,8 @@ work until their implementation and evidence boundaries are complete.
 | Entry witness | `CSARGv1` is decoded only from canonical Molecule `WitnessArgs.input_type`. |
 | Failure mode | Raw payloads, malformed tables, absent `input_type`, wrong placement, and mismatched identities fail closed. |
 | Build identity | The resolved profile independently combines edition, target, primitive assurance, metadata schemas, and entry/witness ABIs, then binds them into metadata, registry, lock, deployment, receipt, and builder records. |
-| Registry contract | The initial publish contract requires Edition 2026 plus its compatibility-profile hash from CLI signature through API, database, CDN JSON, and website. |
+| Registry contract | The deployed publish contract requires Edition 2026 plus its compatibility-profile hash from CLI signature through API, Postgres, version-addressed JSON, and website; assurance states require ordered evidence. |
+| Registry operations | `api.registry.cellscript.dev` and `registry.cellscript.dev` run as an isolated self-hosted Postgres/Node/object-volume/read-only-nginx stack behind trusted TLS. |
 | Tooling | CLI, LSP, WASM, website bindings, examples, and package tooling use the same edition contract. |
 | Syntax audit | Canonical type fields use trailing commas, checked examples use named `u64` boundaries, and compatibility plus CKB-VM regressions cover both source and witness placement. |
 | Native gate | Active test, fixture, evidence, and release tooling is Rust, shell, or Node; repository policy rejects Python source reintroduction. |
@@ -124,13 +127,16 @@ The 0.23 identity set is:
 Consumers reject other identities. Rebuild the artifact and regenerate its
 metadata, lock/deployment records, receipt, and builder together.
 
-The registry has not been deployed, so its initial contract and
-`0001_initial.sql` definition are updated in place. The write API accepts one
-complete signed nested entry instead of an untyped or incomplete JSON object,
-persists edition/profile as typed columns, and repeats them in the CDN object.
-Generic admin status changes may quarantine, yank, deprecate, or move an entry
-through indexing, but cannot label it `verified_build` or `deployed` without a
-future evidence-specific promotion endpoint.
+The production Registry was deployed on 2026-07-31. Its
+`0001_initial.sql` is now the frozen deployed baseline; subsequent schema work
+requires additive numbered migrations. The write API accepts one complete
+signed nested entry instead of an untyped or incomplete JSON object, persists
+edition/profile as typed columns, and repeats them in version-addressed static
+JSON. Generic admin status changes may quarantine, yank, deprecate, or move an
+entry through indexing, but cannot label it `verified_build`, `deployed`, or
+`on_chain_attested`. The ordered evidence-promotion endpoint validates
+identity-bound evidence and the preceding evidence reference for each of those
+states.
 
 ## CLI, LSP, WASM, And Website
 
@@ -140,9 +146,21 @@ future evidence-specific promotion endpoint.
   accept only `"2026"`.
 - The playground worker and TypeScript declarations pass that edition into the
   WASM boundary and include it in compiler-output provenance.
-- Registry pages reject incomplete fixture data and display each package
-  version's source edition and separate compatibility-profile hash; consumers
-  do not infer ABI or schema versions from the edition year.
+- Registry list and dynamic detail pages read the live production API, display
+  evidence plus each version's source edition and separate
+  compatibility-profile hash, and use the checked-in fixture only as an
+  explicitly labelled read-only mirror during API failure. The Coming Soon
+  surface is removed.
+- Production operations include dependency-aware readiness, bounded proxy and
+  application request bodies, persistent Postgres/object volumes, and a daily
+  systemd backup. The first backup passed SHA-256 checks plus non-destructive
+  `pg_restore --list` and object-archive inspection.
+- `cellc install` and `cellc update` use the public API's accepted status as
+  their default registry authority, then download the immutable source snapshot
+  and verify its SHA-256 descriptor, safe file paths, per-file BLAKE2b hashes,
+  source hash, edition, and profile identity. The legacy
+  `CELLSCRIPT_REGISTRY_URL` path remains an explicit Git/`registry.json`
+  offline override.
 - Entry-witness reports, ABI reports, action plans, and generated builders
   expose canonical `WitnessArgs.input_type` placement.
 - NovaSeal core, agreement, and planned-profile devnet transaction constructors
@@ -232,6 +250,19 @@ Production release evidence:
 The `backend` stateful portion and both release modes require a clean tree and
 their documented external dependencies. A passing lighter gate must not be
 reported as release evidence.
+
+Deployed Registry liveness and public read verification:
+
+```bash
+curl --fail --silent --show-error https://api.registry.cellscript.dev/ready
+curl --fail --silent --show-error 'https://api.registry.cellscript.dev/v1/packages?limit=5'
+curl --fail --silent --show-error https://registry.cellscript.dev/health
+curl --fail --silent --show-error https://cellscript.dev/registry/ > /dev/null
+```
+
+These endpoints prove the deployed service boundary, not a publisher-owned
+JoyID signature or first-package install. That interactive positive flow
+remains the explicit adoption checkpoint.
 
 ## Detailed Documentation
 

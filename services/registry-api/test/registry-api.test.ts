@@ -203,18 +203,21 @@ describe("registry api", () => {
       },
     });
 
-    const ready = await get(app, "/ready", {
-      HYPERDRIVE: {},
-      REGISTRY_OBJECTS: {},
-      REGISTRY_ADMIN_TOKEN: "secret",
+    const readyApp = createApp({
+      store: new MemoryRegistryStore(),
+      snapshotWriter: { async put() {} },
+      registryObjectReader: { async get() { return null; } },
+      readinessCheck: async () => ({ runtime: "ready" }),
     });
+    const ready = await get(readyApp, "/ready", { REGISTRY_ADMIN_TOKEN: "secret" });
     expect(ready.status).toBe(200);
     expect(await ready.json()).toMatchObject({
       status: "ready",
       checks: {
-        store: "configured",
+        store: "ready",
         object_store: "configured",
         admin_token: "configured",
+        runtime: "ready",
       },
     });
   });
@@ -705,6 +708,175 @@ describe("registry api", () => {
     expect(JSON.parse(utf8(staticEntryWrites.at(-1)!.body)).status).toBe("quarantined");
     expect(store.auditEvents.some((event) => event.event_type === "admin.namespace.status_updated")).toBe(true);
     expect(store.auditEvents.some((event) => event.event_type === "admin.package_version.status_updated")).toBe(true);
+  });
+
+  it("lists public packages and requires chained evidence for production promotions", async () => {
+    const { app, store, snapshots } = testApp();
+    const payload = authPayload();
+    const capabilityResponse = await post(app, "/v1/capabilities", {
+      payload,
+      joyid_signature: joyidSignature(payload),
+    });
+    const capability = await capabilityResponse.json() as any;
+    store.namespaces.set("cellscript", {
+      namespace: "cellscript",
+      status: "active",
+      owner_principal_type: "joyid_ckb",
+      owner_principal_id: payload.principal_id,
+    });
+    const publish = await publishPayload(capability.key_id);
+    const publishResponse = await post(app, "/v1/packages/cellscript/demo/versions", {
+      payload: publish,
+      capability_signature: { algorithm: "p256-sha256", signature: "sig" },
+      source_snapshot: {
+        content_base64: base64("source snapshot"),
+        content_type: "application/vnd.cellscript.source+tar",
+        size_bytes: "source snapshot".length,
+        source_hash: publish.source_hash,
+      },
+    });
+    expect(publishResponse.status).toBe(202);
+
+    const publicIndex = await get(app, "/v1/packages?q=demo&limit=10");
+    expect(publicIndex.status).toBe(200);
+    expect(await publicIndex.json()).toMatchObject({
+      schema: "cellscript-public-registry-index-v1",
+      count: 1,
+      packages: [{
+        coordinate: "cellscript/demo",
+        latest_version: "1.2.3",
+        status: "source_published",
+        versions: [{
+          source_snapshot: {
+            schema: "cellscript-registry-source-snapshot-v1",
+            url: expect.stringContaining("https://registry.cellscript.dev/source-snapshots/cellscript/demo/1.2.3/"),
+            content_type: "application/vnd.cellscript.source+tar",
+          },
+        }],
+      }],
+    });
+
+    const adminEnv = { REGISTRY_ADMIN_TOKEN: "secret" };
+    const adminHeaders = { authorization: "Bearer secret", "x-registry-admin-actor": "release-bot" };
+    const commonEvidence = {
+      schema: "cellscript-registry-evidence-v1",
+      producer: "cellscript-release-gate/0.23.0",
+      generated_at: "2026-06-23T12:00:00Z",
+      verification_status: "passed",
+      source_hash: publish.source_hash,
+      manifest_hash: publish.manifest_hash,
+      compatibility_profile_hash: publish.registry_entry.versions[0].compatibility_profile_hash,
+    };
+
+    const missingDependency = await post(
+      app,
+      "/v1/admin/packages/cellscript/demo/versions/1.2.3/promote",
+      {
+        kind: "deployed",
+        evidence: {
+          ...commonEvidence,
+          kind: "deployed",
+          verified_build_evidence_hash: `sha256:${"11".repeat(32)}`,
+          artifact_hash: `0x${"31".repeat(32)}`,
+          network: "ckb_testnet",
+          code_hash: `0x${"41".repeat(32)}`,
+          data_hash: `0x${"42".repeat(32)}`,
+          out_point: { tx_hash: `0x${"43".repeat(32)}`, index: 0 },
+          deployment_status: "live",
+        },
+      },
+      adminEnv,
+      adminHeaders,
+    );
+    expect(missingDependency.status).toBe(409);
+    expect((await missingDependency.json() as any).error.code).toBe("evidence_dependency_missing");
+
+    const verified = await post(
+      app,
+      "/v1/admin/packages/cellscript/demo/versions/1.2.3/promote",
+      {
+        kind: "verified_build",
+        evidence: {
+          ...commonEvidence,
+          kind: "verified_build",
+          artifact_hash: `0x${"31".repeat(32)}`,
+          metadata_hash: `0x${"32".repeat(32)}`,
+          compiler_version: "cellc 0.23.0",
+        },
+      },
+      adminEnv,
+      adminHeaders,
+    );
+    expect(verified.status).toBe(200);
+    const verifiedBody = await verified.json() as any;
+    expect(verifiedBody.status).toBe("verified_build");
+
+    const deployed = await post(
+      app,
+      "/v1/admin/packages/cellscript/demo/versions/1.2.3/promote",
+      {
+        kind: "deployed",
+        evidence: {
+          ...commonEvidence,
+          kind: "deployed",
+          verified_build_evidence_hash: verifiedBody.evidence.evidence_hash,
+          artifact_hash: `0x${"31".repeat(32)}`,
+          network: "ckb_testnet",
+          code_hash: `0x${"41".repeat(32)}`,
+          data_hash: `0x${"42".repeat(32)}`,
+          out_point: { tx_hash: `0x${"43".repeat(32)}`, index: 0 },
+          deployment_status: "live",
+        },
+      },
+      adminEnv,
+      adminHeaders,
+    );
+    expect(deployed.status).toBe(200);
+    const deployedBody = await deployed.json() as any;
+    expect(deployedBody.status).toBe("deployed");
+
+    const attested = await post(
+      app,
+      "/v1/admin/packages/cellscript/demo/versions/1.2.3/promote",
+      {
+        kind: "on_chain_attested",
+        evidence: {
+          ...commonEvidence,
+          kind: "on_chain_attested",
+          deployed_evidence_hash: deployedBody.evidence.evidence_hash,
+          network: "ckb_testnet",
+          attestation_tx_hash: `0x${"51".repeat(32)}`,
+          attestation_hash: `0x${"52".repeat(32)}`,
+          attestor: "cellscript-release-bot",
+          observed_at: "2026-06-23T12:00:00Z",
+          attestation_status: "confirmed",
+        },
+      },
+      adminEnv,
+      adminHeaders,
+    );
+    expect(attested.status).toBe(200);
+    expect((await attested.json() as any).status).toBe("on_chain_attested");
+
+    const detail = await get(app, "/v1/packages/cellscript/demo");
+    expect(detail.status).toBe(200);
+    expect(await detail.json()).toMatchObject({
+      coordinate: "cellscript/demo",
+      status: "on_chain_attested",
+      versions: [{
+        version: "1.2.3",
+        status: "on_chain_attested",
+        source_snapshot: { schema: "cellscript-registry-source-snapshot-v1" },
+        evidence: [{ kind: "verified_build" }, { kind: "deployed" }, { kind: "on_chain_attested" }],
+      }],
+    });
+    const evidence = await get(app, "/v1/packages/cellscript/demo/versions/1.2.3/evidence");
+    expect(evidence.status).toBe(200);
+    expect((await evidence.json() as any).evidence).toHaveLength(3);
+    const staticWrites = snapshots.filter((snapshot) => snapshot.key === "packages/cellscript/demo/versions/1.2.3.json");
+    expect(staticWrites).toHaveLength(4);
+    expect(JSON.parse(utf8(staticWrites.at(-1)!.body)).evidence).toHaveLength(3);
+    expect(JSON.parse(utf8(staticWrites.at(-1)!.body)).source_snapshot.url).toContain("/source-snapshots/cellscript/demo/1.2.3/");
   });
 
   it("does not change DB package status when a suppressive static update fails", async () => {

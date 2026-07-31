@@ -144,58 +144,63 @@ Source documents:
 
 ## Pillar 1: Public Registry Production Deployment
 
-The registry is the largest 0.23 feature. The write API (`services/registry-api`)
-is already implemented to the boundary described in
+**Status (2026-07-31): production infrastructure, public reads, website, CLI
+resolution, and evidence promotion are deployed. The first publisher-owned
+positive JoyID publication and clean-machine install remain the final adoption
+checkpoint.**
+
+The registry is the largest 0.23 feature. The write API
+(`services/registry-api`) implements the boundary described in
 [`docs/CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md`](../docs/CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md):
 JoyID-rooted capability authorisation, scoped capability keys, namespace claim
-cooldown, R2 source snapshots, Neon Postgres state, static `/packages/*` read
-path, idempotent publish, and admin-gated status transitions. The 0.23 work
-is to actually deploy it on `cellscript.dev` and to wire the frontend and CLI
-into the same trust model.
+cooldown, content-addressed source snapshots, Postgres state, a separate static
+`/packages/*` read path, idempotent publish, admin-gated suppressive
+transitions, and evidence-gated assurance promotion.
 
 The Edition 2026 plus resolved-profile contract slice is complete across the
-Rust publisher/reader,
-API validation, initial Postgres schema, R2 package-version object, checked-in
-registry fixture, and website data model. The registry has not been deployed,
-so these surfaces are updated directly and accept one complete entry shape;
-there is no fallback reader for omitted fields. Generic admin status changes
-cannot create `verified_build` or `deployed` claims; an evidence-specific
-promotion path remains production work.
+Rust publisher/reader, API validation, deployed Postgres schema,
+version-addressed package JSON, checked-in registry fixture, and website data
+model. These surfaces accept one complete entry shape; there is no fallback
+reader for omitted fields. Generic admin status changes cannot create
+`verified_build`, `deployed`, or `on_chain_attested` claims. The ordered
+`/promote` endpoint requires identity-bound evidence for each transition.
 
 ### Production Domains And Hosting
 
 ```text
-cellscript.dev                -> Astro site (Cloudflare Pages) + playground
-registry.cellscript.dev       -> static/CDN read path backed by R2 objects
-api.registry.cellscript.dev   -> authenticated Cloudflare Worker write API
+cellscript.dev                -> Astro static site + WASM playground
+registry.cellscript.dev       -> read-only nginx over the Registry object volume
+api.registry.cellscript.dev   -> Node 22 Registry API + Postgres 17
+HTTPS                          -> shared HTTPS Portal with persisted ACME state
 ```
 
-The site stays static where it can and only the write path is dynamic.
-Ordinary package reads never touch Hyperdrive or the write store; the
-`/packages/:namespace/:name/versions/:version.json` route is served from R2
-with CDN cache headers.
+All three public hosts are live on the production server. The API/database use
+an isolated internal network; only the API and static read container join the
+existing TLS proxy network. Source snapshots and package JSON share a
+persistent volume, mounted read/write by the API and read-only by nginx.
+Ordinary direct package reads therefore do not touch Postgres or the write
+process. The Cloudflare Worker/Hyperdrive/R2 implementation remains a portable
+alternative deployment, not a claim about the current topology.
 
 ### Scope
 
-- Stand up `services/registry-api` on Cloudflare Workers against a real Neon
-  Postgres instance through Hyperdrive, with the `REGISTRY_ADMIN_TOKEN`,
-  Hyperdrive, and R2 bindings configured as secrets/bindings rather than in
-  `wrangler.toml`.
-- Provision the two R2 buckets (`REGISTRY_OBJECTS`, `SOURCE_SNAPSHOTS`) and
-  the static `/packages/*` write-before-admit path described in the ADR.
-- Bring the staging slice (`staging-registry.cellscript.dev`) up first; the
-  production slice is cut over only after staging has run the acceptance
-  scenarios end to end.
-- Wire the Astro frontend (the existing `website/src/pages/registry*` surface
-  and `RegistryLayout.astro`) to the live read path so the website renders
-  real registry entries instead of the static
-  `website/src/data/registry-packages.json` snapshot.
-- Replace the website publish page with a real JoyID/CCC-backed submit flow
-  that signs `cellscript-registry-auth-v1` capability payloads through the
-  CCC JoyID CKB signer and posts them to `/v1/capabilities`.
-- Keep the existing `npm run prepare:registry` regeneration as a fallback
-  fixture path; it must not become the read authority for the production
-  site.
+- [x] Deploy `services/registry-api` with generated database/admin secrets,
+  persistent Postgres/object volumes, migrations, health checks, bounded
+  request bodies, read-only root filesystems, structured logs, and log rotation.
+- [x] Serve version-addressed `/packages/*` JSON from a read-only process
+  independent of the API and Postgres.
+- [x] Publish trusted TLS for `registry.cellscript.dev` and
+  `api.registry.cellscript.dev`; configure the API vhost for the publish
+  contract's 8 MiB proxy limit.
+- [x] Wire the Astro Registry list and dynamic detail pages to the live API,
+  remove Coming Soon, and label the checked-in fixture strictly as a read-only
+  mirror used only when the API is unavailable.
+- [x] Keep the CCC/JoyID submit page on the same canonical
+  `cellscript-registry-auth-v1` capability protocol.
+- [x] Implement and expose public search/detail/evidence reads plus ordered
+  evidence promotions.
+- [ ] Complete a publisher-owned JoyID capability, namespace claim, publication,
+  replay, revocation, and first clean-machine install against production.
 
 ### CLI Alignment
 
@@ -203,37 +208,48 @@ with CDN cache headers.
   keeping `--offline` and the Git/`registry.json` path as explicit audit and
   fallback modes.
 - Verify `cellc auth capability create/submit/revoke` against the deployed
-  Worker end to end, including the JoyID signature verification, capability
+  write service end to end, including the JoyID signature verification, capability
   key persistence in the OS keychain, and CI signing via
   `CELLSCRIPT_CAPABILITY_PRIVATE_KEY_PKCS8_B64`.
 - Confirm idempotency (`Idempotency-Key`, `x-idempotency-status: replayed`),
   nonce consumption ordering, and the fail-fast-before-object-storage rule
-  against the live Worker.
-- Ensure `cellc install`/`cellc update` resolve against
-  `registry.cellscript.dev` by default and keep hash-first verification
-  (source hash, manifest hash, build identity) intact.
+  against the live write service.
+- `cellc install`/`cellc update` now query
+  `api.registry.cellscript.dev` by default, select only accepted public
+  statuses, then download the version's immutable Registry snapshot and verify
+  its SHA-256 descriptor, per-file BLAKE2b hashes, safe paths, edition/profile,
+  and whole-tree source hash. `CELLSCRIPT_REGISTRY_URL` remains the explicit
+  legacy Git/`registry.json` offline authority override.
 
 ### Acceptance Boundary
 
-Production-readiness for the registry means all of:
+Production-readiness evidence currently proves:
 
-- staging runs the full positive and negative publish flow (capability
-  creation, JoyID signature, namespace claim cooldown, publish, replay,
-  revoke, quarantine, yank);
-- the static read path survives a write-store outage (packages remain
-  readable from R2);
-- existing package versions are rejected before source snapshot writes;
-- per-IP/ASN/principal/capability/namespace/package quotas behave under
-  forged-payload, replay, and burst tests;
-- the admin audit log records every capability, namespace, publish, and
-  override transition with an attributable actor;
-- the first real CellScript source package is published through the
-  production flow and resolves on a clean machine via `cellc install`.
+- all API type checks and 25 admission/state-machine tests pass;
+- live health/readiness checks cover Postgres, the object volume, runtime, and
+  admin configuration;
+- the proxy admits a 2 MiB body to application validation and the Node adapter
+  rejects 7 MiB + 1 byte with a structured 413;
+- unauthorised admin writes, invalid public queries, static POSTs, and traversal
+  attempts are rejected;
+- immutable snapshot descriptors are present in public/static version records,
+  and the resolver fails closed on opaque archives, traversal, file-hash drift,
+  object-hash drift, or source-tree drift;
+- API restart recovery preserves the database, audit log, and object volumes;
+- the daily systemd backup produces checksum-verified Postgres and object-store
+  archives, and both archive formats pass non-destructive restore inspection;
+- the website serves the live Registry and contains no Coming Soon surface.
 
-The existing `services/registry-api` typecheck, unit suite, and dry-run Worker
-build run in the unified `ci` gate as the local contract baseline. Deployed
-end-to-end coverage still belongs in a staging scenario harness; local compiler
-CI is not Cloudflare/R2/Hyperdrive/Neon evidence.
+The remaining release checkpoint is intentionally narrower but real: complete
+the positive publisher-owned JoyID flow and install its first accepted source
+package on a clean machine. Unit-test signatures or direct database seeding do
+not satisfy that checkpoint.
+
+The existing `services/registry-api` typecheck, unit suite, Node build, and
+dry-run Worker build run in the unified `ci` gate as the local contract
+baseline. Deployed end-to-end coverage still belongs in a staging scenario
+harness; local compiler CI is not evidence for either the self-hosted runtime
+or the optional Cloudflare/R2/Hyperdrive/Neon adapter.
 
 ### Non-Goals
 
@@ -504,11 +520,12 @@ work streams. Suggested ordering for *release-blocking* slices:
 
 ## Risk Register
 
-- **Registry production cut-over**. The write API is implemented but has
-  only run locally and in tests. The first real deployment may surface
-  Hyperdrive/R2/Neon integration issues that the test suite does not cover.
-  Mitigation: staging-first, fail-fast-before-object-storage, full admin
-  audit log.
+- **Registry publisher adoption**. The self-hosted production stack and public
+  read surfaces are live, but the first publisher-owned JoyID package has not
+  completed the positive publication/install loop. Mitigation: keep
+  source-published entries out of default resolution, require the existing
+  evidence chain, and do not replace the final interactive checkpoint with
+  seeded database state.
 - **Native tooling serialization drift**. A subtle difference in
   evidence-report formatting breaks historical comparisons. Mitigation:
   byte-identical output requirements, stable schemas, and regression vectors.

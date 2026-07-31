@@ -6,6 +6,7 @@ import {
   DEFAULT_STATIC_REGISTRY_ORIGIN,
   REGISTRY_SCHEMA_VERSION,
   WebCryptoP256Verifier,
+  assertPlainObject,
   base64ToBytes,
   canonicalJson,
   capabilityKeyId,
@@ -24,7 +25,15 @@ import {
   type JoyidVerifier,
   type SourceSnapshotInput,
 } from "./domain";
-import { MemoryRegistryStore, type IdempotencyRecord, type RegistryStore, type SnapshotRecord } from "./store";
+import {
+  MemoryRegistryStore,
+  type IdempotencyRecord,
+  type PackageEvidenceKind,
+  type PackageEvidenceRecord,
+  type PackageVersionRecord,
+  type RegistryStore,
+  type SnapshotRecord,
+} from "./store";
 import { SqlRegistryStore, type HyperdriveLike } from "./sql-store";
 
 export interface Env {
@@ -61,6 +70,7 @@ export interface AppDeps {
   capabilityVerifier?: CapabilitySignatureVerifier;
   snapshotWriter?: SnapshotWriter;
   registryObjectReader?: RegistryObjectReader;
+  readinessCheck?: () => Promise<Record<string, string>>;
   now?: () => Date;
 }
 
@@ -140,6 +150,34 @@ async function routeRequest(
   const registryOrigin = env.REGISTRY_ORIGIN ?? DEFAULT_REGISTRY_ORIGIN;
   const staticOrigin = env.STATIC_REGISTRY_ORIGIN ?? DEFAULT_STATIC_REGISTRY_ORIGIN;
 
+  if (request.method === "GET" && url.pathname === "/v1/packages") {
+    return handleListPackages(request, store, requestId, staticOrigin, headers);
+  }
+
+  const publicEvidenceMatch = url.pathname.match(/^\/v1\/packages\/([^/]+)\/([^/]+)\/versions\/([^/]+)\/evidence$/);
+  if (request.method === "GET" && publicEvidenceMatch) {
+    return handlePublicPackageEvidence(
+      store,
+      requestId,
+      headers,
+      decodeURIComponent(publicEvidenceMatch[1] ?? ""),
+      decodeURIComponent(publicEvidenceMatch[2] ?? ""),
+      decodeURIComponent(publicEvidenceMatch[3] ?? ""),
+    );
+  }
+
+  const publicPackageMatch = url.pathname.match(/^\/v1\/packages\/([^/]+)\/([^/]+)$/);
+  if (request.method === "GET" && publicPackageMatch) {
+    return handlePublicPackageDetail(
+      store,
+      requestId,
+      staticOrigin,
+      headers,
+      decodeURIComponent(publicPackageMatch[1] ?? ""),
+      decodeURIComponent(publicPackageMatch[2] ?? ""),
+    );
+  }
+
   if (request.method === "POST" && url.pathname === "/v1/capabilities") {
     return handleCreateCapability(request, env, store, requestId, registryOrigin, now, deps, headers);
   }
@@ -170,6 +208,22 @@ async function routeRequest(
       decodeURIComponent(adminVersionStatusMatch[1] ?? ""),
       decodeURIComponent(adminVersionStatusMatch[2] ?? ""),
       decodeURIComponent(adminVersionStatusMatch[3] ?? ""),
+    );
+  }
+
+  const adminPromotionMatch = url.pathname.match(/^\/v1\/admin\/packages\/([^/]+)\/([^/]+)\/versions\/([^/]+)\/promote$/);
+  if (request.method === "POST" && adminPromotionMatch) {
+    return handleAdminPackageVersionPromotion(
+      request,
+      env,
+      store,
+      requestId,
+      staticOrigin,
+      deps,
+      headers,
+      decodeURIComponent(adminPromotionMatch[1] ?? ""),
+      decodeURIComponent(adminPromotionMatch[2] ?? ""),
+      decodeURIComponent(adminPromotionMatch[3] ?? ""),
     );
   }
 
@@ -238,23 +292,177 @@ async function handleStaticPackageVersionRead(
   return new Response(object.body, { status: 200, headers });
 }
 
-function handleReadiness(env: Env, deps: AppDeps, requestId: string, headers: Headers): Response {
+async function handleListPackages(
+  request: Request,
+  store: RegistryStore,
+  requestId: string,
+  staticOrigin: string,
+  headers: Headers,
+): Promise<Response> {
+  const params = new URL(request.url).searchParams;
+  const query = optionalPublicQuery(params, "q");
+  const namespaceRaw = optionalPublicQuery(params, "namespace");
+  const statusRaw = optionalPublicQuery(params, "status");
+  const namespace = namespaceRaw ? validatePackageIdent(namespaceRaw, "namespace") : undefined;
+  const status = statusRaw ? publicRegistryStatus(statusRaw) : undefined;
+  const limit = publicListInteger(params, "limit", 50, 1, 100);
+  const offset = publicListInteger(params, "offset", 0, 0, 10_000);
+  const records = await store.listPackageVersions({
+    ...(query ? { query } : {}),
+    ...(namespace ? { namespace } : {}),
+    ...(status ? { status } : {}),
+    limit: Math.min(limit * 4, 400),
+    offset,
+  });
+  const visible = records.filter((record) => record.status !== "quarantined");
+  const grouped = new Map<string, PackageVersionRecord[]>();
+  for (const record of visible) {
+    const key = `${record.namespace}/${record.name}`;
+    const versions = grouped.get(key) ?? [];
+    versions.push(record);
+    grouped.set(key, versions);
+  }
+  const snapshots = await requireSnapshots(store, visible);
+  const packages = [...grouped.entries()].slice(0, limit).map(([coordinate, versions]) => {
+    const latest = versions[0]!;
+    const entry = latest.registry_entry as Record<string, unknown>;
+    return {
+      coordinate,
+      namespace: latest.namespace,
+      name: latest.name,
+      latest_version: latest.version,
+      status: latest.status,
+      description: typeof entry["description"] === "string" ? entry["description"] : null,
+      repository: typeof entry["repository"] === "string" ? entry["repository"] : null,
+      keywords: Array.isArray(entry["keywords"]) ? entry["keywords"] : [],
+      categories: Array.isArray(entry["categories"]) ? entry["categories"] : [],
+      versions: versions.map((version) => staticRegistryVersionPayload(version, snapshotForVersion(snapshots, version), staticOrigin)),
+      updated_at: latest.created_at,
+    };
+  });
+  return json(
+    {
+      schema: "cellscript-public-registry-index-v1",
+      request_id: requestId,
+      packages,
+      count: packages.length,
+      offset,
+      limit,
+      ...(records.length >= Math.min(limit * 4, 400) ? { next_offset: offset + records.length } : {}),
+    },
+    200,
+    headers,
+  );
+}
+
+async function handlePublicPackageDetail(
+  store: RegistryStore,
+  requestId: string,
+  staticOrigin: string,
+  headers: Headers,
+  namespaceFromPath: string,
+  nameFromPath: string,
+): Promise<Response> {
+  const namespace = validatePackageIdent(namespaceFromPath, "namespace");
+  const name = validatePackageIdent(nameFromPath, "name");
+  const versions = await store.listPackageVersions({ namespace, name, limit: 200, offset: 0 });
+  const visible = versions.filter((version) => version.status !== "quarantined");
+  if (visible.length === 0) {
+    throw new ApiError(404, "package_not_found", "package is not known to the public registry");
+  }
+  const snapshots = await requireSnapshots(store, visible);
+  const evidenceByVersion = new Map<string, PackageEvidenceRecord[]>();
+  for (const evidence of await store.listPackageEvidenceForPackage(namespace, name)) {
+    const records = evidenceByVersion.get(evidence.version) ?? [];
+    records.push(evidence);
+    evidenceByVersion.set(evidence.version, records);
+  }
+  const payloads = visible.map((version) => staticRegistryVersionPayload(
+    version,
+    snapshotForVersion(snapshots, version),
+    staticOrigin,
+    evidenceByVersion.get(version.version) ?? [],
+  ));
+  const latest = visible[0]!;
+  const entry = latest.registry_entry as Record<string, unknown>;
+  return json(
+    {
+      schema: "cellscript-public-registry-package-v1",
+      request_id: requestId,
+      coordinate: `${namespace}/${name}`,
+      namespace,
+      name,
+      description: typeof entry["description"] === "string" ? entry["description"] : null,
+      repository: typeof entry["repository"] === "string" ? entry["repository"] : null,
+      homepage: typeof entry["homepage"] === "string" ? entry["homepage"] : null,
+      documentation: typeof entry["documentation"] === "string" ? entry["documentation"] : null,
+      keywords: Array.isArray(entry["keywords"]) ? entry["keywords"] : [],
+      categories: Array.isArray(entry["categories"]) ? entry["categories"] : [],
+      latest_version: latest.version,
+      status: latest.status,
+      versions: payloads,
+    },
+    200,
+    headers,
+  );
+}
+
+async function handlePublicPackageEvidence(
+  store: RegistryStore,
+  requestId: string,
+  headers: Headers,
+  namespaceFromPath: string,
+  nameFromPath: string,
+  versionFromPath: string,
+): Promise<Response> {
+  const namespace = validatePackageIdent(namespaceFromPath, "namespace");
+  const name = validatePackageIdent(nameFromPath, "name");
+  const version = validateVersion(versionFromPath);
+  const record = await store.getPackageVersion(namespace, name, version);
+  if (!record || record.status === "quarantined") {
+    throw new ApiError(404, "package_version_not_found", "package version is not known to the public registry");
+  }
+  const evidence = await store.listPackageEvidence(namespace, name, version);
+  return json({ schema: "cellscript-registry-evidence-list-v1", request_id: requestId, namespace, name, version, evidence }, 200, headers);
+}
+
+async function handleReadiness(env: Env, deps: AppDeps, requestId: string, headers: Headers): Promise<Response> {
   const storeConfigured = !!deps.store || !!env.HYPERDRIVE;
   const objectStoreConfigured =
     (!!deps.snapshotWriter && !!deps.registryObjectReader)
     || !!env.REGISTRY_OBJECTS
     || !!env.SOURCE_SNAPSHOTS;
   const adminConfigured = typeof env.REGISTRY_ADMIN_TOKEN === "string" && env.REGISTRY_ADMIN_TOKEN.trim() !== "";
-  const ready = storeConfigured && objectStoreConfigured && adminConfigured;
+  const checks: Record<string, string> = {
+    store: storeConfigured ? "configured" : "missing_hyperdrive",
+    object_store: objectStoreConfigured ? "configured" : "missing_r2",
+    admin_token: adminConfigured ? "configured" : "missing_secret",
+  };
+  let dependenciesHealthy = true;
+  const store = optionalStore(env, deps);
+  if (store) {
+    try {
+      await store.healthCheck();
+      checks["store"] = "ready";
+    } catch {
+      checks["store"] = "unreachable";
+      dependenciesHealthy = false;
+    }
+  }
+  if (deps.readinessCheck) {
+    try {
+      Object.assign(checks, await deps.readinessCheck());
+    } catch {
+      checks["runtime"] = "unready";
+      dependenciesHealthy = false;
+    }
+  }
+  const ready = storeConfigured && objectStoreConfigured && adminConfigured && dependenciesHealthy;
   return json(
     {
       status: ready ? "ready" : "not_ready",
       request_id: requestId,
-      checks: {
-        store: storeConfigured ? "configured" : "missing_hyperdrive",
-        object_store: objectStoreConfigured ? "configured" : "missing_r2",
-        admin_token: adminConfigured ? "configured" : "missing_secret",
-      },
+      checks,
     },
     ready ? 200 : 503,
     headers,
@@ -380,12 +588,14 @@ async function handleAdminPackageVersionStatus(
   );
   const reason = typeof body["reason"] === "string" && body["reason"].trim() !== "" ? body["reason"].trim() : undefined;
   const directUrl = staticPackageVersionUrl(staticOrigin, namespace, name, version);
+  const existing = await store.getPackageVersion(namespace, name, version);
+  if (!existing) {
+    throw new ApiError(404, "package_version_not_found", "package version is not known to the registry");
+  }
+  const snapshot = await requireSnapshot(store, existing);
+  const evidence = await store.listPackageEvidence(namespace, name, version);
   if (isSuppressivePackageVersionStatus(status)) {
-    const existing = await store.getPackageVersion(namespace, name, version);
-    if (!existing) {
-      throw new ApiError(404, "package_version_not_found", "package version is not known to the registry");
-    }
-    await writeStaticRegistryVersionObject(env, deps, { ...existing, status, direct_url: directUrl });
+    await writeStaticRegistryVersionObject(env, deps, { ...existing, status, direct_url: directUrl }, snapshot, staticOrigin, evidence);
   }
   const record = await store.updatePackageVersionStatus({
     namespace,
@@ -397,9 +607,72 @@ async function handleAdminPackageVersionStatus(
     admin_actor: adminActor,
   });
   if (!isSuppressivePackageVersionStatus(status)) {
-    await writeStaticRegistryVersionObject(env, deps, { ...record, direct_url: directUrl });
+    await writeStaticRegistryVersionObject(env, deps, { ...record, direct_url: directUrl }, snapshot, staticOrigin, evidence);
   }
   return json({ request_id: requestId, ...record }, 200, headers);
+}
+
+async function handleAdminPackageVersionPromotion(
+  request: Request,
+  env: Env,
+  store: RegistryStore,
+  requestId: string,
+  staticOrigin: string,
+  deps: AppDeps,
+  headers: Headers,
+  namespaceFromPath: string,
+  nameFromPath: string,
+  versionFromPath: string,
+): Promise<Response> {
+  const adminActor = requireAdminActor(request, env);
+  const namespace = validatePackageIdent(namespaceFromPath, "namespace");
+  const name = validatePackageIdent(nameFromPath, "name");
+  const version = validateVersion(versionFromPath);
+  const body = await readJson(request, Math.min(maxJsonBytes(env), 512 * 1024));
+  const kind = requireOneOf(
+    String(body["kind"] ?? ""),
+    ["verified_build", "deployed", "on_chain_attested"],
+    "invalid_evidence_kind",
+  ) as PackageEvidenceKind;
+  const existing = await store.getPackageVersion(namespace, name, version);
+  if (!existing) {
+    throw new ApiError(404, "package_version_not_found", "package version is not known to the registry");
+  }
+  const previousEvidence = await store.listPackageEvidence(namespace, name, version);
+  const evidence = validatePromotionEvidence(body["evidence"], kind, existing, previousEvidence);
+  const evidenceHash = `sha256:${await sha256Hex(canonicalJson(evidence))}`;
+  const promoted = await store.promotePackageVersion({
+    namespace,
+    name,
+    version,
+    kind,
+    evidence_hash: evidenceHash,
+    evidence,
+    request_id: requestId,
+    admin_actor: adminActor,
+  });
+  const allEvidence = await store.listPackageEvidence(namespace, name, version);
+  const snapshot = await requireSnapshot(store, promoted.version);
+  await writeStaticRegistryVersionObject(
+    env,
+    deps,
+    { ...promoted.version, direct_url: staticPackageVersionUrl(staticOrigin, namespace, name, version) },
+    snapshot,
+    staticOrigin,
+    allEvidence,
+  );
+  return json(
+    {
+      request_id: requestId,
+      namespace,
+      name,
+      version,
+      status: promoted.version.status,
+      evidence: promoted.evidence,
+    },
+    200,
+    headers,
+  );
 }
 
 function isSuppressivePackageVersionStatus(status: string): boolean {
@@ -690,7 +963,7 @@ async function handlePublishVersion(
       direct_url: directUrl,
       created_at: now.toISOString(),
     } as const;
-    await writeStaticRegistryVersionObject(env, deps, versionInput);
+    await writeStaticRegistryVersionObject(env, deps, versionInput, snapshotRecord, staticOrigin);
     await store.recordSnapshot(snapshotRecord);
     const recordedVersion = await store.recordPackageVersion(versionInput);
     await store.recordCapabilityUsage({
@@ -843,9 +1116,12 @@ async function writeStaticRegistryVersionObject(
   env: Env,
   deps: AppDeps,
   version: SnapshotPackageVersionRecord,
+  snapshot: SnapshotRecord,
+  staticOrigin: string,
+  evidence: PackageEvidenceRecord[] = [],
 ): Promise<void> {
   const key = staticPackageVersionKey(version.namespace, version.name, version.version);
-  const body = new TextEncoder().encode(`${JSON.stringify(staticRegistryVersionPayload(version), null, 2)}\n`);
+  const body = new TextEncoder().encode(`${JSON.stringify(staticRegistryVersionPayload(version, snapshot, staticOrigin, evidence), null, 2)}\n`);
   const writer = deps.snapshotWriter ?? r2SnapshotWriter(env);
   await writer.put(key, body, {
     contentType: "application/json; charset=utf-8",
@@ -862,7 +1138,12 @@ async function writeStaticRegistryVersionObject(
 
 type SnapshotPackageVersionRecord = Awaited<ReturnType<RegistryStore["recordPackageVersion"]>>;
 
-function staticRegistryVersionPayload(version: SnapshotPackageVersionRecord): Record<string, unknown> {
+function staticRegistryVersionPayload(
+  version: SnapshotPackageVersionRecord,
+  snapshot: SnapshotRecord,
+  staticOrigin: string,
+  evidence: PackageEvidenceRecord[] = [],
+): Record<string, unknown> {
   return {
     schema_version: REGISTRY_SCHEMA_VERSION,
     kind: "cellscript.registry.package_version",
@@ -880,8 +1161,49 @@ function staticRegistryVersionPayload(version: SnapshotPackageVersionRecord): Re
     principal_id: version.principal_id,
     registry_entry: version.registry_entry,
     snapshot_hash: version.snapshot_hash,
+    source_snapshot: sourceSnapshotPayload(snapshot, staticOrigin),
     direct_url: version.direct_url,
     created_at: version.created_at,
+    evidence,
+  };
+}
+
+async function requireSnapshot(store: RegistryStore, version: SnapshotPackageVersionRecord): Promise<SnapshotRecord> {
+  const snapshot = await store.getSnapshot(version.snapshot_hash);
+  if (!snapshot || snapshot.source_hash !== version.source_hash) {
+    throw new ApiError(503, "source_snapshot_unavailable", "package source snapshot metadata is unavailable or inconsistent");
+  }
+  return snapshot;
+}
+
+async function requireSnapshots(
+  store: RegistryStore,
+  versions: SnapshotPackageVersionRecord[],
+): Promise<Map<string, SnapshotRecord>> {
+  const snapshots = await store.getSnapshots(versions.map((version) => version.snapshot_hash));
+  for (const version of versions) snapshotForVersion(snapshots, version);
+  return snapshots;
+}
+
+function snapshotForVersion(
+  snapshots: Map<string, SnapshotRecord>,
+  version: SnapshotPackageVersionRecord,
+): SnapshotRecord {
+  const snapshot = snapshots.get(version.snapshot_hash);
+  if (!snapshot || snapshot.source_hash !== version.source_hash) {
+    throw new ApiError(503, "source_snapshot_unavailable", "package source snapshot metadata is unavailable or inconsistent");
+  }
+  return snapshot;
+}
+
+function sourceSnapshotPayload(snapshot: SnapshotRecord, staticOrigin: string): Record<string, unknown> {
+  return {
+    schema: "cellscript-registry-source-snapshot-v1",
+    url: `${staticOrigin.replace(/\/+$/, "")}/${snapshot.r2_key}`,
+    snapshot_hash: snapshot.snapshot_hash,
+    source_hash: snapshot.source_hash,
+    size_bytes: snapshot.size_bytes,
+    content_type: snapshot.content_type,
   };
 }
 
@@ -1187,6 +1509,158 @@ function parseAuditBefore(value: string): string {
   return date.toISOString();
 }
 
+function optionalPublicQuery(params: URLSearchParams, name: string): string | undefined {
+  const value = params.get(name)?.trim();
+  if (!value) return undefined;
+  if (value.length > 160 || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw new ApiError(400, "invalid_public_query", `${name} query parameter is invalid`);
+  }
+  return value;
+}
+
+function publicListInteger(params: URLSearchParams, name: string, fallback: number, minimum: number, maximum: number): number {
+  const value = params.get(name);
+  if (value === null) return fallback;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new ApiError(400, "invalid_public_query", `${name} must be an integer between ${minimum} and ${maximum}`);
+  }
+  return parsed;
+}
+
+function publicRegistryStatus(value: string): PackageVersionRecord["status"] {
+  return requireOneOf(
+    value,
+    [
+      "source_published",
+      "indexed_pending",
+      "verified_build",
+      "deployed",
+      "on_chain_attested",
+      "deprecated",
+      "yanked",
+    ],
+    "invalid_registry_status",
+  ) as PackageVersionRecord["status"];
+}
+
+function validatePromotionEvidence(
+  value: unknown,
+  kind: PackageEvidenceKind,
+  version: PackageVersionRecord,
+  previous: PackageEvidenceRecord[],
+): Record<string, unknown> {
+  const evidence = assertPlainObject(value, "invalid_promotion_evidence");
+  if (evidence["schema"] !== "cellscript-registry-evidence-v1") {
+    throw new ApiError(400, "invalid_evidence_schema", "evidence.schema must be cellscript-registry-evidence-v1");
+  }
+  if (evidence["kind"] !== kind) {
+    throw new ApiError(400, "evidence_kind_mismatch", "evidence.kind must match the requested promotion kind");
+  }
+  requireEvidenceString(evidence, "producer", 1, 200);
+  requireEvidenceTimestamp(evidence, "generated_at");
+  if (evidence["verification_status"] !== "passed") {
+    throw new ApiError(400, "evidence_not_passed", "evidence.verification_status must be passed");
+  }
+  requireMatchingEvidenceHash(evidence, "source_hash", version.source_hash);
+  requireMatchingEvidenceHash(evidence, "manifest_hash", version.manifest_hash);
+  requireMatchingEvidenceHash(evidence, "compatibility_profile_hash", version.compatibility_profile_hash);
+
+  if (kind === "verified_build") {
+    requireEvidenceHash(evidence, "artifact_hash");
+    requireEvidenceHash(evidence, "metadata_hash");
+    requireEvidenceString(evidence, "compiler_version", 1, 80);
+  } else if (kind === "deployed") {
+    const verified = latestEvidence(previous, "verified_build");
+    requireEvidenceReference(evidence, "verified_build_evidence_hash", verified);
+    const artifactHash = requireEvidenceHash(evidence, "artifact_hash");
+    const verifiedArtifact = requireEvidenceHash(verified.evidence, "artifact_hash");
+    if (!sameHash(artifactHash, verifiedArtifact)) {
+      throw new ApiError(400, "deployment_artifact_mismatch", "deployed artifact_hash must match verified-build evidence");
+    }
+    requireEvidenceString(evidence, "network", 1, 80);
+    requireEvidenceHash(evidence, "code_hash");
+    requireEvidenceHash(evidence, "data_hash");
+    const outPoint = assertPlainObject(evidence["out_point"], "invalid_deployment_out_point");
+    requireEvidenceHash(outPoint, "tx_hash");
+    const index = outPoint["index"];
+    if (!Number.isSafeInteger(index) || Number(index) < 0 || Number(index) > 0xffff_ffff) {
+      throw new ApiError(400, "invalid_deployment_out_point", "evidence.out_point.index must be a non-negative u32 integer");
+    }
+    if (evidence["deployment_status"] !== "live") {
+      throw new ApiError(400, "deployment_not_live", "evidence.deployment_status must be live");
+    }
+  } else {
+    const deployed = latestEvidence(previous, "deployed");
+    requireEvidenceReference(evidence, "deployed_evidence_hash", deployed);
+    requireEvidenceString(evidence, "network", 1, 80);
+    requireEvidenceHash(evidence, "attestation_tx_hash");
+    requireEvidenceHash(evidence, "attestation_hash");
+    requireEvidenceString(evidence, "attestor", 1, 200);
+    requireEvidenceTimestamp(evidence, "observed_at");
+    if (evidence["attestation_status"] !== "confirmed") {
+      throw new ApiError(400, "attestation_not_confirmed", "evidence.attestation_status must be confirmed");
+    }
+  }
+  return evidence;
+}
+
+function latestEvidence(records: PackageEvidenceRecord[], kind: PackageEvidenceKind): PackageEvidenceRecord {
+  const record = records.filter((item) => item.kind === kind).at(-1);
+  if (!record) {
+    throw new ApiError(409, "evidence_dependency_missing", `${kind} evidence must exist before this promotion`);
+  }
+  return record;
+}
+
+function requireEvidenceReference(evidence: Record<string, unknown>, key: string, expected: PackageEvidenceRecord): void {
+  const value = requireEvidenceString(evidence, key, 71, 71);
+  if (value !== expected.evidence_hash) {
+    throw new ApiError(400, "evidence_reference_mismatch", `${key} does not reference the accepted ${expected.kind} evidence`);
+  }
+}
+
+function requireMatchingEvidenceHash(evidence: Record<string, unknown>, key: string, expected: string): void {
+  const value = requireEvidenceHash(evidence, key);
+  if (!sameHash(value, expected)) {
+    throw new ApiError(400, "evidence_identity_mismatch", `evidence.${key} does not match the published package identity`);
+  }
+}
+
+function requireEvidenceHash(evidence: Record<string, unknown>, key: string): string {
+  const value = requireEvidenceString(evidence, key, 64, 66);
+  if (!/^(?:0x)?[0-9a-fA-F]{64}$/.test(value)) {
+    throw new ApiError(400, "invalid_evidence_hash", `evidence.${key} must be a 32-byte hex hash`);
+  }
+  return value;
+}
+
+function sameHash(left: string, right: string): boolean {
+  return left.replace(/^0x/i, "").toLowerCase() === right.replace(/^0x/i, "").toLowerCase();
+}
+
+function requireEvidenceString(
+  evidence: Record<string, unknown>,
+  key: string,
+  minimumLength: number,
+  maximumLength: number,
+): string {
+  const value = evidence[key];
+  if (typeof value !== "string" || value.trim() !== value || value.length < minimumLength || value.length > maximumLength) {
+    throw new ApiError(400, "invalid_evidence_field", `evidence.${key} is invalid`);
+  }
+  return value;
+}
+
+function requireEvidenceTimestamp(evidence: Record<string, unknown>, key: string): string {
+  const value = requireEvidenceString(evidence, key, 20, 40);
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp) || timestamp > Date.now() + 5 * 60 * 1000) {
+    throw new ApiError(400, "invalid_evidence_timestamp", `evidence.${key} must be a non-future ISO timestamp`);
+  }
+  return new Date(timestamp).toISOString();
+}
+
 function maxJsonBytes(env: Env): number {
   return Number(env.MAX_JSON_BODY_BYTES ?? DEFAULT_MAX_JSON_BODY_BYTES);
 }
@@ -1220,8 +1694,11 @@ function corsHeaders(requestId: string): Headers {
   return new Headers({
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET,POST,OPTIONS",
-    "access-control-allow-headers": "content-type,authorization,idempotency-key",
+    "access-control-allow-headers": "content-type,authorization,idempotency-key,x-registry-admin-token,x-registry-admin-actor",
     "access-control-expose-headers": "x-request-id,x-idempotency-status",
+    "cache-control": "no-store",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
     "x-request-id": requestId,
   });
 }

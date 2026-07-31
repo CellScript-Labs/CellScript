@@ -3,7 +3,8 @@
 **Status**: implementation contract for the current CellScript CKB profile.
 Phase 1 landed in the 0.19 line; Phase 2 source-package, generated-builder,
 deployment identity, and trust-metadata checks extend through 0.20 and the
-0.21 RC.
+0.21 RC. The 0.23 line deploys the public read/write service and makes its
+accepted package status the default CLI resolution authority.
 
 **Scope**: Source package registry, deployment registry, lockfile binding, and
 builder verification for CellScript on CKB
@@ -15,6 +16,13 @@ protocol semantics, and v0.18 first-class ScriptRef / ScriptArgs work.
 
 **Production boundary ADR**:
 [`CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md`](CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md)
+
+**0.23 production authority**: `https://api.registry.cellscript.dev` owns public
+discovery and accepted status. The source repository and its `registry.json`
+remain mandatory verification inputs after selection. References below to the
+`cellscript-registry` Git discovery index describe the explicit
+`CELLSCRIPT_REGISTRY_URL` offline/private-mirror path unless a historical phase
+is being discussed; they are not an automatic production fallback.
 
 ## Motivation
 
@@ -701,13 +709,21 @@ token = { version = "0.3.0", namespace = "cellscript" }
 Running `cellc build` triggers dependency resolution:
 
 1. Read `Cell.toml` `[dependencies]` → find `token` with `namespace = "cellscript"`.
-2. Query the discovery index (`cellscript-registry` Git repo) →
-   `cellscript/token.json` →
-   `source = "https://github.com/cellscript/token"`.
-3. Clone the source repo, find the latest `0.3.x` tag (e.g., `v0.3.2`).
-4. Read `registry.json` from the cloned repo → verify `source_hash` matches.
-5. Parse the dependency's `Cell.toml` → resolve transitive dependencies.
-6. Write `Cell.lock` with resolved versions and git provenance.
+2. Query `https://api.registry.cellscript.dev/v1/packages/cellscript/token` and
+   select the latest version whose public status is eligible for ordinary
+   resolution.
+3. Read the accepted source repository, tag, source hash, Edition, and
+   compatibility-profile identity from that public record.
+4. Clone the source repo at the accepted tag (e.g., `v0.3.2`).
+5. Read `registry.json` from the cloned repo and require its package/version,
+   tag, source hash, Edition, and profile hash to match the accepted record.
+6. Verify the checked-out source tree against `source_hash`.
+7. Parse the dependency's `Cell.toml` → resolve transitive dependencies.
+8. Write `Cell.lock` with resolved versions and git provenance.
+
+`CELLSCRIPT_REGISTRY_URL` deliberately selects the legacy Git/offline discovery
+authority for private mirrors, tests, and audits. It is not an automatic
+fallback when the production API is unavailable.
 
 Generated `Cell.lock`:
 
@@ -735,14 +751,16 @@ constraints_hash = "blake2b:0x1111..."
 [dependencies.token]
 version = "0.3.2"
 namespace = "cellscript"
-source = { registry = "cellscript/token", url = "https://github.com/cellscript/token", revision = "f7e8d9c0..." }
+source = { registry = "cellscript/token", url = "https://registry.cellscript.dev/source-snapshots/cellscript/token/0.3.2/<sha256>.json", revision = "sha256:<snapshot-hash>" }
 source_hash = "blake2b:0x2222..."
 build = { artifact_hash = "blake2b:0x3333...", abi_hash = "blake2b:0x4444..." }
 ```
 
-Key property: `Cell.lock` is **self-sufficient** for re-verification. The `url`
-and `revision` fields allow `cellc package verify` to re-clone the exact
-source commit without re-querying the discovery index.
+Key property: `Cell.lock` is **self-sufficient** for re-verification. For the
+public Registry, `url` names the immutable source snapshot and `revision` is its
+`sha256:` identity. Explicit Git/offline resolution retains a Git URL and
+commit revision. Neither path needs to re-query a mutable discovery index to
+identify the already locked bytes.
 
 ### Stage 3: Publishing
 
@@ -903,9 +921,11 @@ amm = { version = "1.2.0", namespace = "cellscript" }
 
 Resolution flow:
 
-1. Query discovery index → `cellscript/amm_pool.json` →
-   `source = "https://github.com/cellscript/amm_pool"`.
-2. Clone at tag `v1.2.0` → read `registry.json` → verify `source_hash`.
+1. Query the public Registry API and require an accepted `cellscript/amm_pool`
+   version with a source repository, tag, source hash, Edition, and profile
+   identity.
+2. Clone at the accepted tag `v1.2.0` → read `registry.json` → match the
+   accepted identity → verify `source_hash`.
 3. Read the dependency's `Cell.lock` (if present) →
    find deployment record for `aggron4` →
    `code_hash`, `out_point`, `data_hash` available for builder verification.
@@ -944,18 +964,20 @@ source → build → deployment, all bound by cryptographic hashes in
                     └────────────────────────┘
 
 
-     Discovery Index            Source Repository
-     (cellscript-registry)      (github.com/cellscript/amm_pool)
+     Public Registry API        Source Repository
+     (accepted status)          (github.com/cellscript/amm_pool)
      ┌─────────────────┐       ┌──────────────────────────────────┐
-     │ cellscript/     │       │ Cell.toml                        │
-     │   amm_pool.json │──────►│ registry.json   ← cellc publish --offline mirror │
-     │   token.json    │       │ src/                             │
+     │ /v1/packages/   │       │ Cell.toml                        │
+     │ cellscript/     │──────►│ registry.json   ← offline mirror │
+     │ amm_pool        │       │ src/                             │
      └─────────────────┘       │ Cell.lock       ← cellc build    │
                                │ Deployed.toml   ← cellc deploy   │
                                └──────────────────────────────────┘
 ```
 
-The discovery index maps `namespace/name` → source repository URL.
+The public Registry maps `namespace/name` → accepted version/status and source
+repository identity. The legacy Git discovery index can supply the equivalent
+source map only when explicitly selected for offline/private-mirror use.
 The source repository contains everything else: source code, version index
 (`registry.json`), build identity (`Cell.lock`), and deployment facts
 (`Deployed.toml`). The public registry service is the write authority for
@@ -1037,9 +1059,10 @@ cache-friendly read surface. The data model remains inspired by Go's approach
 (source lives in its own repo, metadata can travel with the source), but the
 public write authority is the registry service, not Git push access.
 
-1. **Discovery index** — a lightweight map from `namespace/name` to the source
-   repository URL and ownership metadata. Updated when a package is claimed,
-   transferred, or its source location changes.
+1. **Public package index** — the deployed API maps `namespace/name` to public
+   versions, accepted/suppressive status, source repository identity, Edition,
+   profile hash, and evidence. It is updated by authenticated namespace,
+   publish, governance, and promotion operations.
 2. **Per-package version index** — a canonical registry entry mirrored as
    `registry.json` for audit, offline fixtures, and direct-Git fallback. The
    public entry is updated by authenticated `cellc publish`; the local mirror is
@@ -1057,10 +1080,12 @@ Rationale:
 - The CKB ecosystem can start with a small write service because expensive
   verification work is asynchronous and bounded.
 
-### Discovery Index Repository
+### Legacy/Offline Discovery Index Repository
 
-A single Git repository (e.g., `github.com/cellscript/cellscript-registry`)
-serves as the discovery index. It is organized by namespace:
+A Git repository (e.g., `github.com/cellscript/cellscript-registry`) can serve
+as the explicit `CELLSCRIPT_REGISTRY_URL` private/offline discovery authority.
+It is not consulted automatically after a failed production API lookup. It is
+organized by namespace:
 
 ```
 cellscript-registry/
@@ -1126,10 +1151,11 @@ alongside `Cell.toml`, for audit and offline use:
 
 This is the registry's initial source-edition/profile shape. `edition` must not
 be used to infer a target or ABI; `compatibility_profile_hash` binds those
-independent choices. The registry has not been deployed, so the original schema
-identifier is retained while the definition is updated in place. Every
-non-optional field shown above is required; readers do not fill in omitted
-`dependencies`, `status`, or `yanked` values.
+independent choices. The production Registry deployed this initial schema on
+2026-07-31. `migrations/0001_initial.sql` is therefore frozen; later database
+changes use additive numbered migrations rather than rewriting the deployed
+baseline. Every non-optional field shown above is required; readers do not fill
+in omitted `dependencies`, `status`, or `yanked` values.
 
 The `tag` field maps each version to a git tag in the source repository.
 This allows `cellc install` to clone the exact commit without needing
@@ -1160,12 +1186,11 @@ git push --tags
 ```
 
 No PR to an external registry repository is required for ordinary version
-updates. The registry entry is authoritative for public discovery, while the
-source repository mirror helps consumers audit and reproduce the same metadata
-when `cellc install` clones a tagged version.
-
-The discovery index only changes when claiming a brand-new package, changing
-source location, or changing ownership metadata.
+updates. The production Registry entry is authoritative for public discovery
+and status, while the source repository mirror lets consumers audit the same
+identity when `cellc install` clones the accepted tag. The legacy Git discovery
+index remains an explicit offline/private-mirror override rather than an
+ordinary production dependency.
 
 Initial entry visibility is staged:
 
@@ -1199,12 +1224,18 @@ cellc install cellscript/amm@1.2.0
 
 Internally:
 
-1. Clone or update the `cellscript-registry` discovery index (cached locally).
-2. Look up `cellscript/amm.json` → get source repository URL.
-3. Clone the source repository at tag `v1.2.0`.
-4. Read `registry.json` from the cloned repository.
-5. Verify `source_hash` matches the current source tree.
-6. Parse `Cell.toml` and resolve transitive dependencies.
+1. Query the production public API for `cellscript/amm`.
+2. Select version `1.2.0` only if its public status is accepted for ordinary
+   resolution; suppressive and pre-verification states fail closed.
+3. Read the immutable source-snapshot descriptor, source hash, Edition, and
+   profile hash from the accepted record.
+4. Download the snapshot without redirects and enforce its declared size.
+5. Verify the object SHA-256, safe/unique file paths, and every file's BLAKE2b.
+6. Atomically materialize the tree and verify the complete `source_hash`.
+7. Parse `Cell.toml`, check package identity, and resolve transitive
+   dependencies. Repository URL, tag, and mirrored `registry.json` remain audit
+   material; they are used as the resolver authority only under the explicit
+   Git/offline override.
 
 ### Write Path DDoS and Spam Boundary
 
@@ -1218,10 +1249,9 @@ registry.cellscript.dev
   -> immutable mirrored metadata / artifact URLs
 
 api.registry.cellscript.dev
-  -> WAF / edge limits
+  -> TLS proxy body limits
   -> schema fail-fast
-  -> auth and ACL checks
-  -> quota and deduplication
+  -> auth, ACL, application quota and deduplication
   -> object storage
   -> bounded verification queues
 ```
@@ -1280,12 +1310,15 @@ cellc package verify
 cellc registry verify
 ```
 
-The `resolve_from_registry` path in `src/package/mod.rs` now implements the
-two-tier source-package resolver: discovery index lookup, source repo clone,
-tag checkout, `registry.json` identity and schema checks, `source_hash`
-verification, `Cell.toml` parsing, and transitive dependency resolution. A
-discovery failure reports the namespace, package, requested version, and
-registry URL instead of falling through to a local-path placeholder.
+The `resolve_from_registry` path in `src/package/mod.rs` implements two explicit
+source-package authorities. By default, the production public API supplies the
+accepted status, signed identity, and immutable snapshot descriptor; the client
+verifies and materializes that snapshot. An explicitly configured
+`CELLSCRIPT_REGISTRY_URL` instead supplies the legacy Git/offline index, tag,
+and mirrored `registry.json`. Both paths finish with `source_hash`, `Cell.toml`,
+and transitive-dependency verification. A lookup failure reports the namespace,
+package, requested version, and authority instead of silently downgrading to
+Git discovery.
 
 ## Deployment Registry (Chain-Indexed)
 
@@ -1377,10 +1410,10 @@ transaction.
 | `PackageManifest` | `Cell.toml` schema | Unchanged structure. `[deploy.ckb]` already supported. `namespace` flows through `PackageInfo`. |
 | `Lockfile` | `version/dependencies` only | Extend with `[package_build]`, `[deployment.*]`, `namespace`, `source_hash` on dependencies. |
 | `LockedDependency` | `version` + `source` only | Add `namespace: Option<String>`, `source_hash: Option<String>`, `build: Option<LockedBuildInfo>`. All with `#[serde(default)]`. |
-| `LockedSource::Registry` | `{ name, version }` only | Extend to `{ namespace, name, version, url, revision }`. The `url` and `revision` fields carry git provenance from the discovery index. |
+| `LockedSource::Registry` | `{ name, version }` only | Extend to `{ namespace, name, version, url, revision }`. Public resolution records the immutable snapshot URL and SHA-256 revision; explicit Git/offline resolution records Git provenance. |
 | `DeploymentManifest` | In `crates/cellscript-ckb-adapter/src/lib.rs` | Extend to `Deployed.toml` schema: add `network`, `chain_id`, `script_role`, `data_hash`, `status`, `[build]` section. |
 | `DeploymentRef` | In adapter crate | Add `network`, `chain_id`, `script_role`, `data_hash`, `status` fields as `Option<String>`. |
-| `PackageManager::resolve_from_registry` | Implemented two-tier source-package resolver: discovery lookup → source repo clone → tag checkout → `registry.json` verification → source hash check → `Cell.toml` parsing. | Keep non-CellScript artifact profiles fail-closed until profile-specific resolver contracts exist. |
+| `PackageManager::resolve_from_registry` | Implemented public-API accepted-status lookup → immutable snapshot size/object/file/path/source verification → atomic cache materialisation → Edition/profile and `Cell.toml` checks. The explicit Git/offline override retains tag + `registry.json` verification. | Keep non-CellScript artifact profiles fail-closed until profile-specific resolver contracts exist. |
 | `build_deployment_manifest_from_evidence` | In adapter crate | Extend to populate new fields. |
 | `ManifestCellDepResolver` | In adapter crate | Unchanged. Still resolves CellDeps from manifest. |
 
@@ -1718,7 +1751,7 @@ implications from the audit above.
 | # | Work | Evidence | Audit Ref |
 |---|---|---|---|
 | 1 | Add `namespace` to `PackageInfo` and `DetailedDependency` | `Cell.toml` with `namespace` parses correctly; `cellc init --namespace` sets it | — |
-| 2 | Extend `LockedSource::Registry` with `namespace`, `url`, `revision` | `Cell.lock` writes registry deps with git provenance; re-verification works without discovery index | #2 |
+| 2 | Extend `LockedSource::Registry` with `namespace`, `url`, `revision` | Historical 0.19 Git resolver records provenance; 0.23 public resolution reuses the fields for immutable snapshot URL + SHA-256 | #2 |
 | 3 | Remove `lock_schema` from Cell.lock; keep `version = 1` | Single version identifier; no dual version confusion | #2 |
 | 4 | Add `schema_version: 1` to `registry.json` format | `cellc publish --offline` writes `schema_version`; `cellc install` rejects unknown versions | #5 |
 | 5 | Fix `registry.json` dependencies to include namespace | `dependencies: { "token": { "namespace": "cellscript", "version": "0.3.0" } }` | #4 |
@@ -1727,7 +1760,7 @@ implications from the audit above.
 | 8 | Add `_schema.json` to discovery index repository | `{ "schema_version": 1 }` at repo root | #11 |
 | 9 | `Cell.lock` with `[package_build]` hash section | `cellc build` writes artifact/metadata/schema/abi/constraints hashes to lockfile | — |
 | 10 | `Deployed.toml` format definition and parsing | Adapter crate can load and validate `Deployed.toml` records | — |
-| 11 | Implement `resolve_from_registry` with two-tier resolution | Discovery index lookup → source repo clone → `registry.json` verification → `Cell.toml` parsing | — |
+| 11 | Implement the initial `resolve_from_registry` with two-tier resolution | Historical 0.19 evidence: discovery lookup → source clone → `registry.json` → `Cell.toml`; 0.23 replaces the default transport with verified Registry snapshots | — |
 | 12 | Define semver compatibility rules and unified version resolution | `cellc build` fails on unsatisfiable version constraints; `"0.3.0"` means `^0.3.0` | #1, #10 |
 | 13 | Define compiler major.minor compatibility window for `constraints_hash` | `cellc registry verify` rejects cross-version hash comparison; same `0.19.x` → same hash | #6 |
 | 14 | Define git tag convention `v{version}` with validation | `cellc publish` validates tag matches version; `cellc install` validates tag exists | #8 |

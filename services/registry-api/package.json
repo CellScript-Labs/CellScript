@@ -7,6 +7,8 @@
     "check": "tsc --noEmit",
     "test": "vitest run",
     "build": "wrangler deploy --dry-run --config wrangler.example.toml --outdir dist",
+    "build:node": "esbuild src/node-server.ts --bundle --platform=node --format=esm --packages=external --target=node22 --sourcemap --outfile=dist-node/server.mjs",
+    "start:node": "node dist-node/server.mjs",
     "migrate": "node scripts/migrate.mjs",
     "deploy": "wrangler deploy --config wrangler.toml"
   },
@@ -16,7 +18,9 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250617.0",
+    "@types/node": "^22.20.1",
     "@types/pg": "^8.11.10",
+    "esbuild": "^0.25.12",
     "typescript": "^5.8.3",
     "vitest": "^3.2.4",
     "wrangler": "^4.20.5"

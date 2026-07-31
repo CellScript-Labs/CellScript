@@ -16,6 +16,11 @@ By the end of this tutorial you will understand:
 - how a verifier downstream of you can confirm that what they
   imported, compiled, and deployed is the same thing you published.
 
+The production surfaces are live at `https://cellscript.dev/registry/`,
+`https://api.registry.cellscript.dev`, and
+`https://registry.cellscript.dev`. The first publisher-owned JoyID publication
+and clean-machine install remain the final interactive adoption checkpoint.
+
 ## Audience
 
 You are writing or porting a contract for CKB. You have a working
@@ -180,18 +185,20 @@ The architecture splits the paths:
 | Path | Responsibility |
 |---|---|
 | Write API | Authentication, namespace/package ACL, quota, schema checks, hash sanity, yanking, quarantine, and queue admission. |
-| Static read path | CDN/cacheable package indexes, source mirrors, direct package URLs, and website browsing. |
+| Static read path | Cacheable package indexes, immutable source snapshots, direct package URLs, and website browsing. |
 | Verifier | Source/build/deployment hash checks, optional live-chain checks, and fail-closed policy. |
 
-The source still lives somewhere content-addressed, usually Git. The build hash
-is computed locally from the source and toolchain. The deployment record is a
-small text file with chain facts that a verifier can re-check. The registry
-service admits and indexes metadata, but consumers still verify the selected
-package.
+The Registry stores a content-addressed source snapshot for every accepted
+version. A Git repository and tag remain useful provenance and offline-mirror
+material, but the normal install path does not require that host to be online.
+The build hash is computed locally from the verified source and toolchain. The
+deployment record is a small text file with chain facts that a verifier can
+re-check. The registry service admits and indexes metadata, but consumers still
+verify the selected package.
 
-The discovery index maps a `(namespace, name)` pair to a Git URL and ownership
-metadata. It changes when a package is claimed, transferred, or moved. It does
-not need to change for every version publish.
+The public API maps a `(namespace, name)` pair to accepted versions, immutable
+snapshot descriptors, provenance, and ownership-governed state. The explicit
+Git/offline index remains available for private mirrors and air-gapped use.
 
 ## Authoring a package from scratch
 
@@ -225,9 +232,9 @@ later lock against. You do not need to write the lockfile yourself.
 If your contract imports another contract, declare it in the
 manifest's dependency section. There are three dependency kinds:
 
-- a **registry** dependency, named by `(namespace, name)` plus a
-  version range. The toolchain resolves it via the discovery index
-  when present, or via the default convention when not.
+- a **registry** dependency, named by `(namespace, name)` plus a version range.
+  The toolchain queries the production API, selects an accepted version, and
+  materializes its verified immutable snapshot.
 - a **git** dependency, named by a Git URL plus an optional tag,
   branch, or revision. The toolchain clones the URL into a local
   cache.
@@ -295,10 +302,11 @@ path dependencies take a filesystem path.
 Run the toolchain's resolver. It performs three checks per
 dependency:
 
-1. It fetches the source through the right channel (discovery
-   index, Git clone, or local read).
-2. It computes the source hash and compares it to the recorded
-   source hash from the metadata. A mismatch is a hard error.
+1. It fetches the source through the right channel (Registry snapshot, explicit
+   Git dependency, or local path).
+2. For Registry sources it verifies descriptor size/SHA-256, safe paths,
+   per-file BLAKE2b, and then the complete source hash. A mismatch is a hard
+   error.
 3. It transitively resolves any dependencies that the dependency
    itself declares.
 
@@ -416,11 +424,10 @@ scope.
 
 ## Operating without GitHub
 
-Phase 1 has no dependency on GitHub. The discovery index is a tiny
-JSON file that lives anywhere you want it to live. The package
-metadata lives inside the source repo and travels with it. The
-resolver clones from any Git URL it can reach, including self-hosted
-Gitea, GitLab, or a bare repo on a file share.
+Production Registry installs have no dependency on GitHub: they use the
+Registry's immutable source object. Repository metadata still travels with the
+entry for audit and may point to GitHub, self-hosted Gitea, GitLab, or another
+Git server without changing the installed bytes.
 
 For air-gapped environments, declare dependencies as `path` or as
 `git` URLs pointing at a local mirror. The lockfile pins the
@@ -464,9 +471,9 @@ specific command. Substitute your toolchain's CLI for each step.
    Commit and push.
 
 3. **Consumer pulls.** A second developer adds the package as a
-   dependency and resolves. The resolver fetches the source through
-   Git (or the discovery index) and verifies that the recorded
-   source hash matches the actual source tree. The resolution writes
+   dependency and resolves. The resolver fetches the immutable Registry
+   snapshot, verifies its object and file hashes, and confirms that the
+   recorded source hash matches the reconstructed source tree. Resolution writes
    a fresh lockfile for the consumer.
 
 4. **Consumer builds.** The consumer's build computes the six
@@ -492,7 +499,7 @@ which layer disagrees.
 
 Phase 1 gives you:
 
-- content-addressed source identity, with no central server;
+- content-addressed source identity served by a separated read-only path;
 - per-build identity that survives toolchain upgrades being treated
   as a deliberate action;
 - per-network deployment identity that can be checked locally or
@@ -500,12 +507,12 @@ Phase 1 gives you:
 - fail-closed verification at every layer, with structured
   disagreements rather than silent overrides.
 
-In exchange, you give up:
+The deliberate constraints are:
 
 - mutable channels like `latest` and `stable`;
-- a canonical index that resolves a namespace globally;
 - automatic cross-profile reuse;
-- the convenience of "yank" and re-publish.
+- mutable version overwrite or re-publish; yanking preserves history and
+  suppresses normal selection instead of deleting an accepted version.
 
 For long-lived, auditable, multi-team contracts, those trade-offs
 are usually worth it. For toy experiments, the lack of a `latest`

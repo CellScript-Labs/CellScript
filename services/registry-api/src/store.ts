@@ -56,6 +56,40 @@ export interface PackageVersionRecord {
   created_at: string;
 }
 
+export interface PackageVersionQuery {
+  query?: string;
+  namespace?: string;
+  name?: string;
+  status?: RegistryEntryStatus;
+  limit: number;
+  offset: number;
+}
+
+export type PackageEvidenceKind = "verified_build" | "deployed" | "on_chain_attested";
+
+export interface PackageEvidenceRecord {
+  namespace: string;
+  name: string;
+  version: string;
+  kind: PackageEvidenceKind;
+  evidence_hash: string;
+  evidence: Record<string, unknown>;
+  request_id: string;
+  admin_actor: string;
+  created_at: string;
+}
+
+export interface PromotePackageVersionInput {
+  namespace: string;
+  name: string;
+  version: string;
+  kind: PackageEvidenceKind;
+  evidence_hash: string;
+  evidence: Record<string, unknown>;
+  request_id: string;
+  admin_actor: string;
+}
+
 export interface IdempotencyRecord {
   key: string;
   request_hash: string;
@@ -125,6 +159,7 @@ export interface NamespaceRecord {
 }
 
 export interface RegistryStore {
+  healthCheck(): Promise<void>;
   recordCapability(input: {
     payload: CapabilityAuthorisationPayload;
     joyid_signature: unknown;
@@ -165,8 +200,17 @@ export interface RegistryStore {
     request_id: string;
   }): Promise<void>;
   recordSnapshot(input: SnapshotRecord): Promise<void>;
+  getSnapshot(snapshotHash: string): Promise<SnapshotRecord | null>;
+  getSnapshots(snapshotHashes: string[]): Promise<Map<string, SnapshotRecord>>;
   getPackageVersion(namespace: string, name: string, version: string): Promise<PackageVersionRecord | null>;
+  listPackageVersions(input: PackageVersionQuery): Promise<PackageVersionRecord[]>;
   recordPackageVersion(input: PackageVersionRecord): Promise<PackageVersionRecord>;
+  listPackageEvidence(namespace: string, name: string, version: string): Promise<PackageEvidenceRecord[]>;
+  listPackageEvidenceForPackage(namespace: string, name: string): Promise<PackageEvidenceRecord[]>;
+  promotePackageVersion(input: PromotePackageVersionInput): Promise<{
+    version: PackageVersionRecord;
+    evidence: PackageEvidenceRecord;
+  }>;
   recordCapabilityUsage(input: {
     key_id: string;
     principal_type: string;
@@ -246,6 +290,7 @@ export class MemoryRegistryStore implements RegistryStore {
   capabilities = new Map<string, CapabilityRecord>();
   namespaces = new Map<string, NamespaceRecord>();
   packageVersions = new Map<string, PackageVersionRecord>();
+  packageEvidence = new Map<string, PackageEvidenceRecord>();
   snapshots = new Map<string, SnapshotRecord>();
   reservedNamespaces = new Map<string, ReservedNamespaceRecord>(DEFAULT_RESERVED_NAMESPACES.map((record) => [record.namespace, record]));
   auditEvents: AuditEventRecord[] = [];
@@ -262,6 +307,8 @@ export class MemoryRegistryStore implements RegistryStore {
     created_at: string;
   }>();
   idempotencyKeys = new Map<string, IdempotencyRecord>();
+
+  async healthCheck(): Promise<void> {}
 
   async recordCapability(input: {
     payload: CapabilityAuthorisationPayload;
@@ -445,8 +492,37 @@ export class MemoryRegistryStore implements RegistryStore {
     this.snapshots.set(input.snapshot_hash, input);
   }
 
+  async getSnapshot(snapshotHash: string): Promise<SnapshotRecord | null> {
+    return this.snapshots.get(snapshotHash) ?? null;
+  }
+
+  async getSnapshots(snapshotHashes: string[]): Promise<Map<string, SnapshotRecord>> {
+    const records = new Map<string, SnapshotRecord>();
+    for (const hash of new Set(snapshotHashes)) {
+      const snapshot = this.snapshots.get(hash);
+      if (snapshot) records.set(hash, snapshot);
+    }
+    return records;
+  }
+
   async getPackageVersion(namespace: string, name: string, version: string): Promise<PackageVersionRecord | null> {
     return this.packageVersions.get(`${namespace}/${name}@${version}`) ?? null;
+  }
+
+  async listPackageVersions(input: PackageVersionQuery): Promise<PackageVersionRecord[]> {
+    const query = input.query?.toLowerCase();
+    return [...this.packageVersions.values()]
+      .filter((record) => !input.namespace || record.namespace === input.namespace)
+      .filter((record) => !input.name || record.name === input.name)
+      .filter((record) => !input.status || record.status === input.status)
+      .filter((record) => {
+        if (!query) return true;
+        return `${record.namespace}/${record.name}@${record.version} ${JSON.stringify(record.registry_entry)}`
+          .toLowerCase()
+          .includes(query);
+      })
+      .sort((left, right) => right.created_at.localeCompare(left.created_at))
+      .slice(input.offset, input.offset + input.limit);
   }
 
   async recordPackageVersion(input: PackageVersionRecord): Promise<PackageVersionRecord> {
@@ -457,6 +533,62 @@ export class MemoryRegistryStore implements RegistryStore {
     }
     this.packageVersions.set(key, input);
     return input;
+  }
+
+  async listPackageEvidence(namespace: string, name: string, version: string): Promise<PackageEvidenceRecord[]> {
+    const prefix = `${namespace}/${name}@${version}:`;
+    return [...this.packageEvidence.entries()]
+      .filter(([key]) => key.startsWith(prefix))
+      .map(([, record]) => record)
+      .sort((left, right) => left.created_at.localeCompare(right.created_at));
+  }
+
+  async listPackageEvidenceForPackage(namespace: string, name: string): Promise<PackageEvidenceRecord[]> {
+    const prefix = `${namespace}/${name}@`;
+    return [...this.packageEvidence.entries()]
+      .filter(([key]) => key.startsWith(prefix))
+      .map(([, record]) => record)
+      .sort((left, right) => left.created_at.localeCompare(right.created_at));
+  }
+
+  async promotePackageVersion(input: PromotePackageVersionInput): Promise<{
+    version: PackageVersionRecord;
+    evidence: PackageEvidenceRecord;
+  }> {
+    const versionKey = `${input.namespace}/${input.name}@${input.version}`;
+    const existing = this.packageVersions.get(versionKey);
+    if (!existing) {
+      throw new ApiError(404, "package_version_not_found", "package version is not known to the registry");
+    }
+    assertPromotionTransition(existing.status, input.kind);
+    const evidenceKey = `${versionKey}:${input.kind}:${input.evidence_hash}`;
+    const prior = this.packageEvidence.get(evidenceKey);
+    const evidence: PackageEvidenceRecord = prior ?? {
+      namespace: input.namespace,
+      name: input.name,
+      version: input.version,
+      kind: input.kind,
+      evidence_hash: input.evidence_hash,
+      evidence: input.evidence,
+      request_id: input.request_id,
+      admin_actor: input.admin_actor,
+      created_at: nowIso(),
+    };
+    this.packageEvidence.set(evidenceKey, evidence);
+    const versionRecord = { ...existing, status: input.kind };
+    this.packageVersions.set(versionKey, versionRecord);
+    await this.appendAuditEvent({
+      request_id: input.request_id,
+      event_type: `evidence.${input.kind}.accepted`,
+      principal_type: existing.principal_type,
+      principal_id: existing.principal_id,
+      capability_key_id: existing.capability_key_id,
+      namespace: input.namespace,
+      name: input.name,
+      version: input.version,
+      data: { admin_actor: input.admin_actor, evidence_hash: input.evidence_hash },
+    });
+    return { version: versionRecord, evidence };
   }
 
   async recordCapabilityUsage(input: {
@@ -682,6 +814,17 @@ export class MemoryRegistryStore implements RegistryStore {
       }
     }
     return undefined;
+  }
+}
+
+export function assertPromotionTransition(current: RegistryEntryStatus, next: PackageEvidenceKind): void {
+  const allowed: Record<PackageEvidenceKind, RegistryEntryStatus[]> = {
+    verified_build: ["source_published", "indexed_pending", "verified_build"],
+    deployed: ["verified_build", "deployed"],
+    on_chain_attested: ["deployed", "on_chain_attested"],
+  };
+  if (!allowed[next].includes(current)) {
+    throw new ApiError(409, "invalid_evidence_transition", `cannot promote package version from '${current}' to '${next}'`);
   }
 }
 

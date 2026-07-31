@@ -1,6 +1,6 @@
 # CellScript Roadmap
 
-**Updated**: 2026-07-27
+**Updated**: 2026-07-31
 
 This roadmap is the high-level planning map for CellScript. It links the
 release-specific trackers and the deeper design notes so the project does not
@@ -15,7 +15,10 @@ The current project direction is simple:
    capacity, witness, or lock-group boundaries;
 4. keep syntax sugar audit-visible by requiring parser, formatter, type,
    lowering, metadata, codegen, docs, and automated syntax-combination gates to
-   agree before release.
+   agree before release;
+5. finish the trusted package-distribution loop before expanding the language
+   surface: authenticated publish, accepted-status resolution, reproducible
+   source verification, evidence promotion, and a usable public website.
 
 ## Current State
 
@@ -32,7 +35,7 @@ The current project direction is simple:
 | 0.21 planned scope | Semantic closure, authenticated compiler evidence, CLI UX reorganisation, dedicated MCP server and CellScript programming skills, derived cyclic graph views, type-level TemplateLayout metadata, and deferred optional template Merkleisation. | [0.21 roadmap](../docs/CELLSCRIPT_0_21_ROADMAP.md), [0.21 CLI UX plan](CELLSCRIPT_0_21_CLI_UX_PLAN.md) |
 | 0.22 release scope | Released typed transaction views, finite invariant quantifiers, bounded collections, capability entailment, concrete payload enums, validity blocks, borrow regions, stable `E2xxx` diagnostics, and metadata schema 55. | [0.22 release notes](../docs/releases/CELLSCRIPT_0_22_RELEASE_NOTES.md), [0.22 type/set roadmap](CELLSCRIPT_0_22_TYPE_AND_SET_THEORY_ROADMAP.md) |
 | 0.22 bounded Fiber interoperability | The dedicated `fungible-type-group-v1` compiler/adapter path and local-devnet scenarios are implemented. The pinned complete external lifecycle/negative matrix remains pending, so this is not a production-readiness claim. | [0.22 Fiber plan](CELLSCRIPT_0_22_FIBER_NATIVE_SUPPORT_PLAN.md), [operator guide](../examples/fiber/README.md) |
-| 0.23 planned scope | Public registry production deployment on `cellscript.dev`, completed native test/fixture tooling with repository-wide source-policy enforcement, deeper RGB++ / Fiber integration, and an Off-Chain Session Runtime profile with initial concurrency support so the Myelin vendored fork can re-converge on upstream. | [0.23 roadmap](CELLSCRIPT_0_23_ROADMAP.md) |
+| 0.23 active scope | The public Registry infrastructure, HTTPS read/write domains, live website browse/detail surfaces, accepted-status CLI resolution, evidence promotion, and native tooling migration are implemented. The first publisher-owned JoyID publication plus clean-machine install remains the Registry adoption checkpoint; RGB++/Fiber and Off-Chain Session Runtime work retain their explicit evidence boundaries. | [0.23 roadmap](CELLSCRIPT_0_23_ROADMAP.md) |
 | CKB language fit | CKB-first design is confirmed; remaining gaps are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB target profiles](../docs/wiki/Tutorial-05-CKB-Target-Profiles.md), [production gates](../docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md) |
 | Surface syntax | Low-risk syntax pass and 0.13.2 syntax-governance hardening are implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md), [Syntax-combination audit](../docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md) |
 | Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md) |
