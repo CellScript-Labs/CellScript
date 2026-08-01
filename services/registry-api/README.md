@@ -420,7 +420,7 @@ provide all of the following:
 1. a CKB signer connection;
 2. the compressed secp256k1 public key;
 3. a 65-byte recoverable signature over the canonical CKB message challenge;
-4. mainnet/testnet network identity and disconnect/change events.
+4. mainnet network identity and disconnect/change events.
 
 The UI merges CCC discovery into the stable directory, so a future compatible
 adapter upgrades the existing entry without adding a brand-specific Registry
