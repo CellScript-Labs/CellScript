@@ -17,6 +17,8 @@
   },
   "dependencies": {
     "@joyid/ckb": "^1.1.4",
+    "@noble/curves": "2.2.0",
+    "@noble/hashes": "2.2.0",
     "pg": "^8.13.1"
   },
   "devDependencies": {

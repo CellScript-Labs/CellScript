@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SignChallengeResponseData } from "@joyid/ckb";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { blake2b } from "@noble/hashes/blake2.js";
 import {
   AUTH_ACTION,
   AUTH_PROTOCOL,
@@ -9,15 +11,52 @@ import {
   PUBLISH_PROTOCOL,
   canonicalJson,
   capabilityKeyId,
+  ckbSecp256k1PrincipalIdFromPublicKey,
   joyidPrincipalIdFromBinding,
   validatePublishPayload,
   type CapabilityAuthorisationPayload,
   type CapabilityRevocationPayload,
+  type CkbSecp256k1Signature,
   type PublishPayload,
 } from "../src/domain";
 import { MemoryRegistryStore, createApp, type SnapshotWriter } from "../src/index";
 
 const now = new Date("2026-06-23T12:00:00Z");
+const ckbPrivateKey = Uint8Array.from({ length: 32 }, (_, index) => index === 31 ? 7 : 0);
+
+function bytesHex(value: Uint8Array): string {
+  return `0x${[...value].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
+
+async function ckbAuthPayload(): Promise<CapabilityAuthorisationPayload> {
+  const publicKey = bytesHex(secp256k1.getPublicKey(ckbPrivateKey, true));
+  return {
+    ...authPayload(),
+    principal_type: "ckb_secp256k1",
+    principal_id: await ckbSecp256k1PrincipalIdFromPublicKey(publicKey),
+  };
+}
+
+function ckbWalletSignature(
+  payload: CapabilityAuthorisationPayload | CapabilityRevocationPayload,
+): CkbSecp256k1Signature {
+  const challenge = canonicalJson(payload);
+  const message = new TextEncoder().encode(`Nervos Message:${challenge}`);
+  const messageHash = blake2b(message, {
+    dkLen: 32,
+    personalization: new TextEncoder().encode("ckb-default-hash"),
+  });
+  const recovered = secp256k1.sign(messageHash, ckbPrivateKey, { format: "recovered", prehash: false });
+  const ckbSignature = new Uint8Array(65);
+  ckbSignature.set(recovered.subarray(1), 0);
+  ckbSignature[64] = recovered[0] ?? 0;
+  return {
+    scheme: "ckb_secp256k1",
+    challenge,
+    signature: bytesHex(ckbSignature),
+    public_key: bytesHex(secp256k1.getPublicKey(ckbPrivateKey, true)),
+  };
+}
 
 function authPayload(principalId = "0x1111111111111111111111111111111111111111"): CapabilityAuthorisationPayload {
   return {
@@ -289,6 +328,75 @@ describe("registry api", () => {
     expect(response.status).toBe(201);
     const body = await response.json() as any;
     expect(body.principal_id).toBe(principalId);
+  });
+
+  it("accepts a capability authorised by a standard CKB secp256k1 wallet", async () => {
+    const { app } = testApp();
+    const payload = await ckbAuthPayload();
+    const response = await post(app, "/v1/capabilities", {
+      payload,
+      wallet_signature: ckbWalletSignature(payload),
+    });
+
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({
+      principal_type: "ckb_secp256k1",
+      principal_id: payload.principal_id,
+      status: "active",
+    });
+  });
+
+  it("lets a standard CKB wallet claim a namespace and revoke its capability", async () => {
+    const { app, store } = testApp();
+    const payload = await ckbAuthPayload();
+    payload.requested_scopes = ["publish:walletdemo/demo"];
+    const capabilityResponse = await post(app, "/v1/capabilities", {
+      payload,
+      wallet_signature: ckbWalletSignature(payload),
+    });
+    expect(capabilityResponse.status).toBe(201);
+    const capability = await capabilityResponse.json() as any;
+
+    const claimResponse = await post(app, "/v1/namespaces/claim", {
+      namespace: "walletdemo",
+      payload,
+      wallet_signature: ckbWalletSignature(payload),
+    });
+    expect(claimResponse.status).toBe(201);
+    expect(await claimResponse.json()).toMatchObject({
+      namespace: "walletdemo",
+      status: "active",
+    });
+    expect(store.namespaces.get("walletdemo")).toMatchObject({
+      owner_principal_type: "ckb_secp256k1",
+      owner_principal_id: payload.principal_id,
+    });
+
+    const revoke: CapabilityRevocationPayload = {
+      ...revokePayload(capability.key_id, payload.principal_id),
+      principal_type: "ckb_secp256k1",
+    };
+    const revokeResponse = await post(app, `/v1/capabilities/${capability.key_id}/revoke`, {
+      payload: revoke,
+      wallet_signature: ckbWalletSignature(revoke),
+      reason: "rotated",
+    });
+    expect(revokeResponse.status).toBe(200);
+    expect((await revokeResponse.json() as any).status).toBe("revoked");
+    expect(store.capabilities.get(capability.key_id)?.revoked_at).toBeTruthy();
+  });
+
+  it("rejects a CKB wallet signature whose public key is not the payload principal", async () => {
+    const { app } = testApp();
+    const payload = await ckbAuthPayload();
+    payload.principal_id = `0x${"44".repeat(32)}`;
+    const response = await post(app, "/v1/capabilities", {
+      payload,
+      wallet_signature: ckbWalletSignature(payload),
+    });
+
+    expect(response.status).toBe(401);
+    expect((await response.json() as any).error.code).toBe("ckb_principal_mismatch");
   });
 
   it("creates a capability, claims namespace, stores snapshot, and admits source_published publish", async () => {

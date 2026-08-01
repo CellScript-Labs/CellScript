@@ -24,8 +24,11 @@ package URLs remain available during a database or API incident.
 The self-hosted production slice was deployed on 2026-07-31. From that point,
 `migrations/0001_initial.sql` is the frozen deployed baseline; schema changes
 use additive numbered migrations. `0002_verification_jobs.sql` adds the leased
-automatic verification queue without rewriting that baseline. Readiness and
-the public/static surfaces are available at:
+automatic verification queue without rewriting that baseline.
+`0003_multi_wallet_principals.sql` widens the typed principal constraint to
+`joyid_ckb` and `ckb_secp256k1` while retaining the legacy signature-column
+name for non-destructive deployment compatibility. Readiness and the
+public/static surfaces are available at:
 
 ```text
 https://api.registry.cellscript.dev/health
@@ -35,17 +38,21 @@ https://registry.cellscript.dev/health
 
 ## Implemented Boundaries
 
-- JoyID-rooted capability authorisation with `@joyid/ckb` `verifySignature`.
+- Typed wallet-rooted capability authorisation: JoyID uses `@joyid/ckb`
+  `verifySignature`; standard CKB wallets use recoverable secp256k1 CKB
+  message signatures.
 - Challenge binding against canonical `cellscript-registry-auth-v1` payloads.
-- `principal_type = joyid_ckb` only.
-- `principal_id` binding against the JoyID signer key; display addresses are
-  not accepted as ACL keys.
+- Accepted principal types are `joyid_ckb` and `ckb_secp256k1`.
+- `principal_id` binding against the signer public key; display addresses are
+  not accepted as ACL keys. The standard CKB binding is
+  `sha256("cellscript-registry-ckb-secp256k1-principal-v1\n" ||
+  compressed_public_key)`.
 - Scoped capability records with expiry and revocation fields.
 - Namespace claim path with reserved/short-name review state.
 - Seeded reserved namespace list for core ecosystem, hostname, security, and
   support namespaces.
-- Namespace claim cooldown for newly claimed namespaces by the same JoyID
-  principal; invalid JoyID signatures do not consume principal quota.
+- Namespace claim cooldown for newly claimed namespaces by the same wallet
+  principal; invalid wallet signatures do not consume principal quota.
 - Publish admission path for source packages.
 - Single-shape `cellscript-registry-publish-v1` admission: the signed
   `registry_entry` must contain exactly the published version and explicitly
@@ -195,7 +202,7 @@ through queue claim, real compilation, evidence persistence,
 consumer install/check/build without `--allow-unverified`. The exact test rows
 were deleted transactionally afterward; its two object files were moved out of
 the served volume into a checksum-verified recovery directory. This is worker
-and deployment evidence, not publisher-owned JoyID authorisation evidence.
+and deployment evidence, not publisher-owned wallet authorisation evidence.
 
 Required runtime configuration:
 
@@ -362,37 +369,64 @@ does not rebuild or create a second evidence record.
 ## Capability Registration And Revocation
 
 `cellc auth capability create` only creates the local delegated key and prints
-the JoyID challenge. It does not register the key until the JoyID-signed payload
-is submitted to the write API:
+the wallet challenge. It does not register the key until the wallet-signed
+payload is submitted to the write API:
 
 ```bash
-cellc auth capability create --principal-id <principal_id> --scope publish:ns/pkg --expires 90d --json > capability-payload.json
-# Sign capability-payload.json with the production JoyID path exposed through CCC.
-cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json
-cellc auth namespace claim --namespace ns --payload capability-payload.json --joyid-signature joyid-signature.json
+cellc auth capability create --principal-type <principal_type> --principal-id <principal_id> --scope publish:ns/pkg --expires 90d --json > capability-payload.json
+# Sign capability-payload.json with a supported CKB signer exposed through CCC.
+cellc auth capability submit --payload capability-payload.json --wallet-signature wallet-signature.json
+cellc auth namespace claim --namespace ns --payload capability-payload.json --wallet-signature wallet-signature.json
 ```
 
-The registry submit page can sign the same payload through the CCC JoyID CKB
-signer and submit it directly to `/v1/capabilities`. The signed response can
-also be copied as `joyid-signature.json` for the CLI submit path.
+The registry submit page can sign the same payload through a CCC CKB signer and
+submit it directly to `/v1/capabilities`. JoyID creates a `joyid_ckb` envelope;
+wallets such as UTXO Global or Rei create a `ckb_secp256k1` envelope. The signed
+response can also be copied as `wallet-signature.json` for the CLI submit path.
 The separate **Claim namespace** action, or `cellc auth namespace claim`, sends
 the same signed authorisation to `/v1/namespaces/claim`. A first publish is
 intentionally rejected until that claim is active; reserved namespaces may
 remain pending for administrator review.
 
-The submit page derives the preferred `principal_id` from the connected JoyID
-signer and exposes a copy action. The API verifies that the JoyID signature's
-public key and key type match the `principal_id` embedded in the payload before
-recording the capability.
+The submit page derives the preferred `principal_id` from the connected signer
+and exposes a copy action. The API verifies that the signature's public key and
+scheme match the `principal_type` and `principal_id` embedded in the payload
+before recording the capability. Recovery phrases never cross this boundary;
+mnemonic import belongs to the wallet, not to the Registry page or API.
 
 Capability revocation follows the same challenge/submit shape so that the
-revocation is also bound to the JoyID root principal:
+revocation is also bound to the wallet root principal:
 
 ```bash
-cellc auth capability revoke --principal-id <principal_id> --capability-key-id <capability_key_id> --json > revoke-payload.json
-# Sign revoke-payload.json with JoyID.
-cellc auth capability revoke --payload revoke-payload.json --joyid-signature joyid-signature.json --reason "rotate delegated key"
+cellc auth capability revoke --principal-type <principal_type> --principal-id <principal_id> --capability-key-id <capability_key_id> --json > revoke-payload.json
+# Sign revoke-payload.json with the same wallet principal.
+cellc auth capability revoke --payload revoke-payload.json --wallet-signature wallet-signature.json --reason "rotate delegated key"
 ```
+
+### Browser wallet compatibility
+
+The chooser includes the complete official CKB wallet directory: Neuron,
+JoyID, imToken, CKBull, SafePal, Ledger, imKey, OneKey, UTXO Global, Rei Wallet,
+Gate, and QuantumPurse. Directory visibility and runtime connectivity are
+separate states. With the pinned CCC connector, detected CKB signers such as
+JoyID Passkey, UTXO Global, and Rei Wallet connect directly. The remaining
+entries open their official wallet surface and continue through the external
+`wallet-signature.json` handoff. Mnemonic import and storage remain entirely
+inside the selected wallet.
+
+A wallet becomes directly connectable when a maintained browser adapter can
+provide all of the following:
+
+1. a CKB signer connection;
+2. the compressed secp256k1 public key;
+3. a 65-byte recoverable signature over the canonical CKB message challenge;
+4. mainnet/testnet network identity and disconnect/change events.
+
+The UI merges CCC discovery into the stable directory, so a future compatible
+adapter upgrades the existing entry without adding a brand-specific Registry
+auth path. Desktop-only, mobile-only, and hardware-wallet flows use the external
+signature handoff until such an adapter exists. A catalog entry alone never
+bypasses backend verification.
 
 ## Publish Payload Boundary
 
@@ -485,7 +519,7 @@ cellc publish --payload publish-payload.json --capability-signature <signature>
 
 `CELLSCRIPT_REGISTRY_API_URL` overrides the write API base URL. CI may set
 `CELLSCRIPT_CAPABILITY_PRIVATE_KEY_PKCS8_B64` to let the CLI sign with a
-delegated capability key without JoyID or keychain access.
+delegated capability key without wallet or keychain access.
 `CELLSCRIPT_REGISTRY_IDEMPOTENCY_KEY` pins the publish retry key; otherwise the
 CLI derives one from the publish request and reuses it for transient retry of
 the same HTTP submission.

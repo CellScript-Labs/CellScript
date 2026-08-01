@@ -3,6 +3,7 @@ import {
   capabilityKeyId,
   canonicalJson,
   type CapabilityAuthorisationPayload,
+  type PrincipalType,
   type PublishPayload,
   type RegistryEntryStatus,
   type RegistryIndexEntry,
@@ -18,7 +19,7 @@ export interface ReservedNamespaceRecord {
 
 export interface CapabilityRecord {
   key_id: string;
-  principal_type: "joyid_ckb";
+  principal_type: PrincipalType;
   principal_id: string;
   capability_pubkey: string;
   scopes: string[];
@@ -48,7 +49,7 @@ export interface PackageVersionRecord {
   /** Complete resolved compatibility identity across independent axes. */
   compatibility_profile_hash: string;
   capability_key_id: string;
-  principal_type: string;
+  principal_type: PrincipalType;
   principal_id: string;
   registry_entry: RegistryIndexEntry;
   snapshot_hash: string;
@@ -180,7 +181,7 @@ export interface PublishAdmissionInput {
   package: {
     namespace: string;
     name: string;
-    principal_type: string;
+    principal_type: PrincipalType;
     principal_id: string;
     source_repo?: string;
     request_id: string;
@@ -189,7 +190,7 @@ export interface PublishAdmissionInput {
   version: PackageVersionRecord;
   capability_usage: {
     key_id: string;
-    principal_type: string;
+    principal_type: PrincipalType;
     principal_id: string;
     request_id: string;
     action: string;
@@ -227,7 +228,7 @@ export interface NamespaceRecord {
   namespace: string;
   status: NamespaceStatus;
   review_reason?: string;
-  owner_principal_type: "joyid_ckb";
+  owner_principal_type: PrincipalType;
   owner_principal_id: string;
 }
 
@@ -235,13 +236,13 @@ export interface RegistryStore {
   healthCheck(): Promise<void>;
   recordCapability(input: {
     payload: CapabilityAuthorisationPayload;
-    joyid_signature: unknown;
+    principal_signature: unknown;
     request_id: string;
   }): Promise<CapabilityRecord>;
   getCapability(keyId: string): Promise<CapabilityRecord | null>;
   revokeCapability(input: {
     key_id: string;
-    principal_type: "joyid_ckb";
+    principal_type: PrincipalType;
     principal_id: string;
     request_id: string;
     reason?: string;
@@ -249,7 +250,7 @@ export interface RegistryStore {
   getNamespace(namespace: string): Promise<NamespaceRecord | null>;
   claimNamespace(input: {
     namespace: string;
-    principal_type: "joyid_ckb";
+    principal_type: PrincipalType;
     principal_id: string;
     request_id: string;
   }): Promise<NamespaceClaimResult>;
@@ -267,7 +268,7 @@ export interface RegistryStore {
   ensurePackage(input: {
     namespace: string;
     name: string;
-    principal_type: string;
+    principal_type: PrincipalType;
     principal_id: string;
     source_repo?: string;
     request_id: string;
@@ -287,7 +288,7 @@ export interface RegistryStore {
   }>;
   recordCapabilityUsage(input: {
     key_id: string;
-    principal_type: string;
+    principal_type: PrincipalType;
     principal_id: string;
     request_id: string;
     action: string;
@@ -427,7 +428,7 @@ export class MemoryRegistryStore implements RegistryStore {
 
   async recordCapability(input: {
     payload: CapabilityAuthorisationPayload;
-    joyid_signature: unknown;
+    principal_signature: unknown;
     request_id: string;
   }): Promise<CapabilityRecord> {
     const key_id = await capabilityKeyId(input.payload.capability_pubkey);
@@ -452,7 +453,7 @@ export class MemoryRegistryStore implements RegistryStore {
       principal_type: record.principal_type,
       principal_id: record.principal_id,
       capability_key_id: key_id,
-      data: { scopes: record.scopes, payload_hash: await hashForMemory(input.payload), joyid_signature_present: !!input.joyid_signature },
+      data: { scopes: record.scopes, payload_hash: await hashForMemory(input.payload), principal_signature_present: !!input.principal_signature },
     });
     return record;
   }
@@ -463,7 +464,7 @@ export class MemoryRegistryStore implements RegistryStore {
 
   async revokeCapability(input: {
     key_id: string;
-    principal_type: "joyid_ckb";
+    principal_type: PrincipalType;
     principal_id: string;
     request_id: string;
     reason?: string;
@@ -492,7 +493,7 @@ export class MemoryRegistryStore implements RegistryStore {
 
   async claimNamespace(input: {
     namespace: string;
-    principal_type: "joyid_ckb";
+    principal_type: PrincipalType;
     principal_id: string;
     request_id: string;
   }): Promise<NamespaceClaimResult> {
@@ -579,7 +580,7 @@ export class MemoryRegistryStore implements RegistryStore {
   async ensurePackage(input: {
     namespace: string;
     name: string;
-    principal_type: string;
+    principal_type: PrincipalType;
     principal_id: string;
     source_repo?: string;
     request_id: string;
@@ -588,7 +589,7 @@ export class MemoryRegistryStore implements RegistryStore {
       this.namespaces.set(input.namespace, {
         namespace: input.namespace,
         status: "active",
-        owner_principal_type: input.principal_type as "joyid_ckb",
+        owner_principal_type: input.principal_type,
         owner_principal_id: input.principal_id,
       });
     }
@@ -733,7 +734,7 @@ export class MemoryRegistryStore implements RegistryStore {
 
   async recordCapabilityUsage(input: {
     key_id: string;
-    principal_type: string;
+    principal_type: PrincipalType;
     principal_id: string;
     request_id: string;
     action: string;

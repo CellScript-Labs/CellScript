@@ -1,6 +1,7 @@
 import { verifySignature, type SignChallengeResponseData } from "@joyid/ckb";
 import {
-  ACCEPTED_PRINCIPAL_TYPE,
+  CKB_SECP256K1_PRINCIPAL_TYPE,
+  JOYID_PRINCIPAL_TYPE,
   ApiError,
   DEFAULT_REGISTRY_ORIGIN,
   DEFAULT_STATIC_REGISTRY_ORIGIN,
@@ -10,6 +11,7 @@ import {
   base64ToBytes,
   canonicalJson,
   capabilityKeyId,
+  isPrincipalType,
   scopeAllowsPublish,
   sha256Hex,
   validateCapabilityPayload,
@@ -18,11 +20,14 @@ import {
   validatePublishPayload,
   validateSnapshot,
   validateVersion,
-  verifyJoyidAuthorisationPayload,
-  verifyJoyidPayloadSignature,
+  verifyPrincipalAuthorisationPayload,
+  verifyPrincipalPayloadSignature,
   type CapabilitySignature,
   type CapabilitySignatureVerifier,
+  type CkbSecp256k1Signature,
   type JoyidVerifier,
+  type PrincipalSignature,
+  type PrincipalType,
   type SourceSnapshotInput,
 } from "./domain";
 import {
@@ -525,8 +530,8 @@ async function handleAdminAuditEvents(
   const versionRaw = optionalAuditParam(params, "version");
   const beforeRaw = optionalAuditParam(params, "before");
   const limit = auditLimit(params);
-  if (principalType && principalType !== ACCEPTED_PRINCIPAL_TYPE) {
-    throw new ApiError(400, "invalid_audit_filter", "principal_type filter must be joyid_ckb");
+  if (principalType && !isPrincipalType(principalType)) {
+    throw new ApiError(400, "invalid_audit_filter", "principal_type filter is unsupported");
   }
   const before = beforeRaw ? parseAuditBefore(beforeRaw) : undefined;
   const namespace = namespaceRaw ? validatePackageIdent(namespaceRaw, "namespace") : undefined;
@@ -757,8 +762,8 @@ async function handleCreateCapability(
   await throttleRequestSource(store, request, requestId, "capability_create", 120, 60, now);
   const body = await readJson(request, maxJsonBytes(env));
   const payload = validateCapabilityPayload(body["payload"], registryOrigin, now);
-  const signature = requireJoyidSignature(body["joyid_signature"]);
-  await verifyJoyidAuthorisationPayload(payload, signature, deps.joyidVerifier ?? productionJoyidVerifier(),);
+  const signature = requirePrincipalSignature(body, payload.principal_type);
+  await verifyPrincipalAuthorisationPayload(payload, signature, deps.joyidVerifier ?? productionJoyidVerifier());
   await throttle(store, requestId, `principal:${payload.principal_type}:${payload.principal_id}`, "capability", 8, 60 * 60, now);
   const nonceKey = await consumeSignedNonce(store, requestId, {
     protocol: payload.protocol,
@@ -770,7 +775,7 @@ async function handleCreateCapability(
   });
   let capability;
   try {
-    capability = await store.recordCapability({ payload, joyid_signature: signature, request_id: requestId });
+    capability = await store.recordCapability({ payload, principal_signature: signature, request_id: requestId });
   } catch (error) {
     await store.releaseNonce({ nonce_key: nonceKey, request_id: requestId });
     throw error;
@@ -804,11 +809,11 @@ async function handleClaimNamespace(
   const body = await readJson(request, maxJsonBytes(env));
   const namespace = validatePackageIdent(String(body["namespace"] ?? ""), "namespace");
   const payload = validateCapabilityPayload(body["payload"], registryOrigin, now);
-  const signature = requireJoyidSignature(body["joyid_signature"]);
+  const signature = requirePrincipalSignature(body, payload.principal_type);
   if (!payload.requested_scopes.some((scope) => scope.startsWith(`publish:${namespace}/`))) {
     throw new ApiError(403, "namespace_scope_missing", "namespace claim requires a publish scope for that namespace");
   }
-  await verifyJoyidAuthorisationPayload(payload, signature, deps.joyidVerifier ?? productionJoyidVerifier());
+  await verifyPrincipalAuthorisationPayload(payload, signature, deps.joyidVerifier ?? productionJoyidVerifier());
   await throttle(store, requestId, `principal:${payload.principal_type}:${payload.principal_id}`, "namespace_claim", 12, 24 * 60 * 60, now);
   const existing = await store.getNamespace(namespace);
   if (
@@ -832,7 +837,7 @@ async function handleClaimNamespace(
   await enforceNamespaceClaimCooldown(store, requestId, payload.principal_type, payload.principal_id, now, namespaceClaimCooldownSeconds(env));
   const claim = await store.claimNamespace({
     namespace,
-    principal_type: ACCEPTED_PRINCIPAL_TYPE,
+    principal_type: payload.principal_type,
     principal_id: payload.principal_id,
     request_id: requestId,
   });
@@ -861,10 +866,10 @@ async function handleRevokeCapability(
     throw new ApiError(404, "capability_not_found", "capability key is not known to the registry");
   }
   if (capability.principal_type !== payload.principal_type || capability.principal_id !== payload.principal_id) {
-    throw new ApiError(403, "capability_owner_mismatch", "JoyID principal does not own this capability");
+    throw new ApiError(403, "capability_owner_mismatch", "wallet principal does not own this capability");
   }
-  const signature = requireJoyidSignature(body["joyid_signature"]);
-  await verifyJoyidPayloadSignature(payload, signature, deps.joyidVerifier ?? productionJoyidVerifier());
+  const signature = requirePrincipalSignature(body, payload.principal_type);
+  await verifyPrincipalPayloadSignature(payload, signature, deps.joyidVerifier ?? productionJoyidVerifier());
   await throttle(store, requestId, `principal:${payload.principal_type}:${payload.principal_id}`, "capability_revoke", 8, 60 * 60, now);
   const nonceKey = await consumeSignedNonce(store, requestId, {
     protocol: payload.protocol,
@@ -1524,11 +1529,31 @@ async function readJson(request: Request, maxBytes: number): Promise<Record<stri
   }
 }
 
-function requireJoyidSignature(value: unknown): SignChallengeResponseData {
-  if (!value || typeof value !== "object") {
-    throw new ApiError(400, "missing_joyid_signature", "joyid_signature is required");
+function requirePrincipalSignature(body: Record<string, unknown>, principalType: PrincipalType): PrincipalSignature {
+  const value = body["wallet_signature"] ?? body["joyid_signature"];
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ApiError(400, "missing_wallet_signature", "wallet_signature is required");
   }
-  return value as SignChallengeResponseData;
+  if (principalType === JOYID_PRINCIPAL_TYPE) {
+    return value as SignChallengeResponseData;
+  }
+  if (principalType !== CKB_SECP256K1_PRINCIPAL_TYPE) {
+    throw new ApiError(400, "unsupported_principal_type", "wallet principal type is unsupported");
+  }
+  const signature = value as Record<string, unknown>;
+  if (
+    signature["scheme"] !== CKB_SECP256K1_PRINCIPAL_TYPE
+    || typeof signature["challenge"] !== "string"
+    || typeof signature["signature"] !== "string"
+    || typeof signature["public_key"] !== "string"
+  ) {
+    throw new ApiError(
+      400,
+      "invalid_wallet_signature",
+      "ckb_secp256k1 wallet_signature must include scheme, challenge, signature, and public_key",
+    );
+  }
+  return signature as unknown as CkbSecp256k1Signature;
 }
 
 function requireCapabilitySignature(value: unknown): CapabilitySignature {

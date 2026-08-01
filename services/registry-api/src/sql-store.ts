@@ -23,7 +23,15 @@ import {
   type VerificationJobStatus,
   type VerificationQueueMetrics,
 } from "./store";
-import { ApiError, capabilityKeyId, canonicalJson, sha256Hex, type CapabilityAuthorisationPayload, type RegistryEntryStatus } from "./domain";
+import {
+  ApiError,
+  capabilityKeyId,
+  canonicalJson,
+  sha256Hex,
+  type CapabilityAuthorisationPayload,
+  type PrincipalType,
+  type RegistryEntryStatus,
+} from "./domain";
 
 export interface HyperdriveLike {
   connectionString: string;
@@ -50,7 +58,7 @@ export class SqlRegistryStore implements RegistryStore {
 
   async recordCapability(input: {
     payload: CapabilityAuthorisationPayload;
-    joyid_signature: unknown;
+    principal_signature: unknown;
     request_id: string;
   }): Promise<CapabilityRecord> {
     const keyId = await capabilityKeyId(input.payload.capability_pubkey);
@@ -86,7 +94,10 @@ export class SqlRegistryStore implements RegistryStore {
             input.payload.requested_scopes,
             input.payload.capability_expires_at,
             JSON.stringify(input.payload),
-            JSON.stringify(input.joyid_signature),
+            // The production schema keeps the original column name for a
+            // non-destructive migration; it stores either supported wallet
+            // signature envelope.
+            JSON.stringify(input.principal_signature),
           ],
         );
         if (capabilityInsert.rowCount !== 1) {
@@ -147,7 +158,7 @@ export class SqlRegistryStore implements RegistryStore {
 
   async revokeCapability(input: {
     key_id: string;
-    principal_type: "joyid_ckb";
+    principal_type: PrincipalType;
     principal_id: string;
     request_id: string;
     reason?: string;
@@ -215,7 +226,7 @@ export class SqlRegistryStore implements RegistryStore {
 
   async claimNamespace(input: {
     namespace: string;
-    principal_type: "joyid_ckb";
+    principal_type: PrincipalType;
     principal_id: string;
     request_id: string;
   }): Promise<NamespaceClaimResult> {
@@ -372,7 +383,7 @@ export class SqlRegistryStore implements RegistryStore {
   async ensurePackage(input: {
     namespace: string;
     name: string;
-    principal_type: string;
+    principal_type: PrincipalType;
     principal_id: string;
     source_repo?: string;
     request_id: string;

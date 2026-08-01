@@ -1,4 +1,6 @@
 import type { SignChallengeResponseData } from "@joyid/ckb";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { blake2b } from "@noble/hashes/blake2.js";
 
 export const AUTH_PROTOCOL = "cellscript-registry-auth-v1";
 export const AUTH_ACTION = "authorize_capability";
@@ -9,8 +11,13 @@ export const REGISTRY_SCHEMA_VERSION = 1;
 export const CELLSCRIPT_EDITION = "2026";
 export const DEFAULT_REGISTRY_ORIGIN = "https://api.registry.cellscript.dev";
 export const DEFAULT_STATIC_REGISTRY_ORIGIN = "https://registry.cellscript.dev";
-export const ACCEPTED_PRINCIPAL_TYPE = "joyid_ckb";
+export const JOYID_PRINCIPAL_TYPE = "joyid_ckb";
+export const CKB_SECP256K1_PRINCIPAL_TYPE = "ckb_secp256k1";
+export const ACCEPTED_PRINCIPAL_TYPES = [JOYID_PRINCIPAL_TYPE, CKB_SECP256K1_PRINCIPAL_TYPE] as const;
 export const JOYID_CKB_PRINCIPAL_BINDING_CONTEXT = "cellscript-registry-joyid-ckb-principal-v1";
+export const CKB_SECP256K1_PRINCIPAL_BINDING_CONTEXT = "cellscript-registry-ckb-secp256k1-principal-v1";
+
+export type PrincipalType = (typeof ACCEPTED_PRINCIPAL_TYPES)[number];
 
 export type RegistryEntryStatus =
   | "source_published"
@@ -26,7 +33,7 @@ export interface CapabilityAuthorisationPayload {
   protocol: typeof AUTH_PROTOCOL;
   action: typeof AUTH_ACTION;
   registry_origin: string;
-  principal_type: typeof ACCEPTED_PRINCIPAL_TYPE;
+  principal_type: PrincipalType;
   principal_id: string;
   capability_pubkey: string;
   requested_scopes: string[];
@@ -41,7 +48,7 @@ export interface CapabilityRevocationPayload {
   protocol: typeof AUTH_PROTOCOL;
   action: typeof AUTH_REVOKE_CAPABILITY_ACTION;
   registry_origin: string;
-  principal_type: typeof ACCEPTED_PRINCIPAL_TYPE;
+  principal_type: PrincipalType;
   principal_id: string;
   capability_key_id: string;
   nonce: string;
@@ -105,6 +112,15 @@ export interface CapabilitySignature {
 export interface JoyidVerifier {
   verifySignature(signature: SignChallengeResponseData): Promise<boolean>;
 }
+
+export interface CkbSecp256k1Signature {
+  scheme: typeof CKB_SECP256K1_PRINCIPAL_TYPE;
+  challenge: string;
+  signature: string;
+  public_key: string;
+}
+
+export type PrincipalSignature = SignChallengeResponseData | CkbSecp256k1Signature;
 
 export interface CapabilitySignatureVerifier {
   verify(canonicalPayload: string, capabilityPubkey: string, signature: CapabilitySignature): Promise<boolean>;
@@ -205,6 +221,39 @@ export function requireStringArray(value: Record<string, unknown>, key: string):
   return item.map((entry) => entry.trim());
 }
 
+export function isPrincipalType(value: string): value is PrincipalType {
+  return ACCEPTED_PRINCIPAL_TYPES.some((principalType) => principalType === value);
+}
+
+export function validatePrincipalType(value: string): PrincipalType {
+  if (!isPrincipalType(value)) {
+    throw new ApiError(
+      400,
+      "unsupported_principal_type",
+      `principal_type must be one of: ${ACCEPTED_PRINCIPAL_TYPES.join(", ")}`,
+    );
+  }
+  return value;
+}
+
+function validatePrincipalId(value: string, principalType: PrincipalType): string {
+  const principalId = value.trim().toLowerCase();
+  if (principalType === CKB_SECP256K1_PRINCIPAL_TYPE) {
+    if (!/^0x[0-9a-f]{64}$/.test(principalId)) {
+      throw new ApiError(
+        400,
+        "invalid_principal_id",
+        "ckb_secp256k1 principal_id must be the 32-byte CellScript public-key binding",
+      );
+    }
+    return principalId;
+  }
+  if (!/^0x[0-9a-f]{40,64}$/.test(principalId) && !/^ck[bt]1[0-9a-z]+$/.test(principalId)) {
+    throw new ApiError(400, "invalid_principal_id", "principal_id must be a normalized JoyID/CKB identity binding");
+  }
+  return principalId;
+}
+
 export function parseTimestamp(value: string, key: string): Date {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) {
@@ -237,8 +286,8 @@ export function validateCapabilityPayload(
   const obj = assertPlainObject(payload, "invalid_capability_payload");
   const protocol = requireString(obj, "protocol");
   const action = requireString(obj, "action");
-  const principalType = requireString(obj, "principal_type");
-  const principalId = requireString(obj, "principal_id");
+  const principalType = validatePrincipalType(requireString(obj, "principal_type"));
+  const principalId = validatePrincipalId(requireString(obj, "principal_id"), principalType);
   const capabilityPubkey = requireString(obj, "capability_pubkey");
   const requestedScopes = requireStringArray(obj, "requested_scopes");
   const capabilityExpiresAt = requireString(obj, "capability_expires_at");
@@ -252,12 +301,6 @@ export function validateCapabilityPayload(
   }
   if (requireString(obj, "registry_origin") !== registryOrigin) {
     throw new ApiError(400, "invalid_registry_origin", "capability payload registry_origin does not match this API");
-  }
-  if (principalType !== ACCEPTED_PRINCIPAL_TYPE) {
-    throw new ApiError(400, "unsupported_principal_type", "only joyid_ckb principals are accepted");
-  }
-  if (!/^0x[0-9a-fA-F]{40,64}$/.test(principalId) && !/^ck[bt]1[0-9a-z]+$/.test(principalId)) {
-    throw new ApiError(400, "invalid_principal_id", "principal_id must be a normalized JoyID/CKB identity binding");
   }
   if (requestedScopes.some((scope) => !/^publish:[a-z0-9][a-z0-9_-]{1,62}\/[a-z0-9][a-z0-9_-]{1,62}$/.test(scope))) {
     throw new ApiError(400, "invalid_scope", "requested_scopes may only contain publish:namespace/package scopes");
@@ -279,7 +322,7 @@ export function validateCapabilityPayload(
     protocol: AUTH_PROTOCOL,
     action: AUTH_ACTION,
     registry_origin: registryOrigin,
-    principal_type: ACCEPTED_PRINCIPAL_TYPE,
+    principal_type: principalType,
     principal_id: principalId,
     capability_pubkey: capabilityPubkey,
     requested_scopes: requestedScopes,
@@ -299,8 +342,8 @@ export function validateCapabilityRevocationPayload(
   const obj = assertPlainObject(payload, "invalid_capability_revocation_payload");
   const protocol = requireString(obj, "protocol");
   const action = requireString(obj, "action");
-  const principalType = requireString(obj, "principal_type");
-  const principalId = requireString(obj, "principal_id");
+  const principalType = validatePrincipalType(requireString(obj, "principal_type"));
+  const principalId = validatePrincipalId(requireString(obj, "principal_id"), principalType);
   const capabilityKeyId = requireString(obj, "capability_key_id");
   const nonce = requireString(obj, "nonce");
   const issuedAt = requireString(obj, "issued_at");
@@ -312,12 +355,6 @@ export function validateCapabilityRevocationPayload(
   }
   if (requireString(obj, "registry_origin") !== registryOrigin) {
     throw new ApiError(400, "invalid_registry_origin", "capability revocation registry_origin does not match this API");
-  }
-  if (principalType !== ACCEPTED_PRINCIPAL_TYPE) {
-    throw new ApiError(400, "unsupported_principal_type", "only joyid_ckb principals are accepted");
-  }
-  if (!/^0x[0-9a-fA-F]{40,64}$/.test(principalId) && !/^ck[bt]1[0-9a-z]+$/.test(principalId)) {
-    throw new ApiError(400, "invalid_principal_id", "principal_id must be a normalized JoyID/CKB identity binding");
   }
   if (!/^cap_[0-9a-f]{32}$/.test(capabilityKeyId)) {
     throw new ApiError(400, "invalid_capability_key_id", "capability_key_id is malformed");
@@ -334,7 +371,7 @@ export function validateCapabilityRevocationPayload(
     protocol: AUTH_PROTOCOL,
     action: AUTH_REVOKE_CAPABILITY_ACTION,
     registry_origin: registryOrigin,
-    principal_type: ACCEPTED_PRINCIPAL_TYPE,
+    principal_type: principalType,
     principal_id: principalId,
     capability_key_id: capabilityKeyId,
     nonce,
@@ -477,6 +514,43 @@ export async function verifyJoyidAuthorisationPayload(
   return verifyJoyidPayloadSignature(payload, signature, verifier);
 }
 
+export async function verifyPrincipalAuthorisationPayload(
+  payload: CapabilityAuthorisationPayload,
+  signature: PrincipalSignature,
+  joyidVerifier: JoyidVerifier,
+): Promise<void> {
+  return verifyPrincipalPayloadSignature(payload, signature, joyidVerifier);
+}
+
+export async function verifyPrincipalPayloadSignature(
+  payload: unknown,
+  signature: PrincipalSignature,
+  joyidVerifier: JoyidVerifier,
+): Promise<void> {
+  const principalType = principalTypeFromPayload(payload);
+  if (principalType === JOYID_PRINCIPAL_TYPE) {
+    if (isCkbSecp256k1Signature(signature)) {
+      throw new ApiError(400, "signature_scheme_mismatch", "joyid_ckb requires a JoyID signature");
+    }
+    return verifyJoyidPayloadSignature(payload, signature, joyidVerifier);
+  }
+  if (!isCkbSecp256k1Signature(signature)) {
+    throw new ApiError(400, "signature_scheme_mismatch", "ckb_secp256k1 requires a CKB secp256k1 signature");
+  }
+  return verifyCkbSecp256k1PayloadSignature(payload, signature);
+}
+
+function principalTypeFromPayload(payload: unknown): PrincipalType {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new ApiError(400, "invalid_principal_payload", "signed payload must be a JSON object");
+  }
+  return validatePrincipalType(requireString(payload as Record<string, unknown>, "principal_type"));
+}
+
+export function isCkbSecp256k1Signature(signature: PrincipalSignature): signature is CkbSecp256k1Signature {
+  return "scheme" in signature && signature.scheme === CKB_SECP256K1_PRINCIPAL_TYPE;
+}
+
 export async function verifyJoyidPayloadSignature(
   payload: unknown,
   signature: SignChallengeResponseData,
@@ -500,7 +574,7 @@ async function verifyJoyidPrincipalBinding(payload: unknown, signature: SignChal
     return;
   }
   const obj = payload as Record<string, unknown>;
-  if (obj["principal_type"] !== ACCEPTED_PRINCIPAL_TYPE || typeof obj["principal_id"] !== "string") {
+  if (obj["principal_type"] !== JOYID_PRINCIPAL_TYPE || typeof obj["principal_id"] !== "string") {
     return;
   }
   const principalId = obj["principal_id"].trim().toLowerCase();
@@ -534,6 +608,69 @@ export async function joyidPrincipalIdFromBinding(keyType: "main_key" | "sub_key
 function normalizeJoyidPubkey(pubkey: string): string {
   const value = pubkey.trim().toLowerCase();
   return value.startsWith("0x") ? value.slice(2) : value;
+}
+
+export async function ckbSecp256k1PrincipalIdFromPublicKey(publicKey: string): Promise<string> {
+  const normalized = normalizeCkbSecp256k1PublicKey(publicKey);
+  const material = `${CKB_SECP256K1_PRINCIPAL_BINDING_CONTEXT}\n${normalized}`;
+  return `0x${await sha256Hex(material)}`;
+}
+
+export async function verifyCkbSecp256k1PayloadSignature(
+  payload: unknown,
+  signature: CkbSecp256k1Signature,
+): Promise<void> {
+  const expectedChallenge = canonicalJson(payload);
+  if (signature.challenge !== expectedChallenge) {
+    throw new ApiError(401, "ckb_challenge_mismatch", "CKB signature challenge does not match the payload");
+  }
+  const publicKey = normalizeCkbSecp256k1PublicKey(signature.public_key);
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new ApiError(400, "invalid_principal_payload", "signed payload must be a JSON object");
+  }
+  const obj = payload as Record<string, unknown>;
+  if (obj["principal_type"] !== CKB_SECP256K1_PRINCIPAL_TYPE || typeof obj["principal_id"] !== "string") {
+    throw new ApiError(400, "signature_scheme_mismatch", "payload is not bound to ckb_secp256k1");
+  }
+  const expectedPrincipalId = await ckbSecp256k1PrincipalIdFromPublicKey(publicKey);
+  if (obj["principal_id"].trim().toLowerCase() !== expectedPrincipalId) {
+    throw new ApiError(401, "ckb_principal_mismatch", "CKB public key does not match payload principal_id");
+  }
+
+  const signatureBytes = hexToBytes(signature.signature);
+  const recoveryId = signatureBytes[64];
+  if (signatureBytes.length !== 65 || recoveryId === undefined || recoveryId > 3) {
+    throw new ApiError(401, "ckb_signature_invalid", "CKB signature must be a 65-byte recoverable secp256k1 signature");
+  }
+  const message = new TextEncoder().encode(`Nervos Message:${expectedChallenge}`);
+  const messageHash = blake2b(message, {
+    dkLen: 32,
+    personalization: new TextEncoder().encode("ckb-default-hash"),
+  });
+  const recoveredSignature = new Uint8Array(65);
+  recoveredSignature[0] = recoveryId;
+  recoveredSignature.set(signatureBytes.subarray(0, 64), 1);
+  let verified = false;
+  try {
+    verified = secp256k1.verify(recoveredSignature, messageHash, hexToBytes(publicKey), {
+      format: "recovered",
+      prehash: false,
+    });
+  } catch {
+    verified = false;
+  }
+  if (!verified) {
+    throw new ApiError(401, "ckb_signature_invalid", "CKB secp256k1 signature verification failed");
+  }
+}
+
+function normalizeCkbSecp256k1PublicKey(publicKey: string): string {
+  const normalized = publicKey.trim().toLowerCase();
+  const clean = normalized.startsWith("0x") ? normalized.slice(2) : normalized;
+  if (!/^(02|03)[0-9a-f]{64}$/.test(clean)) {
+    throw new ApiError(400, "invalid_ckb_public_key", "CKB public key must be a compressed 33-byte secp256k1 key");
+  }
+  return `0x${clean}`;
 }
 
 export function scopeAllowsPublish(scopes: string[], namespace: string, name: string): boolean {

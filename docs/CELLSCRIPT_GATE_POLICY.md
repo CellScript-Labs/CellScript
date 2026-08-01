@@ -66,6 +66,11 @@ The CLI coverage includes the explicit first-publish admission sequence:
 `cellc auth capability submit`, `cellc auth namespace claim`, then
 `cellc publish`. Capability registration does not silently claim a namespace;
 the claim response must be `active` before the write API accepts a version.
+Registry API tests pin both accepted publisher roots: JoyID signatures under
+`principal_type = joyid_ckb` and recoverable CKB message signatures under
+`principal_type = ckb_secp256k1`. CLI fixtures use the generic
+`--wallet-signature` surface; the former `--joyid-signature` spelling remains a
+visible compatibility alias and does not define a second request shape.
 Explicit `--allow-unverified` and `--allow-quarantined` install choices are
 persisted per dependency so the lock refresh and later builds exercise the
 same auditable resolver policy.

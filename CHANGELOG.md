@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+- Redesign the Registry submission and package-maintenance surfaces around
+  contextual, task-first workflows: remove the public `Manage` tab and
+  redundant form controls, link maintenance from package details, guide first
+  publication through one progressive wallet action, show the publication
+  orientation only once per browser, replace the CCC post-connect surface with
+  a compact Registry-owned wallet chooser that has no unrelated `Manage`
+  action, reveal yank fields only for the yank task, and close write commands
+  over verify, dry-run, and publish. Registry route and workflow state changes
+  now use reduced-motion-aware transitions instead of abrupt swaps. Browse and
+  Submit share one DOM-persistent Registry header through navigation, avoiding
+  replacement flicker while retaining the active locale; wallet connection no
+  longer depends on completing the package coordinate first, and the primary
+  authorisation controls use larger, shorter-reach interaction targets.
+  Browse uses a no-flash loading state, URL-backed server search, and API
+  pagination; bundled data appears only as an explicitly labelled error
+  fallback. Static and live package details share one responsive view with
+  localized statuses and copyable audit values. Publisher authorisation now
+  accepts both JoyID
+  (`joyid_ckb`) and standard CKB secp256k1 (`ckb_secp256k1`) principals through
+  the CCC CKB-signer boundary on mainnet or testnet. The frontend never accepts
+  mnemonic words; traditional recovery phrases remain inside the wallet. CLI
+  auth commands use `--wallet-signature`, with `--joyid-signature` retained as
+  a visible compatibility alias, and the API adds the corresponding typed
+  principal migration and signature verification. The compact chooser now
+  preserves the complete official twelve-wallet CKB directory: compatible CCC
+  signers connect directly, while the remaining wallets use the same verified
+  external-signature handoff instead of disappearing from the UI.
 - Deploy the public Registry production slice at
   `api.registry.cellscript.dev` and `registry.cellscript.dev`: Postgres 17 is
   the authoritative write store, the Node 22 adapter persists source snapshots

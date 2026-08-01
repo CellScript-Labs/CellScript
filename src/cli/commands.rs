@@ -580,7 +580,7 @@ pub struct AuthCapabilityArgs {
 pub struct AuthCapabilitySubmitArgs {
     pub api_url: Option<String>,
     pub payload: PathBuf,
-    pub joyid_signature: PathBuf,
+    pub wallet_signature: PathBuf,
     pub json: bool,
 }
 
@@ -592,7 +592,7 @@ pub struct AuthCapabilityRevokeArgs {
     pub principal_id: Option<String>,
     pub capability_key_id: Option<String>,
     pub payload: Option<PathBuf>,
-    pub joyid_signature: Option<PathBuf>,
+    pub wallet_signature: Option<PathBuf>,
     pub reason: Option<String>,
     pub json: bool,
 }
@@ -602,7 +602,7 @@ pub struct AuthNamespaceClaimArgs {
     pub api_url: Option<String>,
     pub namespace: String,
     pub payload: PathBuf,
-    pub joyid_signature: PathBuf,
+    pub wallet_signature: PathBuf,
     pub json: bool,
 }
 
@@ -3720,7 +3720,7 @@ impl CommandExecutor {
                     .or_else(|| std::env::var("CELLSCRIPT_CAPABILITY_KEY_ID").ok())
                     .ok_or_else(|| {
                         crate::error::CompileError::without_span(format!(
-                            "capability key id is required for public publish; connect JoyID through the registry submit page to derive <principal_id>, run `cellc auth capability create --principal-id <principal_id> --scope publish:{}/{} --expires 90d --json > capability-payload.json`, sign that payload with JoyID through CCC, submit it with `cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json`, then claim the namespace with `cellc auth namespace claim --namespace {} --payload capability-payload.json --joyid-signature joyid-signature.json`; after registration and an active namespace claim, pass --capability-key-id or set CELLSCRIPT_CAPABILITY_KEY_ID",
+                            "capability key id is required for public publish; connect a supported CKB wallet through the registry submit page to derive <principal_type> and <principal_id>, run `cellc auth capability create --principal-type <principal_type> --principal-id <principal_id> --scope publish:{}/{} --expires 90d --json > capability-payload.json`, sign that payload through CCC, submit it with `cellc auth capability submit --payload capability-payload.json --wallet-signature wallet-signature.json`, then claim the namespace with `cellc auth namespace claim --namespace {} --payload capability-payload.json --wallet-signature wallet-signature.json`; after registration and an active namespace claim, pass --capability-key-id or set CELLSCRIPT_CAPABILITY_KEY_ID",
                             namespace, manifest.package.name, namespace
                         ))
                     })?;
@@ -4019,9 +4019,12 @@ impl CommandExecutor {
             .unwrap_or_else(|| crate::package::registry::DEFAULT_PUBLIC_REGISTRY_ORIGIN.to_string());
         let principal_type =
             args.principal_type.or_else(|| std::env::var("CELLSCRIPT_PRINCIPAL_TYPE").ok()).unwrap_or_else(|| "joyid_ckb".to_string());
+        if principal_type != "joyid_ckb" && principal_type != "ckb_secp256k1" {
+            return Err(crate::error::CompileError::without_span("principal type must be joyid_ckb or ckb_secp256k1"));
+        }
         let principal_id = args.principal_id.or_else(|| std::env::var("CELLSCRIPT_PRINCIPAL_ID").ok()).ok_or_else(|| {
             crate::error::CompileError::without_span(
-                "principal id is required; pass --principal-id or set CELLSCRIPT_PRINCIPAL_ID to the normalized JoyID/CKB identity binding",
+                "principal id is required; pass --principal-id or set CELLSCRIPT_PRINCIPAL_ID to the normalized wallet identity binding",
             )
         })?;
         let explicit_capability_pubkey = args.capability_pubkey.or_else(|| std::env::var("CELLSCRIPT_CAPABILITY_PUBKEY").ok());
@@ -4068,7 +4071,8 @@ impl CommandExecutor {
             format!("  Scopes: {}", payload.requested_scopes.join(", ")),
             format!("  Capability expires: {}", payload.capability_expires_at),
             String::new(),
-            "Sign this payload with JoyID, then submit the signed authorisation to the registry write API:".to_string(),
+            "Sign this payload with the matching JoyID or CKB wallet, then submit the signed authorisation to the registry write API:"
+                .to_string(),
             serde_json::to_string_pretty(&payload)?,
         ]);
         CommandOutcome { machine, human_lines }.emit(args.json)
@@ -4084,10 +4088,10 @@ impl CommandExecutor {
                 payload.registry_origin, registry_origin
             )));
         }
-        let joyid_signature = read_json_value(&args.joyid_signature)?;
+        let wallet_signature = read_json_value(&args.wallet_signature)?;
         let body = serde_json::json!({
             "payload": payload,
-            "joyid_signature": joyid_signature,
+            "wallet_signature": wallet_signature,
         });
         let endpoint = format!("{}/v1/capabilities", api_base.trim_end_matches('/'));
         let response = submit_registry_json_request(&endpoint, &body, "Submitted capability authorisation", args.json)?;
@@ -4122,11 +4126,11 @@ impl CommandExecutor {
                 "namespace claim payload has no publish scope for namespace '{namespace}'"
             )));
         }
-        let joyid_signature = read_json_value(&args.joyid_signature)?;
+        let wallet_signature = read_json_value(&args.wallet_signature)?;
         let body = serde_json::json!({
             "namespace": namespace,
             "payload": payload,
-            "joyid_signature": joyid_signature,
+            "wallet_signature": wallet_signature,
         });
         let endpoint = format!("{}/v1/namespaces/claim", api_base.trim_end_matches('/'));
         let response = submit_registry_json_request(&endpoint, &body, "Claimed registry namespace", args.json)?;
@@ -4143,9 +4147,9 @@ impl CommandExecutor {
     }
 
     fn auth_capability_revoke(args: AuthCapabilityRevokeArgs) -> Result<()> {
-        if args.payload.is_none() && args.joyid_signature.is_some() {
+        if args.payload.is_none() && args.wallet_signature.is_some() {
             return Err(crate::error::CompileError::without_span(
-                "capability revocation with --joyid-signature must use --payload from a previously generated revoke challenge",
+                "capability revocation with --wallet-signature must use --payload from a previously generated revoke challenge",
             ));
         }
 
@@ -4160,9 +4164,12 @@ impl CommandExecutor {
                 .principal_type
                 .or_else(|| std::env::var("CELLSCRIPT_PRINCIPAL_TYPE").ok())
                 .unwrap_or_else(|| "joyid_ckb".to_string());
+            if principal_type != "joyid_ckb" && principal_type != "ckb_secp256k1" {
+                return Err(crate::error::CompileError::without_span("principal type must be joyid_ckb or ckb_secp256k1"));
+            }
             let principal_id = args.principal_id.or_else(|| std::env::var("CELLSCRIPT_PRINCIPAL_ID").ok()).ok_or_else(|| {
                 crate::error::CompileError::without_span(
-                    "principal id is required for capability revoke; pass --principal-id or set CELLSCRIPT_PRINCIPAL_ID to the normalized JoyID/CKB identity binding",
+                    "principal id is required for capability revoke; pass --principal-id or set CELLSCRIPT_PRINCIPAL_ID to the normalized wallet identity binding",
                 )
             })?;
             let capability_key_id =
@@ -4186,7 +4193,7 @@ impl CommandExecutor {
             )
         };
 
-        let Some(signature_path) = args.joyid_signature.as_deref() else {
+        let Some(signature_path) = args.wallet_signature.as_deref() else {
             if args.json {
                 print_json(&serde_json::to_value(&payload)?)?;
             } else {
@@ -4197,8 +4204,8 @@ impl CommandExecutor {
                 println!("  Principal: {}:{}", payload.principal_type, payload.principal_id);
                 println!("  Capability key id: {}", payload.capability_key_id);
                 println!();
-                println!("Sign this payload with JoyID, then submit it with:");
-                println!("  cellc auth capability revoke --payload <payload.json> --joyid-signature <joyid-signature.json>");
+                println!("Sign this payload with the matching JoyID or CKB wallet, then submit it with:");
+                println!("  cellc auth capability revoke --payload <payload.json> --wallet-signature <wallet-signature.json>");
                 println!("{}", serde_json::to_string_pretty(&payload)?);
             }
             return Ok(());
@@ -4212,10 +4219,10 @@ impl CommandExecutor {
                 payload.registry_origin, registry_origin
             )));
         }
-        let joyid_signature = read_json_value(signature_path)?;
+        let wallet_signature = read_json_value(signature_path)?;
         let mut body = serde_json::json!({
             "payload": payload,
-            "joyid_signature": joyid_signature,
+            "wallet_signature": wallet_signature,
         });
         if let Some(reason) = args.reason.filter(|reason| !reason.trim().is_empty()) {
             body["reason"] = serde_json::Value::String(reason);
@@ -10017,7 +10024,7 @@ fn auth_capability_submit_args_from_matches(m: &clap::ArgMatches) -> AuthCapabil
     AuthCapabilitySubmitArgs {
         api_url: m.get_one::<String>("api-url").cloned(),
         payload: m.get_one::<String>("payload").map(PathBuf::from).expect("required payload"),
-        joyid_signature: m.get_one::<String>("joyid-signature").map(PathBuf::from).expect("required joyid-signature"),
+        wallet_signature: m.get_one::<String>("wallet-signature").map(PathBuf::from).expect("required wallet-signature"),
         json: json_output(m),
     }
 }
@@ -10027,7 +10034,7 @@ fn auth_namespace_claim_args_from_matches(m: &clap::ArgMatches) -> AuthNamespace
         api_url: m.get_one::<String>("api-url").cloned(),
         namespace: m.get_one::<String>("namespace").cloned().expect("required namespace"),
         payload: m.get_one::<String>("payload").map(PathBuf::from).expect("required payload"),
-        joyid_signature: m.get_one::<String>("joyid-signature").map(PathBuf::from).expect("required joyid-signature"),
+        wallet_signature: m.get_one::<String>("wallet-signature").map(PathBuf::from).expect("required wallet-signature"),
         json: json_output(m),
     }
 }
@@ -10040,7 +10047,7 @@ fn auth_capability_revoke_args_from_matches(m: &clap::ArgMatches) -> AuthCapabil
         principal_id: m.get_one::<String>("principal-id").cloned(),
         capability_key_id: m.get_one::<String>("capability-key-id").cloned(),
         payload: m.get_one::<String>("payload").map(PathBuf::from),
-        joyid_signature: m.get_one::<String>("joyid-signature").map(PathBuf::from),
+        wallet_signature: m.get_one::<String>("wallet-signature").map(PathBuf::from),
         reason: m.get_one::<String>("reason").cloned(),
         json: json_output(m),
     }
@@ -13089,7 +13096,7 @@ impl CliParser {
                         Arg::new("capability-key-id")
                             .long("capability-key-id")
                             .value_name("KEY_ID")
-                            .help("Registry capability key id authorised by JoyID"),
+                            .help("Registry capability key id authorised by a root wallet"),
                     )
                     .arg(
                         Arg::new("capability-signature")
@@ -13159,18 +13166,18 @@ impl CliParser {
             )
             .subcommand(
                 ClapCommand::new("auth")
-                    .about("Manage JoyID-rooted registry capability authorisation")
+                    .about("Manage wallet-rooted registry capability authorisation")
                     .subcommand_required(true)
                     .arg_required_else_help(true)
                     .subcommand(
                         ClapCommand::new("login")
                             .hide(true)
-                            .about("Create a JoyID capability authorisation payload")
+                            .about("Create a wallet capability authorisation payload")
                             .arg(
                                 Arg::new("registry-origin")
                                     .long("registry-origin")
                                     .value_name("URL")
-                                    .help("Registry origin bound into the JoyID capability challenge"),
+                                    .help("Registry origin bound into the wallet capability challenge"),
                             )
                             .arg(
                                 Arg::new("principal-type")
@@ -13182,7 +13189,7 @@ impl CliParser {
                                 Arg::new("principal-id")
                                     .long("principal-id")
                                     .value_name("ID")
-                                    .help("Normalized JoyID/CKB principal binding derived from the CCC JoyID signer"),
+                                    .help("Normalized principal binding derived from a supported CCC CKB signer"),
                             )
                             .arg(
                                 Arg::new("capability-pubkey")
@@ -13224,12 +13231,12 @@ impl CliParser {
                             .arg_required_else_help(true)
                             .subcommand(
                                 ClapCommand::new("create")
-                                    .about("Create a JoyID capability authorisation payload for CI or local publishing")
+                                    .about("Create a wallet capability authorisation payload for CI or local publishing")
                                     .arg(
                                         Arg::new("registry-origin")
                                             .long("registry-origin")
                                             .value_name("URL")
-                                            .help("Registry origin bound into the JoyID capability challenge"),
+                                            .help("Registry origin bound into the wallet capability challenge"),
                                     )
                                     .arg(
                                         Arg::new("principal-type")
@@ -13241,7 +13248,7 @@ impl CliParser {
                                         Arg::new("principal-id")
                                             .long("principal-id")
                                             .value_name("ID")
-                                            .help("Normalized JoyID/CKB principal binding derived from the CCC JoyID signer"),
+                                            .help("Normalized principal binding derived from a supported CCC CKB signer"),
                                     )
                                     .arg(
                                         Arg::new("capability-pubkey")
@@ -13278,7 +13285,7 @@ impl CliParser {
                             )
                             .subcommand(
                                 ClapCommand::new("submit")
-                                    .about("Submit a JoyID-signed capability authorisation payload to the registry")
+                                    .about("Submit a wallet-signed capability authorisation payload to the registry")
                                     .arg(
                                         Arg::new("api-url")
                                             .long("api-url")
@@ -13293,11 +13300,12 @@ impl CliParser {
                                             .help("Capability authorisation payload JSON created by auth capability create"),
                                     )
                                     .arg(
-                                        Arg::new("joyid-signature")
-                                            .long("joyid-signature")
+                                        Arg::new("wallet-signature")
+                                            .long("wallet-signature")
+                                            .visible_alias("joyid-signature")
                                             .value_name("FILE")
                                             .required(true)
-                                            .help("JoyID signature JSON whose challenge is the canonical payload"),
+                                            .help("JoyID or CKB wallet signature JSON whose challenge is the canonical payload"),
                                     )
                                     .arg(
                                         Arg::new("json")
@@ -13308,7 +13316,7 @@ impl CliParser {
                             )
                             .subcommand(
                                 ClapCommand::new("revoke")
-                                    .about("Create or submit a JoyID-signed capability revocation payload")
+                                    .about("Create or submit a wallet-signed capability revocation payload")
                                     .arg(
                                         Arg::new("api-url")
                                             .long("api-url")
@@ -13319,7 +13327,7 @@ impl CliParser {
                                         Arg::new("registry-origin")
                                             .long("registry-origin")
                                             .value_name("URL")
-                                            .help("Registry origin bound into the JoyID revocation challenge"),
+                                            .help("Registry origin bound into the wallet revocation challenge"),
                                     )
                                     .arg(
                                         Arg::new("principal-type")
@@ -13331,7 +13339,7 @@ impl CliParser {
                                         Arg::new("principal-id")
                                             .long("principal-id")
                                             .value_name("ID")
-                                            .help("Normalized JoyID/CKB principal binding derived from the CCC JoyID signer"),
+                                            .help("Normalized principal binding derived from a supported CCC CKB signer"),
                                     )
                                     .arg(
                                         Arg::new("capability-key-id")
@@ -13346,10 +13354,11 @@ impl CliParser {
                                             .help("Previously generated capability revocation payload JSON"),
                                     )
                                     .arg(
-                                        Arg::new("joyid-signature")
-                                            .long("joyid-signature")
+                                        Arg::new("wallet-signature")
+                                            .long("wallet-signature")
+                                            .visible_alias("joyid-signature")
                                             .value_name("FILE")
-                                            .help("JoyID signature JSON whose challenge is the canonical revoke payload"),
+                                            .help("JoyID or CKB wallet signature JSON whose challenge is the canonical revoke payload"),
                                     )
                                     .arg(
                                         Arg::new("reason")
@@ -13372,7 +13381,7 @@ impl CliParser {
                             .arg_required_else_help(true)
                             .subcommand(
                                 ClapCommand::new("claim")
-                                    .about("Claim a namespace with a JoyID-signed capability authorisation payload")
+                                    .about("Claim a namespace with a wallet-signed capability authorisation payload")
                                     .arg(
                                         Arg::new("api-url")
                                             .long("api-url")
@@ -13394,11 +13403,12 @@ impl CliParser {
                                             .help("Capability authorisation payload JSON created by auth capability create"),
                                     )
                                     .arg(
-                                        Arg::new("joyid-signature")
-                                            .long("joyid-signature")
+                                        Arg::new("wallet-signature")
+                                            .long("wallet-signature")
+                                            .visible_alias("joyid-signature")
                                             .value_name("FILE")
                                             .required(true)
-                                            .help("JoyID signature JSON whose challenge is the canonical capability payload"),
+                                            .help("JoyID or CKB wallet signature JSON whose challenge is the canonical capability payload"),
                                     )
                                     .arg(
                                         Arg::new("json")

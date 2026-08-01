@@ -1245,7 +1245,11 @@ fn cellc_publish_default_requires_capability_inputs_without_writing_registry_jso
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("capability key id is required for public publish"), "unexpected stderr: {stderr}");
-    assert!(stderr.contains("cellc auth capability create --principal-id <principal_id>"), "unexpected stderr: {stderr}");
+    assert!(
+        stderr.contains("cellc auth capability create --principal-type <principal_type> --principal-id <principal_id>",),
+        "unexpected stderr: {stderr}"
+    );
+    assert!(stderr.contains("--wallet-signature wallet-signature.json"), "unexpected stderr: {stderr}");
     assert!(stderr.contains("cellc auth namespace claim --namespace cellscript"), "unexpected stderr: {stderr}");
     assert!(!temp.path().join("registry.json").exists(), "default public publish must not silently write offline registry.json");
 }
@@ -1450,7 +1454,7 @@ fn cellc_publish_retries_transient_registry_error_with_same_idempotency_key() {
 }
 
 #[test]
-fn cellc_auth_capability_submit_posts_joyid_signature_to_registry_api() {
+fn cellc_auth_capability_submit_posts_ckb_wallet_signature_to_registry_api() {
     let temp = tempfile::tempdir().unwrap();
     let (api_url, request_rx) = start_mock_registry_api_expect_path(
         "/v1/capabilities",
@@ -1467,7 +1471,9 @@ fn cellc_auth_capability_submit_posts_joyid_signature_to_registry_api() {
         .arg("--registry-origin")
         .arg(&api_url)
         .arg("--principal-id")
-        .arg("0x1111111111111111111111111111111111111111")
+        .arg(format!("0x{}", "11".repeat(32)))
+        .arg("--principal-type")
+        .arg("ckb_secp256k1")
         .arg("--capability-pubkey")
         .arg("p256-spki:test")
         .arg("--scope")
@@ -1478,17 +1484,15 @@ fn cellc_auth_capability_submit_posts_joyid_signature_to_registry_api() {
     assert!(create.status.success(), "stderr: {}", String::from_utf8_lossy(&create.stderr));
     let payload: serde_json::Value = serde_json::from_slice(&create.stdout).unwrap();
     let payload_path = temp.path().join("capability-payload.json");
-    let signature_path = temp.path().join("joyid-signature.json");
+    let signature_path = temp.path().join("wallet-signature.json");
     std::fs::write(&payload_path, serde_json::to_vec_pretty(&payload).unwrap()).unwrap();
     std::fs::write(
         &signature_path,
         serde_json::to_vec_pretty(&serde_json::json!({
+            "scheme": "ckb_secp256k1",
             "challenge": serde_json::to_string(&payload).unwrap(),
-            "signature": "sig",
-            "message": "message",
-            "pubkey": "pubkey",
-            "keyType": "main_key",
-            "alg": -7
+            "signature": format!("0x{}", "22".repeat(65)),
+            "public_key": format!("0x02{}", "33".repeat(32))
         }))
         .unwrap(),
     )
@@ -1502,7 +1506,7 @@ fn cellc_auth_capability_submit_posts_joyid_signature_to_registry_api() {
         .arg(&api_url)
         .arg("--payload")
         .arg(&payload_path)
-        .arg("--joyid-signature")
+        .arg("--wallet-signature")
         .arg(&signature_path)
         .arg("--json")
         .output()
@@ -1513,7 +1517,7 @@ fn cellc_auth_capability_submit_posts_joyid_signature_to_registry_api() {
     assert_eq!(response["status"], "active");
     let request = request_rx.recv_timeout(Duration::from_secs(5)).expect("capability request");
     assert_eq!(request["payload"], payload);
-    assert_eq!(request["joyid_signature"]["signature"], "sig");
+    assert_eq!(request["wallet_signature"]["scheme"], "ckb_secp256k1");
 }
 
 #[test]
@@ -1583,7 +1587,7 @@ fn cellc_auth_namespace_claim_posts_signed_capability_payload_to_registry_api() 
     let request = request_rx.recv_timeout(Duration::from_secs(5)).expect("namespace claim request");
     assert_eq!(request["namespace"], "exampleorg");
     assert_eq!(request["payload"], payload);
-    assert_eq!(request["joyid_signature"]["signature"], "sig");
+    assert_eq!(request["wallet_signature"]["signature"], "sig");
 }
 
 #[test]

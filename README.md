@@ -790,31 +790,38 @@ Non-CellScript artifact profiles still fail closed.
 
 **Public registry boundary / fail-closed:**
 
-- Public registry publishing is designed around JoyID-rooted publisher
-  identity: CCC is the connection layer, JoyID is the accepted publisher root,
-  and delegated publisher credentials are stored in the OS keychain for daily
-  `cellc publish`; see
+- Public registry publishing uses typed wallet-rooted publisher identities:
+  CCC is the browser connection layer, `joyid_ckb` accepts JoyID passkeys, and
+  `ckb_secp256k1` accepts standard CKB wallets that expose a compressed public
+  key and recoverable CKB message signature. Delegated publisher credentials
+  are stored in the OS keychain for daily `cellc publish`; see
   [`docs/CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md`](docs/CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md)
-- `cellc auth capability create --principal-id <principal_id> --scope
+- `cellc auth capability create --principal-type <principal_type>
+  --principal-id <principal_id> --scope
   publish:<namespace>/<package> --expires 90d --json >
   capability-payload.json` creates the local P-256 capability key when
   `--capability-pubkey` is not supplied, stores the private key in the OS
-  keychain, and prints the JoyID-bound authorisation payload. The
-  `principal_id` is the normalized JoyID/CKB identity binding derived by the
-  CCC-backed JoyID submit flow, not the display address.
-  After the same payload is signed through JoyID/CCC, `cellc auth capability
-  submit --payload capability-payload.json --joyid-signature
-  joyid-signature.json` registers the delegated key with the write API.
+  keychain, and prints the wallet-bound authorisation payload. The
+  `principal_id` is the normalized binding derived from the connected signer,
+  not the display address. After the same payload is signed through CCC,
+  `cellc auth capability submit --payload capability-payload.json
+  --wallet-signature wallet-signature.json` registers the delegated key with
+  the write API.
   `cellc auth namespace claim --namespace <namespace> --payload
-  capability-payload.json --joyid-signature joyid-signature.json` then
+  capability-payload.json --wallet-signature wallet-signature.json` then
   establishes the required namespace ownership. Bare
   `cellc publish` then signs the concrete publish payload and submits the
   source snapshot to the public registry.
+- The Registry chooser includes Neuron, JoyID, imToken, CKBull, SafePal,
+  Ledger, imKey, OneKey, UTXO Global, Rei Wallet, Gate, and QuantumPurse.
+  Compatible CCC signers connect directly; the remaining directory entries use
+  the same verified `wallet-signature.json` handoff without exposing mnemonic
+  words to the site.
 - `cellc auth capability revoke --principal-id <principal_id>
   --capability-key-id <capability_key_id> --json > revoke-payload.json`
-  generates a JoyID-bound revocation challenge; after signing that challenge,
+  generates a wallet-bound revocation challenge; after signing that challenge,
   `cellc auth capability revoke --payload revoke-payload.json
-  --joyid-signature joyid-signature.json` revokes the delegated key without
+  --wallet-signature wallet-signature.json` revokes the delegated key without
   creating a separate registry account.
 - CI can avoid interactive keychain access by using
   `cellc publish --print-payload --json`, signing the `canonical_payload`
@@ -828,7 +835,7 @@ Non-CellScript artifact profiles still fail closed.
   verification; default search/list visibility begins at `verified_build`, and
   direct URLs preserve admitted `source_published` history. The same typed app
   retains a Cloudflare Worker/Hyperdrive/R2 deployment option. Both paths share
-  JoyID capability authorisation, namespace ACLs, quota hooks, ordered evidence
+  typed wallet capability authorisation, namespace ACLs, quota hooks, ordered evidence
   promotion, and audit events.
 - Public version responses bind a content-addressed source snapshot URL. The
   read-only service exposes `/source-snapshots/*` independently of Postgres and
@@ -900,7 +907,7 @@ Non-CellScript artifact profiles still fail closed.
 | `cellc repl` | Start the interactive REPL |
 | `cellc run` | Run ELF entrypoints via VM runner or simulator; `--json` includes cycles for VM execution and `cycles: null` for simulation |
 | `cellc publish` / `cellc publish --offline` / `cellc registry add` / `cellc registry edit --yank` | Public publish plus explicit local/offline registry metadata flow; public registry policy makes bare `cellc publish` an authenticated registry write, with Git/static metadata retained for audit and fallback |
-| `cellc auth capability create/submit/revoke` / public registry write API / non-CellScript artifact install | JoyID-rooted publication policy and future-facing artifact profiles; fail-closed where unsupported |
+| `cellc auth capability create/submit/revoke` / public registry write API / non-CellScript artifact install | Typed wallet-rooted publication policy and future-facing artifact profiles; fail-closed where unsupported |
 
 ### CLI Options
 

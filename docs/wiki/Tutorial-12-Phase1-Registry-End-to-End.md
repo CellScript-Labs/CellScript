@@ -20,6 +20,13 @@ Package browsing is live-data-first. If the API is unavailable, the website
 labels its bundled fixture as a read-only mirror; it is never the write or
 resolution authority.
 
+The Browse query is stored in `?q=` and paginates through the public API. Static
+mirror links and live direct links open the same package-detail view, including
+localized lifecycle status, normalized release dates, and copyable source,
+profile, out-point, and code hashes. Package maintenance accepts any valid
+`namespace/package` coordinate and an optional local directory; write tasks
+generate the complete local verify, publish dry-run, and publish sequence.
+
 ## What Phase 1 Proves
 
 Phase 1 is not a chain acceptance test and not a trust oracle. It answers three
@@ -65,15 +72,26 @@ For an offline mirror or release fixture, write local registry metadata:
 cellc publish --offline --json
 ```
 
-For public publishing, authorize a local publisher capability through the JoyID
-flow, then publish:
+For public publishing, authorize a local publisher capability through a
+supported CKB wallet, then publish. Use `joyid_ckb` for JoyID or
+`ckb_secp256k1` for a standard CKB wallet exposed through CCC:
 
 ```bash
-cellc auth capability create --principal-id <principal_id> --scope publish:cellscript/amm_pool --expires 90d --json > capability-payload.json
-cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json
-cellc auth namespace claim --namespace cellscript --payload capability-payload.json --joyid-signature joyid-signature.json
+cellc auth capability create --principal-type <principal_type> --principal-id <principal_id> --scope publish:cellscript/amm_pool --expires 90d --json > capability-payload.json
+cellc auth capability submit --payload capability-payload.json --wallet-signature wallet-signature.json
+cellc auth namespace claim --namespace cellscript --payload capability-payload.json --wallet-signature wallet-signature.json
 cellc publish --json
 ```
+
+The Registry wallet chooser contains the complete official CKB directory:
+Neuron, JoyID, imToken, CKBull, SafePal, Ledger, imKey, OneKey, UTXO Global,
+Rei Wallet, Gate, and QuantumPurse. A CCC-discovered CKB signer connects and
+signs in-browser. Other wallets use the external `wallet-signature.json`
+handoff, which is subject to the same backend verification contract.
+
+Recovery phrases stay inside the wallet. The Registry submit page never accepts
+or stores mnemonic words; it receives only the public identity material and a
+signature over the canonical capability challenge.
 
 Namespace ownership is an explicit admission step, not a side effect of
 capability registration. The claim must be `active` before the first publish;
@@ -134,7 +152,7 @@ commit, static publication, default visibility, and a fresh consumer
 install/check/build without an unverified override. The test records and live
 objects were removed afterward, and the migrated clean state was backed up.
 This validates the deployed automation; it deliberately does not count as a
-publisher-owned JoyID capability registration or namespace claim.
+publisher-owned wallet capability registration or namespace claim.
 
 ## Consumer Flow
 
