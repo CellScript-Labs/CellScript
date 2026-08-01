@@ -4,6 +4,8 @@ import {
   CKB_SECP256K1_PRINCIPAL_TYPE,
   JOYID_PRINCIPAL_TYPE,
   ApiError,
+  DEPLOYMENT_ACTION,
+  DEPLOYMENT_PROTOCOL,
   DEFAULT_REGISTRY_ORIGIN,
   DEFAULT_STATIC_REGISTRY_ORIGIN,
   REGISTRY_SCHEMA_VERSION,
@@ -12,6 +14,7 @@ import {
   base64ToBytes,
   canonicalJson,
   capabilityKeyId,
+  ckbBlake2bHex,
   ckbScriptHash,
   initialArtifactStates,
   isPrincipalType,
@@ -87,7 +90,12 @@ export interface AppDeps {
   snapshotWriter?: SnapshotWriter;
   registryObjectReader?: RegistryObjectReader;
   readinessCheck?: () => Promise<Record<string, string>>;
-  verifyMainnetDeployment?: (payload: DeploymentPayload) => Promise<{ block_hash?: string | null }>;
+  verifyMainnetDeployment?: (payload: DeploymentPayload) => Promise<VerifiedMainnetDeployment>;
+  verifyMainnetCommitment?: (
+    evidence: Record<string, unknown>,
+    version: PackageVersionRecord,
+    deployed: PackageEvidenceRecord,
+  ) => Promise<Record<string, unknown>>;
   now?: () => Date;
 }
 
@@ -180,6 +188,18 @@ async function routeRequest(
       decodeURIComponent(publicEvidenceMatch[1] ?? ""),
       decodeURIComponent(publicEvidenceMatch[2] ?? ""),
       decodeURIComponent(publicEvidenceMatch[3] ?? ""),
+    );
+  }
+
+  const publicCommitmentMatch = url.pathname.match(/^\/v1\/artifacts\/([^/]+)\/([^/]+)\/releases\/([^/]+)\/commitment$/);
+  if (request.method === "GET" && publicCommitmentMatch) {
+    return handlePublicRegistryCommitment(
+      store,
+      requestId,
+      headers,
+      decodeURIComponent(publicCommitmentMatch[1] ?? ""),
+      decodeURIComponent(publicCommitmentMatch[2] ?? ""),
+      decodeURIComponent(publicCommitmentMatch[3] ?? ""),
     );
   }
 
@@ -360,7 +380,7 @@ async function handleListPackages(
   const namespace = namespaceRaw ? validatePackageIdent(namespaceRaw, "namespace") : undefined;
   const artifactKind = kindRaw ? requireOneOf(kindRaw, ARTIFACT_KINDS, "invalid_artifact_kind") as ArtifactKind : undefined;
   const verificationStatus = verificationRaw
-    ? requireOneOf(verificationRaw, ["pending", "verified", "evidence_required", "rejected"] as const, "invalid_verification_status") as VerificationStatus
+    ? requireOneOf(verificationRaw, ["pending", "hash_bound", "verified", "evidence_required", "rejected"] as const, "invalid_verification_status") as VerificationStatus
     : undefined;
   const deploymentStatus = deploymentRaw
     ? requireOneOf(deploymentRaw, ["not_applicable", "undeployed", "deployed", "chain_verified"] as const, "invalid_deployment_status") as DeploymentStatus
@@ -498,6 +518,59 @@ async function handlePublicPackageEvidence(
   return json({ schema: "cellscript-registry-evidence-list", request_id: requestId, namespace, name, release: version, evidence }, 200, headers);
 }
 
+async function handlePublicRegistryCommitment(
+  store: RegistryStore,
+  requestId: string,
+  headers: Headers,
+  namespaceFromPath: string,
+  nameFromPath: string,
+  versionFromPath: string,
+): Promise<Response> {
+  const namespace = validatePackageIdent(namespaceFromPath, "namespace");
+  const name = validatePackageIdent(nameFromPath, "name");
+  const version = validateVersion(versionFromPath);
+  const record = await store.getPackageVersion(namespace, name, version);
+  if (!record || record.availability_status === "quarantined") {
+    throw new ApiError(404, "artifact_release_not_found", "artifact release is not known to the public Registry");
+  }
+  const evidence = await store.listPackageEvidence(namespace, name, version);
+  const deployed = evidence.filter((item) => item.kind === "deployed").at(-1);
+  if (!deployed) {
+    throw new ApiError(409, "deployment_evidence_missing", "Registry commitment requires accepted mainnet deployment evidence");
+  }
+  if (!deployed.evidence["chain_verification"]) {
+    throw new ApiError(409, "deployment_chain_evidence_missing", "Registry commitment requires RPC-verified deployment evidence");
+  }
+  const attested = evidence
+    .filter((item) => item.kind === "on_chain_attested"
+      && item.evidence["deployed_evidence_hash"] === deployed.evidence_hash
+      && item.evidence["chain_verification"] === "get_live_cell+type_index")
+    .at(-1);
+  const commitmentHash = registryCommitmentHash(record, deployed.evidence_hash);
+  return json(
+    {
+      schema: "cellscript-registry-commitment-proof-v1",
+      request_id: requestId,
+      namespace,
+      name,
+      release: version,
+      status: attested ? "on_chain_attested" : "commitment_ready",
+      payload: registryCommitmentPayload(record, deployed.evidence_hash),
+      commitment_hash: commitmentHash,
+      cell_data: registryCommitmentCellData(commitmentHash),
+      deployed_evidence_hash: deployed.evidence_hash,
+      ...(attested
+        ? {
+            attestation_evidence_hash: attested.evidence_hash,
+            attestation: attested.evidence,
+          }
+        : {}),
+    },
+    200,
+    headers,
+  );
+}
+
 async function handleRecordDeployment(
   request: Request,
   env: Env,
@@ -591,6 +664,8 @@ async function handleRecordDeployment(
       deployment_status: "live",
       chain_verification: "get_live_cell",
       ...(chain.block_hash ? { block_hash: chain.block_hash } : {}),
+      ...(chain.resolved_code_out_point ? { resolved_code_out_point: chain.resolved_code_out_point } : {}),
+      ...(chain.dep_group_size !== undefined ? { dep_group_size: chain.dep_group_size } : {}),
     };
     const evidenceHash = `sha256:${await sha256Hex(canonicalJson(evidence))}`;
     const predictedEvidence: PackageEvidenceRecord = {
@@ -645,8 +720,58 @@ async function handleRecordDeployment(
   }
 }
 
-async function verifyMainnetDeployment(env: Env, payload: DeploymentPayload): Promise<{ block_hash?: string | null }> {
+interface LiveCellRpcResult {
+  status: string;
+  cell: Record<string, unknown>;
+  block_hash?: string | null;
+}
+
+interface VerifiedMainnetDeployment {
+  block_hash?: string | null;
+  resolved_code_out_point?: { tx_hash: string; index: number };
+  dep_group_size?: number;
+}
+
+async function verifyMainnetDeployment(env: Env, payload: DeploymentPayload): Promise<VerifiedMainnetDeployment> {
   const rpcUrl = env.CKB_MAINNET_RPC_URL?.trim() || "https://mainnet.ckb.dev/rpc";
+  const declared = await getMainnetLiveCell(rpcUrl, payload.out_point);
+  if (payload.dep_type === "code") {
+    verifyDeploymentCodeCell(declared.cell, payload);
+    return { ...(declared.block_hash !== undefined ? { block_hash: declared.block_hash } : {}) };
+  }
+
+  const depGroupData = assertPlainObject(declared.cell["data"], "invalid_ckb_rpc_response");
+  const content = depGroupData["content"];
+  if (typeof content !== "string") {
+    throw new ApiError(409, "invalid_dep_group", "mainnet DepGroup Cell did not return output data");
+  }
+  const members = parseDepGroupOutPoints(content);
+  for (let offset = 0; offset < members.length; offset += 16) {
+    const candidates = await Promise.all(members.slice(offset, offset + 16).map(async (member) => {
+      try {
+        const candidate = await getMainnetLiveCell(rpcUrl, member);
+        verifyDeploymentCodeCell(candidate.cell, payload);
+        return member;
+      } catch (error) {
+        if (error instanceof ApiError && ["deployment_cell_not_live", "deployment_data_hash_mismatch", "deployment_code_hash_mismatch"].includes(error.code)) {
+          return null;
+        }
+        throw error;
+      }
+    }));
+    const member = candidates.find((candidate) => candidate !== null);
+    if (member) {
+      return {
+        ...(declared.block_hash !== undefined ? { block_hash: declared.block_hash } : {}),
+        resolved_code_out_point: member,
+        dep_group_size: members.length,
+      };
+    }
+  }
+  throw new ApiError(409, "dep_group_artifact_not_found", "DepGroup does not resolve to a live code Cell matching the published executable");
+}
+
+async function getMainnetLiveCell(rpcUrl: string, outPoint: { tx_hash: string; index: number }): Promise<LiveCellRpcResult> {
   let response: Response;
   try {
     response = await fetch(rpcUrl, {
@@ -656,7 +781,7 @@ async function verifyMainnetDeployment(env: Env, payload: DeploymentPayload): Pr
         id: 1,
         jsonrpc: "2.0",
         method: "get_live_cell",
-        params: [{ tx_hash: payload.out_point.tx_hash, index: `0x${payload.out_point.index.toString(16)}` }, true, false],
+        params: [{ tx_hash: outPoint.tx_hash, index: `0x${outPoint.index.toString(16)}` }, true, false],
       }),
     });
   } catch (error) {
@@ -674,6 +799,14 @@ async function verifyMainnetDeployment(env: Env, payload: DeploymentPayload): Pr
     throw new ApiError(409, "deployment_cell_not_live", "deployment OutPoint is not a live mainnet Cell");
   }
   const cell = assertPlainObject(result["cell"], "invalid_ckb_rpc_response");
+  return {
+    status: "live",
+    cell,
+    block_hash: typeof result["block_hash"] === "string" ? result["block_hash"] : null,
+  };
+}
+
+function verifyDeploymentCodeCell(cell: Record<string, unknown>, payload: DeploymentPayload): void {
   const data = assertPlainObject(cell["data"], "invalid_ckb_rpc_response");
   if (typeof data["hash"] !== "string" || !sameCkbHash(data["hash"], payload.data_hash)) {
     throw new ApiError(409, "deployment_data_hash_mismatch", "live Cell data hash does not match the published executable");
@@ -686,7 +819,99 @@ async function verifyMainnetDeployment(env: Env, payload: DeploymentPayload): Pr
   } else if (!sameCkbHash(payload.code_hash, payload.data_hash)) {
     throw new ApiError(400, "deployment_code_hash_mismatch", "data hash deployments must use the executable data hash as code_hash");
   }
-  return { block_hash: typeof result["block_hash"] === "string" ? result["block_hash"] : null };
+}
+
+export function parseDepGroupOutPoints(content: string): Array<{ tx_hash: string; index: number }> {
+  if (!/^0x(?:[0-9a-fA-F]{2})+$/.test(content)) {
+    throw new ApiError(409, "invalid_dep_group", "DepGroup Cell data must be non-empty hexadecimal Molecule OutPointVec bytes");
+  }
+  const bytes = Uint8Array.from(content.slice(2).match(/.{2}/g) ?? [], (value) => Number.parseInt(value, 16));
+  if (bytes.length < 4) {
+    throw new ApiError(409, "invalid_dep_group", "DepGroup Cell data is shorter than an OutPointVec header");
+  }
+  const count = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0, true);
+  if (count === 0 || count > 2048 || bytes.length !== 4 + count * 36) {
+    throw new ApiError(409, "invalid_dep_group", "DepGroup Cell data is not a canonical non-empty Molecule OutPointVec");
+  }
+  const outPoints = [];
+  for (let item = 0; item < count; item += 1) {
+    const offset = 4 + item * 36;
+    const txHash = `0x${[...bytes.slice(offset, offset + 32)].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+    const index = new DataView(bytes.buffer, bytes.byteOffset + offset + 32, 4).getUint32(0, true);
+    outPoints.push({ tx_hash: txHash, index });
+  }
+  return outPoints;
+}
+
+export function registryCommitmentPayload(
+  version: PackageVersionRecord,
+  deployedEvidenceHash: string,
+): Record<string, unknown> {
+  const signedRelease = version.registry_entry.versions.find((entry) => entry.version === version.version);
+  if (!signedRelease) {
+    throw new ApiError(500, "registry_release_identity_missing", "signed Registry release identity is missing");
+  }
+  return {
+    schema: "cellscript-registry-commitment-v1",
+    namespace: version.namespace,
+    name: version.name,
+    release: version.version,
+    source_hash: version.source_hash,
+    manifest_hash: version.manifest_hash,
+    artifact_hash: signedRelease.artifact_hash ?? null,
+    deployed_evidence_hash: deployedEvidenceHash,
+  };
+}
+
+export function registryCommitmentHash(version: PackageVersionRecord, deployedEvidenceHash: string): string {
+  return ckbBlake2bHex(canonicalJson(registryCommitmentPayload(version, deployedEvidenceHash)));
+}
+
+export function registryCommitmentCellData(commitmentHash: string): string {
+  if (!/^(?:0x)?[0-9a-fA-F]{64}$/.test(commitmentHash)) {
+    throw new ApiError(400, "invalid_attestation_hash", "Registry commitment hash must be 32-byte hexadecimal data");
+  }
+  const magic = [...new TextEncoder().encode("CSREGv1")].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `0x${magic}${commitmentHash.replace(/^0x/, "").toLowerCase()}`;
+}
+
+async function verifyMainnetRegistryCommitment(
+  env: Env,
+  evidence: Record<string, unknown>,
+  version: PackageVersionRecord,
+  deployed: PackageEvidenceRecord,
+): Promise<Record<string, unknown>> {
+  const expectedHash = registryCommitmentHash(version, deployed.evidence_hash);
+  if (!sameCkbHash(String(evidence["attestation_hash"]), expectedHash)) {
+    throw new ApiError(409, "registry_commitment_mismatch", "attestation_hash does not commit to the accepted Registry release and deployment evidence");
+  }
+  const rawOutPoint = assertPlainObject(evidence["attestation_out_point"], "invalid_attestation_out_point");
+  const outPoint = { tx_hash: String(rawOutPoint["tx_hash"]), index: Number(rawOutPoint["index"]) };
+  const rpcUrl = env.CKB_MAINNET_RPC_URL?.trim() || "https://mainnet.ckb.dev/rpc";
+  const live = await getMainnetLiveCell(rpcUrl, outPoint);
+  const data = assertPlainObject(live.cell["data"], "invalid_ckb_rpc_response");
+  if (typeof data["content"] !== "string" || data["content"].toLowerCase() !== registryCommitmentCellData(expectedHash)) {
+    throw new ApiError(409, "registry_commitment_data_mismatch", "live Registry commitment Cell data does not contain the expected compact commitment");
+  }
+  const output = assertPlainObject(live.cell["output"], "invalid_ckb_rpc_response");
+  const typeScript = output["type"];
+  if (!typeScript) {
+    throw new ApiError(409, "registry_commitment_type_missing", "Registry commitment Cell must have a Type Script for chain indexing");
+  }
+  const actualTypeHash = ckbScriptHash(typeScript);
+  if (!sameCkbHash(actualTypeHash, String(evidence["registry_type_hash"]))) {
+    throw new ApiError(409, "registry_commitment_type_mismatch", "Registry commitment Cell Type Script hash does not match registry_type_hash");
+  }
+  const actualLockHash = ckbScriptHash(output["lock"]);
+  if (!sameCkbHash(actualLockHash, String(evidence["attestor_lock_hash"]))) {
+    throw new ApiError(409, "attestor_lock_mismatch", "Registry commitment Cell lock hash does not match attestor_lock_hash");
+  }
+  return {
+    commitment_schema: "cellscript-registry-commitment-v1",
+    commitment_payload: registryCommitmentPayload(version, deployed.evidence_hash),
+    chain_verification: "get_live_cell+type_index",
+    observed_block_hash: live.block_hash ?? null,
+  };
 }
 
 async function handleReadiness(env: Env, deps: AppDeps, requestId: string, headers: Headers): Promise<Response> {
@@ -943,7 +1168,52 @@ async function handleAdminPackageVersionPromotion(
     throw new ApiError(404, "artifact_release_not_found", "artifact release is not known to the registry");
   }
   const previousEvidence = await store.listPackageEvidence(namespace, name, version);
-  const evidence = validatePromotionEvidence(body["evidence"], kind, existing, previousEvidence);
+  let evidence = validatePromotionEvidence(body["evidence"], kind, existing, previousEvidence);
+  if (kind === "deployed") {
+    if (existing.artifact.profile !== "ckb_executable") {
+      throw new ApiError(409, "deployment_not_applicable", "only ckb_executable artifacts can record deployment evidence");
+    }
+    const rawOutPoint = assertPlainObject(evidence["out_point"], "invalid_deployment_out_point");
+    const deploymentPayload: DeploymentPayload = {
+      protocol: DEPLOYMENT_PROTOCOL,
+      action: DEPLOYMENT_ACTION,
+      registry_origin: env.REGISTRY_ORIGIN ?? DEFAULT_REGISTRY_ORIGIN,
+      namespace,
+      name,
+      release: version,
+      network: "mainnet",
+      artifact_hash: String(evidence["artifact_hash"]),
+      data_hash: String(evidence["data_hash"]),
+      code_hash: String(evidence["code_hash"]),
+      hash_type: evidence["hash_type"] as DeploymentPayload["hash_type"],
+      dep_type: evidence["dep_type"] as DeploymentPayload["dep_type"],
+      out_point: { tx_hash: String(rawOutPoint["tx_hash"]), index: Number(rawOutPoint["index"]) },
+      capability_key_id: "admin-evidence-recovery",
+      nonce: `0x${"00".repeat(32)}`,
+      issued_at: String(evidence["generated_at"]),
+      expires_at: String(evidence["generated_at"]),
+      cli_version: "admin-evidence-recovery",
+    };
+    const chain = deps.verifyMainnetDeployment
+      ? await deps.verifyMainnetDeployment(deploymentPayload)
+      : await verifyMainnetDeployment(env, deploymentPayload);
+    evidence = {
+      ...evidence,
+      chain_verification: "get_live_cell",
+      ...(chain.block_hash ? { block_hash: chain.block_hash } : {}),
+      ...(chain.resolved_code_out_point ? { resolved_code_out_point: chain.resolved_code_out_point } : {}),
+      ...(chain.dep_group_size !== undefined ? { dep_group_size: chain.dep_group_size } : {}),
+    };
+  } else if (kind === "on_chain_attested") {
+    const deployed = latestEvidence(previousEvidence, "deployed");
+    if (!deployed.evidence["chain_verification"]) {
+      throw new ApiError(409, "deployment_chain_evidence_missing", "on-chain attestation requires RPC-verified deployment evidence");
+    }
+    const chainEvidence = deps.verifyMainnetCommitment
+      ? await deps.verifyMainnetCommitment(evidence, existing, deployed)
+      : await verifyMainnetRegistryCommitment(env, evidence, existing, deployed);
+    evidence = { ...evidence, ...chainEvidence };
+  }
   const evidenceHash = `sha256:${await sha256Hex(canonicalJson(evidence))}`;
   const promoted = await store.promotePackageVersion({
     namespace,
@@ -1497,6 +1767,10 @@ function staticRegistryVersionPayload(
   staticOrigin: string,
   evidence: PackageEvidenceRecord[] = [],
 ): Record<string, unknown> {
+  const signedRelease = version.registry_entry.versions.find((entry) => entry.version === version.version);
+  if (!signedRelease) {
+    throw new ApiError(500, "registry_release_identity_missing", "signed Registry release identity is missing");
+  }
   return {
     schema_version: REGISTRY_SCHEMA_VERSION,
     kind: "cellscript.registry.artifact_release",
@@ -1510,6 +1784,10 @@ function staticRegistryVersionPayload(
     availability_status: version.availability_status,
     source_hash: version.source_hash,
     manifest_hash: version.manifest_hash,
+    ...(signedRelease.artifact_hash ? { artifact_hash: signedRelease.artifact_hash } : {}),
+    ...(signedRelease.abi_hash ? { abi_hash: signedRelease.abi_hash } : {}),
+    ...(signedRelease.build_recipe_hash ? { build_recipe_hash: signedRelease.build_recipe_hash } : {}),
+    ...(signedRelease.profile_contract ? { profile_contract: signedRelease.profile_contract } : {}),
     ...(version.edition ? { edition: version.edition } : {}),
     ...(version.compatibility_profile_hash ? { compatibility_profile_hash: version.compatibility_profile_hash } : {}),
     capability_key_id: version.capability_key_id,
@@ -1940,7 +2218,13 @@ export function validatePromotionEvidence(
     if (!(["compiled", "hash_bound", "evidence_required"] as const).includes(level as any)) {
       throw new ApiError(400, "invalid_verification_level", "verification_level is not recognised");
     }
-    if (version.artifact.profile !== "copy_material") requireEvidenceHash(evidence, "artifact_hash");
+    if (version.artifact.profile !== "copy_material") {
+      const artifactHash = requireEvidenceHash(evidence, "artifact_hash");
+      const signedRelease = version.registry_entry.versions.find((entry) => entry.version === version.version);
+      if (signedRelease?.artifact_hash && !sameHash(artifactHash, signedRelease.artifact_hash)) {
+        throw new ApiError(400, "verified_artifact_mismatch", "verified-build artifact_hash must match the signed Registry release");
+      }
+    }
     requireEvidenceHash(evidence, "metadata_hash");
     if (version.artifact.profile === "cellscript_source") requireEvidenceString(evidence, "compiler_version", 1, 80);
   } else if (kind === "deployed") {
@@ -1954,8 +2238,22 @@ export function validatePromotionEvidence(
     if (requireEvidenceString(evidence, "network", 1, 80) !== "mainnet") {
       throw new ApiError(400, "unsupported_deployment_network", "Registry deployment evidence is mainnet-only");
     }
-    requireEvidenceHash(evidence, "code_hash");
-    requireEvidenceHash(evidence, "data_hash");
+    const codeHash = requireEvidenceHash(evidence, "code_hash");
+    const dataHash = requireEvidenceHash(evidence, "data_hash");
+    if (!sameHash(dataHash, artifactHash)) {
+      throw new ApiError(400, "deployment_data_hash_mismatch", "deployed data_hash must match the verified executable artifact_hash");
+    }
+    const hashType = requireEvidenceString(evidence, "hash_type", 1, 16);
+    if (!("data data1 data2 type".split(" ").includes(hashType))) {
+      throw new ApiError(400, "invalid_deployment_hash_type", "evidence.hash_type is not recognised");
+    }
+    if (hashType !== "type" && !sameHash(codeHash, dataHash)) {
+      throw new ApiError(400, "deployment_code_hash_mismatch", "data hash deployments must use the executable data hash as code_hash");
+    }
+    const depType = requireEvidenceString(evidence, "dep_type", 1, 16);
+    if (!("code dep_group".split(" ").includes(depType))) {
+      throw new ApiError(400, "invalid_deployment_dep_type", "evidence.dep_type is not recognised");
+    }
     const outPoint = assertPlainObject(evidence["out_point"], "invalid_deployment_out_point");
     requireEvidenceHash(outPoint, "tx_hash");
     const index = outPoint["index"];
@@ -1968,10 +2266,23 @@ export function validatePromotionEvidence(
   } else {
     const deployed = latestEvidence(previous, "deployed");
     requireEvidenceReference(evidence, "deployed_evidence_hash", deployed);
-    requireEvidenceString(evidence, "network", 1, 80);
+    if (requireEvidenceString(evidence, "network", 1, 80) !== "mainnet") {
+      throw new ApiError(400, "unsupported_attestation_network", "Registry commitments are mainnet-only");
+    }
     requireEvidenceHash(evidence, "attestation_tx_hash");
     requireEvidenceHash(evidence, "attestation_hash");
     requireEvidenceString(evidence, "attestor", 1, 200);
+    requireEvidenceHash(evidence, "attestor_lock_hash");
+    requireEvidenceHash(evidence, "registry_type_hash");
+    const outPoint = assertPlainObject(evidence["attestation_out_point"], "invalid_attestation_out_point");
+    const txHash = requireEvidenceHash(outPoint, "tx_hash");
+    if (!sameHash(txHash, requireEvidenceHash(evidence, "attestation_tx_hash"))) {
+      throw new ApiError(400, "attestation_out_point_mismatch", "attestation_out_point.tx_hash must match attestation_tx_hash");
+    }
+    const outputIndex = outPoint["index"];
+    if (!Number.isSafeInteger(outputIndex) || Number(outputIndex) < 0 || Number(outputIndex) > 0xffff_ffff) {
+      throw new ApiError(400, "invalid_attestation_out_point", "attestation_out_point.index must be a non-negative u32 integer");
+    }
     requireEvidenceTimestamp(evidence, "observed_at");
     if (evidence["attestation_status"] !== "confirmed") {
       throw new ApiError(400, "attestation_not_confirmed", "evidence.attestation_status must be confirmed");

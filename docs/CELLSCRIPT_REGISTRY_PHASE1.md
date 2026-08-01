@@ -49,7 +49,7 @@ a second package route with a competing data shape.
 
 Each release exposes three orthogonal states:
 
-- `verification_status`: `pending`, `verified`, `evidence_required`, or
+- `verification_status`: `pending`, `hash_bound`, `verified`, `evidence_required`, or
   `rejected`;
 - `deployment_status`: `not_applicable`, `undeployed`, `deployed`, or
   `chain_verified`;
@@ -81,6 +81,11 @@ The Registry then calls mainnet `get_live_cell` and verifies:
 - the returned Cell data hash equals the published executable hash;
 - for `hash_type = type`, the returned Type Script hash equals `code_hash`;
 - for data-hash variants, `code_hash` equals the executable data hash.
+
+For `dep_type = dep_group`, the Registry decodes the live DepGroup Cell as the
+canonical Molecule `OutPointVec`, loads its members, and requires a live member
+whose code/data identity matches the published executable. The DepGroup
+container bytes are never treated as executable code.
 
 Only CKB mainnet deployment records are accepted. Testnet is neither a Registry
 deployment state nor a selectable website network.
@@ -125,7 +130,34 @@ repository = "https://github.com/acme/vault-lock"
 keywords = ["lock", "vault"]
 ```
 
-The referenced bundle has this shape:
+The referenced bundle carries a closed, typed profile contract. For a
+deployable contract, canonicalize this object recursively by key and encode the
+resulting JSON as the bundle's `manifest_json` string:
+
+```json
+{
+  "schema": "cellscript-registry-profile-contract-v1",
+  "artifact_kind": "deployable_contract",
+  "profile": "ckb_executable",
+  "build": {
+    "target": "riscv64imac-unknown-none-elf",
+    "toolchain": "rustc 1.97.1",
+    "profile": "release",
+    "source_revision": "<immutable revision>",
+    "reproducible": false
+  },
+  "security": { "status": "review_required" },
+  "ckb": {
+    "vm_version": "2",
+    "script_role": "lock",
+    "hash_type": "data1",
+    "dep_type": "code",
+    "abi_hash": "<CKB Blake2b-256 of the ABI object>"
+  }
+}
+```
+
+The bundle has this shape:
 
 ```json
 {
@@ -134,7 +166,7 @@ The referenced bundle has this shape:
   "name": "vault-lock",
   "release": "1.0.0",
   "profile": "ckb_executable",
-  "manifest_json": "{\"target\":\"riscv64imac-unknown-none-elf\"}",
+  "manifest_json": "<canonical cellscript-registry-profile-contract-v1 JSON>",
   "objects": [
     { "role": "source", "content_base64": "..." },
     { "role": "executable", "content_base64": "..." },
@@ -144,9 +176,26 @@ The referenced bundle has this shape:
 ```
 
 For `reproducible_binary`, use profile `reproducible_build` and replace `abi`
-with `build_recipe`. For `template`, use profile `copy_material` and include
-only `source`. The CLI rejects missing, duplicated, empty, malformed, oversized,
-or profile-incompatible objects before signing a request.
+with `build_recipe`; its contract binds the environment, deterministic command,
+recipe hash, and expected artifact hash. `runtime_verifier` additionally
+requires `verifier_id`, `ipc_abi`, and the IPC ABI hash. For `template`, use
+profile `copy_material`, include only `source`, and encode it as a
+`cellscript-template-file-map-v1` whose relative paths, contents, and hashes are
+authenticated. The CLI rejects unknown contract fields, missing or duplicate
+roles, malformed values, unsafe copy paths, and hashes that do not bind the
+immutable objects.
+
+A `ckb_executable` may also set `build.reproducible = true`, include a
+`build_recipe` object, and use the same `reproduction` contract. Deployment and
+reproducibility are independent axes: the former is proven by a live mainnet
+Cell, while the latter still needs reproducible-build evidence beyond a recipe
+declaration.
+
+When `security.status = "audited"`, the contract must include
+`security.audit_report_hash` and the bundle must contain exactly one non-empty
+`audit_report` object with that CKB Blake2b-256 hash. The status is still a
+publisher declaration; the binding prevents the referenced report from being
+swapped or omitted.
 
 ```bash
 cellc publish --artifact-manifest Artifact.toml --dry-run
@@ -154,9 +203,45 @@ cellc publish --artifact-manifest Artifact.toml
 ```
 
 The independent verifier checks the profile-specific object set and recomputes
-the published hashes. A reproducible build is marked `evidence_required` until
+the published hashes. Generic executable and copy bundles are `hash_bound`; this
+does not claim executable semantics, reproducibility, or a security review. A
+reproducible build is marked `evidence_required` until
 appropriate build evidence exists; merely uploading output bytes does not prove
 reproducibility.
+
+## Consuming Other Artifacts
+
+Generic artifacts never pass through `cellc install`. Use the explicit
+consumer commands:
+
+```bash
+cellc artifact fetch acme/vault-lock@1.0.0 --output vault-lock.bundle.json
+cellc artifact verify --bundle vault-lock.bundle.json --receipt vault-lock.bundle.json.receipt.json
+cellc artifact pin acme/vault-lock@1.0.0 --output Artifacts.lock --accept-hash-bound
+cellc artifact copy acme/starter@1.0.0 --destination ./new-project --accept-hash-bound
+cellc artifact record-deployment acme/vault-lock@1.0.0 --code-hash <hash> --hash-type data1 --dep-type code --tx-hash <tx_hash> --index 0 --capability-key-id <key_id>
+cellc artifact cell-dep acme/vault-lock@1.0.0 --output CellDep.json --accept-hash-bound
+cellc artifact commitment acme/vault-lock@1.0.0 --output RegistryCommitment.json
+```
+
+`fetch` checks the immutable object's SHA-256 identity and every CKB object
+hash. `verify` repeats those checks offline from the receipt. `pin` records the
+exact Registry identity and requires an explicit trust decision for
+integrity-only evidence. `copy` is no-overwrite and rejects traversal,
+platform-specific, duplicate, or unauthenticated paths. `cell-dep` requires an
+attached RPC-verified mainnet deployment and preserves the DepGroup container
+and resolved code-member identities. It never turns an `undeployed` release
+into a CellDep.
+
+`record-deployment` derives the artifact/data identity from the signed Registry
+release, signs a mainnet-only payload with the scoped capability key, and sends
+it to the API for live-Cell verification.
+
+`commitment` produces the canonical `cellscript-registry-commitment-v1`
+payload, CKB Blake2b commitment, and compact `CSREGv1 || hash` Cell data. The
+Registry accepts an on-chain attestation only after reading that live mainnet
+Cell and matching its exact data, attestor Lock hash, and Registry Type Script
+hash used for chain indexing.
 
 ## Publisher Authorisation
 
@@ -183,6 +268,7 @@ GET  /ready
 GET  /v1/artifacts
 GET  /v1/artifacts/:namespace/:name
 GET  /v1/artifacts/:namespace/:name/releases/:release/evidence
+GET  /v1/artifacts/:namespace/:name/releases/:release/commitment
 GET  /artifacts/:namespace/:name/releases/:release.json
 POST /v1/artifacts/:namespace/:name/releases
 POST /v1/artifacts/:namespace/:name/releases/:release/deployments

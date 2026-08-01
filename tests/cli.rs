@@ -1223,23 +1223,41 @@ repository = "https://example.com/cellscript/rust-contract"
 "#,
     )
     .unwrap();
-    std::fs::write(
-        root.join("artifact-bundle.json"),
-        r#"{
-  "schema": "cellscript-registry-bundle",
-  "namespace": "cellscript",
-  "name": "rust-contract",
-  "release": "1.0.0",
-  "profile": "ckb_executable",
-  "manifest_json": "{\"name\":\"rust-contract\"}",
-  "objects": [
-    {"role":"source","content_base64":"c291cmNl"},
-    {"role":"executable","content_base64":"ZWxm"},
-    {"role":"abi","content_base64":"YWJp"}
-  ]
-}"#,
-    )
-    .unwrap();
+    let abi_hash = hex::encode(cellscript::ckb_blake2b256(b"abi"));
+    let profile_contract = serde_json::json!({
+        "schema": "cellscript-registry-profile-contract-v1",
+        "artifact_kind": "deployable_contract",
+        "profile": "ckb_executable",
+        "build": {
+            "target": "riscv64imac-unknown-none-elf",
+            "toolchain": "rustc 1.97.1",
+            "profile": "release",
+            "source_revision": "0123456789abcdef",
+            "reproducible": false
+        },
+        "security": { "status": "review_required" },
+        "ckb": {
+            "vm_version": "2",
+            "script_role": "type",
+            "hash_type": "data1",
+            "dep_type": "code",
+            "abi_hash": abi_hash
+        }
+    });
+    let bundle = serde_json::json!({
+        "schema": "cellscript-registry-bundle",
+        "namespace": "cellscript",
+        "name": "rust-contract",
+        "release": "1.0.0",
+        "profile": "ckb_executable",
+        "manifest_json": cellscript::package::registry::canonical_artifact_contract_json(&profile_contract).unwrap(),
+        "objects": [
+            {"role":"source","content_base64":"c291cmNl"},
+            {"role":"executable","content_base64":"ZWxm"},
+            {"role":"abi","content_base64":"YWJp"}
+        ]
+    });
+    std::fs::write(root.join("artifact-bundle.json"), serde_json::to_vec_pretty(&bundle).unwrap()).unwrap();
 }
 
 #[test]

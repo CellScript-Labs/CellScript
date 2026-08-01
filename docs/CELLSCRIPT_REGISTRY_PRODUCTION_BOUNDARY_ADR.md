@@ -46,10 +46,10 @@ The accepted contracts are:
 | Kinds | Profile | Consumption | Verification boundary |
 |---|---|---|---|
 | source/profile library | `cellscript_source` | dependency | compile authenticated snapshot |
-| runtime verifier | `ckb_executable` | TCB | source + executable + ABI hashes |
-| deployable contract | `ckb_executable` | deployment | source + executable + ABI hashes |
+| runtime verifier | `ckb_executable` | TCB | source + executable + ABI + optional recipe hashes |
+| deployable contract | `ckb_executable` | deployment | source + executable + ABI + optional recipe hashes |
 | reproducible binary | `reproducible_build` | TCB | source + output + recipe hashes and evidence |
-| template | `copy_material` | copy | source hash only |
+| template | `copy_material` | copy | authenticated file-map hash |
 
 The coordinate is shared discovery vocabulary, not shared consumption
 semantics. A caller must select on profile and consumption mode, not infer them
@@ -60,7 +60,7 @@ from a name or file extension.
 Every release records:
 
 ```text
-verification_status = pending | verified | evidence_required | rejected
+verification_status = pending | hash_bound | verified | evidence_required | rejected
 deployment_status   = not_applicable | undeployed | deployed | chain_verified
 availability_status = active | deprecated | yanked | quarantined
 ```
@@ -121,8 +121,10 @@ idempotency response commit transactionally. Admission reports verification as
 queued; it is not verification evidence.
 
 Non-CellScript artifacts use an explicit `Artifact.toml` and JSON bundle. The
-bundle contract is profile-specific and bounded to 5 MiB. Unknown or duplicate
-roles fail closed.
+closed `cellscript-registry-profile-contract-v1` binds build, declared security,
+CKB/ABI, verifier IPC, reproducibility, or copy semantics to the immutable
+objects. The bundle is bounded to 5 MiB. Unknown fields and unknown or duplicate
+roles fail closed in admission, publisher CLI, and isolated verifier.
 
 ## Verification Boundary
 
@@ -151,12 +153,21 @@ executable hash. For Type-hash references it computes the returned Type Script
 hash from canonical Molecule serialization; for data-hash references it
 requires code hash and data hash equality.
 
+For DepGroups, the API decodes the live container data as canonical Molecule
+`OutPointVec`, loads the members, and verifies the matching live code Cell. The
+container hash is not substituted for the member executable identity.
+
 Success appends hash-addressed evidence and sets `deployment_status` to
 `chain_verified`. It does not alter verification or availability.
 
-The compact chain fact is the deployed Cell and its Script/data commitments.
-The full source, ABI, build recipe, compiler metadata, audit evidence, and
-publisher history remain off-chain and hash-bound through the Registry.
+The Registry may additionally attest the release/deployment tuple in a live
+mainnet Cell. Canonical `cellscript-registry-commitment-v1` JSON is CKB
+Blake2b-hashed into `CSREGv1 || hash` Cell data. Acceptance checks that exact
+data, the attestor Lock hash, and a Registry Type Script hash used for chain
+indexing. A public commitment-proof route returns the preimage, expected Cell
+data, and accepted attestation evidence. The full source, ABI, build recipe,
+compiler metadata, audit corpus, and publisher history remain off-chain and
+content-addressed.
 
 ## Read Path
 
@@ -181,6 +192,13 @@ verify object, file, source, build, and deployment hashes independently.
 Public list/detail/evidence routes suppress quarantined releases. The API list
 supports explicit kind, verification, deployment, availability, namespace,
 query, and pagination filters.
+
+Generic consumers use explicit `cellc artifact` operations. Fetch/verify check
+the receipt and all immutable identities; pin records TCB/deployment inputs;
+copy safely materializes only an authenticated file map; record-deployment
+submits mainnet evidence; CellDep generation requires attached RPC evidence;
+commitment generation produces the canonical chain payload. Generic artifacts
+never flow through dependency installation.
 
 ## Resolver Boundary
 

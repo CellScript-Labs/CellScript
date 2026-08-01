@@ -10,6 +10,7 @@ export const PUBLISH_ACTION = "publish";
 export const DEPLOYMENT_PROTOCOL = "cellscript-registry-deployment";
 export const DEPLOYMENT_ACTION = "record_deployment";
 export const REGISTRY_SCHEMA_VERSION = 1;
+export const ARTIFACT_PROFILE_CONTRACT_SCHEMA = "cellscript-registry-profile-contract-v1";
 export const CELLSCRIPT_EDITION = "2026";
 export const DEFAULT_REGISTRY_ORIGIN = "https://api.registry.cellscript.dev";
 export const DEFAULT_STATIC_REGISTRY_ORIGIN = "https://registry.cellscript.dev";
@@ -35,7 +36,7 @@ export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
 export type ArtifactProfile = (typeof ARTIFACT_PROFILES)[number];
 export type ArtifactLanguage = (typeof ARTIFACT_LANGUAGES)[number];
 export type ConsumptionMode = (typeof CONSUMPTION_MODES)[number];
-export type VerificationStatus = "pending" | "verified" | "evidence_required" | "rejected";
+export type VerificationStatus = "pending" | "hash_bound" | "verified" | "evidence_required" | "rejected";
 export type DeploymentStatus = "not_applicable" | "undeployed" | "deployed" | "chain_verified";
 export type AvailabilityStatus = "active" | "deprecated" | "yanked" | "quarantined";
 
@@ -135,6 +136,7 @@ export interface RegistryVersionEntry {
   artifact_hash?: string;
   build_recipe_hash?: string;
   abi_hash?: string;
+  profile_contract?: Record<string, unknown>;
   dependencies?: Record<string, { namespace: string; version: string }>;
   verification_status: "pending";
   deployment_status: DeploymentStatus;
@@ -216,6 +218,15 @@ export async function sha256Hex(input: string | Uint8Array | ArrayBuffer): Promi
     typeof input === "string" ? new TextEncoder().encode(input) : input instanceof Uint8Array ? input : new Uint8Array(input);
   const hash = await crypto.subtle.digest("SHA-256", toArrayBuffer(data));
   return [...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+export function ckbBlake2bHex(input: string | Uint8Array): string {
+  const data = typeof input === "string" ? new TextEncoder().encode(input) : input;
+  const digest = blake2b(data, {
+    dkLen: 32,
+    personalization: new TextEncoder().encode("ckb-default-hash"),
+  });
+  return `0x${[...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 
 export function base64ToBytes(value: string): Uint8Array<ArrayBuffer> {
@@ -574,7 +585,7 @@ export function validatePublishPayload(payload: unknown, registryOrigin: string,
   const expiresAt = requireString(obj, "expires_at");
   const cliVersion = requireString(obj, "cli_version");
   const artifact = validateArtifactDescriptor(obj["artifact"]);
-  const registryEntry = validateRegistryEntry(obj["registry_entry"], { namespace, name, version, sourceHash, artifact });
+  const registryEntry = validateRegistryEntry(obj["registry_entry"], { namespace, name, version, sourceHash, manifestHash, artifact });
   parseTimestamp(issuedAt, "issued_at");
   if (parseTimestamp(expiresAt, "expires_at").getTime() <= now.getTime()) {
     throw new ApiError(401, "publish_payload_expired", "publish payload has expired");
@@ -611,7 +622,7 @@ function validateHash(value: string, field: string, code: string): void {
 
 function validateRegistryEntry(
   input: unknown,
-  outer: { namespace: string; name: string; version: string; sourceHash: string; artifact: ArtifactDescriptor },
+  outer: { namespace: string; name: string; version: string; sourceHash: string; manifestHash: string; artifact: ArtifactDescriptor },
 ): RegistryIndexEntry {
   const entry = assertPlainObject(input, "invalid_registry_entry");
   if (entry["schema_version"] !== REGISTRY_SCHEMA_VERSION) {
@@ -652,6 +663,9 @@ function validateRegistryEntry(
   }
 
   if (artifact.profile === "cellscript_source") {
+    if (published["profile_contract"] !== undefined) {
+      throw new ApiError(400, "invalid_profile_contract", "CellScript source releases do not use profile_contract");
+    }
     requireString(published, "cellscript_version");
     if (published["edition"] !== CELLSCRIPT_EDITION) {
       throw new ApiError(400, "unsupported_cellscript_edition", `registry version edition must be ${CELLSCRIPT_EDITION}`);
@@ -674,8 +688,163 @@ function validateRegistryEntry(
     validateHash(requireString(published, "artifact_hash"), "artifact_hash", "invalid_artifact_hash");
     validateHash(requireString(published, "build_recipe_hash"), "build_recipe_hash", "invalid_build_recipe_hash");
   }
+  if (artifact.profile !== "cellscript_source") {
+    validateArtifactProfileContract(published["profile_contract"], artifact, published, outer.manifestHash);
+  }
 
   return entry as unknown as RegistryIndexEntry;
+}
+
+function validateArtifactProfileContract(
+  input: unknown,
+  artifact: ArtifactDescriptor,
+  release: Record<string, unknown>,
+  manifestHash: string,
+): void {
+  let contract: Record<string, unknown>;
+  try {
+    contract = assertPlainObject(input, "invalid_profile_contract");
+  } catch {
+    throw new ApiError(400, "invalid_profile_contract", "profile_contract must be a JSON object");
+  }
+  exactKeys(contract, ["schema", "artifact_kind", "profile", "build", "security", "ckb", "verifier", "reproduction", "copy"], "profile_contract");
+  requireLiteral(contract, "schema", ARTIFACT_PROFILE_CONTRACT_SCHEMA, "profile_contract");
+  requireLiteral(contract, "artifact_kind", artifact.kind, "profile_contract");
+  requireLiteral(contract, "profile", artifact.profile, "profile_contract");
+  requireSameContentHash(ckbBlake2bHex(canonicalJson(contract)), manifestHash, "profile_contract manifest_hash");
+
+  if (artifact.kind === "runtime_verifier" || artifact.kind === "deployable_contract") {
+    const reproducible = validateBuildContract(contract);
+    validateSecurityContract(contract);
+    const ckb = requiredObject(contract, "ckb", "profile_contract");
+    exactKeys(ckb, ["vm_version", "script_role", "hash_type", "dep_type", "abi_hash"], "profile_contract.ckb");
+    requireOneOf(ckb, "vm_version", ["0", "1", "2"], "profile_contract.ckb");
+    requireOneOf(ckb, "script_role", ["lock", "type", "dual_role", "helper"], "profile_contract.ckb");
+    requireOneOf(ckb, "hash_type", ["data", "data1", "data2", "type"], "profile_contract.ckb");
+    requireOneOf(ckb, "dep_type", ["code", "dep_group"], "profile_contract.ckb");
+    requireBoundHash(ckb, "abi_hash", release["abi_hash"], "profile_contract.ckb");
+    validateReproductionContract(contract, release, reproducible);
+    forbidKeys(contract, ["copy"], "profile_contract");
+    if (artifact.kind === "runtime_verifier") {
+      const verifier = requiredObject(contract, "verifier", "profile_contract");
+      exactKeys(verifier, ["verifier_id", "ipc_abi", "ipc_abi_hash"], "profile_contract.verifier");
+      requireString(verifier, "verifier_id");
+      requireString(verifier, "ipc_abi");
+      requireBoundHash(verifier, "ipc_abi_hash", release["abi_hash"], "profile_contract.verifier");
+    } else {
+      forbidKeys(contract, ["verifier"], "profile_contract");
+    }
+    return;
+  }
+  if (artifact.kind === "reproducible_binary") {
+    validateBuildContract(contract, true);
+    validateSecurityContract(contract);
+    forbidKeys(contract, ["ckb", "verifier", "copy"], "profile_contract");
+    validateReproductionContract(contract, release, true);
+    return;
+  }
+  if (artifact.kind === "template") {
+    forbidKeys(contract, ["build", "security", "ckb", "verifier", "reproduction"], "profile_contract");
+    const copy = requiredObject(contract, "copy", "profile_contract");
+    exactKeys(copy, ["format", "entrypoint"], "profile_contract.copy");
+    requireOneOf(copy, "format", ["file_map_v1"], "profile_contract.copy");
+    requireString(copy, "entrypoint");
+    return;
+  }
+  throw new ApiError(400, "invalid_profile_contract", "profile_contract is not valid for this artifact kind");
+}
+
+function validateBuildContract(contract: Record<string, unknown>, expectedReproducible?: boolean): boolean {
+  const build = requiredObject(contract, "build", "profile_contract");
+  exactKeys(build, ["target", "toolchain", "profile", "source_revision", "reproducible"], "profile_contract.build");
+  for (const field of ["target", "toolchain", "profile", "source_revision"]) requireString(build, field);
+  if (typeof build["reproducible"] !== "boolean") {
+    throw new ApiError(400, "invalid_profile_contract", "profile_contract.build.reproducible must be a boolean");
+  }
+  if (expectedReproducible !== undefined && build["reproducible"] !== expectedReproducible) {
+    throw new ApiError(400, "invalid_profile_contract", `profile_contract.build.reproducible must be ${expectedReproducible}`);
+  }
+  return build["reproducible"];
+}
+
+function validateReproductionContract(
+  contract: Record<string, unknown>,
+  release: Record<string, unknown>,
+  reproducible: boolean,
+): void {
+  if (!reproducible) {
+    forbidKeys(contract, ["reproduction"], "profile_contract");
+    if (release["build_recipe_hash"] !== undefined) {
+      throw new ApiError(400, "invalid_profile_contract", "build_recipe_hash requires profile_contract.build.reproducible=true");
+    }
+    return;
+  }
+  const reproduction = requiredObject(contract, "reproduction", "profile_contract");
+  exactKeys(reproduction, ["environment", "command", "recipe_hash", "expected_artifact_hash"], "profile_contract.reproduction");
+  requireString(reproduction, "environment");
+  requireString(reproduction, "command");
+  requireBoundHash(reproduction, "recipe_hash", release["build_recipe_hash"], "profile_contract.reproduction");
+  requireBoundHash(reproduction, "expected_artifact_hash", release["artifact_hash"], "profile_contract.reproduction");
+}
+
+function validateSecurityContract(contract: Record<string, unknown>): void {
+  const security = requiredObject(contract, "security", "profile_contract");
+  exactKeys(security, ["status", "audit_report_hash"], "profile_contract.security");
+  const status = requireOneOf(security, "status", ["unaudited", "review_required", "audited", "rejected"], "profile_contract.security");
+  if (status === "audited" && security["audit_report_hash"] === undefined) {
+    throw new ApiError(400, "invalid_profile_contract", "profile_contract.security.audit_report_hash is required for audited artifacts");
+  }
+  if (security["audit_report_hash"] !== undefined) {
+    validateHash(requireString(security, "audit_report_hash"), "profile_contract.security.audit_report_hash", "invalid_profile_contract");
+  }
+}
+
+function exactKeys(object: Record<string, unknown>, allowed: string[], label: string): void {
+  const unexpected = Object.keys(object).find((key) => !allowed.includes(key));
+  if (unexpected) throw new ApiError(400, "invalid_profile_contract", `${label}.${unexpected} is not recognised`);
+}
+
+function forbidKeys(object: Record<string, unknown>, forbidden: string[], label: string): void {
+  const present = forbidden.find((key) => object[key] !== undefined);
+  if (present) throw new ApiError(400, "invalid_profile_contract", `${label}.${present} is not valid for this artifact kind`);
+}
+
+function requiredObject(object: Record<string, unknown>, key: string, label: string): Record<string, unknown> {
+  try {
+    return assertPlainObject(object[key], "invalid_profile_contract");
+  } catch {
+    throw new ApiError(400, "invalid_profile_contract", `${label}.${key} must be a JSON object`);
+  }
+}
+
+function requireLiteral(object: Record<string, unknown>, key: string, expected: string, label: string): void {
+  if (requireString(object, key) !== expected) {
+    throw new ApiError(400, "invalid_profile_contract", `${label}.${key} must be '${expected}'`);
+  }
+}
+
+function requireOneOf(object: Record<string, unknown>, key: string, allowed: string[], label: string): string {
+  const value = requireString(object, key);
+  if (!allowed.includes(value)) {
+    throw new ApiError(400, "invalid_profile_contract", `${label}.${key} must be one of ${allowed.join(", ")}`);
+  }
+  return value;
+}
+
+function requireBoundHash(object: Record<string, unknown>, key: string, expected: unknown, label: string): void {
+  const value = requireString(object, key);
+  validateHash(value, `${label}.${key}`, "invalid_profile_contract");
+  if (typeof expected !== "string") {
+    throw new ApiError(400, "invalid_profile_contract", `${label}.${key} has no release hash to bind`);
+  }
+  requireSameContentHash(value, expected, `${label}.${key}`);
+}
+
+function requireSameContentHash(actual: string, expected: string, label: string): void {
+  const normalize = (value: string) => value.replace(/^0x/i, "").toLowerCase();
+  if (normalize(actual) !== normalize(expected)) {
+    throw new ApiError(400, "invalid_profile_contract", `${label} does not match the signed immutable object hash`);
+  }
 }
 
 const ARTIFACT_CONTRACTS: Record<ArtifactKind, Omit<ArtifactDescriptor, "kind" | "language"> & { languages: ArtifactLanguage[] }> = {

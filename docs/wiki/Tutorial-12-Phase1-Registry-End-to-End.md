@@ -60,7 +60,34 @@ bundle = "vault-lock.bundle.json"
 description = "Vault lock Script"
 ```
 
-Create the immutable bundle. Each payload is base64-encoded bytes, not a path:
+Create a closed profile contract first. Its ABI hash is the CKB Blake2b-256 of
+the immutable ABI object:
+
+```json
+{
+  "schema": "cellscript-registry-profile-contract-v1",
+  "artifact_kind": "deployable_contract",
+  "profile": "ckb_executable",
+  "build": {
+    "target": "riscv64imac-unknown-none-elf",
+    "toolchain": "rustc 1.97.1",
+    "profile": "release",
+    "source_revision": "<immutable revision>",
+    "reproducible": false
+  },
+  "security": { "status": "review_required" },
+  "ckb": {
+    "vm_version": "2",
+    "script_role": "lock",
+    "hash_type": "data1",
+    "dep_type": "code",
+    "abi_hash": "<ABI object CKB Blake2b-256>"
+  }
+}
+```
+
+Canonicalize it recursively by key and put that JSON string in the immutable
+bundle. Each payload is base64-encoded bytes, not a path:
 
 ```json
 {
@@ -69,7 +96,7 @@ Create the immutable bundle. Each payload is base64-encoded bytes, not a path:
   "name": "vault-lock",
   "release": "1.0.0",
   "profile": "ckb_executable",
-  "manifest_json": "{\"target\":\"riscv64imac-unknown-none-elf\"}",
+  "manifest_json": "<canonical cellscript-registry-profile-contract-v1 JSON>",
   "objects": [
     { "role": "source", "content_base64": "..." },
     { "role": "executable", "content_base64": "..." },
@@ -99,8 +126,9 @@ deployment_status   = undeployed
 availability_status = active
 ```
 
-After the independent verifier binds the source, executable, and ABI hashes,
-verification becomes `verified`. This does not imply deployment.
+After the independent verifier binds the source, executable, ABI, and profile
+contract hashes, verification becomes `hash_bound`. That is an integrity claim,
+not a claim about Script semantics, security review, or deployment.
 
 ## 4. Record a mainnet deployment
 
@@ -120,6 +148,10 @@ data-hash mismatch, a Type Script hash mismatch, a non-mainnet network, or an
 OutPoint that is not bound to the published executable. A successful request
 appends deployment evidence and changes only `deployment_status` to
 `chain_verified`.
+
+For a DepGroup OutPoint, the API decodes the live Cell data as the canonical
+Molecule `OutPointVec` and finds the matching live code member. It does not hash
+the DepGroup container as though it were the executable.
 
 ## 5. Inspect the artifact
 
@@ -141,15 +173,39 @@ Check these independently:
 Do not use `cellc install` for this executable. `cellc install` accepts only
 `cellscript_source` artifacts whose consumption mode is `dependency`.
 
+Consume it explicitly:
+
+```bash
+cellc artifact fetch acme/vault-lock@1.0.0 --output vault-lock.bundle.json
+cellc artifact verify --bundle vault-lock.bundle.json --receipt vault-lock.bundle.json.receipt.json
+cellc artifact pin acme/vault-lock@1.0.0 --output Artifacts.lock --accept-hash-bound
+cellc artifact record-deployment acme/vault-lock@1.0.0 --code-hash <hash> --hash-type data1 --dep-type code --tx-hash <tx_hash> --index 0 --capability-key-id <key_id>
+cellc artifact cell-dep acme/vault-lock@1.0.0 --output CellDep.json --accept-hash-bound
+cellc artifact commitment acme/vault-lock@1.0.0 --output RegistryCommitment.json
+```
+
+The last two commands fail until mainnet deployment evidence has been verified.
+The commitment file contains canonical `CSREGv1` Cell data; attestation still
+requires the API to read a live mainnet Cell and match its Type/Lock identities.
+
 ## 6. Other artifact kinds
 
 - `runtime_verifier`: `ckb_executable` bundle with source, executable, and ABI;
   consumption mode is `tcb`.
+- A `ckb_executable` that is built reproducibly may additionally include
+  `build_recipe`, set `build.reproducible = true`, and bind the recipe,
+  environment, command, and expected executable hash in `reproduction`.
 - `reproducible_binary`: `reproducible_build` bundle with source, executable,
   and `build_recipe`; the Registry reports `evidence_required` until build
   evidence is sufficient.
-- `template`: `copy_material` bundle containing source only; consumption mode
-  is `copy`, never dependency.
+- `template`: `copy_material` bundle containing a
+  `cellscript-template-file-map-v1` source object; use `cellc artifact copy`.
+  It rejects traversal, duplicates, hash drift, and overwrites.
+
+An artifact declaring `security.status = "audited"` must also carry an
+immutable `audit_report` bundle object whose CKB Blake2b-256 hash exactly
+matches `security.audit_report_hash`. This authenticates the referenced report;
+it does not make the Registry the auditor.
 
 ## 7. Naming rules
 

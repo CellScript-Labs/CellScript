@@ -32,18 +32,25 @@ an artifact descriptor:
 ```
 
 Profile/kind/language/consumption combinations are closed and validated. The
-independent verifier applies a profile-specific object contract:
+generic profiles additionally carry a closed
+`cellscript-registry-profile-contract-v1` object. Admission, the publisher CLI,
+and the isolated verifier independently canonicalize it, bind its hash, reject
+unknown fields, and verify the typed build/security/CKB/verifier/reproduction
+or copy fields against immutable object hashes. The independent verifier then
+applies a profile-specific object contract:
 
 - `cellscript_source`: compile the canonical CellScript snapshot;
-- `ckb_executable`: hash-bind source, executable, and ABI;
+- `ckb_executable`: hash-bind source, executable, ABI, and an optional
+  reproducible build recipe;
 - `reproducible_build`: hash-bind source, executable, and build recipe, then
   require external reproducibility evidence;
-- `copy_material`: hash-bind source only and never treat it as a dependency.
+- `copy_material`: hash-bind a `cellscript-template-file-map-v1` source and
+  never treat it as a dependency.
 
 Release state is split across:
 
 ```text
-verification_status = pending | verified | evidence_required | rejected
+verification_status = pending | hash_bound | verified | evidence_required | rejected
 deployment_status   = not_applicable | undeployed | deployed | chain_verified
 availability_status = active | deprecated | yanked | quarantined
 ```
@@ -61,6 +68,7 @@ GET  /artifacts/:namespace/:name/releases/:release.json
 GET  /v1/artifacts
 GET  /v1/artifacts/:namespace/:name
 GET  /v1/artifacts/:namespace/:name/releases/:release/evidence
+GET  /v1/artifacts/:namespace/:name/releases/:release/commitment
 POST /v1/artifacts/:namespace/:name/releases
 POST /v1/artifacts/:namespace/:name/releases/:release/deployments
 
@@ -131,6 +139,11 @@ Admission requires:
 - a new release coordinate;
 - a non-empty immutable snapshot/bundle no larger than 5 MiB;
 - successful immutable-bundle and initial static-object writes.
+
+Generic artifact profile contracts are closed and hash-bound. In particular,
+an `audited` security declaration requires an immutable `audit_report` bundle
+object bound by `security.audit_report_hash`; the isolated verifier recomputes
+that hash before it emits evidence.
 
 The database transaction stores the release, job, capability use, audit event,
 nonce, and completed idempotency record. The verifier job is created in the
@@ -238,7 +251,8 @@ The API container applies tracked additive migrations before serving traffic.
 `0001_initial.sql` is the frozen deployed baseline. `0002` adds the verifier
 queue; `0003` adds multi-wallet principals; `0004` converts an empty legacy
 release table to the artifact/state model and intentionally fails if rows exist
-so operators cannot perform a lossy implicit migration.
+so operators cannot perform a lossy implicit migration; `0005` separates
+hash-integrity evidence from semantic verification with `hash_bound`.
 
 `GET /health` is liveness. `GET /ready` checks store/object access, admin
 configuration, and—when `REQUIRE_REGISTRY_VERIFIER_READY=true`—a fresh verifier

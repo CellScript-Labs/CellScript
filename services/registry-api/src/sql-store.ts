@@ -748,8 +748,9 @@ export class SqlRegistryStore implements RegistryStore {
           `update package_versions
            set status = $4,
                verification_status = case
-                 when $4 in ('verified_build', 'deployed', 'on_chain_attested') and artifact->>'profile' = 'reproducible_build' then 'evidence_required'
-                 when $4 in ('verified_build', 'deployed', 'on_chain_attested') then 'verified'
+                 when $4 = 'verified_build' and $5 = 'compiled' then 'verified'
+                 when $4 = 'verified_build' and $5 = 'hash_bound' then 'hash_bound'
+                 when $4 = 'verified_build' and $5 = 'evidence_required' then 'evidence_required'
                  else verification_status
                end,
                deployment_status = case
@@ -765,7 +766,7 @@ export class SqlRegistryStore implements RegistryStore {
                      edition, compatibility_profile_hash,
                      capability_key_id, principal_type, principal_id, registry_entry,
                      snapshot_hash, direct_url, created_at`,
-          [input.namespace, input.name, input.version, input.kind],
+          [input.namespace, input.name, input.version, input.kind, input.evidence["verification_level"] ?? null],
         );
         await client.query(
           `insert into audit_events(
@@ -831,7 +832,7 @@ export class SqlRegistryStore implements RegistryStore {
         if (current.deployment_status === "not_applicable") {
           throw new ApiError(409, "deployment_not_applicable", "this artifact profile cannot have a CKB deployment");
         }
-        if (!(current.verification_status === "verified" || current.verification_status === "evidence_required")) {
+        if (!(current.verification_status === "verified" || current.verification_status === "hash_bound" || current.verification_status === "evidence_required")) {
           throw new ApiError(409, "artifact_not_verified", "artifact verification must finish before recording a deployment");
         }
         await client.query(
@@ -1298,8 +1299,10 @@ export class SqlRegistryStore implements RegistryStore {
           `update package_versions
            set status = 'verified_build',
                verification_status = case
-                 when artifact->>'profile' = 'reproducible_build' then 'evidence_required'
-                 else 'verified'
+                 when $4 = 'compiled' then 'verified'
+                 when $4 = 'hash_bound' then 'hash_bound'
+                 when $4 = 'evidence_required' then 'evidence_required'
+                 else verification_status
                end,
                indexed_at = coalesce(indexed_at, now()),
                verified_at = coalesce(verified_at, now())
@@ -1309,7 +1312,7 @@ export class SqlRegistryStore implements RegistryStore {
                      edition, compatibility_profile_hash, capability_key_id,
                      principal_type, principal_id, registry_entry, snapshot_hash,
                      direct_url, created_at`,
-          [current.namespace, current.name, current.version],
+          [current.namespace, current.name, current.version, input.evidence["verification_level"] ?? null],
         );
         await client.query(
           `update verification_jobs

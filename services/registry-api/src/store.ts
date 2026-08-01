@@ -741,7 +741,7 @@ export class MemoryRegistryStore implements RegistryStore {
     const versionRecord: PackageVersionRecord = {
       ...existing,
       status: input.kind,
-      verification_status: existing.artifact.profile === "reproducible_build" ? "evidence_required" : "verified",
+      verification_status: verificationStatusForAcceptedEvidence(existing.verification_status, input.kind, input.evidence),
       deployment_status: input.kind === "on_chain_attested"
         ? "chain_verified"
         : input.kind === "deployed"
@@ -778,7 +778,7 @@ export class MemoryRegistryStore implements RegistryStore {
     if (existing.deployment_status === "not_applicable") {
       throw new ApiError(409, "deployment_not_applicable", "this artifact profile cannot have a CKB deployment");
     }
-    if (!(existing.verification_status === "verified" || existing.verification_status === "evidence_required")) {
+    if (!(existing.verification_status === "verified" || existing.verification_status === "hash_bound" || existing.verification_status === "evidence_required")) {
       throw new ApiError(409, "artifact_not_verified", "artifact verification must finish before recording a deployment");
     }
     const evidenceKey = `${versionKey}:${input.kind}:${input.evidence_hash}`;
@@ -859,7 +859,7 @@ export class MemoryRegistryStore implements RegistryStore {
       ? "on_chain_attested"
       : existing.deployment_status === "deployed"
         ? "deployed"
-        : existing.verification_status === "verified"
+        : existing.verification_status === "verified" || existing.verification_status === "hash_bound" || existing.verification_status === "evidence_required"
           ? "verified_build"
           : "source_published";
     const updated: PackageVersionRecord = {
@@ -1297,6 +1297,24 @@ export function assertPromotionTransition(current: RegistryEntryStatus, next: Pa
   };
   if (!allowed[next].includes(current)) {
     throw new ApiError(409, "invalid_evidence_transition", `cannot promote package version from '${current}' to '${next}'`);
+  }
+}
+
+function verificationStatusForAcceptedEvidence(
+  current: VerificationStatus,
+  kind: PackageEvidenceKind,
+  evidence: Record<string, unknown>,
+): VerificationStatus {
+  if (kind !== "verified_build") return current;
+  switch (evidence["verification_level"]) {
+    case "compiled":
+      return "verified";
+    case "hash_bound":
+      return "hash_bound";
+    case "evidence_required":
+      return "evidence_required";
+    default:
+      throw new ApiError(500, "invalid_verification_level", "accepted build evidence has no recognised verification level");
   }
 }
 

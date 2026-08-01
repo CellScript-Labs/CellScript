@@ -13,6 +13,7 @@ import {
   PUBLISH_PROTOCOL,
   canonicalJson,
   capabilityKeyId,
+  ckbBlake2bHex,
   ckbScriptHash,
   ckbSecp256k1PrincipalIdFromPublicKey,
   joyidPrincipalIdFromBinding,
@@ -23,7 +24,7 @@ import {
   type DeploymentPayload,
   type PublishPayload,
 } from "../src/domain";
-import { MemoryRegistryStore, createApp, type SnapshotWriter } from "../src/index";
+import { MemoryRegistryStore, createApp, parseDepGroupOutPoints, type AppDeps, type SnapshotWriter } from "../src/index";
 
 const now = new Date("2026-06-23T12:00:00Z");
 const ckbPrivateKey = Uint8Array.from({ length: 32 }, (_, index) => index === 31 ? 7 : 0);
@@ -31,6 +32,35 @@ const ckbPrivateKey = Uint8Array.from({ length: 32 }, (_, index) => index === 31
 function bytesHex(value: Uint8Array): string {
   return `0x${[...value].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
+
+function depGroupData(outPoints: Array<{ tx_hash_byte: number; index: number }>): string {
+  const bytes = new Uint8Array(4 + outPoints.length * 36);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(0, outPoints.length, true);
+  outPoints.forEach((outPoint, item) => {
+    const offset = 4 + item * 36;
+    bytes.fill(outPoint.tx_hash_byte, offset, offset + 32);
+    view.setUint32(offset + 32, outPoint.index, true);
+  });
+  return bytesHex(bytes);
+}
+
+describe("DepGroup decoding", () => {
+  it("decodes canonical Molecule OutPointVec data", () => {
+    expect(parseDepGroupOutPoints(depGroupData([
+      { tx_hash_byte: 0x11, index: 3 },
+      { tx_hash_byte: 0xab, index: 0xffff_fffe },
+    ]))).toEqual([
+      { tx_hash: `0x${"11".repeat(32)}`, index: 3 },
+      { tx_hash: `0x${"ab".repeat(32)}`, index: 0xffff_fffe },
+    ]);
+  });
+
+  it("rejects empty and non-canonical DepGroup data", () => {
+    expect(() => parseDepGroupOutPoints("0x00000000")).toThrow(/canonical non-empty/);
+    expect(() => parseDepGroupOutPoints("0x01000000aa")).toThrow(/canonical non-empty/);
+  });
+});
 
 async function ckbAuthPayload(): Promise<CapabilityAuthorisationPayload> {
   const publicKey = bytesHex(secp256k1.getPublicKey(ckbPrivateKey, true));
@@ -188,9 +218,72 @@ async function ckbExecutablePublishPayload(keyId: string): Promise<PublishPayloa
   delete release.dependencies;
   release.artifact_hash = `0x${"31".repeat(32)}`;
   release.abi_hash = `0x${"32".repeat(32)}`;
+  release.profile_contract = {
+    schema: "cellscript-registry-profile-contract-v1",
+    artifact_kind: "deployable_contract",
+    profile: "ckb_executable",
+    build: {
+      target: "riscv64imac-unknown-none-elf",
+      toolchain: "rustc 1.97.1",
+      profile: "release",
+      source_revision: "0123456789abcdef",
+      reproducible: false,
+    },
+    security: { status: "review_required" },
+    ckb: {
+      vm_version: "2",
+      script_role: "type",
+      hash_type: "data1",
+      dep_type: "code",
+      abi_hash: release.abi_hash,
+    },
+  };
+  payload.manifest_hash = ckbBlake2bHex(canonicalJson(release.profile_contract));
   release.deployment_status = "undeployed";
   return payload;
 }
+
+describe("generic artifact profile contracts", () => {
+  it("requires a typed profile contract for non-CellScript releases", async () => {
+    const payload = await ckbExecutablePublishPayload("cap_test");
+    delete payload.registry_entry.versions[0].profile_contract;
+    expect(() => validatePublishPayload(payload, DEFAULT_REGISTRY_ORIGIN, now)).toThrow(/profile_contract/);
+  });
+
+  it("rejects contract hashes that do not bind the immutable ABI identity", async () => {
+    const payload = await ckbExecutablePublishPayload("cap_test");
+    const contract = payload.registry_entry.versions[0].profile_contract!;
+    (contract["ckb"] as Record<string, unknown>)["abi_hash"] = `0x${"99".repeat(32)}`;
+    payload.manifest_hash = ckbBlake2bHex(canonicalJson(contract));
+    expect(() => validatePublishPayload(payload, DEFAULT_REGISTRY_ORIGIN, now)).toThrow(/abi_hash.*does not match/);
+  });
+
+  it("rejects unknown profile contract fields", async () => {
+    const payload = await ckbExecutablePublishPayload("cap_test");
+    const contract = payload.registry_entry.versions[0].profile_contract!;
+    contract["trust_me"] = true;
+    payload.manifest_hash = ckbBlake2bHex(canonicalJson(contract));
+    expect(() => validatePublishPayload(payload, DEFAULT_REGISTRY_ORIGIN, now)).toThrow(/trust_me is not recognised/);
+  });
+
+  it("allows a deployed CKB executable to bind a reproducible build recipe", async () => {
+    const payload = await ckbExecutablePublishPayload("cap_test");
+    const release = payload.registry_entry.versions[0];
+    const contract = release.profile_contract!;
+    const recipeHash = `0x${"34".repeat(32)}`;
+    (contract["build"] as Record<string, unknown>)["reproducible"] = true;
+    contract["reproduction"] = {
+      environment: "docker.io/library/rust:1.97.1@sha256:0123456789abcdef",
+      command: "cargo build --locked --release",
+      recipe_hash: recipeHash,
+      expected_artifact_hash: release.artifact_hash,
+    };
+    release.build_recipe_hash = recipeHash;
+    payload.manifest_hash = ckbBlake2bHex(canonicalJson(contract));
+
+    expect(validatePublishPayload(payload, DEFAULT_REGISTRY_ORIGIN, now).artifact.profile).toBe("ckb_executable");
+  });
+});
 
 function deploymentPayload(keyId: string): DeploymentPayload {
   return {
@@ -223,7 +316,7 @@ function utf8(bytes: Uint8Array): string {
   return new TextDecoder().decode(bytes);
 }
 
-function testApp(store = new MemoryRegistryStore(), writer?: SnapshotWriter) {
+function testApp(store = new MemoryRegistryStore(), writer?: SnapshotWriter, deps: Partial<AppDeps> = {}) {
   const snapshots: Array<{ key: string; body: Uint8Array; contentType: string }> = [];
   const snapshotWriter =
     writer ??
@@ -238,6 +331,7 @@ function testApp(store = new MemoryRegistryStore(), writer?: SnapshotWriter) {
     joyidVerifier: { verifySignature: async () => true },
     capabilityVerifier: { verify: async () => true },
     snapshotWriter,
+    ...deps,
   });
   return { app, store, snapshots };
 }
@@ -601,6 +695,7 @@ describe("registry api", () => {
       producer: "test-verifier",
       generated_at: new Date().toISOString(),
       verification_status: "passed",
+      verification_level: "compiled",
       source_hash: publish.source_hash,
       manifest_hash: publish.manifest_hash,
       compatibility_profile_hash: publish.registry_entry.versions[0].compatibility_profile_hash,
@@ -1007,7 +1102,14 @@ describe("registry api", () => {
   });
 
   it("lists public packages and requires chained evidence for production promotions", async () => {
-    const { app, store, snapshots } = testApp();
+    const { app, store, snapshots } = testApp(undefined, undefined, {
+      verifyMainnetDeployment: async () => ({ block_hash: `0x${"60".repeat(32)}` }),
+      verifyMainnetCommitment: async () => ({
+        commitment_schema: "cellscript-registry-commitment-v1",
+        chain_verification: "get_live_cell+type_index",
+        observed_block_hash: `0x${"61".repeat(32)}`,
+      }),
+    });
     const payload = authPayload();
     const capabilityResponse = await post(app, "/v1/capabilities", {
       payload,
@@ -1020,14 +1122,14 @@ describe("registry api", () => {
       owner_principal_type: "joyid_ckb",
       owner_principal_id: payload.principal_id,
     });
-    const publish = await publishPayload(capability.key_id);
+    const publish = await ckbExecutablePublishPayload(capability.key_id);
     const publishResponse = await post(app, "/v1/artifacts/cellscript/demo/releases", {
       payload: publish,
       capability_signature: { algorithm: "p256-sha256", signature: "sig" },
       source_snapshot: {
-        content_base64: base64("source snapshot"),
-        content_type: "application/vnd.cellscript.source+tar",
-        size_bytes: "source snapshot".length,
+        content_base64: base64("artifact bundle"),
+        content_type: "application/vnd.cellscript.artifact-bundle+json",
+        size_bytes: "artifact bundle".length,
         source_hash: publish.source_hash,
       },
     });
@@ -1042,7 +1144,7 @@ describe("registry api", () => {
         coordinate: "cellscript/demo",
         latest_release: "1.2.3",
         verification_status: "pending",
-        deployment_status: "not_applicable",
+        deployment_status: "undeployed",
         availability_status: "active",
       }],
     });
@@ -1059,7 +1161,7 @@ describe("registry api", () => {
           immutable_bundle: {
             schema: "cellscript-registry-immutable-bundle",
             url: expect.stringContaining("https://registry.cellscript.dev/source-snapshots/cellscript/demo/1.2.3/"),
-            content_type: "application/vnd.cellscript.source+tar",
+            content_type: "application/vnd.cellscript.artifact-bundle+json",
           },
         }],
       }],
@@ -1074,7 +1176,6 @@ describe("registry api", () => {
       verification_status: "passed",
       source_hash: publish.source_hash,
       manifest_hash: publish.manifest_hash,
-      compatibility_profile_hash: publish.registry_entry.versions[0].compatibility_profile_hash,
     };
 
     const missingDependency = await post(
@@ -1088,8 +1189,10 @@ describe("registry api", () => {
           verified_build_evidence_hash: `sha256:${"11".repeat(32)}`,
           artifact_hash: `0x${"31".repeat(32)}`,
           network: "mainnet",
-          code_hash: `0x${"41".repeat(32)}`,
-          data_hash: `0x${"42".repeat(32)}`,
+          code_hash: `0x${"31".repeat(32)}`,
+          data_hash: `0x${"31".repeat(32)}`,
+          hash_type: "data1",
+          dep_type: "code",
           out_point: { tx_hash: `0x${"43".repeat(32)}`, index: 0 },
           deployment_status: "live",
         },
@@ -1108,10 +1211,9 @@ describe("registry api", () => {
         evidence: {
           ...commonEvidence,
           kind: "verified_build",
-          verification_level: "compiled",
+          verification_level: "hash_bound",
           artifact_hash: `0x${"31".repeat(32)}`,
           metadata_hash: `0x${"32".repeat(32)}`,
-          compiler_version: "cellc 0.23.0",
         },
       },
       adminEnv,
@@ -1120,6 +1222,31 @@ describe("registry api", () => {
     expect(verified.status).toBe(200);
     const verifiedBody = await verified.json() as any;
     expect(verifiedBody.status).toBe("verified_build");
+
+    const mismatchedDeployment = await post(
+      app,
+      "/v1/admin/artifacts/cellscript/demo/releases/1.2.3/promote",
+      {
+        kind: "deployed",
+        evidence: {
+          ...commonEvidence,
+          kind: "deployed",
+          verified_build_evidence_hash: verifiedBody.evidence.evidence_hash,
+          artifact_hash: `0x${"31".repeat(32)}`,
+          network: "mainnet",
+          code_hash: `0x${"44".repeat(32)}`,
+          data_hash: `0x${"44".repeat(32)}`,
+          hash_type: "data1",
+          dep_type: "code",
+          out_point: { tx_hash: `0x${"43".repeat(32)}`, index: 0 },
+          deployment_status: "live",
+        },
+      },
+      adminEnv,
+      adminHeaders,
+    );
+    expect(mismatchedDeployment.status).toBe(400);
+    expect((await mismatchedDeployment.json() as any).error.code).toBe("deployment_data_hash_mismatch");
 
     const deployed = await post(
       app,
@@ -1132,8 +1259,10 @@ describe("registry api", () => {
           verified_build_evidence_hash: verifiedBody.evidence.evidence_hash,
           artifact_hash: `0x${"31".repeat(32)}`,
           network: "mainnet",
-          code_hash: `0x${"41".repeat(32)}`,
-          data_hash: `0x${"42".repeat(32)}`,
+          code_hash: `0x${"31".repeat(32)}`,
+          data_hash: `0x${"31".repeat(32)}`,
+          hash_type: "data1",
+          dep_type: "code",
           out_point: { tx_hash: `0x${"43".repeat(32)}`, index: 0 },
           deployment_status: "live",
         },
@@ -1158,6 +1287,9 @@ describe("registry api", () => {
           attestation_tx_hash: `0x${"51".repeat(32)}`,
           attestation_hash: `0x${"52".repeat(32)}`,
           attestor: "cellscript-release-bot",
+          attestor_lock_hash: `0x${"53".repeat(32)}`,
+          registry_type_hash: `0x${"54".repeat(32)}`,
+          attestation_out_point: { tx_hash: `0x${"51".repeat(32)}`, index: 0 },
           observed_at: "2026-06-23T12:00:00Z",
           attestation_status: "confirmed",
         },
@@ -1172,18 +1304,18 @@ describe("registry api", () => {
     expect(acceptedIndex.status).toBe(200);
     expect(await acceptedIndex.json()).toMatchObject({
       count: 1,
-      artifacts: [{ coordinate: "cellscript/demo", verification_status: "verified", deployment_status: "chain_verified" }],
+      artifacts: [{ coordinate: "cellscript/demo", verification_status: "hash_bound", deployment_status: "chain_verified" }],
     });
 
     const detail = await get(app, "/v1/artifacts/cellscript/demo");
     expect(detail.status).toBe(200);
     expect(await detail.json()).toMatchObject({
       coordinate: "cellscript/demo",
-      verification_status: "verified",
+      verification_status: "hash_bound",
       deployment_status: "chain_verified",
       releases: [{
         release: "1.2.3",
-        verification_status: "verified",
+        verification_status: "hash_bound",
         deployment_status: "chain_verified",
         immutable_bundle: { schema: "cellscript-registry-immutable-bundle" },
         evidence: [{ kind: "verified_build" }, { kind: "deployed" }, { kind: "on_chain_attested" }],
@@ -1244,7 +1376,7 @@ describe("registry api", () => {
       version: "1.2.3",
       kind: "verified_build",
       evidence_hash: `sha256:${"61".repeat(32)}`,
-      evidence: { artifact_hash: `0x${"31".repeat(32)}` },
+      evidence: { verification_level: "hash_bound", artifact_hash: `0x${"31".repeat(32)}` },
       request_id: "verification:test",
       admin_actor: "verification-worker:test",
     });
@@ -1270,6 +1402,19 @@ describe("registry api", () => {
     expect(store.packageVersions.get("cellscript/demo@1.2.3")?.deployment_status).toBe("chain_verified");
     expect(store.auditEvents.some((event) => event.event_type === "deployment.chain_verified")).toBe(true);
     expect(snapshots.filter((item) => item.key === "artifacts/cellscript/demo/releases/1.2.3.json")).toHaveLength(2);
+    const commitment = await get(app, "/v1/artifacts/cellscript/demo/releases/1.2.3/commitment");
+    expect(commitment.status).toBe(200);
+    expect(await commitment.json()).toMatchObject({
+      schema: "cellscript-registry-commitment-proof-v1",
+      status: "commitment_ready",
+      payload: {
+        schema: "cellscript-registry-commitment-v1",
+        namespace: "cellscript",
+        name: "demo",
+        release: "1.2.3",
+      },
+      cell_data: expect.stringMatching(/^0x43535245477631[0-9a-f]{64}$/),
+    });
   });
 
   it("rejects testnet deployment payloads and exposes no retired package routes", async () => {

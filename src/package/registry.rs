@@ -51,7 +51,7 @@ pub fn compute_package_manifest_hash(manifest: &PackageManifest) -> Result<Strin
     Ok(crate::hex_encode(&crate::ckb_blake2b256(&bytes)))
 }
 
-fn canonical_json_value(value: &serde_json::Value) -> serde_json::Value {
+pub fn canonical_json_value(value: &serde_json::Value) -> serde_json::Value {
     match value {
         serde_json::Value::Array(items) => serde_json::Value::Array(items.iter().map(canonical_json_value).collect()),
         serde_json::Value::Object(object) => {
@@ -67,6 +67,257 @@ fn canonical_json_value(value: &serde_json::Value) -> serde_json::Value {
         }
         other => other.clone(),
     }
+}
+
+pub const ARTIFACT_PROFILE_CONTRACT_SCHEMA: &str = "cellscript-registry-profile-contract-v1";
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ArtifactContractHashes<'a> {
+    pub artifact_hash: Option<&'a str>,
+    pub abi_hash: Option<&'a str>,
+    pub build_recipe_hash: Option<&'a str>,
+    pub audit_report_hash: Option<&'a str>,
+}
+
+pub fn canonical_artifact_contract_json(value: &serde_json::Value) -> std::result::Result<String, String> {
+    serde_json::to_string(&canonical_json_value(value))
+        .map_err(|error| format!("failed to serialize canonical artifact profile contract: {error}"))
+}
+
+pub fn validate_artifact_profile_contract(
+    artifact_kind: &str,
+    profile: &str,
+    value: &serde_json::Value,
+    hashes: ArtifactContractHashes<'_>,
+) -> std::result::Result<(), String> {
+    let contract = registry_contract_object(value, "profile contract")?;
+    registry_exact_keys(
+        contract,
+        &["schema", "artifact_kind", "profile", "build", "security", "ckb", "verifier", "reproduction", "copy"],
+        "profile contract",
+    )?;
+    registry_require_literal(contract, "schema", ARTIFACT_PROFILE_CONTRACT_SCHEMA, "profile contract")?;
+    registry_require_literal(contract, "artifact_kind", artifact_kind, "profile contract")?;
+    registry_require_literal(contract, "profile", profile, "profile contract")?;
+
+    match (artifact_kind, profile) {
+        ("runtime_verifier", "ckb_executable") => {
+            let reproducible = validate_registry_build_contract(contract, None)?;
+            validate_registry_security_contract(contract, hashes.audit_report_hash)?;
+            validate_registry_ckb_contract(contract)?;
+            validate_registry_abi_contract(contract, hashes.abi_hash)?;
+            validate_registry_reproduction_contract(contract, reproducible, hashes)?;
+            let verifier = registry_required_object(contract, "verifier", "profile contract")?;
+            registry_exact_keys(verifier, &["verifier_id", "ipc_abi", "ipc_abi_hash"], "verifier")?;
+            registry_require_nonempty_string(verifier, "verifier_id", "verifier")?;
+            registry_require_nonempty_string(verifier, "ipc_abi", "verifier")?;
+            registry_require_matching_hash(verifier, "ipc_abi_hash", hashes.abi_hash, "verifier")?;
+            registry_forbid_keys(contract, &["copy"], "profile contract")?;
+        }
+        ("deployable_contract", "ckb_executable") => {
+            let reproducible = validate_registry_build_contract(contract, None)?;
+            validate_registry_security_contract(contract, hashes.audit_report_hash)?;
+            validate_registry_ckb_contract(contract)?;
+            validate_registry_abi_contract(contract, hashes.abi_hash)?;
+            validate_registry_reproduction_contract(contract, reproducible, hashes)?;
+            registry_forbid_keys(contract, &["verifier", "copy"], "profile contract")?;
+        }
+        ("reproducible_binary", "reproducible_build") => {
+            validate_registry_build_contract(contract, Some(true))?;
+            validate_registry_security_contract(contract, hashes.audit_report_hash)?;
+            registry_forbid_keys(contract, &["ckb", "verifier", "copy"], "profile contract")?;
+            validate_registry_reproduction_contract(contract, true, hashes)?;
+        }
+        ("template", "copy_material") => {
+            registry_forbid_keys(contract, &["build", "security", "ckb", "verifier", "reproduction"], "profile contract")?;
+            let copy = registry_required_object(contract, "copy", "profile contract")?;
+            registry_exact_keys(copy, &["format", "entrypoint"], "copy")?;
+            registry_require_one_of(copy, "format", &["file_map_v1"], "copy")?;
+            registry_require_nonempty_string(copy, "entrypoint", "copy")?;
+        }
+        _ => return Err(format!("artifact kind '{artifact_kind}' does not match profile '{profile}'")),
+    }
+    Ok(())
+}
+
+fn validate_registry_build_contract(
+    contract: &serde_json::Map<String, serde_json::Value>,
+    expected_reproducible: Option<bool>,
+) -> std::result::Result<bool, String> {
+    let build = registry_required_object(contract, "build", "profile contract")?;
+    registry_exact_keys(build, &["target", "toolchain", "profile", "source_revision", "reproducible"], "build")?;
+    registry_require_nonempty_string(build, "target", "build")?;
+    registry_require_nonempty_string(build, "toolchain", "build")?;
+    registry_require_nonempty_string(build, "profile", "build")?;
+    registry_require_nonempty_string(build, "source_revision", "build")?;
+    let reproducible = build
+        .get("reproducible")
+        .and_then(serde_json::Value::as_bool)
+        .ok_or_else(|| "build.reproducible must be a boolean".to_string())?;
+    if let Some(expected) = expected_reproducible
+        && reproducible != expected
+    {
+        return Err(format!("build.reproducible must be {expected}"));
+    }
+    Ok(reproducible)
+}
+
+fn validate_registry_reproduction_contract(
+    contract: &serde_json::Map<String, serde_json::Value>,
+    reproducible: bool,
+    hashes: ArtifactContractHashes<'_>,
+) -> std::result::Result<(), String> {
+    if !reproducible {
+        registry_forbid_keys(contract, &["reproduction"], "profile contract")?;
+        if hashes.build_recipe_hash.is_some() {
+            return Err("a build_recipe object requires build.reproducible=true".to_string());
+        }
+        return Ok(());
+    }
+    let reproduction = registry_required_object(contract, "reproduction", "profile contract")?;
+    registry_exact_keys(reproduction, &["environment", "command", "recipe_hash", "expected_artifact_hash"], "reproduction")?;
+    registry_require_nonempty_string(reproduction, "environment", "reproduction")?;
+    registry_require_nonempty_string(reproduction, "command", "reproduction")?;
+    registry_require_matching_hash(reproduction, "recipe_hash", hashes.build_recipe_hash, "reproduction")?;
+    registry_require_matching_hash(reproduction, "expected_artifact_hash", hashes.artifact_hash, "reproduction")
+}
+
+fn validate_registry_security_contract(
+    contract: &serde_json::Map<String, serde_json::Value>,
+    audit_report_hash: Option<&str>,
+) -> std::result::Result<(), String> {
+    let security = registry_required_object(contract, "security", "profile contract")?;
+    registry_exact_keys(security, &["status", "audit_report_hash"], "security")?;
+    let status = registry_require_one_of(security, "status", &["unaudited", "review_required", "audited", "rejected"], "security")?;
+    if status == "audited" || security.contains_key("audit_report_hash") {
+        registry_require_matching_hash(security, "audit_report_hash", audit_report_hash, "security")?;
+    } else if audit_report_hash.is_some() {
+        return Err("security.audit_report_hash must bind the supplied audit_report object".to_string());
+    }
+    Ok(())
+}
+
+fn validate_registry_ckb_contract(contract: &serde_json::Map<String, serde_json::Value>) -> std::result::Result<(), String> {
+    let ckb = registry_required_object(contract, "ckb", "profile contract")?;
+    registry_exact_keys(ckb, &["vm_version", "script_role", "hash_type", "dep_type", "abi_hash"], "ckb")?;
+    registry_require_one_of(ckb, "vm_version", &["0", "1", "2"], "ckb")?;
+    registry_require_one_of(ckb, "script_role", &["lock", "type", "dual_role", "helper"], "ckb")?;
+    registry_require_one_of(ckb, "hash_type", &["data", "data1", "data2", "type"], "ckb")?;
+    registry_require_one_of(ckb, "dep_type", &["code", "dep_group"], "ckb")?;
+    Ok(())
+}
+
+fn validate_registry_abi_contract(
+    contract: &serde_json::Map<String, serde_json::Value>,
+    expected: Option<&str>,
+) -> std::result::Result<(), String> {
+    let ckb = registry_required_object(contract, "ckb", "profile contract")?;
+    registry_require_matching_hash(ckb, "abi_hash", expected, "ckb")
+}
+
+fn registry_contract_object<'a>(
+    value: &'a serde_json::Value,
+    label: &str,
+) -> std::result::Result<&'a serde_json::Map<String, serde_json::Value>, String> {
+    value.as_object().ok_or_else(|| format!("{label} must be a JSON object"))
+}
+
+fn registry_required_object<'a>(
+    object: &'a serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    label: &str,
+) -> std::result::Result<&'a serde_json::Map<String, serde_json::Value>, String> {
+    object
+        .get(key)
+        .ok_or_else(|| format!("{label}.{key} is required"))
+        .and_then(|value| registry_contract_object(value, &format!("{label}.{key}")))
+}
+
+fn registry_exact_keys(
+    object: &serde_json::Map<String, serde_json::Value>,
+    allowed: &[&str],
+    label: &str,
+) -> std::result::Result<(), String> {
+    if let Some(key) = object.keys().find(|key| !allowed.contains(&key.as_str())) {
+        return Err(format!("{label}.{key} is not recognised"));
+    }
+    Ok(())
+}
+
+fn registry_forbid_keys(
+    object: &serde_json::Map<String, serde_json::Value>,
+    forbidden: &[&str],
+    label: &str,
+) -> std::result::Result<(), String> {
+    if let Some(key) = forbidden.iter().find(|key| object.contains_key(**key)) {
+        return Err(format!("{label}.{key} is not valid for this artifact kind"));
+    }
+    Ok(())
+}
+
+fn registry_require_literal(
+    object: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    expected: &str,
+    label: &str,
+) -> std::result::Result<(), String> {
+    let value = registry_require_nonempty_string(object, key, label)?;
+    if value != expected {
+        return Err(format!("{label}.{key} must be '{expected}'"));
+    }
+    Ok(())
+}
+
+fn registry_require_nonempty_string<'a>(
+    object: &'a serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    label: &str,
+) -> std::result::Result<&'a str, String> {
+    object
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| format!("{label}.{key} must be a non-empty string"))
+}
+
+fn registry_require_one_of<'a>(
+    object: &'a serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    allowed: &[&str],
+    label: &str,
+) -> std::result::Result<&'a str, String> {
+    let value = registry_require_nonempty_string(object, key, label)?;
+    if !allowed.contains(&value) {
+        return Err(format!("{label}.{key} must be one of {}", allowed.join(", ")));
+    }
+    Ok(value)
+}
+
+fn registry_require_hash<'a>(
+    object: &'a serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    label: &str,
+) -> std::result::Result<&'a str, String> {
+    let value = registry_require_nonempty_string(object, key, label)?;
+    let bare = value.strip_prefix("0x").unwrap_or(value);
+    if bare.len() != 64 || !bare.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(format!("{label}.{key} must be a 32-byte hexadecimal hash"));
+    }
+    Ok(value)
+}
+
+fn registry_require_matching_hash(
+    object: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    expected: Option<&str>,
+    label: &str,
+) -> std::result::Result<(), String> {
+    let value = registry_require_hash(object, key, label)?;
+    let expected = expected.ok_or_else(|| format!("{label}.{key} has no computed bundle identity to bind"))?;
+    if !value.trim_start_matches("0x").eq_ignore_ascii_case(expected.trim_start_matches("0x")) {
+        return Err(format!("{label}.{key} does not match the corresponding immutable bundle object"));
+    }
+    Ok(())
 }
 
 /// Effective discovery index URL.
@@ -1335,6 +1586,53 @@ mod ckb_blake2b256_stream {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn audited_artifact_contract_binds_the_immutable_audit_report() {
+        let artifact_hash = "11".repeat(32);
+        let abi_hash = "22".repeat(32);
+        let audit_report_hash = "33".repeat(32);
+        let contract = serde_json::json!({
+            "schema": ARTIFACT_PROFILE_CONTRACT_SCHEMA,
+            "artifact_kind": "deployable_contract",
+            "profile": "ckb_executable",
+            "build": {
+                "target": "riscv64imac-unknown-none-elf",
+                "toolchain": "rustc 1.97.1",
+                "profile": "release",
+                "source_revision": "0123456789abcdef",
+                "reproducible": false
+            },
+            "security": {
+                "status": "audited",
+                "audit_report_hash": audit_report_hash
+            },
+            "ckb": {
+                "vm_version": "2",
+                "script_role": "type",
+                "hash_type": "data1",
+                "dep_type": "code",
+                "abi_hash": abi_hash
+            }
+        });
+        let hashes = ArtifactContractHashes {
+            artifact_hash: Some(&artifact_hash),
+            abi_hash: Some(&abi_hash),
+            build_recipe_hash: None,
+            audit_report_hash: Some(&audit_report_hash),
+        };
+
+        validate_artifact_profile_contract("deployable_contract", "ckb_executable", &contract, hashes).unwrap();
+
+        let error = validate_artifact_profile_contract(
+            "deployable_contract",
+            "ckb_executable",
+            &contract,
+            ArtifactContractHashes { audit_report_hash: None, ..hashes },
+        )
+        .unwrap_err();
+        assert!(error.contains("security.audit_report_hash"));
+    }
 
     #[test]
     fn package_manifest_hash_is_independent_of_map_insertion_order() {

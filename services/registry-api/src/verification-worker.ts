@@ -235,6 +235,8 @@ async function runBuildVerification(job: VerificationJobRecord, version: Package
     job.source_hash,
     "--manifest-hash",
     job.manifest_hash,
+    "--artifact-kind",
+    job.artifact.kind,
     "--profile",
     job.artifact.profile,
   ];

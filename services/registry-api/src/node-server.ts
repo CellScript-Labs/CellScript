@@ -39,6 +39,7 @@ const env: Env = {
   ...(process.env["NAMESPACE_CLAIM_COOLDOWN_SECONDS"]
     ? { NAMESPACE_CLAIM_COOLDOWN_SECONDS: process.env["NAMESPACE_CLAIM_COOLDOWN_SECONDS"] }
     : {}),
+  ...(process.env["CKB_MAINNET_RPC_URL"] ? { CKB_MAINNET_RPC_URL: process.env["CKB_MAINNET_RPC_URL"] } : {}),
 };
 
 const app = createApp({

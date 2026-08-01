@@ -22,6 +22,7 @@ struct Args {
     version: String,
     source_hash: String,
     manifest_hash: String,
+    artifact_kind: String,
     profile: String,
     compatibility_profile_hash: Option<String>,
     artifact_hash: Option<String>,
@@ -43,6 +44,7 @@ struct VerificationOutput {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ArtifactBundle {
     schema: String,
     namespace: String,
@@ -54,6 +56,7 @@ struct ArtifactBundle {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ArtifactBundleObject {
     role: String,
     content_base64: String,
@@ -173,13 +176,25 @@ fn verify_artifact_bundle(args: Args, snapshot: &[u8]) -> Result<VerificationOut
     {
         bail!("artifact bundle identity does not match the verification job");
     }
-    let manifest_hash = hex::encode(cellscript::ckb_blake2b256(bundle.manifest_json.as_bytes()));
+    let manifest: serde_json::Value =
+        serde_json::from_str(&bundle.manifest_json).context("artifact bundle manifest_json must be valid JSON")?;
+    if !manifest.is_object() {
+        bail!("artifact bundle manifest_json must encode a JSON object");
+    }
+    validate_bundle_roles(&bundle, &args.profile, &manifest)?;
+    let canonical_manifest = cellscript::package::registry::canonical_artifact_contract_json(&manifest).map_err(anyhow::Error::msg)?;
+    let manifest_hash = hex::encode(cellscript::ckb_blake2b256(canonical_manifest.as_bytes()));
     require_matching_hash("manifest_hash", &manifest_hash, &args.manifest_hash)?;
     let source = bundle_object(&bundle, "source")?;
     let source_hash = hex::encode(cellscript::ckb_blake2b256(&source));
     require_matching_hash("source_hash", &source_hash, &args.source_hash)?;
+    let audit_report_hash = if manifest.pointer("/security/audit_report_hash").is_some() {
+        Some(hex::encode(cellscript::ckb_blake2b256(&bundle_object(&bundle, "audit_report")?)))
+    } else {
+        None
+    };
 
-    let (artifact_hash, artifact_format, verification_level) = match args.profile.as_str() {
+    let (artifact_hash, abi_hash, build_recipe_hash, artifact_format, verification_level) = match args.profile.as_str() {
         "ckb_executable" => {
             let executable = bundle_object(&bundle, "executable")?;
             let actual_artifact_hash = hex::encode(cellscript::ckb_blake2b256(&executable));
@@ -195,7 +210,19 @@ fn verify_artifact_bundle(args: Args, snapshot: &[u8]) -> Result<VerificationOut
                 &actual_abi_hash,
                 args.abi_hash.as_deref().context("ckb_executable requires --abi-hash")?,
             )?;
-            (Some(actual_artifact_hash), "ckb-vm-executable", "hash_bound")
+            let actual_recipe_hash = if manifest.pointer("/build/reproducible").and_then(serde_json::Value::as_bool) == Some(true) {
+                let recipe = bundle_object(&bundle, "build_recipe")?;
+                let hash = hex::encode(cellscript::ckb_blake2b256(&recipe));
+                require_matching_hash(
+                    "build_recipe_hash",
+                    &hash,
+                    args.build_recipe_hash.as_deref().context("reproducible ckb_executable requires --build-recipe-hash")?,
+                )?;
+                Some(hash)
+            } else {
+                None
+            };
+            (Some(actual_artifact_hash), Some(actual_abi_hash), actual_recipe_hash, "ckb-vm-executable", "hash_bound")
         }
         "reproducible_build" => {
             let executable = bundle_object(&bundle, "executable")?;
@@ -212,11 +239,23 @@ fn verify_artifact_bundle(args: Args, snapshot: &[u8]) -> Result<VerificationOut
                 &actual_recipe_hash,
                 args.build_recipe_hash.as_deref().context("reproducible_build requires --build-recipe-hash")?,
             )?;
-            (Some(actual_artifact_hash), "reproducible-binary", "evidence_required")
+            (Some(actual_artifact_hash), None, Some(actual_recipe_hash), "reproducible-binary", "evidence_required")
         }
-        "copy_material" => (None, "copy-material", "hash_bound"),
+        "copy_material" => (None, None, None, "copy-material", "hash_bound"),
         _ => unreachable!("profile was checked before bundle verification"),
     };
+    cellscript::package::registry::validate_artifact_profile_contract(
+        &args.artifact_kind,
+        &args.profile,
+        &manifest,
+        cellscript::package::registry::ArtifactContractHashes {
+            artifact_hash: artifact_hash.as_deref(),
+            abi_hash: abi_hash.as_deref(),
+            build_recipe_hash: build_recipe_hash.as_deref(),
+            audit_report_hash: audit_report_hash.as_deref(),
+        },
+    )
+    .map_err(anyhow::Error::msg)?;
     let metadata_hash = hex::encode(cellscript::ckb_blake2b256(snapshot));
     Ok(VerificationOutput {
         status: "passed",
@@ -246,6 +285,36 @@ fn bundle_object(bundle: &ArtifactBundle, role: &str) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
+fn validate_bundle_roles(bundle: &ArtifactBundle, profile: &str, contract: &serde_json::Value) -> Result<()> {
+    let mut required = match profile {
+        "ckb_executable" => vec!["source", "executable", "abi"],
+        "reproducible_build" => vec!["source", "executable", "build_recipe"],
+        "copy_material" => vec!["source"],
+        other => bail!("unsupported artifact bundle profile '{other}'"),
+    };
+    if contract.pointer("/security/audit_report_hash").is_some() {
+        required.push("audit_report");
+    }
+    if profile == "ckb_executable" && contract.pointer("/build/reproducible").and_then(serde_json::Value::as_bool) == Some(true) {
+        required.push("build_recipe");
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for object in &bundle.objects {
+        if !required.contains(&object.role.as_str()) {
+            bail!("artifact bundle role '{}' is not allowed for profile '{profile}'", object.role);
+        }
+        if !seen.insert(object.role.as_str()) {
+            bail!("artifact bundle contains more than one '{}' object", object.role);
+        }
+    }
+    for role in required {
+        if !seen.contains(role) {
+            bail!("artifact bundle is missing required '{role}' object");
+        }
+    }
+    Ok(())
+}
+
 fn parse_args() -> Result<Args> {
     let mut values = BTreeMap::new();
     let mut arguments = env::args().skip(1);
@@ -266,6 +335,7 @@ fn parse_args() -> Result<Args> {
         version: take("--version")?,
         source_hash: take("--source-hash")?,
         manifest_hash: take("--manifest-hash")?,
+        artifact_kind: take("--artifact-kind")?,
         profile: take("--profile")?,
         compatibility_profile_hash: values.remove("--compatibility-profile-hash"),
         artifact_hash: values.remove("--artifact-hash"),
@@ -380,6 +450,7 @@ action identity(value: u64) -> u64 {
             version: "1.2.3".to_string(),
             source_hash: source_hash.clone(),
             manifest_hash: manifest_hash.clone(),
+            artifact_kind: "source_library".to_string(),
             profile: "cellscript_source".to_string(),
             compatibility_profile_hash: Some(compatibility_profile_hash.clone()),
             artifact_hash: None,
@@ -411,6 +482,22 @@ action identity(value: u64) -> u64 {
         assert_eq!(output.status, "passed");
         assert_eq!(output.verification_level, "hash_bound");
         assert_eq!(output.artifact_format, "ckb-vm-executable");
+    }
+
+    #[test]
+    fn deployed_ckb_executable_can_bind_a_reproducible_recipe() {
+        let executable = b"ckb-vm-elf";
+        let abi = br#"{"actions":[]}"#;
+        let recipe = b"pinned build recipe";
+        let output = verify_bundle(
+            "ckb_executable",
+            &[("source", b"fn main() {}"), ("executable", executable), ("abi", abi), ("build_recipe", recipe)],
+            Some(hex::encode(cellscript::ckb_blake2b256(executable))),
+            Some(hex::encode(cellscript::ckb_blake2b256(abi))),
+            Some(hex::encode(cellscript::ckb_blake2b256(recipe))),
+        )
+        .unwrap();
+        assert_eq!(output.verification_level, "hash_bound");
     }
 
     #[test]
@@ -447,6 +534,32 @@ action identity(value: u64) -> u64 {
         assert!(error.to_string().contains("artifact_hash mismatch"));
     }
 
+    #[test]
+    fn audited_contract_requires_an_immutable_audit_report_object() {
+        let encode = |role: &str| ArtifactBundleObject {
+            role: role.to_string(),
+            content_base64: base64::engine::general_purpose::STANDARD.encode(role),
+        };
+        let contract = json!({
+            "security": { "status": "audited", "audit_report_hash": "11".repeat(32) }
+        });
+        let mut bundle = ArtifactBundle {
+            schema: "cellscript-registry-bundle".to_string(),
+            namespace: "cellscript".to_string(),
+            name: "demo".to_string(),
+            release: "1.2.3".to_string(),
+            profile: "ckb_executable".to_string(),
+            manifest_json: contract.to_string(),
+            objects: vec![encode("source"), encode("executable"), encode("abi")],
+        };
+
+        let error = validate_bundle_roles(&bundle, "ckb_executable", &contract).unwrap_err();
+        assert!(error.to_string().contains("audit_report"));
+
+        bundle.objects.push(encode("audit_report"));
+        validate_bundle_roles(&bundle, "ckb_executable", &contract).unwrap();
+    }
+
     fn verify_bundle(
         profile: &str,
         objects: &[(&str, &[u8])],
@@ -455,7 +568,73 @@ action identity(value: u64) -> u64 {
         build_recipe_hash: Option<String>,
     ) -> Result<VerificationOutput> {
         let root = tempfile::tempdir().unwrap();
-        let manifest_json = r#"{"name":"demo"}"#;
+        let kind = match profile {
+            "ckb_executable" => "deployable_contract",
+            "reproducible_build" => "reproducible_binary",
+            "copy_material" => "template",
+            _ => unreachable!("test helper only supports generic artifact profiles"),
+        };
+        let profile_contract = match profile {
+            "ckb_executable" => {
+                let reproducible = build_recipe_hash.is_some();
+                let mut value = json!({
+                    "schema": cellscript::package::registry::ARTIFACT_PROFILE_CONTRACT_SCHEMA,
+                    "artifact_kind": kind,
+                    "profile": profile,
+                    "build": {
+                        "target": "riscv64imac-unknown-none-elf",
+                        "toolchain": "rustc 1.97.1",
+                        "profile": "release",
+                        "source_revision": "0123456789abcdef",
+                        "reproducible": reproducible
+                    },
+                    "security": { "status": "review_required" },
+                    "ckb": {
+                        "vm_version": "2",
+                        "script_role": "type",
+                        "hash_type": "data1",
+                        "dep_type": "code",
+                        "abi_hash": abi_hash.clone().unwrap()
+                    }
+                });
+                if reproducible {
+                    value["reproduction"] = json!({
+                        "environment": "docker.io/library/rust:1.97.1@sha256:0123456789abcdef",
+                        "command": "cargo build --locked --release",
+                        "recipe_hash": build_recipe_hash.clone().unwrap(),
+                        "expected_artifact_hash": artifact_hash.clone().unwrap()
+                    });
+                }
+                value
+            }
+            "reproducible_build" => json!({
+                "schema": cellscript::package::registry::ARTIFACT_PROFILE_CONTRACT_SCHEMA,
+                "artifact_kind": kind,
+                "profile": profile,
+                "build": {
+                    "target": "x86_64-unknown-linux-gnu",
+                    "toolchain": "rustc 1.97.1",
+                    "profile": "release",
+                    "source_revision": "0123456789abcdef",
+                    "reproducible": true
+                },
+                "security": { "status": "review_required" },
+                "reproduction": {
+                    "environment": "docker.io/library/rust:1.97.1@sha256:0123456789abcdef",
+                    "command": "cargo build --locked --release",
+                    "recipe_hash": build_recipe_hash.clone().unwrap(),
+                    "expected_artifact_hash": artifact_hash.clone().unwrap()
+                }
+            }),
+            "copy_material" => json!({
+                "schema": cellscript::package::registry::ARTIFACT_PROFILE_CONTRACT_SCHEMA,
+                "artifact_kind": kind,
+                "profile": profile,
+                "copy": { "format": "file_map_v1", "entrypoint": "template.cell" }
+            }),
+            _ => unreachable!(),
+        };
+        let manifest_json = cellscript::package::registry::canonical_artifact_contract_json(&profile_contract).unwrap();
         let bundle = json!({
             "schema": "cellscript-registry-bundle",
             "namespace": "cellscript",
@@ -478,6 +657,7 @@ action identity(value: u64) -> u64 {
             version: "1.2.3".to_string(),
             source_hash: hex::encode(cellscript::ckb_blake2b256(source)),
             manifest_hash: hex::encode(cellscript::ckb_blake2b256(manifest_json.as_bytes())),
+            artifact_kind: kind.to_string(),
             profile: profile.to_string(),
             compatibility_profile_hash: None,
             artifact_hash,

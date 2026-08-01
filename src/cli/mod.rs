@@ -1,6 +1,7 @@
 //! CLI module
 //! Command-line interface and subcommand implementation
 
+mod artifact;
 pub mod commands;
 mod novaseal_certification;
 

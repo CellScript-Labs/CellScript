@@ -1,3 +1,4 @@
+use super::artifact::{ArtifactArgs, ArtifactOperation};
 use crate::docgen::{DocGenerator, OutputFormat};
 use crate::error::{CompileError, Result};
 use crate::fmt::format_default;
@@ -121,6 +122,7 @@ pub enum Command {
     VerifyReceipt(VerifyReceiptArgs),
     VerifyArtifact(VerifyArtifactArgs),
     Run(RunArgs),
+    Artifact(ArtifactArgs),
     Publish(PublishArgs),
     Install(InstallArgs),
     RegistryVerify(RegistryVerifyArgs),
@@ -804,6 +806,7 @@ impl CommandExecutor {
             Command::VerifyReceipt(args) => Self::verify_receipt(args),
             Command::VerifyArtifact(args) => Self::verify_artifact(args),
             Command::Run(args) => Self::run(args),
+            Command::Artifact(args) => super::artifact::execute(args),
             Command::Publish(args) => Self::publish(args),
             Command::Install(args) => Self::install(args),
             Command::Update => Self::update(),
@@ -4695,12 +4698,12 @@ fn civil_date_from_days(z: i32) -> (i32, u32, u32) {
     (y, m as u32, d as u32)
 }
 
-fn current_utc_timestamp() -> String {
+pub(super) fn current_utc_timestamp() -> String {
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
     utc_timestamp_from_unix_secs(secs)
 }
 
-fn utc_timestamp_after_seconds(delta_secs: u64) -> String {
+pub(super) fn utc_timestamp_after_seconds(delta_secs: u64) -> String {
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
     utc_timestamp_from_unix_secs(secs.saturating_add(delta_secs))
 }
@@ -4876,6 +4879,10 @@ fn store_registry_capability_private_key(key_id: &str, pkcs8: &[u8]) -> Result<(
 }
 
 fn sign_registry_publish_payload(key_id: &str, canonical_payload: &str) -> Result<String> {
+    sign_registry_capability_payload(key_id, canonical_payload)
+}
+
+pub(super) fn sign_registry_capability_payload(key_id: &str, canonical_payload: &str) -> Result<String> {
     let Some(pkcs8) = load_registry_capability_private_key(key_id)? else {
         return Err(
             crate::error::CompileError::without_span(format!(
@@ -4985,6 +4992,7 @@ struct DeclaredArtifactManifest {
 }
 
 #[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct DeclaredArtifactBundle {
     schema: String,
     namespace: String,
@@ -4996,6 +5004,7 @@ struct DeclaredArtifactBundle {
 }
 
 #[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct DeclaredArtifactBundleObject {
     role: String,
     content_base64: String,
@@ -5041,9 +5050,48 @@ fn publish_declared_artifact(args: PublishArgs, manifest_path: &Path) -> Result<
             "artifact bundle schema, coordinate, release, or profile does not match Artifact.toml",
         ));
     }
+    let manifest_json: serde_json::Value = serde_json::from_str(&bundle.manifest_json).map_err(|error| {
+        crate::error::CompileError::without_span(format!("artifact bundle manifest_json must be valid JSON: {error}"))
+    })?;
+    if !manifest_json.is_object() {
+        return Err(crate::error::CompileError::without_span("artifact bundle manifest_json must encode a JSON object"));
+    }
+    validate_declared_bundle_roles(&bundle, &artifact.profile, &manifest_json)?;
     let source = declared_bundle_object(&bundle, "source")?;
     let source_hash = hex::encode(crate::ckb_blake2b256(&source));
-    let manifest_hash = hex::encode(crate::ckb_blake2b256(bundle.manifest_json.as_bytes()));
+    let mut artifact_hash = None;
+    let mut abi_hash = None;
+    let mut build_recipe_hash = None;
+    let audit_report_hash = if manifest_json.pointer("/security/audit_report_hash").is_some() {
+        Some(hex::encode(crate::ckb_blake2b256(&declared_bundle_object(&bundle, "audit_report")?)))
+    } else {
+        None
+    };
+    if artifact.profile == "ckb_executable" {
+        artifact_hash = Some(hex::encode(crate::ckb_blake2b256(&declared_bundle_object(&bundle, "executable")?)));
+        abi_hash = Some(hex::encode(crate::ckb_blake2b256(&declared_bundle_object(&bundle, "abi")?)));
+        if manifest_json.pointer("/build/reproducible").and_then(serde_json::Value::as_bool) == Some(true) {
+            build_recipe_hash = Some(hex::encode(crate::ckb_blake2b256(&declared_bundle_object(&bundle, "build_recipe")?)));
+        }
+    } else if artifact.profile == "reproducible_build" {
+        artifact_hash = Some(hex::encode(crate::ckb_blake2b256(&declared_bundle_object(&bundle, "executable")?)));
+        build_recipe_hash = Some(hex::encode(crate::ckb_blake2b256(&declared_bundle_object(&bundle, "build_recipe")?)));
+    }
+    crate::package::registry::validate_artifact_profile_contract(
+        &artifact.kind,
+        &artifact.profile,
+        &manifest_json,
+        crate::package::registry::ArtifactContractHashes {
+            artifact_hash: artifact_hash.as_deref(),
+            abi_hash: abi_hash.as_deref(),
+            build_recipe_hash: build_recipe_hash.as_deref(),
+            audit_report_hash: audit_report_hash.as_deref(),
+        },
+    )
+    .map_err(crate::error::CompileError::without_span)?;
+    let canonical_manifest_json = crate::package::registry::canonical_artifact_contract_json(&manifest_json)
+        .map_err(crate::error::CompileError::without_span)?;
+    let manifest_hash = hex::encode(crate::ckb_blake2b256(canonical_manifest_json.as_bytes()));
     let mut release = serde_json::json!({
         "version": manifest.release,
         "tag": format!("v{}", manifest.release),
@@ -5051,17 +5099,16 @@ fn publish_declared_artifact(args: PublishArgs, manifest_path: &Path) -> Result<
         "verification_status": "pending",
         "deployment_status": if artifact.profile == "ckb_executable" { "undeployed" } else { "not_applicable" },
         "availability_status": "active",
+        "profile_contract": manifest_json,
     });
-    if artifact.profile == "ckb_executable" {
-        let executable = declared_bundle_object(&bundle, "executable")?;
-        let abi = declared_bundle_object(&bundle, "abi")?;
-        release["artifact_hash"] = serde_json::Value::String(hex::encode(crate::ckb_blake2b256(&executable)));
-        release["abi_hash"] = serde_json::Value::String(hex::encode(crate::ckb_blake2b256(&abi)));
-    } else if artifact.profile == "reproducible_build" {
-        let executable = declared_bundle_object(&bundle, "executable")?;
-        let recipe = declared_bundle_object(&bundle, "build_recipe")?;
-        release["artifact_hash"] = serde_json::Value::String(hex::encode(crate::ckb_blake2b256(&executable)));
-        release["build_recipe_hash"] = serde_json::Value::String(hex::encode(crate::ckb_blake2b256(&recipe)));
+    if let Some(value) = artifact_hash {
+        release["artifact_hash"] = serde_json::Value::String(value);
+    }
+    if let Some(value) = abi_hash {
+        release["abi_hash"] = serde_json::Value::String(value);
+    }
+    if let Some(value) = build_recipe_hash {
+        release["build_recipe_hash"] = serde_json::Value::String(value);
     }
     let mut registry_entry = serde_json::json!({
         "schema_version": crate::package::registry::RegistryIndex::CURRENT_SCHEMA_VERSION,
@@ -5229,6 +5276,44 @@ fn declared_bundle_object(bundle: &DeclaredArtifactBundle, role: &str) -> Result
     Ok(bytes)
 }
 
+fn validate_declared_bundle_roles(bundle: &DeclaredArtifactBundle, profile: &str, contract: &serde_json::Value) -> Result<()> {
+    let mut required = match profile {
+        "ckb_executable" => vec!["source", "executable", "abi"],
+        "reproducible_build" => vec!["source", "executable", "build_recipe"],
+        "copy_material" => vec!["source"],
+        other => {
+            return Err(crate::error::CompileError::without_span(format!("unsupported declared artifact profile '{other}'")));
+        }
+    };
+    if contract.pointer("/security/audit_report_hash").is_some() {
+        required.push("audit_report");
+    }
+    if profile == "ckb_executable" && contract.pointer("/build/reproducible").and_then(serde_json::Value::as_bool) == Some(true) {
+        required.push("build_recipe");
+    }
+    let mut seen = BTreeSet::new();
+    for object in &bundle.objects {
+        if !required.contains(&object.role.as_str()) {
+            return Err(crate::error::CompileError::without_span(format!(
+                "artifact bundle role '{}' is not allowed for profile '{profile}'",
+                object.role
+            )));
+        }
+        if !seen.insert(object.role.as_str()) {
+            return Err(crate::error::CompileError::without_span(format!(
+                "artifact bundle contains more than one '{}' object",
+                object.role
+            )));
+        }
+    }
+    for role in required {
+        if !seen.contains(role) {
+            return Err(crate::error::CompileError::without_span(format!("artifact bundle is missing required '{role}' object")));
+        }
+    }
+    Ok(())
+}
+
 fn validate_declared_artifact_ident(value: &str, field: &str) -> Result<()> {
     let bytes = value.as_bytes();
     let edge = |byte: u8| byte.is_ascii_lowercase() || byte.is_ascii_digit();
@@ -5374,7 +5459,7 @@ fn cellscript_artifact_descriptor(kind: Option<&str>) -> Result<crate::package::
     })
 }
 
-fn resolve_registry_api_base(api_url: Option<String>) -> Result<String> {
+pub(super) fn resolve_registry_api_base(api_url: Option<String>) -> Result<String> {
     let value = api_url
         .or_else(|| std::env::var("CELLSCRIPT_REGISTRY_API_URL").ok())
         .or_else(|| std::env::var("CELLSCRIPT_REGISTRY_ORIGIN").ok())
@@ -5387,7 +5472,7 @@ fn resolve_registry_api_base(api_url: Option<String>) -> Result<String> {
     Ok(trimmed.to_string())
 }
 
-fn registry_origin_from_api_base(api_base: &str) -> Result<String> {
+pub(super) fn registry_origin_from_api_base(api_base: &str) -> Result<String> {
     Ok(parse_registry_api_url(api_base)?.origin().ascii_serialization())
 }
 
@@ -5718,7 +5803,7 @@ fn submit_registry_publish_request(
     Ok(())
 }
 
-fn registry_http_client() -> Result<reqwest::blocking::Client> {
+pub(super) fn registry_http_client() -> Result<reqwest::blocking::Client> {
     reqwest::blocking::Client::builder().timeout(Duration::from_secs(30)).redirect(reqwest::redirect::Policy::none()).build().map_err(
         |error| {
             crate::error::CompileError::without_span(format!("failed to build registry HTTP client: {}", error))
@@ -13409,6 +13494,99 @@ impl CliParser {
                     .arg(Arg::new("args").value_name("ARGS").num_args(0..).trailing_var_arg(true)),
             )
             .subcommand(
+                ClapCommand::new("artifact")
+                    .display_order(105)
+                    .about("Fetch, verify, pin, copy, and consume non-CellScript Registry artifacts")
+                    .subcommand_required(true)
+                    .arg_required_else_help(true)
+                    .subcommand(
+                        ClapCommand::new("fetch")
+                            .about("Download an immutable artifact bundle and write an authenticated receipt")
+                            .arg(Arg::new("coordinate").value_name("NAMESPACE/NAME@RELEASE").required(true))
+                            .arg(Arg::new("output").long("output").short('o').value_name("FILE").required(true))
+                            .arg(Arg::new("receipt").long("receipt").value_name("FILE"))
+                            .arg(Arg::new("api-url").long("api-url").value_name("URL"))
+                            .arg(Arg::new("force").long("force").action(ArgAction::SetTrue)),
+                    )
+                    .subcommand(
+                        ClapCommand::new("verify")
+                            .about("Verify a downloaded bundle against its signed Registry receipt")
+                            .arg(Arg::new("bundle").long("bundle").value_name("FILE").required(true))
+                            .arg(Arg::new("receipt").long("receipt").value_name("FILE").required(true)),
+                    )
+                    .subcommand(
+                        ClapCommand::new("pin")
+                            .about("Write a deterministic TCB/deployment artifact lock")
+                            .arg(Arg::new("coordinate").value_name("NAMESPACE/NAME@RELEASE").required(true))
+                            .arg(Arg::new("output").long("output").short('o').value_name("FILE").default_value("Artifacts.lock"))
+                            .arg(Arg::new("api-url").long("api-url").value_name("URL"))
+                            .arg(
+                                Arg::new("accept-hash-bound")
+                                    .long("accept-hash-bound")
+                                    .action(ArgAction::SetTrue)
+                                    .help("Explicitly pin immutable bytes that have integrity evidence but no semantic/security certification"),
+                            )
+                            .arg(Arg::new("force").long("force").action(ArgAction::SetTrue)),
+                    )
+                    .subcommand(
+                        ClapCommand::new("copy")
+                            .about("Materialize an authenticated template file map without overwriting files")
+                            .arg(Arg::new("coordinate").value_name("NAMESPACE/NAME@RELEASE").required(true))
+                            .arg(Arg::new("destination").long("destination").short('d').value_name("DIR").default_value("."))
+                            .arg(Arg::new("api-url").long("api-url").value_name("URL"))
+                            .arg(Arg::new("accept-hash-bound").long("accept-hash-bound").action(ArgAction::SetTrue)),
+                    )
+                    .subcommand(
+                        ClapCommand::new("cell-dep")
+                            .visible_alias("celldep")
+                            .about("Generate a transaction-builder CellDep descriptor from chain-verified deployment evidence")
+                            .arg(Arg::new("coordinate").value_name("NAMESPACE/NAME@RELEASE").required(true))
+                            .arg(Arg::new("output").long("output").short('o').value_name("FILE").required(true))
+                            .arg(Arg::new("api-url").long("api-url").value_name("URL"))
+                            .arg(
+                                Arg::new("accept-hash-bound")
+                                    .long("accept-hash-bound")
+                                    .action(ArgAction::SetTrue)
+                                    .help("Explicitly consume chain-verified deployment bytes that have integrity evidence but no semantic/security certification"),
+                            )
+                            .arg(Arg::new("force").long("force").action(ArgAction::SetTrue)),
+                    )
+                    .subcommand(
+                        ClapCommand::new("record-deployment")
+                            .about("Sign, submit, and RPC-verify a CKB mainnet deployment record")
+                            .arg(Arg::new("coordinate").value_name("NAMESPACE/NAME@RELEASE").required(true))
+                            .arg(Arg::new("code-hash").long("code-hash").value_name("HASH").required(true))
+                            .arg(
+                                Arg::new("hash-type")
+                                    .long("hash-type")
+                                    .value_name("TYPE")
+                                    .value_parser(["data", "data1", "data2", "type"])
+                                    .required(true),
+                            )
+                            .arg(
+                                Arg::new("dep-type")
+                                    .long("dep-type")
+                                    .value_name("TYPE")
+                                    .value_parser(["code", "dep_group"])
+                                    .required(true),
+                            )
+                            .arg(Arg::new("tx-hash").long("tx-hash").value_name("HASH").required(true))
+                            .arg(Arg::new("index").long("index").value_name("U32").value_parser(clap::value_parser!(u32)).required(true))
+                            .arg(Arg::new("capability-key-id").long("capability-key-id").value_name("KEY_ID").required(true))
+                            .arg(Arg::new("capability-signature").long("capability-signature").value_name("SIGNATURE"))
+                            .arg(Arg::new("api-url").long("api-url").value_name("URL"))
+                            .arg(Arg::new("print-payload").long("print-payload").action(ArgAction::SetTrue)),
+                    )
+                    .subcommand(
+                        ClapCommand::new("commitment")
+                            .about("Generate the canonical mainnet Registry commitment payload and Cell data")
+                            .arg(Arg::new("coordinate").value_name("NAMESPACE/NAME@RELEASE").required(true))
+                            .arg(Arg::new("output").long("output").short('o').value_name("FILE").required(true))
+                            .arg(Arg::new("api-url").long("api-url").value_name("URL"))
+                            .arg(Arg::new("force").long("force").action(ArgAction::SetTrue)),
+                    ),
+            )
+            .subcommand(
                 ClapCommand::new("publish")
                     .display_order(110)
                     .about("Publish a package to the public registry, or write an offline fixture with --offline")
@@ -14322,6 +14500,67 @@ impl CliParser {
                 release: m.get_flag("release"),
                 simulate: m.get_flag("simulate"),
                 json: json_output(m),
+            }),
+            Some(("artifact", m)) => Command::Artifact(ArtifactArgs {
+                operation: match m.subcommand() {
+                    Some(("fetch", action)) => ArtifactOperation::Fetch {
+                        coordinate: action.get_one::<String>("coordinate").cloned().expect("required coordinate"),
+                        output: action.get_one::<String>("output").map(PathBuf::from).expect("required output"),
+                        receipt: action.get_one::<String>("receipt").map(PathBuf::from),
+                        api_url: action.get_one::<String>("api-url").cloned(),
+                        force: action.get_flag("force"),
+                        json: json_output(action),
+                    },
+                    Some(("verify", action)) => ArtifactOperation::Verify {
+                        bundle: action.get_one::<String>("bundle").map(PathBuf::from).expect("required bundle"),
+                        receipt: action.get_one::<String>("receipt").map(PathBuf::from).expect("required receipt"),
+                        json: json_output(action),
+                    },
+                    Some(("pin", action)) => ArtifactOperation::Pin {
+                        coordinate: action.get_one::<String>("coordinate").cloned().expect("required coordinate"),
+                        output: action.get_one::<String>("output").map(PathBuf::from).expect("defaulted output"),
+                        api_url: action.get_one::<String>("api-url").cloned(),
+                        accept_hash_bound: action.get_flag("accept-hash-bound"),
+                        force: action.get_flag("force"),
+                        json: json_output(action),
+                    },
+                    Some(("copy", action)) => ArtifactOperation::Copy {
+                        coordinate: action.get_one::<String>("coordinate").cloned().expect("required coordinate"),
+                        destination: action.get_one::<String>("destination").map(PathBuf::from).expect("defaulted destination"),
+                        api_url: action.get_one::<String>("api-url").cloned(),
+                        accept_hash_bound: action.get_flag("accept-hash-bound"),
+                        json: json_output(action),
+                    },
+                    Some(("cell-dep", action)) => ArtifactOperation::CellDep {
+                        coordinate: action.get_one::<String>("coordinate").cloned().expect("required coordinate"),
+                        output: action.get_one::<String>("output").map(PathBuf::from).expect("required output"),
+                        api_url: action.get_one::<String>("api-url").cloned(),
+                        accept_hash_bound: action.get_flag("accept-hash-bound"),
+                        force: action.get_flag("force"),
+                        json: json_output(action),
+                    },
+                    Some(("record-deployment", action)) => ArtifactOperation::RecordDeployment {
+                        coordinate: action.get_one::<String>("coordinate").cloned().expect("required coordinate"),
+                        code_hash: action.get_one::<String>("code-hash").cloned().expect("required code hash"),
+                        hash_type: action.get_one::<String>("hash-type").cloned().expect("required hash type"),
+                        dep_type: action.get_one::<String>("dep-type").cloned().expect("required dep type"),
+                        tx_hash: action.get_one::<String>("tx-hash").cloned().expect("required tx hash"),
+                        index: *action.get_one::<u32>("index").expect("required index"),
+                        capability_key_id: action.get_one::<String>("capability-key-id").cloned().expect("required capability key id"),
+                        capability_signature: action.get_one::<String>("capability-signature").cloned(),
+                        api_url: action.get_one::<String>("api-url").cloned(),
+                        print_payload: action.get_flag("print-payload"),
+                        json: json_output(action),
+                    },
+                    Some(("commitment", action)) => ArtifactOperation::Commitment {
+                        coordinate: action.get_one::<String>("coordinate").cloned().expect("required coordinate"),
+                        output: action.get_one::<String>("output").map(PathBuf::from).expect("required output"),
+                        api_url: action.get_one::<String>("api-url").cloned(),
+                        force: action.get_flag("force"),
+                        json: json_output(action),
+                    },
+                    _ => unreachable!(),
+                },
             }),
             Some(("publish", m)) => Command::Publish(PublishArgs {
                 dry_run: m.get_flag("dry-run"),
