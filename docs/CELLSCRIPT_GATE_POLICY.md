@@ -57,10 +57,12 @@ coverage.
 
 The `ci` gate also typechecks/tests `services/registry-api`, builds both Node
 entrypoints, performs its Wrangler dry-run build, and runs tests and clippy for
-the independent real-compiler Registry verifier crate. `dev` at least checks that
-verifier crate. This pins the publish contract, additive queue migration,
-worker boundary, and database/static-object shape to the compiler-generated
-registry entry. It is local service coverage, not evidence
+the independent real-compiler Registry verifier crate. `dev` at least checks
+that verifier crate. This pins the single `/v1/artifacts` contract, orthogonal
+verification/deployment/availability states, generic artifact bundles,
+mainnet deployment evidence, additive migrations, worker boundary, and
+database/static-object shape to the CLI-generated Registry entry. It is local
+service coverage, not evidence
 that Cloudflare, R2, Hyperdrive, Neon, DNS, or a production deployment works.
 The CLI coverage includes the explicit first-publish admission sequence:
 `cellc auth capability submit`, `cellc auth namespace claim`, then

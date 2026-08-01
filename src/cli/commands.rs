@@ -544,6 +544,8 @@ pub struct PublishArgs {
     pub idempotency_key: Option<String>,
     pub payload: Option<PathBuf>,
     pub source_snapshot: Option<PathBuf>,
+    pub artifact_manifest: Option<PathBuf>,
+    pub artifact_kind: Option<String>,
     pub print_payload: bool,
     pub json: bool,
 }
@@ -3614,8 +3616,12 @@ impl CommandExecutor {
     }
 
     fn publish(args: PublishArgs) -> Result<()> {
+        if let Some(manifest_path) = args.artifact_manifest.clone() {
+            return publish_declared_artifact(args, &manifest_path);
+        }
         let pm = PackageManager::new(".");
         let manifest = pm.read_manifest()?;
+        let artifact = cellscript_artifact_descriptor(args.artifact_kind.as_deref())?;
 
         if args.dry_run {
             let mut issues = Vec::<String>::new();
@@ -3711,7 +3717,7 @@ impl CommandExecutor {
             let api_base = resolve_registry_api_base(args.api_url)?;
             let registry_origin = registry_origin_from_api_base(&api_base)?;
             let endpoint = registry_publish_endpoint(&api_base, &namespace, &manifest.package.name);
-            let registry_entry = build_publish_registry_entry(&manifest, &namespace, version_entry)?;
+            let registry_entry = build_publish_registry_entry(&manifest, &namespace, version_entry, &artifact)?;
             let payload = if let Some(payload_path) = args.payload.as_deref() {
                 read_registry_publish_payload(payload_path)?
             } else {
@@ -3749,6 +3755,7 @@ impl CommandExecutor {
                     issued_at,
                     expires_at,
                     cli_version: crate::VERSION.to_string(),
+                    artifact: artifact.clone(),
                     registry_entry,
                 }
             };
@@ -4953,6 +4960,301 @@ fn registry_publish_nonce(
     format!("0x{}", hex::encode(crate::ckb_blake2b256(material.as_bytes())))
 }
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeclaredArtifactManifest {
+    schema: String,
+    namespace: String,
+    name: String,
+    release: String,
+    kind: String,
+    language: String,
+    bundle: PathBuf,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    repository: String,
+    #[serde(default)]
+    homepage: String,
+    #[serde(default)]
+    documentation: String,
+    #[serde(default)]
+    keywords: Vec<String>,
+    #[serde(default)]
+    categories: Vec<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct DeclaredArtifactBundle {
+    schema: String,
+    namespace: String,
+    name: String,
+    release: String,
+    profile: String,
+    manifest_json: String,
+    objects: Vec<DeclaredArtifactBundleObject>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct DeclaredArtifactBundleObject {
+    role: String,
+    content_base64: String,
+}
+
+fn publish_declared_artifact(args: PublishArgs, manifest_path: &Path) -> Result<()> {
+    if args.payload.is_some() || args.source_snapshot.is_some() {
+        return Err(crate::error::CompileError::without_span(
+            "--artifact-manifest owns the publish payload and immutable bundle; do not combine it with --payload or --source-snapshot",
+        ));
+    }
+    let manifest_text = std::fs::read_to_string(manifest_path).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to read artifact manifest '{}': {}", manifest_path.display(), error))
+    })?;
+    let manifest: DeclaredArtifactManifest = toml::from_str(&manifest_text).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to parse artifact manifest '{}': {}", manifest_path.display(), error))
+    })?;
+    if manifest.schema != "cellscript-registry-artifact" {
+        return Err(crate::error::CompileError::without_span("Artifact.toml schema must be 'cellscript-registry-artifact'"));
+    }
+    validate_declared_artifact_ident(&manifest.namespace, "namespace")?;
+    validate_declared_artifact_ident(&manifest.name, "name")?;
+    validate_declared_artifact_release(&manifest.release)?;
+    let artifact = declared_artifact_descriptor(&manifest.kind, &manifest.language)?;
+    let manifest_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
+    let bundle_path = if manifest.bundle.is_absolute() { manifest.bundle.clone() } else { manifest_dir.join(&manifest.bundle) };
+    let bundle_bytes = std::fs::read(&bundle_path).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to read artifact bundle '{}': {}", bundle_path.display(), error))
+    })?;
+    if bundle_bytes.is_empty() || bundle_bytes.len() > 5 * 1024 * 1024 {
+        return Err(crate::error::CompileError::without_span("artifact bundle must be a non-empty JSON file no larger than 5 MiB"));
+    }
+    let bundle: DeclaredArtifactBundle = serde_json::from_slice(&bundle_bytes).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to parse artifact bundle '{}': {}", bundle_path.display(), error))
+    })?;
+    if bundle.schema != "cellscript-registry-bundle"
+        || bundle.namespace != manifest.namespace
+        || bundle.name != manifest.name
+        || bundle.release != manifest.release
+        || bundle.profile != artifact.profile
+    {
+        return Err(crate::error::CompileError::without_span(
+            "artifact bundle schema, coordinate, release, or profile does not match Artifact.toml",
+        ));
+    }
+    let source = declared_bundle_object(&bundle, "source")?;
+    let source_hash = hex::encode(crate::ckb_blake2b256(&source));
+    let manifest_hash = hex::encode(crate::ckb_blake2b256(bundle.manifest_json.as_bytes()));
+    let mut release = serde_json::json!({
+        "version": manifest.release,
+        "tag": format!("v{}", manifest.release),
+        "source_hash": source_hash,
+        "verification_status": "pending",
+        "deployment_status": if artifact.profile == "ckb_executable" { "undeployed" } else { "not_applicable" },
+        "availability_status": "active",
+    });
+    if artifact.profile == "ckb_executable" {
+        let executable = declared_bundle_object(&bundle, "executable")?;
+        let abi = declared_bundle_object(&bundle, "abi")?;
+        release["artifact_hash"] = serde_json::Value::String(hex::encode(crate::ckb_blake2b256(&executable)));
+        release["abi_hash"] = serde_json::Value::String(hex::encode(crate::ckb_blake2b256(&abi)));
+    } else if artifact.profile == "reproducible_build" {
+        let executable = declared_bundle_object(&bundle, "executable")?;
+        let recipe = declared_bundle_object(&bundle, "build_recipe")?;
+        release["artifact_hash"] = serde_json::Value::String(hex::encode(crate::ckb_blake2b256(&executable)));
+        release["build_recipe_hash"] = serde_json::Value::String(hex::encode(crate::ckb_blake2b256(&recipe)));
+    }
+    let mut registry_entry = serde_json::json!({
+        "schema_version": crate::package::registry::RegistryIndex::CURRENT_SCHEMA_VERSION,
+        "namespace": manifest.namespace,
+        "name": manifest.name,
+        "artifact": artifact,
+        "versions": [release],
+    });
+    let entry = registry_entry.as_object_mut().expect("registry entry JSON object");
+    for (key, value) in [
+        ("description", &manifest.description),
+        ("repository", &manifest.repository),
+        ("homepage", &manifest.homepage),
+        ("documentation", &manifest.documentation),
+    ] {
+        if !value.is_empty() {
+            entry.insert(key.to_string(), serde_json::Value::String(value.clone()));
+        }
+    }
+    if !manifest.keywords.is_empty() {
+        entry.insert(
+            "keywords".to_string(),
+            serde_json::to_value(&manifest.keywords).map_err(|error| {
+                crate::error::CompileError::without_span(format!("failed to serialize artifact keywords: {error}"))
+            })?,
+        );
+    }
+    if !manifest.categories.is_empty() {
+        entry.insert(
+            "categories".to_string(),
+            serde_json::to_value(&manifest.categories).map_err(|error| {
+                crate::error::CompileError::without_span(format!("failed to serialize artifact categories: {error}"))
+            })?,
+        );
+    }
+
+    if args.dry_run {
+        let summary = serde_json::json!({
+            "status": "valid",
+            "coordinate": format!("{}/{}@{}", manifest.namespace, manifest.name, manifest.release),
+            "artifact": artifact,
+            "source_hash": source_hash,
+            "manifest_hash": manifest_hash,
+            "bundle": bundle_path,
+        });
+        if args.json {
+            return print_json(&summary);
+        }
+        println!("{}", "Artifact publish dry-run passed".green());
+        println!("  Coordinate: {}/{}@{}", manifest.namespace, manifest.name, manifest.release);
+        println!("  Kind: {}", artifact.kind);
+        println!("  Profile: {}", artifact.profile);
+        println!("  Source hash: {}", source_hash);
+        return Ok(());
+    }
+
+    let api_base = resolve_registry_api_base(args.api_url)?;
+    let registry_origin = registry_origin_from_api_base(&api_base)?;
+    let endpoint = registry_publish_endpoint(&api_base, &manifest.namespace, &manifest.name);
+    let capability_key_id = args
+        .capability_key_id
+        .or_else(|| std::env::var("CELLSCRIPT_CAPABILITY_KEY_ID").ok())
+        .ok_or_else(|| crate::error::CompileError::without_span("capability key id is required for artifact publish"))?;
+    let issued_at = current_utc_timestamp();
+    let expires_at = utc_timestamp_after_seconds(10 * 60);
+    let nonce = registry_publish_nonce(
+        &registry_origin,
+        &manifest.namespace,
+        &manifest.name,
+        &manifest.release,
+        &source_hash,
+        &capability_key_id,
+        &issued_at,
+    );
+    let payload = crate::package::registry::RegistryPublishPayload {
+        protocol: crate::package::registry::REGISTRY_PUBLISH_PROTOCOL.to_string(),
+        action: crate::package::registry::PUBLISH_ACTION.to_string(),
+        registry_origin,
+        namespace: manifest.namespace,
+        name: manifest.name,
+        version: manifest.release,
+        source_hash: source_hash.clone(),
+        manifest_hash,
+        capability_key_id,
+        nonce,
+        issued_at,
+        expires_at,
+        cli_version: crate::VERSION.to_string(),
+        artifact,
+        registry_entry,
+    };
+    let canonical_payload = registry_publish_canonical_payload(&payload)?;
+    if args.print_payload {
+        return print_json(&serde_json::json!({ "endpoint": endpoint, "payload": payload, "canonical_payload": canonical_payload }));
+    }
+    let capability_signature =
+        if let Some(signature) = args.capability_signature.or_else(|| std::env::var("CELLSCRIPT_CAPABILITY_SIGNATURE").ok()) {
+            signature
+        } else {
+            sign_registry_publish_payload(&payload.capability_key_id, &canonical_payload)?
+        };
+    let request = crate::package::registry::RegistryPublishRequest {
+        payload,
+        capability_signature: crate::package::registry::RegistryCapabilitySignature {
+            algorithm: "p256-sha256".to_string(),
+            signature: capability_signature,
+        },
+        source_snapshot: crate::package::registry::RegistrySourceSnapshot {
+            content_base64: base64::engine::general_purpose::STANDARD.encode(&bundle_bytes),
+            content_type: "application/vnd.cellscript.artifact-bundle+json".to_string(),
+            size_bytes: bundle_bytes.len() as u64,
+            source_hash,
+        },
+    };
+    let idempotency_key = resolve_registry_publish_idempotency_key(args.idempotency_key.as_deref(), &request)?;
+    submit_registry_publish_request(&endpoint, &request, &idempotency_key, args.json)
+}
+
+fn declared_artifact_descriptor(kind: &str, language: &str) -> Result<crate::package::registry::RegistryArtifactDescriptor> {
+    let allowed_language = match kind {
+        "runtime_verifier" | "deployable_contract" => matches!(language, "cellscript" | "rust" | "c" | "javascript" | "other"),
+        "reproducible_binary" => matches!(language, "rust" | "c" | "other"),
+        "template" => matches!(language, "cellscript" | "rust" | "c" | "javascript" | "other" | "unspecified"),
+        "source_library" | "profile_library" => {
+            return Err(crate::error::CompileError::without_span(
+                "source_library and profile_library use the native CellScript package publish path",
+            ));
+        }
+        _ => return Err(crate::error::CompileError::without_span(format!("unknown artifact kind '{kind}'"))),
+    };
+    if !allowed_language {
+        return Err(crate::error::CompileError::without_span(format!(
+            "language '{language}' is not valid for artifact kind '{kind}'"
+        )));
+    }
+    let (profile, consumption_mode) = match kind {
+        "runtime_verifier" => ("ckb_executable", "tcb"),
+        "deployable_contract" => ("ckb_executable", "deployment"),
+        "reproducible_binary" => ("reproducible_build", "tcb"),
+        "template" => ("copy_material", "copy"),
+        _ => unreachable!("artifact kind was checked above"),
+    };
+    Ok(crate::package::registry::RegistryArtifactDescriptor {
+        kind: kind.to_string(),
+        profile: profile.to_string(),
+        consumption_mode: consumption_mode.to_string(),
+        language: language.to_string(),
+    })
+}
+
+fn declared_bundle_object(bundle: &DeclaredArtifactBundle, role: &str) -> Result<Vec<u8>> {
+    let mut objects = bundle.objects.iter().filter(|object| object.role == role);
+    let object = objects
+        .next()
+        .ok_or_else(|| crate::error::CompileError::without_span(format!("artifact bundle is missing required '{role}' object")))?;
+    if objects.next().is_some() {
+        return Err(crate::error::CompileError::without_span(format!("artifact bundle contains more than one '{role}' object")));
+    }
+    let bytes = base64::engine::general_purpose::STANDARD.decode(&object.content_base64).map_err(|error| {
+        crate::error::CompileError::without_span(format!("artifact bundle '{role}' object is not valid base64: {error}"))
+    })?;
+    if bytes.is_empty() {
+        return Err(crate::error::CompileError::without_span(format!("artifact bundle '{role}' object must not be empty")));
+    }
+    Ok(bytes)
+}
+
+fn validate_declared_artifact_ident(value: &str, field: &str) -> Result<()> {
+    let bytes = value.as_bytes();
+    let edge = |byte: u8| byte.is_ascii_lowercase() || byte.is_ascii_digit();
+    if bytes.is_empty()
+        || bytes.len() > 64
+        || !edge(bytes[0])
+        || !edge(*bytes.last().expect("non-empty identifier"))
+        || !bytes.iter().all(|byte| edge(*byte) || matches!(*byte, b'_' | b'-'))
+    {
+        return Err(crate::error::CompileError::without_span(format!(
+            "artifact {field} must be 1-64 lowercase letters or numbers, with '_' or '-' only between characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_declared_artifact_release(value: &str) -> Result<()> {
+    let mut core = value.split(['-', '+']).next().unwrap_or_default().split('.');
+    let valid = (0..3).all(|_| core.next().is_some_and(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit())))
+        && core.next().is_none();
+    if !valid {
+        return Err(crate::error::CompileError::without_span("artifact release must be semver-like"));
+    }
+    Ok(())
+}
+
 fn build_publish_registry_version(
     manifest: &PackageManifest,
     result: &crate::CompileResult,
@@ -4995,6 +5297,7 @@ fn build_publish_registry_entry(
     manifest: &PackageManifest,
     namespace: &str,
     version_entry: crate::package::registry::RegistryVersion,
+    artifact: &crate::package::registry::RegistryArtifactDescriptor,
 ) -> Result<serde_json::Value> {
     let index = crate::package::registry::RegistryIndex {
         schema_version: crate::package::registry::RegistryIndex::CURRENT_SCHEMA_VERSION,
@@ -5008,6 +5311,23 @@ fn build_publish_registry_entry(
     let Some(object) = value.as_object_mut() else {
         return Err(crate::error::CompileError::without_span("registry entry did not serialize as a JSON object"));
     };
+    object.insert(
+        "artifact".to_string(),
+        serde_json::to_value(artifact).map_err(|error| {
+            crate::error::CompileError::without_span(format!("failed to serialize CellScript artifact descriptor: {}", error))
+        })?,
+    );
+    let published = object
+        .get_mut("versions")
+        .and_then(serde_json::Value::as_array_mut)
+        .and_then(|versions| versions.first_mut())
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or_else(|| crate::error::CompileError::without_span("registry entry has no publish release"))?;
+    published.remove("status");
+    published.remove("yanked");
+    published.insert("verification_status".to_string(), serde_json::Value::String("pending".to_string()));
+    published.insert("deployment_status".to_string(), serde_json::Value::String("not_applicable".to_string()));
+    published.insert("availability_status".to_string(), serde_json::Value::String("active".to_string()));
     if !manifest.package.repository.is_empty() {
         object.insert("repository".to_string(), serde_json::Value::String(manifest.package.repository.clone()));
     }
@@ -5037,6 +5357,21 @@ fn build_publish_registry_entry(
         );
     }
     Ok(value)
+}
+
+fn cellscript_artifact_descriptor(kind: Option<&str>) -> Result<crate::package::registry::RegistryArtifactDescriptor> {
+    let kind = kind.unwrap_or("source_library");
+    if !matches!(kind, "source_library" | "profile_library") {
+        return Err(crate::error::CompileError::without_span(
+            "CellScript package artifact kind must be source_library or profile_library",
+        ));
+    }
+    Ok(crate::package::registry::RegistryArtifactDescriptor {
+        kind: kind.to_string(),
+        profile: "cellscript_source".to_string(),
+        consumption_mode: "dependency".to_string(),
+        language: "cellscript".to_string(),
+    })
 }
 
 fn resolve_registry_api_base(api_url: Option<String>) -> Result<String> {
@@ -5090,7 +5425,7 @@ fn parse_registry_api_url(api_base: &str) -> Result<reqwest::Url> {
 }
 
 fn registry_publish_endpoint(api_base: &str, namespace: &str, name: &str) -> String {
-    format!("{}/v1/packages/{}/{}/versions", api_base.trim_end_matches('/'), namespace, name)
+    format!("{}/v1/artifacts/{}/{}/releases", api_base.trim_end_matches('/'), namespace, name)
 }
 
 fn resolve_registry_publish_idempotency_key(
@@ -5179,6 +5514,15 @@ fn validate_publish_payload_matches_local_package(
             "publish payload source_hash '{}' does not match local source_hash '{}'",
             payload.source_hash, source_hash
         )));
+    }
+    if !matches!(payload.artifact.kind.as_str(), "source_library" | "profile_library")
+        || payload.artifact.profile != "cellscript_source"
+        || payload.artifact.consumption_mode != "dependency"
+        || payload.artifact.language != "cellscript"
+    {
+        return Err(crate::error::CompileError::without_span(
+            "CellScript package publish payload must declare the source_library/cellscript_source dependency contract",
+        ));
     }
     Ok(())
 }
@@ -13123,6 +13467,21 @@ impl CliParser {
                             .help("Immutable source snapshot bytes to upload; defaults to a generated CellScript source snapshot"),
                     )
                     .arg(
+                        Arg::new("artifact-manifest")
+                            .long("artifact-manifest")
+                            .value_name("FILE")
+                            .conflicts_with("offline")
+                            .help("Publish a non-package artifact described by Artifact.toml and its immutable bundle"),
+                    )
+                    .arg(
+                        Arg::new("artifact-kind")
+                            .long("artifact-kind")
+                            .value_name("KIND")
+                            .value_parser(["source_library", "profile_library"])
+                            .conflicts_with("artifact-manifest")
+                            .help("CellScript dependency kind; defaults to source_library"),
+                    )
+                    .arg(
                         Arg::new("print-payload")
                             .long("print-payload")
                             .action(ArgAction::SetTrue)
@@ -13974,6 +14333,8 @@ impl CliParser {
                 idempotency_key: m.get_one::<String>("idempotency-key").cloned(),
                 payload: m.get_one::<String>("payload").map(PathBuf::from),
                 source_snapshot: m.get_one::<String>("source-snapshot").map(PathBuf::from),
+                artifact_manifest: m.get_one::<String>("artifact-manifest").map(PathBuf::from),
+                artifact_kind: m.get_one::<String>("artifact-kind").cloned(),
                 print_payload: m.get_flag("print-payload"),
                 json: json_output(m),
             }),

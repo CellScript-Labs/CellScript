@@ -284,7 +284,7 @@ Deployed Registry liveness and public read verification:
 
 ```bash
 curl --fail --silent --show-error https://api.registry.cellscript.dev/ready
-curl --fail --silent --show-error 'https://api.registry.cellscript.dev/v1/packages?limit=5'
+curl --fail --silent --show-error 'https://api.registry.cellscript.dev/v1/artifacts?limit=5'
 curl --fail --silent --show-error https://registry.cellscript.dev/health
 curl --fail --silent --show-error https://cellscript.dev/registry/ > /dev/null
 ```

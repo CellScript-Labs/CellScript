@@ -117,8 +117,8 @@ to current branch-specific evidence or forward design:
 - `CELLSCRIPT_GRAMMAR_GOVERNANCE_RFC.md` and
   `CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md` for 0.19 grammar/syntax
   governance scope
-- `CELLSCRIPT_REGISTRY_PHASE1.md` for the 0.19 package/deployment identity
-  registry closure and 0.20 handoff boundary
+- `CELLSCRIPT_REGISTRY_PHASE1.md` for the current artifact, verification,
+  deployment-evidence, and public API contract
 - `archive/0.20/CELLSCRIPT_0_20_ROADMAP.md` for generated TypeScript action builders,
   live-chain registry verification, stateful flow evidence, and the bounded
   CellFabric JSON bridge

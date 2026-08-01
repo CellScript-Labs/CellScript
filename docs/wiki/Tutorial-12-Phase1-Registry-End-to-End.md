@@ -1,247 +1,167 @@
-# Tutorial 12: Phase 1 Registry: End-to-End
+# Tutorial 12: Registry Artifacts End to End
 
-This tutorial walks through the Phase 1 registry loop at the level a package
-author or reviewer needs: source identity, build identity, deployment identity,
-and the commands that bind them together.
+**Status**: current tutorial for publishing and inspecting CellScript and
+non-CellScript artifacts in the public Registry.
 
-For the longer repository version, read
-[docs/tutorials/phase1-end-to-end.md](https://github.com/CellScript-Labs/CellScript/blob/main/docs/tutorials/phase1-end-to-end.md).
+The Registry is not limited to dependency packages. It distinguishes source
+libraries, profile libraries, CKB runtime verifiers, deployable contracts,
+reproducible binaries, and copy-only templates. This tutorial uses the native
+CellScript path first, then the generic artifact path.
 
-The production surfaces are live:
+## 1. Connect a CKB wallet
 
-```text
-Website:      https://cellscript.dev/registry/
-Public API:   https://api.registry.cellscript.dev/v1/packages
-Write API:    https://api.registry.cellscript.dev
-Static reads: https://registry.cellscript.dev/packages/
+Open `https://cellscript.dev/registry/submit`. The page does not expose a
+network selector: Registry authorisation and deployment evidence are CKB
+mainnet-only.
+
+Choose a detected wallet from the modal. Wallets listed without an active
+connector link to their official installation page. The wallet signs only the
+canonical capability authorisation; `cellc` generates and stores the delegated
+P-256 publish key.
+
+Claim a namespace and wait until it is active. The submit form then produces
+the capability and publish commands for the selected artifact kind.
+
+## 2. Publish a CellScript source library
+
+Add the namespace to `Cell.toml`:
+
+```toml
+[package]
+name = "math"
+version = "1.0.0"
+namespace = "acme"
 ```
 
-Package browsing is live-data-first. If the API is unavailable, the website
-labels its bundled fixture as a read-only mirror; it is never the write or
-resolution authority.
-
-The Browse query is stored in `?q=` and paginates through the public API. Static
-mirror links and live direct links open the same package-detail view, including
-localized lifecycle status, normalized release dates, and copyable source,
-profile, out-point, and code hashes. Package maintenance accepts any valid
-`namespace/package` coordinate and an optional local directory; write tasks
-generate the complete local verify, publish dry-run, and publish sequence.
-
-## What Phase 1 Proves
-
-Phase 1 is not a chain acceptance test and not a trust oracle. It answers three
-bounded questions:
-
-| Question | Evidence |
-| --- | --- |
-| Which source was published? | `Cell.toml`, package source hash, namespace/name/version, registry metadata. |
-| Which build came from that source? | Artifact hash, metadata hash, ABI/schema/constraint hashes, compiler version, target profile. |
-| Which deployed Cell claims to contain that build? | Network, tx hash, output index, code hash, data hash, CellDep/deployment metadata. |
-
-The rule is fail-closed. Missing hashes, stale source, toolchain drift, or a
-deployment record that does not match chain facts should be treated as a
-verification failure.
-
-## Author Flow
-
-Start with a package:
+Verify and publish:
 
 ```bash
-cellc init my_contract
-cd my_contract
+cellc package verify --json
+cellc publish --dry-run
+cellc publish
 ```
 
-Fill in the package identity in `Cell.toml`: name, namespace, version,
-description, repository, license, entry file, and target profile. Then write the
-source and build it:
+Use `--artifact-kind profile_library` when the package is a named CellScript
+profile library. Both kinds use compiler-backed verification and remain valid
+`Cell.toml` dependencies.
 
-```bash
-cellc check --target-profile ckb --json
-cellc build --target riscv64-elf --target-profile ckb --json
+## 3. Publish a deployable CKB contract
+
+Create `Artifact.toml`:
+
+```toml
+schema = "cellscript-registry-artifact"
+namespace = "acme"
+name = "vault-lock"
+release = "1.0.0"
+kind = "deployable_contract"
+language = "rust"
+bundle = "vault-lock.bundle.json"
+description = "Vault lock Script"
 ```
 
-Before publishing, do a local dry run:
-
-```bash
-cellc publish --dry-run --json
-```
-
-For an offline mirror or release fixture, write local registry metadata:
-
-```bash
-cellc publish --offline --json
-```
-
-For public publishing, authorize a local publisher capability through a
-supported CKB wallet, then publish. Use `joyid_ckb` for JoyID or
-`ckb_secp256k1` for a standard CKB wallet exposed through CCC:
-
-```bash
-cellc auth capability create --principal-type <principal_type> --principal-id <principal_id> --scope publish:cellscript/amm_pool --expires 90d --json > capability-payload.json
-cellc auth capability submit --payload capability-payload.json --wallet-signature wallet-signature.json
-cellc auth namespace claim --namespace cellscript --payload capability-payload.json --wallet-signature wallet-signature.json
-cellc publish --json
-```
-
-The Registry wallet chooser contains the complete official CKB directory:
-Neuron, JoyID, imToken, CKBull, SafePal, Ledger, imKey, OneKey, UTXO Global,
-Rei Wallet, Gate, and QuantumPurse. A CCC-discovered CKB signer connects and
-signs in-browser. Other wallets use the external `wallet-signature.json`
-handoff, which is subject to the same backend verification contract.
-
-Recovery phrases stay inside the wallet. The Registry submit page never accepts
-or stores mnemonic words; it receives only the public identity material and a
-signature over the canonical capability challenge.
-
-Namespace ownership is an explicit admission step, not a side effect of
-capability registration. The claim must be `active` before the first publish;
-reserved namespaces may return a pending review status.
-
-The public write API admits package metadata, but consumers still verify the
-source and build identity locally.
-
-## Source Edition And Compatibility Profile Contract
-
-Public publishing uses the registry's single current publish contract. The
-signed payload contains one complete version entry, and the API checks that
-its namespace, package name, version, and source hash equal the outer signed
-identity. The entry must also contain:
+Create the immutable bundle. Each payload is base64-encoded bytes, not a path:
 
 ```json
 {
-  "schema_version": 1,
-  "versions": [{
-    "edition": "2026",
-    "compatibility_profile_hash": "<32-byte hex hash>"
-  }]
+  "schema": "cellscript-registry-bundle",
+  "namespace": "acme",
+  "name": "vault-lock",
+  "release": "1.0.0",
+  "profile": "ckb_executable",
+  "manifest_json": "{\"target\":\"riscv64imac-unknown-none-elf\"}",
+  "objects": [
+    { "role": "source", "content_base64": "..." },
+    { "role": "executable", "content_base64": "..." },
+    { "role": "abi", "content_base64": "..." }
+  ]
 }
 ```
 
-These are not website labels. `edition` identifies source-language semantics;
-`compatibility_profile_hash` separately binds the complete combination of
-edition, target, primitive assurance, metadata schemas, and entry/witness ABI.
-The API stores both as typed fields and exposes them in its static
-package-version JSON. Consumers must not derive ABI or schema versions from the
-edition year. Missing `edition`, `compatibility_profile_hash`,
-`dependencies`, `status`, or `yanked`, an unknown schema identifier, or a
-mismatched nested identity is rejected. The production Registry deployed this
-as its initial schema on 2026-07-31; `0001_initial.sql` is now frozen and later
-schema changes require additive migrations. `0002_verification_jobs.sql` is the
-first such migration and adds the automatic queue without rewriting history.
-
-`source_published` means the signed source snapshot was admitted; it does not
-mean the build or deployment was verified. The generic admin endpoint cannot
-promote an entry to `verified_build`, `deployed`, or `on_chain_attested`.
-Those labels require the ordered evidence endpoint. Each step stores
-hash-addressed evidence, validates the package/build identity, and binds the
-next step to the preceding evidence reference.
-
-The baseline `verified_build` step is automatic. Publish creates a verification
-job in the same database transaction as the version. A leased worker then
-authenticates the immutable generated snapshot, compiles it with the current
-CellScript compiler, verifies the canonical manifest and resolved-profile
-hashes, commits evidence/status atomically, and refreshes the static version
-object. Queue attempts are bounded; rejected builds dead-letter, while
-operators can inspect metrics and audit an explicit requeue. Admission therefore
-returns `verification: queued`, never a synchronous verification claim.
-
-The worker is live in the production topology as of 2026-08-01. Deployment
-acceptance used an explicitly seeded one-time smoke identity to exercise the
-normal external `cellc publish` path, queue lease, real compiler, evidence
-commit, static publication, default visibility, and a fresh consumer
-install/check/build without an unverified override. The test records and live
-objects were removed afterward, and the migrated clean state was backed up.
-This validates the deployed automation; it deliberately does not count as a
-publisher-owned wallet capability registration or namespace claim.
-
-## Consumer Flow
-
-Add a dependency, resolve it, and check the resulting package graph:
+Validate before sending anything:
 
 ```bash
-cellc install namespace/package@1.2.3
-cellc install
-cellc package verify --json
+cellc publish --artifact-manifest Artifact.toml --dry-run
 ```
 
-The default resolver queries the production public API, accepts only statuses
-eligible for normal resolution, then downloads the version's content-addressed
-source snapshot. It verifies the snapshot descriptor's SHA-256, rejects opaque
-or path-escaping content, verifies every file's BLAKE2b digest, reconstructs the
-source tree atomically, and checks `Cell.toml`, source hash, Edition 2026, and
-compatibility-profile identity.
-The default package list/search follows the same baseline and shows only
-`verified_build`, `deployed`, or `on_chain_attested`. Direct package/version
-URLs and an explicit `?status=source_published` query remain available for
-auditing an admitted version before verification completes.
-For a direct `source_published` or `indexed_pending` install, pass
-`--allow-unverified`; incident review of a quarantined entry additionally needs
-`--allow-quarantined`. `cellc install` persists these acknowledgements on that
-dependency's `Cell.toml` table, so lock refreshes and later builds retain the
-same explicit policy.
-`CELLSCRIPT_REGISTRY_URL` is an explicit Git/offline override, not an automatic
-fallback from a failed production lookup. Registry packages otherwise use the
-same fail-closed principle as path and Git dependencies: the selected source
-must match the recorded identity before the compiler can treat it as part of
-the build.
-
-Then build and verify the artifact:
+The CLI checks the coordinate, release, kind/language pair, bundle profile,
+required object roles, size limit, and computed hashes. Publish with:
 
 ```bash
-cellc build --target riscv64-elf --target-profile ckb --json
-cellc verify-artifact build/main.elf --expect-target-profile ckb --verify-sources --production
+cellc publish --artifact-manifest Artifact.toml
 ```
 
-## Deployment Review
+The release initially reports:
 
-After a deployment adapter records chain facts, verify the local deployment
-metadata:
+```text
+verification_status = pending
+deployment_status   = undeployed
+availability_status = active
+```
+
+After the independent verifier binds the source, executable, and ABI hashes,
+verification becomes `verified`. This does not imply deployment.
+
+## 4. Record a mainnet deployment
+
+The deployment request is a signed
+`cellscript-registry-deployment` / `record_deployment` payload sent to:
+
+```text
+POST /v1/artifacts/acme/vault-lock/releases/1.0.0/deployments
+```
+
+It includes the published `artifact_hash`, equal `data_hash`, `code_hash`,
+`hash_type`, `dep_type`, and the mainnet OutPoint. The API requires the same
+namespace capability used for publishing and prior verified-build evidence.
+
+The API calls mainnet `get_live_cell`. It rejects a dead or missing Cell, a
+data-hash mismatch, a Type Script hash mismatch, a non-mainnet network, or an
+OutPoint that is not bound to the published executable. A successful request
+appends deployment evidence and changes only `deployment_status` to
+`chain_verified`.
+
+## 5. Inspect the artifact
+
+Open the artifact detail page or query the API:
 
 ```bash
-cellc registry verify --json
+curl --fail 'https://api.registry.cellscript.dev/v1/artifacts/acme/vault-lock'
+curl --fail 'https://api.registry.cellscript.dev/v1/artifacts/acme/vault-lock/releases/1.0.0/evidence'
 ```
 
-If you have a CKB RPC endpoint and want live chain checks:
+Check these independently:
+
+- artifact kind, profile, language, and consumption mode;
+- source, executable, ABI, or recipe hashes;
+- verification, deployment, and availability states;
+- evidence producer and evidence hash;
+- mainnet OutPoint, code hash, data hash, hash type, and dep type.
+
+Do not use `cellc install` for this executable. `cellc install` accepts only
+`cellscript_source` artifacts whose consumption mode is `dependency`.
+
+## 6. Other artifact kinds
+
+- `runtime_verifier`: `ckb_executable` bundle with source, executable, and ABI;
+  consumption mode is `tcb`.
+- `reproducible_binary`: `reproducible_build` bundle with source, executable,
+  and `build_recipe`; the Registry reports `evidence_required` until build
+  evidence is sufficient.
+- `template`: `copy_material` bundle containing source only; consumption mode
+  is `copy`, never dependency.
+
+## 7. Naming rules
+
+Namespace and artifact names are 1–64 characters. Use lowercase letters and
+digits; `_` and `-` may appear only between characters. A one-character name is
+valid. The UI and API enforce the same rule.
+
+## 8. Validate repository integration
 
 ```bash
-cellc registry verify --live --rpc-url "$CELLSCRIPT_CKB_RPC_URL" --json
+./scripts/cellscript_gate.sh dev
 ```
 
-Live checks do not replace source/build verification. They add the chain-facing
-question: does the recorded OutPoint still expose the expected deployment
-identity?
-
-## What Not To Put In The Resolver
-
-The registry may discover more than the resolver can import. Keep these
-boundaries separate:
-
-| Object | Correct treatment |
-| --- | --- |
-| CellScript source package | `Cell.toml` dependency, resolved by `cellc install`. |
-| Deployed verifier or helper script | Deployment/verifier evidence with code hash, data hash, OutPoint, ABI, and status. |
-| Reproducible CKB binary | Future artifact profile, not a source package. |
-| Protocol skeleton or cookbook | Copy into local source; after copying, verify as your own package. |
-
-A useful repository is not automatically an installable dependency. A cookbook
-is starting material, not registry-trusted source identity.
-
-## Failure Modes To Expect
-
-Phase 1 should reject:
-
-- source files that no longer hash to the published source identity;
-- `Cell.lock` or deployment metadata that names a different build;
-- missing compiler, target profile, ABI, schema, or constraints hashes;
-- deployment records with mismatched network, tx hash, output index, code hash,
-  or data hash;
-- production verification that still depends on unresolved runtime obligations.
-
-## See Also
-
-- [Packages and CLI Workflow](Tutorial-04-Packages-and-CLI-Workflow.md)
-- [Metadata, Verification, and Production Gates](Tutorial-06-Metadata-Verification-and-Production-Gates.md)
-- [CKB Target Profiles](Tutorial-05-CKB-Target-Profiles.md)
-- [Agentic Loops and cellscript-mcp](Tutorial-13-Agentic-Loops-and-cellscript-mcp.md)
-- `docs/CELLSCRIPT_PACKAGE_PROVENANCE_AND_DEPLOYMENT_IDENTITY.md`
-- `docs/CELLSCRIPT_REGISTRY_PHASE1.md`
+For the complete model and failure rules, see
+[`docs/CELLSCRIPT_REGISTRY_PHASE1.md`](../CELLSCRIPT_REGISTRY_PHASE1.md).

@@ -1,4 +1,4 @@
-//! Integration tests for the Phase 1 Registry system.
+//! Integration tests for the Registry artifact model and offline index tools.
 //!
 //! Tests cover:
 //! - Source hash computation determinism
@@ -6,9 +6,11 @@
 //! - Discovery index lookup with local Git fixture
 //! - Deployed.toml file round-trip
 //! - Cell.lock new fields (package.build, deployment.*)
-//! - Full publish → verify flow with local Git fixtures
+//! - Public artifact API dependency resolution with immutable snapshots
+//! - Explicit offline Git fixture editing and verification
 //! - Fail-closed verification on hash mismatch
 
+use base64::Engine as _;
 use cellscript::package::registry::{
     compute_source_hash, DiscoveryEntry, DiscoveryIndex, RegistryAuditInfo, RegistryDependencyRef, RegistryEntryStatus, RegistryIndex,
     RegistryVersion,
@@ -18,10 +20,14 @@ use cellscript::package::{
     LockedDependency, LockedSource, Lockfile, LockfileDeploymentRef, LockfilePackageInfo, PackageManager, ScriptRole,
     DEPLOYED_MANIFEST_SCHEMA,
 };
+use sha2::{Digest as _, Sha256};
 use std::collections::BTreeMap;
 use std::ffi::OsString;
+use std::io::{Read, Write};
+use std::net::TcpListener;
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 static REGISTRY_ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -31,12 +37,12 @@ struct RegistryEnvGuard {
 }
 
 impl RegistryEnvGuard {
-    fn new(url: &Path) -> Self {
-        let guard = REGISTRY_ENV_LOCK.lock().unwrap();
-        let previous = std::env::var_os(cellscript::package::registry::REGISTRY_URL_ENV);
+    fn new(url: &str) -> Self {
+        let guard = REGISTRY_ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let previous = std::env::var_os(cellscript::package::registry::REGISTRY_API_URL_ENV);
         // SAFETY: CI runs tests with one test thread, and this guard serializes
         // registry URL changes within this test binary.
-        unsafe { std::env::set_var(cellscript::package::registry::REGISTRY_URL_ENV, url) };
+        unsafe { std::env::set_var(cellscript::package::registry::REGISTRY_API_URL_ENV, url) };
         Self { previous, _guard: guard }
     }
 }
@@ -45,12 +51,126 @@ impl Drop for RegistryEnvGuard {
     fn drop(&mut self) {
         if let Some(previous) = &self.previous {
             // SAFETY: See `RegistryEnvGuard::new`; the guard still owns the lock.
-            unsafe { std::env::set_var(cellscript::package::registry::REGISTRY_URL_ENV, previous) };
+            unsafe { std::env::set_var(cellscript::package::registry::REGISTRY_API_URL_ENV, previous) };
         } else {
             // SAFETY: See `RegistryEnvGuard::new`; the guard still owns the lock.
-            unsafe { std::env::remove_var(cellscript::package::registry::REGISTRY_URL_ENV) };
+            unsafe { std::env::remove_var(cellscript::package::registry::REGISTRY_API_URL_ENV) };
         }
     }
+}
+
+struct PackageArtifactApi {
+    origin: String,
+    stop: Arc<AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for PackageArtifactApi {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(handle) = self.handle.take() {
+            handle.join().unwrap();
+        }
+    }
+}
+
+fn read_mock_http_path(stream: &mut std::net::TcpStream) -> String {
+    let mut request = Vec::new();
+    let mut buffer = [0_u8; 1024];
+    loop {
+        let read = stream.read(&mut buffer).unwrap();
+        assert_ne!(read, 0, "artifact API request ended before headers");
+        request.extend_from_slice(&buffer[..read]);
+        if let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+            let headers = String::from_utf8_lossy(&request[..header_end]);
+            return headers.lines().next().and_then(|line| line.split_whitespace().nth(1)).unwrap_or("/").to_string();
+        }
+    }
+}
+
+fn start_package_artifact_api(source_root: &Path, verification_status: &str) -> PackageArtifactApi {
+    let index = RegistryIndex::read_from_repo(source_root).unwrap();
+    assert_eq!(index.versions.len(), 1, "single-package API fixture expects one release");
+    let version = &index.versions[0];
+    let snapshot_files = ["Cell.toml", "src/main.cell"]
+        .into_iter()
+        .map(|path| {
+            let content = std::fs::read(source_root.join(path)).unwrap();
+            serde_json::json!({
+                "path": path,
+                "blake2b256": hex::encode(cellscript::ckb_blake2b256(&content)),
+                "content_base64": base64::engine::general_purpose::STANDARD.encode(content),
+            })
+        })
+        .collect::<Vec<_>>();
+    let snapshot = serde_json::to_vec(&serde_json::json!({
+        "schema": "cellscript-source-snapshot-v1",
+        "package": { "namespace": index.namespace, "name": index.name, "version": version.version },
+        "files": snapshot_files,
+    }))
+    .unwrap();
+    let snapshot_hash = format!("sha256:{}", hex::encode(Sha256::digest(&snapshot)));
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let artifact_path = format!("/v1/artifacts/{}/{}", index.namespace, index.name);
+    let snapshot_path = format!("/source-snapshots/{}/{}/{}/fixture.json", index.namespace, index.name, version.version);
+    let artifact = serde_json::to_vec(&serde_json::json!({
+        "schema": "cellscript-registry-artifact",
+        "namespace": index.namespace,
+        "name": index.name,
+        "repository": format!("https://example.test/{}/{}", index.namespace, index.name),
+        "artifact": {
+            "kind": "source_library",
+            "profile": "cellscript_source",
+            "consumption_mode": "dependency",
+            "language": "cellscript"
+        },
+        "releases": [{
+            "release": version.version,
+            "verification_status": verification_status,
+            "availability_status": "active",
+            "registry_entry": index,
+            "immutable_bundle": {
+                "schema": "cellscript-registry-immutable-bundle",
+                "url": format!("{origin}{snapshot_path}"),
+                "snapshot_hash": snapshot_hash,
+                "source_hash": version.source_hash,
+                "size_bytes": snapshot.len(),
+                "content_type": "application/vnd.cellscript.source-snapshot+json"
+            }
+        }]
+    }))
+    .unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let server_stop = Arc::clone(&stop);
+    let handle = std::thread::spawn(move || {
+        while !server_stop.load(Ordering::Acquire) {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    let path = read_mock_http_path(&mut stream);
+                    let (status, content_type, body) = if path == artifact_path {
+                        ("200 OK", "application/json", artifact.as_slice())
+                    } else if path == snapshot_path {
+                        ("200 OK", "application/vnd.cellscript.source-snapshot+json", snapshot.as_slice())
+                    } else {
+                        ("404 Not Found", "application/json", b"{}".as_slice())
+                    };
+                    let headers = format!(
+                        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    );
+                    stream.write_all(headers.as_bytes()).unwrap();
+                    stream.write_all(body).unwrap();
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Err(error) => panic!("artifact API fixture failed: {error}"),
+            }
+        }
+    });
+    PackageArtifactApi { origin, stop, handle: Some(handle) }
 }
 
 // ---------------------------------------------------------------------------
@@ -813,7 +933,7 @@ fn full_publish_install_verify_flow_with_local_git() {
 }
 
 #[test]
-fn package_manager_resolves_registry_dependency_with_source_hash_from_local_git_fixture() {
+fn package_manager_resolves_artifact_api_dependency_with_source_hash() {
     let temp = tempfile::tempdir().unwrap();
 
     let source_repo = temp.path().join("source-repo");
@@ -881,7 +1001,8 @@ namespace = "cellscript"
     .unwrap();
     std::fs::write(consumer.join("src/main.cell"), "module consumer;\n").unwrap();
 
-    let _env = RegistryEnvGuard::new(&registry_repo);
+    let api = start_package_artifact_api(&source_repo, "verified");
+    let _env = RegistryEnvGuard::new(&api.origin);
     let mut manager = PackageManager::new(&consumer);
     manager.resolve_dependencies().unwrap();
     let resolved = manager.get_resolved().get("token").unwrap();
@@ -965,7 +1086,8 @@ namespace = "cellscript"
     .unwrap();
     std::fs::write(consumer.join("src/main.cell"), "module consumer;\n").unwrap();
 
-    let _env = RegistryEnvGuard::new(&registry_repo);
+    let api = start_package_artifact_api(&source_repo, "pending");
+    let _env = RegistryEnvGuard::new(&api.origin);
     let mut manager = PackageManager::new(&consumer);
     let err = manager.resolve_dependencies().unwrap_err();
     assert!(err.message.contains("status 'source_published'"), "unexpected error: {}", err.message);
@@ -1042,7 +1164,8 @@ allow_unverified = true
     .unwrap();
     std::fs::write(consumer.join("src/main.cell"), "module consumer;\n").unwrap();
 
-    let _env = RegistryEnvGuard::new(&registry_repo);
+    let api = start_package_artifact_api(&source_repo, "pending");
+    let _env = RegistryEnvGuard::new(&api.origin);
     let mut manager = PackageManager::new(&consumer);
     manager.resolve_dependencies().unwrap();
     assert_eq!(manager.get_resolved()["token"].source_hash.as_deref(), Some(source_hash.as_str()));
@@ -1116,10 +1239,15 @@ namespace = "cellscript"
     .unwrap();
     std::fs::write(consumer.join("src/main.cell"), "module consumer;\n").unwrap();
 
-    let _env = RegistryEnvGuard::new(&registry_repo);
+    let api = start_package_artifact_api(&source_repo, "verified");
+    let _env = RegistryEnvGuard::new(&api.origin);
     let mut manager = PackageManager::new(&consumer);
     let err = manager.resolve_dependencies().unwrap_err();
-    assert!(err.message.contains("source_hash mismatch"), "unexpected error: {}", err.message);
+    assert!(
+        err.message.contains("source_hash") && err.message.contains("deliberately_wrong_hash"),
+        "unexpected error: {}",
+        err.message
+    );
 }
 
 // ---------------------------------------------------------------------------

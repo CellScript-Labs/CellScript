@@ -5,7 +5,7 @@ compatibility_flags = ["nodejs_compat"]
 
 routes = [
   { pattern = "api.registry.cellscript.dev/*", zone_name = "cellscript.dev" },
-  { pattern = "registry.cellscript.dev/packages/*", zone_name = "cellscript.dev" }
+  { pattern = "registry.cellscript.dev/artifacts/*", zone_name = "cellscript.dev" }
 ]
 
 [triggers]

@@ -18,7 +18,7 @@ const verifierHeartbeatPath = resolve(process.env["REGISTRY_VERIFIER_SHARED_HEAR
 const verifierHeartbeatMaxAgeSeconds = integerEnv("REGISTRY_VERIFIER_HEARTBEAT_MAX_AGE_SECONDS", 120, 30, 600);
 
 await mkdir(objectRoot, { recursive: true, mode: 0o750 });
-const managedObjectPrefixes = ["source-snapshots", "packages"].map((prefix) => resolve(objectRoot, prefix));
+const managedObjectPrefixes = ["source-snapshots", "artifacts"].map((prefix) => resolve(objectRoot, prefix));
 for (const prefix of managedObjectPrefixes) {
   await mkdir(prefix, { recursive: true, mode: 0o750 });
   await access(prefix, fsConstants.R_OK | fsConstants.W_OK);

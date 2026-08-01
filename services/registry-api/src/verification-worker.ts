@@ -102,23 +102,26 @@ async function processJob(job: VerificationJobRecord): Promise<void> {
       }
       version = existing;
     } else {
-      const result = await runBuildVerification(job);
       const existing = await store.getPackageVersion(job.namespace, job.name, job.version);
       if (!existing) throw new Error("verification job package version disappeared");
+      const result = await runBuildVerification(job, existing);
       const previous = await store.listPackageEvidence(job.namespace, job.name, job.version);
       const evidence = validatePromotionEvidence(
         {
-          schema: "cellscript-registry-evidence-v1",
+          schema: "cellscript-registry-evidence",
           kind: "verified_build",
-          producer: `cellscript-registry-verifier/${result.compiler_version}`,
+          producer: result.compiler_version
+            ? `cellscript-registry-verifier/${result.compiler_version}`
+            : `cellscript-registry-verifier/${job.artifact.profile}`,
           generated_at: new Date().toISOString(),
           verification_status: "passed",
+          verification_level: result.verification_level,
           source_hash: result.source_hash,
           manifest_hash: result.manifest_hash,
-          compatibility_profile_hash: result.compatibility_profile_hash,
-          artifact_hash: result.artifact_hash,
+          ...(result.compatibility_profile_hash ? { compatibility_profile_hash: result.compatibility_profile_hash } : {}),
+          ...(result.artifact_hash ? { artifact_hash: result.artifact_hash } : {}),
           metadata_hash: result.metadata_hash,
-          compiler_version: result.compiler_version,
+          ...(result.compiler_version ? { compiler_version: result.compiler_version } : {}),
           artifact_format: result.artifact_format,
           snapshot_hash: job.snapshot_hash,
           verification_job_id: job.id,
@@ -184,20 +187,24 @@ async function processJob(job: VerificationJobRecord): Promise<void> {
 
 interface BuildVerificationResult {
   status: "passed";
-  artifact_hash: string;
+  verification_level: "compiled" | "hash_bound" | "evidence_required";
+  artifact_hash?: string;
   metadata_hash: string;
-  compiler_version: string;
+  compiler_version?: string;
   source_hash: string;
   manifest_hash: string;
-  compatibility_profile_hash: string;
+  compatibility_profile_hash?: string;
   artifact_format: string;
 }
 
-async function runBuildVerification(job: VerificationJobRecord): Promise<BuildVerificationResult> {
-  if (job.snapshot_content_type !== "application/vnd.cellscript.source-snapshot+json") {
+async function runBuildVerification(job: VerificationJobRecord, version: PackageVersionRecord): Promise<BuildVerificationResult> {
+  const expectedContentType = job.artifact.profile === "cellscript_source"
+    ? "application/vnd.cellscript.source-snapshot+json"
+    : "application/vnd.cellscript.artifact-bundle+json";
+  if (job.snapshot_content_type !== expectedContentType) {
     throw new VerificationRejected(
       "unsupported_snapshot_content_type",
-      `automated verification requires application/vnd.cellscript.source-snapshot+json, got ${job.snapshot_content_type}`,
+      `${job.artifact.profile} verification requires ${expectedContentType}, got ${job.snapshot_content_type}`,
     );
   }
   const snapshotPath = objectStore.pathFor(job.snapshot_object_key);
@@ -214,24 +221,30 @@ async function runBuildVerification(job: VerificationJobRecord): Promise<BuildVe
     throw new VerificationRejected("snapshot_hash_mismatch", "source snapshot object does not match its admitted SHA-256 identity");
   }
 
+  const published = version.registry_entry.versions[0];
+  const verifierArgs = [
+    "--snapshot",
+    snapshotPath,
+    "--namespace",
+    job.namespace,
+    "--name",
+    job.name,
+    "--version",
+    job.version,
+    "--source-hash",
+    job.source_hash,
+    "--manifest-hash",
+    job.manifest_hash,
+    "--profile",
+    job.artifact.profile,
+  ];
+  if (job.compatibility_profile_hash) verifierArgs.push("--compatibility-profile-hash", job.compatibility_profile_hash);
+  if (published.artifact_hash) verifierArgs.push("--artifact-hash", published.artifact_hash);
+  if (published.abi_hash) verifierArgs.push("--abi-hash", published.abi_hash);
+  if (published.build_recipe_hash) verifierArgs.push("--build-recipe-hash", published.build_recipe_hash);
   const child = spawn(
     verifierBinary,
-    [
-      "--snapshot",
-      snapshotPath,
-      "--namespace",
-      job.namespace,
-      "--name",
-      job.name,
-      "--version",
-      job.version,
-      "--source-hash",
-      job.source_hash,
-      "--manifest-hash",
-      job.manifest_hash,
-      "--compatibility-profile-hash",
-      job.compatibility_profile_hash,
-    ],
+    verifierArgs,
     {
       cwd: "/tmp",
       env: {
@@ -272,17 +285,23 @@ async function runBuildVerification(job: VerificationJobRecord): Promise<BuildVe
   }
   const parsed: BuildVerificationResult = {
     status: "passed",
-    artifact_hash: requiredHash(output, "artifact_hash"),
+    verification_level: requiredVerificationLevel(output),
+    ...(optionalHash(output, "artifact_hash") ? { artifact_hash: optionalHash(output, "artifact_hash")! } : {}),
     metadata_hash: requiredHash(output, "metadata_hash"),
-    compiler_version: requiredOutputString(output, "compiler_version", 80),
+    ...(safeString(output["compiler_version"]) ? { compiler_version: requiredOutputString(output, "compiler_version", 80) } : {}),
     source_hash: requiredHash(output, "source_hash"),
     manifest_hash: requiredHash(output, "manifest_hash"),
-    compatibility_profile_hash: requiredHash(output, "compatibility_profile_hash"),
+    ...(optionalHash(output, "compatibility_profile_hash")
+      ? { compatibility_profile_hash: optionalHash(output, "compatibility_profile_hash")! }
+      : {}),
     artifact_format: requiredOutputString(output, "artifact_format", 80),
   };
   requireSameHash(parsed.source_hash, job.source_hash, "source_hash");
   requireSameHash(parsed.manifest_hash, job.manifest_hash, "manifest_hash");
-  requireSameHash(parsed.compatibility_profile_hash, job.compatibility_profile_hash, "compatibility_profile_hash");
+  if (job.compatibility_profile_hash) {
+    if (!parsed.compatibility_profile_hash) throw new VerificationRejected("compatibility_profile_hash_missing", "verifier omitted compatibility_profile_hash");
+    requireSameHash(parsed.compatibility_profile_hash, job.compatibility_profile_hash, "compatibility_profile_hash");
+  }
   return parsed;
 }
 
@@ -338,6 +357,19 @@ function requiredHash(value: Record<string, unknown>, key: string): string {
   const hash = requiredOutputString(value, key, 66);
   if (!/^(?:0x)?[0-9a-f]{64}$/i.test(hash)) throw new Error(`CellScript verifier ${key} is not a 32-byte hex hash`);
   return hash;
+}
+
+function optionalHash(value: Record<string, unknown>, key: string): string | undefined {
+  if (value[key] == null) return undefined;
+  return requiredHash(value, key);
+}
+
+function requiredVerificationLevel(value: Record<string, unknown>): BuildVerificationResult["verification_level"] {
+  const level = requiredOutputString(value, "verification_level", 80);
+  if (level !== "compiled" && level !== "hash_bound" && level !== "evidence_required") {
+    throw new Error("CellScript verifier verification_level is not recognised");
+  }
+  return level;
 }
 
 function requiredOutputString(value: Record<string, unknown>, key: string, maximum: number): string {

@@ -1,12 +1,11 @@
-//! Public registry and offline Git-mirror clients for CellScript packages.
+//! Public artifact registry and local fixture support for CellScript packages.
 //!
 //! Production resolution reads accepted package state from the public registry
 //! API, then downloads and verifies the registry's immutable source snapshot.
 //! The repository URL and tag remain provenance/audit fields rather than an
-//! availability dependency. The historical Git discovery index remains
-//! available only through an explicit
-//! `CELLSCRIPT_REGISTRY_URL` override for tests, private mirrors, and offline
-//! workflows.
+//! availability dependency. The Git discovery index is retained only for the
+//! explicit offline fixture editing commands; dependency resolution never
+//! falls back to it.
 //!
 //! Resolution priority: path > git > registry
 
@@ -83,17 +82,12 @@ pub fn default_registry_url() -> String {
         .unwrap_or_else(|| DEFAULT_REGISTRY_URL.to_string())
 }
 
-/// Effective production resolver URL.
-///
-/// `CELLSCRIPT_REGISTRY_URL` deliberately has highest priority as the legacy
-/// explicit Git-mirror override. Without that override, resolution uses the
-/// public API configured for publish/auth, then the production default.
+/// Effective production artifact API used by dependency resolution.
 pub fn resolver_registry_url() -> String {
-    std::env::var(REGISTRY_URL_ENV)
+    std::env::var(REGISTRY_API_URL_ENV)
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-        .or_else(|| std::env::var(REGISTRY_API_URL_ENV).ok().map(|value| value.trim().to_string()).filter(|value| !value.is_empty()))
         .or_else(|| std::env::var(REGISTRY_ORIGIN_ENV).ok().map(|value| value.trim().to_string()).filter(|value| !value.is_empty()))
         .unwrap_or_else(|| DEFAULT_PUBLIC_REGISTRY_ORIGIN.to_string())
 }
@@ -109,24 +103,15 @@ pub struct DiscoveryEntry {
 pub struct RegistryResolution {
     pub registry_url: String,
     pub entry: DiscoveryEntry,
-    /// Accepted production statuses from the public API. Git-mirror overrides
-    /// leave this empty and continue to read `registry.json` from the source.
+    /// Accepted production releases from the public API.
     pub authoritative_index: Option<RegistryIndex>,
-    /// Immutable install snapshots keyed by package version. Git-mirror
-    /// overrides leave this empty.
+    /// Immutable install snapshots keyed by package version.
     pub source_snapshots: BTreeMap<String, PublicRegistrySourceSnapshot>,
 }
 
-/// Resolve package discovery through the production API unless the caller has
-/// explicitly selected the legacy Git discovery index.
+/// Resolve a CellScript dependency through the production artifact API.
 pub fn lookup_for_resolution(namespace: &str, name: &str, cache_dir: &Path) -> Result<RegistryResolution> {
-    if let Some(registry_url) =
-        std::env::var(REGISTRY_URL_ENV).ok().map(|value| value.trim().to_string()).filter(|value| !value.is_empty())
-    {
-        let entry = DiscoveryIndex::new(&registry_url, cache_dir).lookup(namespace, name)?;
-        return Ok(RegistryResolution { registry_url, entry, authoritative_index: None, source_snapshots: BTreeMap::new() });
-    }
-
+    let _ = cache_dir;
     let registry_url = resolver_registry_url();
     let (entry, authoritative_index, source_snapshots) = lookup_public_registry(&registry_url, namespace, name)?;
     Ok(RegistryResolution { registry_url, entry, authoritative_index: Some(authoritative_index), source_snapshots })
@@ -138,7 +123,7 @@ fn lookup_public_registry(
     namespace: &str,
     name: &str,
 ) -> Result<(DiscoveryEntry, RegistryIndex, BTreeMap<String, PublicRegistrySourceSnapshot>)> {
-    let url = format!("{}/v1/packages/{}/{}", registry_url.trim_end_matches('/'), namespace, name);
+    let url = format!("{}/v1/artifacts/{}/{}", registry_url.trim_end_matches('/'), namespace, name);
     let response = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .build()
@@ -176,16 +161,18 @@ struct PublicRegistryPackage {
     namespace: String,
     name: String,
     repository: Option<String>,
-    versions: Vec<PublicRegistryVersion>,
+    artifact: RegistryArtifactDescriptor,
+    releases: Vec<PublicRegistryVersion>,
 }
 
 #[cfg(feature = "cli")]
 #[derive(Debug, Deserialize)]
 struct PublicRegistryVersion {
-    version: String,
-    status: RegistryEntryStatus,
+    release: String,
+    verification_status: String,
+    availability_status: String,
     registry_entry: RegistryIndex,
-    source_snapshot: PublicRegistrySourceSnapshot,
+    immutable_bundle: PublicRegistrySourceSnapshot,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -205,7 +192,7 @@ impl PublicRegistryPackage {
         expected_namespace: &str,
         expected_name: &str,
     ) -> Result<(DiscoveryEntry, RegistryIndex, BTreeMap<String, PublicRegistrySourceSnapshot>)> {
-        if self.schema != "cellscript-public-registry-package-v1" {
+        if self.schema != "cellscript-registry-artifact" {
             return Err(CompileError::without_span(format!("public registry returned unsupported schema '{}'", self.schema)));
         }
         if self.namespace != expected_namespace || self.name != expected_name {
@@ -214,44 +201,50 @@ impl PublicRegistryPackage {
                 self.namespace, self.name
             )));
         }
+        if self.artifact.profile != "cellscript_source" || self.artifact.consumption_mode != "dependency" {
+            return Err(CompileError::without_span(format!(
+                "artifact '{expected_namespace}/{expected_name}' is not a resolver-safe CellScript dependency"
+            )));
+        }
         let source = self.repository.filter(|value| !value.trim().is_empty()).unwrap_or_default();
-        let mut versions = Vec::with_capacity(self.versions.len());
+        let mut versions = Vec::with_capacity(self.releases.len());
         let mut source_snapshots = BTreeMap::new();
-        for public_version in self.versions {
+        for public_version in self.releases {
             if public_version.registry_entry.schema_version != RegistryIndex::CURRENT_SCHEMA_VERSION
                 || public_version.registry_entry.namespace != expected_namespace
                 || public_version.registry_entry.name != expected_name
             {
                 return Err(CompileError::without_span(format!(
                     "public registry version '{}' contains mismatched registry identity",
-                    public_version.version
+                    public_version.release
                 )));
             }
             let mut matching = public_version
                 .registry_entry
                 .versions
                 .into_iter()
-                .find(|version| version.version == public_version.version)
+                .find(|version| version.version == public_version.release)
                 .ok_or_else(|| {
                     CompileError::without_span(format!(
                         "public registry version '{}' has no matching signed version entry",
-                        public_version.version
+                        public_version.release
                     ))
                 })?;
-            matching.status = public_version.status.clone();
-            matching.yanked = matches!(public_version.status, RegistryEntryStatus::Yanked);
-            if public_version.source_snapshot.schema != "cellscript-registry-source-snapshot-v1"
-                || public_version.source_snapshot.source_hash != matching.source_hash
+            matching.status =
+                public_registry_release_status(&public_version.verification_status, &public_version.availability_status)?;
+            matching.yanked = public_version.availability_status == "yanked";
+            if public_version.immutable_bundle.schema != "cellscript-registry-immutable-bundle"
+                || public_version.immutable_bundle.source_hash != matching.source_hash
             {
                 return Err(CompileError::without_span(format!(
                     "public registry version '{}' contains invalid source snapshot identity",
-                    public_version.version
+                    public_version.release
                 )));
             }
-            if source_snapshots.insert(public_version.version.clone(), public_version.source_snapshot).is_some() {
+            if source_snapshots.insert(public_version.release.clone(), public_version.immutable_bundle).is_some() {
                 return Err(CompileError::without_span(format!(
                     "public registry returned duplicate version '{}'",
-                    public_version.version
+                    public_version.release
                 )));
             }
             versions.push(matching);
@@ -271,6 +264,26 @@ impl PublicRegistryPackage {
             },
             source_snapshots,
         ))
+    }
+}
+
+#[cfg(feature = "cli")]
+fn public_registry_release_status(verification: &str, availability: &str) -> Result<RegistryEntryStatus> {
+    match availability {
+        "deprecated" => return Ok(RegistryEntryStatus::Deprecated),
+        "yanked" => return Ok(RegistryEntryStatus::Yanked),
+        "quarantined" => return Ok(RegistryEntryStatus::Quarantined),
+        "active" => {}
+        value => {
+            return Err(CompileError::without_span(format!("public registry returned unknown availability state '{value}'")));
+        }
+    }
+    match verification {
+        "verified" => Ok(RegistryEntryStatus::VerifiedBuild),
+        "pending" => Ok(RegistryEntryStatus::SourcePublished),
+        "evidence_required" => Ok(RegistryEntryStatus::IndexedPending),
+        "rejected" => Ok(RegistryEntryStatus::Quarantined),
+        value => Err(CompileError::without_span(format!("public registry returned unknown verification state '{value}'"))),
     }
 }
 
@@ -383,7 +396,7 @@ pub fn materialize_public_source_snapshot(
 
 #[cfg(feature = "cli")]
 fn validate_public_source_snapshot_descriptor(snapshot: &PublicRegistrySourceSnapshot, expected_source_hash: &str) -> Result<()> {
-    if snapshot.schema != "cellscript-registry-source-snapshot-v1" {
+    if snapshot.schema != "cellscript-registry-immutable-bundle" {
         return Err(CompileError::without_span(format!("unsupported public registry source snapshot schema '{}'", snapshot.schema)));
     }
     let digest = snapshot
@@ -663,7 +676,16 @@ pub struct RegistryPublishPayload {
     pub issued_at: String,
     pub expires_at: String,
     pub cli_version: String,
+    pub artifact: RegistryArtifactDescriptor,
     pub registry_entry: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RegistryArtifactDescriptor {
+    pub kind: String,
+    pub profile: String,
+    pub consumption_mode: String,
+    pub language: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1353,15 +1375,22 @@ left = "a"
     }
 
     #[test]
-    fn public_registry_status_overrides_publisher_claim() {
+    fn public_registry_states_override_publisher_claim() {
         let payload: PublicRegistryPackage = serde_json::from_value(serde_json::json!({
-            "schema": "cellscript-public-registry-package-v1",
+            "schema": "cellscript-registry-artifact",
             "namespace": "cellscript",
             "name": "demo",
             "repository": "https://github.com/cellscript/demo",
-            "versions": [{
-                "version": "1.2.3",
-                "status": "deployed",
+            "artifact": {
+                "kind": "source_library",
+                "profile": "cellscript_source",
+                "consumption_mode": "dependency",
+                "language": "cellscript"
+            },
+            "releases": [{
+                "release": "1.2.3",
+                "verification_status": "verified",
+                "availability_status": "active",
                 "registry_entry": {
                     "schema_version": 1,
                     "namespace": "cellscript",
@@ -1378,8 +1407,8 @@ left = "a"
                         "yanked": false
                     }]
                 },
-                "source_snapshot": {
-                    "schema": "cellscript-registry-source-snapshot-v1",
+                "immutable_bundle": {
+                    "schema": "cellscript-registry-immutable-bundle",
                     "url": "https://registry.cellscript.dev/source-snapshots/cellscript/demo/1.2.3/example.json",
                     "snapshot_hash": format!("sha256:{}", "1".repeat(64)),
                     "source_hash": "source-hash",
@@ -1393,7 +1422,7 @@ left = "a"
         let (entry, index, snapshots) = payload.into_resolution("cellscript", "demo").unwrap();
         assert_eq!(entry.source, "https://github.com/cellscript/demo");
         assert_eq!(index.versions.len(), 1);
-        assert_eq!(index.versions[0].status, RegistryEntryStatus::Deployed);
+        assert_eq!(index.versions[0].status, RegistryEntryStatus::VerifiedBuild);
         assert!(!index.versions[0].yanked);
         assert_eq!(snapshots["1.2.3"].source_hash, "source-hash");
     }
@@ -1439,7 +1468,7 @@ left = "a"
     #[test]
     fn public_snapshot_descriptor_rejects_opaque_archives() {
         let snapshot = PublicRegistrySourceSnapshot {
-            schema: "cellscript-registry-source-snapshot-v1".to_string(),
+            schema: "cellscript-registry-immutable-bundle".to_string(),
             url: "https://registry.cellscript.dev/source-snapshots/demo.tar".to_string(),
             snapshot_hash: format!("sha256:{}", "1".repeat(64)),
             source_hash: "source-hash".to_string(),
@@ -1492,7 +1521,7 @@ left = "a"
             std::io::Write::write_all(&mut stream, &response_bytes).unwrap();
         });
         let descriptor = PublicRegistrySourceSnapshot {
-            schema: "cellscript-registry-source-snapshot-v1".to_string(),
+            schema: "cellscript-registry-immutable-bundle".to_string(),
             url: format!("http://{address}/snapshot.json"),
             snapshot_hash: snapshot_hash.clone(),
             source_hash: source_hash.clone(),

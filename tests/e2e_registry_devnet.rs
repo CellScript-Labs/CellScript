@@ -1,10 +1,11 @@
-//! End-to-end integration tests for the CellScript two-tier Git registry
-//! with CKB devnet deployment and multi-scenario verification.
+//! End-to-end integration tests for CellScript registry data, the public
+//! artifact API resolver, and CKB devnet deployment.
 //!
 //! ## Test Layers
 //!
-//! 1. **Offline Git registry** (always runs): Two-tier discovery + registry.json,
-//!    source hash verification, publish/install/verify lifecycle.
+//! 1. **Registry data** (always runs): Explicit offline Git editing fixtures
+//!    plus public artifact API resolution, immutable snapshots, source hash
+//!    verification, and publish/install/verify lifecycle.
 //! 2. **Headless CKB deploy** (always runs): Build deploy transactions without RPC,
 //!    compute on-chain identity fields (data_hash, code_hash, TYPE_ID),
 //!    write Deployed.toml + Cell.lock, cross-verify three identity layers.
@@ -25,6 +26,7 @@
 //! cargo test --locked -p cellscript --test e2e_registry_devnet -- --ignored
 //! ```
 
+use base64::Engine as _;
 use blake2b_simd::Params as Blake2bParams;
 use cellscript::package::registry::{
     compute_source_hash, git_checkout, git_clone, git_list_tags, git_revision, DiscoveryEntry, DiscoveryIndex, RegistryAuditInfo,
@@ -43,11 +45,16 @@ use ckb_testtool::ckb_types::{
     prelude::*,
 };
 use ckb_testtool::context::Context;
+use sha2::{Digest as _, Sha256};
 use std::collections::BTreeMap;
+use std::io::{Read, Write};
+use std::net::TcpListener;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
-// Registry env guard (serialises CELLSCRIPT_REGISTRY_URL across tests in this binary)
+// Registry env guard (serialises the public artifact API origin across tests)
 // ---------------------------------------------------------------------------
 
 use std::ffi::OsString;
@@ -61,14 +68,14 @@ struct RegistryEnvGuard {
 }
 
 impl RegistryEnvGuard {
-    fn new(url: &Path) -> Self {
+    fn new(url: &str) -> Self {
         // Recover from a poisoned mutex so one test panicking while holding the
         // lock does not cascade into every later test in this binary.
         let guard = REGISTRY_ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let previous = std::env::var_os(cellscript::package::registry::REGISTRY_URL_ENV);
+        let previous = std::env::var_os(cellscript::package::registry::REGISTRY_API_URL_ENV);
         // SAFETY: CI runs tests with one test thread, and this guard serializes
         // registry URL changes within this test binary.
-        unsafe { std::env::set_var(cellscript::package::registry::REGISTRY_URL_ENV, url) };
+        unsafe { std::env::set_var(cellscript::package::registry::REGISTRY_API_URL_ENV, url) };
         Self { previous, _guard: guard }
     }
 }
@@ -77,12 +84,167 @@ impl Drop for RegistryEnvGuard {
     fn drop(&mut self) {
         if let Some(previous) = &self.previous {
             // SAFETY: See `RegistryEnvGuard::new`; the guard still owns the lock.
-            unsafe { std::env::set_var(cellscript::package::registry::REGISTRY_URL_ENV, previous) };
+            unsafe { std::env::set_var(cellscript::package::registry::REGISTRY_API_URL_ENV, previous) };
         } else {
             // SAFETY: See `RegistryEnvGuard::new`; the guard still owns the lock.
-            unsafe { std::env::remove_var(cellscript::package::registry::REGISTRY_URL_ENV) };
+            unsafe { std::env::remove_var(cellscript::package::registry::REGISTRY_API_URL_ENV) };
         }
     }
+}
+
+struct SourceSnapshotFixture {
+    release: String,
+    source_hash: String,
+    bytes: Vec<u8>,
+    snapshot_hash: String,
+}
+
+struct ArtifactPackageFixture {
+    namespace: String,
+    name: String,
+    repository: String,
+    index: RegistryIndex,
+    snapshots: BTreeMap<String, SourceSnapshotFixture>,
+}
+
+struct ArtifactApiServer {
+    origin: String,
+    stop: Arc<AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for ArtifactApiServer {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(handle) = self.handle.take() {
+            handle.join().unwrap();
+        }
+    }
+}
+
+fn source_snapshot_fixture(root: &Path, namespace: &str, name: &str, release: &str, source_hash: &str) -> SourceSnapshotFixture {
+    let files = ["Cell.toml", "src/main.cell"]
+        .into_iter()
+        .map(|path| {
+            let content = std::fs::read(root.join(path)).unwrap();
+            serde_json::json!({
+                "path": path,
+                "blake2b256": hex::encode(cellscript::ckb_blake2b256(&content)),
+                "content_base64": base64::engine::general_purpose::STANDARD.encode(content),
+            })
+        })
+        .collect::<Vec<_>>();
+    let bytes = serde_json::to_vec(&serde_json::json!({
+        "schema": "cellscript-source-snapshot-v1",
+        "package": { "namespace": namespace, "name": name, "version": release },
+        "files": files,
+    }))
+    .unwrap();
+    let snapshot_hash = format!("sha256:{}", hex::encode(Sha256::digest(&bytes)));
+    SourceSnapshotFixture { release: release.to_string(), source_hash: source_hash.to_string(), bytes, snapshot_hash }
+}
+
+fn artifact_package_fixture(repo: &Path, snapshots: Vec<SourceSnapshotFixture>) -> ArtifactPackageFixture {
+    let index = RegistryIndex::read_from_repo(repo).unwrap();
+    ArtifactPackageFixture {
+        namespace: index.namespace.clone(),
+        name: index.name.clone(),
+        repository: format!("https://example.test/{}/{}", index.namespace, index.name),
+        index,
+        snapshots: snapshots.into_iter().map(|snapshot| (snapshot.release.clone(), snapshot)).collect(),
+    }
+}
+
+fn read_mock_http_path(stream: &mut std::net::TcpStream) -> String {
+    let mut request = Vec::new();
+    let mut buffer = [0_u8; 1024];
+    loop {
+        let read = stream.read(&mut buffer).unwrap();
+        assert_ne!(read, 0, "artifact API request ended before headers");
+        request.extend_from_slice(&buffer[..read]);
+        if let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+            let headers = String::from_utf8_lossy(&request[..header_end]);
+            return headers.lines().next().and_then(|line| line.split_whitespace().nth(1)).unwrap_or("/").to_string();
+        }
+    }
+}
+
+fn start_artifact_api(packages: Vec<ArtifactPackageFixture>) -> ArtifactApiServer {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let mut api_responses = BTreeMap::<String, Vec<u8>>::new();
+    let mut snapshot_responses = BTreeMap::<String, Vec<u8>>::new();
+    for package in packages {
+        let releases = package
+            .index
+            .versions
+            .iter()
+            .map(|version| {
+                let snapshot = package.snapshots.get(&version.version).expect("snapshot for every Registry release");
+                let path = format!("/source-snapshots/{}/{}/{}/fixture.json", package.namespace, package.name, version.version);
+                snapshot_responses.insert(path.clone(), snapshot.bytes.clone());
+                serde_json::json!({
+                    "release": version.version,
+                    "verification_status": "verified",
+                    "availability_status": "active",
+                    "registry_entry": &package.index,
+                    "immutable_bundle": {
+                        "schema": "cellscript-registry-immutable-bundle",
+                        "url": format!("{origin}{path}"),
+                        "snapshot_hash": snapshot.snapshot_hash,
+                        "source_hash": snapshot.source_hash,
+                        "size_bytes": snapshot.bytes.len(),
+                        "content_type": "application/vnd.cellscript.source-snapshot+json"
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        let response = serde_json::to_vec(&serde_json::json!({
+            "schema": "cellscript-registry-artifact",
+            "namespace": package.namespace,
+            "name": package.name,
+            "repository": package.repository,
+            "artifact": {
+                "kind": "source_library",
+                "profile": "cellscript_source",
+                "consumption_mode": "dependency",
+                "language": "cellscript"
+            },
+            "releases": releases
+        }))
+        .unwrap();
+        api_responses.insert(format!("/v1/artifacts/{}/{}", package.index.namespace, package.index.name), response);
+    }
+    let stop = Arc::new(AtomicBool::new(false));
+    let server_stop = Arc::clone(&stop);
+    let handle = std::thread::spawn(move || {
+        while !server_stop.load(Ordering::Acquire) {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    let path = read_mock_http_path(&mut stream);
+                    let (status, content_type, body) = if let Some(body) = api_responses.get(&path) {
+                        ("200 OK", "application/json", body.as_slice())
+                    } else if let Some(body) = snapshot_responses.get(&path) {
+                        ("200 OK", "application/vnd.cellscript.source-snapshot+json", body.as_slice())
+                    } else {
+                        ("404 Not Found", "application/json", b"{}".as_slice())
+                    };
+                    let headers = format!(
+                        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    );
+                    stream.write_all(headers.as_bytes()).unwrap();
+                    stream.write_all(body).unwrap();
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Err(error) => panic!("artifact API fixture failed: {error}"),
+            }
+        }
+    });
+    ArtifactApiServer { origin, stop, handle: Some(handle) }
 }
 
 // ---------------------------------------------------------------------------
@@ -652,11 +814,13 @@ fn e2e_diamond_dependency_compatible_versions_unify() {
 
     // ── 1. Shared package "token" with two compatible versions ──
     let token_repo = temp.path().join("source-repos/cellscript-token");
-    let _hash_030 = init_source_repo(&token_repo, "token", "0.3.0", "cellscript");
+    let hash_030 = init_source_repo(&token_repo, "token", "0.3.0", "cellscript");
+    let token_snapshot_030 = source_snapshot_fixture(&token_repo, "cellscript", "token", "0.3.0", &hash_030);
     // Bump Cell.toml version to 0.3.2 and change source so the hashes differ.
     bump_manifest_version(&token_repo, "0.3.2");
     std::fs::write(token_repo.join("src/main.cell"), "module token;\n// v0.3.2\n").unwrap();
     let hash_032 = compute_source_hash(&token_repo).unwrap();
+    let token_snapshot_032 = source_snapshot_fixture(&token_repo, "cellscript", "token", "0.3.2", &hash_032);
     publish_version_with_deps(&token_repo, "token", "cellscript", "0.3.2", &hash_032, &[]);
 
     // ── 2. amm depends on token ^0.3.0, vesting depends on token ^0.3.0 ──
@@ -667,6 +831,7 @@ fn e2e_diamond_dependency_compatible_versions_unify() {
     let amm_repo = temp.path().join("source-repos/cellscript-amm");
     create_package_with_dep(&amm_repo, "amm", "0.1.0", Some("cellscript"), "token", "0.3.0", Some("cellscript"));
     let amm_hash = compute_source_hash(&amm_repo).unwrap();
+    let amm_snapshot = source_snapshot_fixture(&amm_repo, "cellscript", "amm", "0.1.0", &amm_hash);
     publish_version_with_deps(
         &amm_repo,
         "amm",
@@ -679,6 +844,7 @@ fn e2e_diamond_dependency_compatible_versions_unify() {
     let vesting_repo = temp.path().join("source-repos/cellscript-vesting");
     create_package_with_dep(&vesting_repo, "vesting", "0.1.0", Some("cellscript"), "token", "0.3.0", Some("cellscript"));
     let vesting_hash = compute_source_hash(&vesting_repo).unwrap();
+    let vesting_snapshot = source_snapshot_fixture(&vesting_repo, "cellscript", "vesting", "0.1.0", &vesting_hash);
     publish_version_with_deps(
         &vesting_repo,
         "vesting",
@@ -688,16 +854,12 @@ fn e2e_diamond_dependency_compatible_versions_unify() {
         &[("token".into(), "cellscript".into(), "0.3.0".into())],
     );
 
-    // ── 3. Discovery index with all three packages ──
-    let discovery_repo = temp.path().join("discovery-index");
-    init_discovery_repo(
-        &discovery_repo,
-        &[
-            ("cellscript", "token", &token_repo.to_string_lossy()),
-            ("cellscript", "amm", &amm_repo.to_string_lossy()),
-            ("cellscript", "vesting", &vesting_repo.to_string_lossy()),
-        ],
-    );
+    // ── 3. Public artifact API with immutable source snapshots ──
+    let api = start_artifact_api(vec![
+        artifact_package_fixture(&token_repo, vec![token_snapshot_030, token_snapshot_032]),
+        artifact_package_fixture(&amm_repo, vec![amm_snapshot]),
+        artifact_package_fixture(&vesting_repo, vec![vesting_snapshot]),
+    ]);
 
     // ── 4. Consumer "app" depends on both amm and vesting (the diamond) ──
     let app_dir = temp.path().join("consumer-app");
@@ -708,8 +870,7 @@ fn e2e_diamond_dependency_compatible_versions_unify() {
     std::fs::write(app_dir.join("Cell.toml"), toml).unwrap();
     std::fs::write(app_dir.join("src/main.cell"), "module app;\n").unwrap();
 
-    // Point the resolver at our local discovery index (serialised across tests).
-    let _env = RegistryEnvGuard::new(&discovery_repo);
+    let _env = RegistryEnvGuard::new(&api.origin);
 
     let mut pm = PackageManager::new(&app_dir);
     // Resolution should succeed: both amm and vesting require token ^0.3.0,
@@ -728,10 +889,12 @@ fn e2e_diamond_dependency_conflicting_versions_fails_closed() {
 
     // ── 1. Shared package "token" with 0.3.x and 0.4.x lines ──
     let token_repo = temp.path().join("source-repos/cellscript-token");
-    let _hash_030 = init_source_repo(&token_repo, "token", "0.3.0", "cellscript");
+    let hash_030 = init_source_repo(&token_repo, "token", "0.3.0", "cellscript");
+    let token_snapshot_030 = source_snapshot_fixture(&token_repo, "cellscript", "token", "0.3.0", &hash_030);
     bump_manifest_version(&token_repo, "0.4.0");
     std::fs::write(token_repo.join("src/main.cell"), "module token;\n// v0.4.0\n").unwrap();
     let hash_040 = compute_source_hash(&token_repo).unwrap();
+    let token_snapshot_040 = source_snapshot_fixture(&token_repo, "cellscript", "token", "0.4.0", &hash_040);
     publish_version_with_deps(&token_repo, "token", "cellscript", "0.4.0", &hash_040, &[]);
 
     // ── 2. amm pins token to ^0.3.0, vesting pins token to ^0.4.0 ──
@@ -740,6 +903,7 @@ fn e2e_diamond_dependency_conflicting_versions_fails_closed() {
     let amm_repo = temp.path().join("source-repos/cellscript-amm");
     create_package_with_dep(&amm_repo, "amm", "0.1.0", Some("cellscript"), "token", "0.3.0", Some("cellscript"));
     let amm_hash = compute_source_hash(&amm_repo).unwrap();
+    let amm_snapshot = source_snapshot_fixture(&amm_repo, "cellscript", "amm", "0.1.0", &amm_hash);
     publish_version_with_deps(
         &amm_repo,
         "amm",
@@ -752,6 +916,7 @@ fn e2e_diamond_dependency_conflicting_versions_fails_closed() {
     let vesting_repo = temp.path().join("source-repos/cellscript-vesting");
     create_package_with_dep(&vesting_repo, "vesting", "0.1.0", Some("cellscript"), "token", "0.4.0", Some("cellscript"));
     let vesting_hash = compute_source_hash(&vesting_repo).unwrap();
+    let vesting_snapshot = source_snapshot_fixture(&vesting_repo, "cellscript", "vesting", "0.1.0", &vesting_hash);
     publish_version_with_deps(
         &vesting_repo,
         "vesting",
@@ -761,16 +926,12 @@ fn e2e_diamond_dependency_conflicting_versions_fails_closed() {
         &[("token".into(), "cellscript".into(), "0.4.0".into())],
     );
 
-    // ── 3. Discovery index ──
-    let discovery_repo = temp.path().join("discovery-index");
-    init_discovery_repo(
-        &discovery_repo,
-        &[
-            ("cellscript", "token", &token_repo.to_string_lossy()),
-            ("cellscript", "amm", &amm_repo.to_string_lossy()),
-            ("cellscript", "vesting", &vesting_repo.to_string_lossy()),
-        ],
-    );
+    // ── 3. Public artifact API ──
+    let api = start_artifact_api(vec![
+        artifact_package_fixture(&token_repo, vec![token_snapshot_030, token_snapshot_040]),
+        artifact_package_fixture(&amm_repo, vec![amm_snapshot]),
+        artifact_package_fixture(&vesting_repo, vec![vesting_snapshot]),
+    ]);
 
     // ── 4. Consumer "app" forms the conflicting diamond ──
     let app_dir = temp.path().join("consumer-app");
@@ -781,7 +942,7 @@ fn e2e_diamond_dependency_conflicting_versions_fails_closed() {
     std::fs::write(app_dir.join("Cell.toml"), toml).unwrap();
     std::fs::write(app_dir.join("src/main.cell"), "module app;\n").unwrap();
 
-    let _env = RegistryEnvGuard::new(&discovery_repo);
+    let _env = RegistryEnvGuard::new(&api.origin);
 
     let mut pm = PackageManager::new(&app_dir);
     let err = pm.resolve_dependencies().expect_err("conflicting diamond must fail closed");

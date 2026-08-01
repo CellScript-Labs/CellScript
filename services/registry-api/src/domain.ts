@@ -7,6 +7,8 @@ export const AUTH_ACTION = "authorize_capability";
 export const AUTH_REVOKE_CAPABILITY_ACTION = "revoke_capability";
 export const PUBLISH_PROTOCOL = "cellscript-registry-publish-v1";
 export const PUBLISH_ACTION = "publish";
+export const DEPLOYMENT_PROTOCOL = "cellscript-registry-deployment";
+export const DEPLOYMENT_ACTION = "record_deployment";
 export const REGISTRY_SCHEMA_VERSION = 1;
 export const CELLSCRIPT_EDITION = "2026";
 export const DEFAULT_REGISTRY_ORIGIN = "https://api.registry.cellscript.dev";
@@ -14,10 +16,35 @@ export const DEFAULT_STATIC_REGISTRY_ORIGIN = "https://registry.cellscript.dev";
 export const JOYID_PRINCIPAL_TYPE = "joyid_ckb";
 export const CKB_SECP256K1_PRINCIPAL_TYPE = "ckb_secp256k1";
 export const ACCEPTED_PRINCIPAL_TYPES = [JOYID_PRINCIPAL_TYPE, CKB_SECP256K1_PRINCIPAL_TYPE] as const;
+export const ARTIFACT_KINDS = [
+  "source_library",
+  "profile_library",
+  "runtime_verifier",
+  "deployable_contract",
+  "reproducible_binary",
+  "template",
+] as const;
+export const ARTIFACT_PROFILES = ["cellscript_source", "ckb_executable", "reproducible_build", "copy_material"] as const;
+export const ARTIFACT_LANGUAGES = ["cellscript", "rust", "c", "javascript", "other", "unspecified"] as const;
+export const CONSUMPTION_MODES = ["dependency", "tcb", "deployment", "copy"] as const;
 export const JOYID_CKB_PRINCIPAL_BINDING_CONTEXT = "cellscript-registry-joyid-ckb-principal-v1";
 export const CKB_SECP256K1_PRINCIPAL_BINDING_CONTEXT = "cellscript-registry-ckb-secp256k1-principal-v1";
 
 export type PrincipalType = (typeof ACCEPTED_PRINCIPAL_TYPES)[number];
+export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
+export type ArtifactProfile = (typeof ARTIFACT_PROFILES)[number];
+export type ArtifactLanguage = (typeof ARTIFACT_LANGUAGES)[number];
+export type ConsumptionMode = (typeof CONSUMPTION_MODES)[number];
+export type VerificationStatus = "pending" | "verified" | "evidence_required" | "rejected";
+export type DeploymentStatus = "not_applicable" | "undeployed" | "deployed" | "chain_verified";
+export type AvailabilityStatus = "active" | "deprecated" | "yanked" | "quarantined";
+
+export interface ArtifactDescriptor {
+  kind: ArtifactKind;
+  profile: ArtifactProfile;
+  consumption_mode: ConsumptionMode;
+  language: ArtifactLanguage;
+}
 
 export type RegistryEntryStatus =
   | "source_published"
@@ -71,21 +98,47 @@ export interface PublishPayload {
   issued_at: string;
   expires_at: string;
   cli_version: string;
+  artifact: ArtifactDescriptor;
   registry_entry: RegistryIndexEntry;
+}
+
+export interface DeploymentPayload {
+  protocol: typeof DEPLOYMENT_PROTOCOL;
+  action: typeof DEPLOYMENT_ACTION;
+  registry_origin: string;
+  namespace: string;
+  name: string;
+  release: string;
+  network: "mainnet";
+  artifact_hash: string;
+  data_hash: string;
+  code_hash: string;
+  hash_type: "data" | "data1" | "data2" | "type";
+  dep_type: "code" | "dep_group";
+  out_point: { tx_hash: string; index: number };
+  capability_key_id: string;
+  nonce: string;
+  issued_at: string;
+  expires_at: string;
+  cli_version: string;
 }
 
 export interface RegistryVersionEntry {
   version: string;
   tag: string;
   source_hash: string;
-  cellscript_version: string;
+  cellscript_version?: string;
   /** Source-language semantics only; target/ABI/schema identity is separate. */
-  edition: typeof CELLSCRIPT_EDITION;
+  edition?: typeof CELLSCRIPT_EDITION;
   /** Hash of the resolved edition + target + assurance + ABI + schema axes. */
-  compatibility_profile_hash: string;
-  dependencies: Record<string, { namespace: string; version: string }>;
-  status: "source_published";
-  yanked: false;
+  compatibility_profile_hash?: string;
+  artifact_hash?: string;
+  build_recipe_hash?: string;
+  abi_hash?: string;
+  dependencies?: Record<string, { namespace: string; version: string }>;
+  verification_status: "pending";
+  deployment_status: DeploymentStatus;
+  availability_status: "active";
   [key: string]: unknown;
 }
 
@@ -93,6 +146,7 @@ export interface RegistryIndexEntry {
   schema_version: typeof REGISTRY_SCHEMA_VERSION;
   namespace: string;
   name: string;
+  artifact: ArtifactDescriptor;
   versions: [RegistryVersionEntry];
   [key: string]: unknown;
 }
@@ -264,8 +318,12 @@ export function parseTimestamp(value: string, key: string): Date {
 
 export function validatePackageIdent(value: string, field: string): string {
   const trimmed = value.trim();
-  if (!/^[a-z0-9][a-z0-9_-]{1,62}$/.test(trimmed)) {
-    throw new ApiError(400, "invalid_package_identifier", `${field} must be lowercase ascii, 2-63 chars`);
+  if (!/^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$/.test(trimmed)) {
+    throw new ApiError(
+      400,
+      "invalid_package_identifier",
+      `${field} must be 1-64 lowercase letters or numbers, with _ or - only between characters`,
+    );
   }
   return trimmed;
 }
@@ -276,6 +334,117 @@ export function validateVersion(value: string): string {
     throw new ApiError(400, "invalid_version", "version must be semver-like");
   }
   return trimmed;
+}
+
+export function validateDeploymentPayload(
+  input: unknown,
+  registryOrigin: string,
+  now: Date,
+): DeploymentPayload {
+  const value = assertPlainObject(input, "invalid_deployment_payload");
+  if (requireString(value, "protocol") !== DEPLOYMENT_PROTOCOL || requireString(value, "action") !== DEPLOYMENT_ACTION) {
+    throw new ApiError(400, "invalid_deployment_action", "deployment payload has the wrong protocol or action");
+  }
+  if (requireString(value, "registry_origin") !== registryOrigin) {
+    throw new ApiError(400, "invalid_registry_origin", "deployment payload registry_origin does not match this API");
+  }
+  const network = requireString(value, "network");
+  if (network !== "mainnet") {
+    throw new ApiError(400, "unsupported_deployment_network", "Registry deployment records are mainnet-only");
+  }
+  const artifactHash = requireString(value, "artifact_hash");
+  const dataHash = requireString(value, "data_hash");
+  const codeHash = requireString(value, "code_hash");
+  validateHash(artifactHash, "artifact_hash", "invalid_artifact_hash");
+  validateHash(dataHash, "data_hash", "invalid_data_hash");
+  validateHash(codeHash, "code_hash", "invalid_code_hash");
+  if (!sameCkbHash(artifactHash, dataHash)) {
+    throw new ApiError(400, "deployment_data_hash_mismatch", "data_hash must equal the published executable artifact_hash");
+  }
+  const hashType = requireString(value, "hash_type");
+  if (!(hashType === "data" || hashType === "data1" || hashType === "data2" || hashType === "type")) {
+    throw new ApiError(400, "invalid_hash_type", "hash_type must be data, data1, data2, or type");
+  }
+  const depType = requireString(value, "dep_type");
+  if (!(depType === "code" || depType === "dep_group")) {
+    throw new ApiError(400, "invalid_dep_type", "dep_type must be code or dep_group");
+  }
+  const outPoint = assertPlainObject(value["out_point"], "invalid_deployment_out_point");
+  const txHash = requireString(outPoint, "tx_hash");
+  validateHash(txHash, "out_point.tx_hash", "invalid_deployment_out_point");
+  const index = outPoint["index"];
+  if (!Number.isSafeInteger(index) || Number(index) < 0 || Number(index) > 0xffff_ffff) {
+    throw new ApiError(400, "invalid_deployment_out_point", "out_point.index must be a non-negative u32 integer");
+  }
+  const nonce = requireString(value, "nonce");
+  if (!/^0x[0-9a-fA-F]{16,}$/.test(nonce)) {
+    throw new ApiError(400, "invalid_nonce", "nonce must be hex and at least 8 bytes");
+  }
+  const issuedAt = requireString(value, "issued_at");
+  const expiresAt = requireString(value, "expires_at");
+  parseTimestamp(issuedAt, "issued_at");
+  if (parseTimestamp(expiresAt, "expires_at").getTime() <= now.getTime()) {
+    throw new ApiError(401, "deployment_payload_expired", "deployment payload has expired");
+  }
+  return {
+    protocol: DEPLOYMENT_PROTOCOL,
+    action: DEPLOYMENT_ACTION,
+    registry_origin: registryOrigin,
+    namespace: validatePackageIdent(requireString(value, "namespace"), "namespace"),
+    name: validatePackageIdent(requireString(value, "name"), "name"),
+    release: validateVersion(requireString(value, "release")),
+    network: "mainnet",
+    artifact_hash: artifactHash,
+    data_hash: dataHash,
+    code_hash: codeHash,
+    hash_type: hashType,
+    dep_type: depType,
+    out_point: { tx_hash: txHash, index: Number(index) },
+    capability_key_id: requireString(value, "capability_key_id"),
+    nonce,
+    issued_at: issuedAt,
+    expires_at: expiresAt,
+    cli_version: requireString(value, "cli_version"),
+  };
+}
+
+export function sameCkbHash(left: string, right: string): boolean {
+  return left.replace(/^0x/, "").toLowerCase() === right.replace(/^0x/, "").toLowerCase();
+}
+
+export function ckbScriptHash(value: unknown): string {
+  const script = assertPlainObject(value, "invalid_ckb_script");
+  const codeHash = hexToBytes(requireString(script, "code_hash"));
+  if (codeHash.length !== 32) {
+    throw new ApiError(502, "invalid_ckb_rpc_response", "CKB RPC returned a script with a non-Byte32 code_hash");
+  }
+  const hashType = requireString(script, "hash_type");
+  const hashTypeByte = ({ data: 0, type: 1, data1: 2, data2: 4 } as const)[hashType as "data" | "type" | "data1" | "data2"];
+  if (hashTypeByte === undefined) {
+    throw new ApiError(502, "invalid_ckb_rpc_response", "CKB RPC returned an unknown script hash_type");
+  }
+  const args = hexToBytes(requireString(script, "args"));
+  const totalSize = 53 + args.length;
+  const serialized = new Uint8Array(totalSize);
+  writeU32Le(serialized, 0, totalSize);
+  writeU32Le(serialized, 4, 16);
+  writeU32Le(serialized, 8, 48);
+  writeU32Le(serialized, 12, 49);
+  serialized.set(codeHash, 16);
+  serialized[48] = hashTypeByte;
+  // Molecule Bytes is a byte FixVec: the u32 header stores the item count,
+  // while the enclosing Script table stores the total byte size.
+  writeU32Le(serialized, 49, args.length);
+  serialized.set(args, 53);
+  const digest = blake2b(serialized, {
+    dkLen: 32,
+    personalization: new TextEncoder().encode("ckb-default-hash"),
+  });
+  return `0x${[...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function writeU32Le(target: Uint8Array, offset: number, value: number): void {
+  new DataView(target.buffer, target.byteOffset, target.byteLength).setUint32(offset, value, true);
 }
 
 export function validateCapabilityPayload(
@@ -302,7 +471,8 @@ export function validateCapabilityPayload(
   if (requireString(obj, "registry_origin") !== registryOrigin) {
     throw new ApiError(400, "invalid_registry_origin", "capability payload registry_origin does not match this API");
   }
-  if (requestedScopes.some((scope) => !/^publish:[a-z0-9][a-z0-9_-]{1,62}\/[a-z0-9][a-z0-9_-]{1,62}$/.test(scope))) {
+  const ident = "[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?";
+  if (requestedScopes.some((scope) => !(new RegExp(`^publish:${ident}/${ident}$`)).test(scope))) {
     throw new ApiError(400, "invalid_scope", "requested_scopes may only contain publish:namespace/package scopes");
   }
   if (!/^0x[0-9a-fA-F]{16,}$/.test(nonce)) {
@@ -403,7 +573,8 @@ export function validatePublishPayload(payload: unknown, registryOrigin: string,
   const issuedAt = requireString(obj, "issued_at");
   const expiresAt = requireString(obj, "expires_at");
   const cliVersion = requireString(obj, "cli_version");
-  const registryEntry = validateRegistryEntry(obj["registry_entry"], { namespace, name, version, sourceHash });
+  const artifact = validateArtifactDescriptor(obj["artifact"]);
+  const registryEntry = validateRegistryEntry(obj["registry_entry"], { namespace, name, version, sourceHash, artifact });
   parseTimestamp(issuedAt, "issued_at");
   if (parseTimestamp(expiresAt, "expires_at").getTime() <= now.getTime()) {
     throw new ApiError(401, "publish_payload_expired", "publish payload has expired");
@@ -426,6 +597,7 @@ export function validatePublishPayload(payload: unknown, registryOrigin: string,
     issued_at: issuedAt,
     expires_at: expiresAt,
     cli_version: cliVersion,
+    artifact,
     registry_entry: registryEntry,
   };
   return result;
@@ -439,7 +611,7 @@ function validateHash(value: string, field: string, code: string): void {
 
 function validateRegistryEntry(
   input: unknown,
-  outer: { namespace: string; name: string; version: string; sourceHash: string },
+  outer: { namespace: string; name: string; version: string; sourceHash: string; artifact: ArtifactDescriptor },
 ): RegistryIndexEntry {
   const entry = assertPlainObject(input, "invalid_registry_entry");
   if (entry["schema_version"] !== REGISTRY_SCHEMA_VERSION) {
@@ -451,6 +623,10 @@ function validateRegistryEntry(
   }
   if (requireString(entry, "namespace") !== outer.namespace || requireString(entry, "name") !== outer.name) {
     throw new ApiError(400, "registry_identity_mismatch", "registry_entry namespace/name must match the signed publish identity");
+  }
+  const artifact = validateArtifactDescriptor(entry["artifact"]);
+  if (canonicalJson(artifact) !== canonicalJson(outer.artifact)) {
+    throw new ApiError(400, "artifact_identity_mismatch", "registry_entry artifact descriptor must match the signed publish identity");
   }
 
   const versions = entry["versions"];
@@ -466,29 +642,77 @@ function validateRegistryEntry(
   if (requireString(published, "tag") !== `v${outer.version}`) {
     throw new ApiError(400, "invalid_registry_tag", "registry version tag must be v<version>");
   }
-  requireString(published, "cellscript_version");
-  if (published["edition"] !== CELLSCRIPT_EDITION) {
-    throw new ApiError(400, "unsupported_cellscript_edition", `registry version edition must be ${CELLSCRIPT_EDITION}`);
-  }
-  const compatibilityProfileHash = requireString(published, "compatibility_profile_hash");
-  validateHash(compatibilityProfileHash, "compatibility_profile_hash", "invalid_compatibility_profile_hash");
-  if (published["status"] !== "source_published" || published["yanked"] !== false) {
-    throw new ApiError(
-      400,
-      "invalid_initial_registry_status",
-      "new registry versions must be source_published and not yanked",
-    );
+  const initialStates = initialArtifactStates(artifact);
+  if (
+    published["verification_status"] !== initialStates.verification_status
+    || published["deployment_status"] !== initialStates.deployment_status
+    || published["availability_status"] !== initialStates.availability_status
+  ) {
+    throw new ApiError(400, "invalid_initial_artifact_state", "new releases must use the profile's initial verification, deployment, and availability states");
   }
 
-  const dependencies = assertPlainObject(published["dependencies"], "invalid_registry_dependencies");
-  for (const [dependencyName, dependencyValue] of Object.entries(dependencies)) {
-    validatePackageIdent(dependencyName, "dependency name");
-    const dependency = assertPlainObject(dependencyValue, "invalid_registry_dependency");
-    validatePackageIdent(requireString(dependency, "namespace"), "dependency namespace");
-    validateVersion(requireString(dependency, "version"));
+  if (artifact.profile === "cellscript_source") {
+    requireString(published, "cellscript_version");
+    if (published["edition"] !== CELLSCRIPT_EDITION) {
+      throw new ApiError(400, "unsupported_cellscript_edition", `registry version edition must be ${CELLSCRIPT_EDITION}`);
+    }
+    const compatibilityProfileHash = requireString(published, "compatibility_profile_hash");
+    validateHash(compatibilityProfileHash, "compatibility_profile_hash", "invalid_compatibility_profile_hash");
+    const dependencies = assertPlainObject(published["dependencies"], "invalid_registry_dependencies");
+    for (const [dependencyName, dependencyValue] of Object.entries(dependencies)) {
+      validatePackageIdent(dependencyName, "dependency name");
+      const dependency = assertPlainObject(dependencyValue, "invalid_registry_dependency");
+      validatePackageIdent(requireString(dependency, "namespace"), "dependency namespace");
+      validateVersion(requireString(dependency, "version"));
+    }
+  }
+  if (artifact.profile === "ckb_executable") {
+    validateHash(requireString(published, "artifact_hash"), "artifact_hash", "invalid_artifact_hash");
+    validateHash(requireString(published, "abi_hash"), "abi_hash", "invalid_abi_hash");
+  }
+  if (artifact.profile === "reproducible_build") {
+    validateHash(requireString(published, "artifact_hash"), "artifact_hash", "invalid_artifact_hash");
+    validateHash(requireString(published, "build_recipe_hash"), "build_recipe_hash", "invalid_build_recipe_hash");
   }
 
   return entry as unknown as RegistryIndexEntry;
+}
+
+const ARTIFACT_CONTRACTS: Record<ArtifactKind, Omit<ArtifactDescriptor, "kind" | "language"> & { languages: ArtifactLanguage[] }> = {
+  source_library: { profile: "cellscript_source", consumption_mode: "dependency", languages: ["cellscript"] },
+  profile_library: { profile: "cellscript_source", consumption_mode: "dependency", languages: ["cellscript"] },
+  runtime_verifier: { profile: "ckb_executable", consumption_mode: "tcb", languages: ["cellscript", "rust", "c", "javascript", "other"] },
+  deployable_contract: { profile: "ckb_executable", consumption_mode: "deployment", languages: ["cellscript", "rust", "c", "javascript", "other"] },
+  reproducible_binary: { profile: "reproducible_build", consumption_mode: "tcb", languages: ["rust", "c", "other"] },
+  template: { profile: "copy_material", consumption_mode: "copy", languages: ["cellscript", "rust", "c", "javascript", "other", "unspecified"] },
+};
+
+export function validateArtifactDescriptor(input: unknown): ArtifactDescriptor {
+  const value = assertPlainObject(input, "invalid_artifact_descriptor");
+  const kind = requireString(value, "kind") as ArtifactKind;
+  const profile = requireString(value, "profile") as ArtifactProfile;
+  const consumptionMode = requireString(value, "consumption_mode") as ConsumptionMode;
+  const language = requireString(value, "language") as ArtifactLanguage;
+  if (!ARTIFACT_KINDS.includes(kind)) {
+    throw new ApiError(400, "invalid_artifact_kind", `artifact.kind must be one of ${ARTIFACT_KINDS.join(", ")}`);
+  }
+  const contract = ARTIFACT_CONTRACTS[kind];
+  if (profile !== contract.profile || consumptionMode !== contract.consumption_mode || !contract.languages.includes(language)) {
+    throw new ApiError(400, "invalid_artifact_contract", "artifact profile, consumption mode, and language do not match its kind");
+  }
+  return { kind, profile, consumption_mode: consumptionMode, language };
+}
+
+export function initialArtifactStates(artifact: ArtifactDescriptor): {
+  verification_status: VerificationStatus;
+  deployment_status: DeploymentStatus;
+  availability_status: AvailabilityStatus;
+} {
+  return {
+    verification_status: "pending",
+    deployment_status: artifact.profile === "ckb_executable" ? "undeployed" : "not_applicable",
+    availability_status: "active",
+  };
 }
 
 export function validateSnapshot(input: unknown, payload: PublishPayload, maxBytes: number): SourceSnapshotInput {

@@ -28,6 +28,7 @@ import {
   capabilityKeyId,
   canonicalJson,
   sha256Hex,
+  type AvailabilityStatus,
   type CapabilityAuthorisationPayload,
   type PrincipalType,
   type RegistryEntryStatus,
@@ -441,7 +442,8 @@ export class SqlRegistryStore implements RegistryStore {
   async getPackageVersion(namespace: string, name: string, version: string): Promise<PackageVersionRecord | null> {
     return this.withClient(async (client) => {
       const result = await client.query(
-        `select namespace, name, version, status, source_hash, manifest_hash,
+        `select namespace, name, version, status, artifact, verification_status, deployment_status, availability_status,
+                source_hash, manifest_hash,
                 edition, compatibility_profile_hash,
                 capability_key_id, principal_type, principal_id, registry_entry,
                 snapshot_hash, direct_url, created_at
@@ -457,7 +459,9 @@ export class SqlRegistryStore implements RegistryStore {
   async listPackageVersions(input: PackageVersionQuery): Promise<PackageVersionRecord[]> {
     return this.withClient(async (client) => {
       const result = await client.query(
-        `select pv.namespace, pv.name, pv.version, pv.status, pv.source_hash, pv.manifest_hash,
+        `select pv.namespace, pv.name, pv.version, pv.status, pv.artifact,
+                pv.verification_status, pv.deployment_status, pv.availability_status,
+                pv.source_hash, pv.manifest_hash,
                 pv.edition, pv.compatibility_profile_hash,
                 pv.capability_key_id, pv.principal_type, pv.principal_id, pv.registry_entry,
                 pv.snapshot_hash, pv.direct_url, pv.created_at
@@ -467,6 +471,10 @@ export class SqlRegistryStore implements RegistryStore {
            and ($2::text is null or pv.name = $2)
            and ($3::text is null or pv.status = $3)
            and ($7::text[] is null or pv.status = any($7::text[]))
+           and ($8::text is null or pv.artifact->>'kind' = $8)
+           and ($9::text is null or pv.verification_status = $9)
+           and ($10::text is null or pv.deployment_status = $10)
+           and ($11::text is null or pv.availability_status = $11)
            and (
              $4::text is null
              or pv.namespace ilike '%' || $4 || '%'
@@ -485,6 +493,10 @@ export class SqlRegistryStore implements RegistryStore {
           input.limit,
           input.offset,
           input.statuses ?? null,
+          input.artifact_kind ?? null,
+          input.verification_status ?? null,
+          input.deployment_status ?? null,
+          input.availability_status ?? null,
         ],
       );
       return result.rows.map(packageVersionFromRow);
@@ -495,12 +507,13 @@ export class SqlRegistryStore implements RegistryStore {
     await this.withClient(async (client) => {
       const result = await client.query(
         `insert into package_versions(
-           namespace, name, version, status, source_hash, manifest_hash,
+           namespace, name, version, status, artifact, verification_status, deployment_status, availability_status,
+           source_hash, manifest_hash,
            edition, compatibility_profile_hash,
            capability_key_id, principal_type, principal_id, registry_entry,
            snapshot_hash, direct_url
          )
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14)
+         values ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17, $18)
          on conflict (namespace, name, version) do nothing
          returning namespace`,
         [
@@ -508,6 +521,10 @@ export class SqlRegistryStore implements RegistryStore {
           input.name,
           input.version,
           input.status,
+          JSON.stringify(input.artifact),
+          input.verification_status,
+          input.deployment_status,
+          input.availability_status,
           input.source_hash,
           input.manifest_hash,
           input.edition,
@@ -521,7 +538,7 @@ export class SqlRegistryStore implements RegistryStore {
         ],
       );
       if (result.rowCount !== 1) {
-        throw new ApiError(409, "package_version_exists", "package version already exists and cannot be overwritten");
+        throw new ApiError(409, "artifact_release_exists", "artifact release already exists and cannot be overwritten");
       }
     });
     return input;
@@ -553,12 +570,13 @@ export class SqlRegistryStore implements RegistryStore {
         );
         const insertedVersion = await client.query(
           `insert into package_versions(
-             namespace, name, version, status, source_hash, manifest_hash,
+             namespace, name, version, status, artifact, verification_status, deployment_status, availability_status,
+             source_hash, manifest_hash,
              edition, compatibility_profile_hash,
              capability_key_id, principal_type, principal_id, registry_entry,
              snapshot_hash, direct_url
            )
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14)
+           values ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17, $18)
            on conflict (namespace, name, version) do nothing
            returning namespace`,
           [
@@ -566,6 +584,10 @@ export class SqlRegistryStore implements RegistryStore {
             input.version.name,
             input.version.version,
             input.version.status,
+            JSON.stringify(input.version.artifact),
+            input.version.verification_status,
+            input.version.deployment_status,
+            input.version.availability_status,
             input.version.source_hash,
             input.version.manifest_hash,
             input.version.edition,
@@ -579,7 +601,7 @@ export class SqlRegistryStore implements RegistryStore {
           ],
         );
         if (insertedVersion.rowCount !== 1) {
-          throw new ApiError(409, "package_version_exists", "package version already exists and cannot be overwritten");
+          throw new ApiError(409, "artifact_release_exists", "artifact release already exists and cannot be overwritten");
         }
         await client.query(
           `insert into verification_jobs(namespace, name, version)
@@ -689,7 +711,8 @@ export class SqlRegistryStore implements RegistryStore {
       await client.query("begin");
       try {
         const locked = await client.query(
-          `select namespace, name, version, status, source_hash, manifest_hash,
+          `select namespace, name, version, status, artifact, verification_status, deployment_status, availability_status,
+                  source_hash, manifest_hash,
                   edition, compatibility_profile_hash,
                   capability_key_id, principal_type, principal_id, registry_entry,
                   snapshot_hash, direct_url, created_at
@@ -700,7 +723,7 @@ export class SqlRegistryStore implements RegistryStore {
         );
         const currentRow = locked.rows[0];
         if (!currentRow) {
-          throw new ApiError(404, "package_version_not_found", "package version is not known to the registry");
+          throw new ApiError(404, "artifact_release_not_found", "artifact release is not known to the registry");
         }
         const current = packageVersionFromRow(currentRow);
         assertPromotionTransition(current.status, input.kind);
@@ -724,10 +747,21 @@ export class SqlRegistryStore implements RegistryStore {
         const updated = await client.query(
           `update package_versions
            set status = $4,
+               verification_status = case
+                 when $4 in ('verified_build', 'deployed', 'on_chain_attested') and artifact->>'profile' = 'reproducible_build' then 'evidence_required'
+                 when $4 in ('verified_build', 'deployed', 'on_chain_attested') then 'verified'
+                 else verification_status
+               end,
+               deployment_status = case
+                 when $4 = 'deployed' then 'deployed'
+                 when $4 = 'on_chain_attested' then 'chain_verified'
+                 else deployment_status
+               end,
                indexed_at = coalesce(indexed_at, now()),
                verified_at = case when $4 in ('verified_build', 'deployed', 'on_chain_attested') then coalesce(verified_at, now()) else verified_at end
            where namespace = $1 and name = $2 and version = $3
-           returning namespace, name, version, status, source_hash, manifest_hash,
+           returning namespace, name, version, status, artifact, verification_status, deployment_status, availability_status,
+                     source_hash, manifest_hash,
                      edition, compatibility_profile_hash,
                      capability_key_id, principal_type, principal_id, registry_entry,
                      snapshot_hash, direct_url, created_at`,
@@ -756,6 +790,89 @@ export class SqlRegistryStore implements RegistryStore {
            from package_version_evidence
            where namespace = $1 and name = $2 and version = $3 and kind = $4 and evidence_hash = $5`,
           [input.namespace, input.name, input.version, input.kind, input.evidence_hash],
+        );
+        await client.query("commit");
+        return {
+          version: packageVersionFromRow(updated.rows[0]),
+          evidence: packageEvidenceFromRow(evidenceResult.rows[0]),
+        };
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      }
+    });
+  }
+
+  async recordChainVerifiedDeployment(input: PromotePackageVersionInput): Promise<{
+    version: PackageVersionRecord;
+    evidence: PackageEvidenceRecord;
+  }> {
+    if (input.kind !== "deployed") {
+      throw new ApiError(500, "invalid_deployment_evidence_kind", "chain-verified deployment evidence must use kind deployed");
+    }
+    return this.withClient(async (client) => {
+      await client.query("begin");
+      try {
+        const locked = await client.query(
+          `select namespace, name, version, status, artifact, verification_status, deployment_status, availability_status,
+                  source_hash, manifest_hash, edition, compatibility_profile_hash,
+                  capability_key_id, principal_type, principal_id, registry_entry,
+                  snapshot_hash, direct_url, created_at
+           from package_versions
+           where namespace = $1 and name = $2 and version = $3
+           for update`,
+          [input.namespace, input.name, input.version],
+        );
+        const currentRow = locked.rows[0];
+        if (!currentRow) {
+          throw new ApiError(404, "artifact_release_not_found", "artifact release is not known to the registry");
+        }
+        const current = packageVersionFromRow(currentRow);
+        if (current.deployment_status === "not_applicable") {
+          throw new ApiError(409, "deployment_not_applicable", "this artifact profile cannot have a CKB deployment");
+        }
+        if (!(current.verification_status === "verified" || current.verification_status === "evidence_required")) {
+          throw new ApiError(409, "artifact_not_verified", "artifact verification must finish before recording a deployment");
+        }
+        await client.query(
+          `insert into package_version_evidence(
+             namespace, name, version, kind, evidence_hash, evidence, request_id, admin_actor
+           ) values ($1, $2, $3, 'deployed', $4, $5::jsonb, $6, $7)
+           on conflict (namespace, name, version, kind, evidence_hash) do nothing`,
+          [input.namespace, input.name, input.version, input.evidence_hash, JSON.stringify(input.evidence), input.request_id, input.admin_actor],
+        );
+        const updated = await client.query(
+          `update package_versions
+           set status = 'deployed', deployment_status = 'chain_verified', indexed_at = coalesce(indexed_at, now())
+           where namespace = $1 and name = $2 and version = $3
+           returning namespace, name, version, status, artifact, verification_status, deployment_status, availability_status,
+                     source_hash, manifest_hash, edition, compatibility_profile_hash,
+                     capability_key_id, principal_type, principal_id, registry_entry,
+                     snapshot_hash, direct_url, created_at`,
+          [input.namespace, input.name, input.version],
+        );
+        await client.query(
+          `insert into audit_events(
+             request_id, event_type, principal_type, principal_id, capability_key_id,
+             namespace, name, version, data
+           ) values ($1, 'deployment.chain_verified', $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+          [
+            input.request_id,
+            current.principal_type,
+            current.principal_id,
+            current.capability_key_id,
+            input.namespace,
+            input.name,
+            input.version,
+            JSON.stringify({ actor: input.admin_actor, evidence_hash: input.evidence_hash }),
+          ],
+        );
+        const evidenceResult = await client.query(
+          `select namespace, name, version, kind, evidence_hash, evidence,
+                  request_id, admin_actor, created_at
+           from package_version_evidence
+           where namespace = $1 and name = $2 and version = $3 and kind = 'deployed' and evidence_hash = $4`,
+          [input.namespace, input.name, input.version, input.evidence_hash],
         );
         await client.query("commit");
         return {
@@ -812,7 +929,7 @@ export class SqlRegistryStore implements RegistryStore {
     namespace: string;
     name: string;
     version: string;
-    status: RegistryEntryStatus;
+    status: AvailabilityStatus;
     reason?: string;
     request_id: string;
     admin_actor: string;
@@ -822,7 +939,14 @@ export class SqlRegistryStore implements RegistryStore {
       try {
         const updated = await client.query(
           `update package_versions
-           set status = $4,
+           set status = case
+                 when $4 <> 'active' then $4
+                 when deployment_status = 'chain_verified' then 'on_chain_attested'
+                 when deployment_status = 'deployed' then 'deployed'
+                 when verification_status = 'verified' then 'verified_build'
+                 else 'source_published'
+               end,
+               availability_status = $4,
                yanked_at = case when $4 = 'yanked' then coalesce(yanked_at, now()) else yanked_at end,
                yanked_reason = case when $4 = 'yanked' then $5 else yanked_reason end,
                quarantined_at = case when $4 = 'quarantined' then coalesce(quarantined_at, now()) else quarantined_at end,
@@ -830,7 +954,8 @@ export class SqlRegistryStore implements RegistryStore {
                indexed_at = case when $4 in ('indexed_pending', 'verified_build') then coalesce(indexed_at, now()) else indexed_at end,
                verified_at = case when $4 = 'verified_build' then coalesce(verified_at, now()) else verified_at end
            where namespace = $1 and name = $2 and version = $3
-           returning namespace, name, version, status, source_hash, manifest_hash,
+           returning namespace, name, version, status, artifact, verification_status, deployment_status, availability_status,
+                     source_hash, manifest_hash,
                      edition, compatibility_profile_hash,
                      capability_key_id, principal_type, principal_id, registry_entry,
                      snapshot_hash, direct_url, created_at`,
@@ -838,7 +963,7 @@ export class SqlRegistryStore implements RegistryStore {
         );
         const record = updated.rows[0];
         if (!record) {
-          throw new ApiError(404, "package_version_not_found", "package version is not known to the registry");
+          throw new ApiError(404, "artifact_release_not_found", "artifact release is not known to the registry");
         }
         await client.query(
           `insert into audit_events(
@@ -1108,7 +1233,7 @@ export class SqlRegistryStore implements RegistryStore {
            returning job.*
          )
          select claimed.*,
-                pv.source_hash, pv.manifest_hash, pv.compatibility_profile_hash, pv.snapshot_hash,
+                pv.artifact, pv.source_hash, pv.manifest_hash, pv.compatibility_profile_hash, pv.snapshot_hash,
                 ss.r2_key as snapshot_object_key, ss.size_bytes as snapshot_size_bytes,
                 ss.content_type as snapshot_content_type
          from claimed
@@ -1133,7 +1258,8 @@ export class SqlRegistryStore implements RegistryStore {
       try {
         const locked = await client.query(
           `select job.namespace, job.name, job.version,
-                  pv.status, pv.source_hash, pv.manifest_hash, pv.edition,
+                  pv.status, pv.artifact, pv.verification_status, pv.deployment_status, pv.availability_status,
+                  pv.source_hash, pv.manifest_hash, pv.edition,
                   pv.compatibility_profile_hash, pv.capability_key_id,
                   pv.principal_type, pv.principal_id, pv.registry_entry,
                   pv.snapshot_hash, pv.direct_url, pv.created_at
@@ -1171,10 +1297,15 @@ export class SqlRegistryStore implements RegistryStore {
         const updatedVersion = await client.query(
           `update package_versions
            set status = 'verified_build',
+               verification_status = case
+                 when artifact->>'profile' = 'reproducible_build' then 'evidence_required'
+                 else 'verified'
+               end,
                indexed_at = coalesce(indexed_at, now()),
                verified_at = coalesce(verified_at, now())
            where namespace = $1 and name = $2 and version = $3
-           returning namespace, name, version, status, source_hash, manifest_hash,
+           returning namespace, name, version, status, artifact, verification_status, deployment_status, availability_status,
+                     source_hash, manifest_hash,
                      edition, compatibility_profile_hash, capability_key_id,
                      principal_type, principal_id, registry_entry, snapshot_hash,
                      direct_url, created_at`,
@@ -1407,7 +1538,7 @@ export class SqlRegistryStore implements RegistryStore {
   private async verificationJobById(client: Client, jobId: string): Promise<VerificationJobRecord> {
     const result = await client.query(
       `select job.*,
-              pv.source_hash, pv.manifest_hash, pv.compatibility_profile_hash, pv.snapshot_hash,
+              pv.artifact, pv.source_hash, pv.manifest_hash, pv.compatibility_profile_hash, pv.snapshot_hash,
               ss.r2_key as snapshot_object_key, ss.size_bytes as snapshot_size_bytes,
               ss.content_type as snapshot_content_type
        from verification_jobs job
@@ -1450,10 +1581,14 @@ function packageVersionFromRow(row: any): PackageVersionRecord {
     name: row.name,
     version: row.version,
     status: row.status,
+    artifact: row.artifact,
+    verification_status: row.verification_status,
+    deployment_status: row.deployment_status,
+    availability_status: row.availability_status,
     source_hash: row.source_hash,
     manifest_hash: row.manifest_hash,
-    edition: row.edition,
-    compatibility_profile_hash: row.compatibility_profile_hash,
+    ...(row.edition ? { edition: row.edition } : {}),
+    ...(row.compatibility_profile_hash ? { compatibility_profile_hash: row.compatibility_profile_hash } : {}),
     capability_key_id: row.capability_key_id,
     principal_type: row.principal_type,
     principal_id: row.principal_id,
@@ -1506,7 +1641,8 @@ function verificationJobFromRow(row: any): VerificationJobRecord {
     completed_at: row.completed_at ? new Date(row.completed_at).toISOString() : null,
     source_hash: String(row.source_hash),
     manifest_hash: String(row.manifest_hash),
-    compatibility_profile_hash: String(row.compatibility_profile_hash),
+    artifact: row.artifact,
+    ...(row.compatibility_profile_hash ? { compatibility_profile_hash: String(row.compatibility_profile_hash) } : {}),
     snapshot_hash: String(row.snapshot_hash),
     snapshot_object_key: String(row.snapshot_object_key),
     snapshot_size_bytes: Number(row.snapshot_size_bytes),

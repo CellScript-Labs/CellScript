@@ -2,11 +2,16 @@ import {
   ApiError,
   capabilityKeyId,
   canonicalJson,
+  type ArtifactDescriptor,
+  type ArtifactKind,
+  type AvailabilityStatus,
   type CapabilityAuthorisationPayload,
+  type DeploymentStatus,
   type PrincipalType,
   type PublishPayload,
   type RegistryEntryStatus,
   type RegistryIndexEntry,
+  type VerificationStatus,
 } from "./domain";
 
 export type NamespaceStatus = "active" | "review_pending" | "reserved" | "rejected" | "quarantined";
@@ -42,12 +47,16 @@ export interface PackageVersionRecord {
   name: string;
   version: string;
   status: RegistryEntryStatus;
+  artifact: ArtifactDescriptor;
+  verification_status: VerificationStatus;
+  deployment_status: DeploymentStatus;
+  availability_status: AvailabilityStatus;
   source_hash: string;
   manifest_hash: string;
   /** Source-language semantics, not a compiler or wire-ABI version. */
-  edition: "2026";
+  edition?: "2026";
   /** Complete resolved compatibility identity across independent axes. */
-  compatibility_profile_hash: string;
+  compatibility_profile_hash?: string;
   capability_key_id: string;
   principal_type: PrincipalType;
   principal_id: string;
@@ -61,6 +70,10 @@ export interface PackageVersionQuery {
   query?: string;
   namespace?: string;
   name?: string;
+  artifact_kind?: ArtifactKind;
+  verification_status?: VerificationStatus;
+  deployment_status?: DeploymentStatus;
+  availability_status?: AvailabilityStatus;
   status?: RegistryEntryStatus;
   statuses?: RegistryEntryStatus[];
   limit: number;
@@ -139,7 +152,8 @@ export interface VerificationJobRecord {
   completed_at?: string | null;
   source_hash: string;
   manifest_hash: string;
-  compatibility_profile_hash: string;
+  artifact: ArtifactDescriptor;
+  compatibility_profile_hash?: string;
   snapshot_hash: string;
   snapshot_object_key: string;
   snapshot_size_bytes: number;
@@ -286,6 +300,10 @@ export interface RegistryStore {
     version: PackageVersionRecord;
     evidence: PackageEvidenceRecord;
   }>;
+  recordChainVerifiedDeployment(input: PromotePackageVersionInput): Promise<{
+    version: PackageVersionRecord;
+    evidence: PackageEvidenceRecord;
+  }>;
   recordCapabilityUsage(input: {
     key_id: string;
     principal_type: PrincipalType;
@@ -300,7 +318,7 @@ export interface RegistryStore {
     namespace: string;
     name: string;
     version: string;
-    status: RegistryEntryStatus;
+    status: AvailabilityStatus;
     reason?: string;
     request_id: string;
     admin_actor: string;
@@ -630,6 +648,10 @@ export class MemoryRegistryStore implements RegistryStore {
     return [...this.packageVersions.values()]
       .filter((record) => !input.namespace || record.namespace === input.namespace)
       .filter((record) => !input.name || record.name === input.name)
+      .filter((record) => !input.artifact_kind || record.artifact.kind === input.artifact_kind)
+      .filter((record) => !input.verification_status || record.verification_status === input.verification_status)
+      .filter((record) => !input.deployment_status || record.deployment_status === input.deployment_status)
+      .filter((record) => !input.availability_status || record.availability_status === input.availability_status)
       .filter((record) => !input.status || record.status === input.status)
       .filter((record) => !input.statuses || input.statuses.includes(record.status))
       .filter((record) => {
@@ -646,7 +668,7 @@ export class MemoryRegistryStore implements RegistryStore {
     const key = `${input.namespace}/${input.name}@${input.version}`;
     const existing = this.packageVersions.get(key);
     if (existing) {
-      throw new ApiError(409, "package_version_exists", "package version already exists and cannot be overwritten");
+      throw new ApiError(409, "artifact_release_exists", "artifact release already exists and cannot be overwritten");
     }
     this.packageVersions.set(key, input);
     return input;
@@ -655,7 +677,7 @@ export class MemoryRegistryStore implements RegistryStore {
   async admitPackageVersion(input: PublishAdmissionInput): Promise<PackageVersionRecord> {
     const versionKey = `${input.version.namespace}/${input.version.name}@${input.version.version}`;
     if (this.packageVersions.has(versionKey)) {
-      throw new ApiError(409, "package_version_exists", "package version already exists and cannot be overwritten");
+      throw new ApiError(409, "artifact_release_exists", "artifact release already exists and cannot be overwritten");
     }
     if (input.idempotency) {
       const reservation = this.idempotencyKeys.get(input.idempotency.key);
@@ -699,7 +721,7 @@ export class MemoryRegistryStore implements RegistryStore {
     const versionKey = `${input.namespace}/${input.name}@${input.version}`;
     const existing = this.packageVersions.get(versionKey);
     if (!existing) {
-      throw new ApiError(404, "package_version_not_found", "package version is not known to the registry");
+      throw new ApiError(404, "artifact_release_not_found", "artifact release is not known to the registry");
     }
     assertPromotionTransition(existing.status, input.kind);
     const evidenceKey = `${versionKey}:${input.kind}:${input.evidence_hash}`;
@@ -716,7 +738,16 @@ export class MemoryRegistryStore implements RegistryStore {
       created_at: nowIso(),
     };
     this.packageEvidence.set(evidenceKey, evidence);
-    const versionRecord = { ...existing, status: input.kind };
+    const versionRecord: PackageVersionRecord = {
+      ...existing,
+      status: input.kind,
+      verification_status: existing.artifact.profile === "reproducible_build" ? "evidence_required" : "verified",
+      deployment_status: input.kind === "on_chain_attested"
+        ? "chain_verified"
+        : input.kind === "deployed"
+          ? "deployed"
+          : existing.deployment_status,
+    };
     this.packageVersions.set(versionKey, versionRecord);
     await this.appendAuditEvent({
       request_id: input.request_id,
@@ -728,6 +759,57 @@ export class MemoryRegistryStore implements RegistryStore {
       name: input.name,
       version: input.version,
       data: { admin_actor: input.admin_actor, evidence_hash: input.evidence_hash },
+    });
+    return { version: versionRecord, evidence };
+  }
+
+  async recordChainVerifiedDeployment(input: PromotePackageVersionInput): Promise<{
+    version: PackageVersionRecord;
+    evidence: PackageEvidenceRecord;
+  }> {
+    if (input.kind !== "deployed") {
+      throw new ApiError(500, "invalid_deployment_evidence_kind", "chain-verified deployment evidence must use kind deployed");
+    }
+    const versionKey = `${input.namespace}/${input.name}@${input.version}`;
+    const existing = this.packageVersions.get(versionKey);
+    if (!existing) {
+      throw new ApiError(404, "artifact_release_not_found", "artifact release is not known to the registry");
+    }
+    if (existing.deployment_status === "not_applicable") {
+      throw new ApiError(409, "deployment_not_applicable", "this artifact profile cannot have a CKB deployment");
+    }
+    if (!(existing.verification_status === "verified" || existing.verification_status === "evidence_required")) {
+      throw new ApiError(409, "artifact_not_verified", "artifact verification must finish before recording a deployment");
+    }
+    const evidenceKey = `${versionKey}:${input.kind}:${input.evidence_hash}`;
+    const evidence: PackageEvidenceRecord = this.packageEvidence.get(evidenceKey) ?? {
+      namespace: input.namespace,
+      name: input.name,
+      version: input.version,
+      kind: input.kind,
+      evidence_hash: input.evidence_hash,
+      evidence: input.evidence,
+      request_id: input.request_id,
+      admin_actor: input.admin_actor,
+      created_at: nowIso(),
+    };
+    this.packageEvidence.set(evidenceKey, evidence);
+    const versionRecord: PackageVersionRecord = {
+      ...existing,
+      status: "deployed",
+      deployment_status: "chain_verified",
+    };
+    this.packageVersions.set(versionKey, versionRecord);
+    await this.appendAuditEvent({
+      request_id: input.request_id,
+      event_type: "deployment.chain_verified",
+      principal_type: existing.principal_type,
+      principal_id: existing.principal_id,
+      capability_key_id: existing.capability_key_id,
+      namespace: input.namespace,
+      name: input.name,
+      version: input.version,
+      data: { actor: input.admin_actor, evidence_hash: input.evidence_hash },
     });
     return { version: versionRecord, evidence };
   }
@@ -763,7 +845,7 @@ export class MemoryRegistryStore implements RegistryStore {
     namespace: string;
     name: string;
     version: string;
-    status: RegistryEntryStatus;
+    status: AvailabilityStatus;
     reason?: string;
     request_id: string;
     admin_actor: string;
@@ -771,9 +853,20 @@ export class MemoryRegistryStore implements RegistryStore {
     const key = `${input.namespace}/${input.name}@${input.version}`;
     const existing = this.packageVersions.get(key);
     if (!existing) {
-      throw new ApiError(404, "package_version_not_found", "package version is not known to the registry");
+      throw new ApiError(404, "artifact_release_not_found", "artifact release is not known to the registry");
     }
-    const updated = { ...existing, status: input.status };
+    const restoredStatus: RegistryEntryStatus = existing.deployment_status === "chain_verified"
+      ? "on_chain_attested"
+      : existing.deployment_status === "deployed"
+        ? "deployed"
+        : existing.verification_status === "verified"
+          ? "verified_build"
+          : "source_published";
+    const updated: PackageVersionRecord = {
+      ...existing,
+      status: input.status === "active" ? restoredStatus : input.status,
+      availability_status: input.status,
+    };
     this.packageVersions.set(key, updated);
     await this.appendAuditEvent({
       request_id: input.request_id,
@@ -1157,7 +1250,8 @@ export class MemoryRegistryStore implements RegistryStore {
       updated_at: createdAt,
       source_hash: version.source_hash,
       manifest_hash: version.manifest_hash,
-      compatibility_profile_hash: version.compatibility_profile_hash,
+      artifact: version.artifact,
+      ...(version.compatibility_profile_hash ? { compatibility_profile_hash: version.compatibility_profile_hash } : {}),
       snapshot_hash: snapshot.snapshot_hash,
       snapshot_object_key: snapshot.r2_key,
       snapshot_size_bytes: snapshot.size_bytes,

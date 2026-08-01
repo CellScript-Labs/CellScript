@@ -1,40 +1,13 @@
 mod common;
 
+use base64::Engine as _;
 use common::cellc_command;
+use sha2::{Digest as _, Sha256};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use unicode_width::UnicodeWidthStr;
-
-fn git_init(repo_dir: &std::path::Path) {
-    let status = Command::new("git").args(["init"]).current_dir(repo_dir).status().expect("git init");
-    assert!(status.success());
-}
-
-fn git_add_all(repo_dir: &std::path::Path) {
-    let status = Command::new("git").args(["add", "."]).current_dir(repo_dir).status().expect("git add");
-    assert!(status.success());
-}
-
-fn git_commit(repo_dir: &std::path::Path, msg: &str) {
-    git_add_all(repo_dir);
-    let status = Command::new("git")
-        .args(["-c", "commit.gpgsign=false", "commit", "-m", msg, "--author=test <test@test.com>"])
-        .env("GIT_AUTHOR_DATE", "2026-01-01T00:00:00+00:00")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@test.com")
-        .env("GIT_COMMITTER_DATE", "2026-01-01T00:00:00+00:00")
-        .current_dir(repo_dir)
-        .status()
-        .expect("git commit");
-    assert!(status.success());
-}
-
-fn git_tag(repo_dir: &std::path::Path, tag: &str) {
-    let status = Command::new("git").args(["-c", "tag.gpgSign=false", "tag", tag]).current_dir(repo_dir).status().expect("git tag");
-    assert!(status.success());
-}
 
 fn hex_lower(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
@@ -1235,6 +1208,63 @@ action identity(value: u64) -> u64 {
     .unwrap();
 }
 
+fn write_declared_artifact_fixture(root: &std::path::Path) {
+    std::fs::write(
+        root.join("Artifact.toml"),
+        r#"schema = "cellscript-registry-artifact"
+namespace = "cellscript"
+name = "rust-contract"
+release = "1.0.0"
+kind = "deployable_contract"
+language = "rust"
+bundle = "artifact-bundle.json"
+description = "Rust CKB contract"
+repository = "https://example.com/cellscript/rust-contract"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("artifact-bundle.json"),
+        r#"{
+  "schema": "cellscript-registry-bundle",
+  "namespace": "cellscript",
+  "name": "rust-contract",
+  "release": "1.0.0",
+  "profile": "ckb_executable",
+  "manifest_json": "{\"name\":\"rust-contract\"}",
+  "objects": [
+    {"role":"source","content_base64":"c291cmNl"},
+    {"role":"executable","content_base64":"ZWxm"},
+    {"role":"abi","content_base64":"YWJp"}
+  ]
+}"#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn cellc_publish_dry_run_validates_declared_non_cellscript_artifact() {
+    let temp = tempfile::tempdir().unwrap();
+    write_declared_artifact_fixture(temp.path());
+    let output = cellc_command()
+        .arg("publish")
+        .arg("--artifact-manifest")
+        .arg("Artifact.toml")
+        .arg("--dry-run")
+        .arg("--json")
+        .current_dir(temp.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["status"], "valid");
+    assert_eq!(result["coordinate"], "cellscript/rust-contract@1.0.0");
+    assert_eq!(result["artifact"]["kind"], "deployable_contract");
+    assert_eq!(result["artifact"]["profile"], "ckb_executable");
+    assert_eq!(result["artifact"]["consumption_mode"], "deployment");
+    assert_eq!(result["source_hash"].as_str().unwrap().len(), 64);
+}
+
 #[test]
 fn cellc_publish_default_requires_capability_inputs_without_writing_registry_json() {
     let temp = tempfile::tempdir().unwrap();
@@ -1271,7 +1301,7 @@ fn cellc_publish_print_payload_outputs_signable_registry_publish_payload() {
 
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
     let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(envelope["endpoint"], "https://api.registry.cellscript.dev/v1/packages/cellscript/demo/versions");
+    assert_eq!(envelope["endpoint"], "https://api.registry.cellscript.dev/v1/artifacts/cellscript/demo/releases");
     assert_eq!(envelope["payload"]["protocol"], "cellscript-registry-publish-v1");
     assert_eq!(envelope["payload"]["action"], "publish");
     assert_eq!(envelope["payload"]["registry_origin"], "https://api.registry.cellscript.dev");
@@ -1279,11 +1309,36 @@ fn cellc_publish_print_payload_outputs_signable_registry_publish_payload() {
     assert_eq!(envelope["payload"]["name"], "demo");
     assert_eq!(envelope["payload"]["version"], "1.2.3");
     assert_eq!(envelope["payload"]["capability_key_id"], "cap_test");
-    assert_eq!(envelope["payload"]["registry_entry"]["versions"][0]["status"], "source_published");
+    assert_eq!(envelope["payload"]["artifact"]["kind"], "source_library");
+    assert_eq!(envelope["payload"]["registry_entry"]["versions"][0]["verification_status"], "pending");
     let canonical_payload = envelope["canonical_payload"].as_str().expect("canonical payload");
     let canonical_json: serde_json::Value = serde_json::from_str(canonical_payload).unwrap();
     assert_eq!(canonical_json, envelope["payload"]);
     assert!(!temp.path().join("registry.json").exists(), "payload preview must not write offline registry.json");
+}
+
+#[test]
+fn cellc_publish_profile_library_preserves_the_declared_artifact_kind() {
+    let temp = tempfile::tempdir().unwrap();
+    write_publish_fixture_package(temp.path());
+
+    let output = cellc_command()
+        .arg("publish")
+        .arg("--artifact-kind")
+        .arg("profile_library")
+        .arg("--capability-key-id")
+        .arg("cap_test")
+        .arg("--print-payload")
+        .arg("--json")
+        .current_dir(temp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(envelope["payload"]["artifact"]["kind"], "profile_library");
+    assert_eq!(envelope["payload"]["artifact"]["profile"], "cellscript_source");
+    assert_eq!(envelope["payload"]["registry_entry"]["artifact"]["kind"], "profile_library");
 }
 
 #[test]
@@ -1293,8 +1348,10 @@ fn cellc_publish_posts_signed_request_to_registry_api() {
 
     let (api_url, request_rx) = start_mock_registry_api_capture_request(serde_json::json!({
         "request_id": "req_test",
-        "status": "source_published",
-        "direct_url": "https://registry.cellscript.dev/packages/cellscript/demo/versions/1.2.3.json",
+        "verification_status": "pending",
+        "deployment_status": "not_applicable",
+        "availability_status": "active",
+        "direct_url": "https://registry.cellscript.dev/artifacts/cellscript/demo/releases/1.2.3.json",
         "snapshot_hash": "sha256:test",
         "verification": "queued"
     }));
@@ -1330,9 +1387,10 @@ fn cellc_publish_posts_signed_request_to_registry_api() {
 
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
     let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(response["status"], "source_published");
+    assert_eq!(response["verification_status"], "pending");
+    assert_eq!(response["deployment_status"], "not_applicable");
     let request = request_rx.recv_timeout(Duration::from_secs(5)).expect("registry API request");
-    assert_eq!(request.path, "/v1/packages/cellscript/demo/versions");
+    assert_eq!(request.path, "/v1/artifacts/cellscript/demo/releases");
     assert!(
         request
             .header("idempotency-key")
@@ -1358,8 +1416,10 @@ fn cellc_publish_honors_explicit_idempotency_key() {
 
     let (api_url, request_rx) = start_mock_registry_api_capture_request(serde_json::json!({
         "request_id": "req_test",
-        "status": "source_published",
-        "direct_url": "https://registry.cellscript.dev/packages/cellscript/demo/versions/1.2.3.json",
+        "verification_status": "pending",
+        "deployment_status": "not_applicable",
+        "availability_status": "active",
+        "direct_url": "https://registry.cellscript.dev/artifacts/cellscript/demo/releases/1.2.3.json",
         "snapshot_hash": "sha256:test",
         "verification": "queued"
     }));
@@ -1406,8 +1466,10 @@ fn cellc_publish_retries_transient_registry_error_with_same_idempotency_key() {
 
     let (api_url, request_rx) = start_mock_registry_api_retry_then_success(serde_json::json!({
         "request_id": "req_retry",
-        "status": "source_published",
-        "direct_url": "https://registry.cellscript.dev/packages/cellscript/demo/versions/1.2.3.json",
+        "verification_status": "pending",
+        "deployment_status": "not_applicable",
+        "availability_status": "active",
+        "direct_url": "https://registry.cellscript.dev/artifacts/cellscript/demo/releases/1.2.3.json",
         "snapshot_hash": "sha256:test",
         "verification": "queued"
     }));
@@ -1862,7 +1924,7 @@ fn read_http_request_path_headers_and_body(stream: &mut std::net::TcpStream) -> 
                     let (name, value) = line.split_once(':')?;
                     name.eq_ignore_ascii_case("content-length").then(|| value.trim().parse::<usize>().unwrap())
                 })
-                .unwrap();
+                .unwrap_or(0);
             let body_start = header_end + 4;
             while request.len() < body_start + content_length {
                 let read = stream.read(&mut buffer).unwrap();
@@ -2841,12 +2903,11 @@ action ping() -> u64 {
 }
 
 #[test]
-fn cellc_build_resolves_registry_dependency_and_writes_phase1_lockfile() {
+fn cellc_build_resolves_artifact_api_dependency_and_writes_lockfile() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
     let dep_root = root.join("token");
     let app_root = root.join("app");
-    let registry_root = root.join("registry");
 
     std::fs::create_dir_all(dep_root.join("src")).unwrap();
     std::fs::write(
@@ -2872,11 +2933,11 @@ resource Token has store, replace, relock, consume, burn {
     )
     .unwrap();
     let source_hash = cellscript::package::registry::compute_source_hash(&dep_root).unwrap();
-    cellscript::package::registry::RegistryIndex::append_version(
-        &dep_root,
-        "token",
-        "cellscript",
-        cellscript::package::registry::RegistryVersion {
+    let registry_entry = cellscript::package::registry::RegistryIndex {
+        schema_version: cellscript::package::registry::RegistryIndex::CURRENT_SCHEMA_VERSION,
+        name: "token".to_string(),
+        namespace: "cellscript".to_string(),
+        versions: vec![cellscript::package::registry::RegistryVersion {
             edition: cellscript::CURRENT_EDITION,
             compatibility_profile_hash: "test-compatibility-profile".to_string(),
             version: "0.3.0".to_string(),
@@ -2894,24 +2955,92 @@ resource Token has store, replace, relock, consume, burn {
             yanked_reason: None,
             replaced_by: None,
             audit: None,
-        },
-    )
-    .unwrap();
-    git_init(&dep_root);
-    git_add_all(&dep_root);
-    git_commit(&dep_root, "publish token");
-    git_tag(&dep_root, "v0.3.0");
-
-    std::fs::create_dir_all(registry_root.join("cellscript")).unwrap();
-    git_init(&registry_root);
-    let entry = cellscript::package::registry::DiscoveryEntry {
-        name: "token".to_string(),
-        namespace: "cellscript".to_string(),
-        source: dep_root.to_string_lossy().to_string(),
+        }],
     };
-    std::fs::write(registry_root.join("cellscript/token.json"), serde_json::to_string_pretty(&entry).unwrap()).unwrap();
-    git_add_all(&registry_root);
-    git_commit(&registry_root, "add token");
+
+    let snapshot_file = |path: &str, content: &[u8]| {
+        serde_json::json!({
+            "path": path,
+            "blake2b256": hex_lower(&cellscript::ckb_blake2b256(content)),
+            "content_base64": base64::engine::general_purpose::STANDARD.encode(content),
+        })
+    };
+    let manifest_bytes = std::fs::read(dep_root.join("Cell.toml")).unwrap();
+    let source_bytes = std::fs::read(dep_root.join("src/token.cell")).unwrap();
+    let snapshot_bytes = serde_json::to_vec(&serde_json::json!({
+        "schema": "cellscript-source-snapshot-v1",
+        "package": { "namespace": "cellscript", "name": "token", "version": "0.3.0" },
+        "files": [
+            snapshot_file("Cell.toml", &manifest_bytes),
+            snapshot_file("src/token.cell", &source_bytes),
+        ],
+    }))
+    .unwrap();
+    let snapshot_digest = Sha256::digest(&snapshot_bytes);
+    let snapshot_hash = format!("sha256:{}", hex_lower(&snapshot_digest));
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let api_origin = format!("http://{address}");
+    let snapshot_path = "/source-snapshots/cellscript/token/0.3.0/token.json";
+    let api_body = serde_json::json!({
+        "schema": "cellscript-registry-artifact",
+        "namespace": "cellscript",
+        "name": "token",
+        "repository": "https://example.test/cellscript/token",
+        "artifact": {
+            "kind": "source_library",
+            "profile": "cellscript_source",
+            "consumption_mode": "dependency",
+            "language": "cellscript"
+        },
+        "releases": [{
+            "release": "0.3.0",
+            "verification_status": "verified",
+            "availability_status": "active",
+            "registry_entry": registry_entry,
+            "immutable_bundle": {
+                "schema": "cellscript-registry-immutable-bundle",
+                "url": format!("{api_origin}{snapshot_path}"),
+                "snapshot_hash": snapshot_hash,
+                "source_hash": source_hash,
+                "size_bytes": snapshot_bytes.len(),
+                "content_type": "application/vnd.cellscript.source-snapshot+json"
+            }
+        }]
+    })
+    .to_string();
+    let served_snapshot = snapshot_bytes.clone();
+    listener.set_nonblocking(true).unwrap();
+    let stop_server = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let server_stop = std::sync::Arc::clone(&stop_server);
+    let server = std::thread::spawn(move || {
+        while !server_stop.load(std::sync::atomic::Ordering::Acquire) {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    let (path, _) = read_http_request_path_and_body(&mut stream);
+                    assert!(matches!(
+                        path.as_str(),
+                        "/v1/artifacts/cellscript/token" | "/source-snapshots/cellscript/token/0.3.0/token.json"
+                    ));
+                    let (body, content_type) = if path == snapshot_path {
+                        (served_snapshot.as_slice(), "application/vnd.cellscript.source-snapshot+json")
+                    } else {
+                        (api_body.as_bytes(), "application/json")
+                    };
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    );
+                    stream.write_all(response.as_bytes()).unwrap();
+                    stream.write_all(body).unwrap();
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Err(error) => panic!("artifact API mock failed: {error}"),
+            }
+        }
+    });
 
     std::fs::create_dir_all(app_root.join("src")).unwrap();
     std::fs::write(
@@ -2946,12 +3075,12 @@ action pass_through(token: Token) -> Token {
 
     let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
         .arg("build")
-        .env(cellscript::package::registry::REGISTRY_URL_ENV, &registry_root)
+        .env(cellscript::package::registry::REGISTRY_API_URL_ENV, &api_origin)
         .current_dir(&app_root)
         .output()
         .unwrap();
-
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+
     let lockfile: cellscript::package::Lockfile =
         toml::from_str(&std::fs::read_to_string(app_root.join("Cell.lock")).unwrap()).unwrap();
     assert!(lockfile.package.source_hash.is_some());
@@ -2969,10 +3098,12 @@ action pass_through(token: Token) -> Token {
     let verify = Command::new(env!("CARGO_BIN_EXE_cellc"))
         .arg("package")
         .arg("verify")
-        .env(cellscript::package::registry::REGISTRY_URL_ENV, &registry_root)
+        .env(cellscript::package::registry::REGISTRY_API_URL_ENV, &api_origin)
         .current_dir(&app_root)
         .output()
         .unwrap();
+    stop_server.store(true, std::sync::atomic::Ordering::Release);
+    server.join().unwrap();
     assert!(verify.status.success(), "stderr: {}", String::from_utf8_lossy(&verify.stderr));
 }
 

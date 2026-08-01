@@ -1,5 +1,6 @@
 import { verifySignature, type SignChallengeResponseData } from "@joyid/ckb";
 import {
+  ARTIFACT_KINDS,
   CKB_SECP256K1_PRINCIPAL_TYPE,
   JOYID_PRINCIPAL_TYPE,
   ApiError,
@@ -11,11 +12,15 @@ import {
   base64ToBytes,
   canonicalJson,
   capabilityKeyId,
+  ckbScriptHash,
+  initialArtifactStates,
   isPrincipalType,
   scopeAllowsPublish,
   sha256Hex,
+  sameCkbHash,
   validateCapabilityPayload,
   validateCapabilityRevocationPayload,
+  validateDeploymentPayload,
   validatePackageIdent,
   validatePublishPayload,
   validateSnapshot,
@@ -28,7 +33,12 @@ import {
   type JoyidVerifier,
   type PrincipalSignature,
   type PrincipalType,
+  type ArtifactKind,
+  type AvailabilityStatus,
+  type DeploymentStatus,
+  type DeploymentPayload,
   type SourceSnapshotInput,
+  type VerificationStatus,
 } from "./domain";
 import {
   MemoryRegistryStore,
@@ -53,6 +63,7 @@ export interface Env {
   ENVIRONMENT?: string;
   CLEANUP_QUOTA_EVENT_RETENTION_HOURS?: string;
   NAMESPACE_CLAIM_COOLDOWN_SECONDS?: string;
+  CKB_MAINNET_RPC_URL?: string;
 }
 
 export interface SnapshotWriter {
@@ -76,6 +87,7 @@ export interface AppDeps {
   snapshotWriter?: SnapshotWriter;
   registryObjectReader?: RegistryObjectReader;
   readinessCheck?: () => Promise<Record<string, string>>;
+  verifyMainnetDeployment?: (payload: DeploymentPayload) => Promise<{ block_hash?: string | null }>;
   now?: () => Date;
 }
 
@@ -138,7 +150,7 @@ async function routeRequest(
   if (request.method === "GET" && url.pathname === "/ready") {
     return handleReadiness(env, deps, requestId, headers);
   }
-  const staticPackageVersionMatch = url.pathname.match(/^\/packages\/([^/]+)\/([^/]+)\/versions\/([^/]+)[.]json$/);
+  const staticPackageVersionMatch = url.pathname.match(/^\/artifacts\/([^/]+)\/([^/]+)\/releases\/([^/]+)[.]json$/);
   if (request.method === "GET" && staticPackageVersionMatch) {
     return handleStaticPackageVersionRead(
       env,
@@ -155,11 +167,11 @@ async function routeRequest(
   const registryOrigin = env.REGISTRY_ORIGIN ?? DEFAULT_REGISTRY_ORIGIN;
   const staticOrigin = env.STATIC_REGISTRY_ORIGIN ?? DEFAULT_STATIC_REGISTRY_ORIGIN;
 
-  if (request.method === "GET" && url.pathname === "/v1/packages") {
+  if (request.method === "GET" && url.pathname === "/v1/artifacts") {
     return handleListPackages(request, store, requestId, staticOrigin, headers);
   }
 
-  const publicEvidenceMatch = url.pathname.match(/^\/v1\/packages\/([^/]+)\/([^/]+)\/versions\/([^/]+)\/evidence$/);
+  const publicEvidenceMatch = url.pathname.match(/^\/v1\/artifacts\/([^/]+)\/([^/]+)\/releases\/([^/]+)\/evidence$/);
   if (request.method === "GET" && publicEvidenceMatch) {
     return handlePublicPackageEvidence(
       store,
@@ -171,7 +183,25 @@ async function routeRequest(
     );
   }
 
-  const publicPackageMatch = url.pathname.match(/^\/v1\/packages\/([^/]+)\/([^/]+)$/);
+  const deploymentMatch = url.pathname.match(/^\/v1\/artifacts\/([^/]+)\/([^/]+)\/releases\/([^/]+)\/deployments$/);
+  if (request.method === "POST" && deploymentMatch) {
+    return handleRecordDeployment(
+      request,
+      env,
+      store,
+      requestId,
+      registryOrigin,
+      staticOrigin,
+      now,
+      deps,
+      headers,
+      decodeURIComponent(deploymentMatch[1] ?? ""),
+      decodeURIComponent(deploymentMatch[2] ?? ""),
+      decodeURIComponent(deploymentMatch[3] ?? ""),
+    );
+  }
+
+  const publicPackageMatch = url.pathname.match(/^\/v1\/artifacts\/([^/]+)\/([^/]+)$/);
   if (request.method === "GET" && publicPackageMatch) {
     return handlePublicPackageDetail(
       store,
@@ -216,7 +246,7 @@ async function routeRequest(
     return handleAdminNamespaceStatus(request, env, store, requestId, headers, decodeURIComponent(adminNamespaceStatusMatch[1] ?? ""));
   }
 
-  const adminVersionStatusMatch = url.pathname.match(/^\/v1\/admin\/packages\/([^/]+)\/([^/]+)\/versions\/([^/]+)\/status$/);
+  const adminVersionStatusMatch = url.pathname.match(/^\/v1\/admin\/artifacts\/([^/]+)\/([^/]+)\/releases\/([^/]+)\/availability$/);
   if (request.method === "POST" && adminVersionStatusMatch) {
     return handleAdminPackageVersionStatus(
       request,
@@ -232,7 +262,7 @@ async function routeRequest(
     );
   }
 
-  const adminPromotionMatch = url.pathname.match(/^\/v1\/admin\/packages\/([^/]+)\/([^/]+)\/versions\/([^/]+)\/promote$/);
+  const adminPromotionMatch = url.pathname.match(/^\/v1\/admin\/artifacts\/([^/]+)\/([^/]+)\/releases\/([^/]+)\/promote$/);
   if (request.method === "POST" && adminPromotionMatch) {
     return handleAdminPackageVersionPromotion(
       request,
@@ -267,7 +297,7 @@ async function routeRequest(
     return handleClaimNamespace(request, env, store, requestId, registryOrigin, now, deps, headers);
   }
 
-  const publishMatch = url.pathname.match(/^\/v1\/packages\/([^/]+)\/([^/]+)\/versions$/);
+  const publishMatch = url.pathname.match(/^\/v1\/artifacts\/([^/]+)\/([^/]+)\/releases$/);
   if (request.method === "POST" && publishMatch) {
     return handlePublishVersion(
       request,
@@ -302,7 +332,7 @@ async function handleStaticPackageVersionRead(
   const reader = deps.registryObjectReader ?? r2RegistryObjectReader(env);
   const object = await reader.get(key);
   if (!object) {
-    throw new ApiError(404, "registry_object_not_found", "package version registry object was not found");
+    throw new ApiError(404, "registry_object_not_found", "artifact release registry object was not found");
   }
   const headers = corsHeaders(requestId);
   headers.set("content-type", object.contentType ?? "application/json; charset=utf-8");
@@ -323,20 +353,34 @@ async function handleListPackages(
   const params = new URL(request.url).searchParams;
   const query = optionalPublicQuery(params, "q");
   const namespaceRaw = optionalPublicQuery(params, "namespace");
-  const statusRaw = optionalPublicQuery(params, "status");
+  const kindRaw = optionalPublicQuery(params, "kind");
+  const verificationRaw = optionalPublicQuery(params, "verification");
+  const deploymentRaw = optionalPublicQuery(params, "deployment");
+  const availabilityRaw = optionalPublicQuery(params, "availability");
   const namespace = namespaceRaw ? validatePackageIdent(namespaceRaw, "namespace") : undefined;
-  const status = statusRaw ? publicRegistryStatus(statusRaw) : undefined;
+  const artifactKind = kindRaw ? requireOneOf(kindRaw, ARTIFACT_KINDS, "invalid_artifact_kind") as ArtifactKind : undefined;
+  const verificationStatus = verificationRaw
+    ? requireOneOf(verificationRaw, ["pending", "verified", "evidence_required", "rejected"] as const, "invalid_verification_status") as VerificationStatus
+    : undefined;
+  const deploymentStatus = deploymentRaw
+    ? requireOneOf(deploymentRaw, ["not_applicable", "undeployed", "deployed", "chain_verified"] as const, "invalid_deployment_status") as DeploymentStatus
+    : undefined;
+  const availabilityStatus = availabilityRaw
+    ? requireOneOf(availabilityRaw, ["active", "deprecated", "yanked", "quarantined"] as const, "invalid_availability_status") as AvailabilityStatus
+    : "active";
   const limit = publicListInteger(params, "limit", 50, 1, 100);
   const offset = publicListInteger(params, "offset", 0, 0, 10_000);
   const records = await store.listPackageVersions({
     ...(query ? { query } : {}),
     ...(namespace ? { namespace } : {}),
-    ...(status ? { status } : {}),
-    ...(!status ? { statuses: ["verified_build", "deployed", "on_chain_attested"] as PackageVersionRecord["status"][] } : {}),
+    ...(artifactKind ? { artifact_kind: artifactKind } : {}),
+    ...(verificationStatus ? { verification_status: verificationStatus } : {}),
+    ...(deploymentStatus ? { deployment_status: deploymentStatus } : {}),
+    ...(availabilityStatus ? { availability_status: availabilityStatus } : {}),
     limit: Math.min(limit * 4, 400),
     offset,
   });
-  const visible = records.filter((record) => record.status !== "quarantined");
+  const visible = records.filter((record) => record.availability_status !== "quarantined");
   const grouped = new Map<string, PackageVersionRecord[]>();
   for (const record of visible) {
     const key = `${record.namespace}/${record.name}`;
@@ -352,21 +396,24 @@ async function handleListPackages(
       coordinate,
       namespace: latest.namespace,
       name: latest.name,
-      latest_version: latest.version,
-      status: latest.status,
+      latest_release: latest.version,
+      artifact: latest.artifact,
+      verification_status: latest.verification_status,
+      deployment_status: latest.deployment_status,
+      availability_status: latest.availability_status,
       description: typeof entry["description"] === "string" ? entry["description"] : null,
       repository: typeof entry["repository"] === "string" ? entry["repository"] : null,
       keywords: Array.isArray(entry["keywords"]) ? entry["keywords"] : [],
       categories: Array.isArray(entry["categories"]) ? entry["categories"] : [],
-      versions: versions.map((version) => staticRegistryVersionPayload(version, snapshotForVersion(snapshots, version), staticOrigin)),
+      releases: versions.map((version) => staticRegistryVersionPayload(version, snapshotForVersion(snapshots, version), staticOrigin)),
       updated_at: latest.created_at,
     };
   });
   return json(
     {
-      schema: "cellscript-public-registry-index-v1",
+      schema: "cellscript-registry-artifact-index",
       request_id: requestId,
-      packages,
+      artifacts: packages,
       count: packages.length,
       offset,
       limit,
@@ -388,9 +435,9 @@ async function handlePublicPackageDetail(
   const namespace = validatePackageIdent(namespaceFromPath, "namespace");
   const name = validatePackageIdent(nameFromPath, "name");
   const versions = await store.listPackageVersions({ namespace, name, limit: 200, offset: 0 });
-  const visible = versions.filter((version) => version.status !== "quarantined");
+  const visible = versions.filter((version) => version.availability_status !== "quarantined");
   if (visible.length === 0) {
-    throw new ApiError(404, "package_not_found", "package is not known to the public registry");
+    throw new ApiError(404, "artifact_not_found", "artifact is not known to the public registry");
   }
   const snapshots = await requireSnapshots(store, visible);
   const evidenceByVersion = new Map<string, PackageEvidenceRecord[]>();
@@ -409,7 +456,7 @@ async function handlePublicPackageDetail(
   const entry = latest.registry_entry as Record<string, unknown>;
   return json(
     {
-      schema: "cellscript-public-registry-package-v1",
+      schema: "cellscript-registry-artifact",
       request_id: requestId,
       coordinate: `${namespace}/${name}`,
       namespace,
@@ -420,9 +467,12 @@ async function handlePublicPackageDetail(
       documentation: typeof entry["documentation"] === "string" ? entry["documentation"] : null,
       keywords: Array.isArray(entry["keywords"]) ? entry["keywords"] : [],
       categories: Array.isArray(entry["categories"]) ? entry["categories"] : [],
-      latest_version: latest.version,
-      status: latest.status,
-      versions: payloads,
+      latest_release: latest.version,
+      artifact: latest.artifact,
+      verification_status: latest.verification_status,
+      deployment_status: latest.deployment_status,
+      availability_status: latest.availability_status,
+      releases: payloads,
     },
     200,
     headers,
@@ -441,11 +491,202 @@ async function handlePublicPackageEvidence(
   const name = validatePackageIdent(nameFromPath, "name");
   const version = validateVersion(versionFromPath);
   const record = await store.getPackageVersion(namespace, name, version);
-  if (!record || record.status === "quarantined") {
-    throw new ApiError(404, "package_version_not_found", "package version is not known to the public registry");
+  if (!record || record.availability_status === "quarantined") {
+    throw new ApiError(404, "artifact_release_not_found", "artifact release is not known to the public registry");
   }
   const evidence = await store.listPackageEvidence(namespace, name, version);
-  return json({ schema: "cellscript-registry-evidence-list-v1", request_id: requestId, namespace, name, version, evidence }, 200, headers);
+  return json({ schema: "cellscript-registry-evidence-list", request_id: requestId, namespace, name, release: version, evidence }, 200, headers);
+}
+
+async function handleRecordDeployment(
+  request: Request,
+  env: Env,
+  store: RegistryStore,
+  requestId: string,
+  registryOrigin: string,
+  staticOrigin: string,
+  now: Date,
+  deps: AppDeps,
+  headers: Headers,
+  namespaceFromPath: string,
+  nameFromPath: string,
+  releaseFromPath: string,
+): Promise<Response> {
+  await throttleRequestSource(store, request, requestId, "deployment", 40, 60 * 60, now);
+  const body = await readJson(request, Math.min(maxJsonBytes(env), 512 * 1024));
+  const payload = validateDeploymentPayload(body["payload"], registryOrigin, now);
+  const namespace = validatePackageIdent(namespaceFromPath, "namespace");
+  const name = validatePackageIdent(nameFromPath, "name");
+  const release = validateVersion(releaseFromPath);
+  if (payload.namespace !== namespace || payload.name !== name || payload.release !== release) {
+    throw new ApiError(400, "route_payload_mismatch", "artifact route and deployment payload do not match");
+  }
+  const version = await store.getPackageVersion(namespace, name, release);
+  if (!version) {
+    throw new ApiError(404, "artifact_release_not_found", "artifact release is not known to the registry");
+  }
+  if (version.artifact.profile !== "ckb_executable" || version.deployment_status === "not_applicable") {
+    throw new ApiError(409, "deployment_not_applicable", "this artifact profile cannot have a CKB deployment");
+  }
+  const signedRelease = version.registry_entry.versions.find((entry) => entry.version === release);
+  if (!signedRelease?.artifact_hash || !sameCkbHash(signedRelease.artifact_hash, payload.artifact_hash)) {
+    throw new ApiError(400, "deployment_artifact_mismatch", "deployment artifact_hash does not match the published release");
+  }
+  const capability = await store.getCapability(payload.capability_key_id);
+  if (!capability || capability.revoked_at || new Date(capability.expires_at).getTime() <= now.getTime()) {
+    throw new ApiError(401, "capability_inactive", "deployment capability is missing, revoked, or expired");
+  }
+  if (!scopeAllowsPublish(capability.scopes, namespace, name)) {
+    throw new ApiError(403, "capability_scope_denied", "capability scope does not allow this artifact deployment");
+  }
+  const namespaceRecord = await store.getNamespace(namespace);
+  if (
+    !namespaceRecord
+    || namespaceRecord.status !== "active"
+    || namespaceRecord.owner_principal_type !== capability.principal_type
+    || namespaceRecord.owner_principal_id !== capability.principal_id
+  ) {
+    throw new ApiError(403, "namespace_owner_mismatch", "capability principal does not own the active namespace");
+  }
+  const signature = requireCapabilitySignature(body["capability_signature"]);
+  const verifier = deps.capabilityVerifier ?? new WebCryptoP256Verifier();
+  if (!(await verifier.verify(canonicalJson(payload), capability.capability_pubkey, signature))) {
+    throw new ApiError(401, "capability_signature_invalid", "capability signature verification failed");
+  }
+
+  const nonceKey = await consumeSignedNonce(store, requestId, {
+    protocol: payload.protocol,
+    action: payload.action,
+    nonce: payload.nonce,
+    expires_at: payload.expires_at,
+    principal_type: capability.principal_type,
+    principal_id: capability.principal_id,
+    capability_key_id: capability.key_id,
+  });
+  try {
+    const chain = deps.verifyMainnetDeployment
+      ? await deps.verifyMainnetDeployment(payload)
+      : await verifyMainnetDeployment(env, payload);
+    const previousEvidence = await store.listPackageEvidence(namespace, name, release);
+    const buildEvidence = previousEvidence.filter((item) => item.kind === "verified_build").at(-1);
+    if (!buildEvidence) {
+      throw new ApiError(409, "evidence_dependency_missing", "build verification evidence must exist before deployment");
+    }
+    const evidence = {
+      schema: "cellscript-registry-evidence",
+      kind: "deployed",
+      producer: `publisher:${capability.principal_type}`,
+      generated_at: now.toISOString(),
+      verification_status: "passed",
+      source_hash: version.source_hash,
+      manifest_hash: version.manifest_hash,
+      verified_build_evidence_hash: buildEvidence.evidence_hash,
+      network: "mainnet",
+      artifact_hash: payload.artifact_hash,
+      data_hash: payload.data_hash,
+      code_hash: payload.code_hash,
+      hash_type: payload.hash_type,
+      dep_type: payload.dep_type,
+      out_point: payload.out_point,
+      deployment_status: "live",
+      chain_verification: "get_live_cell",
+      ...(chain.block_hash ? { block_hash: chain.block_hash } : {}),
+    };
+    const evidenceHash = `sha256:${await sha256Hex(canonicalJson(evidence))}`;
+    const predictedEvidence: PackageEvidenceRecord = {
+      namespace,
+      name,
+      version: release,
+      kind: "deployed",
+      evidence_hash: evidenceHash,
+      evidence,
+      request_id: requestId,
+      admin_actor: `publisher:${capability.principal_id}`,
+      created_at: now.toISOString(),
+    };
+    const snapshot = await requireSnapshot(store, version);
+    await writeStaticRegistryVersionObject(
+      env,
+      deps,
+      { ...version, status: "deployed", deployment_status: "chain_verified" },
+      snapshot,
+      staticOrigin,
+      [...previousEvidence, predictedEvidence],
+    );
+    const recorded = await store.recordChainVerifiedDeployment({
+      namespace,
+      name,
+      version: release,
+      kind: "deployed",
+      evidence_hash: evidenceHash,
+      evidence,
+      request_id: requestId,
+      admin_actor: `publisher:${capability.principal_id}`,
+    });
+    await store.recordCapabilityUsage({
+      key_id: capability.key_id,
+      principal_type: capability.principal_type,
+      principal_id: capability.principal_id,
+      request_id: requestId,
+      action: "record_deployment",
+      namespace,
+      name,
+      version: release,
+    });
+    return json({
+      request_id: requestId,
+      coordinate: `${namespace}/${name}@${release}`,
+      deployment_status: recorded.version.deployment_status,
+      evidence: recorded.evidence,
+    }, 201, headers);
+  } catch (error) {
+    await store.releaseNonce({ nonce_key: nonceKey, request_id: requestId });
+    throw error;
+  }
+}
+
+async function verifyMainnetDeployment(env: Env, payload: DeploymentPayload): Promise<{ block_hash?: string | null }> {
+  const rpcUrl = env.CKB_MAINNET_RPC_URL?.trim() || "https://mainnet.ckb.dev/rpc";
+  let response: Response;
+  try {
+    response = await fetch(rpcUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "get_live_cell",
+        params: [{ tx_hash: payload.out_point.tx_hash, index: `0x${payload.out_point.index.toString(16)}` }, true, false],
+      }),
+    });
+  } catch (error) {
+    throw new ApiError(503, "ckb_rpc_unavailable", `mainnet CKB RPC request failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!response.ok) {
+    throw new ApiError(503, "ckb_rpc_unavailable", `mainnet CKB RPC returned HTTP ${response.status}`);
+  }
+  const rpc = assertPlainObject(await response.json(), "invalid_ckb_rpc_response");
+  if (rpc["error"]) {
+    throw new ApiError(503, "ckb_rpc_error", "mainnet CKB RPC rejected get_live_cell");
+  }
+  const result = assertPlainObject(rpc["result"], "invalid_ckb_rpc_response");
+  if (result["status"] !== "live") {
+    throw new ApiError(409, "deployment_cell_not_live", "deployment OutPoint is not a live mainnet Cell");
+  }
+  const cell = assertPlainObject(result["cell"], "invalid_ckb_rpc_response");
+  const data = assertPlainObject(cell["data"], "invalid_ckb_rpc_response");
+  if (typeof data["hash"] !== "string" || !sameCkbHash(data["hash"], payload.data_hash)) {
+    throw new ApiError(409, "deployment_data_hash_mismatch", "live Cell data hash does not match the published executable");
+  }
+  if (payload.hash_type === "type") {
+    const output = assertPlainObject(cell["output"], "invalid_ckb_rpc_response");
+    if (!output["type"] || !sameCkbHash(ckbScriptHash(output["type"]), payload.code_hash)) {
+      throw new ApiError(409, "deployment_code_hash_mismatch", "live Cell type script hash does not match code_hash");
+    }
+  } else if (!sameCkbHash(payload.code_hash, payload.data_hash)) {
+    throw new ApiError(400, "deployment_code_hash_mismatch", "data hash deployments must use the executable data hash as code_hash");
+  }
+  return { block_hash: typeof result["block_hash"] === "string" ? result["block_hash"] : null };
 }
 
 async function handleReadiness(env: Env, deps: AppDeps, requestId: string, headers: Headers): Promise<Response> {
@@ -638,20 +879,27 @@ async function handleAdminPackageVersionStatus(
   const name = validatePackageIdent(nameFromPath, "name");
   const version = validateVersion(versionFromPath);
   const status = requireOneOf(
-    String(body["status"] ?? ""),
-    ["source_published", "indexed_pending", "deprecated", "yanked", "quarantined"],
-    "invalid_package_version_status",
+    String(body["availability_status"] ?? ""),
+    ["active", "deprecated", "yanked", "quarantined"],
+    "invalid_availability_status",
   );
   const reason = typeof body["reason"] === "string" && body["reason"].trim() !== "" ? body["reason"].trim() : undefined;
   const directUrl = staticPackageVersionUrl(staticOrigin, namespace, name, version);
   const existing = await store.getPackageVersion(namespace, name, version);
   if (!existing) {
-    throw new ApiError(404, "package_version_not_found", "package version is not known to the registry");
+    throw new ApiError(404, "artifact_release_not_found", "artifact release is not known to the registry");
   }
   const snapshot = await requireSnapshot(store, existing);
   const evidence = await store.listPackageEvidence(namespace, name, version);
   if (isSuppressivePackageVersionStatus(status)) {
-    await writeStaticRegistryVersionObject(env, deps, { ...existing, status, direct_url: directUrl }, snapshot, staticOrigin, evidence);
+    await writeStaticRegistryVersionObject(
+      env,
+      deps,
+      { ...existing, status: status === "active" ? existing.status : status, availability_status: status, direct_url: directUrl },
+      snapshot,
+      staticOrigin,
+      evidence,
+    );
   }
   const record = await store.updatePackageVersionStatus({
     namespace,
@@ -692,7 +940,7 @@ async function handleAdminPackageVersionPromotion(
   ) as PackageEvidenceKind;
   const existing = await store.getPackageVersion(namespace, name, version);
   if (!existing) {
-    throw new ApiError(404, "package_version_not_found", "package version is not known to the registry");
+    throw new ApiError(404, "artifact_release_not_found", "artifact release is not known to the registry");
   }
   const previousEvidence = await store.listPackageEvidence(namespace, name, version);
   const evidence = validatePromotionEvidence(body["evidence"], kind, existing, previousEvidence);
@@ -948,7 +1196,7 @@ async function handlePublishVersion(
     throw new ApiError(401, "capability_expired", "capability key has expired");
   }
   if (!scopeAllowsPublish(capability.scopes, payload.namespace, payload.name)) {
-    throw new ApiError(403, "capability_scope_denied", "capability scope does not allow this package publish");
+    throw new ApiError(403, "capability_scope_denied", "capability scope does not allow this artifact publish");
   }
   const namespace = await store.getNamespace(payload.namespace);
   if (!namespace) {
@@ -967,9 +1215,9 @@ async function handlePublishVersion(
     throw new ApiError(401, "capability_signature_invalid", "capability signature verification failed");
   }
   await throttle(store, requestId, `capability:${capability.key_id}`, "publish", 60, 60 * 60, now);
-  await throttle(store, requestId, `package:${payload.namespace}/${payload.name}`, "publish", 12, 60 * 60, now);
+  await throttle(store, requestId, `artifact:${payload.namespace}/${payload.name}`, "publish", 12, 60 * 60, now);
   if (await store.getPackageVersion(payload.namespace, payload.name, payload.version)) {
-    throw new ApiError(409, "package_version_exists", "package version already exists and cannot be overwritten");
+    throw new ApiError(409, "artifact_release_exists", "artifact release already exists and cannot be overwritten");
   }
   let idempotencyReserved = false;
   if (idempotencyKey) {
@@ -1015,15 +1263,20 @@ async function handlePublishVersion(
     };
     const directUrl = staticPackageVersionUrl(staticOrigin, payload.namespace, payload.name, payload.version);
     const publishedRegistryVersion = payload.registry_entry.versions[0];
+    const states = initialArtifactStates(payload.artifact);
     const versionInput = {
       namespace: payload.namespace,
       name: payload.name,
       version: payload.version,
       status: "source_published",
+      artifact: payload.artifact,
+      ...states,
       source_hash: payload.source_hash,
       manifest_hash: payload.manifest_hash,
-      edition: publishedRegistryVersion.edition,
-      compatibility_profile_hash: publishedRegistryVersion.compatibility_profile_hash,
+      ...(publishedRegistryVersion.edition ? { edition: publishedRegistryVersion.edition } : {}),
+      ...(publishedRegistryVersion.compatibility_profile_hash
+        ? { compatibility_profile_hash: publishedRegistryVersion.compatibility_profile_hash }
+        : {}),
       capability_key_id: capability.key_id,
       principal_type: capability.principal_type,
       principal_id: capability.principal_id,
@@ -1056,11 +1309,12 @@ async function handlePublishVersion(
       version: payload.version,
       ...(ipHash ? { ip_hash: ipHash } : {}),
       ...(userAgent ? { user_agent: userAgent } : {}),
-      data: { status: versionInput.status, snapshot_hash: snapshotRecord.snapshot_hash, direct_url: directUrl },
+      data: { artifact: payload.artifact, ...states, snapshot_hash: snapshotRecord.snapshot_hash, direct_url: directUrl },
     };
     const responseBody = {
       request_id: requestId,
-      status: versionInput.status,
+      artifact: payload.artifact,
+      ...states,
       direct_url: directUrl,
       snapshot_hash: snapshotRecord.snapshot_hash,
       verification: "queued",
@@ -1096,7 +1350,7 @@ async function handlePublishVersion(
 
 async function publishRequestHash(payload: unknown, signature: CapabilitySignature, snapshot: SourceSnapshotInput): Promise<string> {
   return sha256Hex(canonicalJson({
-    route: "publish_package_version",
+    route: "publish_artifact_release",
     payload,
     capability_signature: signature,
     source_snapshot: snapshot,
@@ -1245,22 +1499,25 @@ function staticRegistryVersionPayload(
 ): Record<string, unknown> {
   return {
     schema_version: REGISTRY_SCHEMA_VERSION,
-    kind: "cellscript.registry.package_version",
+    kind: "cellscript.registry.artifact_release",
     coordinate: `${version.namespace}/${version.name}@${version.version}`,
     namespace: version.namespace,
     name: version.name,
-    version: version.version,
-    status: version.status,
+    release: version.version,
+    artifact: version.artifact,
+    verification_status: version.verification_status,
+    deployment_status: version.deployment_status,
+    availability_status: version.availability_status,
     source_hash: version.source_hash,
     manifest_hash: version.manifest_hash,
-    edition: version.edition,
-    compatibility_profile_hash: version.compatibility_profile_hash,
+    ...(version.edition ? { edition: version.edition } : {}),
+    ...(version.compatibility_profile_hash ? { compatibility_profile_hash: version.compatibility_profile_hash } : {}),
     capability_key_id: version.capability_key_id,
     principal_type: version.principal_type,
     principal_id: version.principal_id,
     registry_entry: version.registry_entry,
     snapshot_hash: version.snapshot_hash,
-    source_snapshot: sourceSnapshotPayload(snapshot, staticOrigin),
+    immutable_bundle: sourceSnapshotPayload(snapshot, staticOrigin),
     direct_url: version.direct_url,
     created_at: version.created_at,
     evidence,
@@ -1297,7 +1554,7 @@ function snapshotForVersion(
 
 function sourceSnapshotPayload(snapshot: SnapshotRecord, staticOrigin: string): Record<string, unknown> {
   return {
-    schema: "cellscript-registry-source-snapshot-v1",
+    schema: "cellscript-registry-immutable-bundle",
     url: `${staticOrigin.replace(/\/+$/, "")}/${snapshot.r2_key}`,
     snapshot_hash: snapshot.snapshot_hash,
     source_hash: snapshot.source_hash,
@@ -1307,11 +1564,11 @@ function sourceSnapshotPayload(snapshot: SnapshotRecord, staticOrigin: string): 
 }
 
 function staticPackageVersionKey(namespace: string, name: string, version: string): string {
-  return `packages/${namespace}/${name}/versions/${version}.json`;
+  return `artifacts/${namespace}/${name}/releases/${version}.json`;
 }
 
 function staticPackageVersionUrl(staticOrigin: string, namespace: string, name: string, version: string): string {
-  return `${staticOrigin.replace(/\/+$/, "")}/packages/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/versions/${encodeURIComponent(version)}.json`;
+  return `${staticOrigin.replace(/\/+$/, "")}/artifacts/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/releases/${encodeURIComponent(version)}.json`;
 }
 
 async function writeSnapshot(
@@ -1654,22 +1911,6 @@ function publicListInteger(params: URLSearchParams, name: string, fallback: numb
   return parsed;
 }
 
-function publicRegistryStatus(value: string): PackageVersionRecord["status"] {
-  return requireOneOf(
-    value,
-    [
-      "source_published",
-      "indexed_pending",
-      "verified_build",
-      "deployed",
-      "on_chain_attested",
-      "deprecated",
-      "yanked",
-    ],
-    "invalid_registry_status",
-  ) as PackageVersionRecord["status"];
-}
-
 export function validatePromotionEvidence(
   value: unknown,
   kind: PackageEvidenceKind,
@@ -1677,8 +1918,8 @@ export function validatePromotionEvidence(
   previous: PackageEvidenceRecord[],
 ): Record<string, unknown> {
   const evidence = assertPlainObject(value, "invalid_promotion_evidence");
-  if (evidence["schema"] !== "cellscript-registry-evidence-v1") {
-    throw new ApiError(400, "invalid_evidence_schema", "evidence.schema must be cellscript-registry-evidence-v1");
+  if (evidence["schema"] !== "cellscript-registry-evidence") {
+    throw new ApiError(400, "invalid_evidence_schema", "evidence.schema must be cellscript-registry-evidence");
   }
   if (evidence["kind"] !== kind) {
     throw new ApiError(400, "evidence_kind_mismatch", "evidence.kind must match the requested promotion kind");
@@ -1690,12 +1931,18 @@ export function validatePromotionEvidence(
   }
   requireMatchingEvidenceHash(evidence, "source_hash", version.source_hash);
   requireMatchingEvidenceHash(evidence, "manifest_hash", version.manifest_hash);
-  requireMatchingEvidenceHash(evidence, "compatibility_profile_hash", version.compatibility_profile_hash);
+  if (version.compatibility_profile_hash) {
+    requireMatchingEvidenceHash(evidence, "compatibility_profile_hash", version.compatibility_profile_hash);
+  }
 
   if (kind === "verified_build") {
-    requireEvidenceHash(evidence, "artifact_hash");
+    const level = requireEvidenceString(evidence, "verification_level", 1, 80);
+    if (!(["compiled", "hash_bound", "evidence_required"] as const).includes(level as any)) {
+      throw new ApiError(400, "invalid_verification_level", "verification_level is not recognised");
+    }
+    if (version.artifact.profile !== "copy_material") requireEvidenceHash(evidence, "artifact_hash");
     requireEvidenceHash(evidence, "metadata_hash");
-    requireEvidenceString(evidence, "compiler_version", 1, 80);
+    if (version.artifact.profile === "cellscript_source") requireEvidenceString(evidence, "compiler_version", 1, 80);
   } else if (kind === "deployed") {
     const verified = latestEvidence(previous, "verified_build");
     requireEvidenceReference(evidence, "verified_build_evidence_hash", verified);
@@ -1704,7 +1951,9 @@ export function validatePromotionEvidence(
     if (!sameHash(artifactHash, verifiedArtifact)) {
       throw new ApiError(400, "deployment_artifact_mismatch", "deployed artifact_hash must match verified-build evidence");
     }
-    requireEvidenceString(evidence, "network", 1, 80);
+    if (requireEvidenceString(evidence, "network", 1, 80) !== "mainnet") {
+      throw new ApiError(400, "unsupported_deployment_network", "Registry deployment evidence is mainnet-only");
+    }
     requireEvidenceHash(evidence, "code_hash");
     requireEvidenceHash(evidence, "data_hash");
     const outPoint = assertPlainObject(evidence["out_point"], "invalid_deployment_out_point");

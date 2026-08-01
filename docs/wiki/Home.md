@@ -92,8 +92,8 @@ If you already know what you need, jump directly:
 11. [Scoped Invariants and ProofPlan](Tutorial-11-Scoped-Invariants-and-ProofPlan.md):
    inspect 0.15 invariant trigger/scope/read metadata and understand
    metadata-only ProofPlan gaps.
-12. [Phase 1 Registry: End-to-End](Tutorial-12-Phase1-Registry-End-to-End.md):
-   follow the registry package flow from init through verification.
+12. [Registry Artifacts: End-to-End](Tutorial-12-Phase1-Registry-End-to-End.md):
+   publish and inspect CellScript and non-CellScript artifacts.
 13. [Agentic Loops and cellscript-mcp](Tutorial-13-Agentic-Loops-and-cellscript-mcp.md):
    drive the read-oriented compiler surface from an automated writer in a
    write -> check -> explain -> fix loop.

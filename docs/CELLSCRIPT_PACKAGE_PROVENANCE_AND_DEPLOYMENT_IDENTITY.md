@@ -709,15 +709,13 @@ token = { version = "0.3.0", namespace = "cellscript" }
 Running `cellc build` triggers dependency resolution:
 
 1. Read `Cell.toml` `[dependencies]` → find `token` with `namespace = "cellscript"`.
-2. Query `https://api.registry.cellscript.dev/v1/packages/cellscript/token` and
-   select the latest version whose public status is eligible for ordinary
-   resolution.
-3. Read the accepted source repository, tag, source hash, Edition, and
-   compatibility-profile identity from that public record.
-4. Clone the source repo at the accepted tag (e.g., `v0.3.2`).
-5. Read `registry.json` from the cloned repo and require its package/version,
-   tag, source hash, Edition, and profile hash to match the accepted record.
-6. Verify the checked-out source tree against `source_hash`.
+2. Query `https://api.registry.cellscript.dev/v1/artifacts/cellscript/token`.
+3. Require the `cellscript_source` profile and `dependency` consumption mode,
+   then select an eligible verified release.
+4. Download its immutable source snapshot from the static Registry origin.
+5. Verify the snapshot object identity, package coordinate, file hashes,
+   Edition, compatibility-profile identity, and whole-tree source hash.
+6. Materialize the verified source into the dependency cache.
 7. Parse the dependency's `Cell.toml` → resolve transitive dependencies.
 8. Write `Cell.lock` with resolved versions and git provenance.
 
@@ -967,7 +965,7 @@ source → build → deployment, all bound by cryptographic hashes in
      Public Registry API        Source Repository
      (accepted status)          (github.com/cellscript/amm_pool)
      ┌─────────────────┐       ┌──────────────────────────────────┐
-     │ /v1/packages/   │       │ Cell.toml                        │
+     │ /v1/artifacts/  │       │ Cell.toml                        │
      │ cellscript/     │──────►│ registry.json   ← offline mirror │
      │ amm_pool        │       │ src/                             │
      └─────────────────┘       │ Cell.lock       ← cellc build    │

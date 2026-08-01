@@ -482,7 +482,7 @@ pub fn run(root: &Path) -> Result<()> {
         "tests/cli.rs",
         &[
             "cellc_rejects_registry_dependency_without_namespace",
-            "cellc_build_resolves_registry_dependency_and_writes_phase1_lockfile",
+            "cellc_build_resolves_artifact_api_dependency_and_writes_lockfile",
             "cellc_auth_namespace_claim_posts_signed_capability_payload_to_registry_api",
             "cellc_install_path_updates_lockfile_and_remove_prunes_it",
             "cellc_fmt_subcommand_formats_sources",
@@ -495,7 +495,7 @@ pub fn run(root: &Path) -> Result<()> {
         root,
         "tests/registry.rs",
         &[
-            "package_manager_resolves_registry_dependency_with_source_hash_from_local_git_fixture",
+            "package_manager_resolves_artifact_api_dependency_with_source_hash",
             "package_manager_persists_unverified_registry_policy_in_dependency_manifest",
             "package_manager_rejects_registry_source_hash_mismatch",
             "lockfile_consistency_accepts_matching_registry_source",
