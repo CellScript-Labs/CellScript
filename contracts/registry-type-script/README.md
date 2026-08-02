@@ -29,6 +29,14 @@ contracts/registry-type-script/build_reproducible_release.sh
 cargo test --locked --manifest-path contracts/registry-type-script/Cargo.toml
 ```
 
+The release build disables `ckb-std` default features and enables only its Rust
+allocator. Fixed-size data, Script, and lock-hash buffers call the official
+syscall layer directly; the contract does not carry the higher-level Molecule
+type graph. Consequently the canonical artifact does not depend on a host C
+compiler or the bundled `libc.c`; the pinned Rust toolchain plus
+`llvm-tools-preview` is the complete compiler toolchain used by this contract
+build.
+
 The test suite executes the stripped RISC-V binary in CKB-VM through
 `ckb-testtool`, covering authorized creation, replacement, destruction,
 unauthorized creation, incorrect custody Locks, malformed data, and

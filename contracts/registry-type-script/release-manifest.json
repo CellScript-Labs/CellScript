@@ -3,11 +3,11 @@
   "version": "0.22.0",
   "target": "riscv64imac-unknown-none-elf",
   "artifact": "cellscript-registry-type-script",
-  "artifact_bytes": 17832,
-  "sha256": "a17c2390a4e4d3ae96f768d9916a2ebc1c656f09630900c98c98aa6c07bdc3ef",
-  "ckb_data_hash": "0xdc36198561cf09b6084fdfb69b98f52613985f78c4834f4b2a8408ac6479c345",
+  "artifact_bytes": 3352,
+  "sha256": "0f48a8736360c121f6ae0f04ab4b0496834f6715d47e3284a0a07add609dede9",
+  "ckb_data_hash": "0x0dd596ade29e06e5bcc00f56abf36ecbe9afaa09f1b26a64436aa37854da622b",
   "script_template": {
-    "code_hash": "0xdc36198561cf09b6084fdfb69b98f52613985f78c4834f4b2a8408ac6479c345",
+    "code_hash": "0x0dd596ade29e06e5bcc00f56abf36ecbe9afaa09f1b26a64436aa37854da622b",
     "hash_type": "data1",
     "args_schema": "ckb_script_hash(custody_lock)",
     "args_bytes": 32

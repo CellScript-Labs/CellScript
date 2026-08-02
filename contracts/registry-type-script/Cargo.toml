@@ -17,7 +17,7 @@ required-features = ["ckb-script"]
 ckb-script = []
 
 [dependencies]
-ckb-std = "=1.1.0"
+ckb-std = { version = "=1.1.0", default-features = false, features = ["allocator"] }
 
 [dev-dependencies]
 ckb-testtool = "=1.1.1"

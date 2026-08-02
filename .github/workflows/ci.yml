@@ -64,9 +64,7 @@ jobs:
       - name: Install CI dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm ripgrep
-          clang --version
-          llvm-ar --version
+          sudo apt-get install -y ripgrep
           rg --version
 
       - name: Configure Git identity for local registry fixtures

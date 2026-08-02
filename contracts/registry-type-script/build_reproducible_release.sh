@@ -5,13 +5,6 @@ contract_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd "$contract_dir/../.." && pwd)"
 cargo_home_dir="${CARGO_HOME:-${HOME}/.cargo}"
 target_dir="${CARGO_TARGET_DIR:-$contract_dir/target}"
-clang="$($contract_dir/scripts/find_clang)"
-llvm_ar="$(dirname "$clang")/llvm-ar"
-if [[ ! -x "$llvm_ar" ]]; then
-    printf 'llvm-ar matching %s was not found\n' "$clang" >&2
-    exit 1
-fi
-
 rust_sysroot="$(rustc --print sysroot)"
 host_triple="$(rustc -vV | awk '/^host: / { print $2 }')"
 rust_objcopy="$rust_sysroot/lib/rustlib/$host_triple/bin/rust-objcopy"
@@ -32,8 +25,6 @@ env -u RUSTFLAGS \
     CARGO_ENCODED_RUSTFLAGS="$encoded_rustflags" \
     CARGO_INCREMENTAL=0 \
     CARGO_TARGET_DIR="$target_dir" \
-    TARGET_AR="$llvm_ar" \
-    TARGET_CC="$clang" \
     cargo build \
         --locked \
         --manifest-path "$contract_dir/Cargo.toml" \

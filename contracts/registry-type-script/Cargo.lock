@@ -476,7 +476,6 @@ checksum = "7defadecfc39d5a25cddf11d86308130d745262f8f006bd9f602e7c968596460"
 dependencies = [
  "buddy-alloc",
  "cc",
- "ckb-gen-types",
  "gcd",
  "int-enum",
 ]
