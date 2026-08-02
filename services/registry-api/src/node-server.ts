@@ -40,6 +40,18 @@ const env: Env = {
     ? { NAMESPACE_CLAIM_COOLDOWN_SECONDS: process.env["NAMESPACE_CLAIM_COOLDOWN_SECONDS"] }
     : {}),
   ...(process.env["CKB_MAINNET_RPC_URL"] ? { CKB_MAINNET_RPC_URL: process.env["CKB_MAINNET_RPC_URL"] } : {}),
+  ...(process.env["REGISTRY_TYPE_SCRIPT_JSON"]
+    ? { REGISTRY_TYPE_SCRIPT_JSON: process.env["REGISTRY_TYPE_SCRIPT_JSON"] }
+    : {}),
+  ...(process.env["REGISTRY_TYPE_SCRIPT_CELL_DEP_JSON"]
+    ? { REGISTRY_TYPE_SCRIPT_CELL_DEP_JSON: process.env["REGISTRY_TYPE_SCRIPT_CELL_DEP_JSON"] }
+    : {}),
+  ...(process.env["REGISTRY_ATTESTOR_LOCK_SCRIPT_JSON"]
+    ? { REGISTRY_ATTESTOR_LOCK_SCRIPT_JSON: process.env["REGISTRY_ATTESTOR_LOCK_SCRIPT_JSON"] }
+    : {}),
+  ...(process.env["CKB_REGISTRY_SCAN_MAX_CELLS"]
+    ? { CKB_REGISTRY_SCAN_MAX_CELLS: process.env["CKB_REGISTRY_SCAN_MAX_CELLS"] }
+    : {}),
 };
 
 const app = createApp({

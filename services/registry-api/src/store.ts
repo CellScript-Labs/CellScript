@@ -86,7 +86,7 @@ export interface ArtifactPackagePage {
   has_more: boolean;
 }
 
-export type PackageEvidenceKind = "verified_build" | "deployed" | "on_chain_attested";
+export type PackageEvidenceKind = "verified_build" | "reproduced_build" | "deployed" | "on_chain_attested";
 
 export interface PackageEvidenceRecord {
   namespace: string;
@@ -312,6 +312,15 @@ export interface RegistryStore {
     version: PackageVersionRecord;
     evidence: PackageEvidenceRecord;
   }>;
+  reconcilePackageVersionLifecycle(input: {
+    namespace: string;
+    name: string;
+    version: string;
+    status: "verified_build" | "deployed";
+    deployment_status: "deployed" | "chain_verified";
+    request_id: string;
+    reason: string;
+  }): Promise<PackageVersionRecord>;
   recordCapabilityUsage(input: {
     key_id: string;
     principal_type: PrincipalType;
@@ -768,7 +777,7 @@ export class MemoryRegistryStore implements RegistryStore {
     this.packageEvidence.set(evidenceKey, evidence);
     const versionRecord: PackageVersionRecord = {
       ...existing,
-      status: input.kind,
+      status: input.kind === "reproduced_build" ? "verified_build" : input.kind,
       verification_status: verificationStatusForAcceptedEvidence(existing.verification_status, input.kind, input.evidence),
       deployment_status: input.kind === "on_chain_attested"
         ? "chain_verified"
@@ -809,6 +818,9 @@ export class MemoryRegistryStore implements RegistryStore {
     if (!(existing.verification_status === "verified" || existing.verification_status === "hash_bound" || existing.verification_status === "evidence_required")) {
       throw new ApiError(409, "artifact_not_verified", "artifact verification must finish before recording a deployment");
     }
+    if (packageVersionRequiresReproduction(existing) && existing.verification_status !== "verified") {
+      throw new ApiError(409, "reproduction_evidence_missing", "reproducible artifacts require accepted independent reproduction evidence before deployment");
+    }
     const evidenceKey = `${versionKey}:${input.kind}:${input.evidence_hash}`;
     const evidence: PackageEvidenceRecord = this.packageEvidence.get(evidenceKey) ?? {
       namespace: input.namespace,
@@ -843,6 +855,40 @@ export class MemoryRegistryStore implements RegistryStore {
       await this.recordCapabilityUsage(input.capability_usage);
     }
     return { version: versionRecord, evidence };
+  }
+
+  async reconcilePackageVersionLifecycle(input: {
+    namespace: string;
+    name: string;
+    version: string;
+    status: "verified_build" | "deployed";
+    deployment_status: "deployed" | "chain_verified";
+    request_id: string;
+    reason: string;
+  }): Promise<PackageVersionRecord> {
+    const key = `${input.namespace}/${input.name}@${input.version}`;
+    const existing = this.packageVersions.get(key);
+    if (!existing) {
+      throw new ApiError(404, "artifact_release_not_found", "artifact release is not known to the registry");
+    }
+    const updated: PackageVersionRecord = {
+      ...existing,
+      status: existing.availability_status === "active" ? input.status : existing.status,
+      deployment_status: input.deployment_status,
+    };
+    this.packageVersions.set(key, updated);
+    await this.appendAuditEvent({
+      request_id: input.request_id,
+      event_type: "lifecycle.chain_state_reconciled",
+      principal_type: existing.principal_type,
+      principal_id: existing.principal_id,
+      capability_key_id: existing.capability_key_id,
+      namespace: input.namespace,
+      name: input.name,
+      version: input.version,
+      data: { status: input.status, deployment_status: input.deployment_status, reason: input.reason },
+    });
+    return updated;
   }
 
   async recordCapabilityUsage(input: {
@@ -1354,6 +1400,7 @@ export class MemoryRegistryStore implements RegistryStore {
 export function assertPromotionTransition(current: RegistryEntryStatus, next: PackageEvidenceKind): void {
   const allowed: Record<PackageEvidenceKind, RegistryEntryStatus[]> = {
     verified_build: ["source_published", "indexed_pending", "verified_build"],
+    reproduced_build: ["verified_build"],
     deployed: ["verified_build", "deployed"],
     on_chain_attested: ["deployed", "on_chain_attested"],
   };
@@ -1367,6 +1414,7 @@ function verificationStatusForAcceptedEvidence(
   kind: PackageEvidenceKind,
   evidence: Record<string, unknown>,
 ): VerificationStatus {
+  if (kind === "reproduced_build") return "verified";
   if (kind !== "verified_build") return current;
   switch (evidence["verification_level"]) {
     case "compiled":
@@ -1378,6 +1426,15 @@ function verificationStatusForAcceptedEvidence(
     default:
       throw new ApiError(500, "invalid_verification_level", "accepted build evidence has no recognised verification level");
   }
+}
+
+export function packageVersionRequiresReproduction(version: PackageVersionRecord): boolean {
+  if (version.artifact.profile === "reproducible_build") return true;
+  const release = version.registry_entry.versions.find((entry) => entry.version === version.version);
+  const contract = release?.profile_contract;
+  if (!contract || typeof contract !== "object" || Array.isArray(contract)) return false;
+  const build = (contract as Record<string, unknown>)["build"];
+  return Boolean(build && typeof build === "object" && !Array.isArray(build) && (build as Record<string, unknown>)["reproducible"] === true);
 }
 
 async function hashForMemory(value: unknown): Promise<string> {

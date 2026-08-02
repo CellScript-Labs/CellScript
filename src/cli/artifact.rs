@@ -78,6 +78,14 @@ pub enum ArtifactOperation {
         print_payload: bool,
         json: bool,
     },
+    ReproductionEvidence {
+        coordinate: String,
+        reports: Vec<PathBuf>,
+        output: PathBuf,
+        api_url: Option<String>,
+        force: bool,
+        json: bool,
+    },
     Commitment {
         coordinate: String,
         output: PathBuf,
@@ -131,6 +139,19 @@ struct TemplateFile {
     path: String,
     content_base64: String,
     blake2b256: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReproductionReport {
+    schema: String,
+    builder_id: String,
+    environment: String,
+    source_hash: String,
+    build_recipe_hash: String,
+    artifact_hash: String,
+    build_log_hash: String,
+    generated_at: String,
 }
 
 struct Coordinate {
@@ -328,6 +349,19 @@ pub fn execute(args: ArtifactArgs) -> Result<()> {
             print_payload,
             json,
         ),
+        ArtifactOperation::ReproductionEvidence { coordinate, reports, output, api_url, force, json } => {
+            let fetched = fetch(&coordinate, api_url.as_deref())?;
+            let verified = verify_fetched(&fetched)?;
+            let reports =
+                reports.iter().map(|path| read_json(path, "reproduction report")).collect::<Result<Vec<ReproductionReport>>>()?;
+            let promotion = build_reproduction_promotion(&fetched, &verified, reports)?;
+            write_json(&output, &promotion, force)?;
+            emit(
+                json,
+                json!({ "status": "reproduction_evidence_generated", "coordinate": coordinate, "output": output }),
+                format!("Generated independently reproduced build evidence at {}", output.display()),
+            )
+        }
         ArtifactOperation::Commitment { coordinate, output, api_url, force, json } => {
             let fetched = fetch(&coordinate, api_url.as_deref())?;
             verify_fetched(&fetched)?;
@@ -347,13 +381,17 @@ pub fn execute(args: ArtifactArgs) -> Result<()> {
             let canonical = canonical_json(&payload)?;
             let commitment_hash = format!("0x{}", hex::encode(crate::ckb_blake2b256(canonical.as_bytes())));
             let cell_data = format!("0x{}{}", hex::encode("CSREGv1"), commitment_hash.trim_start_matches("0x"));
+            let proof = fetch_commitment_proof(&fetched)?;
+            let transaction_intent = validate_commitment_proof(&proof, &payload, &commitment_hash, &cell_data)?;
             let commitment = json!({
-                "schema": "cellscript-registry-commitment-builder-v1",
+                "schema": "cellscript-registry-commitment-builder-v2",
                 "payload": payload,
                 "commitment_hash": commitment_hash,
                 "cell_data": cell_data,
-                "required_type_index": true,
                 "network": "mainnet",
+                "registry_type_hash": proof["registry_type_hash"],
+                "attestor_lock_hash": proof["attestor_lock_hash"],
+                "transaction_intent": transaction_intent,
             });
             write_json(&output, &commitment, force)?;
             emit(
@@ -363,6 +401,130 @@ pub fn execute(args: ArtifactArgs) -> Result<()> {
             )
         }
     }
+}
+
+fn fetch_commitment_proof(fetched: &FetchedArtifact) -> Result<Value> {
+    let url = format!(
+        "{}/v1/artifacts/{}/{}/releases/{}/commitment",
+        fetched.registry_origin.trim_end_matches('/'),
+        fetched.coordinate.namespace,
+        fetched.coordinate.name,
+        fetched.coordinate.release,
+    );
+    let response = super::commands::registry_http_client()?
+        .get(&url)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .header(reqwest::header::USER_AGENT, format!("cellc/{}", env!("CARGO_PKG_VERSION")))
+        .send()
+        .map_err(|err| error(format!("Registry commitment request '{url}' failed: {err}")))?;
+    if !response.status().is_success() {
+        return Err(error(format!("Registry commitment request '{url}' returned HTTP {}", response.status())));
+    }
+    let bytes = response.bytes().map_err(|err| error(format!("failed to read Registry commitment response: {err}")))?;
+    if bytes.is_empty() || bytes.len() > MAX_REGISTRY_RESPONSE_BYTES {
+        return Err(error("Registry commitment response is empty or exceeds 2 MiB"));
+    }
+    serde_json::from_slice(&bytes).map_err(|err| error(format!("Registry commitment response is invalid JSON: {err}")))
+}
+
+fn validate_commitment_proof(proof: &Value, payload: &Value, commitment_hash: &str, cell_data: &str) -> Result<Value> {
+    if proof.get("schema").and_then(Value::as_str) != Some("cellscript-registry-commitment-proof-v1") {
+        return Err(error("Registry commitment proof schema is not supported"));
+    }
+    require_ckb_hash(
+        string_field(proof, "commitment_hash", "Registry commitment proof")?,
+        commitment_hash,
+        "Registry commitment hash",
+    )?;
+    if string_field(proof, "cell_data", "Registry commitment proof")? != cell_data {
+        return Err(error("Registry commitment Cell data does not match the locally verified release"));
+    }
+    let remote_payload = proof.get("payload").ok_or_else(|| error("Registry commitment proof has no payload"))?;
+    if canonical_json(remote_payload)? != canonical_json(payload)? {
+        return Err(error("Registry commitment payload does not match the locally verified release"));
+    }
+    require_hash_shape(string_field(proof, "registry_type_hash", "Registry commitment proof")?, "registry_type_hash")?;
+    require_hash_shape(string_field(proof, "attestor_lock_hash", "Registry commitment proof")?, "attestor_lock_hash")?;
+    proof
+        .get("transaction_intent")
+        .filter(|value| value.is_object())
+        .cloned()
+        .ok_or_else(|| error("Registry commitment transaction construction is not configured by the service operator"))
+}
+
+fn build_reproduction_promotion(
+    fetched: &FetchedArtifact,
+    verified: &VerifiedBundle,
+    reports: Vec<ReproductionReport>,
+) -> Result<Value> {
+    if verified.profile_contract.pointer("/build/reproducible").and_then(Value::as_bool) != Some(true) {
+        return Err(error("artifact does not declare profile_contract.build.reproducible=true"));
+    }
+    let environment = verified
+        .profile_contract
+        .pointer("/reproduction/environment")
+        .and_then(Value::as_str)
+        .ok_or_else(|| error("reproducible artifact has no signed reproduction.environment"))?;
+    let release_identity = signed_release(&fetched.release)?;
+    let artifact_hash = map_string_field(release_identity, "artifact_hash", "signed release")?;
+    let build_recipe_hash = map_string_field(release_identity, "build_recipe_hash", "signed release")?;
+    let source_hash = string_field(&fetched.release, "source_hash", "Registry release")?;
+    let manifest_hash = string_field(&fetched.release, "manifest_hash", "Registry release")?;
+    let verified_build = fetched
+        .release
+        .get("evidence")
+        .and_then(Value::as_array)
+        .and_then(|items| items.iter().rev().find(|item| item.get("kind").and_then(Value::as_str) == Some("verified_build")))
+        .ok_or_else(|| error("Registry release has no accepted verified_build evidence to reproduce"))?;
+    let verified_build_hash = string_field(verified_build, "evidence_hash", "verified_build evidence")?;
+    let verified_build_body = object_field(verified_build, "evidence", "verified_build evidence")?;
+    require_ckb_hash(
+        map_string_field(verified_build_body, "artifact_hash", "verified_build evidence")?,
+        artifact_hash,
+        "verified_build artifact_hash",
+    )?;
+
+    if !(2..=16).contains(&reports.len()) {
+        return Err(error("reproduction evidence requires between 2 and 16 reports"));
+    }
+    let mut builders = BTreeSet::new();
+    for report in &reports {
+        if report.schema != "cellscript-reproduction-report-v1" {
+            return Err(error("reproduction report schema must be cellscript-reproduction-report-v1"));
+        }
+        if report.builder_id.trim().is_empty() || report.builder_id.len() > 200 || !builders.insert(report.builder_id.clone()) {
+            return Err(error("reproduction reports require distinct non-empty builder_id values"));
+        }
+        if report.environment != environment {
+            return Err(error("reproduction report environment does not match the signed profile contract"));
+        }
+        require_ckb_hash(&report.source_hash, source_hash, "reproduction report source_hash")?;
+        require_ckb_hash(&report.build_recipe_hash, build_recipe_hash, "reproduction report build_recipe_hash")?;
+        require_ckb_hash(&report.artifact_hash, artifact_hash, "reproduction report artifact_hash")?;
+        require_hash_shape(&report.build_log_hash, "reproduction report build_log_hash")?;
+        if report.generated_at.trim().is_empty() || report.generated_at.len() > 40 {
+            return Err(error("reproduction report generated_at must be a non-empty ISO timestamp"));
+        }
+    }
+    let mut evidence = json!({
+        "schema": "cellscript-registry-evidence",
+        "kind": "reproduced_build",
+        "producer": format!("cellc/{version}", version = env!("CARGO_PKG_VERSION")),
+        "generated_at": super::commands::current_utc_timestamp(),
+        "verification_status": "passed",
+        "verification_level": "reproduced",
+        "source_hash": source_hash,
+        "manifest_hash": manifest_hash,
+        "artifact_hash": artifact_hash,
+        "build_recipe_hash": build_recipe_hash,
+        "verified_build_evidence_hash": verified_build_hash,
+        "minimum_reproducers": 2,
+        "reproducers": reports,
+    });
+    if let Some(profile_hash) = fetched.release.get("compatibility_profile_hash").and_then(Value::as_str) {
+        evidence["compatibility_profile_hash"] = Value::String(profile_hash.to_string());
+    }
+    Ok(json!({ "kind": "reproduced_build", "evidence": evidence }))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1206,6 +1368,94 @@ mod tests {
         };
         let verified = verify_fetched(&fetched).unwrap();
         assert_eq!(verified.object_hashes.get("executable"), Some(&artifact_hash));
+    }
+
+    #[test]
+    fn reproduction_promotion_requires_independent_matching_reports() {
+        let source_hash = format!("0x{}", "11".repeat(32));
+        let artifact_hash = format!("0x{}", "22".repeat(32));
+        let recipe_hash = format!("0x{}", "33".repeat(32));
+        let environment = "docker.io/library/rust:1.97.1@sha256:0123456789abcdef";
+        let fetched = FetchedArtifact {
+            coordinate: parse_coordinate("demo/contract@1.0.0").unwrap(),
+            registry_origin: "https://registry.example".to_string(),
+            artifact: json!({ "kind": "deployable_contract", "profile": "ckb_executable" }),
+            release: json!({
+                "release": "1.0.0",
+                "source_hash": source_hash,
+                "manifest_hash": format!("0x{}", "44".repeat(32)),
+                "verification_status": "evidence_required",
+                "registry_entry": {
+                    "versions": [{
+                        "version": "1.0.0",
+                        "artifact_hash": artifact_hash,
+                        "build_recipe_hash": recipe_hash
+                    }]
+                },
+                "evidence": [{
+                    "kind": "verified_build",
+                    "evidence_hash": format!("sha256:{}", "55".repeat(32)),
+                    "evidence": { "artifact_hash": artifact_hash }
+                }]
+            }),
+            bundle_url: "https://registry.example/bundle".to_string(),
+            bundle: Vec::new(),
+        };
+        let verified = VerifiedBundle {
+            profile_contract: json!({
+                "build": { "reproducible": true },
+                "reproduction": { "environment": environment }
+            }),
+            source: Vec::new(),
+            object_hashes: BTreeMap::new(),
+        };
+        let report = |builder_id: &str| ReproductionReport {
+            schema: "cellscript-reproduction-report-v1".to_string(),
+            builder_id: builder_id.to_string(),
+            environment: environment.to_string(),
+            source_hash: source_hash.clone(),
+            build_recipe_hash: recipe_hash.clone(),
+            artifact_hash: artifact_hash.clone(),
+            build_log_hash: format!("0x{}", "66".repeat(32)),
+            generated_at: "2026-06-23T12:00:00Z".to_string(),
+        };
+
+        let promotion = build_reproduction_promotion(&fetched, &verified, vec![report("builder-a"), report("builder-b")]).unwrap();
+        assert_eq!(promotion["kind"], "reproduced_build");
+        assert_eq!(promotion["evidence"]["verification_level"], "reproduced");
+        assert_eq!(promotion["evidence"]["reproducers"].as_array().unwrap().len(), 2);
+        assert!(build_reproduction_promotion(&fetched, &verified, vec![report("builder-a"), report("builder-a")]).is_err());
+    }
+
+    #[test]
+    fn commitment_proof_binds_the_wallet_transaction_intent() {
+        let payload = json!({
+            "schema": "cellscript-registry-commitment-v1",
+            "namespace": "demo",
+            "name": "contract",
+            "release": "1.0.0"
+        });
+        let commitment_hash = format!("0x{}", "11".repeat(32));
+        let cell_data = format!("0x{}{}", hex::encode("CSREGv1"), commitment_hash.trim_start_matches("0x"));
+        let intent = json!({
+            "schema": "cellscript-registry-commitment-transaction-intent-v1",
+            "network": "mainnet",
+            "output": { "data": cell_data }
+        });
+        let proof = json!({
+            "schema": "cellscript-registry-commitment-proof-v1",
+            "payload": payload,
+            "commitment_hash": commitment_hash,
+            "cell_data": cell_data,
+            "registry_type_hash": format!("0x{}", "22".repeat(32)),
+            "attestor_lock_hash": format!("0x{}", "33".repeat(32)),
+            "transaction_intent": intent
+        });
+
+        assert_eq!(validate_commitment_proof(&proof, &payload, &commitment_hash, &cell_data).unwrap(), intent);
+        let mut mismatched = proof;
+        mismatched["cell_data"] = Value::String(format!("0x{}", "00".repeat(39)));
+        assert!(validate_commitment_proof(&mismatched, &payload, &commitment_hash, &cell_data).is_err());
     }
 
     #[test]

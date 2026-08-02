@@ -27,7 +27,14 @@ import {
   type DeploymentPayload,
   type PublishPayload,
 } from "../src/domain";
-import { MemoryRegistryStore, createApp, parseDepGroupOutPoints, type AppDeps, type SnapshotWriter } from "../src/index";
+import {
+  MemoryRegistryStore,
+  createApp,
+  parseDepGroupOutPoints,
+  registryCommitmentHash,
+  type AppDeps,
+  type SnapshotWriter,
+} from "../src/index";
 import type { PackageVersionRecord } from "../src/store";
 
 const now = new Date("2026-06-23T12:00:00Z");
@@ -269,6 +276,21 @@ async function ckbExecutablePublishPayload(keyId: string): Promise<PublishPayloa
   return payload;
 }
 
+function declareReproducibleBuild(payload: PublishPayload): void {
+  const release = payload.registry_entry.versions[0];
+  const contract = release.profile_contract!;
+  const recipeHash = `0x${"34".repeat(32)}`;
+  (contract["build"] as Record<string, unknown>)["reproducible"] = true;
+  contract["reproduction"] = {
+    environment: "docker.io/library/rust:1.97.1@sha256:0123456789abcdef",
+    command: "cargo build --locked --release",
+    recipe_hash: recipeHash,
+    expected_artifact_hash: release.artifact_hash,
+  };
+  release.build_recipe_hash = recipeHash;
+  payload.manifest_hash = ckbBlake2bHex(canonicalJson(contract));
+}
+
 describe("generic artifact profile contracts", () => {
   it("requires a typed profile contract for non-CellScript releases", async () => {
     const payload = await ckbExecutablePublishPayload("cap_test");
@@ -294,18 +316,7 @@ describe("generic artifact profile contracts", () => {
 
   it("allows a deployed CKB executable to bind a reproducible build recipe", async () => {
     const payload = await ckbExecutablePublishPayload("cap_test");
-    const release = payload.registry_entry.versions[0];
-    const contract = release.profile_contract!;
-    const recipeHash = `0x${"34".repeat(32)}`;
-    (contract["build"] as Record<string, unknown>)["reproducible"] = true;
-    contract["reproduction"] = {
-      environment: "docker.io/library/rust:1.97.1@sha256:0123456789abcdef",
-      command: "cargo build --locked --release",
-      recipe_hash: recipeHash,
-      expected_artifact_hash: release.artifact_hash,
-    };
-    release.build_recipe_hash = recipeHash;
-    payload.manifest_hash = ckbBlake2bHex(canonicalJson(contract));
+    declareReproducibleBuild(payload);
 
     expect(validatePublishPayload(payload, DEFAULT_REGISTRY_ORIGIN, now).artifact.profile).toBe("ckb_executable");
   });
@@ -452,6 +463,16 @@ describe("registry api", () => {
         admin_token: "configured",
         runtime: "ready",
       },
+    });
+
+    const partiallyConfigured = await get(readyApp, "/ready", {
+      REGISTRY_ADMIN_TOKEN: "secret",
+      REGISTRY_TYPE_SCRIPT_JSON: JSON.stringify({ code_hash: `0x${"11".repeat(32)}`, hash_type: "type", args: "0x" }),
+    });
+    expect(partiallyConfigured.status).toBe(503);
+    expect(await partiallyConfigured.json()).toMatchObject({
+      status: "not_ready",
+      checks: { registry_commitment: "misconfigured" },
     });
   });
 
@@ -1357,6 +1378,140 @@ describe("registry api", () => {
     expect(JSON.parse(utf8(staticWrites.at(-1)!.body)).immutable_bundle.url).toContain("/source-snapshots/cellscript/demo/1.2.3/");
   });
 
+  it("requires two independent reproduction reports before deploying a reproducible executable", async () => {
+    const { app, store } = testApp(undefined, undefined, {
+      verifyMainnetDeployment: async () => ({ block_hash: `0x${"60".repeat(32)}` }),
+    });
+    const payload = authPayload();
+    const capability = await (await post(app, "/v1/capabilities", {
+      payload,
+      joyid_signature: joyidSignature(payload),
+    })).json() as any;
+    store.namespaces.set("cellscript", {
+      namespace: "cellscript",
+      status: "active",
+      owner_principal_type: "joyid_ckb",
+      owner_principal_id: payload.principal_id,
+    });
+    const publish = await ckbExecutablePublishPayload(capability.key_id);
+    declareReproducibleBuild(publish);
+    expect((await post(app, "/v1/artifacts/cellscript/demo/releases", {
+      payload: publish,
+      capability_signature: { algorithm: "p256-sha256", signature: "sig" },
+      source_snapshot: {
+        content_base64: base64("reproducible artifact bundle"),
+        content_type: "application/vnd.cellscript.artifact-bundle+json",
+        size_bytes: "reproducible artifact bundle".length,
+        source_hash: publish.source_hash,
+      },
+    })).status).toBe(202);
+
+    const adminEnv = { REGISTRY_ADMIN_TOKEN: "secret" };
+    const adminHeaders = { authorization: "Bearer secret", "x-registry-admin-actor": "release-bot" };
+    const commonEvidence = {
+      schema: "cellscript-registry-evidence",
+      producer: "cellscript-release-gate/0.23.0",
+      generated_at: "2026-06-23T12:00:00Z",
+      verification_status: "passed",
+      source_hash: publish.source_hash,
+      manifest_hash: publish.manifest_hash,
+    };
+    const verifiedResponse = await post(
+      app,
+      "/v1/admin/artifacts/cellscript/demo/releases/1.2.3/promote",
+      {
+        kind: "verified_build",
+        evidence: {
+          ...commonEvidence,
+          kind: "verified_build",
+          verification_level: "evidence_required",
+          artifact_hash: `0x${"31".repeat(32)}`,
+          metadata_hash: `0x${"32".repeat(32)}`,
+        },
+      },
+      adminEnv,
+      adminHeaders,
+    );
+    expect(verifiedResponse.status).toBe(200);
+    const verified = await verifiedResponse.json() as any;
+    expect(store.packageVersions.get("cellscript/demo@1.2.3")?.verification_status).toBe("evidence_required");
+
+    const deploymentEvidence = (buildEvidenceHash: string) => ({
+      ...commonEvidence,
+      kind: "deployed",
+      verified_build_evidence_hash: buildEvidenceHash,
+      artifact_hash: `0x${"31".repeat(32)}`,
+      network: "mainnet",
+      code_hash: `0x${"31".repeat(32)}`,
+      data_hash: `0x${"31".repeat(32)}`,
+      hash_type: "data1",
+      dep_type: "code",
+      out_point: { tx_hash: `0x${"43".repeat(32)}`, index: 0 },
+      deployment_status: "live",
+    });
+    const prematureDeployment = await post(
+      app,
+      "/v1/admin/artifacts/cellscript/demo/releases/1.2.3/promote",
+      { kind: "deployed", evidence: deploymentEvidence(verified.evidence.evidence_hash) },
+      adminEnv,
+      adminHeaders,
+    );
+    expect(prematureDeployment.status).toBe(409);
+    expect((await prematureDeployment.json() as any).error.code).toBe("reproduction_evidence_missing");
+
+    const report = (builderId: string) => ({
+      schema: "cellscript-reproduction-report-v1",
+      builder_id: builderId,
+      environment: "docker.io/library/rust:1.97.1@sha256:0123456789abcdef",
+      source_hash: publish.source_hash,
+      build_recipe_hash: `0x${"34".repeat(32)}`,
+      artifact_hash: `0x${"31".repeat(32)}`,
+      build_log_hash: `0x${"71".repeat(32)}`,
+      generated_at: "2026-06-23T12:00:00Z",
+    });
+    const reproducedEvidence = {
+      ...commonEvidence,
+      kind: "reproduced_build",
+      verification_level: "reproduced",
+      verified_build_evidence_hash: verified.evidence.evidence_hash,
+      artifact_hash: `0x${"31".repeat(32)}`,
+      build_recipe_hash: `0x${"34".repeat(32)}`,
+      minimum_reproducers: 2,
+      reproducers: [report("builder-a"), report("builder-b")],
+    };
+    const duplicate = await post(
+      app,
+      "/v1/admin/artifacts/cellscript/demo/releases/1.2.3/promote",
+      { kind: "reproduced_build", evidence: { ...reproducedEvidence, reproducers: [report("builder-a"), report("builder-a")] } },
+      adminEnv,
+      adminHeaders,
+    );
+    expect(duplicate.status).toBe(400);
+    expect((await duplicate.json() as any).error.code).toBe("duplicate_reproducer");
+
+    const reproducedResponse = await post(
+      app,
+      "/v1/admin/artifacts/cellscript/demo/releases/1.2.3/promote",
+      { kind: "reproduced_build", evidence: reproducedEvidence },
+      adminEnv,
+      adminHeaders,
+    );
+    expect(reproducedResponse.status).toBe(200);
+    const reproduced = await reproducedResponse.json() as any;
+    expect(reproduced.status).toBe("verified_build");
+    expect(store.packageVersions.get("cellscript/demo@1.2.3")?.verification_status).toBe("verified");
+
+    const deployed = await post(
+      app,
+      "/v1/admin/artifacts/cellscript/demo/releases/1.2.3/promote",
+      { kind: "deployed", evidence: deploymentEvidence(reproduced.evidence.evidence_hash) },
+      adminEnv,
+      adminHeaders,
+    );
+    expect(deployed.status).toBe(200);
+    expect((await deployed.json() as any).status).toBe("deployed");
+  });
+
   it("paginates public discovery by package without splitting a package's releases", async () => {
     const { app, store } = testApp();
     const snapshotHash = `sha256:${"90".repeat(32)}`;
@@ -1901,6 +2056,137 @@ describe("registry api", () => {
       idempotency_keys_deleted: 1,
       quota_events_deleted: 1,
     });
+  });
+
+  it("indexes configured Registry commitment Cells and demotes spent attestations", async () => {
+    const typeScript = { code_hash: `0x${"71".repeat(32)}`, hash_type: "data1", args: "0x01" };
+    const attestorLock = { code_hash: `0x${"72".repeat(32)}`, hash_type: "type", args: "0x02" };
+    const typeCellDep = {
+      out_point: { tx_hash: `0x${"73".repeat(32)}`, index: "0x0" },
+      dep_type: "code",
+    };
+    let commitmentHash = `0x${"00".repeat(32)}`;
+    let commitmentLive = true;
+    const { app, store } = testApp(undefined, undefined, {
+      verifyMainnetDeployment: async () => ({ block_hash: `0x${"60".repeat(32)}` }),
+      listMainnetCommitmentCells: async (configuration) => {
+        expect(configuration.type_script_hash).toBe(ckbScriptHash(typeScript));
+        expect(configuration.attestor_lock_hash).toBe(ckbScriptHash(attestorLock));
+        return commitmentLive
+          ? [{
+              commitment_hash: commitmentHash,
+              out_point: { tx_hash: `0x${"74".repeat(32)}`, index: 1 },
+              block_number: "0x1234",
+              output: { lock: attestorLock, type: typeScript },
+            }]
+          : [];
+      },
+    });
+    const owner = authPayload();
+    const capability = await (await post(app, "/v1/capabilities", {
+      payload: owner,
+      joyid_signature: joyidSignature(owner),
+    })).json() as any;
+    store.namespaces.set("cellscript", {
+      namespace: "cellscript",
+      status: "active",
+      owner_principal_type: "joyid_ckb",
+      owner_principal_id: owner.principal_id,
+    });
+    const publish = await ckbExecutablePublishPayload(capability.key_id);
+    expect((await post(app, "/v1/artifacts/cellscript/demo/releases", {
+      payload: publish,
+      capability_signature: { algorithm: "p256-sha256", signature: "sig" },
+      source_snapshot: {
+        content_base64: base64("commitment artifact bundle"),
+        content_type: "application/vnd.cellscript.artifact-bundle+json",
+        size_bytes: "commitment artifact bundle".length,
+        source_hash: publish.source_hash,
+      },
+    })).status).toBe(202);
+    const adminEnv = { REGISTRY_ADMIN_TOKEN: "secret" };
+    const adminHeaders = { authorization: "Bearer secret", "x-registry-admin-actor": "release-bot" };
+    const commonEvidence = {
+      schema: "cellscript-registry-evidence",
+      producer: "cellscript-release-gate/0.23.0",
+      generated_at: "2026-06-23T12:00:00Z",
+      verification_status: "passed",
+      source_hash: publish.source_hash,
+      manifest_hash: publish.manifest_hash,
+    };
+    const verified = await (await post(
+      app,
+      "/v1/admin/artifacts/cellscript/demo/releases/1.2.3/promote",
+      {
+        kind: "verified_build",
+        evidence: {
+          ...commonEvidence,
+          kind: "verified_build",
+          verification_level: "hash_bound",
+          artifact_hash: `0x${"31".repeat(32)}`,
+          metadata_hash: `0x${"32".repeat(32)}`,
+        },
+      },
+      adminEnv,
+      adminHeaders,
+    )).json() as any;
+    const deployed = await (await post(
+      app,
+      "/v1/admin/artifacts/cellscript/demo/releases/1.2.3/promote",
+      {
+        kind: "deployed",
+        evidence: {
+          ...commonEvidence,
+          kind: "deployed",
+          verified_build_evidence_hash: verified.evidence.evidence_hash,
+          artifact_hash: `0x${"31".repeat(32)}`,
+          network: "mainnet",
+          code_hash: `0x${"31".repeat(32)}`,
+          data_hash: `0x${"31".repeat(32)}`,
+          hash_type: "data1",
+          dep_type: "code",
+          out_point: { tx_hash: `0x${"43".repeat(32)}`, index: 0 },
+          deployment_status: "live",
+        },
+      },
+      adminEnv,
+      adminHeaders,
+    )).json() as any;
+    const version = store.packageVersions.get("cellscript/demo@1.2.3")!;
+    commitmentHash = registryCommitmentHash(version, deployed.evidence.evidence_hash);
+    const scheduledEnv = {
+      REGISTRY_TYPE_SCRIPT_JSON: JSON.stringify(typeScript),
+      REGISTRY_TYPE_SCRIPT_CELL_DEP_JSON: JSON.stringify(typeCellDep),
+      REGISTRY_ATTESTOR_LOCK_SCRIPT_JSON: JSON.stringify(attestorLock),
+    };
+
+    await app.scheduled(
+      { scheduledTime: now.getTime(), cron: "*/15 * * * *" } as ScheduledController,
+      scheduledEnv,
+    );
+    expect(store.packageVersions.get("cellscript/demo@1.2.3")?.status).toBe("on_chain_attested");
+    const commitmentProof = await (await get(
+      app,
+      "/v1/artifacts/cellscript/demo/releases/1.2.3/commitment",
+      scheduledEnv,
+    )).json() as any;
+    expect(commitmentProof.status).toBe("on_chain_attested");
+    expect(commitmentProof.transaction_intent.output.type).toEqual(typeScript);
+    expect(commitmentProof.transaction_intent.required_cell_deps).toEqual([typeCellDep]);
+
+    commitmentLive = false;
+    await app.scheduled(
+      { scheduledTime: now.getTime(), cron: "*/15 * * * *" } as ScheduledController,
+      scheduledEnv,
+    );
+    expect(store.packageVersions.get("cellscript/demo@1.2.3")?.status).toBe("deployed");
+    const reconciledProof = await (await get(
+      app,
+      "/v1/artifacts/cellscript/demo/releases/1.2.3/commitment",
+      scheduledEnv,
+    )).json() as any;
+    expect(reconciledProof.status).toBe("commitment_ready");
+    expect(store.auditEvents.some((event) => event.event_type === "lifecycle.chain_state_reconciled")).toBe(true);
   });
 
   it("revokes a capability with JoyID and blocks later publish", async () => {

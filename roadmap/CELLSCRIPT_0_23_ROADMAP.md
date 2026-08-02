@@ -144,18 +144,21 @@ Source documents:
 
 ## Pillar 1: Public Registry Production Deployment
 
-**Status (2026-08-01): production infrastructure, public reads, website, CLI
+**Status (2026-08-02): production infrastructure, public reads, website, CLI
 resolution, evidence promotion, and the bounded automatic source/build
-verification pipeline are implemented and deployed. The live worker completed
-the full publish-to-install production smoke, and the migrated database/object
-state has a checksum-verified backup. The first
-publisher-owned positive JoyID publication and clean-machine install remain the
-final adoption checkpoint.**
+verification pipeline are implemented and deployed. The generalized artifact,
+independent reproduction, mainnet deployment, and configured chain-commitment
+paths are implemented in-tree. Production chain attestation is not active until
+the canonical Registry Type Script, its CellDep, and the attestor Lock are
+deployed and configured. A publisher-owned wallet publication, a real
+non-CellScript mainnet artifact, and clean-machine consumption remain adoption
+checkpoints.**
 
 The registry is the largest 0.23 feature. The write API
 (`services/registry-api`) implements the boundary described in
 [`docs/CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md`](../docs/CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md):
-JoyID-rooted capability authorisation, scoped capability keys, namespace claim
+wallet-rooted JoyID or CKB secp256k1 capability authorisation, scoped capability
+keys, namespace claim
 cooldown, content-addressed source snapshots, Postgres state, a separate static
 `/packages/*` read path, idempotent publish, admin-gated suppressive
 transitions, and evidence-gated assurance promotion.
@@ -198,7 +201,7 @@ alternative deployment, not a claim about the current topology.
 - [x] Wire the Astro Registry list and dynamic detail pages to the live API,
   remove Coming Soon, and label the checked-in fixture strictly as a read-only
   mirror used only when the API is unavailable.
-- [x] Keep the CCC/JoyID submit page on the same canonical
+- [x] Keep the CCC wallet submit page on the same canonical
   `cellscript-registry-auth-v1` capability protocol.
 - [x] Expose namespace ownership as an explicit first-publish step through
   `cellc auth namespace claim` and the submit page, matching the deployed
@@ -213,8 +216,21 @@ alternative deployment, not a claim about the current topology.
 - [x] Keep unverified versions available by direct URL and explicit status
   query, while limiting the default public list/search and resolver to
   `verified_build`, `deployed`, and `on_chain_attested`.
-- [ ] Complete a publisher-owned JoyID capability, namespace claim, publication,
-  replay, revocation, and first clean-machine install against production.
+- [x] Separate CellScript dependencies, deployable CKB executables, runtime
+  verifiers, reproducible binaries, and copy-only templates with closed
+  artifact/profile/language/consumption contracts across API, CLI, verifier,
+  website, and immutable bundles.
+- [x] Require independent `reproduced_build` reports before a reproducible
+  artifact can become verified or acquire deployment evidence.
+- [x] Generate wallet-ready Registry commitment intents, scan exact configured
+  Type Script matches, and reconcile spent attestations or stale deployments
+  without deleting historical evidence.
+- [ ] Deploy and configure the canonical mainnet Registry Type Script, CellDep,
+  and attestor Lock; then publish and attest the first real non-CellScript
+  mainnet artifact.
+- [ ] Complete a publisher-owned wallet capability, namespace claim,
+  publication, replay, revocation, and first clean-machine install against
+  production.
 
 ### CLI Alignment
 
@@ -222,8 +238,8 @@ alternative deployment, not a claim about the current topology.
   keeping `--offline` and the Git/`registry.json` path as explicit audit and
   fallback modes.
 - Verify `cellc auth capability create/submit/revoke` against the deployed
-  write service end to end, including the JoyID signature verification, capability
-  key persistence in the OS keychain, and CI signing via
+  write service end to end, including JoyID and CKB secp256k1 signature
+  verification, capability-key persistence in the OS keychain, and CI signing via
   `CELLSCRIPT_CAPABILITY_PRIVATE_KEY_PKCS8_B64`.
 - Confirm idempotency (`Idempotency-Key`, `x-idempotency-status: replayed`),
   request-owned nonce release on pre-admission failure, transactional admission,
@@ -237,9 +253,10 @@ alternative deployment, not a claim about the current topology.
 
 ### Acceptance Boundary
 
-Production-readiness evidence currently proves:
+Production-readiness evidence for the already deployed source-package slice
+currently proves:
 
-- all API type checks and 26 admission/state-machine tests pass;
+- all API type checks and 42 admission/state-machine tests pass locally;
 - the independent Rust verifier compiles a generated snapshot with the real
   compiler and rejects source, manifest, and compatibility-profile drift;
 - an isolated production Compose topology completed a real `cellc publish` from
@@ -272,10 +289,13 @@ Production-readiness evidence currently proves:
   production; this proves deployment mechanics but is not publisher-owned
   JoyID evidence.
 
-The remaining release checkpoint is intentionally narrower but real: complete
-the positive publisher-owned JoyID flow and install its first accepted source
-package on a clean machine. Unit-test signatures or direct database seeding do
-not satisfy that checkpoint.
+The remaining deployment checkpoints are intentionally concrete: complete a
+positive publisher-owned wallet flow and install its first accepted source
+package on a clean machine; then deploy/configure the canonical Registry
+Scripts and exercise reproduction, deployment, commitment, index discovery,
+and lifecycle demotion with a real mainnet non-CellScript artifact. Unit-test
+signatures, transaction intents, or direct database seeding do not satisfy
+those checkpoints.
 
 The existing `services/registry-api` typecheck, unit suite, Node API/verifier
 builds, dry-run Worker build, and the independent Rust verifier tests/clippy run
@@ -286,12 +306,15 @@ runtime or the optional Cloudflare/R2/Hyperdrive/Neon adapter.
 
 ### Non-Goals
 
-- No on-chain deployment record submission in the first slice. On-chain
-  attestation uses the same identity model but is feature-gated and must not
-  be mixed into the first write API.
+- No claim that a transaction intent is an on-chain attestation. Only a live
+  mainnet Cell using the configured Registry Type Script and attestor Lock can
+  produce current `on_chain_attested` state.
+- No Registry ownership of application business Cells. The Registry identifies
+  code, build, TCB, deployment, and commitment evidence; application state Cells
+  remain under their own Lock/Type Scripts and transaction protocols.
 - No bond or refundable deposit mechanism; the schema leaves `policy_hooks`
   and `bond_policy_hooks` for later.
-- No non-`joyid_ckb` publisher principals.
+- No testnet Registry authorisation, deployment, or commitment state.
 - No D1 as primary database.
 
 Source documents:
@@ -554,11 +577,17 @@ work streams. Suggested ordering for *release-blocking* slices:
 ## Risk Register
 
 - **Registry publisher adoption**. The self-hosted production stack and public
-  read surfaces are live, but the first publisher-owned JoyID package has not
+  read surfaces are live, but the first publisher-owned wallet package has not
   completed the positive publication/install loop. Mitigation: keep
   source-published entries out of default resolution, require the existing
   evidence chain, and do not replace the final interactive checkpoint with
   seeded database state.
+- **Registry chain activation**. Transaction intent, Script-indexed discovery,
+  and lifecycle reconciliation are implemented, but no public attestation may
+  be claimed until the canonical mainnet Registry Type Script, CellDep, and
+  attestor Lock are deployed and pinned. Mitigation: leave all three settings
+  absent, fail readiness on partial configuration, and require a real live-Cell
+  drill before marking the checkpoint complete.
 - **Native tooling serialization drift**. A subtle difference in
   evidence-report formatting breaks historical comparisons. Mitigation:
   byte-identical output requirements, stable schemas, and regression vectors.

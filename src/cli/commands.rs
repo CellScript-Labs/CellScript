@@ -13601,6 +13601,22 @@ impl CliParser {
                             .arg(Arg::new("print-payload").long("print-payload").action(ArgAction::SetTrue)),
                     )
                     .subcommand(
+                        ClapCommand::new("reproduction-evidence")
+                            .about("Validate independent reproduction reports and generate an admin promotion request")
+                            .arg(Arg::new("coordinate").value_name("NAMESPACE/NAME@RELEASE").required(true))
+                            .arg(
+                                Arg::new("report")
+                                    .long("report")
+                                    .value_name("FILE")
+                                    .action(ArgAction::Append)
+                                    .required(true)
+                                    .help("Independent cellscript-reproduction-report-v1 JSON; pass once per builder"),
+                            )
+                            .arg(Arg::new("output").long("output").short('o').value_name("FILE").required(true))
+                            .arg(Arg::new("api-url").long("api-url").value_name("URL"))
+                            .arg(Arg::new("force").long("force").action(ArgAction::SetTrue)),
+                    )
+                    .subcommand(
                         ClapCommand::new("commitment")
                             .about("Generate the canonical mainnet Registry commitment payload and Cell data")
                             .arg(Arg::new("coordinate").value_name("NAMESPACE/NAME@RELEASE").required(true))
@@ -14584,6 +14600,18 @@ impl CliParser {
                         capability_signature: action.get_one::<String>("capability-signature").cloned(),
                         api_url: action.get_one::<String>("api-url").cloned(),
                         print_payload: action.get_flag("print-payload"),
+                        json: json_output(action),
+                    },
+                    Some(("reproduction-evidence", action)) => ArtifactOperation::ReproductionEvidence {
+                        coordinate: action.get_one::<String>("coordinate").cloned().expect("required coordinate"),
+                        reports: action
+                            .get_many::<String>("report")
+                            .expect("required reproduction reports")
+                            .map(PathBuf::from)
+                            .collect(),
+                        output: action.get_one::<String>("output").map(PathBuf::from).expect("required output"),
+                        api_url: action.get_one::<String>("api-url").cloned(),
+                        force: action.get_flag("force"),
                         json: json_output(action),
                     },
                     Some(("commitment", action)) => ArtifactOperation::Commitment {

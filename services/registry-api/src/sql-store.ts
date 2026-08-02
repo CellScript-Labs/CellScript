@@ -1,6 +1,7 @@
 import { Client } from "pg";
 import {
   assertPromotionTransition,
+  packageVersionRequiresReproduction,
   type AuditEventInput,
   type AuditEventRecord,
   type CapabilityRecord,
@@ -811,8 +812,9 @@ export class SqlRegistryStore implements RegistryStore {
         );
         const updated = await client.query(
           `update package_versions
-           set status = $4,
+           set status = case when $4 = 'reproduced_build' then 'verified_build' else $4 end,
                verification_status = case
+                 when $4 = 'reproduced_build' then 'verified'
                  when $4 = 'verified_build' and $5 = 'compiled' then 'verified'
                  when $4 = 'verified_build' and $5 = 'hash_bound' then 'hash_bound'
                  when $4 = 'verified_build' and $5 = 'evidence_required' then 'evidence_required'
@@ -824,7 +826,7 @@ export class SqlRegistryStore implements RegistryStore {
                  else deployment_status
                end,
                indexed_at = coalesce(indexed_at, now()),
-               verified_at = case when $4 in ('verified_build', 'deployed', 'on_chain_attested') then coalesce(verified_at, now()) else verified_at end
+               verified_at = case when $4 in ('verified_build', 'reproduced_build', 'deployed', 'on_chain_attested') then coalesce(verified_at, now()) else verified_at end
            where namespace = $1 and name = $2 and version = $3
            returning namespace, name, version, status, artifact, verification_status, deployment_status, availability_status,
                      source_hash, manifest_hash,
@@ -919,6 +921,9 @@ export class SqlRegistryStore implements RegistryStore {
         if (!(current.verification_status === "verified" || current.verification_status === "hash_bound" || current.verification_status === "evidence_required")) {
           throw new ApiError(409, "artifact_not_verified", "artifact verification must finish before recording a deployment");
         }
+        if (packageVersionRequiresReproduction(current) && current.verification_status !== "verified") {
+          throw new ApiError(409, "reproduction_evidence_missing", "reproducible artifacts require accepted independent reproduction evidence before deployment");
+        }
         await client.query(
           `insert into package_version_evidence(
              namespace, name, version, kind, evidence_hash, evidence, request_id, admin_actor
@@ -983,6 +988,58 @@ export class SqlRegistryStore implements RegistryStore {
           version: packageVersionFromRow(updated.rows[0]),
           evidence: packageEvidenceFromRow(evidenceResult.rows[0]),
         };
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      }
+    });
+  }
+
+  async reconcilePackageVersionLifecycle(input: {
+    namespace: string;
+    name: string;
+    version: string;
+    status: "verified_build" | "deployed";
+    deployment_status: "deployed" | "chain_verified";
+    request_id: string;
+    reason: string;
+  }): Promise<PackageVersionRecord> {
+    return this.withClient(async (client) => {
+      await client.query("begin");
+      try {
+        const updated = await client.query(
+          `update package_versions
+           set status = case when availability_status = 'active' then $4 else status end,
+               deployment_status = $5
+           where namespace = $1 and name = $2 and version = $3
+           returning namespace, name, version, status, artifact, verification_status, deployment_status, availability_status,
+                     source_hash, manifest_hash, edition, compatibility_profile_hash,
+                     capability_key_id, principal_type, principal_id, registry_entry,
+                     snapshot_hash, direct_url, created_at`,
+          [input.namespace, input.name, input.version, input.status, input.deployment_status],
+        );
+        const record = updated.rows[0];
+        if (!record) {
+          throw new ApiError(404, "artifact_release_not_found", "artifact release is not known to the registry");
+        }
+        await client.query(
+          `insert into audit_events(
+             request_id, event_type, principal_type, principal_id, capability_key_id,
+             namespace, name, version, data
+           ) values ($1, 'lifecycle.chain_state_reconciled', $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+          [
+            input.request_id,
+            record.principal_type,
+            record.principal_id,
+            record.capability_key_id,
+            input.namespace,
+            input.name,
+            input.version,
+            JSON.stringify({ status: input.status, deployment_status: input.deployment_status, reason: input.reason }),
+          ],
+        );
+        await client.query("commit");
+        return packageVersionFromRow(record);
       } catch (error) {
         await client.query("rollback");
         throw error;

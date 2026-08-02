@@ -19,6 +19,11 @@ JOYID_SERVER_URL = "https://api.joy.id/api/v1"
 MAX_JSON_BODY_BYTES = "6291456"
 CLEANUP_QUOTA_EVENT_RETENTION_HOURS = "48"
 NAMESPACE_CLAIM_COOLDOWN_SECONDS = "3600"
+CKB_REGISTRY_SCAN_MAX_CELLS = "1000"
+# Enable only after the canonical mainnet Registry Type Script is deployed.
+# REGISTRY_TYPE_SCRIPT_JSON = '{"code_hash":"0x...","hash_type":"type","args":"0x..."}'
+# REGISTRY_TYPE_SCRIPT_CELL_DEP_JSON = '{"out_point":{"tx_hash":"0x...","index":"0x0"},"dep_type":"code"}'
+# REGISTRY_ATTESTOR_LOCK_SCRIPT_JSON = '{"code_hash":"0x...","hash_type":"type","args":"0x..."}'
 
 [[r2_buckets]]
 binding = "REGISTRY_OBJECTS"

@@ -4,6 +4,13 @@
 admission, verification, discovery, deployment-evidence, CLI, and website
 surfaces described here are checked in on the current release line.
 
+The source-package production slice is deployed. Generic artifact,
+reproduction, deployment, and chain-index code is implemented, but a public
+`on_chain_attested` claim additionally requires operators to deploy and pin the
+canonical mainnet Registry Type Script, its CellDep, and the attestor Lock.
+Until all three identities are configured, commitment construction fails
+closed and scheduled chain reconciliation remains disabled.
+
 The Registry indexes CKB ecosystem artifacts. A coordinate is
 `namespace/name`; a release adds an immutable version. The coordinate does not
 imply that the object is a CellScript dependency, executable, deployed Script,
@@ -59,6 +66,10 @@ These states must not be collapsed into one lifecycle label. A reproducible
 binary may be verified but have no deployment concept. A CKB executable may be
 verified and still undeployed. A previously chain-verified release may later be
 deprecated without rewriting its evidence.
+
+`on_chain_attested` is a current-state claim, not a permanent badge. Scheduled
+maintenance returns a spent commitment to `deployed` and a stale deployment to
+`verified_build`, while retaining every accepted evidence record for audit.
 
 ## Artifact Identity
 
@@ -209,6 +220,40 @@ reproducible build is marked `evidence_required` until
 appropriate build evidence exists; merely uploading output bytes does not prove
 reproducibility.
 
+## Accepting Reproduction Evidence
+
+The Registry never executes an arbitrary publisher build recipe in its API
+process. Independent builders execute the signed recipe in the declared
+environment and emit bounded reports:
+
+```json
+{
+  "schema": "cellscript-reproduction-report-v1",
+  "builder_id": "builder-a",
+  "environment": "<exact signed environment>",
+  "source_hash": "<CKB Blake2b-256>",
+  "build_recipe_hash": "<CKB Blake2b-256>",
+  "artifact_hash": "<CKB Blake2b-256>",
+  "build_log_hash": "<CKB Blake2b-256>",
+  "generated_at": "2026-08-02T00:00:00Z"
+}
+```
+
+Create the operator promotion payload locally:
+
+```bash
+cellc artifact reproduction-evidence acme/vault-lock@1.0.0 \
+  --report reports/builder-a.json \
+  --report reports/builder-b.json \
+  --output reproduced-build-promotion.json
+```
+
+The CLI and API require two to sixteen distinct builder IDs and exact matches
+for the signed environment, source, recipe, and executable. The promotion also
+references the accepted `verified_build` evidence. A reproducible artifact
+stays `evidence_required`, and deployment admission fails, until
+`reproduced_build` evidence is accepted.
+
 ## Consuming Other Artifacts
 
 Generic artifacts never pass through `cellc install`. Use the explicit
@@ -219,6 +264,7 @@ cellc artifact fetch acme/vault-lock@1.0.0 --output vault-lock.bundle.json
 cellc artifact verify --bundle vault-lock.bundle.json --receipt vault-lock.bundle.json.receipt.json
 cellc artifact pin acme/vault-lock@1.0.0 --output Artifacts.lock --accept-hash-bound
 cellc artifact copy acme/starter@1.0.0 --destination ./new-project --accept-hash-bound
+cellc artifact reproduction-evidence acme/vault-lock@1.0.0 --report builder-a.json --report builder-b.json --output reproduced-build-promotion.json
 cellc artifact record-deployment acme/vault-lock@1.0.0 --code-hash <hash> --hash-type data1 --dep-type code --tx-hash <tx_hash> --index 0 --capability-key-id <key_id>
 cellc artifact cell-dep acme/vault-lock@1.0.0 --output CellDep.json --accept-hash-bound --rpc-url https://mainnet.ckb.dev/rpc
 cellc artifact set-availability acme/vault-lock@1.0.0 --status yanked --reason "security advisory" --capability-key-id <key_id>
@@ -246,11 +292,22 @@ It signs a short-lived, nonce-protected capability payload; publishers may set
 `active`, `deprecated`, or `yanked`, while administrative quarantine remains a
 separate privileged action.
 
-`commitment` produces the canonical `cellscript-registry-commitment-v1`
-payload, CKB Blake2b commitment, and compact `CSREGv1 || hash` Cell data. The
-Registry accepts an on-chain attestation only after reading that live mainnet
-Cell and matching its exact data, attestor Lock hash, and Registry Type Script
-hash used for chain indexing.
+`commitment` verifies the Registry response against the locally fetched signed
+release, then writes the canonical `cellscript-registry-commitment-v1` payload,
+CKB Blake2b commitment, compact `CSREGv1 || hash` Cell data, fixed Registry
+Type/Lock hashes, and a wallet-ready mainnet transaction intent. The wallet,
+not the Registry or CLI, completes capacity, inputs, change, fee, witnesses,
+signatures, and broadcast.
+
+The Registry accepts an on-chain attestation only after reading the live
+mainnet Cell and matching its exact data, configured attestor Lock, and
+configured Registry Type Script. Scheduled maintenance uses an exact Type
+Script indexer query plus the `CSREGv1` prefix to discover commitments and
+reconcile their live lifecycle.
+
+This contract indexes code/artifact evidence; it does not take ownership of
+application business Cells. Business state remains governed by the
+application's own Lock/Type Scripts, schemas, and replacement transactions.
 
 ## Publisher Authorisation
 
@@ -311,6 +368,8 @@ that every artifact is installable.
   only between characters.
 - A source dependency resolver rejects every non-CellScript profile.
 - A CKB deployment requires prior verified-build evidence.
+- A reproducible CKB deployment additionally requires accepted
+  `reproduced_build` evidence.
 - Deployment evidence must match the published executable hash and a live
   mainnet Cell.
 - Quarantined releases are not returned by public detail or evidence routes.
@@ -319,6 +378,8 @@ that every artifact is installable.
   other mirror failures are audited and retried by verification sync, so an
   uncommitted release or deployment is never advertised as current.
 - State transitions append evidence; they do not mutate hash identity.
+- An unconfigured or partially configured Registry Type/Lock Script set cannot
+  produce a wallet transaction intent or current attestation.
 
 ## Validation
 

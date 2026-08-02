@@ -130,7 +130,45 @@ After the independent verifier binds the source, executable, ABI, and profile
 contract hashes, verification becomes `hash_bound`. That is an integrity claim,
 not a claim about Script semantics, security review, or deployment.
 
-## 4. Record a mainnet deployment
+## 4. Prove a reproducible build
+
+Skip this step for the non-reproducible example above. If the signed profile
+sets `build.reproducible = true`, or the kind is `reproducible_binary`, the
+release remains `evidence_required` until independent builders reproduce the
+same executable.
+
+Each builder writes a bounded report:
+
+```json
+{
+  "schema": "cellscript-reproduction-report-v1",
+  "builder_id": "builder-a",
+  "environment": "<exact environment from the signed profile>",
+  "source_hash": "<CKB Blake2b-256>",
+  "build_recipe_hash": "<CKB Blake2b-256>",
+  "artifact_hash": "<CKB Blake2b-256>",
+  "build_log_hash": "<CKB Blake2b-256>",
+  "generated_at": "2026-08-02T00:00:00Z"
+}
+```
+
+Validate and combine at least two distinct builders:
+
+```bash
+cellc artifact reproduction-evidence acme/vault-lock@1.0.0 \
+  --report reports/builder-a.json \
+  --report reports/builder-b.json \
+  --output reproduced-build-promotion.json
+```
+
+The command fetches and verifies the signed release, predecessor build
+evidence, source, recipe, artifact, environment, and report identities. It does
+not execute the publisher's recipe. A Registry operator reviews and submits the
+generated `reproduced_build` promotion payload. Only then does verification
+become `verified`; a reproducible executable cannot be recorded as deployed
+before this transition.
+
+## 5. Record a mainnet deployment
 
 The deployment request is a signed
 `cellscript-registry-deployment` / `record_deployment` payload sent to:
@@ -153,7 +191,7 @@ For a DepGroup OutPoint, the API decodes the live Cell data as the canonical
 Molecule `OutPointVec` and finds the matching live code member. It does not hash
 the DepGroup container as though it were the executable.
 
-## 5. Inspect the artifact
+## 6. Inspect and consume the artifact
 
 Open the artifact detail page or query the API:
 
@@ -179,6 +217,7 @@ Consume it explicitly:
 cellc artifact fetch acme/vault-lock@1.0.0 --output vault-lock.bundle.json
 cellc artifact verify --bundle vault-lock.bundle.json --receipt vault-lock.bundle.json.receipt.json
 cellc artifact pin acme/vault-lock@1.0.0 --output Artifacts.lock --accept-hash-bound
+cellc artifact reproduction-evidence acme/vault-lock@1.0.0 --report builder-a.json --report builder-b.json --output reproduced-build-promotion.json
 cellc artifact record-deployment acme/vault-lock@1.0.0 --code-hash <hash> --hash-type data1 --dep-type code --tx-hash <tx_hash> --index 0 --capability-key-id <key_id>
 cellc artifact cell-dep acme/vault-lock@1.0.0 --output CellDep.json --accept-hash-bound --rpc-url https://mainnet.ckb.dev/rpc
 cellc artifact set-availability acme/vault-lock@1.0.0 --status yanked --reason "security advisory" --capability-key-id <key_id>
@@ -188,10 +227,23 @@ cellc artifact commitment acme/vault-lock@1.0.0 --output RegistryCommitment.json
 `cell-dep` fails until mainnet deployment evidence has been verified, then
 rechecks that the deployment (and resolved DepGroup code member) is still live
 at consumption time. Deployment mode must equal the immutable profile
-contract. The commitment file contains canonical `CSREGv1` Cell data; attestation still
-requires the API to read a live mainnet Cell and match its Type/Lock identities.
+contract. The commitment file contains canonical `CSREGv1` Cell data;
+attestation still requires the API to read a live mainnet Cell and match its
+configured Type/Lock identities. When those Scripts are configured, the file
+also contains a mainnet-only transaction intent. A compatible wallet completes
+capacity, inputs, change, fee, witnesses, signatures, and broadcast.
 
-## 6. Other artifact kinds
+Scheduled maintenance discovers exact Registry Type Script matches through the
+CKB indexer. A live matching commitment promotes the current release to
+`on_chain_attested`; spending that Cell returns it to `deployed`; and spending
+or replacing the deployment Cell returns it to `verified_build`. Accepted
+evidence remains available for audit.
+
+The transaction-intent and scanner code is implemented, but production does
+not claim chain attestation until operators deploy and configure the canonical
+mainnet Registry Type Script, its CellDep, and the attestor Lock.
+
+## 7. Other artifact kinds
 
 - `runtime_verifier`: `ckb_executable` bundle with source, executable, and ABI;
   consumption mode is `tcb`.
@@ -210,13 +262,19 @@ immutable `audit_report` bundle object whose CKB Blake2b-256 hash exactly
 matches `security.audit_report_hash`. This authenticates the referenced report;
 it does not make the Registry the auditor.
 
-## 7. Naming rules
+## 8. Naming rules
 
 Namespace and artifact names are 1–64 characters. Use lowercase letters and
 digits; `_` and `-` may appear only between characters. A one-character name is
 valid. The UI and API enforce the same rule.
 
-## 8. Validate repository integration
+## 9. Registry scope and repository validation
+
+The Registry names code, build recipes, TCB inputs, deployment facts, and
+compact commitments. It does not operate application business Cells. Those
+Cells remain governed by their own Lock/Type Scripts, schemas, and replacement
+transactions; publishing a Script is not equivalent to indexing every state
+Cell that uses it.
 
 ```bash
 ./scripts/cellscript_gate.sh dev

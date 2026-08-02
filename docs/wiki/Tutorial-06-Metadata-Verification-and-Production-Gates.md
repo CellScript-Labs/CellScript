@@ -577,6 +577,16 @@ generated packages constructed the acceptance transactions. Likewise,
 verifier behaviour and transaction shape, not the production resource-identity
 deployment story.
 
+Registry artifact evidence remains another independent boundary. A
+`verified_build` record proves either compiler-backed CellScript verification
+or the declared hash-bound generic profile level. A reproducible profile is not
+`verified` until `reproduced_build` evidence binds at least two independent
+builders to the signed source, recipe, environment, executable, and logs.
+Likewise, a wallet-ready Registry commitment file is not chain evidence. Only a
+live mainnet Cell using the configured Registry Type Script and attestor Lock
+can produce current `on_chain_attested` state, and scheduled reconciliation may
+demote that current state when the commitment or deployment Cell is spent.
+
 For the current NovaSeal profile set, production-ready source-package evidence
 means the live local devnet runners pass for core, Agreement, and the six
 planned profiles: BTC transaction commitment, BTC UTXO seal, dual seal, Fiber

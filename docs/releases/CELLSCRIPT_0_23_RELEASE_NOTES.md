@@ -3,7 +3,7 @@
 **Status**: Development release notes for `nightly-0.23`; not a stable release
 certificate.
 
-**Updated**: 2026-08-01.
+**Updated**: 2026-08-02.
 
 CellScript 0.23 makes its source semantics and compatibility axes explicit.
 Edition 2026 is the first and only CellScript source-semantics epoch. The
@@ -13,8 +13,10 @@ canonical location:
 
 This document records completed 0.23 work. The public Registry infrastructure,
 read/write domains, website, CLI read authority, and automatic compiler-backed
-evidence chain are deployed; the first publisher-owned JoyID publication and
-clean-machine install remain the final Registry adoption checkpoint. Broader
+source-package evidence chain are deployed. General artifact, reproduction,
+deployment, and commitment support is implemented in-tree, while canonical
+Registry Script deployment, the first real non-CellScript mainnet attestation,
+and publisher-owned clean-machine adoption remain checkpoints. Broader
 RGB++/Fiber evidence and the Off-Chain Session Runtime profile remain roadmap
 work.
 
@@ -30,6 +32,9 @@ work.
 | Registry operations | `api.registry.cellscript.dev` and `registry.cellscript.dev` run as an isolated self-hosted Postgres/Node/object-volume/read-only-nginx stack behind trusted TLS. |
 | Registry retry safety | Pre-admission failures release only the failed request's nonce and retry reservation; accepted metadata commits transactionally, and readiness covers the actual managed object prefixes. |
 | Registry verification | Publish transactionally queues a leased, bounded real-compiler verification job; verified evidence/status commit atomically before crash-safe static-index convergence, and default search stays hidden until the baseline passes. |
+| Registry artifact profiles | CellScript dependencies, CKB executables, runtime verifiers, reproducible binaries, and copy-only templates share discovery but retain different resolver, TCB, deployment, and copy contracts. |
+| Registry reproducibility | Reproducible profiles stay `evidence_required` until independent builder reports bind the signed environment, source, recipe, executable, and build logs. |
+| Registry chain evidence | Mainnet deployment records are RPC-checked; configured Registry Type/Lock Scripts produce wallet transaction intents and a bounded Type-Script indexer reconciles live commitments without erasing history. |
 | Production HTTP boundary | API/static JSON responses use HSTS, deny-all content policy, anti-framing, no-sniff, and restrictive browser permissions; the website ships a reproducible read-only nginx deployment with health checks and bounded logs/temp storage. |
 | Registry install policy | Explicit unverified/quarantined install acknowledgements persist per dependency, so lock refresh and subsequent builds retain the same auditable risk choice. |
 | Tooling | CLI, LSP, WASM, website bindings, examples, and package tooling use the same edition contract. |
@@ -163,6 +168,41 @@ This removes the previous cross-process nondeterminism caused by serializing
 `HashMap` fields directly and gives the publisher and isolated verifier one
 stable identity.
 
+## General Artifact And Chain Evidence Closure
+
+The public model no longer equates Registry discovery with `cellc install`.
+Each release declares an artifact kind, profile, source language, and
+consumption mode. Only `cellscript_source` plus `dependency` enters the package
+resolver. A CKB executable is consumed through explicit artifact verification,
+pinning, deployment, and CellDep commands; a runtime verifier is a declared TCB
+input; and a template is copied without becoming an implicit dependency.
+
+Reproducibility is now an evidence transition rather than a manifest adjective.
+`cellc artifact reproduction-evidence` verifies two to sixteen reports from
+distinct builder IDs. Every report must use
+`cellscript-reproduction-report-v1` and match the signed environment, source
+hash, build-recipe hash, executable hash, build-log hash, and timestamp. The
+Registry binds the promotion to the accepted `verified_build` evidence. Until
+that promotion succeeds, a reproducible executable remains
+`evidence_required` and cannot acquire deployment evidence.
+
+For an RPC-verified mainnet deployment, the commitment endpoint computes the
+canonical `cellscript-registry-commitment-v1` payload and compact
+`CSREGv1 || commitment_hash` Cell data. When operators configure the canonical
+Registry Type Script, its CellDep, and the attestor Lock, the endpoint also
+returns a mainnet-only wallet transaction intent. A compatible wallet supplies
+capacity, inputs, change, fee, witnesses, signatures, and broadcast. Scheduled
+maintenance scans exact Type Script matches through the CKB indexer and
+reconciles current state: a matching live Cell promotes the release to
+`on_chain_attested`; a spent attestation falls back to `deployed`; and a stale
+deployment falls back to `verified_build`. Evidence remains append-only.
+
+This is an implementation boundary, not a claim that the canonical mainnet
+Registry Script has already been deployed. Production chain attestation stays
+disabled until those three Script identities are deployed and configured, and
+the first real non-CellScript mainnet artifact is still an adoption/evidence
+checkpoint.
+
 ## CLI, LSP, WASM, And Website
 
 - Package commands read Edition 2026 from `Cell.toml`.
@@ -176,6 +216,10 @@ stable identity.
   compatibility-profile hash, and use the checked-in fixture only as an
   explicitly labelled read-only mirror during API failure. The Coming Soon
   surface is removed.
+- Submit separates artifact kind from source language instead of hard-coding
+  Rust. Manage exposes isolated reproduction, mainnet deployment, and
+  commitment command builders alongside publish, inspect, and availability;
+  task-specific fields disappear when the task changes.
 - `cellc auth namespace claim` and the submit page's **Claim namespace** action
   expose the namespace-ownership admission step required before a package's
   first public publish. Capability registration no longer appears to imply a
