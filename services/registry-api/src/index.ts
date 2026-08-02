@@ -140,7 +140,7 @@ const DEFAULT_MAX_SNAPSHOT_BYTES = 5 * 1024 * 1024;
 const DEFAULT_QUOTA_EVENT_RETENTION_HOURS = 48;
 const DEFAULT_NAMESPACE_CLAIM_COOLDOWN_SECONDS = 60 * 60;
 export const CANONICAL_REGISTRY_TYPE_SCRIPT = Object.freeze({
-  code_hash: "0x0dd596ade29e06e5bcc00f56abf36ecbe9afaa09f1b26a64436aa37854da622b",
+  code_hash: "0x8b6de99567accdca438818a55c16534ed10fc335f117709b1487fd2666808bfb",
   hash_type: "data1",
 });
 export const CKB_MAINNET_SIGHASH_LOCK = Object.freeze({

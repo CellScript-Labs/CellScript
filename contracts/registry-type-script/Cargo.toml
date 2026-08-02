@@ -13,10 +13,20 @@ doctest = false
 bench = false
 required-features = ["ckb-script"]
 
+[[bin]]
+name = "cellscript-registry-type-script-hash"
+path = "src/bin/ckb_data_hash.rs"
+test = false
+doctest = false
+bench = false
+required-features = ["hash-tool"]
+
 [features]
 ckb-script = []
+hash-tool = ["dep:ckb-hash"]
 
 [dependencies]
+ckb-hash = { version = "=1.1.1", optional = true }
 ckb-std = { version = "=1.1.0", default-features = false, features = ["allocator"] }
 
 [dev-dependencies]

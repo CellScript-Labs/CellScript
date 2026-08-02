@@ -204,8 +204,11 @@ to `deployed`; and a stale deployment falls back to
 also clears current commitment pointers. Evidence remains append-only.
 
 The canonical Registry Type Script implementation is tracked as an independent
-`no_std` crate under `contracts/registry-type-script`, with a stripped,
-path-remapped reproducible RISC-V release and CKB-VM tests. Its Type args bind
+`no_std` crate under `contracts/registry-type-script`, together with the exact
+3,352-byte deployable ELF and its pinned Linux x86_64 builder image identity.
+The canonical host rebuild must match that artifact byte-for-byte; other hosts
+report their host artifact without making a cross-host reproduction claim.
+CKB-VM tests always execute the tracked deployable bytes. Its Type args bind
 the custody Lock Script hash, all group Cells must use that Lock, and creation
 also requires a custody-locked input. Production configuration is rejected if
 it drifts from the tracked code data hash or the standard mainnet secp

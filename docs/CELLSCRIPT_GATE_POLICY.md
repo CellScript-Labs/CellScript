@@ -82,9 +82,13 @@ same auditable resolver policy.
 
 Both `dev` and `ci` also build the independent
 `contracts/registry-type-script` crate for
-`riscv64imac-unknown-none-elf`, strip it with the pinned toolchain, compare its
-SHA-256 and CKB data hash to the tracked release manifest, and execute its
+`riscv64imac-unknown-none-elf`, strip it with the pinned toolchain, verify the
+tracked canonical ELF's SHA-256 and CKB data hash, and execute that ELF's
 positive and negative lifecycle matrix in CKB-VM through `ckb-testtool`.
+Linux x86_64 additionally requires the fresh build to match the tracked ELF
+byte-for-byte. Other build hosts record their host artifact hash and make no
+cross-host reproduction claim; the pinned container builder provides that
+canonical check there.
 Passing this local boundary proves the deployed bytes' behavior and identity;
 it does not prove that the code Cell or custody Lock CellDep is live on
 mainnet. Production readiness still performs live RPC and confirmation checks.

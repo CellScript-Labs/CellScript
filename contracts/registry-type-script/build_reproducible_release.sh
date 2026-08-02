@@ -5,6 +5,7 @@ contract_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd "$contract_dir/../.." && pwd)"
 cargo_home_dir="${CARGO_HOME:-${HOME}/.cargo}"
 target_dir="${CARGO_TARGET_DIR:-$contract_dir/target}"
+hash_target_dir="${CELLSCRIPT_HASH_TARGET_DIR:-$repository_root/target}"
 rust_sysroot="$(rustc --print sysroot)"
 host_triple="$(rustc -vV | awk '/^host: / { print $2 }')"
 rust_objcopy="$rust_sysroot/lib/rustlib/$host_triple/bin/rust-objcopy"
@@ -34,17 +35,26 @@ env -u RUSTFLAGS \
         --bin cellscript-registry-type-script
 
 artifact="$target_dir/riscv64imac-unknown-none-elf/release/cellscript-registry-type-script"
-stripped_artifact="$artifact.stripped"
-"$rust_objcopy" --strip-all "$artifact" "$stripped_artifact"
-mv "$stripped_artifact" "$artifact"
+host_artifact="$artifact.$host_triple.stripped"
+"$rust_objcopy" --strip-all "$artifact" "$host_artifact"
 
-sha256_hash="$(shasum -a 256 "$artifact" | awk '{ print $1 }')"
-artifact_bytes="$(wc -c < "$artifact" | tr -d ' ')"
-ckb_hash_json="$(CARGO_TARGET_DIR="$repository_root/target" cargo run --quiet --locked \
-    --manifest-path "$repository_root/Cargo.toml" \
-    -p cellscript --bin cellc -- ckb-hash --file "$artifact" --json)"
-ckb_data_hash="$(printf '%s\n' "$ckb_hash_json" | sed -n 's/.*"hash": "\([0-9a-f]*\)".*/\1/p')"
 release_manifest="$contract_dir/release-manifest.json"
+canonical_relative_path="$(sed -n 's/.*"artifact": "\([^"]*\)".*/\1/p' "$release_manifest")"
+canonical_artifact="$contract_dir/$canonical_relative_path"
+if [[ -z "$canonical_relative_path" || ! -f "$canonical_artifact" ]]; then
+    printf 'canonical Registry Type Script artifact is missing: %s\n' "$canonical_artifact" >&2
+    exit 1
+fi
+
+sha256_hash="$(shasum -a 256 "$canonical_artifact" | awk '{ print $1 }')"
+artifact_bytes="$(wc -c < "$canonical_artifact" | tr -d ' ')"
+ckb_data_hash="$(CARGO_TARGET_DIR="$hash_target_dir" cargo run --quiet --locked \
+    --manifest-path "$contract_dir/Cargo.toml" \
+    --features hash-tool \
+    --bin cellscript-registry-type-script-hash \
+    -- "$canonical_artifact")"
+ckb_hash_json="$(printf '{\n  "algorithm": "blake2b-256",\n  "hash": "%s",\n  "input_bytes": %s,\n  "personalization": "ckb-default-hash",\n  "status": "ok"\n}' \
+    "$ckb_data_hash" "$artifact_bytes")"
 expected_sha256="$(sed -n 's/.*"sha256": "\([0-9a-f]*\)".*/\1/p' "$release_manifest")"
 expected_artifact_bytes="$(sed -n 's/.*"artifact_bytes": \([0-9]*\).*/\1/p' "$release_manifest")"
 expected_ckb_data_hash="$(sed -n 's/.*"ckb_data_hash": "0x\([0-9a-f]*\)".*/\1/p' "$release_manifest")"
@@ -54,6 +64,22 @@ if [[ "$artifact_bytes" != "$expected_artifact_bytes" || "$sha256_hash" != "$exp
     printf 'actual   bytes=%s sha256=%s ckb_data_hash=0x%s\n' "$artifact_bytes" "$sha256_hash" "$ckb_data_hash" >&2
     exit 1
 fi
+
+host_sha256="$(shasum -a 256 "$host_artifact" | awk '{ print $1 }')"
+if [[ "$host_triple" == "x86_64-unknown-linux-gnu" ]]; then
+    if ! cmp -s "$host_artifact" "$canonical_artifact"; then
+        printf 'canonical x86_64 Linux rebuild does not match the tracked Registry Type Script artifact\n' >&2
+        printf 'expected sha256=%s actual sha256=%s\n' "$sha256_hash" "$host_sha256" >&2
+        exit 1
+    fi
+    printf 'canonical_rebuild=matched\n'
+else
+    printf 'canonical_rebuild=not_claimed host=%s host_sha256=%s\n' "$host_triple" "$host_sha256"
+fi
+
+# Downstream tools always execute the exact tracked deployable bytes. A
+# non-canonical host build is retained beside this path for inspection.
+cp "$canonical_artifact" "$artifact"
 
 printf 'artifact=%s\n' "$artifact"
 printf 'artifact_bytes=%s\n' "$artifact_bytes"

@@ -178,6 +178,7 @@ dependencies = [
 name = "cellscript-registry-type-script"
 version = "0.22.0"
 dependencies = [
+ "ckb-hash",
  "ckb-std",
  "ckb-testtool",
 ]

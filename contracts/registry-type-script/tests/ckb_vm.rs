@@ -22,11 +22,8 @@ struct Scripts {
 }
 
 fn contract_binary() -> Bytes {
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/riscv64imac-unknown-none-elf/release/cellscript-registry-type-script");
-    std::fs::read(&path)
-        .unwrap_or_else(|error| panic!("read {}: {error}; run build_reproducible_release.sh first", path.display()))
-        .into()
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("artifacts/v0.22.0/cellscript-registry-type-script");
+    std::fs::read(&path).unwrap_or_else(|error| panic!("read tracked canonical artifact {}: {error}", path.display())).into()
 }
 
 fn scripts(args: Option<Bytes>) -> Scripts {

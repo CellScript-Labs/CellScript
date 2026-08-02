@@ -29,13 +29,28 @@ contracts/registry-type-script/build_reproducible_release.sh
 cargo test --locked --manifest-path contracts/registry-type-script/Cargo.toml
 ```
 
-The release build disables `ckb-std` default features and enables only its Rust
+Reproduce the canonical Linux artifact with the pinned container digest:
+
+```bash
+contracts/registry-type-script/build_canonical_container.sh
+```
+
+The deployable artifact is tracked under `artifacts/v0.22.0` and was produced
+for the `x86_64-unknown-linux-gnu` host with the builder image digest recorded
+in `release-manifest.json`. Rust/LLVM may order identical RISC-V functions
+differently on another build host, so the script claims a byte-for-byte
+reproduction only on that canonical host. On every other host it still builds
+the source, reports the host artifact hash, verifies the tracked canonical
+identity, and places the canonical bytes at the normal target path for
+downstream tooling. The CKB-VM suite always executes those deployable bytes.
+
+The build disables `ckb-std` default features and enables only its Rust
 allocator. Fixed-size data, Script, and lock-hash buffers call the official
 syscall layer directly; the contract does not carry the higher-level Molecule
-type graph. Consequently the canonical artifact does not depend on a host C
-compiler or the bundled `libc.c`; the pinned Rust toolchain plus
-`llvm-tools-preview` is the complete compiler toolchain used by this contract
-build.
+type graph or depend on a host C compiler and bundled `libc.c`.
+The small host-side hash utility in the same crate computes CKB's personalized
+Blake2b-256 identity without depending on the root compiler workspace or a
+sibling SDK checkout.
 
 The test suite executes the stripped RISC-V binary in CKB-VM through
 `ckb-testtool`, covering authorized creation, replacement, destruction,
