@@ -5,17 +5,17 @@ use cellscript_ckb_adapter::{
 };
 use ckb_types::{
     bytes::Bytes,
-    core::ScriptHashType,
-    packed::{CellInput, OutPoint},
+    core::{DepType, ScriptHashType},
+    packed::{CellDep, CellInput, OutPoint},
     prelude::*,
     H160,
 };
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(name = "cellscript-deploy")]
-#[command(about = "CellScript CKB adapter CLI — deploy, act, and query on-chain state")]
+#[command(about = "CellScript CKB adapter CLI — build mainnet deployment transactions, act, and query on-chain state")]
 #[command(version = env!("CARGO_PKG_VERSION"))]
 struct Cli {
     /// CKB node RPC URL
@@ -32,10 +32,11 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Deploy a compiled artifact as an on-chain code cell with TYPE_ID
+    /// Refuse unsigned submission and direct callers to the external-signing flow
+    #[command(hide = true)]
     Deploy(DeployArgs),
 
-    /// Build a headless deploy transaction without submitting
+    /// Build a mainnet unsigned deploy transaction for external signing
     BuildDeploy(BuildDeployArgs),
 
     /// Build a transaction from an action plan
@@ -49,8 +50,8 @@ enum Commands {
 }
 
 #[derive(clap::Args, Debug)]
-struct DeployArgs {
-    /// Artifact binary file path (.s or .cell)
+struct DeploySpecArgs {
+    /// Compiled RISC-V ELF artifact path
     #[arg(long)]
     artifact: PathBuf,
 
@@ -63,16 +64,30 @@ struct DeployArgs {
     name: String,
 
     /// Fee in shannons
-    #[arg(long, default_value_t = 1_000)]
+    #[arg(long, default_value_t = 10_000)]
     fee: u64,
 
     /// Capacity input out_point (format: 0x<TX_HASH>:<INDEX>)
     #[arg(long)]
     capacity_out_point: String,
 
-    /// Capacity input shannons
-    #[arg(long, default_value_t = 200_000_000_000)]
-    capacity_shannons: u64,
+    /// Code reference hash type: type creates a TYPE_ID cell; data variants create an immutable data cell
+    #[arg(long, value_enum, default_value_t = DeploymentHashType::Type)]
+    hash_type: DeploymentHashType,
+
+    /// CellDep out_point for the input lock script (format: 0x<TX_HASH>:<INDEX>)
+    #[arg(long, default_value = "0x71a7ba8fc96349fea0ed3a5c47992e3b4084b031a42264a018e0072e8172e46c:0")]
+    lock_cell_dep_out_point: String,
+
+    /// CellDep kind for the input lock script
+    #[arg(long, value_enum, default_value_t = CliDepType::DepGroup)]
+    lock_cell_dep_type: CliDepType,
+}
+
+#[derive(clap::Args, Debug)]
+struct DeployArgs {
+    #[command(flatten)]
+    spec: DeploySpecArgs,
 
     /// Max attempts to wait for commitment
     #[arg(long, default_value_t = 30)]
@@ -89,29 +104,42 @@ struct DeployArgs {
 
 #[derive(clap::Args, Debug)]
 struct BuildDeployArgs {
-    /// Artifact binary file path
-    #[arg(long)]
-    artifact: PathBuf,
+    #[command(flatten)]
+    spec: DeploySpecArgs,
+}
 
-    /// Deployer lock script args (hex, 20 bytes for secp256k1-sighash)
-    #[arg(long)]
-    lock_arg: String,
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum DeploymentHashType {
+    Type,
+    Data,
+    Data1,
+    Data2,
+}
 
-    /// Name for the deployment
-    #[arg(long, default_value = "cellscript-contract")]
-    name: String,
+impl From<DeploymentHashType> for ScriptHashType {
+    fn from(value: DeploymentHashType) -> Self {
+        match value {
+            DeploymentHashType::Type => Self::Type,
+            DeploymentHashType::Data => Self::Data,
+            DeploymentHashType::Data1 => Self::Data1,
+            DeploymentHashType::Data2 => Self::Data2,
+        }
+    }
+}
 
-    /// Fee in shannons
-    #[arg(long, default_value_t = 1_000)]
-    fee: u64,
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum CliDepType {
+    Code,
+    DepGroup,
+}
 
-    /// Capacity input out_point (format: 0x<TX_HASH>:<INDEX>)
-    #[arg(long)]
-    capacity_out_point: String,
-
-    /// Capacity input shannons
-    #[arg(long, default_value_t = 200_000_000_000)]
-    capacity_shannons: u64,
+impl From<CliDepType> for DepType {
+    fn from(value: CliDepType) -> Self {
+        match value {
+            CliDepType::Code => Self::Code,
+            CliDepType::DepGroup => Self::DepGroup,
+        }
+    }
 }
 
 #[derive(clap::Args, Debug)]
@@ -173,20 +201,13 @@ fn parse_lock_arg(s: &str) -> Result<H160> {
 }
 
 /// Shared spec builder for deploy and build-deploy.
-fn build_deploy_spec(
-    artifact: PathBuf,
-    lock_arg: String,
-    name: String,
-    fee: u64,
-    capacity_out_point: String,
-    capacity_shannons: u64,
-) -> Result<DeployArtifactSpec> {
-    let artifact_binary = std::fs::read(&artifact)?;
+fn build_deploy_spec(adapter: &CellScriptAdapter, args: DeploySpecArgs) -> Result<DeployArtifactSpec> {
+    let artifact_binary = std::fs::read(&args.artifact)?;
     let artifact_binary = Bytes::from(artifact_binary);
     let artifact_hash = ckb_hash::blake2b_256(&artifact_binary).iter().map(|b| format!("{:02x}", b)).collect::<String>();
 
-    let lock_arg = parse_lock_arg(&lock_arg)?;
-    // Construct secp256k1-sighash lock script (code_hash for mainnet/devnet).
+    let lock_arg = parse_lock_arg(&args.lock_arg)?;
+    // Construct the mainnet secp256k1-sighash lock script.
     let lock_script = cellscript_ckb_adapter::construct_script(&cellscript_ckb_adapter::ScriptSpec::new(
         [
             0x9b, 0x81, 0x97, 0x34, 0x7e, 0x6e, 0x47, 0x1d, 0x7e, 0xa2, 0x8b, 0x52, 0x0c, 0x45, 0x3e, 0x18, 0x54, 0xf0, 0x96, 0x2e,
@@ -196,97 +217,65 @@ fn build_deploy_spec(
         lock_arg.as_bytes().to_vec(),
     ));
 
-    let capacity_out_point = parse_out_point(&capacity_out_point)?;
+    let capacity_out_point = parse_out_point(&args.capacity_out_point)?;
+    let (capacity_input_shannons, capacity_input_data) = adapter.resolve_pure_capacity_input(&capacity_out_point, &lock_script)?;
     let capacity_input = CellInput::new_builder().previous_output(capacity_out_point).build();
+    let lock_cell_dep = CellDep::new_builder()
+        .out_point(parse_out_point(&args.lock_cell_dep_out_point)?)
+        .dep_type(DepType::from(args.lock_cell_dep_type))
+        .build();
 
     Ok(DeployArtifactSpec {
-        name,
+        name: args.name,
         artifact_binary,
         artifact_hash,
         deployer_lock: lock_script,
         capacity_input,
-        capacity_input_shannons: capacity_shannons,
-        capacity_input_data: Bytes::new(),
-        type_id_hash_type: ScriptHashType::Type,
+        capacity_input_shannons,
+        capacity_input_data,
+        type_id_hash_type: args.hash_type.into(),
         type_script: None,
-        cell_deps: Vec::new(),
+        cell_deps: vec![lock_cell_dep],
         header_deps: Vec::new(),
-        fee_shannons: fee,
+        fee_shannons: args.fee,
     })
 }
 
-fn cmd_deploy(rpc: &str, json: bool, args: DeployArgs) -> Result<()> {
-    let spec = build_deploy_spec(args.artifact, args.lock_arg, args.name, args.fee, args.capacity_out_point, args.capacity_shannons)?;
-    let name = spec.name.clone();
-
-    let (tx, deploy_evidence) = build_deploy_transaction(&spec)?;
-
-    // Connect and submit.
-    let adapter = CellScriptAdapter::connect(rpc)?;
-
-    // Estimate cycles.
-    let estimate_cycles = adapter.estimate_cycles(&tx).ok().map(|e| e.cycles.value());
-
-    // Test tx-pool acceptance.
-    let tx_pool_accepted = adapter.test_tx_pool_accept(&tx).is_ok();
-
-    // Submit.
-    let tx_hash = adapter.submit_transaction(&tx)?;
-    eprintln!("submitted tx: 0x{}", hex::encode(tx_hash.as_bytes()));
-
-    // Wait for commitment.
-    let committed = adapter.wait_for_commitment(&tx_hash, args.wait_attempts, args.wait_delay_ms)?;
-
-    // Build manifest.
-    let mut hash_bytes = [0u8; 32];
-    hash_bytes.copy_from_slice(tx_hash.as_bytes());
-    let manifest = cellscript_ckb_adapter::build_deployment_manifest_from_evidence(&deploy_evidence, &hash_bytes, 0);
-
-    // Write manifest if requested.
-    if let Some(ref path) = args.manifest_out {
-        let manifest_json = serde_json::to_string_pretty(&manifest)?;
-        std::fs::write(path, &manifest_json)?;
-        eprintln!("manifest written to {}", path.display());
-    }
-
-    if json {
-        let output = serde_json::json!({
-            "tx_hash": format!("0x{}", hex::encode(tx_hash.as_bytes())),
-            "committed": true,
-            "block_hash": format!("0x{}", hex::encode(committed.block_hash.as_bytes())),
-            "estimate_cycles": estimate_cycles,
-            "tx_pool_accepted": tx_pool_accepted,
-            "manifest": manifest,
-        });
-        println!("{}", serde_json::to_string_pretty(&output)?);
-    } else {
-        println!("deployed {} at tx 0x{}", name, hex::encode(tx_hash.as_bytes()));
-        println!("  committed in block 0x{}", hex::encode(committed.block_hash.as_bytes()));
-        if let Some(cycles) = estimate_cycles {
-            println!("  estimate_cycles: {cycles}");
-        }
-    }
-
-    Ok(())
+fn cmd_deploy(_rpc: &str, _json: bool, args: DeployArgs) -> Result<()> {
+    let _ = (args.spec, args.wait_attempts, args.wait_delay_ms, args.manifest_out);
+    bail!(
+        "direct deploy is disabled because this CLI does not hold or invoke a signer; use build-deploy, sign the returned transaction with a CKB wallet, then broadcast it"
+    )
 }
 
 fn cmd_build_deploy(rpc: &str, json: bool, args: BuildDeployArgs) -> Result<()> {
-    let spec = build_deploy_spec(args.artifact, args.lock_arg, args.name, args.fee, args.capacity_out_point, args.capacity_shannons)?;
+    let adapter = CellScriptAdapter::connect(rpc)?;
+    adapter.require_mainnet()?;
+    let spec = build_deploy_spec(&adapter, args.spec)?;
 
-    let (tx, _evidence) = build_deploy_transaction(&spec)?;
+    let (tx, evidence) = build_deploy_transaction(&spec)?;
 
-    // Try to estimate cycles if node is available.
-    let estimate = CellScriptAdapter::connect(rpc).ok().and_then(|a| a.estimate_cycles(&tx).ok()).map(|e| e.cycles.value());
+    // An unsigned secp transaction is expected to fail script verification, so
+    // cycle estimation remains informational until the external signer fills it.
+    let estimate = adapter.estimate_cycles(&tx).ok().map(|e| e.cycles.value());
 
     if json {
         let tx_json = serde_json::to_value(cellscript_ckb_adapter::to_rpc_transaction(&tx))?;
         let output = serde_json::json!({
+            "can_submit": false,
+            "signing_required": true,
             "transaction": tx_json,
             "estimate_cycles": estimate,
+            "evidence": evidence,
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
-        println!("built deploy transaction ({} bytes)", tx.data().serialized_size_in_block());
+        println!("built unsigned deploy transaction ({} bytes)", tx.data().serialized_size_in_block());
+        println!("  can_submit: false");
+        println!("  signing_required: true");
+        println!("  hash_type: {}", evidence.hash_type);
+        println!("  code_hash: 0x{}", hex::encode(&evidence.code_hash));
+        println!("  cell_deps: {}", evidence.cell_deps);
         if let Some(cycles) = estimate {
             println!("  estimate_cycles: {cycles}");
         }
@@ -406,4 +395,65 @@ fn cmd_info(rpc: &str, json: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const INPUT: &str = "0x1111111111111111111111111111111111111111111111111111111111111111:0";
+
+    fn parse_build_deploy(extra: &[&str]) -> Cli {
+        let mut args = vec![
+            "cellscript-deploy",
+            "build-deploy",
+            "--artifact",
+            "registry-type-script",
+            "--lock-arg",
+            "0x2222222222222222222222222222222222222222",
+            "--capacity-out-point",
+            INPUT,
+        ];
+        args.extend_from_slice(extra);
+        Cli::try_parse_from(args).unwrap()
+    }
+
+    #[test]
+    fn build_deploy_accepts_immutable_data1() {
+        let cli = parse_build_deploy(&["--hash-type", "data1"]);
+        let Commands::BuildDeploy(args) = cli.command else {
+            panic!("expected build-deploy command");
+        };
+        assert_eq!(args.spec.hash_type, DeploymentHashType::Data1);
+        assert_eq!(args.spec.fee, 10_000);
+        assert_eq!(args.spec.lock_cell_dep_type, CliDepType::DepGroup);
+        assert_eq!(args.spec.lock_cell_dep_out_point, "0x71a7ba8fc96349fea0ed3a5c47992e3b4084b031a42264a018e0072e8172e46c:0");
+    }
+
+    #[test]
+    fn build_deploy_defaults_to_type_id() {
+        let cli = parse_build_deploy(&[]);
+        let Commands::BuildDeploy(args) = cli.command else {
+            panic!("expected build-deploy command");
+        };
+        assert_eq!(args.spec.hash_type, DeploymentHashType::Type);
+    }
+
+    #[test]
+    fn build_deploy_rejects_unknown_hash_type() {
+        let error = Cli::try_parse_from([
+            "cellscript-deploy",
+            "build-deploy",
+            "--artifact",
+            "registry-type-script",
+            "--lock-arg",
+            "0x2222222222222222222222222222222222222222",
+            "--capacity-out-point",
+            INPUT,
+            "--hash-type",
+            "data3",
+        ])
+        .unwrap_err();
+        assert!(error.to_string().contains("invalid value 'data3'"));
+    }
 }
