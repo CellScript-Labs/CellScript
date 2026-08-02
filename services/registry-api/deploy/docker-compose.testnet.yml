@@ -66,7 +66,7 @@ services:
       - registry-testnet-objects:/objects
     networks: [registry-testnet-internal, stack-network]
     read_only: true
-    tmpfs: [/tmp:size=32m,mode=1777]
+    tmpfs: ["/tmp:size=32m,mode=1777"]
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
@@ -101,7 +101,7 @@ services:
       - registry-testnet-objects:/objects
     networks: [registry-testnet-internal, stack-network]
     read_only: true
-    tmpfs: [/tmp:size=512m,mode=1777]
+    tmpfs: ["/tmp:size=512m,mode=1777"]
     pids_limit: 128
     mem_limit: 1g
     cpus: 1.0
