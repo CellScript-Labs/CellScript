@@ -12,7 +12,10 @@
   evidence before verification becomes `verified`; deployment is rejected
   until that evidence exists. Add `cellc artifact reproduction-report` and
   `cellc artifact reproduction-evidence`, wallet-ready mainnet commitment
-  transaction intents, fixed Registry Type/commitment Lock configuration,
+  transaction intents, and `cellc auth reproducer create` for generating a
+  builder-local P-256 key plus a public policy enrollment record without
+  exposing PKCS#8 material. Explicit CI-key output is mode 0600 on Unix and
+  no-overwrite. Add fixed Registry Type/commitment Lock configuration,
   Type-Script-indexed `CSREGv1` scans, and scheduled lifecycle reconciliation
   that demotes spent commitments or stale deployment Cells without deleting
   historical evidence. Both Script code CellDeps must be live and sufficiently

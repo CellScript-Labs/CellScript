@@ -79,6 +79,22 @@ independent trust domains. `/ready` validates policy shape, key importability,
 and configured threshold only; it is not an organizational-independence
 attestation.
 
+Each independent operator can create its own key and public enrollment record
+without contacting the Registry write API:
+
+```bash
+cellc auth reproducer create \
+  --builder-id <stable-id> \
+  --trust-domain <independent-domain> \
+  --json > builder-enrollment.json
+```
+
+The operator sends only `policy_builder` to the Registry administrator. By
+default the private key remains in that builder's OS keychain. The explicit
+`--private-key-output <new-file>` mode exists on Unix for transfer into that
+builder's CI secret manager; it creates a new mode-0600 PKCS#8-base64 file and
+refuses to overwrite an existing path.
+
 ## Endpoints
 
 ```text

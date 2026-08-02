@@ -69,6 +69,10 @@ The CLI coverage includes the explicit first-publish admission sequence:
 `cellc publish`; publisher maintenance additionally uses the capability-signed
 `cellc artifact set-availability` path, and `cellc artifact cell-dep` performs a
 fresh mainnet liveness check before producing a transaction-builder descriptor.
+Independent reproducibility builders use `cellc auth reproducer create`; CLI
+coverage verifies that its public enrollment contains an importable P-256 SPKI,
+that private PKCS#8 material never appears in JSON output, and that explicit CI
+secret files are mode 0600 on Unix and no-overwrite.
 Capability registration does not silently claim a namespace;
 the claim response must be `active` before the write API accepts a version.
 Registry API tests pin both accepted publisher roots: JoyID signatures under

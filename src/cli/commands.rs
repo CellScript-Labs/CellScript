@@ -137,6 +137,7 @@ pub enum Command {
     AuthCapabilityCreate(AuthCapabilityArgs),
     AuthCapabilitySubmit(AuthCapabilitySubmitArgs),
     AuthCapabilityRevoke(AuthCapabilityRevokeArgs),
+    AuthReproducerCreate(AuthReproducerCreateArgs),
     AuthNamespaceClaim(AuthNamespaceClaimArgs),
 }
 
@@ -602,6 +603,14 @@ pub struct AuthCapabilityRevokeArgs {
 }
 
 #[derive(Debug, Default)]
+pub struct AuthReproducerCreateArgs {
+    pub builder_id: String,
+    pub trust_domain: String,
+    pub private_key_output: Option<PathBuf>,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
 pub struct AuthNamespaceClaimArgs {
     pub api_url: Option<String>,
     pub namespace: String,
@@ -815,6 +824,7 @@ impl CommandExecutor {
             Command::AuthLogin(args) | Command::AuthCapabilityCreate(args) => Self::auth_capability(args),
             Command::AuthCapabilitySubmit(args) => Self::auth_capability_submit(args),
             Command::AuthCapabilityRevoke(args) => Self::auth_capability_revoke(args),
+            Command::AuthReproducerCreate(args) => Self::auth_reproducer_create(args),
             Command::AuthNamespaceClaim(args) => Self::auth_namespace_claim(args),
             Command::RegistryVerify(args) => Self::registry_verify(args),
             Command::PackageVerify(args) => Self::package_verify(args),
@@ -4088,6 +4098,66 @@ impl CommandExecutor {
         CommandOutcome { machine, human_lines }.emit(args.json)
     }
 
+    fn auth_reproducer_create(args: AuthReproducerCreateArgs) -> Result<()> {
+        let builder_id = args.builder_id.trim().to_string();
+        if builder_id.is_empty() || builder_id.len() > 200 {
+            return Err(crate::error::CompileError::without_span("builder id must contain 1 to 200 characters"));
+        }
+        let trust_domain = args.trust_domain.trim().to_string();
+        if trust_domain.is_empty() || trust_domain.len() > 200 {
+            return Err(crate::error::CompileError::without_span("trust domain must contain 1 to 200 characters"));
+        }
+
+        let generated = generate_registry_key_material()?;
+        let (private_key_storage, storage_line) = if let Some(path) = args.private_key_output {
+            write_new_reproducer_private_key(&path, &generated.private_key_pkcs8)?;
+            let path_display = path.display().to_string();
+            (
+                serde_json::json!({
+                    "kind": "pkcs8_base64_file",
+                    "path": &path_display,
+                    "environment_variable": "CELLSCRIPT_REPRODUCER_PRIVATE_KEY_PKCS8_B64",
+                }),
+                format!("  Private key: restricted PKCS#8 base64 file at {path_display}"),
+            )
+        } else {
+            store_registry_private_key(&generated.key_id, &generated.private_key_pkcs8)?;
+            (
+                serde_json::json!({
+                    "kind": "os_keychain",
+                    "service": "cellscript-registry",
+                    "key_id": &generated.key_id,
+                }),
+                "  Private key: stored in the OS keychain".to_string(),
+            )
+        };
+        let machine = serde_json::json!({
+            "schema": "cellscript-reproducer-builder-enrollment-v1",
+            "builder_id": &builder_id,
+            "trust_domain": &trust_domain,
+            "builder_key_id": &generated.key_id,
+            "builder_public_key": &generated.public_key,
+            "policy_builder": {
+                "builder_id": &builder_id,
+                "trust_domain": &trust_domain,
+                "public_key": &generated.public_key,
+            },
+            "private_key_storage": private_key_storage,
+        });
+        let human_lines = vec![
+            "Reproducer builder key created".green().to_string(),
+            format!("  Builder: {builder_id}"),
+            format!("  Trust domain: {trust_domain}"),
+            format!("  Builder key id: {}", generated.key_id),
+            format!("  Builder public key: {}", generated.public_key),
+            storage_line,
+            String::new(),
+            "Send only policy_builder to the Registry operator. Keep the private key inside this builder's independent custody."
+                .to_string(),
+        ];
+        CommandOutcome { machine, human_lines }.emit(args.json)
+    }
+
     fn auth_capability_submit(args: AuthCapabilitySubmitArgs) -> Result<()> {
         let api_base = resolve_registry_api_base(args.api_url)?;
         let registry_origin = registry_origin_from_api_base(&api_base)?;
@@ -4825,17 +4895,30 @@ struct GeneratedRegistryCapabilityKey {
     capability_pubkey: String,
 }
 
-fn generate_and_store_registry_capability_key() -> Result<GeneratedRegistryCapabilityKey> {
+struct GeneratedRegistryKeyMaterial {
+    key_id: String,
+    public_key: String,
+    private_key_pkcs8: Vec<u8>,
+}
+
+fn generate_registry_key_material() -> Result<GeneratedRegistryKeyMaterial> {
     let rng = ring::rand::SystemRandom::new();
     let pkcs8 = ring::signature::EcdsaKeyPair::generate_pkcs8(&ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING, &rng)
-        .map_err(|error| crate::error::CompileError::without_span(format!("failed to generate capability key: {:?}", error)))?;
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to generate P-256 registry key: {:?}", error)))?;
     let key_pair = ring::signature::EcdsaKeyPair::from_pkcs8(&ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8.as_ref(), &rng)
-        .map_err(|error| crate::error::CompileError::without_span(format!("failed to load generated capability key: {:?}", error)))?;
+        .map_err(|error| {
+            crate::error::CompileError::without_span(format!("failed to load generated P-256 registry key: {:?}", error))
+        })?;
     let spki = p256_spki_der_from_uncompressed_public_key(key_pair.public_key().as_ref())?;
-    let capability_pubkey = format!("p256-spki:{}", base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(spki));
-    let key_id = registry_capability_key_id(&capability_pubkey);
-    store_registry_capability_private_key(&key_id, pkcs8.as_ref())?;
-    Ok(GeneratedRegistryCapabilityKey { key_id, capability_pubkey })
+    let public_key = format!("p256-spki:{}", base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(spki));
+    let key_id = registry_capability_key_id(&public_key);
+    Ok(GeneratedRegistryKeyMaterial { key_id, public_key, private_key_pkcs8: pkcs8.as_ref().to_vec() })
+}
+
+fn generate_and_store_registry_capability_key() -> Result<GeneratedRegistryCapabilityKey> {
+    let generated = generate_registry_key_material()?;
+    store_registry_private_key(&generated.key_id, &generated.private_key_pkcs8)?;
+    Ok(GeneratedRegistryCapabilityKey { key_id: generated.key_id, capability_pubkey: generated.public_key })
 }
 
 fn registry_capability_key_id(capability_pubkey: &str) -> String {
@@ -4851,7 +4934,7 @@ fn p256_spki_der_from_uncompressed_public_key(public_key: &[u8]) -> Result<Vec<u
     ];
     if public_key.len() != 65 || public_key.first() != Some(&0x04) {
         return Err(crate::error::CompileError::without_span(format!(
-            "generated capability public key must be an uncompressed 65-byte P-256 point, got {} bytes",
+            "generated registry public key must be an uncompressed 65-byte P-256 point, got {} bytes",
             public_key.len()
         )));
     }
@@ -4861,7 +4944,7 @@ fn p256_spki_der_from_uncompressed_public_key(public_key: &[u8]) -> Result<Vec<u
     Ok(spki)
 }
 
-fn store_registry_capability_private_key(key_id: &str, pkcs8: &[u8]) -> Result<()> {
+fn store_registry_private_key(key_id: &str, pkcs8: &[u8]) -> Result<()> {
     let secret = base64::engine::general_purpose::STANDARD.encode(pkcs8);
     let entry = keyring::Entry::new("cellscript-registry", key_id).map_err(|error| {
         crate::error::CompileError::without_span(format!("failed to open OS keychain: {}", error))
@@ -4870,12 +4953,60 @@ fn store_registry_capability_private_key(key_id: &str, pkcs8: &[u8]) -> Result<(
     })?;
     entry.set_password(&secret).map_err(|error| {
         crate::error::CompileError::without_span(format!(
-            "failed to store capability private key '{}' in OS keychain: {}",
+            "failed to store registry P-256 private key '{}' in OS keychain: {}",
             key_id, error
         ))
         .with_category(crate::error::CompileErrorCategory::Authentication)
         .with_source(error)
     })
+}
+
+fn write_new_reproducer_private_key(path: &Path, pkcs8: &[u8]) -> Result<()> {
+    #[cfg(not(unix))]
+    {
+        let _ = (path, pkcs8);
+        return Err(crate::error::CompileError::without_span(
+            "--private-key-output requires Unix mode-0600 permission semantics; use the OS keychain on this platform",
+        )
+        .with_category(crate::error::CompileErrorCategory::Authentication));
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        options.mode(0o600);
+        let mut file = options.open(path).map_err(|error| {
+            crate::error::CompileError::without_span(format!(
+                "failed to create reproducer private-key file '{}': {}",
+                path.display(),
+                error
+            ))
+            .with_category(crate::error::CompileErrorCategory::Authentication)
+            .with_source(error)
+        })?;
+        let secret = base64::engine::general_purpose::STANDARD.encode(pkcs8);
+        file.write_all(secret.as_bytes()).and_then(|_| file.write_all(b"\n")).map_err(|error| {
+            crate::error::CompileError::without_span(format!(
+                "failed to write reproducer private-key file '{}': {}",
+                path.display(),
+                error
+            ))
+            .with_category(crate::error::CompileErrorCategory::Authentication)
+            .with_source(error)
+        })?;
+        file.sync_all().map_err(|error| {
+            crate::error::CompileError::without_span(format!(
+                "failed to sync reproducer private-key file '{}': {}",
+                path.display(),
+                error
+            ))
+            .with_category(crate::error::CompileErrorCategory::Authentication)
+            .with_source(error)
+        })
+    }
 }
 
 fn sign_registry_publish_payload(key_id: &str, canonical_payload: &str) -> Result<String> {
@@ -10492,6 +10623,15 @@ fn auth_capability_submit_args_from_matches(m: &clap::ArgMatches) -> AuthCapabil
     }
 }
 
+fn auth_reproducer_create_args_from_matches(m: &clap::ArgMatches) -> AuthReproducerCreateArgs {
+    AuthReproducerCreateArgs {
+        builder_id: m.get_one::<String>("builder-id").cloned().expect("required builder-id"),
+        trust_domain: m.get_one::<String>("trust-domain").cloned().expect("required trust-domain"),
+        private_key_output: m.get_one::<String>("private-key-output").map(PathBuf::from),
+        json: json_output(m),
+    }
+}
+
 fn auth_namespace_claim_args_from_matches(m: &clap::ArgMatches) -> AuthNamespaceClaimArgs {
     AuthNamespaceClaimArgs {
         api_url: m.get_one::<String>("api-url").cloned(),
@@ -14004,6 +14144,44 @@ impl CliParser {
                             ),
                     )
                     .subcommand(
+                        ClapCommand::new("reproducer")
+                            .about("Manage independent reproducibility builder identities")
+                            .subcommand_required(true)
+                            .arg_required_else_help(true)
+                            .subcommand(
+                                ClapCommand::new("create")
+                                    .about("Create a P-256 reproducer key and public policy enrollment record")
+                                    .arg(
+                                        Arg::new("builder-id")
+                                            .long("builder-id")
+                                            .value_name("ID")
+                                            .required(true)
+                                            .help("Stable builder identifier assigned by the independent operator"),
+                                    )
+                                    .arg(
+                                        Arg::new("trust-domain")
+                                            .long("trust-domain")
+                                            .value_name("DOMAIN")
+                                            .required(true)
+                                            .help("Administrative and private-key custody domain for this builder"),
+                                    )
+                                    .arg(
+                                        Arg::new("private-key-output")
+                                            .long("private-key-output")
+                                            .value_name("FILE")
+                                            .help(
+                                                "On Unix, write PKCS#8 base64 to a new mode-0600 file for CI secret enrollment instead of the OS keychain",
+                                            ),
+                                    )
+                                    .arg(
+                                        Arg::new("json")
+                                            .long("json")
+                                            .action(ArgAction::SetTrue)
+                                            .help("Emit the public builder enrollment record as JSON without private-key material"),
+                                    ),
+                            ),
+                    )
+                    .subcommand(
                         ClapCommand::new("namespace")
                             .about("Manage Registry namespace ownership")
                             .subcommand_required(true)
@@ -14729,6 +14907,10 @@ impl CliParser {
                     Some(("create", create)) => Command::AuthCapabilityCreate(auth_capability_args_from_matches(create)),
                     Some(("submit", submit)) => Command::AuthCapabilitySubmit(auth_capability_submit_args_from_matches(submit)),
                     Some(("revoke", revoke)) => Command::AuthCapabilityRevoke(auth_capability_revoke_args_from_matches(revoke)),
+                    _ => unreachable!(),
+                },
+                Some(("reproducer", reproducer)) => match reproducer.subcommand() {
+                    Some(("create", create)) => Command::AuthReproducerCreate(auth_reproducer_create_args_from_matches(create)),
                     _ => unreachable!(),
                 },
                 Some(("namespace", namespace)) => match namespace.subcommand() {

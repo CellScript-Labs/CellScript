@@ -147,6 +147,7 @@ fn cellc_auth_help_hides_legacy_login_alias() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("capability"), "unexpected auth help: {stdout}");
+    assert!(stdout.contains("reproducer"), "unexpected auth help: {stdout}");
     assert!(!stdout.contains("login"), "legacy auth login alias should be hidden from auth help: {stdout}");
 }
 
@@ -1175,6 +1176,91 @@ fn cellc_auth_capability_create_requires_principal_id() {
     let message = failure["diagnostics"][0]["message"].as_str().unwrap_or_default();
     assert!(message.contains("principal id is required"), "unexpected failure: {failure}");
     assert!(message.contains("--principal-id"), "unexpected failure: {failure}");
+}
+
+#[cfg(unix)]
+#[test]
+fn cellc_auth_reproducer_create_keeps_private_key_out_of_public_enrollment() {
+    let temp = tempfile::tempdir().unwrap();
+    let private_key_path = temp.path().join("builder-private.pkcs8.b64");
+    let output = cellc_command()
+        .args(["auth", "reproducer", "create"])
+        .arg("--builder-id")
+        .arg("independent-builder-a")
+        .arg("--trust-domain")
+        .arg("independent-org-a")
+        .arg("--private-key-output")
+        .arg(&private_key_path)
+        .arg("--json")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let enrollment: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(enrollment["schema"], "cellscript-reproducer-builder-enrollment-v1");
+    assert_eq!(enrollment["builder_id"], "independent-builder-a");
+    assert_eq!(enrollment["trust_domain"], "independent-org-a");
+    assert_eq!(enrollment["policy_builder"]["builder_id"], "independent-builder-a");
+    assert_eq!(enrollment["policy_builder"]["trust_domain"], "independent-org-a");
+    assert_eq!(enrollment["private_key_storage"]["kind"], "pkcs8_base64_file");
+
+    let public_key = enrollment["builder_public_key"].as_str().unwrap();
+    assert!(public_key.starts_with("p256-spki:"));
+    let spki = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(public_key.trim_start_matches("p256-spki:")).unwrap();
+    assert_eq!(spki.len(), 91);
+    let expected_key_id = format!("cap_{}", &hex::encode(Sha256::digest(public_key.as_bytes()))[..32]);
+    assert_eq!(enrollment["builder_key_id"], expected_key_id);
+    assert_eq!(enrollment["policy_builder"]["public_key"], public_key);
+
+    let private_key_secret = std::fs::read_to_string(&private_key_path).unwrap();
+    let private_key = base64::engine::general_purpose::STANDARD.decode(private_key_secret.trim()).unwrap();
+    assert!(private_key.len() > 100);
+    assert!(!String::from_utf8_lossy(&output.stdout).contains(private_key_secret.trim()));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        assert_eq!(std::fs::metadata(&private_key_path).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+
+    let second = cellc_command()
+        .args(["auth", "reproducer", "create"])
+        .arg("--builder-id")
+        .arg("independent-builder-a")
+        .arg("--trust-domain")
+        .arg("independent-org-a")
+        .arg("--private-key-output")
+        .arg(&private_key_path)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(!second.status.success(), "existing private-key file must not be overwritten");
+    assert_eq!(std::fs::read_to_string(&private_key_path).unwrap(), private_key_secret);
+}
+
+#[cfg(not(unix))]
+#[test]
+fn cellc_auth_reproducer_create_rejects_private_key_file_without_unix_permissions() {
+    let temp = tempfile::tempdir().unwrap();
+    let private_key_path = temp.path().join("builder-private.pkcs8.b64");
+    let output = cellc_command()
+        .args(["auth", "reproducer", "create"])
+        .arg("--builder-id")
+        .arg("independent-builder-a")
+        .arg("--trust-domain")
+        .arg("independent-org-a")
+        .arg("--private-key-output")
+        .arg(&private_key_path)
+        .arg("--json")
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("requires Unix mode-0600 permission semantics"),
+        "unexpected stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!private_key_path.exists());
 }
 
 fn write_publish_fixture_package(root: &std::path::Path) {

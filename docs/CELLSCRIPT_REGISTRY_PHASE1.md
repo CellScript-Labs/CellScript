@@ -261,6 +261,12 @@ environment and emit bounded reports:
 Generate each report next to the reproduced artifact and bounded build log:
 
 ```bash
+# Run once inside each independent builder's own administrative domain.
+cellc auth reproducer create \
+  --builder-id builder-a \
+  --trust-domain independent-org-a \
+  --json > reports/builder-a-enrollment.json
+
 cellc artifact reproduction-report acme/vault-lock@1.0.0 \
   --artifact target/vault-lock \
   --build-log reports/builder-a.log \
@@ -271,9 +277,13 @@ cellc artifact reproduction-report acme/vault-lock@1.0.0 \
   --output reports/builder-a.json
 ```
 
-The corresponding private key must be isolated per builder. Load it from that
-builder's OS keychain entry, or set
-`CELLSCRIPT_REPRODUCER_PRIVATE_KEY_PKCS8_B64` only in its CI environment.
+The create command emits a public `policy_builder` record and stores the
+corresponding private key in that builder's OS keychain. For CI enrollment,
+on Unix, pass `--private-key-output <new-file>` to write PKCS#8 base64 into a
+new mode-0600 file, move its value into that builder's secret manager as
+`CELLSCRIPT_REPRODUCER_PRIVATE_KEY_PKCS8_B64`, and do not send the file to the
+Registry operator. Only the public `policy_builder` record crosses the trust
+boundary.
 
 Create the operator promotion payload locally:
 

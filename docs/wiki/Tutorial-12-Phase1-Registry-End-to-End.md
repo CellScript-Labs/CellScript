@@ -161,6 +161,11 @@ Each builder writes a bounded report:
 Generate a signed report on each independent builder:
 
 ```bash
+cellc auth reproducer create \
+  --builder-id builder-a \
+  --trust-domain independent-org-a \
+  --json > reports/builder-a-enrollment.json
+
 cellc artifact reproduction-report acme/vault-lock@1.0.0 \
   --artifact target/vault-lock \
   --build-log reports/builder-a.log \
@@ -171,9 +176,11 @@ cellc artifact reproduction-report acme/vault-lock@1.0.0 \
   --output reports/builder-a.json
 ```
 
-Each builder keeps its private key isolated in its OS keychain or supplies it
-through `CELLSCRIPT_REPRODUCER_PRIVATE_KEY_PKCS8_B64` in that builder's CI
-environment.
+Each builder sends only the generated public `policy_builder` record to the
+Registry operator. The private key stays in that builder's OS keychain. A CI
+builder on Unix may pass `--private-key-output <new-file>` during enrollment,
+import the mode-0600 file's PKCS#8 base64 value into its own secret manager as
+`CELLSCRIPT_REPRODUCER_PRIVATE_KEY_PKCS8_B64`, and must not share that file.
 
 Validate and combine at least two signed reports with distinct builder IDs,
 public keys, and trust domains:
