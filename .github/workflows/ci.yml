@@ -56,6 +56,7 @@ jobs:
       - name: Install Rust toolchain
         run: |
           rustup toolchain install 1.97.1 --profile minimal --component rustfmt --component clippy --component llvm-tools-preview
+          rustup target add --toolchain 1.97.1 riscv64imac-unknown-none-elf wasm32-unknown-unknown
           rustup default 1.97.1
           rustc --version
           cargo --version
