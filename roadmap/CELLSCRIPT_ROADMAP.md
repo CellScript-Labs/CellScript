@@ -340,7 +340,7 @@ Detailed status:
 - [Registry API service](../services/registry-api/README.md)
 - [0.22 Fiber plan (carried forward)](CELLSCRIPT_0_22_FIBER_NATIVE_SUPPORT_PLAN.md)
 - [Spore/RGB++ interop plan](CELLSCRIPT_SPORE_RGBPP_INTEROP_PLAN.md)
-- [Myelin Session L2 plan](../../Myelin/MYELIN_SESSION_L2_PLAN.md)
+- [Myelin Session L2 plan](https://github.com/Myelin-Labs/Myelin/blob/main/MYELIN_SESSION_L2_PLAN.md)
 
 ### Next Authorization Hardening Track
 

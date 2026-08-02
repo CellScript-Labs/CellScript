@@ -538,9 +538,9 @@ After the profile lands in upstream CellScript:
 
 Source documents:
 
-- [Myelin Session L2 plan](../../Myelin/MYELIN_SESSION_L2_PLAN.md)
-- [Myelin CKB semantic deviations](../../Myelin/MYELIN_CKB_SEMANTIC_DEVIATIONS.md)
-- [Myelin production gate](../../Myelin/MYELIN_PRODUCTION_GATE.md)
+- [Myelin Session L2 plan](https://github.com/Myelin-Labs/Myelin/blob/main/MYELIN_SESSION_L2_PLAN.md)
+- [Myelin CKB semantic deviations](https://github.com/Myelin-Labs/Myelin/blob/main/MYELIN_CKB_SEMANTIC_DEVIATIONS.md)
+- [Myelin production gate](https://github.com/Myelin-Labs/Myelin/blob/main/MYELIN_PRODUCTION_GATE.md)
 - [0.22 type/set roadmap (session-type deferral)](CELLSCRIPT_0_22_TYPE_AND_SET_THEORY_ROADMAP.md)
 
 ## Cross-Cutting Discipline
