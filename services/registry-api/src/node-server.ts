@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 
 import { createApp, type Env } from "./index";
 import { FilesystemObjectStore } from "./filesystem-object-store";
+import { nodeCkbRpcEnv } from "./node-runtime-env";
 import { SqlRegistryStore } from "./sql-store";
 
 const port = integerEnv("PORT", 8787, 1, 65_535);
@@ -40,8 +41,7 @@ const env: Env = {
   ...(process.env["NAMESPACE_CLAIM_COOLDOWN_SECONDS"]
     ? { NAMESPACE_CLAIM_COOLDOWN_SECONDS: process.env["NAMESPACE_CLAIM_COOLDOWN_SECONDS"] }
     : {}),
-  ...(process.env["CKB_MAINNET_RPC_URL"] ? { CKB_MAINNET_RPC_URL: process.env["CKB_MAINNET_RPC_URL"] } : {}),
-  ...(process.env["CKB_RPC_URL"] ? { CKB_RPC_URL: process.env["CKB_RPC_URL"] } : {}),
+  ...nodeCkbRpcEnv(process.env),
   ...(process.env["REGISTRY_TYPE_SCRIPT_JSON"]
     ? { REGISTRY_TYPE_SCRIPT_JSON: process.env["REGISTRY_TYPE_SCRIPT_JSON"] }
     : {}),

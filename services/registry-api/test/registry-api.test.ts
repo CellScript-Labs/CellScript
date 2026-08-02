@@ -43,6 +43,7 @@ import {
   type SnapshotWriter,
 } from "../src/index";
 import type { PackageVersionRecord } from "../src/store";
+import { nodeCkbRpcEnv } from "../src/node-runtime-env";
 
 const now = new Date("2026-06-23T12:00:00Z");
 const ckbPrivateKey = Uint8Array.from({ length: 32 }, (_, index) => index === 31 ? 7 : 0);
@@ -50,6 +51,25 @@ const reproducerPublicKeys = {
   "builder-a": "p256-spki:MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE2GpMwoWK1SO7Vrd_Rn3kxf_VllpSMGMu1Mo40vH2IotxFkJwZwO7acw8A-lZB7z4l5QAYDKTP4ua7YilwZQfBw",
   "builder-b": "p256-spki:MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEcZljLFjOhAdes8hm88phoxoMmsya3kKGRbmwjtH1eW4tWV_sn81NRL5EwkrqhjPuYxXfEbYBfuSVPMVD3at7hQ",
 } as const;
+
+describe("Node CKB RPC environment", () => {
+  it("forwards every bounded RPC control used by the shared API", () => {
+    expect(nodeCkbRpcEnv({
+      CKB_MAINNET_RPC_URL: "https://mainnet.ckb.dev/rpc",
+      CKB_RPC_URL: "https://testnet.ckb.dev/rpc",
+      CKB_RPC_TIMEOUT_MS: "15000",
+      CKB_RPC_MAX_RESPONSE_BYTES: "8388608",
+      CKB_DEP_GROUP_MAX_MEMBERS: "256",
+      UNRELATED_SECRET: "must-not-pass-through",
+    })).toEqual({
+      CKB_MAINNET_RPC_URL: "https://mainnet.ckb.dev/rpc",
+      CKB_RPC_URL: "https://testnet.ckb.dev/rpc",
+      CKB_RPC_TIMEOUT_MS: "15000",
+      CKB_RPC_MAX_RESPONSE_BYTES: "8388608",
+      CKB_DEP_GROUP_MAX_MEMBERS: "256",
+    });
+  });
+});
 
 function bytesHex(value: Uint8Array): string {
   return `0x${[...value].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;

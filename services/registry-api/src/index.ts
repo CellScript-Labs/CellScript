@@ -1408,7 +1408,20 @@ async function ckbRpcRequest(
   if (!response.ok) {
     throw new ApiError(503, "ckb_rpc_unavailable", `CKB RPC returned HTTP ${response.status}`);
   }
-  const rpc = assertPlainObject(await readBoundedRpcJson(response, options.maximum_bytes), "invalid_ckb_rpc_response");
+  let rpcBody: unknown;
+  try {
+    rpcBody = await readBoundedRpcJson(response, options.maximum_bytes);
+  } catch (error) {
+    if (error instanceof ApiError && error.code === "ckb_rpc_response_too_large") {
+      throw new ApiError(
+        error.status,
+        error.code,
+        `CKB RPC ${method} response exceeds the configured size limit`,
+      );
+    }
+    throw error;
+  }
+  const rpc = assertPlainObject(rpcBody, "invalid_ckb_rpc_response");
   if (rpc["error"]) {
     throw new ApiError(503, "ckb_rpc_error", `CKB RPC rejected ${method}`);
   }

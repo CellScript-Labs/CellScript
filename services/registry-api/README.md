@@ -13,7 +13,7 @@ The Pudge test environment is a separate, ephemeral service:
 
 - `https://api.testnet.registry.cellscript.dev` is the sandbox API;
 - `https://objects.testnet.registry.cellscript.dev` is its object origin;
-- `https://testnet.cellscript.dev/registry` is its `noindex` UI.
+- `https://testnet.registry.cellscript.dev/registry` is its `noindex` UI.
 
 It uses a different Postgres volume, object volume, signing origin, wallet
 storage key, RPC identity, and Compose project. Do not put a network selector in
@@ -254,7 +254,11 @@ require `code_hash` to equal the data hash. Success appends hash-addressed
 evidence and sets only `deployment_status = chain_verified`.
 
 `CKB_RPC_URL` configures the environment RPC. `CKB_MAINNET_RPC_URL` remains a
-production compatibility alias.
+production compatibility alias. The Docker deployment sets
+`CKB_RPC_MAX_RESPONSE_BYTES=8388608`: canonical secp256k1 DepGroup validation
+must read the genesis data Cell, whose JSON-RPC hex encoding exceeds the
+conservative 2 MiB library default. The API still enforces its 8 MiB hard
+ceiling and bounded RPC timeout.
 
 ## Registry Chain Commitments
 

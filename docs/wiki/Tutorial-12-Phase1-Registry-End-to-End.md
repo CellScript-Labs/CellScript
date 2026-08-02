@@ -12,7 +12,7 @@ CellScript path first, then the generic artifact path.
 
 Open `https://cellscript.dev/registry/submit`. The page does not expose a
 network selector. The production Registry is CKB mainnet-only. Pudge testing
-uses `https://testnet.cellscript.dev/registry`, with a different API origin,
+uses `https://testnet.registry.cellscript.dev/registry`, with a different API origin,
 database, object store, wallet connection state, and testnet-only evidence.
 Sandbox records disappear from discovery after 72 hours and their source bytes
 are purged after a 24-hour grace period; this does not erase Pudge chain history.
