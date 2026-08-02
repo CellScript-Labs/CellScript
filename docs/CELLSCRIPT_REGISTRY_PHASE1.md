@@ -295,6 +295,14 @@ rotation cannot rewrite the historical trust boundary. A reproducible artifact
 stays `evidence_required`, and deployment admission fails, until
 `reproduced_build` evidence is accepted.
 
+Distinct policy labels are necessary but cannot prove organizational
+independence. The production operator must obtain each public key from a builder
+under separate administrative control and private-key custody. Creating two
+keys inside the Registry operator's own infrastructure and assigning different
+`trust_domain` strings does not satisfy this model. Readiness proves that the
+policy is well-formed and that its P-256 keys are importable; it does not attest
+who controls those keys.
+
 ## Consuming Other Artifacts
 
 Generic artifacts never pass through `cellc install`. Use the explicit

@@ -71,6 +71,14 @@ reproducible artifact until this transition succeeds. Accepted evidence also
 stores the canonical policy SHA-256 and the minimum trust-domain threshold used
 at acceptance time.
 
+Trust-domain independence is an operator-governance fact, not something the API
+can infer from two different strings. Production policy must use builders under
+separate administrative control and separate private-key custody. Two keys
+created or controlled by the same Registry operator must not be labelled as two
+independent trust domains. `/ready` validates policy shape, key importability,
+and configured threshold only; it is not an organizational-independence
+attestation.
+
 ## Endpoints
 
 ```text
