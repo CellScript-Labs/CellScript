@@ -55,7 +55,7 @@ jobs:
 
       - name: Install Rust toolchain
         run: |
-          rustup toolchain install 1.97.1 --profile minimal --component rustfmt --component clippy
+          rustup toolchain install 1.97.1 --profile minimal --component rustfmt --component clippy --component llvm-tools-preview
           rustup default 1.97.1
           rustc --version
           cargo --version
@@ -63,7 +63,9 @@ jobs:
       - name: Install CI dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ripgrep
+          sudo apt-get install -y clang llvm ripgrep
+          clang --version
+          llvm-ar --version
           rg --version
 
       - name: Configure Git identity for local registry fixtures

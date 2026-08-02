@@ -5,30 +5,33 @@ if [[ -n "${CLANG:-}" ]]; then
     exit 0
 fi
 
-search_target="${SEARCH_TARGET:-llvm-strip}"
 candidates=(
-    "$search_target"
-    "$search_target-19"
-    "$search_target-20"
-    "$search_target-21"
-    "$search_target-22"
+    clang
+    clang-16
+    clang-17
+    clang-18
+    clang-19
+    clang-20
+    clang-21
+    clang-22
 )
 
 brew_prefix="$(brew --prefix 2>/dev/null || true)"
 if [[ -n "$brew_prefix" ]]; then
     candidates+=(
-        "$brew_prefix/opt/llvm/bin/$search_target"
-        "$brew_prefix/opt/llvm@19/bin/$search_target"
-        "$brew_prefix/opt/llvm@20/bin/$search_target"
-        "$brew_prefix/opt/llvm@21/bin/$search_target"
-        "$brew_prefix/opt/llvm@22/bin/$search_target"
+        "$brew_prefix/opt/llvm/bin/clang"
+        "$brew_prefix/opt/llvm@19/bin/clang"
+        "$brew_prefix/opt/llvm@20/bin/clang"
+        "$brew_prefix/opt/llvm@21/bin/clang"
+        "$brew_prefix/opt/llvm@22/bin/clang"
     )
 fi
 
 for candidate in "${candidates[@]}"; do
+    resolved="$(command -v "$candidate" 2>/dev/null || true)"
     version="$($candidate --version 2>/dev/null | sed -n 's/.*version \([0-9][0-9]*\).*/\1/p' | head -n 1)"
-    if [[ -n "$version" && "$version" -ge 16 ]]; then
-        printf '%s\n' "${candidate/$search_target/clang}"
+    if [[ -n "$resolved" && -x "$(dirname "$resolved")/llvm-ar" && -n "$version" && "$version" -ge 16 ]]; then
+        printf '%s\n' "$resolved"
         exit 0
     fi
 done
