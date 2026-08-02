@@ -214,6 +214,16 @@ REGISTRY_COMMITMENT_LOCK_SCRIPT_JSON
 REGISTRY_COMMITMENT_LOCK_CELL_DEP_JSON
 ```
 
+In `ENVIRONMENT=production`, configuration is additionally pinned to the
+tracked immutable Registry Type Script release in
+`contracts/registry-type-script/release-manifest.json`. Its Type args must be
+the CKB Script hash of the complete custody Lock, the custody Lock must be the
+mainnet `secp256k1_blake160_sighash_all` Script with 20-byte signer args, and
+its CellDep must be the canonical genesis DepGroup. The Type Script requires a
+custody-locked input for creation as well as update/destruction, so merely
+creating an output addressed to the Registry cannot forge an official
+commitment.
+
 `CKB_REGISTRY_SCAN_MAX_CELLS` bounds the scheduled indexer scan (default 1000,
 allowed range 100–10000). `CKB_MIN_CONFIRMATIONS` defaults to 24 and applies to
 deployment Cells, commitment Cells, and both configured Script code CellDeps.

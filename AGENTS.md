@@ -88,8 +88,8 @@ require extra tooling.
 
 | Mode | What it does |
 | --- | --- |
-| `dev` | Explicit workspace-package formatting and checks for the compiler, Fiber adapter, CKB adapter, WASM crate, CKB SDK builder example, `cellscript-tools`, and the independent Registry verifier crate; native source-policy enforcement; strict backend audit (quick); syntax combo audit (quick); parity-gated skill-pack freshness; `git diff --check`. Run before committing. |
-| `ci` | `dev` coverage plus tests and clippy for every workspace package, `cellscript-tools`, and the Registry verifier; Registry API tests plus Node API/verifier bundles; full package contents check, website build check (requires `npm`), shell syntax and native source-policy checks, parity-gated skill-pack freshness, and trailing-whitespace check. Run before claiming merge-readiness. |
+| `dev` | Explicit workspace-package formatting and checks for the compiler, Fiber adapter, CKB adapter, WASM crate, CKB SDK builder example, `cellscript-tools`, and the independent Registry verifier crate; reproducible Registry Type Script build and CKB-VM tests; native source-policy enforcement; strict backend audit (quick); syntax combo audit (quick); parity-gated skill-pack freshness; `git diff --check`. Run before committing. |
+| `ci` | `dev` coverage plus tests and clippy for every workspace package, `cellscript-tools`, the Registry verifier, and the Registry Type Script; Registry API tests plus Node API/verifier bundles; full package contents check, website build check (requires `npm`), shell syntax and native source-policy checks, parity-gated skill-pack freshness, and trailing-whitespace check. Run before claiming merge-readiness. |
 | `backend` | For IR / codegen / assembler / ABI / ELF / RISC-V changes: explicit workspace-package format checking, `cargo check --locked -p cellscript --all-targets`, `cargo test --locked -p cellscript`, `cargo clippy ... -D warnings`, strict backend audit (full, which itself fires the CKB stateful-scenarios harness via `cellscript_ckb_stateful_scenarios.sh`), `git diff --check`. |
 | `release` / `release-quick` | Everything `ci` does plus release-auxiliary checks (CKB acceptance, NovaSeal pinning, NovaSeal Rust tooling for RISC-V, fresh WASM + VS Code packaging, CKB tx measure tool, etc.) and the CKB acceptance harness (`scripts/ckb_cellscript_acceptance.sh`). These modes need the pinned sibling CKB checkout from `scripts/ckb_acceptance_pin.json`, the NovaSeal submodule, a sibling `ckb-sdk-rust` checkout at tag `v5.1.0`, Docker for the canonical Linux/amd64 WASM build, and `riscv64imac-unknown-none-elf` for NovaSeal verifier builds. Do not run them casually. |
 
@@ -121,7 +121,7 @@ The root `Cargo.toml` declares a virtual workspace with these members:
 - `examples/ckb-sdk-builder`
 
 Excluded from the workspace (still buildable through their own manifests):
-`services/registry-verifier`,
+`contracts/registry-type-script`, `services/registry-verifier`,
 `proposals/novaseal/v0-mvp-skeleton/{harness,verifier}` and
 `proposals/novaseal/agreement-profile-v0/harness/ckb_vm`. `tools/ckb-tx-measure`
 defines its own `[workspace]` (no parent) because it pulls `ckb-jsonrpc-types`

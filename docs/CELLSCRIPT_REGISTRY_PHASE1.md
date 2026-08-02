@@ -12,6 +12,12 @@ code CellDeps. Until all four configuration values are present and their Cells
 are live with the required confirmation depth, commitment construction fails
 closed and scheduled chain reconciliation remains disabled.
 
+The canonical `no_std` Script source, CKB-VM tests, reproducible build recipe,
+and release identity are tracked under `contracts/registry-type-script`. Its
+args bind the full custody Lock Script hash and every lifecycle transition must
+consume a Cell under that Lock; an unrelated sender cannot create a trusted
+commitment merely by locking an output to the Registry address.
+
 The Registry indexes CKB ecosystem artifacts. A coordinate is
 `namespace/name`; a release adds an immutable version. The coordinate does not
 imply that the object is a CellScript dependency, executable, deployed Script,

@@ -139,6 +139,21 @@ const DEFAULT_MAX_JSON_BODY_BYTES = 6 * 1024 * 1024;
 const DEFAULT_MAX_SNAPSHOT_BYTES = 5 * 1024 * 1024;
 const DEFAULT_QUOTA_EVENT_RETENTION_HOURS = 48;
 const DEFAULT_NAMESPACE_CLAIM_COOLDOWN_SECONDS = 60 * 60;
+export const CANONICAL_REGISTRY_TYPE_SCRIPT = Object.freeze({
+  code_hash: "0xdc36198561cf09b6084fdfb69b98f52613985f78c4834f4b2a8408ac6479c345",
+  hash_type: "data1",
+});
+export const CKB_MAINNET_SIGHASH_LOCK = Object.freeze({
+  code_hash: "0x9bd7e06f3ecf4be0f2fcd2188b23f1b9fcc88e5d4b65a8637b17723bbda3cce8",
+  hash_type: "type",
+});
+export const CKB_MAINNET_SIGHASH_DEP_GROUP = Object.freeze({
+  out_point: Object.freeze({
+    tx_hash: "0x71a7ba8fc96349fea0ed3a5c47992e3b4084b031a42264a018e0072e8172e46c",
+    index: "0x0",
+  }),
+  dep_type: "dep_group",
+});
 
 export function createApp(deps: AppDeps = {}) {
   return {
@@ -1387,6 +1402,13 @@ export function registryCommitmentConfiguration(env: Env, required: boolean): Re
   validateConfiguredScript(commitmentLockScript, "Registry commitment lock");
   validateConfiguredCellDep(typeScriptCellDep, "Registry Type Script CellDep");
   validateConfiguredCellDep(commitmentLockCellDep, "Registry commitment Lock CellDep");
+  validateCanonicalMainnetRegistryConfiguration(
+    env,
+    typeScript,
+    typeScriptCellDep,
+    commitmentLockScript,
+    commitmentLockCellDep,
+  );
   return {
     type_script: typeScript,
     type_script_hash: ckbScriptHash(typeScript),
@@ -1395,6 +1417,60 @@ export function registryCommitmentConfiguration(env: Env, required: boolean): Re
     commitment_lock_hash: ckbScriptHash(commitmentLockScript),
     commitment_lock_cell_dep: commitmentLockCellDep,
   };
+}
+
+function validateCanonicalMainnetRegistryConfiguration(
+  env: Env,
+  typeScript: Record<string, unknown>,
+  typeScriptCellDep: Record<string, unknown>,
+  commitmentLockScript: Record<string, unknown>,
+  commitmentLockCellDep: Record<string, unknown>,
+): void {
+  if (env.ENVIRONMENT?.trim().toLowerCase() !== "production") return;
+
+  const typeScriptIsCanonical = sameCkbHash(
+    String(typeScript["code_hash"]),
+    CANONICAL_REGISTRY_TYPE_SCRIPT.code_hash,
+  )
+    && typeScript["hash_type"] === CANONICAL_REGISTRY_TYPE_SCRIPT.hash_type
+    && typeof typeScript["args"] === "string"
+    && /^0x[0-9a-fA-F]{64}$/.test(typeScript["args"])
+    && sameCkbHash(String(typeScript["args"]), ckbScriptHash(commitmentLockScript));
+  if (!typeScriptIsCanonical || typeScriptCellDep["dep_type"] !== "code") {
+    throw new ApiError(
+      503,
+      "registry_commitment_misconfigured",
+      "production Registry Type Script must use the tracked immutable data1 release and a direct code CellDep",
+    );
+  }
+
+  const lockArgs = commitmentLockScript["args"];
+  const lockIsCanonical = sameCkbHash(
+    String(commitmentLockScript["code_hash"]),
+    CKB_MAINNET_SIGHASH_LOCK.code_hash,
+  )
+    && commitmentLockScript["hash_type"] === CKB_MAINNET_SIGHASH_LOCK.hash_type
+    && typeof lockArgs === "string"
+    && /^0x[0-9a-fA-F]{40}$/.test(lockArgs);
+  if (!lockIsCanonical || !sameConfiguredCellDep(commitmentLockCellDep, CKB_MAINNET_SIGHASH_DEP_GROUP)) {
+    throw new ApiError(
+      503,
+      "registry_commitment_misconfigured",
+      "production commitment custody must use a 20-byte mainnet secp256k1-blake160 lock and the genesis DepGroup",
+    );
+  }
+}
+
+function sameConfiguredCellDep(
+  actual: Record<string, unknown>,
+  expected: { out_point: { tx_hash: string; index: string }; dep_type: string },
+): boolean {
+  const actualOutPoint = actual["out_point"] as Record<string, unknown>;
+  const actualIndex = actualOutPoint["index"];
+  const normalizedIndex = typeof actualIndex === "number" ? `0x${actualIndex.toString(16)}` : String(actualIndex).toLowerCase();
+  return actual["dep_type"] === expected.dep_type
+    && sameCkbHash(String(actualOutPoint["tx_hash"]), expected.out_point.tx_hash)
+    && normalizedIndex === expected.out_point.index;
 }
 
 async function verifyRegistryCommitmentConfigurationOnChain(

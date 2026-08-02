@@ -8,6 +8,7 @@ members = [
     "examples/ckb-sdk-builder",
 ]
 exclude = [
+    "contracts/registry-type-script",
     "services/registry-verifier",
     "proposals/novaseal/agreement-profile-v0/harness/ckb_vm",
     "proposals/novaseal/v0-mvp-skeleton/harness/ckb_vm",

@@ -397,6 +397,23 @@ run_registry_api_check() {
     run cargo clippy --locked --manifest-path services/registry-verifier/Cargo.toml --all-targets -- -D warnings
 }
 
+run_registry_type_script_check() {
+    run cargo fmt --manifest-path contracts/registry-type-script/Cargo.toml -- --check
+    run contracts/registry-type-script/build_reproducible_release.sh
+    run cargo test --locked --manifest-path contracts/registry-type-script/Cargo.toml
+    local registry_type_script_hash
+    registry_type_script_hash="$(sed -n 's/.*"ckb_data_hash": "\(0x[0-9a-f]*\)".*/\1/p' \
+        contracts/registry-type-script/release-manifest.json)"
+    if [[ ! "$registry_type_script_hash" =~ ^0x[0-9a-f]{64}$ ]]; then
+        printf 'Registry Type Script release manifest has no canonical CKB data hash\n' >&2
+        return 1
+    fi
+    if ! rg --fixed-strings --quiet "$registry_type_script_hash" services/registry-api/src/index.ts; then
+        printf 'Registry API canonical Type Script identity is stale: expected %s\n' "$registry_type_script_hash" >&2
+        return 1
+    fi
+}
+
 check_wasm_release_bundle() {
     require_cmd docker
     run website/scripts/build-wasm.sh
@@ -439,6 +456,7 @@ run_dev_gate() {
     run cargo check --locked -p cellscript-ckb-sdk-builder-example --all-targets
     run cargo check --locked -p cellscript-tools --all-targets
     run cargo check --locked --manifest-path services/registry-verifier/Cargo.toml --all-targets
+    run_registry_type_script_check
     check_canonical_cellscript_format
     check_example_u64_boundaries
     run ./scripts/cellscript_strict_backend_audit.sh quick
@@ -477,6 +495,8 @@ run_ci_gate() {
     run cargo clippy --locked -p cellscript-wasm --all-targets --features wasm -- -D warnings
     run cargo clippy --locked -p cellscript-ckb-sdk-builder-example --all-targets -- -D warnings
     run cargo clippy --locked -p cellscript-tools --all-targets -- -D warnings
+    run_registry_type_script_check
+    run cargo clippy --locked --manifest-path contracts/registry-type-script/Cargo.toml --tests -- -D warnings
     run ./scripts/cellscript_strict_backend_audit.sh ci
     run cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
         --root "$ROOT_DIR" check-skill-pack

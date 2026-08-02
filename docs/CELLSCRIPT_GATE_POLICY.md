@@ -14,8 +14,8 @@ deciding whether a change is ready.
 
 | Mode | When to run | Evidence boundary |
 |---|---|---|
-| `dev` | Local development before pushing | Rust formatting, canonical CellScript example formatting, all workspace-package Rust checks (including `cellscript-tools`) plus the independent Registry verifier crate, strict backend quick audit, syntax-combination quick audit, parity-gated skill-pack freshness, README-linked CellScript doc Status freshness, local markdown link check, whitespace diff check |
-| `ci` | Pull requests, pushes, and routine merge readiness | Canonical CellScript example formatting; tests and clippy for the compiler, Fiber adapter, CKB adapter, WASM crate, CKB SDK builder example, `cellscript-tools`, and the Registry verifier; Registry API typecheck/tests, Node API/verifier bundles, and dry-run Worker build; strict backend CI audit; package verification; parity-gated skill-pack/doc freshness; local-link and script syntax checks |
+| `dev` | Local development before pushing | Rust formatting, canonical CellScript example formatting, all workspace-package Rust checks (including `cellscript-tools`) plus the independent Registry verifier crate; reproducible Registry Type Script build and CKB-VM tests; strict backend quick audit, syntax-combination quick audit, parity-gated skill-pack freshness, README-linked CellScript doc Status freshness, local markdown link check, whitespace diff check |
+| `ci` | Pull requests, pushes, and routine merge readiness | Canonical CellScript example formatting; tests and clippy for the compiler, Fiber adapter, CKB adapter, WASM crate, CKB SDK builder example, `cellscript-tools`, and the Registry verifier; reproducible Registry Type Script identity plus CKB-VM tests and clippy; Registry API typecheck/tests, Node API/verifier bundles, and dry-run Worker build; strict backend CI audit; package verification; parity-gated skill-pack/doc freshness; local-link and script syntax checks |
 | `backend` | Changes touching IR, codegen, assembler, ABI, ELF, or RISC-V behavior | Full Rust tests, clippy, and strict backend full audit, including stateful CKB scenarios |
 | `release` | Nightly/stable release candidates and any production CKB claim | Clean tagged source plus `ci`, a fresh size-gated website WASM rebuild, tooling/docs and VS Code checks, pinned-CKB acceptance harnesses, public builder-contract generation, and mandatory stateful scenario/action coverage |
 | `release-quick` | Wrapper compatibility and local compile-only preflight | `ci` plus compile-only production acceptance; not external live/devnet evidence |
@@ -79,6 +79,15 @@ visible compatibility alias and does not define a second request shape.
 Explicit `--allow-unverified` and `--allow-quarantined` install choices are
 persisted per dependency so the lock refresh and later builds exercise the
 same auditable resolver policy.
+
+Both `dev` and `ci` also build the independent
+`contracts/registry-type-script` crate for
+`riscv64imac-unknown-none-elf`, strip it with the pinned toolchain, compare its
+SHA-256 and CKB data hash to the tracked release manifest, and execute its
+positive and negative lifecycle matrix in CKB-VM through `ckb-testtool`.
+Passing this local boundary proves the deployed bytes' behavior and identity;
+it does not prove that the code Cell or custody Lock CellDep is live on
+mainnet. Production readiness still performs live RPC and confirmation checks.
 
 The full gate reads `scripts/ckb_acceptance_pin.json` and rejects a CKB checkout
 whose revision or worktree differs from the pin. Its report binds the CKB

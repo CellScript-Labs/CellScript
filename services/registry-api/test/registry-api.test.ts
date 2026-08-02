@@ -29,6 +29,9 @@ import {
   type PublishPayload,
 } from "../src/domain";
 import {
+  CANONICAL_REGISTRY_TYPE_SCRIPT,
+  CKB_MAINNET_SIGHASH_DEP_GROUP,
+  CKB_MAINNET_SIGHASH_LOCK,
   MemoryRegistryStore,
   createApp,
   parseDepGroupOutPoints,
@@ -571,6 +574,49 @@ describe("registry api", () => {
       status: "ready",
       checks: { registry_commitment: "configured_and_live" },
     });
+
+    const nonCanonicalProduction = await get(commitmentReadyApp, "/ready", {
+      ENVIRONMENT: "production",
+      REGISTRY_ADMIN_TOKEN: "secret",
+      REGISTRY_TYPE_SCRIPT_JSON: JSON.stringify(typeScript),
+      REGISTRY_TYPE_SCRIPT_CELL_DEP_JSON: JSON.stringify(typeCellDep),
+      REGISTRY_COMMITMENT_LOCK_SCRIPT_JSON: JSON.stringify(commitmentLock),
+      REGISTRY_COMMITMENT_LOCK_CELL_DEP_JSON: JSON.stringify(lockCellDep),
+    });
+    expect(nonCanonicalProduction.status).toBe(503);
+    expect(await nonCanonicalProduction.json()).toMatchObject({
+      status: "not_ready",
+      checks: { registry_commitment: "misconfigured" },
+    });
+
+    const canonicalLock = { ...CKB_MAINNET_SIGHASH_LOCK, args: `0x${"55".repeat(20)}` };
+    const canonicalTypeScript = {
+      ...CANONICAL_REGISTRY_TYPE_SCRIPT,
+      args: ckbScriptHash(canonicalLock),
+    };
+    const canonicalTypeCellDep = {
+      out_point: { tx_hash: `0x${"66".repeat(32)}`, index: "0x0" },
+      dep_type: "code",
+    };
+    let canonicalConfigurationChecked = false;
+    const productionCommitmentApp = createApp({
+      store: new MemoryRegistryStore(),
+      snapshotWriter: { async put() {} },
+      registryObjectReader: { async get() { return null; } },
+      verifyRegistryCommitmentConfiguration: async () => {
+        canonicalConfigurationChecked = true;
+      },
+    });
+    const canonicalProduction = await get(productionCommitmentApp, "/ready", {
+      ENVIRONMENT: "production",
+      REGISTRY_ADMIN_TOKEN: "secret",
+      REGISTRY_TYPE_SCRIPT_JSON: JSON.stringify(canonicalTypeScript),
+      REGISTRY_TYPE_SCRIPT_CELL_DEP_JSON: JSON.stringify(canonicalTypeCellDep),
+      REGISTRY_COMMITMENT_LOCK_SCRIPT_JSON: JSON.stringify(canonicalLock),
+      REGISTRY_COMMITMENT_LOCK_CELL_DEP_JSON: JSON.stringify(CKB_MAINNET_SIGHASH_DEP_GROUP),
+    });
+    expect(canonicalProduction.status).toBe(200);
+    expect(canonicalConfigurationChecked).toBe(true);
 
     const invalidReproducerPolicy = await get(commitmentReadyApp, "/ready", {
       REGISTRY_ADMIN_TOKEN: "secret",

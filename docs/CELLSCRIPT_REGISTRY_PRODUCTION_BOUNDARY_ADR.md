@@ -170,6 +170,14 @@ data, and accepted commitment evidence. The full source, ABI, build recipe,
 compiler metadata, audit corpus, and publisher history remain off-chain and
 content-addressed.
 
+The canonical Registry Type Script binds its 32-byte args to the complete
+custody Lock Script hash, requires every group Cell to use that Lock, and
+requires every creation, replacement, or destruction transaction to consume a
+Cell under that Lock. This closes the CKB creation-authority gap: sending a new
+Cell to the Registry Lock is not sufficient to manufacture an official
+commitment without exercising the Registry signer. Production API readiness
+also pins the Type code data hash and standard mainnet secp Lock/DepGroup.
+
 ## Read Path
 
 Production domains:

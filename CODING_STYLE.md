@@ -28,6 +28,28 @@ project contract.
   short reason; crate-wide or module-wide clippy allowances are only for
   documented legacy or transition boundaries.
 
+## On-Chain Registry Script Rules
+
+`contracts/registry-type-script` is an independent `no_std` CKB Script crate.
+Its release binary is part of the Registry trust boundary, not a host utility.
+
+- Build only with the pinned repository toolchain and
+  `build_reproducible_release.sh`; the script path-remaps sources, strips the
+  RISC-V ELF, and verifies both SHA-256 and CKB data hash against the tracked
+  release manifest.
+- Keep Script args equal to the 32-byte custody Lock Script hash and the
+  accepted Cell data exactly `CSREGv1 || 32-byte commitment hash`. Every group
+  Cell must use that Lock and every transition must consume a Cell using it;
+  otherwise an unauthorised creator could impersonate an official commitment.
+  Format changes require a new protocol prefix and migration plan, not a
+  permissive parser.
+- Run the `ckb-testtool` suite for every Script change. Positive creation,
+  replacement, and destruction plus unauthorised creation, incorrect custody
+  Locks, malformed input/output, and non-canonical args are mandatory evidence.
+- Production deployment requires a live mainnet code Cell, the standard
+  custody Lock CellDep, sufficient confirmations, and a committed deployment
+  manifest. Local CKB-VM tests are not mainnet deployment evidence.
+
 ## Backend And Codegen Rules
 
 `src/codegen/mod.rs` is the orchestration layer of a multi-file backend.

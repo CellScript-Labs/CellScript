@@ -203,6 +203,14 @@ to `deployed`; and a stale deployment falls back to
 `deployment_status = undeployed` (projected as `verified_build`). Disabling Script configuration
 also clears current commitment pointers. Evidence remains append-only.
 
+The canonical Registry Type Script implementation is tracked as an independent
+`no_std` crate under `contracts/registry-type-script`, with a stripped,
+path-remapped reproducible RISC-V release and CKB-VM tests. Its Type args bind
+the custody Lock Script hash, all group Cells must use that Lock, and creation
+also requires a custody-locked input. Production configuration is rejected if
+it drifts from the tracked code data hash or the standard mainnet secp
+Lock/DepGroup.
+
 This is an implementation boundary, not a claim that the canonical mainnet
 Registry Scripts have already been deployed. Production chain commitment stays
 disabled until all four Script/CellDep values are deployed, confirmed, and configured, and

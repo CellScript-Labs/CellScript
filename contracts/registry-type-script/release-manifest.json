@@ -1,0 +1,17 @@
+{
+  "schema": "cellscript-registry-type-script-release-v1",
+  "version": "0.22.0",
+  "target": "riscv64imac-unknown-none-elf",
+  "artifact": "cellscript-registry-type-script",
+  "artifact_bytes": 17832,
+  "sha256": "a17c2390a4e4d3ae96f768d9916a2ebc1c656f09630900c98c98aa6c07bdc3ef",
+  "ckb_data_hash": "0xdc36198561cf09b6084fdfb69b98f52613985f78c4834f4b2a8408ac6479c345",
+  "script_template": {
+    "code_hash": "0xdc36198561cf09b6084fdfb69b98f52613985f78c4834f4b2a8408ac6479c345",
+    "hash_type": "data1",
+    "args_schema": "ckb_script_hash(custody_lock)",
+    "args_bytes": 32
+  },
+  "deployment_policy": "immutable_data_cell",
+  "custody_lock": "ckb_mainnet_secp256k1_blake160_sighash_all"
+}

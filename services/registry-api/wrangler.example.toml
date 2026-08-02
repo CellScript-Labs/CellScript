@@ -21,10 +21,10 @@ CLEANUP_QUOTA_EVENT_RETENTION_HOURS = "48"
 NAMESPACE_CLAIM_COOLDOWN_SECONDS = "3600"
 CKB_REGISTRY_SCAN_MAX_CELLS = "1000"
 # Enable only after the canonical mainnet Registry Type Script is deployed.
-# REGISTRY_TYPE_SCRIPT_JSON = '{"code_hash":"0x...","hash_type":"type","args":"0x..."}'
-# REGISTRY_TYPE_SCRIPT_CELL_DEP_JSON = '{"out_point":{"tx_hash":"0x...","index":"0x0"},"dep_type":"code"}'
-# REGISTRY_COMMITMENT_LOCK_SCRIPT_JSON = '{"code_hash":"0x...","hash_type":"type","args":"0x..."}'
-# REGISTRY_COMMITMENT_LOCK_CELL_DEP_JSON = '{"out_point":{"tx_hash":"0x...","index":"0x0"},"dep_type":"code"}'
+# REGISTRY_TYPE_SCRIPT_JSON = '{"code_hash":"0xdc36198561cf09b6084fdfb69b98f52613985f78c4834f4b2a8408ac6479c345","hash_type":"data1","args":"0x<CUSTODY_LOCK_SCRIPT_HASH>"}'
+# REGISTRY_TYPE_SCRIPT_CELL_DEP_JSON = '{"out_point":{"tx_hash":"0x<TYPE_CODE_CELL_TX_HASH>","index":"0x0"},"dep_type":"code"}'
+# REGISTRY_COMMITMENT_LOCK_SCRIPT_JSON = '{"code_hash":"0x9bd7e06f3ecf4be0f2fcd2188b23f1b9fcc88e5d4b65a8637b17723bbda3cce8","hash_type":"type","args":"0x<CUSTODY_BLAKE160>"}'
+# REGISTRY_COMMITMENT_LOCK_CELL_DEP_JSON = '{"out_point":{"tx_hash":"0x71a7ba8fc96349fea0ed3a5c47992e3b4084b031a42264a018e0072e8172e46c","index":"0x0"},"dep_type":"dep_group"}'
 # REGISTRY_REPRODUCER_POLICY_JSON = '{"schema":"cellscript-reproducer-policy-v1","minimum_trust_domains":2,"builders":[{"builder_id":"builder-a","trust_domain":"org-a","public_key":"p256-spki:..."},{"builder_id":"builder-b","trust_domain":"org-b","public_key":"p256-spki:..."}]}'
 # CKB_MIN_CONFIRMATIONS = "24"
 

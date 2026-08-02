@@ -154,6 +154,11 @@ CellDeps are deployed, sufficiently confirmed, and configured. A publisher-owned
 non-CellScript mainnet artifact, and clean-machine consumption remain adoption
 checkpoints.**
 
+The canonical Registry Type Script source, reproducible release identity,
+CKB-VM lifecycle/authorization tests, and production configuration pinning are
+now implemented in-tree. The unchecked item below is specifically the external
+mainnet transaction, confirmation, and operator configuration checkpoint.
+
 The registry is the largest 0.23 feature. The write API
 (`services/registry-api`) implements the boundary described in
 [`docs/CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md`](../docs/CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md):
