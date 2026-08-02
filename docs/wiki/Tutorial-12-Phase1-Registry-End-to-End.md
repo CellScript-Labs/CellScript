@@ -180,12 +180,15 @@ cellc artifact fetch acme/vault-lock@1.0.0 --output vault-lock.bundle.json
 cellc artifact verify --bundle vault-lock.bundle.json --receipt vault-lock.bundle.json.receipt.json
 cellc artifact pin acme/vault-lock@1.0.0 --output Artifacts.lock --accept-hash-bound
 cellc artifact record-deployment acme/vault-lock@1.0.0 --code-hash <hash> --hash-type data1 --dep-type code --tx-hash <tx_hash> --index 0 --capability-key-id <key_id>
-cellc artifact cell-dep acme/vault-lock@1.0.0 --output CellDep.json --accept-hash-bound
+cellc artifact cell-dep acme/vault-lock@1.0.0 --output CellDep.json --accept-hash-bound --rpc-url https://mainnet.ckb.dev/rpc
+cellc artifact set-availability acme/vault-lock@1.0.0 --status yanked --reason "security advisory" --capability-key-id <key_id>
 cellc artifact commitment acme/vault-lock@1.0.0 --output RegistryCommitment.json
 ```
 
-The last two commands fail until mainnet deployment evidence has been verified.
-The commitment file contains canonical `CSREGv1` Cell data; attestation still
+`cell-dep` fails until mainnet deployment evidence has been verified, then
+rechecks that the deployment (and resolved DepGroup code member) is still live
+at consumption time. Deployment mode must equal the immutable profile
+contract. The commitment file contains canonical `CSREGv1` Cell data; attestation still
 requires the API to read a live mainnet Cell and match its Type/Lock identities.
 
 ## 6. Other artifact kinds

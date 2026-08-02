@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Harden the unified artifact Registry boundary: default discovery now hides
+  pending/rejected releases and paginates by package coordinate; deployment
+  records and admin recovery must match the immutable CKB `hash_type` and
+  `dep_type`; generated CellDep descriptors re-query mainnet and reject spent
+  code/DepGroup Cells; RPC calls are time- and size-bounded; and deployment
+  capability use commits with the chain-verified state. Positive static-mirror
+  publication now follows database admission, while suppressive states are
+  mirrored first to fail closed; deferred sync is audited rather than
+  advertising uncommitted positive state. Add the capability-signed
+  `cellc artifact set-availability` publisher path used by Manage, defensive
+  frontend page deduplication, and complete `Artifact.toml` plus bundle
+  scaffolding for non-CellScript submissions.
 - Redesign the Registry submission and package-maintenance surfaces around
   contextual, task-first workflows: remove the public `Manage` tab and
   redundant form controls, link maintenance from package details, guide first

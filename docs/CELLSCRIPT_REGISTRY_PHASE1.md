@@ -220,7 +220,8 @@ cellc artifact verify --bundle vault-lock.bundle.json --receipt vault-lock.bundl
 cellc artifact pin acme/vault-lock@1.0.0 --output Artifacts.lock --accept-hash-bound
 cellc artifact copy acme/starter@1.0.0 --destination ./new-project --accept-hash-bound
 cellc artifact record-deployment acme/vault-lock@1.0.0 --code-hash <hash> --hash-type data1 --dep-type code --tx-hash <tx_hash> --index 0 --capability-key-id <key_id>
-cellc artifact cell-dep acme/vault-lock@1.0.0 --output CellDep.json --accept-hash-bound
+cellc artifact cell-dep acme/vault-lock@1.0.0 --output CellDep.json --accept-hash-bound --rpc-url https://mainnet.ckb.dev/rpc
+cellc artifact set-availability acme/vault-lock@1.0.0 --status yanked --reason "security advisory" --capability-key-id <key_id>
 cellc artifact commitment acme/vault-lock@1.0.0 --output RegistryCommitment.json
 ```
 
@@ -230,12 +231,20 @@ exact Registry identity and requires an explicit trust decision for
 integrity-only evidence. `copy` is no-overwrite and rejects traversal,
 platform-specific, duplicate, or unauthenticated paths. `cell-dep` requires an
 attached RPC-verified mainnet deployment and preserves the DepGroup container
-and resolved code-member identities. It never turns an `undeployed` release
-into a CellDep.
+and resolved code-member identities. Before writing `CellDep.json`, it queries
+mainnet again, rejects a spent deployment or resolved code member, checks the
+RPC chain identity, and rebinds `hash_type` / `dep_type` to the signed profile
+contract. It never turns an `undeployed` release into a CellDep.
 
 `record-deployment` derives the artifact/data identity from the signed Registry
 release, signs a mainnet-only payload with the scoped capability key, and sends
-it to the API for live-Cell verification.
+it to the API for live-Cell verification. Both publisher and recovery paths
+reject deployment modes that differ from `profile_contract.ckb`.
+
+`set-availability` is the publisher control-plane path used by the Manage UI.
+It signs a short-lived, nonce-protected capability payload; publishers may set
+`active`, `deprecated`, or `yanked`, while administrative quarantine remains a
+separate privileged action.
 
 `commitment` produces the canonical `cellscript-registry-commitment-v1`
 payload, CKB Blake2b commitment, and compact `CSREGv1 || hash` Cell data. The
@@ -245,9 +254,10 @@ hash used for chain indexing.
 
 ## Publisher Authorisation
 
-The website presents a single “Connect CKB wallet” entry. Its modal lists all
-supported CKB wallet connectors, but only connectors actually detected in the
-current browser can sign immediately; install links are shown for the rest.
+The website presents a single “Connect CKB wallet” entry. Its modal separates
+CCC-detected browser signers, which can connect immediately, from wallet
+directory entries, which open an official site and continue through the manual
+payload/signature path. A directory entry is never reported as connected.
 Network selection is not exposed because authorisation and deployment are
 mainnet-only.
 
@@ -272,10 +282,14 @@ GET  /v1/artifacts/:namespace/:name/releases/:release/commitment
 GET  /artifacts/:namespace/:name/releases/:release.json
 POST /v1/artifacts/:namespace/:name/releases
 POST /v1/artifacts/:namespace/:name/releases/:release/deployments
+POST /v1/artifacts/:namespace/:name/releases/:release/availability
 ```
 
 The list endpoint accepts `q`, `namespace`, `kind`, `verification`,
-`deployment`, `availability`, `limit`, and `offset`. Static release objects and
+`deployment`, `availability`, `limit`, and `offset`. Without an explicit
+`verification` filter, public discovery includes only accepted verification
+states and excludes `pending` / `rejected`. Pagination offsets count package
+coordinates, not version rows. Static release objects and
 immutable bundles are served separately from the write database so consumers
 can hash-verify and cache them independently.
 
@@ -300,7 +314,10 @@ that every artifact is installable.
 - Deployment evidence must match the published executable hash and a live
   mainnet Cell.
 - Quarantined releases are not returned by public detail or evidence routes.
-- Immutable bundle writes complete before release admission.
+- The database admits positive identity/state atomically before publishing its
+  mutable static mirror. Suppressive states are mirrored first to fail closed;
+  other mirror failures are audited and retried by verification sync, so an
+  uncommitted release or deployment is never advertised as current.
 - State transitions append evidence; they do not mutate hash identity.
 
 ## Validation

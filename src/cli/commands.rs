@@ -43,7 +43,7 @@ const ICKB_REQUIRED_PRODUCTION_EVIDENCE: [&str; 8] = [
 ];
 const ICKB_REQUIRED_HARDENING_EVIDENCE: [&str; 5] =
     ["mutation_coverage", "deterministic_fuzz_seed", "normalized_fixture_generator", "max_cellscript_cycles", "max_tx_size_bytes"];
-const CELLSCRIPT_CKB_RPC_URL_ENV: &str = "CELLSCRIPT_CKB_RPC_URL";
+pub(super) const CELLSCRIPT_CKB_RPC_URL_ENV: &str = "CELLSCRIPT_CKB_RPC_URL";
 const NOVASEAL_CERTIFICATION_PLUGIN: &str = "novaseal-profile-v0";
 const NOVASEAL_CERTIFICATION_REPORT_SCHEMA: &str = "cellscript-certification-report-v0.1";
 const NOVASEAL_PLUGIN_REPORT_SCHEMA: &str = "novaseal-production-gates-v0.4";
@@ -11350,7 +11350,7 @@ fn live_cell_code_hash_for_deployment(
     }
 }
 
-fn ckb_script_hash_from_json(script: &serde_json::Value) -> Result<String> {
+pub(super) fn ckb_script_hash_from_json(script: &serde_json::Value) -> Result<String> {
     let code_hash = script
         .get("code_hash")
         .and_then(|value| value.as_str())
@@ -13544,6 +13544,12 @@ impl CliParser {
                             .arg(Arg::new("output").long("output").short('o').value_name("FILE").required(true))
                             .arg(Arg::new("api-url").long("api-url").value_name("URL"))
                             .arg(
+                                Arg::new("rpc-url")
+                                    .long("rpc-url")
+                                    .value_name("URL")
+                                    .help("Mainnet CKB RPC used to re-check Cell liveness (defaults to CELLSCRIPT_CKB_RPC_URL or mainnet.ckb.dev)"),
+                            )
+                            .arg(
                                 Arg::new("accept-hash-bound")
                                     .long("accept-hash-bound")
                                     .action(ArgAction::SetTrue)
@@ -13572,6 +13578,23 @@ impl CliParser {
                             )
                             .arg(Arg::new("tx-hash").long("tx-hash").value_name("HASH").required(true))
                             .arg(Arg::new("index").long("index").value_name("U32").value_parser(clap::value_parser!(u32)).required(true))
+                            .arg(Arg::new("capability-key-id").long("capability-key-id").value_name("KEY_ID").required(true))
+                            .arg(Arg::new("capability-signature").long("capability-signature").value_name("SIGNATURE"))
+                            .arg(Arg::new("api-url").long("api-url").value_name("URL"))
+                            .arg(Arg::new("print-payload").long("print-payload").action(ArgAction::SetTrue)),
+                    )
+                    .subcommand(
+                        ClapCommand::new("set-availability")
+                            .about("Set a release active, deprecated, or yanked with a publisher capability")
+                            .arg(Arg::new("coordinate").value_name("NAMESPACE/NAME@RELEASE").required(true))
+                            .arg(
+                                Arg::new("status")
+                                    .long("status")
+                                    .value_name("STATUS")
+                                    .value_parser(["active", "deprecated", "yanked"])
+                                    .required(true),
+                            )
+                            .arg(Arg::new("reason").long("reason").value_name("TEXT"))
                             .arg(Arg::new("capability-key-id").long("capability-key-id").value_name("KEY_ID").required(true))
                             .arg(Arg::new("capability-signature").long("capability-signature").value_name("SIGNATURE"))
                             .arg(Arg::new("api-url").long("api-url").value_name("URL"))
@@ -14535,6 +14558,7 @@ impl CliParser {
                         coordinate: action.get_one::<String>("coordinate").cloned().expect("required coordinate"),
                         output: action.get_one::<String>("output").map(PathBuf::from).expect("required output"),
                         api_url: action.get_one::<String>("api-url").cloned(),
+                        rpc_url: action.get_one::<String>("rpc-url").cloned(),
                         accept_hash_bound: action.get_flag("accept-hash-bound"),
                         force: action.get_flag("force"),
                         json: json_output(action),
@@ -14546,6 +14570,16 @@ impl CliParser {
                         dep_type: action.get_one::<String>("dep-type").cloned().expect("required dep type"),
                         tx_hash: action.get_one::<String>("tx-hash").cloned().expect("required tx hash"),
                         index: *action.get_one::<u32>("index").expect("required index"),
+                        capability_key_id: action.get_one::<String>("capability-key-id").cloned().expect("required capability key id"),
+                        capability_signature: action.get_one::<String>("capability-signature").cloned(),
+                        api_url: action.get_one::<String>("api-url").cloned(),
+                        print_payload: action.get_flag("print-payload"),
+                        json: json_output(action),
+                    },
+                    Some(("set-availability", action)) => ArtifactOperation::SetAvailability {
+                        coordinate: action.get_one::<String>("coordinate").cloned().expect("required coordinate"),
+                        status: action.get_one::<String>("status").cloned().expect("required status"),
+                        reason: action.get_one::<String>("reason").cloned(),
                         capability_key_id: action.get_one::<String>("capability-key-id").cloned().expect("required capability key id"),
                         capability_signature: action.get_one::<String>("capability-signature").cloned(),
                         api_url: action.get_one::<String>("api-url").cloned(),

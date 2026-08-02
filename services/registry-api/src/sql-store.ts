@@ -473,6 +473,7 @@ export class SqlRegistryStore implements RegistryStore {
            and ($7::text[] is null or pv.status = any($7::text[]))
            and ($8::text is null or pv.artifact->>'kind' = $8)
            and ($9::text is null or pv.verification_status = $9)
+           and ($12::text[] is null or pv.verification_status = any($12::text[]))
            and ($10::text is null or pv.deployment_status = $10)
            and ($11::text is null or pv.availability_status = $11)
            and (
@@ -497,9 +498,73 @@ export class SqlRegistryStore implements RegistryStore {
           input.verification_status ?? null,
           input.deployment_status ?? null,
           input.availability_status ?? null,
+          input.verification_statuses ?? null,
         ],
       );
       return result.rows.map(packageVersionFromRow);
+    });
+  }
+
+  async listArtifactPackagePage(input: PackageVersionQuery): Promise<{ records: PackageVersionRecord[]; has_more: boolean }> {
+    return this.withClient(async (client) => {
+      const result = await client.query(
+        `with matching as (
+           select pv.namespace, pv.name, pv.version, pv.status, pv.artifact,
+                  pv.verification_status, pv.deployment_status, pv.availability_status,
+                  pv.source_hash, pv.manifest_hash, pv.edition, pv.compatibility_profile_hash,
+                  pv.capability_key_id, pv.principal_type, pv.principal_id, pv.registry_entry,
+                  pv.snapshot_hash, pv.direct_url, pv.created_at
+           from package_versions pv
+           join packages p on p.namespace = pv.namespace and p.name = pv.name
+           where ($1::text is null or pv.namespace = $1)
+             and ($2::text is null or pv.name = $2)
+             and ($3::text is null or pv.status = $3)
+             and ($7::text[] is null or pv.status = any($7::text[]))
+             and ($8::text is null or pv.artifact->>'kind' = $8)
+             and ($9::text is null or pv.verification_status = $9)
+             and ($12::text[] is null or pv.verification_status = any($12::text[]))
+             and ($10::text is null or pv.deployment_status = $10)
+             and ($11::text is null or pv.availability_status = $11)
+             and (
+               $4::text is null
+               or pv.namespace ilike '%' || $4 || '%'
+               or pv.name ilike '%' || $4 || '%'
+               or pv.version ilike '%' || $4 || '%'
+               or coalesce(p.source_repo, '') ilike '%' || $4 || '%'
+               or pv.registry_entry::text ilike '%' || $4 || '%'
+             )
+         ), package_page as (
+           select namespace, name, max(created_at) as package_updated_at,
+                  row_number() over (order by max(created_at) desc, namespace, name) as page_position
+           from matching
+           group by namespace, name
+           order by package_updated_at desc, namespace, name
+           limit $5 + 1 offset $6
+         )
+         select m.*, (select count(*) > $5 from package_page) as has_more
+         from matching m
+         join package_page pp on pp.namespace = m.namespace and pp.name = m.name
+         where pp.page_position <= $6 + $5
+         order by pp.package_updated_at desc, m.namespace, m.name, m.created_at desc, m.version desc`,
+        [
+          input.namespace ?? null,
+          input.name ?? null,
+          input.status ?? null,
+          input.query ?? null,
+          input.limit,
+          input.offset,
+          input.statuses ?? null,
+          input.artifact_kind ?? null,
+          input.verification_status ?? null,
+          input.deployment_status ?? null,
+          input.availability_status ?? null,
+          input.verification_statuses ?? null,
+        ],
+      );
+      return {
+        records: result.rows.map(packageVersionFromRow),
+        has_more: result.rows[0]?.has_more === true,
+      };
     });
   }
 
@@ -785,6 +850,25 @@ export class SqlRegistryStore implements RegistryStore {
             JSON.stringify({ admin_actor: input.admin_actor, evidence_hash: input.evidence_hash }),
           ],
         );
+        if (input.capability_usage) {
+          await client.query("update capabilities set last_used_at = now() where key_id = $1", [input.capability_usage.key_id]);
+          await client.query(
+            `insert into audit_events(
+               request_id, event_type, principal_type, principal_id, capability_key_id,
+               namespace, name, version, data
+             ) values ($1, 'capability.used', $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+            [
+              input.capability_usage.request_id,
+              input.capability_usage.principal_type,
+              input.capability_usage.principal_id,
+              input.capability_usage.key_id,
+              input.capability_usage.namespace ?? null,
+              input.capability_usage.name ?? null,
+              input.capability_usage.version ?? null,
+              JSON.stringify({ action: input.capability_usage.action }),
+            ],
+          );
+        }
         const evidenceResult = await client.query(
           `select namespace, name, version, kind, evidence_hash, evidence,
                   request_id, admin_actor, created_at
@@ -868,6 +952,25 @@ export class SqlRegistryStore implements RegistryStore {
             JSON.stringify({ actor: input.admin_actor, evidence_hash: input.evidence_hash }),
           ],
         );
+        if (input.capability_usage) {
+          await client.query("update capabilities set last_used_at = now() where key_id = $1", [input.capability_usage.key_id]);
+          await client.query(
+            `insert into audit_events(
+               request_id, event_type, principal_type, principal_id, capability_key_id,
+               namespace, name, version, data
+             ) values ($1, 'capability.used', $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+            [
+              input.capability_usage.request_id,
+              input.capability_usage.principal_type,
+              input.capability_usage.principal_id,
+              input.capability_usage.key_id,
+              input.capability_usage.namespace ?? null,
+              input.capability_usage.name ?? null,
+              input.capability_usage.version ?? null,
+              JSON.stringify({ action: input.capability_usage.action }),
+            ],
+          );
+        }
         const evidenceResult = await client.query(
           `select namespace, name, version, kind, evidence_hash, evidence,
                   request_id, admin_actor, created_at
@@ -934,6 +1037,8 @@ export class SqlRegistryStore implements RegistryStore {
     reason?: string;
     request_id: string;
     admin_actor: string;
+    audit_event_type?: string;
+    capability_usage?: PublishAdmissionInput["capability_usage"];
   }): Promise<PackageVersionRecord> {
     const row = await this.withClient(async (client) => {
       await client.query("begin");
@@ -942,9 +1047,15 @@ export class SqlRegistryStore implements RegistryStore {
           `update package_versions
            set status = case
                  when $4 <> 'active' then $4
-                 when deployment_status = 'chain_verified' then 'on_chain_attested'
-                 when deployment_status = 'deployed' then 'deployed'
-                 when verification_status = 'verified' then 'verified_build'
+                 when exists (
+                   select 1 from package_version_evidence pve
+                   where pve.namespace = package_versions.namespace
+                     and pve.name = package_versions.name
+                     and pve.version = package_versions.version
+                     and pve.kind = 'on_chain_attested'
+                 ) then 'on_chain_attested'
+                 when deployment_status in ('chain_verified', 'deployed') then 'deployed'
+                 when verification_status in ('verified', 'hash_bound', 'evidence_required') then 'verified_build'
                  else 'source_published'
                end,
                availability_status = $4,
@@ -971,7 +1082,7 @@ export class SqlRegistryStore implements RegistryStore {
              request_id, event_type, principal_type, principal_id, capability_key_id,
              namespace, name, version, data
            )
-           values ($1, 'admin.package_version.status_updated', $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+           values ($1, $9, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
           [
             input.request_id,
             record.principal_type,
@@ -981,8 +1092,28 @@ export class SqlRegistryStore implements RegistryStore {
             input.name,
             input.version,
             JSON.stringify({ admin_actor: input.admin_actor, status: input.status, reason: input.reason ?? null }),
+            input.audit_event_type ?? "admin.package_version.status_updated",
           ],
         );
+        if (input.capability_usage) {
+          await client.query("update capabilities set last_used_at = now() where key_id = $1", [input.capability_usage.key_id]);
+          await client.query(
+            `insert into audit_events(
+               request_id, event_type, principal_type, principal_id, capability_key_id,
+               namespace, name, version, data
+             ) values ($1, 'capability.used', $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+            [
+              input.capability_usage.request_id,
+              input.capability_usage.principal_type,
+              input.capability_usage.principal_id,
+              input.capability_usage.key_id,
+              input.capability_usage.namespace ?? null,
+              input.capability_usage.name ?? null,
+              input.capability_usage.version ?? null,
+              JSON.stringify({ action: input.capability_usage.action }),
+            ],
+          );
+        }
         await client.query("commit");
         return record;
       } catch (error) {
@@ -1395,6 +1526,20 @@ export class SqlRegistryStore implements RegistryStore {
         await client.query("rollback");
         throw error;
       }
+    });
+  }
+
+  async requestStaticSync(input: { namespace: string; name: string; version: string; error_message: string }): Promise<void> {
+    await this.withClient(async (client) => {
+      await client.query(
+        `update verification_jobs
+         set status = 'retry_wait', lease_owner = null, lease_expires_at = null,
+             available_at = now(), completed_at = null, updated_at = now(),
+             last_error_code = 'static_registry_sync_deferred', last_error_message = $4
+         where namespace = $1 and name = $2 and version = $3
+           and status not in ('running', 'publishing')`,
+        [input.namespace, input.name, input.version, input.error_message],
+      );
     });
   }
 

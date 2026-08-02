@@ -72,12 +72,18 @@ export interface PackageVersionQuery {
   name?: string;
   artifact_kind?: ArtifactKind;
   verification_status?: VerificationStatus;
+  verification_statuses?: VerificationStatus[];
   deployment_status?: DeploymentStatus;
   availability_status?: AvailabilityStatus;
   status?: RegistryEntryStatus;
   statuses?: RegistryEntryStatus[];
   limit: number;
   offset: number;
+}
+
+export interface ArtifactPackagePage {
+  records: PackageVersionRecord[];
+  has_more: boolean;
 }
 
 export type PackageEvidenceKind = "verified_build" | "deployed" | "on_chain_attested";
@@ -103,6 +109,7 @@ export interface PromotePackageVersionInput {
   evidence: Record<string, unknown>;
   request_id: string;
   admin_actor: string;
+  capability_usage?: PublishAdmissionInput["capability_usage"];
 }
 
 export interface IdempotencyRecord {
@@ -292,6 +299,7 @@ export interface RegistryStore {
   getSnapshots(snapshotHashes: string[]): Promise<Map<string, SnapshotRecord>>;
   getPackageVersion(namespace: string, name: string, version: string): Promise<PackageVersionRecord | null>;
   listPackageVersions(input: PackageVersionQuery): Promise<PackageVersionRecord[]>;
+  listArtifactPackagePage(input: PackageVersionQuery): Promise<ArtifactPackagePage>;
   recordPackageVersion(input: PackageVersionRecord): Promise<PackageVersionRecord>;
   admitPackageVersion(input: PublishAdmissionInput): Promise<PackageVersionRecord>;
   listPackageEvidence(namespace: string, name: string, version: string): Promise<PackageEvidenceRecord[]>;
@@ -322,6 +330,8 @@ export interface RegistryStore {
     reason?: string;
     request_id: string;
     admin_actor: string;
+    audit_event_type?: string;
+    capability_usage?: PublishAdmissionInput["capability_usage"];
   }): Promise<PackageVersionRecord>;
   appendAuditEvent(event: AuditEventInput): Promise<void>;
   listAuditEvents(input: ListAuditEventsInput): Promise<AuditEventRecord[]>;
@@ -384,6 +394,12 @@ export interface RegistryStore {
     job_id: string;
     worker_id: string;
   }): Promise<VerificationJobRecord>;
+  requestStaticSync(input: {
+    namespace: string;
+    name: string;
+    version: string;
+    error_message: string;
+  }): Promise<void>;
   failVerificationJob(input: {
     job_id: string;
     worker_id: string;
@@ -650,6 +666,7 @@ export class MemoryRegistryStore implements RegistryStore {
       .filter((record) => !input.name || record.name === input.name)
       .filter((record) => !input.artifact_kind || record.artifact.kind === input.artifact_kind)
       .filter((record) => !input.verification_status || record.verification_status === input.verification_status)
+      .filter((record) => !input.verification_statuses || input.verification_statuses.includes(record.verification_status))
       .filter((record) => !input.deployment_status || record.deployment_status === input.deployment_status)
       .filter((record) => !input.availability_status || record.availability_status === input.availability_status)
       .filter((record) => !input.status || record.status === input.status)
@@ -662,6 +679,17 @@ export class MemoryRegistryStore implements RegistryStore {
       })
       .sort((left, right) => right.created_at.localeCompare(left.created_at))
       .slice(input.offset, input.offset + input.limit);
+  }
+
+  async listArtifactPackagePage(input: PackageVersionQuery): Promise<ArtifactPackagePage> {
+    const all = await this.listPackageVersions({ ...input, limit: Number.MAX_SAFE_INTEGER, offset: 0 });
+    const coordinates = [...new Set(all.map((record) => `${record.namespace}/${record.name}`))];
+    const pageCoordinates = coordinates.slice(input.offset, input.offset + input.limit);
+    const selected = new Set(pageCoordinates);
+    return {
+      records: all.filter((record) => selected.has(`${record.namespace}/${record.name}`)),
+      has_more: coordinates.length > input.offset + input.limit,
+    };
   }
 
   async recordPackageVersion(input: PackageVersionRecord): Promise<PackageVersionRecord> {
@@ -811,6 +839,9 @@ export class MemoryRegistryStore implements RegistryStore {
       version: input.version,
       data: { actor: input.admin_actor, evidence_hash: input.evidence_hash },
     });
+    if (input.capability_usage) {
+      await this.recordCapabilityUsage(input.capability_usage);
+    }
     return { version: versionRecord, evidence };
   }
 
@@ -849,15 +880,23 @@ export class MemoryRegistryStore implements RegistryStore {
     reason?: string;
     request_id: string;
     admin_actor: string;
+    audit_event_type?: string;
+    capability_usage?: PublishAdmissionInput["capability_usage"];
   }): Promise<PackageVersionRecord> {
     const key = `${input.namespace}/${input.name}@${input.version}`;
     const existing = this.packageVersions.get(key);
     if (!existing) {
       throw new ApiError(404, "artifact_release_not_found", "artifact release is not known to the registry");
     }
-    const restoredStatus: RegistryEntryStatus = existing.deployment_status === "chain_verified"
+    const hasAttestation = [...this.packageEvidence.values()].some((evidence) =>
+      evidence.namespace === input.namespace
+      && evidence.name === input.name
+      && evidence.version === input.version
+      && evidence.kind === "on_chain_attested"
+    );
+    const restoredStatus: RegistryEntryStatus = hasAttestation
       ? "on_chain_attested"
-      : existing.deployment_status === "deployed"
+      : existing.deployment_status === "chain_verified" || existing.deployment_status === "deployed"
         ? "deployed"
         : existing.verification_status === "verified" || existing.verification_status === "hash_bound" || existing.verification_status === "evidence_required"
           ? "verified_build"
@@ -870,7 +909,7 @@ export class MemoryRegistryStore implements RegistryStore {
     this.packageVersions.set(key, updated);
     await this.appendAuditEvent({
       request_id: input.request_id,
-      event_type: "admin.package_version.status_updated",
+      event_type: input.audit_event_type ?? "admin.package_version.status_updated",
       principal_type: existing.principal_type,
       principal_id: existing.principal_id,
       capability_key_id: existing.capability_key_id,
@@ -879,6 +918,9 @@ export class MemoryRegistryStore implements RegistryStore {
       version: input.version,
       data: { admin_actor: input.admin_actor, status: input.status, reason: input.reason ?? null },
     });
+    if (input.capability_usage) {
+      await this.recordCapabilityUsage(input.capability_usage);
+    }
     return updated;
   }
 
@@ -1129,6 +1171,26 @@ export class MemoryRegistryStore implements RegistryStore {
       data: { job_id: job.id, attempt_count: job.attempt_count, evidence_hash: job.evidence_hash },
     });
     return completed;
+  }
+
+  async requestStaticSync(input: { namespace: string; name: string; version: string; error_message: string }): Promise<void> {
+    const job = [...this.verificationJobs.values()].find((candidate) =>
+      candidate.namespace === input.namespace && candidate.name === input.name && candidate.version === input.version
+    );
+    if (!job) return;
+    if (job.status === "running" || job.status === "publishing") return;
+    const requestedAt = nowIso();
+    this.verificationJobs.set(job.id, {
+      ...job,
+      status: "retry_wait",
+      lease_owner: null,
+      lease_expires_at: null,
+      available_at: requestedAt,
+      completed_at: null,
+      last_error_code: "static_registry_sync_deferred",
+      last_error_message: input.error_message,
+      updated_at: requestedAt,
+    });
   }
 
   async failVerificationJob(input: {

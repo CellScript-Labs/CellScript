@@ -9,6 +9,8 @@ export const PUBLISH_PROTOCOL = "cellscript-registry-publish-v1";
 export const PUBLISH_ACTION = "publish";
 export const DEPLOYMENT_PROTOCOL = "cellscript-registry-deployment";
 export const DEPLOYMENT_ACTION = "record_deployment";
+export const AVAILABILITY_PROTOCOL = "cellscript-registry-availability-v1";
+export const AVAILABILITY_ACTION = "set_availability";
 export const REGISTRY_SCHEMA_VERSION = 1;
 export const ARTIFACT_PROFILE_CONTRACT_SCHEMA = "cellscript-registry-profile-contract-v1";
 export const CELLSCRIPT_EDITION = "2026";
@@ -117,6 +119,22 @@ export interface DeploymentPayload {
   hash_type: "data" | "data1" | "data2" | "type";
   dep_type: "code" | "dep_group";
   out_point: { tx_hash: string; index: number };
+  capability_key_id: string;
+  nonce: string;
+  issued_at: string;
+  expires_at: string;
+  cli_version: string;
+}
+
+export interface AvailabilityPayload {
+  protocol: typeof AVAILABILITY_PROTOCOL;
+  action: typeof AVAILABILITY_ACTION;
+  registry_origin: string;
+  namespace: string;
+  name: string;
+  release: string;
+  availability_status: Exclude<AvailabilityStatus, "quarantined">;
+  reason?: string;
   capability_key_id: string;
   nonce: string;
   issued_at: string;
@@ -412,6 +430,60 @@ export function validateDeploymentPayload(
     dep_type: depType,
     out_point: { tx_hash: txHash, index: Number(index) },
     capability_key_id: requireString(value, "capability_key_id"),
+    nonce,
+    issued_at: issuedAt,
+    expires_at: expiresAt,
+    cli_version: requireString(value, "cli_version"),
+  };
+}
+
+export function validateAvailabilityPayload(
+  input: unknown,
+  registryOrigin: string,
+  now: Date,
+): AvailabilityPayload {
+  const value = assertPlainObject(input, "invalid_availability_payload");
+  if (requireString(value, "protocol") !== AVAILABILITY_PROTOCOL || requireString(value, "action") !== AVAILABILITY_ACTION) {
+    throw new ApiError(400, "invalid_availability_action", "availability payload has the wrong protocol or action");
+  }
+  if (requireString(value, "registry_origin") !== registryOrigin) {
+    throw new ApiError(400, "invalid_registry_origin", "availability payload registry_origin does not match this API");
+  }
+  const availabilityStatus = requireString(value, "availability_status");
+  if (!(availabilityStatus === "active" || availabilityStatus === "deprecated" || availabilityStatus === "yanked")) {
+    throw new ApiError(400, "invalid_publisher_availability_status", "publishers may set availability_status to active, deprecated, or yanked");
+  }
+  const reason = value["reason"] === undefined ? undefined : requireString(value, "reason").trim();
+  if (availabilityStatus === "yanked" && !reason) {
+    throw new ApiError(400, "availability_reason_required", "yanking a release requires a reason");
+  }
+  if (reason && reason.length > 500) {
+    throw new ApiError(400, "invalid_availability_reason", "availability reason must be no longer than 500 characters");
+  }
+  const capabilityKeyId = requireString(value, "capability_key_id");
+  if (!/^cap_[0-9a-f]{32}$/.test(capabilityKeyId)) {
+    throw new ApiError(400, "invalid_capability_key_id", "capability_key_id is malformed");
+  }
+  const nonce = requireString(value, "nonce");
+  if (!/^0x[0-9a-fA-F]{16,}$/.test(nonce)) {
+    throw new ApiError(400, "invalid_nonce", "nonce must be hex and at least 8 bytes");
+  }
+  const issuedAt = requireString(value, "issued_at");
+  const expiresAt = requireString(value, "expires_at");
+  parseTimestamp(issuedAt, "issued_at");
+  if (parseTimestamp(expiresAt, "expires_at").getTime() <= now.getTime()) {
+    throw new ApiError(401, "availability_payload_expired", "availability payload has expired");
+  }
+  return {
+    protocol: AVAILABILITY_PROTOCOL,
+    action: AVAILABILITY_ACTION,
+    registry_origin: registryOrigin,
+    namespace: validatePackageIdent(requireString(value, "namespace"), "namespace"),
+    name: validatePackageIdent(requireString(value, "name"), "name"),
+    release: validateVersion(requireString(value, "release")),
+    availability_status: availabilityStatus,
+    ...(reason ? { reason } : {}),
+    capability_key_id: capabilityKeyId,
     nonce,
     issued_at: issuedAt,
     expires_at: expiresAt,

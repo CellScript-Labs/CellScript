@@ -6,6 +6,8 @@ import {
   AUTH_ACTION,
   AUTH_PROTOCOL,
   AUTH_REVOKE_CAPABILITY_ACTION,
+  AVAILABILITY_ACTION,
+  AVAILABILITY_PROTOCOL,
   DEPLOYMENT_ACTION,
   DEPLOYMENT_PROTOCOL,
   DEFAULT_REGISTRY_ORIGIN,
@@ -20,11 +22,13 @@ import {
   validatePublishPayload,
   type CapabilityAuthorisationPayload,
   type CapabilityRevocationPayload,
+  type AvailabilityPayload,
   type CkbSecp256k1Signature,
   type DeploymentPayload,
   type PublishPayload,
 } from "../src/domain";
 import { MemoryRegistryStore, createApp, parseDepGroupOutPoints, type AppDeps, type SnapshotWriter } from "../src/index";
+import type { PackageVersionRecord } from "../src/store";
 
 const now = new Date("2026-06-23T12:00:00Z");
 const ckbPrivateKey = Uint8Array.from({ length: 32 }, (_, index) => index === 31 ? 7 : 0);
@@ -133,6 +137,28 @@ function revokePayload(keyId: string, principalId = "0x1111111111111111111111111
     principal_id: principalId,
     capability_key_id: keyId,
     nonce: "0x3333333333333333",
+    issued_at: "2026-06-23T12:00:00Z",
+    expires_at: "2026-06-23T12:10:00Z",
+    cli_version: "cellc 0.23.0",
+  };
+}
+
+function availabilityPayload(
+  keyId: string,
+  status: AvailabilityPayload["availability_status"] = "yanked",
+  nonce = "0x7777777777777777",
+): AvailabilityPayload {
+  return {
+    protocol: AVAILABILITY_PROTOCOL,
+    action: AVAILABILITY_ACTION,
+    registry_origin: DEFAULT_REGISTRY_ORIGIN,
+    namespace: "cellscript",
+    name: "demo",
+    release: "1.2.3",
+    availability_status: status,
+    ...(status === "yanked" ? { reason: "security review" } : {}),
+    capability_key_id: keyId,
+    nonce,
     issued_at: "2026-06-23T12:00:00Z",
     expires_at: "2026-06-23T12:10:00Z",
     cli_version: "cellc 0.23.0",
@@ -958,7 +984,7 @@ describe("registry api", () => {
     expect(store.auditEvents.some((event) => event.event_type === "nonce.replay_blocked")).toBe(true);
   });
 
-  it("releases publish nonce and idempotency reservation when an object write fails before admission", async () => {
+  it("keeps the database authoritative when a static mirror write fails after admission", async () => {
     const store = new MemoryRegistryStore();
     const writes: Array<{ key: string; body: Uint8Array; contentType: string }> = [];
     let failStaticWrites = true;
@@ -1004,17 +1030,19 @@ describe("registry api", () => {
       source_snapshot: sourceSnapshot,
     }, {}, { "idempotency-key": idempotencyKey });
 
-    expect(response.status).toBe(500);
-    expect((await response.json() as any).error.code).toBe("internal_error");
+    expect(response.status).toBe(202);
+    expect((await response.json() as any).verification_status).toBe("pending");
     expect(writes).toHaveLength(1);
     expect(writes[0]?.key).toContain("source-snapshots/cellscript/demo/1.2.3/");
-    expect(store.snapshots.size).toBe(0);
-    expect(store.packageVersions.has("cellscript/demo@1.2.3")).toBe(false);
-    expect(store.idempotencyKeys.has(`publish:${idempotencyKey}`)).toBe(false);
-    expect(store.usedNonces.size).toBe(noncesBeforePublish);
-    expect(store.capabilities.get(capability.key_id)?.last_used_at).toBeFalsy();
-    expect(store.auditEvents.some((event) => event.event_type === "capability.used")).toBe(false);
-    expect(store.auditEvents.some((event) => event.event_type === "publish.accepted")).toBe(false);
+    expect(store.snapshots.size).toBe(1);
+    expect(store.packageVersions.has("cellscript/demo@1.2.3")).toBe(true);
+    expect(store.idempotencyKeys.get(`publish:${idempotencyKey}`)?.status).toBe("completed");
+    expect(store.usedNonces.size).toBe(noncesBeforePublish + 1);
+    expect(store.capabilities.get(capability.key_id)?.last_used_at).toBeTruthy();
+    expect(store.auditEvents.some((event) => event.event_type === "capability.used")).toBe(true);
+    expect(store.auditEvents.some((event) => event.event_type === "publish.accepted")).toBe(true);
+    expect(store.auditEvents.some((event) => event.event_type === "static_registry.sync_deferred")).toBe(true);
+    expect([...store.verificationJobs.values()][0]?.status).toBe("retry_wait");
 
     failStaticWrites = false;
     const retry = await post(app, "/v1/artifacts/cellscript/demo/releases", {
@@ -1024,6 +1052,7 @@ describe("registry api", () => {
     }, {}, { "idempotency-key": idempotencyKey });
 
     expect(retry.status).toBe(202);
+    expect(retry.headers.get("x-idempotency-status")).toBe("replayed");
     expect((await retry.json() as any).verification_status).toBe("pending");
     expect(store.packageVersions.has("cellscript/demo@1.2.3")).toBe(true);
     expect(store.idempotencyKeys.get(`publish:${idempotencyKey}`)?.status).toBe("completed");
@@ -1139,14 +1168,8 @@ describe("registry api", () => {
     expect(publicIndex.status).toBe(200);
     expect(await publicIndex.json()).toMatchObject({
       schema: "cellscript-registry-artifact-index",
-      count: 1,
-      artifacts: [{
-        coordinate: "cellscript/demo",
-        latest_release: "1.2.3",
-        verification_status: "pending",
-        deployment_status: "undeployed",
-        availability_status: "active",
-      }],
+      count: 0,
+      artifacts: [],
     });
     const explicitlyUnverified = await get(app, "/v1/artifacts?q=demo&verification=pending&limit=10");
     expect(explicitlyUnverified.status).toBe(200);
@@ -1222,6 +1245,9 @@ describe("registry api", () => {
     expect(verified.status).toBe(200);
     const verifiedBody = await verified.json() as any;
     expect(verifiedBody.status).toBe("verified_build");
+    const verifiedIndex = await (await get(app, "/v1/artifacts?q=demo&limit=10")).json() as any;
+    expect(verifiedIndex.count).toBe(1);
+    expect(verifiedIndex.artifacts[0].verification_status).toBe("hash_bound");
 
     const mismatchedDeployment = await post(
       app,
@@ -1273,6 +1299,7 @@ describe("registry api", () => {
     expect(deployed.status).toBe(200);
     const deployedBody = await deployed.json() as any;
     expect(deployedBody.status).toBe("deployed");
+    expect(store.packageVersions.get("cellscript/demo@1.2.3")?.deployment_status).toBe("chain_verified");
 
     const attested = await post(
       app,
@@ -1330,6 +1357,76 @@ describe("registry api", () => {
     expect(JSON.parse(utf8(staticWrites.at(-1)!.body)).immutable_bundle.url).toContain("/source-snapshots/cellscript/demo/1.2.3/");
   });
 
+  it("paginates public discovery by package without splitting a package's releases", async () => {
+    const { app, store } = testApp();
+    const snapshotHash = `sha256:${"90".repeat(32)}`;
+    const sourceHash = `0x${"91".repeat(32)}`;
+    store.snapshots.set(snapshotHash, {
+      snapshot_hash: snapshotHash,
+      r2_key: "source-snapshots/shared.tar",
+      source_hash: sourceHash,
+      size_bytes: 1,
+      content_type: "application/vnd.cellscript.source+tar",
+    });
+    const record = (name: string, version: string, createdAt: string): PackageVersionRecord => ({
+      namespace: "cellscript",
+      name,
+      version,
+      status: "verified_build",
+      artifact: { kind: "source_library", profile: "cellscript_source", consumption_mode: "dependency", language: "cellscript" },
+      verification_status: "verified",
+      deployment_status: "not_applicable",
+      availability_status: "active",
+      source_hash: sourceHash,
+      manifest_hash: `0x${"92".repeat(32)}`,
+      edition: "2026",
+      compatibility_profile_hash: "93".repeat(32),
+      capability_key_id: "cap_11111111111111111111111111111111",
+      principal_type: "joyid_ckb",
+      principal_id: "0x1111111111111111111111111111111111111111",
+      registry_entry: {
+        schema_version: 1,
+        namespace: "cellscript",
+        name,
+        artifact: { kind: "source_library", profile: "cellscript_source", consumption_mode: "dependency", language: "cellscript" },
+        versions: [{
+          version,
+          tag: `v${version}`,
+          source_hash: sourceHash,
+          cellscript_version: "0.23.0",
+          edition: "2026",
+          compatibility_profile_hash: "93".repeat(32),
+          dependencies: {},
+          verification_status: "pending",
+          deployment_status: "not_applicable",
+          availability_status: "active",
+        }],
+      },
+      snapshot_hash: snapshotHash,
+      direct_url: `https://registry.cellscript.dev/artifacts/cellscript/${name}/releases/${version}.json`,
+      created_at: createdAt,
+    });
+    for (const item of [
+      record("alpha", "2.0.0", "2026-06-23T12:04:00Z"),
+      record("alpha", "1.0.0", "2026-06-23T12:01:00Z"),
+      record("beta", "1.0.0", "2026-06-23T12:03:00Z"),
+      record("gamma", "1.0.0", "2026-06-23T12:02:00Z"),
+    ]) {
+      store.packageVersions.set(`${item.namespace}/${item.name}@${item.version}`, item);
+    }
+
+    const first = await (await get(app, "/v1/artifacts?limit=1&offset=0")).json() as any;
+    const second = await (await get(app, "/v1/artifacts?limit=1&offset=1")).json() as any;
+    const third = await (await get(app, "/v1/artifacts?limit=1&offset=2")).json() as any;
+    expect(first.artifacts[0].coordinate).toBe("cellscript/alpha");
+    expect(first.artifacts[0].releases).toHaveLength(2);
+    expect(first.next_offset).toBe(1);
+    expect(second.artifacts[0].coordinate).toBe("cellscript/beta");
+    expect(second.next_offset).toBe(2);
+    expect(third.artifacts[0].coordinate).toBe("cellscript/gamma");
+    expect(third.next_offset).toBeUndefined();
+  });
+
   it("records only capability-signed, chain-verified mainnet deployments for executable artifacts", async () => {
     const store = new MemoryRegistryStore();
     const snapshots: Array<{ key: string; body: Uint8Array }> = [];
@@ -1382,6 +1479,12 @@ describe("registry api", () => {
     });
 
     const deployment = deploymentPayload(capability.key_id);
+    const contractMismatch = await post(app, "/v1/artifacts/cellscript/demo/releases/1.2.3/deployments", {
+      payload: { ...deployment, hash_type: "data" },
+      capability_signature: { algorithm: "p256-sha256", signature: "sig" },
+    });
+    expect(contractMismatch.status).toBe(400);
+    expect((await contractMismatch.json() as any).error.code).toBe("deployment_hash_type_contract_mismatch");
     const response = await post(app, "/v1/artifacts/cellscript/demo/releases/1.2.3/deployments", {
       payload: deployment,
       capability_signature: { algorithm: "p256-sha256", signature: "sig" },
@@ -1415,6 +1518,55 @@ describe("registry api", () => {
       },
       cell_data: expect.stringMatching(/^0x43535245477631[0-9a-f]{64}$/),
     });
+  });
+
+  it("lets the namespace owner yank and restore a release with a scoped capability", async () => {
+    const { app, store, snapshots } = testApp();
+    const root = authPayload();
+    const capability = await (await post(app, "/v1/capabilities", {
+      payload: root,
+      joyid_signature: joyidSignature(root),
+    })).json() as any;
+    store.namespaces.set("cellscript", {
+      namespace: "cellscript",
+      status: "active",
+      owner_principal_type: "joyid_ckb",
+      owner_principal_id: root.principal_id,
+    });
+    const publish = await publishPayload(capability.key_id);
+    expect((await post(app, "/v1/artifacts/cellscript/demo/releases", {
+      payload: publish,
+      capability_signature: { algorithm: "p256-sha256", signature: "sig" },
+      source_snapshot: {
+        content_base64: base64("source snapshot"),
+        content_type: "application/vnd.cellscript.source+tar",
+        size_bytes: "source snapshot".length,
+        source_hash: publish.source_hash,
+      },
+    })).status).toBe(202);
+
+    const yank = availabilityPayload(capability.key_id);
+    const yanked = await post(app, "/v1/artifacts/cellscript/demo/releases/1.2.3/availability", {
+      payload: yank,
+      capability_signature: { algorithm: "p256-sha256", signature: "sig" },
+    });
+    expect(yanked.status).toBe(200);
+    expect(await yanked.json()).toMatchObject({
+      coordinate: "cellscript/demo@1.2.3",
+      availability_status: "yanked",
+    });
+    expect(store.packageVersions.get("cellscript/demo@1.2.3")?.availability_status).toBe("yanked");
+    expect(store.auditEvents.some((event) => event.event_type === "publisher.package_version.availability_updated")).toBe(true);
+    expect(JSON.parse(utf8(snapshots.at(-1)!.body)).availability_status).toBe("yanked");
+
+    const active = availabilityPayload(capability.key_id, "active", "0x8888888888888888");
+    const restored = await post(app, "/v1/artifacts/cellscript/demo/releases/1.2.3/availability", {
+      payload: active,
+      capability_signature: { algorithm: "p256-sha256", signature: "sig" },
+    });
+    expect(restored.status).toBe(200);
+    expect((await restored.json() as any).availability_status).toBe("active");
+    expect(store.packageVersions.get("cellscript/demo@1.2.3")?.availability_status).toBe("active");
   });
 
   it("rejects testnet deployment payloads and exposes no retired package routes", async () => {

@@ -4,10 +4,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
 const MAX_REGISTRY_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_BUNDLE_BYTES: usize = 5 * 1024 * 1024;
+const DEFAULT_CKB_MAINNET_RPC_URL: &str = "https://mainnet.ckb.dev/rpc";
 
 #[derive(Debug)]
 pub struct ArtifactArgs {
@@ -48,6 +50,7 @@ pub enum ArtifactOperation {
         coordinate: String,
         output: PathBuf,
         api_url: Option<String>,
+        rpc_url: Option<String>,
         accept_hash_bound: bool,
         force: bool,
         json: bool,
@@ -59,6 +62,16 @@ pub enum ArtifactOperation {
         dep_type: String,
         tx_hash: String,
         index: u32,
+        capability_key_id: String,
+        capability_signature: Option<String>,
+        api_url: Option<String>,
+        print_payload: bool,
+        json: bool,
+    },
+    SetAvailability {
+        coordinate: String,
+        status: String,
+        reason: Option<String>,
         capability_key_id: String,
         capability_signature: Option<String>,
         api_url: Option<String>,
@@ -230,7 +243,7 @@ pub fn execute(args: ArtifactArgs) -> Result<()> {
                 format!("Copied {coordinate} into {}", destination.display()),
             )
         }
-        ArtifactOperation::CellDep { coordinate, output, api_url, accept_hash_bound, force, json } => {
+        ArtifactOperation::CellDep { coordinate, output, api_url, rpc_url, accept_hash_bound, force, json } => {
             let fetched = fetch(&coordinate, api_url.as_deref())?;
             let verified = verify_fetched(&fetched)?;
             require_assurance(&fetched.release, accept_hash_bound)?;
@@ -240,6 +253,11 @@ pub fn execute(args: ArtifactArgs) -> Result<()> {
             let deployed = chain_verified_deployment(&fetched.release)?;
             let release_identity = signed_release(&fetched.release)?;
             let evidence = object_field(deployed, "evidence", "deployed evidence")?;
+            require_deployment_contract(&verified.profile_contract, evidence)?;
+            let rpc_url = rpc_url
+                .or_else(|| std::env::var(super::commands::CELLSCRIPT_CKB_RPC_URL_ENV).ok())
+                .unwrap_or_else(|| DEFAULT_CKB_MAINNET_RPC_URL.to_string());
+            revalidate_mainnet_deployment(evidence, &rpc_url)?;
             let descriptor = json!({
                 "schema": "cellscript-registry-cell-dep-v1",
                 "coordinate": coordinate,
@@ -254,7 +272,8 @@ pub fn execute(args: ArtifactArgs) -> Result<()> {
                     "code_hash": evidence["code_hash"],
                     "hash_type": evidence["hash_type"],
                 },
-                "chain_verification": evidence["chain_verification"],
+                "chain_verification": "get_live_cell:fresh",
+                "liveness_checked_at": super::commands::current_utc_timestamp(),
                 "resolved_code_out_point": evidence.get("resolved_code_out_point").cloned().unwrap_or(Value::Null),
                 "deployed_evidence_hash": deployed["evidence_hash"],
             });
@@ -284,6 +303,25 @@ pub fn execute(args: ArtifactArgs) -> Result<()> {
             &dep_type,
             &tx_hash,
             index,
+            &capability_key_id,
+            capability_signature.as_deref(),
+            api_url,
+            print_payload,
+            json,
+        ),
+        ArtifactOperation::SetAvailability {
+            coordinate,
+            status,
+            reason,
+            capability_key_id,
+            capability_signature,
+            api_url,
+            print_payload,
+            json,
+        } => set_availability(
+            &coordinate,
+            &status,
+            reason.as_deref(),
             &capability_key_id,
             capability_signature.as_deref(),
             api_url,
@@ -352,10 +390,11 @@ fn record_deployment(
     let api_base = super::commands::resolve_registry_api_base(api_url)?;
     let registry_origin = super::commands::registry_origin_from_api_base(&api_base)?;
     let fetched = fetch(coordinate, Some(&api_base))?;
-    verify_fetched(&fetched)?;
+    let verified = verify_fetched(&fetched)?;
     if fetched.artifact["profile"].as_str() != Some("ckb_executable") {
         return Err(error("deployment evidence is valid only for profile=ckb_executable"));
     }
+    require_deployment_contract_values(&verified.profile_contract, hash_type, dep_type)?;
     let release = signed_release(&fetched.release)?;
     let artifact_hash = map_string_field(release, "artifact_hash", "signed release")?;
     if hash_type != "type" {
@@ -416,6 +455,97 @@ fn record_deployment(
     }
     let response_json = serde_json::from_str::<Value>(&body).unwrap_or_else(|_| json!({ "response": body }));
     emit(json_output, response_json, format!("Recorded and chain-verified mainnet deployment for {coordinate}"))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn set_availability(
+    coordinate: &str,
+    status: &str,
+    reason: Option<&str>,
+    capability_key_id: &str,
+    capability_signature: Option<&str>,
+    api_url: Option<String>,
+    print_payload: bool,
+    json_output: bool,
+) -> Result<()> {
+    if !matches!(status, "active" | "deprecated" | "yanked") {
+        return Err(error("--status must be active, deprecated, or yanked"));
+    }
+    let reason = reason.map(str::trim).filter(|value| !value.is_empty());
+    if status == "yanked" && reason.is_none() {
+        return Err(error("--reason is required when yanking a release"));
+    }
+    if reason.is_some_and(|value| value.len() > 500) {
+        return Err(error("--reason must be no longer than 500 characters"));
+    }
+    if capability_key_id.len() != 36
+        || !capability_key_id.starts_with("cap_")
+        || !capability_key_id[4..].bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err(error("--capability-key-id must be a Registry capability key id"));
+    }
+    let coordinate = parse_coordinate(coordinate)?;
+    let api_base = super::commands::resolve_registry_api_base(api_url)?;
+    let registry_origin = super::commands::registry_origin_from_api_base(&api_base)?;
+    let issued_at = super::commands::current_utc_timestamp();
+    let expires_at = super::commands::utc_timestamp_after_seconds(10 * 60);
+    let nonce_material = format!(
+        "cellscript-registry-availability-v1\n{registry_origin}\n{}/{}/{}\n{status}\n{}\n{issued_at}",
+        coordinate.namespace,
+        coordinate.name,
+        coordinate.release,
+        reason.unwrap_or("")
+    );
+    let mut payload = json!({
+        "protocol": "cellscript-registry-availability-v1",
+        "action": "set_availability",
+        "registry_origin": registry_origin,
+        "namespace": coordinate.namespace,
+        "name": coordinate.name,
+        "release": coordinate.release,
+        "availability_status": status,
+        "capability_key_id": capability_key_id,
+        "nonce": format!("0x{}", hex::encode(crate::ckb_blake2b256(nonce_material.as_bytes()))),
+        "issued_at": issued_at,
+        "expires_at": expires_at,
+        "cli_version": crate::VERSION,
+    });
+    if let Some(reason) = reason {
+        payload["reason"] = Value::String(reason.to_string());
+    }
+    let canonical = canonical_json(&payload)?;
+    let endpoint =
+        format!("{}/v1/artifacts/{}/{}/releases/{}/availability", api_base, coordinate.namespace, coordinate.name, coordinate.release);
+    if print_payload {
+        return emit(
+            json_output,
+            json!({ "endpoint": endpoint, "payload": payload, "canonical_payload": canonical }),
+            format!("{canonical}\n\nEndpoint: {endpoint}"),
+        );
+    }
+    let signature = match capability_signature {
+        Some(value) => value.to_string(),
+        None => super::commands::sign_registry_capability_payload(capability_key_id, &canonical)?,
+    };
+    let response = super::commands::registry_http_client()?
+        .post(&endpoint)
+        .json(&json!({
+            "payload": payload,
+            "capability_signature": { "algorithm": "p256-sha256", "signature": signature }
+        }))
+        .send()
+        .map_err(|err| error(format!("failed to submit availability update to '{endpoint}': {err}")))?;
+    let http_status = response.status();
+    let body = response.text().map_err(|err| error(format!("failed to read availability response: {err}")))?;
+    if !http_status.is_success() {
+        return Err(error(format!("availability update failed with HTTP {http_status}: {}", body.trim())));
+    }
+    let response_json = serde_json::from_str::<Value>(&body).unwrap_or_else(|_| json!({ "response": body }));
+    emit(
+        json_output,
+        response_json,
+        format!("Set {}/{}@{} availability to {status}", coordinate.namespace, coordinate.name, coordinate.release),
+    )
 }
 
 fn fetch(raw_coordinate: &str, api_url: Option<&str>) -> Result<FetchedArtifact> {
@@ -660,6 +790,185 @@ fn signed_release(release: &Value) -> Result<&serde_json::Map<String, Value>> {
         .find(|item| item.get("version").and_then(Value::as_str) == Some(release_name))
         .and_then(Value::as_object)
         .ok_or_else(|| error("signed registry_entry does not contain the selected release"))
+}
+
+fn require_deployment_contract(contract: &Value, evidence: &serde_json::Map<String, Value>) -> Result<()> {
+    require_deployment_contract_values(
+        contract,
+        map_string_field(evidence, "hash_type", "deployed evidence")?,
+        map_string_field(evidence, "dep_type", "deployed evidence")?,
+    )
+}
+
+fn require_deployment_contract_values(contract: &Value, hash_type: &str, dep_type: &str) -> Result<()> {
+    let contract_hash_type = contract
+        .pointer("/ckb/hash_type")
+        .and_then(Value::as_str)
+        .ok_or_else(|| error("signed profile contract has no ckb.hash_type"))?;
+    let contract_dep_type = contract
+        .pointer("/ckb/dep_type")
+        .and_then(Value::as_str)
+        .ok_or_else(|| error("signed profile contract has no ckb.dep_type"))?;
+    if hash_type != contract_hash_type {
+        return Err(error(format!(
+            "deployment hash_type '{hash_type}' does not match signed profile contract '{contract_hash_type}'"
+        )));
+    }
+    if dep_type != contract_dep_type {
+        return Err(error(format!("deployment dep_type '{dep_type}' does not match signed profile contract '{contract_dep_type}'")));
+    }
+    Ok(())
+}
+
+fn revalidate_mainnet_deployment(evidence: &serde_json::Map<String, Value>, rpc_url: &str) -> Result<()> {
+    let chain = ckb_rpc_call(rpc_url, "get_blockchain_info", json!([]))?;
+    let chain_id = chain
+        .get("chain")
+        .or_else(|| chain.get("chain_id"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| error("CKB RPC get_blockchain_info returned no chain identity"))?;
+    if !matches!(chain_id.trim().to_ascii_lowercase().replace('_', "-").as_str(), "ckb" | "ckb-mainnet") {
+        return Err(error(format!("artifact CellDep consumption is mainnet-only; RPC reports chain '{chain_id}'")));
+    }
+
+    let declared_out_point =
+        evidence.get("out_point").and_then(Value::as_object).ok_or_else(|| error("deployed evidence.out_point must be an object"))?;
+    let declared = get_live_cell(rpc_url, declared_out_point)?;
+    match map_string_field(evidence, "dep_type", "deployed evidence")? {
+        "code" => verify_live_code_cell(&declared, evidence),
+        "dep_group" => {
+            let content = declared
+                .pointer("/cell/data/content")
+                .and_then(Value::as_str)
+                .ok_or_else(|| error("live DepGroup Cell has no output data"))?;
+            let members = parse_dep_group_out_points(content)?;
+            if let Some(expected_size) = evidence.get("dep_group_size").and_then(Value::as_u64) {
+                if expected_size != members.len() as u64 {
+                    return Err(error("live DepGroup member count no longer matches Registry deployment evidence"));
+                }
+            }
+            let resolved = evidence
+                .get("resolved_code_out_point")
+                .and_then(Value::as_object)
+                .ok_or_else(|| error("DepGroup deployment evidence has no resolved_code_out_point"))?;
+            let resolved_tx_hash = map_string_field(resolved, "tx_hash", "resolved_code_out_point")?;
+            let resolved_index = resolved
+                .get("index")
+                .and_then(Value::as_u64)
+                .and_then(|value| u32::try_from(value).ok())
+                .ok_or_else(|| error("resolved_code_out_point.index must be a u32"))?;
+            if !members.iter().any(|(tx_hash, index)| tx_hash.eq_ignore_ascii_case(resolved_tx_hash) && *index == resolved_index) {
+                return Err(error("resolved code Cell is not a member of the live DepGroup"));
+            }
+            let code = get_live_cell(rpc_url, resolved)?;
+            verify_live_code_cell(&code, evidence)
+        }
+        other => Err(error(format!("unsupported deployment dep_type '{other}'"))),
+    }
+}
+
+fn get_live_cell(rpc_url: &str, out_point: &serde_json::Map<String, Value>) -> Result<Value> {
+    let tx_hash = map_string_field(out_point, "tx_hash", "out_point")?;
+    require_hash_shape(tx_hash, "out_point.tx_hash")?;
+    let index = out_point
+        .get("index")
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+        .ok_or_else(|| error("out_point.index must be a u32"))?;
+    let live = ckb_rpc_call(rpc_url, "get_live_cell", json!([{ "tx_hash": tx_hash, "index": format!("0x{index:x}") }, true, false]))?;
+    if live.get("status").and_then(Value::as_str) != Some("live") {
+        return Err(error(format!("deployment Cell {tx_hash}:0x{index:x} is no longer live")));
+    }
+    if !live.get("cell").is_some_and(Value::is_object) {
+        return Err(error("CKB RPC live Cell response has no cell object"));
+    }
+    Ok(live)
+}
+
+fn verify_live_code_cell(live: &Value, evidence: &serde_json::Map<String, Value>) -> Result<()> {
+    let data_hash = live
+        .pointer("/cell/data/hash")
+        .or_else(|| live.pointer("/cell/data_hash"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| error("CKB RPC live Cell response has no data hash"))?;
+    require_ckb_hash(data_hash, map_string_field(evidence, "data_hash", "deployed evidence")?, "live Cell data_hash")?;
+    let expected_code_hash = map_string_field(evidence, "code_hash", "deployed evidence")?;
+    if map_string_field(evidence, "hash_type", "deployed evidence")? == "type" {
+        let type_script = live
+            .pointer("/cell/output/type")
+            .filter(|value| !value.is_null())
+            .ok_or_else(|| error("type-hash deployment Cell has no Type Script"))?;
+        let actual = super::commands::ckb_script_hash_from_json(type_script)?;
+        require_ckb_hash(&actual, expected_code_hash, "live Cell type script hash")?;
+    } else {
+        require_ckb_hash(data_hash, expected_code_hash, "live Cell code_hash")?;
+    }
+    Ok(())
+}
+
+fn parse_dep_group_out_points(content: &str) -> Result<Vec<(String, u32)>> {
+    let bytes = hex::decode(content.strip_prefix("0x").unwrap_or(content))
+        .map_err(|err| error(format!("DepGroup Cell data is not hexadecimal: {err}")))?;
+    if bytes.len() < 4 {
+        return Err(error("DepGroup Cell data is shorter than an OutPointVec header"));
+    }
+    let count = u32::from_le_bytes(bytes[..4].try_into().expect("four-byte slice")) as usize;
+    if count == 0 || count > 2048 || bytes.len() != 4 + count * 36 {
+        return Err(error("DepGroup Cell data is not a canonical non-empty Molecule OutPointVec"));
+    }
+    Ok((0..count)
+        .map(|item| {
+            let offset = 4 + item * 36;
+            let tx_hash = format!("0x{}", hex::encode(&bytes[offset..offset + 32]));
+            let index = u32::from_le_bytes(bytes[offset + 32..offset + 36].try_into().expect("four-byte slice"));
+            (tx_hash, index)
+        })
+        .collect())
+}
+
+fn ckb_rpc_call(rpc_url: &str, method: &str, params: Value) -> Result<Value> {
+    validate_rpc_url(rpc_url)?;
+    let client = super::commands::registry_http_client()?;
+    let mut response = client
+        .post(rpc_url)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .header(reqwest::header::USER_AGENT, format!("cellc/{}", env!("CARGO_PKG_VERSION")))
+        .json(&json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params }))
+        .send()
+        .map_err(|err| error(format!("CKB RPC request '{method}' failed: {err}")))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(error(format!("CKB RPC request '{method}' returned HTTP {status}")));
+    }
+    let mut bytes = Vec::new();
+    Read::by_ref(&mut response)
+        .take((MAX_REGISTRY_RESPONSE_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|err| error(format!("failed to read CKB RPC response '{method}': {err}")))?;
+    if bytes.is_empty() || bytes.len() > MAX_REGISTRY_RESPONSE_BYTES {
+        return Err(error("CKB RPC response is empty or exceeds 2 MiB"));
+    }
+    let rpc: Value =
+        serde_json::from_slice(&bytes).map_err(|err| error(format!("CKB RPC response '{method}' is invalid JSON: {err}")))?;
+    if let Some(rpc_error) = rpc.get("error") {
+        return Err(error(format!("CKB RPC request '{method}' failed: {rpc_error}")));
+    }
+    rpc.get("result").cloned().ok_or_else(|| error(format!("CKB RPC response '{method}' has no result")))
+}
+
+fn validate_rpc_url(value: &str) -> Result<()> {
+    let url = reqwest::Url::parse(value).map_err(|err| error(format!("CKB RPC URL is invalid: {err}")))?;
+    let host = url.host_str().ok_or_else(|| error("CKB RPC URL has no host"))?;
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    let loopback =
+        host.eq_ignore_ascii_case("localhost") || host.parse::<std::net::IpAddr>().is_ok_and(|address| address.is_loopback());
+    if url.scheme() != "https" && !(url.scheme() == "http" && loopback) {
+        return Err(error("CKB RPC URL must use HTTPS; plaintext HTTP is allowed only for loopback development servers"));
+    }
+    if !url.username().is_empty() || url.password().is_some() || url.fragment().is_some() {
+        return Err(error("CKB RPC URL must not contain credentials or a fragment"));
+    }
+    Ok(())
 }
 
 fn chain_verified_deployment(release: &Value) -> Result<&Value> {
@@ -914,5 +1223,31 @@ mod tests {
         assert!(validate_download_url("http://registry.example/bundle").is_err());
         assert!(validate_download_url("https://user:secret@registry.example/bundle").is_err());
         assert!(validate_download_url("https://registry.example/bundle#fragment").is_err());
+    }
+
+    #[test]
+    fn deployment_consumption_is_bound_to_the_signed_ckb_contract() {
+        let contract = json!({ "ckb": { "hash_type": "data1", "dep_type": "code" } });
+        assert!(require_deployment_contract_values(&contract, "data1", "code").is_ok());
+        assert!(require_deployment_contract_values(&contract, "type", "code").is_err());
+        assert!(require_deployment_contract_values(&contract, "data1", "dep_group").is_err());
+    }
+
+    #[test]
+    fn dep_group_members_are_decoded_canonically() {
+        let mut bytes = vec![1, 0, 0, 0];
+        bytes.extend([0x42; 32]);
+        bytes.extend(7_u32.to_le_bytes());
+        let members = parse_dep_group_out_points(&format!("0x{}", hex::encode(bytes))).unwrap();
+        assert_eq!(members, vec![(format!("0x{}", "42".repeat(32)), 7)]);
+        assert!(parse_dep_group_out_points("0x00000000").is_err());
+    }
+
+    #[test]
+    fn rpc_transport_requires_https_except_for_loopback_development() {
+        assert!(validate_rpc_url("https://mainnet.ckb.dev/rpc").is_ok());
+        assert!(validate_rpc_url("http://127.0.0.1:8114").is_ok());
+        assert!(validate_rpc_url("http://public.example/rpc").is_err());
+        assert!(validate_rpc_url("https://user:secret@mainnet.ckb.dev/rpc").is_err());
     }
 }

@@ -66,7 +66,10 @@ service coverage, not evidence
 that Cloudflare, R2, Hyperdrive, Neon, DNS, or a production deployment works.
 The CLI coverage includes the explicit first-publish admission sequence:
 `cellc auth capability submit`, `cellc auth namespace claim`, then
-`cellc publish`. Capability registration does not silently claim a namespace;
+`cellc publish`; publisher maintenance additionally uses the capability-signed
+`cellc artifact set-availability` path, and `cellc artifact cell-dep` performs a
+fresh mainnet liveness check before producing a transaction-builder descriptor.
+Capability registration does not silently claim a namespace;
 the claim response must be `active` before the write API accepts a version.
 Registry API tests pin both accepted publisher roots: JoyID signatures under
 `principal_type = joyid_ckb` and recoverable CKB message signatures under
