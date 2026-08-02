@@ -78,6 +78,19 @@ pub enum ArtifactOperation {
         print_payload: bool,
         json: bool,
     },
+    ReproductionReport {
+        coordinate: String,
+        artifact: PathBuf,
+        build_log: PathBuf,
+        builder_id: String,
+        trust_domain: String,
+        builder_key_id: String,
+        builder_public_key: String,
+        output: PathBuf,
+        api_url: Option<String>,
+        force: bool,
+        json: bool,
+    },
     ReproductionEvidence {
         coordinate: String,
         reports: Vec<PathBuf>,
@@ -146,12 +159,22 @@ struct TemplateFile {
 struct ReproductionReport {
     schema: String,
     builder_id: String,
+    trust_domain: String,
+    builder_public_key: String,
     environment: String,
     source_hash: String,
     build_recipe_hash: String,
     artifact_hash: String,
     build_log_hash: String,
     generated_at: String,
+    signature: ReproductionSignature,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReproductionSignature {
+    algorithm: String,
+    signature: String,
 }
 
 struct Coordinate {
@@ -349,6 +372,44 @@ pub fn execute(args: ArtifactArgs) -> Result<()> {
             print_payload,
             json,
         ),
+        ArtifactOperation::ReproductionReport {
+            coordinate,
+            artifact,
+            build_log,
+            builder_id,
+            trust_domain,
+            builder_key_id,
+            builder_public_key,
+            output,
+            api_url,
+            force,
+            json,
+        } => {
+            let fetched = fetch(&coordinate, api_url.as_deref())?;
+            let verified = verify_fetched(&fetched)?;
+            let report = build_signed_reproduction_report(
+                &fetched,
+                &verified,
+                &artifact,
+                &build_log,
+                &builder_id,
+                &trust_domain,
+                &builder_key_id,
+                &builder_public_key,
+            )?;
+            write_json(&output, &report, force)?;
+            emit(
+                json,
+                json!({
+                    "status": "reproduction_report_signed",
+                    "coordinate": coordinate,
+                    "builder_id": builder_id,
+                    "trust_domain": trust_domain,
+                    "output": output,
+                }),
+                format!("Signed reproduction report at {}", output.display()),
+            )
+        }
         ArtifactOperation::ReproductionEvidence { coordinate, reports, output, api_url, force, json } => {
             let fetched = fetch(&coordinate, api_url.as_deref())?;
             let verified = verify_fetched(&fetched)?;
@@ -390,7 +451,7 @@ pub fn execute(args: ArtifactArgs) -> Result<()> {
                 "cell_data": cell_data,
                 "network": "mainnet",
                 "registry_type_hash": proof["registry_type_hash"],
-                "attestor_lock_hash": proof["attestor_lock_hash"],
+                "commitment_lock_hash": proof["commitment_lock_hash"],
                 "transaction_intent": transaction_intent,
             });
             write_json(&output, &commitment, force)?;
@@ -401,6 +462,79 @@ pub fn execute(args: ArtifactArgs) -> Result<()> {
             )
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_signed_reproduction_report(
+    fetched: &FetchedArtifact,
+    verified: &VerifiedBundle,
+    artifact_path: &Path,
+    build_log_path: &Path,
+    builder_id: &str,
+    trust_domain: &str,
+    builder_key_id: &str,
+    builder_public_key: &str,
+) -> Result<ReproductionReport> {
+    if builder_id.trim().is_empty() || builder_id.len() > 200 {
+        return Err(error("builder id must contain 1 to 200 characters"));
+    }
+    if trust_domain.trim().is_empty() || trust_domain.len() > 200 {
+        return Err(error("trust domain must contain 1 to 200 characters"));
+    }
+    if !builder_public_key.starts_with("p256-spki:") {
+        return Err(error("builder public key must use p256-spki"));
+    }
+    let expected_key_id = format!("cap_{}", &hex::encode(Sha256::digest(builder_public_key.as_bytes()))[..32]);
+    if builder_key_id != expected_key_id {
+        return Err(error("builder key id does not match builder public key"));
+    }
+    let environment = verified
+        .profile_contract
+        .pointer("/reproduction/environment")
+        .and_then(Value::as_str)
+        .ok_or_else(|| error("artifact has no signed reproduction.environment"))?;
+    let release_identity = signed_release(&fetched.release)?;
+    let expected_artifact_hash = map_string_field(release_identity, "artifact_hash", "signed release")?;
+    let build_recipe_hash = map_string_field(release_identity, "build_recipe_hash", "signed release")?;
+    let artifact = read_limited(artifact_path, MAX_BUNDLE_BYTES, "reproduced artifact")?;
+    let artifact_hash = format!("0x{}", hex::encode(crate::ckb_blake2b256(&artifact)));
+    require_ckb_hash(&artifact_hash, expected_artifact_hash, "reproduced artifact hash")?;
+    let build_log = read_limited(build_log_path, MAX_BUNDLE_BYTES, "reproduction build log")?;
+    let build_log_hash = format!("0x{}", hex::encode(Sha256::digest(&build_log)));
+    let generated_at = super::commands::current_utc_timestamp();
+    let unsigned = json!({
+        "schema": "cellscript-reproduction-report-v2",
+        "builder_id": builder_id,
+        "trust_domain": trust_domain,
+        "builder_public_key": builder_public_key,
+        "environment": environment,
+        "source_hash": string_field(&fetched.release, "source_hash", "Registry release")?,
+        "build_recipe_hash": build_recipe_hash,
+        "artifact_hash": artifact_hash,
+        "build_log_hash": build_log_hash,
+        "generated_at": generated_at,
+    });
+    let canonical = canonical_json(&unsigned)?;
+    let signature = super::commands::sign_registry_reproducer_payload(builder_key_id, &canonical)?;
+    let report = serde_json::from_value(json!({
+        "schema": "cellscript-reproduction-report-v2",
+        "builder_id": builder_id,
+        "trust_domain": trust_domain,
+        "builder_public_key": builder_public_key,
+        "environment": environment,
+        "source_hash": string_field(&fetched.release, "source_hash", "Registry release")?,
+        "build_recipe_hash": build_recipe_hash,
+        "artifact_hash": artifact_hash,
+        "build_log_hash": build_log_hash,
+        "generated_at": generated_at,
+        "signature": {
+            "algorithm": "p256-sha256",
+            "signature": signature,
+        },
+    }))
+    .map_err(|err| error(format!("failed to construct reproduction report: {err}")))?;
+    verify_reproduction_report_signature(&report)?;
+    Ok(report)
 }
 
 fn fetch_commitment_proof(fetched: &FetchedArtifact) -> Result<Value> {
@@ -443,13 +577,53 @@ fn validate_commitment_proof(proof: &Value, payload: &Value, commitment_hash: &s
     if canonical_json(remote_payload)? != canonical_json(payload)? {
         return Err(error("Registry commitment payload does not match the locally verified release"));
     }
-    require_hash_shape(string_field(proof, "registry_type_hash", "Registry commitment proof")?, "registry_type_hash")?;
-    require_hash_shape(string_field(proof, "attestor_lock_hash", "Registry commitment proof")?, "attestor_lock_hash")?;
-    proof
+    let registry_type_hash = string_field(proof, "registry_type_hash", "Registry commitment proof")?;
+    let commitment_lock_hash = string_field(proof, "commitment_lock_hash", "Registry commitment proof")?;
+    require_hash_shape(registry_type_hash, "registry_type_hash")?;
+    require_hash_shape(commitment_lock_hash, "commitment_lock_hash")?;
+    let intent = proof
         .get("transaction_intent")
         .filter(|value| value.is_object())
         .cloned()
-        .ok_or_else(|| error("Registry commitment transaction construction is not configured by the service operator"))
+        .ok_or_else(|| error("Registry commitment transaction construction is not configured by the service operator"))?;
+    if string_field(&intent, "schema", "Registry commitment transaction intent")?
+        != "cellscript-registry-commitment-transaction-intent-v1"
+        || string_field(&intent, "network", "Registry commitment transaction intent")? != "mainnet"
+    {
+        return Err(error("Registry commitment transaction intent schema or network is invalid"));
+    }
+    let output = object_field(&intent, "output", "Registry commitment transaction intent")?;
+    let output_data = map_string_field(output, "data", "Registry commitment output")?;
+    if output_data != cell_data {
+        return Err(error("Registry commitment transaction output data does not match the locally verified commitment"));
+    }
+    let type_script = output
+        .get("type")
+        .filter(|value| value.is_object())
+        .ok_or_else(|| error("Registry commitment transaction output has no Type Script"))?;
+    let lock_script = output
+        .get("lock")
+        .filter(|value| value.is_object())
+        .ok_or_else(|| error("Registry commitment transaction output has no Lock Script"))?;
+    require_ckb_hash(
+        &super::commands::ckb_script_hash_from_json(type_script)?,
+        registry_type_hash,
+        "Registry commitment transaction Type Script hash",
+    )?;
+    require_ckb_hash(
+        &super::commands::ckb_script_hash_from_json(lock_script)?,
+        commitment_lock_hash,
+        "Registry commitment transaction Lock Script hash",
+    )?;
+    let required_cell_deps = intent
+        .get("required_cell_deps")
+        .and_then(Value::as_array)
+        .filter(|items| !items.is_empty() && items.iter().all(Value::is_object))
+        .ok_or_else(|| error("Registry commitment transaction intent has no valid Type Script CellDep"))?;
+    if required_cell_deps.len() > 16 || !intent.get("custody_cell_dep").is_some_and(Value::is_object) {
+        return Err(error("Registry commitment transaction intent has invalid Script CellDeps"));
+    }
+    Ok(intent)
 }
 
 fn build_reproduction_promotion(
@@ -488,15 +662,26 @@ fn build_reproduction_promotion(
         return Err(error("reproduction evidence requires between 2 and 16 reports"));
     }
     let mut builders = BTreeSet::new();
+    let mut builder_keys = BTreeSet::new();
+    let mut trust_domains = BTreeSet::new();
     for report in &reports {
-        if report.schema != "cellscript-reproduction-report-v1" {
-            return Err(error("reproduction report schema must be cellscript-reproduction-report-v1"));
+        if report.schema != "cellscript-reproduction-report-v2" {
+            return Err(error("reproduction report schema must be cellscript-reproduction-report-v2"));
         }
         if report.builder_id.trim().is_empty() || report.builder_id.len() > 200 || !builders.insert(report.builder_id.clone()) {
             return Err(error("reproduction reports require distinct non-empty builder_id values"));
         }
         if report.environment != environment {
             return Err(error("reproduction report environment does not match the signed profile contract"));
+        }
+        if report.trust_domain.trim().is_empty()
+            || report.trust_domain.len() > 200
+            || !trust_domains.insert(report.trust_domain.clone())
+        {
+            return Err(error("reproduction reports require distinct non-empty trust_domain values"));
+        }
+        if !report.builder_public_key.starts_with("p256-spki:") || !builder_keys.insert(report.builder_public_key.clone()) {
+            return Err(error("reproduction reports require distinct p256-spki builder_public_key values"));
         }
         require_ckb_hash(&report.source_hash, source_hash, "reproduction report source_hash")?;
         require_ckb_hash(&report.build_recipe_hash, build_recipe_hash, "reproduction report build_recipe_hash")?;
@@ -505,6 +690,7 @@ fn build_reproduction_promotion(
         if report.generated_at.trim().is_empty() || report.generated_at.len() > 40 {
             return Err(error("reproduction report generated_at must be a non-empty ISO timestamp"));
         }
+        verify_reproduction_report_signature(report)?;
     }
     let mut evidence = json!({
         "schema": "cellscript-registry-evidence",
@@ -525,6 +711,46 @@ fn build_reproduction_promotion(
         evidence["compatibility_profile_hash"] = Value::String(profile_hash.to_string());
     }
     Ok(json!({ "kind": "reproduced_build", "evidence": evidence }))
+}
+
+fn verify_reproduction_report_signature(report: &ReproductionReport) -> Result<()> {
+    if report.signature.algorithm != "p256-sha256" {
+        return Err(error("reproduction report signature algorithm must be p256-sha256"));
+    }
+    let encoded_key = report
+        .builder_public_key
+        .strip_prefix("p256-spki:")
+        .ok_or_else(|| error("reproduction report builder_public_key must use p256-spki"))?;
+    let spki = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(encoded_key)
+        .map_err(|err| error(format!("reproduction report builder_public_key is invalid base64url: {err}")))?;
+    const P256_SPKI_PREFIX: &[u8] = &[
+        0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03,
+        0x01, 0x07, 0x03, 0x42, 0x00,
+    ];
+    let public_key = spki
+        .strip_prefix(P256_SPKI_PREFIX)
+        .filter(|key| key.len() == 65 && key.first() == Some(&0x04))
+        .ok_or_else(|| error("reproduction report builder_public_key is not a canonical P-256 SPKI key"))?;
+    let signature = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(report.signature.signature.trim())
+        .map_err(|err| error(format!("reproduction report signature is invalid base64url: {err}")))?;
+    let payload = json!({
+        "schema": report.schema,
+        "builder_id": report.builder_id,
+        "trust_domain": report.trust_domain,
+        "builder_public_key": report.builder_public_key,
+        "environment": report.environment,
+        "source_hash": report.source_hash,
+        "build_recipe_hash": report.build_recipe_hash,
+        "artifact_hash": report.artifact_hash,
+        "build_log_hash": report.build_log_hash,
+        "generated_at": report.generated_at,
+    });
+    let canonical = canonical_json(&payload)?;
+    ring::signature::UnparsedPublicKey::new(&ring::signature::ECDSA_P256_SHA256_FIXED, public_key)
+        .verify(canonical.as_bytes(), &signature)
+        .map_err(|_| error(format!("reproduction report signature for '{}' is invalid", report.builder_id)))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1409,22 +1635,60 @@ mod tests {
             source: Vec::new(),
             object_hashes: BTreeMap::new(),
         };
-        let report = |builder_id: &str| ReproductionReport {
-            schema: "cellscript-reproduction-report-v1".to_string(),
-            builder_id: builder_id.to_string(),
-            environment: environment.to_string(),
-            source_hash: source_hash.clone(),
-            build_recipe_hash: recipe_hash.clone(),
-            artifact_hash: artifact_hash.clone(),
-            build_log_hash: format!("0x{}", "66".repeat(32)),
-            generated_at: "2026-06-23T12:00:00Z".to_string(),
+        let report = |builder_id: &str, trust_domain: &str| {
+            use ring::signature::KeyPair as _;
+            let rng = ring::rand::SystemRandom::new();
+            let pkcs8 =
+                ring::signature::EcdsaKeyPair::generate_pkcs8(&ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING, &rng).unwrap();
+            let key_pair =
+                ring::signature::EcdsaKeyPair::from_pkcs8(&ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8.as_ref(), &rng)
+                    .unwrap();
+            let mut spki = vec![
+                0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce,
+                0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00,
+            ];
+            spki.extend_from_slice(key_pair.public_key().as_ref());
+            let builder_public_key = format!("p256-spki:{}", base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(spki));
+            let unsigned = json!({
+                "schema": "cellscript-reproduction-report-v2",
+                "builder_id": builder_id,
+                "trust_domain": trust_domain,
+                "builder_public_key": builder_public_key,
+                "environment": environment,
+                "source_hash": source_hash,
+                "build_recipe_hash": recipe_hash,
+                "artifact_hash": artifact_hash,
+                "build_log_hash": format!("0x{}", "66".repeat(32)),
+                "generated_at": "2026-06-23T12:00:00Z",
+            });
+            let signature = key_pair.sign(&rng, canonical_json(&unsigned).unwrap().as_bytes()).unwrap();
+            serde_json::from_value(json!({
+                "schema": "cellscript-reproduction-report-v2",
+                "builder_id": builder_id,
+                "trust_domain": trust_domain,
+                "builder_public_key": builder_public_key,
+                "environment": environment,
+                "source_hash": source_hash,
+                "build_recipe_hash": recipe_hash,
+                "artifact_hash": artifact_hash,
+                "build_log_hash": format!("0x{}", "66".repeat(32)),
+                "generated_at": "2026-06-23T12:00:00Z",
+                "signature": {
+                    "algorithm": "p256-sha256",
+                    "signature": base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(signature.as_ref()),
+                },
+            }))
+            .unwrap()
         };
 
-        let promotion = build_reproduction_promotion(&fetched, &verified, vec![report("builder-a"), report("builder-b")]).unwrap();
+        let promotion =
+            build_reproduction_promotion(&fetched, &verified, vec![report("builder-a", "org-a"), report("builder-b", "org-b")])
+                .unwrap();
         assert_eq!(promotion["kind"], "reproduced_build");
         assert_eq!(promotion["evidence"]["verification_level"], "reproduced");
         assert_eq!(promotion["evidence"]["reproducers"].as_array().unwrap().len(), 2);
-        assert!(build_reproduction_promotion(&fetched, &verified, vec![report("builder-a"), report("builder-a")]).is_err());
+        assert!(build_reproduction_promotion(&fetched, &verified, vec![report("builder-a", "org-a"), report("builder-a", "org-b")])
+            .is_err());
     }
 
     #[test]
@@ -1437,18 +1701,24 @@ mod tests {
         });
         let commitment_hash = format!("0x{}", "11".repeat(32));
         let cell_data = format!("0x{}{}", hex::encode("CSREGv1"), commitment_hash.trim_start_matches("0x"));
+        let type_script = json!({ "code_hash": format!("0x{}", "22".repeat(32)), "hash_type": "data1", "args": "0x01" });
+        let lock_script = json!({ "code_hash": format!("0x{}", "33".repeat(32)), "hash_type": "type", "args": "0x02" });
+        let registry_type_hash = super::super::commands::ckb_script_hash_from_json(&type_script).unwrap();
+        let commitment_lock_hash = super::super::commands::ckb_script_hash_from_json(&lock_script).unwrap();
         let intent = json!({
             "schema": "cellscript-registry-commitment-transaction-intent-v1",
             "network": "mainnet",
-            "output": { "data": cell_data }
+            "output": { "lock": lock_script, "type": type_script, "data": cell_data },
+            "required_cell_deps": [{ "out_point": { "tx_hash": format!("0x{}", "44".repeat(32)), "index": "0x0" }, "dep_type": "code" }],
+            "custody_cell_dep": { "out_point": { "tx_hash": format!("0x{}", "55".repeat(32)), "index": "0x0" }, "dep_type": "code" }
         });
         let proof = json!({
             "schema": "cellscript-registry-commitment-proof-v1",
             "payload": payload,
             "commitment_hash": commitment_hash,
             "cell_data": cell_data,
-            "registry_type_hash": format!("0x{}", "22".repeat(32)),
-            "attestor_lock_hash": format!("0x{}", "33".repeat(32)),
+            "registry_type_hash": registry_type_hash,
+            "commitment_lock_hash": commitment_lock_hash,
             "transaction_intent": intent
         });
 

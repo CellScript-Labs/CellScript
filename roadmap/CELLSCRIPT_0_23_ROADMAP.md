@@ -148,9 +148,9 @@ Source documents:
 resolution, evidence promotion, and the bounded automatic source/build
 verification pipeline are implemented and deployed. The generalized artifact,
 independent reproduction, mainnet deployment, and configured chain-commitment
-paths are implemented in-tree. Production chain attestation is not active until
-the canonical Registry Type Script, its CellDep, and the attestor Lock are
-deployed and configured. A publisher-owned wallet publication, a real
+paths are implemented in-tree. Production chain commitment is not active until
+the canonical Registry Type Script, commitment custody Lock, and both code
+CellDeps are deployed, sufficiently confirmed, and configured. A publisher-owned wallet publication, a real
 non-CellScript mainnet artifact, and clean-machine consumption remain adoption
 checkpoints.**
 
@@ -168,7 +168,7 @@ Rust publisher/reader, API validation, deployed Postgres schema,
 version-addressed package JSON, checked-in registry fixture, and website data
 model. These surfaces accept one complete entry shape; there is no fallback
 reader for omitted fields. Generic admin status changes cannot create
-`verified_build`, `deployed`, or `on_chain_attested` claims. The ordered
+`verified_build`, `deployed`, or `on_chain_committed` claims. The ordered
 `/promote` endpoint requires identity-bound evidence for each transition.
 
 ### Production Domains And Hosting
@@ -215,7 +215,7 @@ alternative deployment, not a claim about the current topology.
   metrics, dead letters, and audited manual requeue.
 - [x] Keep unverified versions available by direct URL and explicit status
   query, while limiting the default public list/search and resolver to
-  `verified_build`, `deployed`, and `on_chain_attested`.
+  `verified_build`, `deployed`, and `on_chain_committed`.
 - [x] Separate CellScript dependencies, deployable CKB executables, runtime
   verifiers, reproducible binaries, and copy-only templates with closed
   artifact/profile/language/consumption contracts across API, CLI, verifier,
@@ -223,10 +223,10 @@ alternative deployment, not a claim about the current topology.
 - [x] Require independent `reproduced_build` reports before a reproducible
   artifact can become verified or acquire deployment evidence.
 - [x] Generate wallet-ready Registry commitment intents, scan exact configured
-  Type Script matches, and reconcile spent attestations or stale deployments
+  Type Script matches, and reconcile spent commitments or stale deployments
   without deleting historical evidence.
-- [ ] Deploy and configure the canonical mainnet Registry Type Script, CellDep,
-  and attestor Lock; then publish and attest the first real non-CellScript
+- [ ] Deploy and configure the canonical mainnet Registry Type Script,
+  commitment custody Lock, and both code CellDeps; then publish and commit the first real non-CellScript
   mainnet artifact.
 - [ ] Complete a publisher-owned wallet capability, namespace claim,
   publication, replay, revocation, and first clean-machine install against
@@ -306,9 +306,10 @@ runtime or the optional Cloudflare/R2/Hyperdrive/Neon adapter.
 
 ### Non-Goals
 
-- No claim that a transaction intent is an on-chain attestation. Only a live
-  mainnet Cell using the configured Registry Type Script and attestor Lock can
-  produce current `on_chain_attested` state.
+- No claim that a transaction intent is an on-chain commitment. Only a
+  sufficiently confirmed live mainnet Cell matching the configured Registry
+  Type Script, commitment Lock, exact commitment data, and both live code
+  CellDeps can produce current `on_chain_committed` state.
 - No Registry ownership of application business Cells. The Registry identifies
   code, build, TCB, deployment, and commitment evidence; application state Cells
   remain under their own Lock/Type Scripts and transaction protocols.
@@ -583,10 +584,10 @@ work streams. Suggested ordering for *release-blocking* slices:
   evidence chain, and do not replace the final interactive checkpoint with
   seeded database state.
 - **Registry chain activation**. Transaction intent, Script-indexed discovery,
-  and lifecycle reconciliation are implemented, but no public attestation may
-  be claimed until the canonical mainnet Registry Type Script, CellDep, and
-  attestor Lock are deployed and pinned. Mitigation: leave all three settings
-  absent, fail readiness on partial configuration, and require a real live-Cell
+  and lifecycle reconciliation are implemented, but no public commitment may
+  be claimed until the canonical mainnet Registry Type Script, commitment Lock,
+  and both code CellDeps are deployed and pinned. Mitigation: leave all four
+  settings absent, fail readiness on partial or immature configuration, and require a real live-Cell
   drill before marking the checkpoint complete.
 - **Native tooling serialization drift**. A subtle difference in
   evidence-report formatting breaks historical comparisons. Mitigation:

@@ -141,18 +141,42 @@ Each builder writes a bounded report:
 
 ```json
 {
-  "schema": "cellscript-reproduction-report-v1",
+  "schema": "cellscript-reproduction-report-v2",
   "builder_id": "builder-a",
+  "trust_domain": "independent-org-a",
+  "builder_public_key": "p256-spki:<base64-der>",
   "environment": "<exact environment from the signed profile>",
   "source_hash": "<CKB Blake2b-256>",
   "build_recipe_hash": "<CKB Blake2b-256>",
   "artifact_hash": "<CKB Blake2b-256>",
   "build_log_hash": "<CKB Blake2b-256>",
-  "generated_at": "2026-08-02T00:00:00Z"
+  "generated_at": "2026-08-02T00:00:00Z",
+  "signature": {
+    "algorithm": "p256-sha256",
+    "signature": "<base64url-fixed-signature>"
+  }
 }
 ```
 
-Validate and combine at least two distinct builders:
+Generate a signed report on each independent builder:
+
+```bash
+cellc artifact reproduction-report acme/vault-lock@1.0.0 \
+  --artifact target/vault-lock \
+  --build-log reports/builder-a.log \
+  --builder-id builder-a \
+  --trust-domain independent-org-a \
+  --builder-key-id cap_<sha256-prefix> \
+  --builder-public-key 'p256-spki:<base64url-der>' \
+  --output reports/builder-a.json
+```
+
+Each builder keeps its private key isolated in its OS keychain or supplies it
+through `CELLSCRIPT_REPRODUCER_PRIVATE_KEY_PKCS8_B64` in that builder's CI
+environment.
+
+Validate and combine at least two signed reports with distinct builder IDs,
+public keys, and trust domains:
 
 ```bash
 cellc artifact reproduction-evidence acme/vault-lock@1.0.0 \
@@ -161,12 +185,15 @@ cellc artifact reproduction-evidence acme/vault-lock@1.0.0 \
   --output reproduced-build-promotion.json
 ```
 
-The command fetches and verifies the signed release, predecessor build
-evidence, source, recipe, artifact, environment, and report identities. It does
-not execute the publisher's recipe. A Registry operator reviews and submits the
-generated `reproduced_build` promotion payload. Only then does verification
-become `verified`; a reproducible executable cannot be recorded as deployed
-before this transition.
+The command verifies each P-256 report signature and fetches and verifies the
+signed release, predecessor build evidence, source, recipe, artifact,
+environment, and report identities. It does not execute the publisher's recipe.
+A Registry operator reviews and submits the generated `reproduced_build`
+promotion payload. The API also requires every builder to match its configured
+policy, enforces a minimum number of trust domains, and records that policy's
+canonical SHA-256 and threshold in the accepted evidence. Only then does
+verification become `verified`; a reproducible executable cannot be recorded
+as deployed before this transition.
 
 ## 5. Record a mainnet deployment
 
@@ -228,20 +255,21 @@ cellc artifact commitment acme/vault-lock@1.0.0 --output RegistryCommitment.json
 rechecks that the deployment (and resolved DepGroup code member) is still live
 at consumption time. Deployment mode must equal the immutable profile
 contract. The commitment file contains canonical `CSREGv1` Cell data;
-attestation still requires the API to read a live mainnet Cell and match its
-configured Type/Lock identities. When those Scripts are configured, the file
+current commitment still requires the API to read a sufficiently confirmed
+live mainnet Cell and match its configured Type/Lock identities and both live
+code CellDeps. When those Scripts and CellDeps are configured, the file
 also contains a mainnet-only transaction intent. A compatible wallet completes
 capacity, inputs, change, fee, witnesses, signatures, and broadcast.
 
 Scheduled maintenance discovers exact Registry Type Script matches through the
-CKB indexer. A live matching commitment promotes the current release to
-`on_chain_attested`; spending that Cell returns it to `deployed`; and spending
+CKB indexer. A sufficiently confirmed live matching commitment promotes the
+current release to `on_chain_committed`; spending that Cell returns it to `deployed`; and spending
 or replacing the deployment Cell returns it to `verified_build`. Accepted
 evidence remains available for audit.
 
 The transaction-intent and scanner code is implemented, but production does
-not claim chain attestation until operators deploy and configure the canonical
-mainnet Registry Type Script, its CellDep, and the attestor Lock.
+not claim a chain commitment until operators deploy and configure the canonical
+mainnet Registry Type Script, commitment custody Lock, and both code CellDeps.
 
 ## 7. Other artifact kinds
 

@@ -51,6 +51,8 @@ export interface PackageVersionRecord {
   verification_status: VerificationStatus;
   deployment_status: DeploymentStatus;
   availability_status: AvailabilityStatus;
+  /** Accepted commitment evidence that was observed in a currently live mainnet Cell. */
+  current_commitment_evidence_hash?: string | null;
   source_hash: string;
   manifest_hash: string;
   /** Source-language semantics, not a compiler or wire-ABI version. */
@@ -86,7 +88,7 @@ export interface ArtifactPackagePage {
   has_more: boolean;
 }
 
-export type PackageEvidenceKind = "verified_build" | "reproduced_build" | "deployed" | "on_chain_attested";
+export type PackageEvidenceKind = "verified_build" | "reproduced_build" | "deployed" | "on_chain_committed";
 
 export interface PackageEvidenceRecord {
   namespace: string;
@@ -110,6 +112,7 @@ export interface PromotePackageVersionInput {
   request_id: string;
   admin_actor: string;
   capability_usage?: PublishAdmissionInput["capability_usage"];
+  idempotency?: PublishAdmissionInput["idempotency"];
 }
 
 export interface IdempotencyRecord {
@@ -255,6 +258,7 @@ export interface NamespaceRecord {
 
 export interface RegistryStore {
   healthCheck(): Promise<void>;
+  withMaintenanceLease<T>(name: string, task: () => Promise<T>): Promise<T | null>;
   recordCapability(input: {
     payload: CapabilityAuthorisationPayload;
     principal_signature: unknown;
@@ -317,7 +321,7 @@ export interface RegistryStore {
     name: string;
     version: string;
     status: "verified_build" | "deployed";
-    deployment_status: "deployed" | "chain_verified";
+    deployment_status: "undeployed" | "deployed" | "chain_verified";
     request_id: string;
     reason: string;
   }): Promise<PackageVersionRecord>;
@@ -341,6 +345,7 @@ export interface RegistryStore {
     admin_actor: string;
     audit_event_type?: string;
     capability_usage?: PublishAdmissionInput["capability_usage"];
+    idempotency?: PublishAdmissionInput["idempotency"];
   }): Promise<PackageVersionRecord>;
   appendAuditEvent(event: AuditEventInput): Promise<void>;
   listAuditEvents(input: ListAuditEventsInput): Promise<AuditEventRecord[]>;
@@ -466,8 +471,19 @@ export class MemoryRegistryStore implements RegistryStore {
   }>();
   idempotencyKeys = new Map<string, IdempotencyRecord>();
   verificationJobs = new Map<string, VerificationJobRecord>();
+  maintenanceLeases = new Set<string>();
 
   async healthCheck(): Promise<void> {}
+
+  async withMaintenanceLease<T>(name: string, task: () => Promise<T>): Promise<T | null> {
+    if (this.maintenanceLeases.has(name)) return null;
+    this.maintenanceLeases.add(name);
+    try {
+      return await task();
+    } finally {
+      this.maintenanceLeases.delete(name);
+    }
+  }
 
   async recordCapability(input: {
     payload: CapabilityAuthorisationPayload;
@@ -716,12 +732,7 @@ export class MemoryRegistryStore implements RegistryStore {
     if (this.packageVersions.has(versionKey)) {
       throw new ApiError(409, "artifact_release_exists", "artifact release already exists and cannot be overwritten");
     }
-    if (input.idempotency) {
-      const reservation = this.idempotencyKeys.get(input.idempotency.key);
-      if (reservation?.status !== "processing" || reservation.request_hash !== input.idempotency.request_hash) {
-        throw new ApiError(409, "idempotency_key_conflict", "idempotency key is reserved for another request");
-      }
-    }
+    this.assertProcessingIdempotency(input.idempotency);
 
     await this.ensurePackage(input.package);
     await this.recordSnapshot(input.snapshot);
@@ -760,7 +771,8 @@ export class MemoryRegistryStore implements RegistryStore {
     if (!existing) {
       throw new ApiError(404, "artifact_release_not_found", "artifact release is not known to the registry");
     }
-    assertPromotionTransition(existing.status, input.kind);
+    assertPromotionTransition(existing, input.kind);
+    this.assertProcessingIdempotency(input.idempotency);
     const evidenceKey = `${versionKey}:${input.kind}:${input.evidence_hash}`;
     const prior = this.packageEvidence.get(evidenceKey);
     const evidence: PackageEvidenceRecord = prior ?? {
@@ -777,14 +789,17 @@ export class MemoryRegistryStore implements RegistryStore {
     this.packageEvidence.set(evidenceKey, evidence);
     const versionRecord: PackageVersionRecord = {
       ...existing,
-      status: input.kind === "reproduced_build" ? "verified_build" : input.kind,
       verification_status: verificationStatusForAcceptedEvidence(existing.verification_status, input.kind, input.evidence),
-      deployment_status: input.kind === "on_chain_attested"
+      deployment_status: input.kind === "on_chain_committed"
         ? "chain_verified"
         : input.kind === "deployed"
           ? "deployed"
           : existing.deployment_status,
+      current_commitment_evidence_hash: input.kind === "on_chain_committed"
+        ? input.evidence_hash
+        : existing.current_commitment_evidence_hash ?? null,
     };
+    versionRecord.status = deriveRegistryEntryStatus(versionRecord, existing.status);
     this.packageVersions.set(versionKey, versionRecord);
     await this.appendAuditEvent({
       request_id: input.request_id,
@@ -797,6 +812,12 @@ export class MemoryRegistryStore implements RegistryStore {
       version: input.version,
       data: { admin_actor: input.admin_actor, evidence_hash: input.evidence_hash },
     });
+    if (input.capability_usage) {
+      await this.recordCapabilityUsage(input.capability_usage);
+    }
+    if (input.idempotency) {
+      await this.completeIdempotencyKey(input.idempotency);
+    }
     return { version: versionRecord, evidence };
   }
 
@@ -821,6 +842,7 @@ export class MemoryRegistryStore implements RegistryStore {
     if (packageVersionRequiresReproduction(existing) && existing.verification_status !== "verified") {
       throw new ApiError(409, "reproduction_evidence_missing", "reproducible artifacts require accepted independent reproduction evidence before deployment");
     }
+    this.assertProcessingIdempotency(input.idempotency);
     const evidenceKey = `${versionKey}:${input.kind}:${input.evidence_hash}`;
     const evidence: PackageEvidenceRecord = this.packageEvidence.get(evidenceKey) ?? {
       namespace: input.namespace,
@@ -836,9 +858,10 @@ export class MemoryRegistryStore implements RegistryStore {
     this.packageEvidence.set(evidenceKey, evidence);
     const versionRecord: PackageVersionRecord = {
       ...existing,
-      status: "deployed",
       deployment_status: "chain_verified",
+      current_commitment_evidence_hash: null,
     };
+    versionRecord.status = deriveRegistryEntryStatus(versionRecord, existing.status);
     this.packageVersions.set(versionKey, versionRecord);
     await this.appendAuditEvent({
       request_id: input.request_id,
@@ -854,6 +877,9 @@ export class MemoryRegistryStore implements RegistryStore {
     if (input.capability_usage) {
       await this.recordCapabilityUsage(input.capability_usage);
     }
+    if (input.idempotency) {
+      await this.completeIdempotencyKey(input.idempotency);
+    }
     return { version: versionRecord, evidence };
   }
 
@@ -862,7 +888,7 @@ export class MemoryRegistryStore implements RegistryStore {
     name: string;
     version: string;
     status: "verified_build" | "deployed";
-    deployment_status: "deployed" | "chain_verified";
+    deployment_status: "undeployed" | "deployed" | "chain_verified";
     request_id: string;
     reason: string;
   }): Promise<PackageVersionRecord> {
@@ -873,9 +899,10 @@ export class MemoryRegistryStore implements RegistryStore {
     }
     const updated: PackageVersionRecord = {
       ...existing,
-      status: existing.availability_status === "active" ? input.status : existing.status,
       deployment_status: input.deployment_status,
+      current_commitment_evidence_hash: null,
     };
+    updated.status = deriveRegistryEntryStatus(updated, input.status);
     this.packageVersions.set(key, updated);
     await this.appendAuditEvent({
       request_id: input.request_id,
@@ -928,30 +955,19 @@ export class MemoryRegistryStore implements RegistryStore {
     admin_actor: string;
     audit_event_type?: string;
     capability_usage?: PublishAdmissionInput["capability_usage"];
+    idempotency?: PublishAdmissionInput["idempotency"];
   }): Promise<PackageVersionRecord> {
     const key = `${input.namespace}/${input.name}@${input.version}`;
     const existing = this.packageVersions.get(key);
     if (!existing) {
       throw new ApiError(404, "artifact_release_not_found", "artifact release is not known to the registry");
     }
-    const hasAttestation = [...this.packageEvidence.values()].some((evidence) =>
-      evidence.namespace === input.namespace
-      && evidence.name === input.name
-      && evidence.version === input.version
-      && evidence.kind === "on_chain_attested"
-    );
-    const restoredStatus: RegistryEntryStatus = hasAttestation
-      ? "on_chain_attested"
-      : existing.deployment_status === "chain_verified" || existing.deployment_status === "deployed"
-        ? "deployed"
-        : existing.verification_status === "verified" || existing.verification_status === "hash_bound" || existing.verification_status === "evidence_required"
-          ? "verified_build"
-          : "source_published";
+    this.assertProcessingIdempotency(input.idempotency);
     const updated: PackageVersionRecord = {
       ...existing,
-      status: input.status === "active" ? restoredStatus : input.status,
       availability_status: input.status,
     };
+    updated.status = deriveRegistryEntryStatus(updated, existing.status);
     this.packageVersions.set(key, updated);
     await this.appendAuditEvent({
       request_id: input.request_id,
@@ -966,6 +982,9 @@ export class MemoryRegistryStore implements RegistryStore {
     });
     if (input.capability_usage) {
       await this.recordCapabilityUsage(input.capability_usage);
+    }
+    if (input.idempotency) {
+      await this.completeIdempotencyKey(input.idempotency);
     }
     return updated;
   }
@@ -1078,7 +1097,7 @@ export class MemoryRegistryStore implements RegistryStore {
     response_body: Record<string, unknown>;
   }): Promise<IdempotencyRecord> {
     const existing = this.idempotencyKeys.get(input.key);
-    if (!existing || existing.request_hash !== input.request_hash) {
+    if (!existing || existing.status !== "processing" || existing.request_hash !== input.request_hash) {
       throw new ApiError(409, "idempotency_key_conflict", "idempotency key is reserved for another request");
     }
     const completed: IdempotencyRecord = {
@@ -1384,6 +1403,14 @@ export class MemoryRegistryStore implements RegistryStore {
     return job;
   }
 
+  private assertProcessingIdempotency(input: PublishAdmissionInput["idempotency"]): void {
+    if (!input) return;
+    const reservation = this.idempotencyKeys.get(input.key);
+    if (reservation?.status !== "processing" || reservation.request_hash !== input.request_hash) {
+      throw new ApiError(409, "idempotency_key_conflict", "idempotency key is reserved for another request");
+    }
+  }
+
   private reservedNamespaceFor(namespace: string): ReservedNamespaceRecord | undefined {
     for (const record of this.reservedNamespaces.values()) {
       if (record.match_type === "prefix" && namespace.startsWith(record.namespace)) {
@@ -1397,16 +1424,37 @@ export class MemoryRegistryStore implements RegistryStore {
   }
 }
 
-export function assertPromotionTransition(current: RegistryEntryStatus, next: PackageEvidenceKind): void {
-  const allowed: Record<PackageEvidenceKind, RegistryEntryStatus[]> = {
-    verified_build: ["source_published", "indexed_pending", "verified_build"],
-    reproduced_build: ["verified_build"],
-    deployed: ["verified_build", "deployed"],
-    on_chain_attested: ["deployed", "on_chain_attested"],
-  };
-  if (!allowed[next].includes(current)) {
-    throw new ApiError(409, "invalid_evidence_transition", `cannot promote package version from '${current}' to '${next}'`);
+export function assertPromotionTransition(current: PackageVersionRecord, next: PackageEvidenceKind): void {
+  let allowed = false;
+  if (next === "verified_build") {
+    allowed = true;
+  } else if (next === "reproduced_build") {
+    allowed = current.verification_status !== "pending" && current.verification_status !== "rejected";
+  } else if (next === "deployed") {
+    allowed = current.deployment_status !== "not_applicable"
+      && ["hash_bound", "verified", "evidence_required"].includes(current.verification_status)
+      && (!packageVersionRequiresReproduction(current) || current.verification_status === "verified");
+  } else if (next === "on_chain_committed") {
+    allowed = current.deployment_status === "deployed" || current.deployment_status === "chain_verified";
   }
+  if (!allowed) {
+    throw new ApiError(
+      409,
+      "invalid_evidence_transition",
+      `cannot accept '${next}' evidence for verification='${current.verification_status}', deployment='${current.deployment_status}', availability='${current.availability_status}'`,
+    );
+  }
+}
+
+export function deriveRegistryEntryStatus(
+  version: Pick<PackageVersionRecord, "verification_status" | "deployment_status" | "availability_status" | "current_commitment_evidence_hash">,
+  pendingStatus: RegistryEntryStatus = "source_published",
+): RegistryEntryStatus {
+  if (version.availability_status !== "active") return version.availability_status;
+  if (version.current_commitment_evidence_hash) return "on_chain_committed";
+  if (version.deployment_status === "deployed" || version.deployment_status === "chain_verified") return "deployed";
+  if (["hash_bound", "verified", "evidence_required"].includes(version.verification_status)) return "verified_build";
+  return pendingStatus === "indexed_pending" ? "indexed_pending" : "source_published";
 }
 
 function verificationStatusForAcceptedEvidence(

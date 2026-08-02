@@ -583,9 +583,11 @@ or the declared hash-bound generic profile level. A reproducible profile is not
 `verified` until `reproduced_build` evidence binds at least two independent
 builders to the signed source, recipe, environment, executable, and logs.
 Likewise, a wallet-ready Registry commitment file is not chain evidence. Only a
-live mainnet Cell using the configured Registry Type Script and attestor Lock
-can produce current `on_chain_attested` state, and scheduled reconciliation may
-demote that current state when the commitment or deployment Cell is spent.
+sufficiently confirmed live mainnet Cell matching the configured Registry Type
+Script, commitment custody Lock, exact commitment data, and both live Script
+code CellDeps can produce current `on_chain_committed` state. Scheduled
+reconciliation demotes that current state when the commitment or deployment
+Cell is spent or no longer sufficiently confirmed.
 
 For the current NovaSeal profile set, production-ready source-package evidence
 means the live local devnet runners pass for core, Agreement, and the six

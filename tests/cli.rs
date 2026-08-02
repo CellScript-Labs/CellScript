@@ -3035,6 +3035,7 @@ resource Token has store, replace, relock, consume, burn {
         while !server_stop.load(std::sync::atomic::Ordering::Acquire) {
             match listener.accept() {
                 Ok((mut stream, _)) => {
+                    stream.set_nonblocking(false).unwrap();
                     let (path, _) = read_http_request_path_and_body(&mut stream);
                     assert!(matches!(
                         path.as_str(),

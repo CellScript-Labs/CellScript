@@ -23,7 +23,10 @@ CKB_REGISTRY_SCAN_MAX_CELLS = "1000"
 # Enable only after the canonical mainnet Registry Type Script is deployed.
 # REGISTRY_TYPE_SCRIPT_JSON = '{"code_hash":"0x...","hash_type":"type","args":"0x..."}'
 # REGISTRY_TYPE_SCRIPT_CELL_DEP_JSON = '{"out_point":{"tx_hash":"0x...","index":"0x0"},"dep_type":"code"}'
-# REGISTRY_ATTESTOR_LOCK_SCRIPT_JSON = '{"code_hash":"0x...","hash_type":"type","args":"0x..."}'
+# REGISTRY_COMMITMENT_LOCK_SCRIPT_JSON = '{"code_hash":"0x...","hash_type":"type","args":"0x..."}'
+# REGISTRY_COMMITMENT_LOCK_CELL_DEP_JSON = '{"out_point":{"tx_hash":"0x...","index":"0x0"},"dep_type":"code"}'
+# REGISTRY_REPRODUCER_POLICY_JSON = '{"schema":"cellscript-reproducer-policy-v1","minimum_trust_domains":2,"builders":[{"builder_id":"builder-a","trust_domain":"org-a","public_key":"p256-spki:..."},{"builder_id":"builder-b","trust_domain":"org-b","public_key":"p256-spki:..."}]}'
+# CKB_MIN_CONFIRMATIONS = "24"
 
 [[r2_buckets]]
 binding = "REGISTRY_OBJECTS"

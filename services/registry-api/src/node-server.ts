@@ -46,11 +46,20 @@ const env: Env = {
   ...(process.env["REGISTRY_TYPE_SCRIPT_CELL_DEP_JSON"]
     ? { REGISTRY_TYPE_SCRIPT_CELL_DEP_JSON: process.env["REGISTRY_TYPE_SCRIPT_CELL_DEP_JSON"] }
     : {}),
-  ...(process.env["REGISTRY_ATTESTOR_LOCK_SCRIPT_JSON"]
-    ? { REGISTRY_ATTESTOR_LOCK_SCRIPT_JSON: process.env["REGISTRY_ATTESTOR_LOCK_SCRIPT_JSON"] }
+  ...(process.env["REGISTRY_COMMITMENT_LOCK_SCRIPT_JSON"]
+    ? { REGISTRY_COMMITMENT_LOCK_SCRIPT_JSON: process.env["REGISTRY_COMMITMENT_LOCK_SCRIPT_JSON"] }
+    : {}),
+  ...(process.env["REGISTRY_COMMITMENT_LOCK_CELL_DEP_JSON"]
+    ? { REGISTRY_COMMITMENT_LOCK_CELL_DEP_JSON: process.env["REGISTRY_COMMITMENT_LOCK_CELL_DEP_JSON"] }
+    : {}),
+  ...(process.env["REGISTRY_REPRODUCER_POLICY_JSON"]
+    ? { REGISTRY_REPRODUCER_POLICY_JSON: process.env["REGISTRY_REPRODUCER_POLICY_JSON"] }
     : {}),
   ...(process.env["CKB_REGISTRY_SCAN_MAX_CELLS"]
     ? { CKB_REGISTRY_SCAN_MAX_CELLS: process.env["CKB_REGISTRY_SCAN_MAX_CELLS"] }
+    : {}),
+  ...(process.env["CKB_MIN_CONFIRMATIONS"]
+    ? { CKB_MIN_CONFIRMATIONS: process.env["CKB_MIN_CONFIRMATIONS"] }
     : {}),
 };
 
@@ -138,11 +147,23 @@ server.headersTimeout = 15_000;
 server.keepAliveTimeout = 5_000;
 server.listen(port, "0.0.0.0", () => log("server.started", { port, object_root: objectRoot }));
 
-const maintenanceInterval = setInterval(() => {
-  app.scheduled({} as ScheduledController, env).catch((error) => {
-    log("maintenance.failed", { error: error instanceof Error ? error.message : "unknown error" });
-  });
-}, 15 * 60 * 1000);
+let maintenanceRunning = false;
+const runMaintenance = () => {
+  if (maintenanceRunning) {
+    log("maintenance.skipped", { reason: "previous_run_active" });
+    return;
+  }
+  maintenanceRunning = true;
+  app.scheduled({} as ScheduledController, env)
+    .catch((error) => {
+      log("maintenance.failed", { error: error instanceof Error ? error.message : "unknown error" });
+    })
+    .finally(() => {
+      maintenanceRunning = false;
+    });
+};
+void runMaintenance();
+const maintenanceInterval = setInterval(runMaintenance, 15 * 60 * 1000);
 maintenanceInterval.unref();
 
 for (const signal of ["SIGTERM", "SIGINT"] as const) {

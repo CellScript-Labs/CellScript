@@ -160,12 +160,13 @@ container hash is not substituted for the member executable identity.
 Success appends hash-addressed evidence and sets `deployment_status` to
 `chain_verified`. It does not alter verification or availability.
 
-The Registry may additionally attest the release/deployment tuple in a live
+The Registry may additionally commit the release/deployment tuple in a live
 mainnet Cell. Canonical `cellscript-registry-commitment-v1` JSON is CKB
 Blake2b-hashed into `CSREGv1 || hash` Cell data. Acceptance checks that exact
-data, the attestor Lock hash, and a Registry Type Script hash used for chain
-indexing. A public commitment-proof route returns the preimage, expected Cell
-data, and accepted attestation evidence. The full source, ABI, build recipe,
+data, the commitment custody Lock hash, a Registry Type Script hash used for
+chain indexing, minimum confirmation depth, and the live Type/Lock code
+CellDeps. A public commitment-proof route returns the preimage, expected Cell
+data, and accepted commitment evidence. The full source, ABI, build recipe,
 compiler metadata, audit corpus, and publisher history remain off-chain and
 content-addressed.
 

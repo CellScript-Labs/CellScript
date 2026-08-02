@@ -244,10 +244,11 @@ compiler version, and possibly type-id lineage.
 A deployment-bound package is what wallets and production builders should rely
 on when constructing real transactions.
 
-**On-chain-attested package.** A deployment claim has an explicit JoyID-rooted
-attestation or chain-indexed record. This is a stronger statement about who made
-the deployment claim, but it still does not replace source, build, deployment,
-and live-chain verification.
+**On-chain-committed package.** A sufficiently confirmed live mainnet Cell
+commits the exact Registry release/deployment tuple under the configured
+Registry Type Script and custody Lock. This is a current discoverability and
+integrity statement, not an attestation of source quality or authorship. It does
+not replace source, build, deployment, and live-chain verification.
 
 **Deprecated, yanked, or quarantined package.** Historical entries remain
 addressable for reproducibility, but default search and recommendation surfaces
@@ -255,9 +256,10 @@ may suppress them. Quarantine is for abuse or high-risk packages; yanking is a
 maintainer action that preserves exact-pin warning metadata.
 
 The same source package version may have zero, one, or many deployment
-bindings. For example, `amm@1.2.0` may start as a source-only package, later
-gain a CKB testnet deployment, then eventually a CKB mainnet deployment. These
-are separate deployment records attached to the same source/package identity,
+bindings. For example, `amm@1.2.0` may start as a source-only package and later
+gain one or more CKB mainnet deployment bindings. Local or private tooling may
+track testnet deployments separately, but the public Registry accepts only
+mainnet deployment evidence. These are separate deployment records attached to the same source/package identity,
 not separate source packages.
 
 ```
@@ -1197,7 +1199,7 @@ source_published  -> direct URL and author dashboard visible
 indexed_pending   -> waiting for asynchronous verifier/indexer workers
 verified_build    -> build evidence accepted
 deployed          -> deployment facts attached and verified locally
-on_chain_attested -> feature-gated JoyID/chain-backed deployment attestation
+on_chain_committed -> sufficiently confirmed live Registry commitment Cell
 deprecated/yanked -> historical entry retained, default resolution suppressed
 quarantined       -> direct URL retained, default search suppressed
 ```
@@ -1730,9 +1732,9 @@ registry admission authority.
 |---|---|
 | JoyID-rooted publisher identity | `cellc auth capability create --principal-id <principal_id> --scope publish:ns/pkg --expires 90d --json > capability-payload.json` plus `cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json` uses the CCC-backed JoyID flow, records `principal_type = joyid_ckb`, binds `principal_id` to a local publisher credential, and stores that credential in the OS keychain |
 | Scoped publisher credentials | Capability-style signing key with namespace/package/action scopes, expiry, revocation, nonce/origin checks, and CI-safe delegation |
-| Namespace/package ACL | Namespace owners, package maintainers, yanking authority, attestation authority, maintainer rotation, and source-location update permissions |
+| Namespace/package ACL | Namespace owners, package maintainers, yanking authority, commitment authority, maintainer rotation, and source-location update permissions |
 | Abuse controls | Separate static read path from write API; WAF/rate limits/body caps/hash dedup/bounded queues/quarantine/cooldown; fee/bond rules remain later policy hooks |
-| Entry visibility state machine | `source_published` -> `indexed_pending` -> `verified_build` -> `deployed` -> `on_chain_attested`; `deprecated`/`yanked`/`quarantined` suppress default search without deleting history |
+| Entry visibility state machine | `source_published` -> `indexed_pending` -> `verified_build` -> `deployed` -> `on_chain_committed`; `deprecated`/`yanked`/`quarantined` suppress default search without deleting history |
 
 ### Phase 0 — No Block on v0.12
 
@@ -1848,19 +1850,20 @@ Any failure in this chain causes fail-closed rejection.
 
 Namespace ownership is the core registry ACL. A namespace has owner principals;
 packages have maintainer principals; publisher credentials are scoped to
-actions such as `publish`, `yank`, `attest`, and `manage-maintainers`. The root
-publisher principal is `joyid_ckb`, while daily operations use delegated
+actions such as `publish`, `yank`, `commit`, and `manage-maintainers`. The root
+publisher principal is `joyid_ckb` or `ckb_secp256k1`, while daily operations use delegated
 publisher credentials that can expire and be revoked. The exact bootstrap
 policy for first namespace claim (review, cooldown, reserved namespaces, or
 later fee/bond hooks) is an ecosystem decision.
 
 ### Should reproducible build proofs or audit signatures be required before a package is considered production-ready?
 
-Phase 1 requires hash matching but not build attestations or audit signatures.
-Phase 2 adds optional publisher signatures and audit report hashes. Whether
-audit signatures become mandatory for production readiness is an ecosystem
-policy decision, not a toolchain enforcement decision. The toolchain should
-support the mechanism; the policy should be set by the community.
+Hash matching remains the baseline for generic artifacts. A release declaring
+a reproducible build additionally requires policy-approved, P-256-signed
+reproduction reports from independent trust domains before it becomes
+`verified` or can acquire deployment evidence. Security audit signatures remain
+policy-specific; when a release declares `security.status = audited`, the
+referenced audit report must at least be present and hash-bound.
 
 ### How should yanking, supersession, and maintainer rotation work?
 

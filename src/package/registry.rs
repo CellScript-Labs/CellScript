@@ -1065,7 +1065,7 @@ pub enum RegistryEntryStatus {
     IndexedPending,
     VerifiedBuild,
     Deployed,
-    OnChainAttested,
+    OnChainCommitted,
     Deprecated,
     Yanked,
     Quarantined,
@@ -1078,7 +1078,7 @@ impl RegistryEntryStatus {
             Self::IndexedPending => "indexed_pending",
             Self::VerifiedBuild => "verified_build",
             Self::Deployed => "deployed",
-            Self::OnChainAttested => "on_chain_attested",
+            Self::OnChainCommitted => "on_chain_committed",
             Self::Deprecated => "deprecated",
             Self::Yanked => "yanked",
             Self::Quarantined => "quarantined",
@@ -1086,7 +1086,7 @@ impl RegistryEntryStatus {
     }
 
     pub fn is_baseline_verified(&self) -> bool {
-        matches!(self, Self::VerifiedBuild | Self::Deployed | Self::OnChainAttested)
+        matches!(self, Self::VerifiedBuild | Self::Deployed | Self::OnChainCommitted)
     }
 
     pub fn is_unverified_direct_install(&self) -> bool {
@@ -1150,7 +1150,7 @@ impl RegistryVersion {
         }
 
         match self.status {
-            RegistryEntryStatus::VerifiedBuild | RegistryEntryStatus::Deployed | RegistryEntryStatus::OnChainAttested => None,
+            RegistryEntryStatus::VerifiedBuild | RegistryEntryStatus::Deployed | RegistryEntryStatus::OnChainCommitted => None,
             RegistryEntryStatus::SourcePublished | RegistryEntryStatus::IndexedPending if policy.allow_unverified => None,
             RegistryEntryStatus::SourcePublished | RegistryEntryStatus::IndexedPending => Some("unverified"),
             RegistryEntryStatus::Quarantined if policy.allow_quarantined => None,

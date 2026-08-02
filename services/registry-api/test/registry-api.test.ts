@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { SignChallengeResponseData } from "@joyid/ckb";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { blake2b } from "@noble/hashes/blake2.js";
@@ -13,6 +13,7 @@ import {
   DEFAULT_REGISTRY_ORIGIN,
   PUBLISH_ACTION,
   PUBLISH_PROTOCOL,
+  ApiError,
   canonicalJson,
   capabilityKeyId,
   ckbBlake2bHex,
@@ -32,6 +33,7 @@ import {
   createApp,
   parseDepGroupOutPoints,
   registryCommitmentHash,
+  verifyMainnetDeployment,
   type AppDeps,
   type SnapshotWriter,
 } from "../src/index";
@@ -39,6 +41,10 @@ import type { PackageVersionRecord } from "../src/store";
 
 const now = new Date("2026-06-23T12:00:00Z");
 const ckbPrivateKey = Uint8Array.from({ length: 32 }, (_, index) => index === 31 ? 7 : 0);
+const reproducerPublicKeys = {
+  "builder-a": "p256-spki:MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE2GpMwoWK1SO7Vrd_Rn3kxf_VllpSMGMu1Mo40vH2IotxFkJwZwO7acw8A-lZB7z4l5QAYDKTP4ua7YilwZQfBw",
+  "builder-b": "p256-spki:MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEcZljLFjOhAdes8hm88phoxoMmsya3kKGRbmwjtH1eW4tWV_sn81NRL5EwkrqhjPuYxXfEbYBfuSVPMVD3at7hQ",
+} as const;
 
 function bytesHex(value: Uint8Array): string {
   return `0x${[...value].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
@@ -70,6 +76,62 @@ describe("DepGroup decoding", () => {
   it("rejects empty and non-canonical DepGroup data", () => {
     expect(() => parseDepGroupOutPoints("0x00000000")).toThrow(/canonical non-empty/);
     expect(() => parseDepGroupOutPoints("0x01000000aa")).toThrow(/canonical non-empty/);
+  });
+});
+
+describe("CKB mainnet observations", () => {
+  it("requires the configured confirmation depth for a live deployment Cell", async () => {
+    const blockHash = `0x${"aa".repeat(32)}`;
+    const artifactHash = `0x${"bb".repeat(32)}`;
+    vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { method: string };
+      const results: Record<string, unknown> = {
+        get_blockchain_info: { chain: "ckb" },
+        get_live_cell: {
+          status: "live",
+          block_hash: blockHash,
+          cell: {
+            data: { hash: artifactHash, content: "0x00" },
+            output: {
+              capacity: "0x0",
+              lock: { code_hash: `0x${"cc".repeat(32)}`, hash_type: "type", args: "0x" },
+              type: null,
+            },
+          },
+        },
+        get_header: { number: "0x64" },
+        get_tip_header: { number: "0x6a" },
+      };
+      return Response.json({ jsonrpc: "2.0", id: 1, result: results[request.method] });
+    });
+    const payload: DeploymentPayload = {
+      protocol: DEPLOYMENT_PROTOCOL,
+      action: DEPLOYMENT_ACTION,
+      registry_origin: DEFAULT_REGISTRY_ORIGIN,
+      namespace: "fixture",
+      name: "contract",
+      release: "1.0.0",
+      network: "mainnet",
+      artifact_hash: artifactHash,
+      data_hash: artifactHash,
+      code_hash: artifactHash,
+      hash_type: "data1",
+      dep_type: "code",
+      out_point: { tx_hash: `0x${"dd".repeat(32)}`, index: 0 },
+      capability_key_id: "cap_11111111111111111111111111111111",
+      nonce: "0x1111111111111111",
+      issued_at: "2026-06-23T12:00:00Z",
+      expires_at: "2026-06-23T12:10:00Z",
+      cli_version: "cellc 0.23.0",
+    };
+    try {
+      await expect(verifyMainnetDeployment({ CKB_MIN_CONFIRMATIONS: "8" }, payload))
+        .rejects.toMatchObject({ code: "chain_confirmation_depth_insufficient" });
+      await expect(verifyMainnetDeployment({ CKB_MIN_CONFIRMATIONS: "7" }, payload))
+        .resolves.toMatchObject({ block_number: "0x64", tip_block_number: "0x6a", confirmations: 7 });
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
@@ -473,6 +535,58 @@ describe("registry api", () => {
     expect(await partiallyConfigured.json()).toMatchObject({
       status: "not_ready",
       checks: { registry_commitment: "misconfigured" },
+    });
+
+    const typeScript = { code_hash: `0x${"11".repeat(32)}`, hash_type: "data1", args: "0x01" };
+    const commitmentLock = { code_hash: `0x${"22".repeat(32)}`, hash_type: "type", args: "0x02" };
+    const typeCellDep = {
+      out_point: { tx_hash: `0x${"33".repeat(32)}`, index: "0x0" },
+      dep_type: "code",
+    };
+    const lockCellDep = {
+      out_point: { tx_hash: `0x${"44".repeat(32)}`, index: "0x0" },
+      dep_type: "code",
+    };
+    let configurationChecked = false;
+    const commitmentReadyApp = createApp({
+      store: new MemoryRegistryStore(),
+      snapshotWriter: { async put() {} },
+      registryObjectReader: { async get() { return null; } },
+      verifyRegistryCommitmentConfiguration: async (configuration) => {
+        configurationChecked = true;
+        expect(configuration.type_script_hash).toBe(ckbScriptHash(typeScript));
+        expect(configuration.commitment_lock_hash).toBe(ckbScriptHash(commitmentLock));
+      },
+    });
+    const configured = await get(commitmentReadyApp, "/ready", {
+      REGISTRY_ADMIN_TOKEN: "secret",
+      REGISTRY_TYPE_SCRIPT_JSON: JSON.stringify(typeScript),
+      REGISTRY_TYPE_SCRIPT_CELL_DEP_JSON: JSON.stringify(typeCellDep),
+      REGISTRY_COMMITMENT_LOCK_SCRIPT_JSON: JSON.stringify(commitmentLock),
+      REGISTRY_COMMITMENT_LOCK_CELL_DEP_JSON: JSON.stringify(lockCellDep),
+    });
+    expect(configured.status).toBe(200);
+    expect(configurationChecked).toBe(true);
+    expect(await configured.json()).toMatchObject({
+      status: "ready",
+      checks: { registry_commitment: "configured_and_live" },
+    });
+
+    const invalidReproducerPolicy = await get(commitmentReadyApp, "/ready", {
+      REGISTRY_ADMIN_TOKEN: "secret",
+      REGISTRY_REPRODUCER_POLICY_JSON: JSON.stringify({
+        schema: "cellscript-reproducer-policy-v1",
+        minimum_trust_domains: 2,
+        builders: [
+          { builder_id: "builder-a", trust_domain: "same-operator", public_key: reproducerPublicKeys["builder-a"] },
+          { builder_id: "builder-b", trust_domain: "same-operator", public_key: reproducerPublicKeys["builder-b"] },
+        ],
+      }),
+    });
+    expect(invalidReproducerPolicy.status).toBe(503);
+    expect(await invalidReproducerPolicy.json()).toMatchObject({
+      status: "not_ready",
+      checks: { reproducer_policy: "misconfigured" },
     });
   });
 
@@ -1152,8 +1266,13 @@ describe("registry api", () => {
   });
 
   it("lists public packages and requires chained evidence for production promotions", async () => {
+    const registryTypeScript = { code_hash: `0x${"71".repeat(32)}`, hash_type: "data1", args: "0x01" };
+    const commitmentLockScript = { code_hash: `0x${"72".repeat(32)}`, hash_type: "type", args: "0x02" };
+    const registryTypeCellDep = { out_point: { tx_hash: `0x${"73".repeat(32)}`, index: "0x0" }, dep_type: "code" };
+    const commitmentLockCellDep = { out_point: { tx_hash: `0x${"74".repeat(32)}`, index: "0x0" }, dep_type: "code" };
     const { app, store, snapshots } = testApp(undefined, undefined, {
       verifyMainnetDeployment: async () => ({ block_hash: `0x${"60".repeat(32)}` }),
+      verifyRegistryCommitmentConfiguration: async () => {},
       verifyMainnetCommitment: async () => ({
         commitment_schema: "cellscript-registry-commitment-v1",
         chain_verification: "get_live_cell+type_index",
@@ -1211,7 +1330,13 @@ describe("registry api", () => {
       }],
     });
 
-    const adminEnv = { REGISTRY_ADMIN_TOKEN: "secret" };
+    const adminEnv = {
+      REGISTRY_ADMIN_TOKEN: "secret",
+      REGISTRY_TYPE_SCRIPT_JSON: JSON.stringify(registryTypeScript),
+      REGISTRY_TYPE_SCRIPT_CELL_DEP_JSON: JSON.stringify(registryTypeCellDep),
+      REGISTRY_COMMITMENT_LOCK_SCRIPT_JSON: JSON.stringify(commitmentLockScript),
+      REGISTRY_COMMITMENT_LOCK_CELL_DEP_JSON: JSON.stringify(commitmentLockCellDep),
+    };
     const adminHeaders = { authorization: "Bearer secret", "x-registry-admin-actor": "release-bot" };
     const commonEvidence = {
       schema: "cellscript-registry-evidence",
@@ -1326,27 +1451,26 @@ describe("registry api", () => {
       app,
       "/v1/admin/artifacts/cellscript/demo/releases/1.2.3/promote",
       {
-        kind: "on_chain_attested",
+        kind: "on_chain_committed",
         evidence: {
           ...commonEvidence,
-          kind: "on_chain_attested",
+          kind: "on_chain_committed",
           deployed_evidence_hash: deployedBody.evidence.evidence_hash,
           network: "mainnet",
-          attestation_tx_hash: `0x${"51".repeat(32)}`,
-          attestation_hash: `0x${"52".repeat(32)}`,
-          attestor: "cellscript-release-bot",
-          attestor_lock_hash: `0x${"53".repeat(32)}`,
+          commitment_tx_hash: `0x${"51".repeat(32)}`,
+          commitment_hash: `0x${"52".repeat(32)}`,
+          commitment_lock_hash: `0x${"53".repeat(32)}`,
           registry_type_hash: `0x${"54".repeat(32)}`,
-          attestation_out_point: { tx_hash: `0x${"51".repeat(32)}`, index: 0 },
+          commitment_out_point: { tx_hash: `0x${"51".repeat(32)}`, index: 0 },
           observed_at: "2026-06-23T12:00:00Z",
-          attestation_status: "confirmed",
+          commitment_status: "confirmed",
         },
       },
       adminEnv,
       adminHeaders,
     );
     expect(attested.status).toBe(200);
-    expect((await attested.json() as any).status).toBe("on_chain_attested");
+    expect((await attested.json() as any).status).toBe("on_chain_committed");
 
     const acceptedIndex = await get(app, "/v1/artifacts?q=demo&limit=10");
     expect(acceptedIndex.status).toBe(200);
@@ -1366,7 +1490,7 @@ describe("registry api", () => {
         verification_status: "hash_bound",
         deployment_status: "chain_verified",
         immutable_bundle: { schema: "cellscript-registry-immutable-bundle" },
-        evidence: [{ kind: "verified_build" }, { kind: "deployed" }, { kind: "on_chain_attested" }],
+        evidence: [{ kind: "verified_build" }, { kind: "deployed" }, { kind: "on_chain_committed" }],
       }],
     });
     const evidence = await get(app, "/v1/artifacts/cellscript/demo/releases/1.2.3/evidence");
@@ -1379,8 +1503,13 @@ describe("registry api", () => {
   });
 
   it("requires two independent reproduction reports before deploying a reproducible executable", async () => {
+    let acceptReproducerSignatures = true;
     const { app, store } = testApp(undefined, undefined, {
       verifyMainnetDeployment: async () => ({ block_hash: `0x${"60".repeat(32)}` }),
+      capabilityVerifier: {
+        verify: async (canonicalPayload) => !canonicalPayload.includes('"schema":"cellscript-reproduction-report-v2"')
+          || acceptReproducerSignatures,
+      },
     });
     const payload = authPayload();
     const capability = await (await post(app, "/v1/capabilities", {
@@ -1406,7 +1535,17 @@ describe("registry api", () => {
       },
     })).status).toBe(202);
 
-    const adminEnv = { REGISTRY_ADMIN_TOKEN: "secret" };
+    const adminEnv = {
+      REGISTRY_ADMIN_TOKEN: "secret",
+      REGISTRY_REPRODUCER_POLICY_JSON: JSON.stringify({
+        schema: "cellscript-reproducer-policy-v1",
+        minimum_trust_domains: 2,
+        builders: [
+          { builder_id: "builder-a", trust_domain: "org-a", public_key: reproducerPublicKeys["builder-a"] },
+          { builder_id: "builder-b", trust_domain: "org-b", public_key: reproducerPublicKeys["builder-b"] },
+        ],
+      }),
+    };
     const adminHeaders = { authorization: "Bearer secret", "x-registry-admin-actor": "release-bot" };
     const commonEvidence = {
       schema: "cellscript-registry-evidence",
@@ -1459,15 +1598,18 @@ describe("registry api", () => {
     expect(prematureDeployment.status).toBe(409);
     expect((await prematureDeployment.json() as any).error.code).toBe("reproduction_evidence_missing");
 
-    const report = (builderId: string) => ({
-      schema: "cellscript-reproduction-report-v1",
+    const report = (builderId: "builder-a" | "builder-b") => ({
+      schema: "cellscript-reproduction-report-v2",
       builder_id: builderId,
+      trust_domain: builderId === "builder-a" ? "org-a" : "org-b",
+      builder_public_key: reproducerPublicKeys[builderId],
       environment: "docker.io/library/rust:1.97.1@sha256:0123456789abcdef",
       source_hash: publish.source_hash,
       build_recipe_hash: `0x${"34".repeat(32)}`,
       artifact_hash: `0x${"31".repeat(32)}`,
       build_log_hash: `0x${"71".repeat(32)}`,
       generated_at: "2026-06-23T12:00:00Z",
+      signature: { algorithm: "p256-sha256", signature: "signed-reproduction-report-value" },
     });
     const reproducedEvidence = {
       ...commonEvidence,
@@ -1489,6 +1631,18 @@ describe("registry api", () => {
     expect(duplicate.status).toBe(400);
     expect((await duplicate.json() as any).error.code).toBe("duplicate_reproducer");
 
+    acceptReproducerSignatures = false;
+    const invalidSignature = await post(
+      app,
+      "/v1/admin/artifacts/cellscript/demo/releases/1.2.3/promote",
+      { kind: "reproduced_build", evidence: reproducedEvidence },
+      adminEnv,
+      adminHeaders,
+    );
+    expect(invalidSignature.status).toBe(401);
+    expect((await invalidSignature.json() as any).error.code).toBe("reproduction_signature_invalid");
+    acceptReproducerSignatures = true;
+
     const reproducedResponse = await post(
       app,
       "/v1/admin/artifacts/cellscript/demo/releases/1.2.3/promote",
@@ -1499,6 +1653,11 @@ describe("registry api", () => {
     expect(reproducedResponse.status).toBe(200);
     const reproduced = await reproducedResponse.json() as any;
     expect(reproduced.status).toBe("verified_build");
+    expect(reproduced.evidence.evidence.reproducer_policy).toMatchObject({
+      schema: "cellscript-reproducer-policy-acceptance-v1",
+      policy_hash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+      minimum_trust_domains: 2,
+    });
     expect(store.packageVersions.get("cellscript/demo@1.2.3")?.verification_status).toBe("verified");
 
     const deployed = await post(
@@ -1622,7 +1781,15 @@ describe("registry api", () => {
       },
     });
     expect(published.status).toBe(202);
-    await store.promotePackageVersion({
+    await store.updatePackageVersionStatus({
+      namespace: "cellscript",
+      name: "demo",
+      version: "1.2.3",
+      status: "yanked",
+      request_id: "yank-during-verification",
+      admin_actor: "test",
+    });
+    const verifiedWhileYanked = await store.promotePackageVersion({
       namespace: "cellscript",
       name: "demo",
       version: "1.2.3",
@@ -1632,6 +1799,17 @@ describe("registry api", () => {
       request_id: "verification:test",
       admin_actor: "verification-worker:test",
     });
+    expect(verifiedWhileYanked.version.status).toBe("yanked");
+    expect(verifiedWhileYanked.version.verification_status).toBe("hash_bound");
+    const restoredAfterVerification = await store.updatePackageVersionStatus({
+      namespace: "cellscript",
+      name: "demo",
+      version: "1.2.3",
+      status: "active",
+      request_id: "restore-after-verification",
+      admin_actor: "test",
+    });
+    expect(restoredAfterVerification.status).toBe("verified_build");
 
     const deployment = deploymentPayload(capability.key_id);
     const contractMismatch = await post(app, "/v1/artifacts/cellscript/demo/releases/1.2.3/deployments", {
@@ -1640,12 +1818,14 @@ describe("registry api", () => {
     });
     expect(contractMismatch.status).toBe(400);
     expect((await contractMismatch.json() as any).error.code).toBe("deployment_hash_type_contract_mismatch");
-    const response = await post(app, "/v1/artifacts/cellscript/demo/releases/1.2.3/deployments", {
+    const deploymentRequest = {
       payload: deployment,
       capability_signature: { algorithm: "p256-sha256", signature: "sig" },
-    });
+    };
+    const response = await post(app, "/v1/artifacts/cellscript/demo/releases/1.2.3/deployments", deploymentRequest);
     expect(response.status).toBe(201);
-    expect(await response.json()).toMatchObject({
+    const deploymentResponse = await response.json();
+    expect(deploymentResponse).toMatchObject({
       coordinate: "cellscript/demo@1.2.3",
       deployment_status: "chain_verified",
       evidence: {
@@ -1657,6 +1837,20 @@ describe("registry api", () => {
         },
       },
     });
+    const replayedDeployment = await post(app, "/v1/artifacts/cellscript/demo/releases/1.2.3/deployments", deploymentRequest);
+    expect(replayedDeployment.status).toBe(201);
+    expect(await replayedDeployment.json()).toEqual(deploymentResponse);
+    const deploymentNonceReplay = await post(
+      app,
+      "/v1/artifacts/cellscript/demo/releases/1.2.3/deployments",
+      deploymentRequest,
+      {},
+      { "idempotency-key": "deployment-replay-cleanup" },
+    );
+    expect(deploymentNonceReplay.status).toBe(409);
+    expect((await deploymentNonceReplay.json() as any).error.code).toBe("nonce_replay");
+    expect(store.idempotencyKeys.has("deployment:deployment-replay-cleanup")).toBe(false);
+    expect((await store.listPackageEvidence("cellscript", "demo", "1.2.3")).filter((item) => item.kind === "deployed")).toHaveLength(1);
     expect(store.packageVersions.get("cellscript/demo@1.2.3")?.deployment_status).toBe("chain_verified");
     expect(store.auditEvents.some((event) => event.event_type === "deployment.chain_verified")).toBe(true);
     expect(snapshots.filter((item) => item.key === "artifacts/cellscript/demo/releases/1.2.3.json")).toHaveLength(2);
@@ -1706,13 +1900,35 @@ describe("registry api", () => {
       capability_signature: { algorithm: "p256-sha256", signature: "sig" },
     });
     expect(yanked.status).toBe(200);
-    expect(await yanked.json()).toMatchObject({
+    const yankedBody = await yanked.json();
+    expect(yankedBody).toMatchObject({
       coordinate: "cellscript/demo@1.2.3",
       availability_status: "yanked",
     });
     expect(store.packageVersions.get("cellscript/demo@1.2.3")?.availability_status).toBe("yanked");
     expect(store.auditEvents.some((event) => event.event_type === "publisher.package_version.availability_updated")).toBe(true);
     expect(JSON.parse(utf8(snapshots.at(-1)!.body)).availability_status).toBe("yanked");
+
+    const replayedYank = await post(app, "/v1/artifacts/cellscript/demo/releases/1.2.3/availability", {
+      payload: yank,
+      capability_signature: { algorithm: "p256-sha256", signature: "sig" },
+    });
+    expect(replayedYank.status).toBe(200);
+    expect(await replayedYank.json()).toEqual(yankedBody);
+    expect(store.auditEvents.filter((event) => event.event_type === "publisher.package_version.availability_updated")).toHaveLength(1);
+    const availabilityNonceReplay = await post(
+      app,
+      "/v1/artifacts/cellscript/demo/releases/1.2.3/availability",
+      {
+        payload: yank,
+        capability_signature: { algorithm: "p256-sha256", signature: "sig" },
+      },
+      {},
+      { "idempotency-key": "availability-replay-cleanup" },
+    );
+    expect(availabilityNonceReplay.status).toBe(409);
+    expect((await availabilityNonceReplay.json() as any).error.code).toBe("nonce_replay");
+    expect(store.idempotencyKeys.has("availability:availability-replay-cleanup")).toBe(false);
 
     const active = availabilityPayload(capability.key_id, "active", "0x8888888888888888");
     const restored = await post(app, "/v1/artifacts/cellscript/demo/releases/1.2.3/availability", {
@@ -2058,26 +2274,72 @@ describe("registry api", () => {
     });
   });
 
-  it("indexes configured Registry commitment Cells and demotes spent attestations", async () => {
+  it("serialises overlapping scheduled maintenance runs", async () => {
+    const { app, store } = testApp();
+    const cleanup = store.cleanupExpiredState.bind(store);
+    let cleanupCalls = 0;
+    let announceStarted!: () => void;
+    let releaseCleanup!: () => void;
+    const started = new Promise<void>((resolve) => { announceStarted = resolve; });
+    const held = new Promise<void>((resolve) => { releaseCleanup = resolve; });
+    store.cleanupExpiredState = async (input) => {
+      cleanupCalls += 1;
+      announceStarted();
+      await held;
+      return cleanup(input);
+    };
+
+    const first = app.scheduled(
+      { scheduledTime: now.getTime(), cron: "*/15 * * * *" } as ScheduledController,
+      {},
+    );
+    await started;
+    await app.scheduled(
+      { scheduledTime: now.getTime(), cron: "*/15 * * * *" } as ScheduledController,
+      {},
+    );
+    expect(cleanupCalls).toBe(1);
+    releaseCleanup();
+    await first;
+    expect(cleanupCalls).toBe(1);
+  });
+
+  it("indexes configured Registry commitment Cells and never restores a spent commitment from history", async () => {
     const typeScript = { code_hash: `0x${"71".repeat(32)}`, hash_type: "data1", args: "0x01" };
-    const attestorLock = { code_hash: `0x${"72".repeat(32)}`, hash_type: "type", args: "0x02" };
+    const commitmentLock = { code_hash: `0x${"72".repeat(32)}`, hash_type: "type", args: "0x02" };
     const typeCellDep = {
       out_point: { tx_hash: `0x${"73".repeat(32)}`, index: "0x0" },
       dep_type: "code",
     };
+    const lockCellDep = {
+      out_point: { tx_hash: `0x${"75".repeat(32)}`, index: "0x0" },
+      dep_type: "code",
+    };
     let commitmentHash = `0x${"00".repeat(32)}`;
     let commitmentLive = true;
+    let commitmentConfigurationLive = true;
+    let deploymentLive = true;
     const { app, store } = testApp(undefined, undefined, {
-      verifyMainnetDeployment: async () => ({ block_hash: `0x${"60".repeat(32)}` }),
+      verifyMainnetDeployment: async () => {
+        if (!deploymentLive) {
+          throw new ApiError(409, "deployment_cell_not_live", "deployment Cell is spent");
+        }
+        return { block_hash: `0x${"60".repeat(32)}` };
+      },
+      verifyRegistryCommitmentConfiguration: async () => {
+        if (!commitmentConfigurationLive) {
+          throw new ApiError(409, "deployment_cell_not_live", "Registry commitment Lock CellDep is not live");
+        }
+      },
       listMainnetCommitmentCells: async (configuration) => {
         expect(configuration.type_script_hash).toBe(ckbScriptHash(typeScript));
-        expect(configuration.attestor_lock_hash).toBe(ckbScriptHash(attestorLock));
+        expect(configuration.commitment_lock_hash).toBe(ckbScriptHash(commitmentLock));
         return commitmentLive
           ? [{
               commitment_hash: commitmentHash,
               out_point: { tx_hash: `0x${"74".repeat(32)}`, index: 1 },
               block_number: "0x1234",
-              output: { lock: attestorLock, type: typeScript },
+              output: { lock: commitmentLock, type: typeScript },
             }]
           : [];
       },
@@ -2157,22 +2419,69 @@ describe("registry api", () => {
     const scheduledEnv = {
       REGISTRY_TYPE_SCRIPT_JSON: JSON.stringify(typeScript),
       REGISTRY_TYPE_SCRIPT_CELL_DEP_JSON: JSON.stringify(typeCellDep),
-      REGISTRY_ATTESTOR_LOCK_SCRIPT_JSON: JSON.stringify(attestorLock),
+      REGISTRY_COMMITMENT_LOCK_SCRIPT_JSON: JSON.stringify(commitmentLock),
+      REGISTRY_COMMITMENT_LOCK_CELL_DEP_JSON: JSON.stringify(lockCellDep),
     };
 
     await app.scheduled(
       { scheduledTime: now.getTime(), cron: "*/15 * * * *" } as ScheduledController,
       scheduledEnv,
     );
-    expect(store.packageVersions.get("cellscript/demo@1.2.3")?.status).toBe("on_chain_attested");
+    expect(store.packageVersions.get("cellscript/demo@1.2.3")?.status).toBe("on_chain_committed");
     const commitmentProof = await (await get(
       app,
       "/v1/artifacts/cellscript/demo/releases/1.2.3/commitment",
       scheduledEnv,
     )).json() as any;
-    expect(commitmentProof.status).toBe("on_chain_attested");
+    expect(commitmentProof.status).toBe("on_chain_committed");
     expect(commitmentProof.transaction_intent.output.type).toEqual(typeScript);
     expect(commitmentProof.transaction_intent.required_cell_deps).toEqual([typeCellDep]);
+    expect(commitmentProof.transaction_intent.custody_cell_dep).toEqual(lockCellDep);
+
+    commitmentConfigurationLive = false;
+    await app.scheduled(
+      { scheduledTime: now.getTime(), cron: "*/15 * * * *" } as ScheduledController,
+      scheduledEnv,
+    );
+    expect(store.packageVersions.get("cellscript/demo@1.2.3")?.status).toBe("deployed");
+    expect(store.auditEvents.some((event) => event.event_type === "maintenance.registry_commitment_configuration_failed"
+      && event.data?.["demoted_commitments"] === 1)).toBe(true);
+
+    const unsafeIntent = await get(
+      app,
+      "/v1/artifacts/cellscript/demo/releases/1.2.3/commitment",
+      scheduledEnv,
+    );
+    expect(unsafeIntent.status).toBe(409);
+
+    commitmentConfigurationLive = true;
+    await app.scheduled(
+      { scheduledTime: now.getTime(), cron: "*/15 * * * *" } as ScheduledController,
+      scheduledEnv,
+    );
+    expect(store.packageVersions.get("cellscript/demo@1.2.3")?.status).toBe("on_chain_committed");
+
+    const proofWithoutConfiguration = await (await get(
+      app,
+      "/v1/artifacts/cellscript/demo/releases/1.2.3/commitment",
+    )).json() as any;
+    expect(proofWithoutConfiguration.status).toBe("commitment_unconfigured");
+    expect(proofWithoutConfiguration.commitment).toBeUndefined();
+    expect(proofWithoutConfiguration.transaction_intent).toBeNull();
+
+    await app.scheduled(
+      { scheduledTime: now.getTime(), cron: "*/15 * * * *" } as ScheduledController,
+      {},
+    );
+    expect(store.packageVersions.get("cellscript/demo@1.2.3")?.status).toBe("deployed");
+    expect(store.auditEvents.some((event) => event.event_type === "maintenance.registry_commitment_disabled"
+      && event.data?.["demoted_commitments"] === 1)).toBe(true);
+
+    await app.scheduled(
+      { scheduledTime: now.getTime(), cron: "*/15 * * * *" } as ScheduledController,
+      scheduledEnv,
+    );
+    expect(store.packageVersions.get("cellscript/demo@1.2.3")?.status).toBe("on_chain_committed");
 
     commitmentLive = false;
     await app.scheduled(
@@ -2187,6 +2496,36 @@ describe("registry api", () => {
     )).json() as any;
     expect(reconciledProof.status).toBe("commitment_ready");
     expect(store.auditEvents.some((event) => event.event_type === "lifecycle.chain_state_reconciled")).toBe(true);
+    expect(store.packageVersions.get("cellscript/demo@1.2.3")?.current_commitment_evidence_hash).toBeNull();
+
+    await store.updatePackageVersionStatus({
+      namespace: "cellscript",
+      name: "demo",
+      version: "1.2.3",
+      status: "yanked",
+      request_id: "yank-after-spend",
+      admin_actor: "test",
+    });
+    const restored = await store.updatePackageVersionStatus({
+      namespace: "cellscript",
+      name: "demo",
+      version: "1.2.3",
+      status: "active",
+      request_id: "restore-after-spend",
+      admin_actor: "test",
+    });
+    expect(restored.status).toBe("deployed");
+    expect(restored.current_commitment_evidence_hash).toBeNull();
+
+    deploymentLive = false;
+    await app.scheduled(
+      { scheduledTime: now.getTime(), cron: "*/15 * * * *" } as ScheduledController,
+      scheduledEnv,
+    );
+    const staleDeployment = store.packageVersions.get("cellscript/demo@1.2.3")!;
+    expect(staleDeployment.status).toBe("verified_build");
+    expect(staleDeployment.deployment_status).toBe("undeployed");
+    expect(staleDeployment.current_commitment_evidence_hash).toBeNull();
   });
 
   it("revokes a capability with JoyID and blocks later publish", async () => {

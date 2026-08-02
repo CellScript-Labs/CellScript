@@ -4895,6 +4895,19 @@ pub(super) fn sign_registry_capability_payload(key_id: &str, canonical_payload: 
     sign_registry_publish_payload_with_pkcs8(&pkcs8, canonical_payload)
 }
 
+pub(super) fn sign_registry_reproducer_payload(key_id: &str, canonical_payload: &str) -> Result<String> {
+    let Some(pkcs8) = load_registry_reproducer_private_key(key_id)? else {
+        return Err(
+            crate::error::CompileError::without_span(format!(
+                "reproducer signature key '{}' was not found in the OS keychain; set CELLSCRIPT_REPRODUCER_PRIVATE_KEY_PKCS8_B64 for an isolated builder",
+                key_id
+            ))
+            .with_category(crate::error::CompileErrorCategory::Authentication),
+        );
+    };
+    sign_registry_publish_payload_with_pkcs8(&pkcs8, canonical_payload)
+}
+
 fn load_registry_capability_private_key(key_id: &str) -> Result<Option<Vec<u8>>> {
     if let Ok(value) = std::env::var("CELLSCRIPT_CAPABILITY_PRIVATE_KEY_PKCS8_B64") {
         let trimmed = value.trim();
@@ -4909,6 +4922,27 @@ fn load_registry_capability_private_key(key_id: &str) -> Result<Option<Vec<u8>>>
         }
     }
 
+    load_registry_keychain_private_key(key_id)
+}
+
+fn load_registry_reproducer_private_key(key_id: &str) -> Result<Option<Vec<u8>>> {
+    if let Ok(value) = std::env::var("CELLSCRIPT_REPRODUCER_PRIVATE_KEY_PKCS8_B64") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            let decoded = base64::engine::general_purpose::STANDARD.decode(trimmed).map_err(|error| {
+                crate::error::CompileError::without_span(format!(
+                    "failed to decode CELLSCRIPT_REPRODUCER_PRIVATE_KEY_PKCS8_B64: {}",
+                    error
+                ))
+            })?;
+            return Ok(Some(decoded));
+        }
+    }
+
+    load_registry_keychain_private_key(key_id)
+}
+
+fn load_registry_keychain_private_key(key_id: &str) -> Result<Option<Vec<u8>>> {
     let entry = keyring::Entry::new("cellscript-registry", key_id).map_err(|error| {
         crate::error::CompileError::without_span(format!("failed to open OS keychain: {}", error))
             .with_category(crate::error::CompileErrorCategory::Authentication)
@@ -13601,8 +13635,27 @@ impl CliParser {
                             .arg(Arg::new("print-payload").long("print-payload").action(ArgAction::SetTrue)),
                     )
                     .subcommand(
+                        ClapCommand::new("reproduction-report")
+                            .about("Hash a clean reproduction and sign a builder-authenticated report")
+                            .arg(Arg::new("coordinate").value_name("NAMESPACE/NAME@RELEASE").required(true))
+                            .arg(Arg::new("artifact").long("artifact").value_name("FILE").required(true))
+                            .arg(Arg::new("build-log").long("build-log").value_name("FILE").required(true))
+                            .arg(Arg::new("builder-id").long("builder-id").value_name("ID").required(true))
+                            .arg(Arg::new("trust-domain").long("trust-domain").value_name("DOMAIN").required(true))
+                            .arg(Arg::new("builder-key-id").long("builder-key-id").value_name("KEY_ID").required(true))
+                            .arg(
+                                Arg::new("builder-public-key")
+                                    .long("builder-public-key")
+                                    .value_name("P256_SPKI")
+                                    .required(true),
+                            )
+                            .arg(Arg::new("output").long("output").short('o').value_name("FILE").required(true))
+                            .arg(Arg::new("api-url").long("api-url").value_name("URL"))
+                            .arg(Arg::new("force").long("force").action(ArgAction::SetTrue)),
+                    )
+                    .subcommand(
                         ClapCommand::new("reproduction-evidence")
-                            .about("Validate independent reproduction reports and generate an admin promotion request")
+                            .about("Validate signed independent reproduction reports and generate an admin promotion request")
                             .arg(Arg::new("coordinate").value_name("NAMESPACE/NAME@RELEASE").required(true))
                             .arg(
                                 Arg::new("report")
@@ -13610,7 +13663,7 @@ impl CliParser {
                                     .value_name("FILE")
                                     .action(ArgAction::Append)
                                     .required(true)
-                                    .help("Independent cellscript-reproduction-report-v1 JSON; pass once per builder"),
+                                    .help("Signed independent cellscript-reproduction-report-v2 JSON; pass once per trusted builder"),
                             )
                             .arg(Arg::new("output").long("output").short('o').value_name("FILE").required(true))
                             .arg(Arg::new("api-url").long("api-url").value_name("URL"))
@@ -14600,6 +14653,22 @@ impl CliParser {
                         capability_signature: action.get_one::<String>("capability-signature").cloned(),
                         api_url: action.get_one::<String>("api-url").cloned(),
                         print_payload: action.get_flag("print-payload"),
+                        json: json_output(action),
+                    },
+                    Some(("reproduction-report", action)) => ArtifactOperation::ReproductionReport {
+                        coordinate: action.get_one::<String>("coordinate").cloned().expect("required coordinate"),
+                        artifact: action.get_one::<String>("artifact").map(PathBuf::from).expect("required artifact"),
+                        build_log: action.get_one::<String>("build-log").map(PathBuf::from).expect("required build log"),
+                        builder_id: action.get_one::<String>("builder-id").cloned().expect("required builder id"),
+                        trust_domain: action.get_one::<String>("trust-domain").cloned().expect("required trust domain"),
+                        builder_key_id: action.get_one::<String>("builder-key-id").cloned().expect("required builder key id"),
+                        builder_public_key: action
+                            .get_one::<String>("builder-public-key")
+                            .cloned()
+                            .expect("required builder public key"),
+                        output: action.get_one::<String>("output").map(PathBuf::from).expect("required output"),
+                        api_url: action.get_one::<String>("api-url").cloned(),
+                        force: action.get_flag("force"),
                         json: json_output(action),
                     },
                     Some(("reproduction-evidence", action)) => ArtifactOperation::ReproductionEvidence {

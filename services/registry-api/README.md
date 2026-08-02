@@ -61,10 +61,15 @@ axis and does not rewrite identity or evidence.
 
 For a reproducible profile, `verified_build` with level `evidence_required` is
 only the hash-bound predecessor. An admin promotion to `reproduced_build`
-requires two to sixteen distinct `cellscript-reproduction-report-v1` builder
-reports bound to the signed environment, source hash, build-recipe hash,
-artifact hash, build-log hash, timestamp, and predecessor evidence. Deployment
-admission rejects a reproducible artifact until this transition succeeds.
+requires two to sixteen P-256-signed `cellscript-reproduction-report-v2`
+reports. Each builder ID, public key, and trust domain must be distinct; every
+builder must match `REGISTRY_REPRODUCER_POLICY_JSON`; and the reports must span
+the policy's minimum number of trust domains. Reports bind the signed
+environment, source hash, build-recipe hash, artifact hash, build-log hash,
+timestamp, and predecessor evidence. Deployment admission rejects a
+reproducible artifact until this transition succeeds. Accepted evidence also
+stores the canonical policy SHA-256 and the minimum trust-domain threshold used
+at acceptance time.
 
 ## Endpoints
 
@@ -197,29 +202,36 @@ No testnet network value is accepted.
 After deployment evidence exists, the public commitment endpoint returns the
 canonical payload, `CSREGv1 || commitment_hash` Cell data, and—when fully
 configured—a mainnet transaction intent containing the fixed output Lock, Type
-Script, data, and required Type Script CellDep. The publisher's wallet supplies
+Script, data, and both required code CellDeps. The publisher's wallet supplies
 capacity, inputs, change, fee, witnesses, signatures, and broadcast.
 
-The three Script configuration values are all-or-nothing:
+The four Script configuration values are all-or-nothing:
 
 ```text
 REGISTRY_TYPE_SCRIPT_JSON
 REGISTRY_TYPE_SCRIPT_CELL_DEP_JSON
-REGISTRY_ATTESTOR_LOCK_SCRIPT_JSON
+REGISTRY_COMMITMENT_LOCK_SCRIPT_JSON
+REGISTRY_COMMITMENT_LOCK_CELL_DEP_JSON
 ```
 
 `CKB_REGISTRY_SCAN_MAX_CELLS` bounds the scheduled indexer scan (default 1000,
-allowed range 100–10000). Maintenance queries exact Type Script matches with a
-`CSREGv1` data prefix, verifies the configured attestor Lock, and reconciles
-current lifecycle state. A matching live Cell promotes to
-`on_chain_attested`; a spent commitment returns to `deployed`; and a stale
-deployment returns to `verified_build`. Historical evidence is retained.
+allowed range 100–10000). `CKB_MIN_CONFIRMATIONS` defaults to 24 and applies to
+deployment Cells, commitment Cells, and both configured Script code CellDeps.
+Maintenance queries exact Type Script matches with a `CSREGv1` data prefix,
+verifies the configured commitment Lock, and reconciles current lifecycle
+state. A matching sufficiently confirmed live Cell promotes to
+`on_chain_committed`; a spent or immature commitment returns to `deployed`; and
+a stale deployment returns to `verification_status = verified` with
+`deployment_status = undeployed` (projected as `verified_build`). Historical
+evidence is retained.
 
-Leaving all three Script values unset deliberately disables transaction-intent
-construction and chain reconciliation. Setting only some of them is a service
-misconfiguration. Deploying and pinning the canonical mainnet Registry Type
-Script remains an operator action; checked-in code does not itself prove that a
-public attestation exists.
+Leaving all four Script values unset deliberately disables transaction-intent
+construction and chain reconciliation; maintenance then clears any prior
+current-commitment pointer because it can no longer re-observe that claim.
+Setting only some of them is a service misconfiguration. Invalid, spent, or insufficiently confirmed code CellDeps
+also fail readiness. Deploying and pinning the canonical mainnet Registry Type
+and commitment Lock Scripts remains an operator action; checked-in code does
+not itself prove that a public commitment exists.
 
 ## Verification Worker
 
@@ -286,9 +298,12 @@ REGISTRY_VERIFIER_IMAGE
 
 Mainnet deployment checks use `CKB_MAINNET_RPC_URL`. Chain commitments remain
 disabled unless `REGISTRY_TYPE_SCRIPT_JSON`,
-`REGISTRY_TYPE_SCRIPT_CELL_DEP_JSON`, and
-`REGISTRY_ATTESTOR_LOCK_SCRIPT_JSON` are supplied together. The Node adapter,
-production Compose file, and Worker example pass the same settings.
+`REGISTRY_TYPE_SCRIPT_CELL_DEP_JSON`, `REGISTRY_COMMITMENT_LOCK_SCRIPT_JSON`,
+and `REGISTRY_COMMITMENT_LOCK_CELL_DEP_JSON` are supplied together. Set
+`REGISTRY_REPRODUCER_POLICY_JSON` before accepting reproduction promotions and
+use `CKB_MIN_CONFIRMATIONS` to raise or lower the default 24-block confirmation
+floor. The Node adapter, production Compose file, and Worker example pass the
+same settings.
 
 The API container applies tracked additive migrations before serving traffic.
 `0001_initial.sql` is the frozen deployed baseline. `0002` adds the verifier
@@ -296,7 +311,10 @@ queue; `0003` adds multi-wallet principals; `0004` converts an empty legacy
 release table to the artifact/state model and intentionally fails if rows exist
 so operators cannot perform a lossy implicit migration; `0005` separates
 hash-integrity evidence from semantic verification with `hash_bound`; and
-`0006` admits the independent `reproduced_build` evidence kind.
+`0006` admits the independent `reproduced_build` evidence kind; and `0007`
+renames historical chain evidence, adds the current-commitment pointer and
+status projection constraints, and deliberately demotes legacy current claims
+until the mainnet indexer re-observes a sufficiently confirmed live Cell.
 
 `GET /health` is liveness. `GET /ready` checks store/object access, admin
 configuration, and—when `REQUIRE_REGISTRY_VERIFIER_READY=true`—a fresh verifier

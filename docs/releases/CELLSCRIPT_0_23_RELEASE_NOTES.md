@@ -15,7 +15,7 @@ This document records completed 0.23 work. The public Registry infrastructure,
 read/write domains, website, CLI read authority, and automatic compiler-backed
 source-package evidence chain are deployed. General artifact, reproduction,
 deployment, and commitment support is implemented in-tree, while canonical
-Registry Script deployment, the first real non-CellScript mainnet attestation,
+Registry Script deployment, the first real non-CellScript mainnet commitment,
 and publisher-owned clean-machine adoption remain checkpoints. Broader
 RGB++/Fiber evidence and the Off-Chain Session Runtime profile remain roadmap
 work.
@@ -144,7 +144,7 @@ signed nested entry instead of an untyped or incomplete JSON object, persists
 edition/profile as typed columns, and repeats them in version-addressed static
 JSON. Generic admin status changes may quarantine, yank, deprecate, or move an
 entry through indexing, but cannot label it `verified_build`, `deployed`, or
-`on_chain_attested`. The ordered evidence-promotion endpoint validates
+`on_chain_committed`. The ordered evidence-promotion endpoint validates
 identity-bound evidence and the preceding evidence reference for each of those
 states.
 
@@ -160,7 +160,7 @@ evidence already exists. Three attempts, exponential delay, dead letters,
 admin metrics/requeue, bounded process resources/output/time, and a worker
 heartbeat in API readiness make the queue operationally fail-closed. Default
 public list/search now shows only `verified_build`, `deployed`, and
-`on_chain_attested`; direct URLs and explicit status filters preserve admitted
+`on_chain_committed`; direct URLs and explicit status filters preserve admitted
 history.
 
 Manifest hashes are now computed from recursively key-sorted canonical JSON.
@@ -178,28 +178,34 @@ pinning, deployment, and CellDep commands; a runtime verifier is a declared TCB
 input; and a template is copied without becoming an implicit dependency.
 
 Reproducibility is now an evidence transition rather than a manifest adjective.
-`cellc artifact reproduction-evidence` verifies two to sixteen reports from
-distinct builder IDs. Every report must use
-`cellscript-reproduction-report-v1` and match the signed environment, source
-hash, build-recipe hash, executable hash, build-log hash, and timestamp. The
-Registry binds the promotion to the accepted `verified_build` evidence. Until
-that promotion succeeds, a reproducible executable remains
-`evidence_required` and cannot acquire deployment evidence.
+`cellc artifact reproduction-report` creates a P-256-signed builder report, and
+`cellc artifact reproduction-evidence` verifies two to sixteen reports with
+distinct builder IDs, public keys, and trust domains. Every report must use
+`cellscript-reproduction-report-v2` and match the signed environment, source
+hash, build-recipe hash, executable hash, build-log hash, and timestamp. The API
+additionally binds each builder to `REGISTRY_REPRODUCER_POLICY_JSON` and
+requires the configured minimum number of independent trust domains. The
+Registry stores the canonical policy SHA-256 and acceptance threshold and binds
+the promotion to the accepted `verified_build` evidence. Until
+that promotion succeeds, a reproducible executable remains `evidence_required`
+and cannot acquire deployment evidence.
 
 For an RPC-verified mainnet deployment, the commitment endpoint computes the
 canonical `cellscript-registry-commitment-v1` payload and compact
 `CSREGv1 || commitment_hash` Cell data. When operators configure the canonical
-Registry Type Script, its CellDep, and the attestor Lock, the endpoint also
-returns a mainnet-only wallet transaction intent. A compatible wallet supplies
+Registry Type Script, commitment custody Lock, and both code CellDeps, the
+endpoint also returns a mainnet-only wallet transaction intent. A compatible wallet supplies
 capacity, inputs, change, fee, witnesses, signatures, and broadcast. Scheduled
 maintenance scans exact Type Script matches through the CKB indexer and
-reconciles current state: a matching live Cell promotes the release to
-`on_chain_attested`; a spent attestation falls back to `deployed`; and a stale
-deployment falls back to `verified_build`. Evidence remains append-only.
+reconciles current state: a matching sufficiently confirmed live Cell promotes
+the release to `on_chain_committed`; a spent or immature commitment falls back
+to `deployed`; and a stale deployment falls back to
+`deployment_status = undeployed` (projected as `verified_build`). Disabling Script configuration
+also clears current commitment pointers. Evidence remains append-only.
 
 This is an implementation boundary, not a claim that the canonical mainnet
-Registry Script has already been deployed. Production chain attestation stays
-disabled until those three Script identities are deployed and configured, and
+Registry Scripts have already been deployed. Production chain commitment stays
+disabled until all four Script/CellDep values are deployed, confirmed, and configured, and
 the first real non-CellScript mainnet artifact is still an adoption/evidence
 checkpoint.
 

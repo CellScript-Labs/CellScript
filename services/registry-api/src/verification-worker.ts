@@ -97,7 +97,7 @@ async function processJob(job: VerificationJobRecord): Promise<void> {
     let version: PackageVersionRecord;
     if (job.evidence_hash && job.evidence) {
       const existing = await store.getPackageVersion(job.namespace, job.name, job.version);
-      if (!existing || !["verified_build", "deployed", "on_chain_attested"].includes(existing.status)) {
+      if (!existing || !["verified", "hash_bound", "evidence_required"].includes(existing.verification_status)) {
         throw new Error("verification job has promoted evidence but package version is not promoted");
       }
       version = existing;

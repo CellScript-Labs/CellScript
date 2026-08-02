@@ -331,7 +331,7 @@ The resolver writes a snapshot of the resolved graph into the
 lockfile so subsequent builds do not need network access.
 
 Normal resolution accepts `verified_build`, `deployed`, and
-`on_chain_attested`. An exact `source_published` or `indexed_pending` version
+`on_chain_committed`. An exact `source_published` or `indexed_pending` version
 requires `--allow-unverified`; a quarantined version requires the stronger
 `--allow-quarantined`. These acknowledgements persist in the dependency table.
 

@@ -54,7 +54,7 @@ export type RegistryEntryStatus =
   | "indexed_pending"
   | "verified_build"
   | "deployed"
-  | "on_chain_attested"
+  | "on_chain_committed"
   | "deprecated"
   | "yanked"
   | "quarantined";
@@ -1146,25 +1146,61 @@ export async function capabilityKeyId(capabilityPubkey: string): Promise<string>
   return `cap_${(await sha256Hex(capabilityPubkey)).slice(0, 32)}`;
 }
 
-export class WebCryptoP256Verifier implements CapabilitySignatureVerifier {
-  async verify(canonicalPayload: string, capabilityPubkey: string, signature: CapabilitySignature): Promise<boolean> {
-    if (signature.algorithm !== "p256-sha256" || !capabilityPubkey.startsWith("p256-spki:")) {
-      return false;
-    }
-    const spki = base64UrlToBytes(capabilityPubkey.slice("p256-spki:".length));
-    const sig = parseSignatureBytes(signature.signature);
-    const key = await crypto.subtle.importKey(
+const P256_SPKI_PREFIX = Uint8Array.from([
+  0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01,
+  0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00,
+]);
+
+export function isCanonicalP256SpkiPublicKey(value: string): boolean {
+  if (!value.startsWith("p256-spki:")) return false;
+  try {
+    const bytes = base64UrlToBytes(value.slice("p256-spki:".length));
+    if (bytes.length !== P256_SPKI_PREFIX.length + 65 || bytes[P256_SPKI_PREFIX.length] !== 0x04) return false;
+    return P256_SPKI_PREFIX.every((byte, index) => bytes[index] === byte);
+  } catch {
+    return false;
+  }
+}
+
+export async function isImportableP256SpkiPublicKey(value: string): Promise<boolean> {
+  if (!isCanonicalP256SpkiPublicKey(value)) return false;
+  try {
+    await crypto.subtle.importKey(
       "spki",
-      toArrayBuffer(spki),
+      toArrayBuffer(base64UrlToBytes(value.slice("p256-spki:".length))),
       { name: "ECDSA", namedCurve: "P-256" },
       false,
       ["verify"],
     );
-    return crypto.subtle.verify(
-      { name: "ECDSA", hash: "SHA-256" },
-      key,
-      toArrayBuffer(sig),
-      new TextEncoder().encode(canonicalPayload),
-    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export class WebCryptoP256Verifier implements CapabilitySignatureVerifier {
+  async verify(canonicalPayload: string, capabilityPubkey: string, signature: CapabilitySignature): Promise<boolean> {
+    if (signature.algorithm !== "p256-sha256" || !isCanonicalP256SpkiPublicKey(capabilityPubkey)) {
+      return false;
+    }
+    try {
+      const spki = base64UrlToBytes(capabilityPubkey.slice("p256-spki:".length));
+      const sig = parseSignatureBytes(signature.signature);
+      const key = await crypto.subtle.importKey(
+        "spki",
+        toArrayBuffer(spki),
+        { name: "ECDSA", namedCurve: "P-256" },
+        false,
+        ["verify"],
+      );
+      return crypto.subtle.verify(
+        { name: "ECDSA", hash: "SHA-256" },
+        key,
+        toArrayBuffer(sig),
+        new TextEncoder().encode(canonicalPayload),
+      );
+    } catch {
+      return false;
+    }
   }
 }

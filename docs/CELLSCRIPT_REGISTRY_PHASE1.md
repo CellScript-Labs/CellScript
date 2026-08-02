@@ -6,9 +6,10 @@ surfaces described here are checked in on the current release line.
 
 The source-package production slice is deployed. Generic artifact,
 reproduction, deployment, and chain-index code is implemented, but a public
-`on_chain_attested` claim additionally requires operators to deploy and pin the
-canonical mainnet Registry Type Script, its CellDep, and the attestor Lock.
-Until all three identities are configured, commitment construction fails
+`on_chain_committed` claim additionally requires operators to deploy and pin
+the canonical mainnet Registry Type Script, commitment custody Lock, and both
+code CellDeps. Until all four configuration values are present and their Cells
+are live with the required confirmation depth, commitment construction fails
 closed and scheduled chain reconciliation remains disabled.
 
 The Registry indexes CKB ecosystem artifacts. A coordinate is
@@ -67,9 +68,12 @@ binary may be verified but have no deployment concept. A CKB executable may be
 verified and still undeployed. A previously chain-verified release may later be
 deprecated without rewriting its evidence.
 
-`on_chain_attested` is a current-state claim, not a permanent badge. Scheduled
+`on_chain_committed` is a current-state claim, not a permanent badge. Scheduled
 maintenance returns a spent commitment to `deployed` and a stale deployment to
-`verified_build`, while retaining every accepted evidence record for audit.
+`verification_status = verified` plus `deployment_status = undeployed`
+(projected as `verified_build`), while retaining every accepted evidence record
+for audit. Disabling the Registry Script configuration also clears current
+commitment pointers because the service can no longer re-observe them.
 
 ## Artifact Identity
 
@@ -228,16 +232,39 @@ environment and emit bounded reports:
 
 ```json
 {
-  "schema": "cellscript-reproduction-report-v1",
+  "schema": "cellscript-reproduction-report-v2",
   "builder_id": "builder-a",
+  "trust_domain": "independent-org-a",
+  "builder_public_key": "p256-spki:<base64-der>",
   "environment": "<exact signed environment>",
   "source_hash": "<CKB Blake2b-256>",
   "build_recipe_hash": "<CKB Blake2b-256>",
   "artifact_hash": "<CKB Blake2b-256>",
   "build_log_hash": "<CKB Blake2b-256>",
-  "generated_at": "2026-08-02T00:00:00Z"
+  "generated_at": "2026-08-02T00:00:00Z",
+  "signature": {
+    "algorithm": "p256-sha256",
+    "signature": "<base64url-fixed-signature>"
+  }
 }
 ```
+
+Generate each report next to the reproduced artifact and bounded build log:
+
+```bash
+cellc artifact reproduction-report acme/vault-lock@1.0.0 \
+  --artifact target/vault-lock \
+  --build-log reports/builder-a.log \
+  --builder-id builder-a \
+  --trust-domain independent-org-a \
+  --builder-key-id cap_<sha256-prefix> \
+  --builder-public-key 'p256-spki:<base64url-der>' \
+  --output reports/builder-a.json
+```
+
+The corresponding private key must be isolated per builder. Load it from that
+builder's OS keychain entry, or set
+`CELLSCRIPT_REPRODUCER_PRIVATE_KEY_PKCS8_B64` only in its CI environment.
 
 Create the operator promotion payload locally:
 
@@ -248,9 +275,14 @@ cellc artifact reproduction-evidence acme/vault-lock@1.0.0 \
   --output reproduced-build-promotion.json
 ```
 
-The CLI and API require two to sixteen distinct builder IDs and exact matches
-for the signed environment, source, recipe, and executable. The promotion also
-references the accepted `verified_build` evidence. A reproducible artifact
+The CLI verifies every report signature and requires distinct builder IDs,
+public keys, and trust domains. The API additionally requires each builder to
+match `REGISTRY_REPRODUCER_POLICY_JSON` and enforces its configured minimum
+trust-domain count. Both layers require exact matches for the signed environment,
+source, recipe, executable, and build log. The promotion also references the
+accepted `verified_build` evidence. Accepted evidence records the canonical
+policy SHA-256 and the threshold used for that decision, so later policy
+rotation cannot rewrite the historical trust boundary. A reproducible artifact
 stays `evidence_required`, and deployment admission fails, until
 `reproduced_build` evidence is accepted.
 
@@ -299,9 +331,10 @@ Type/Lock hashes, and a wallet-ready mainnet transaction intent. The wallet,
 not the Registry or CLI, completes capacity, inputs, change, fee, witnesses,
 signatures, and broadcast.
 
-The Registry accepts an on-chain attestation only after reading the live
-mainnet Cell and matching its exact data, configured attestor Lock, and
-configured Registry Type Script. Scheduled maintenance uses an exact Type
+The Registry accepts an on-chain commitment only after reading a sufficiently
+confirmed live mainnet Cell and matching its exact data, configured commitment
+Lock, and configured Registry Type Script. Readiness separately resolves and
+checks the Type and Lock code CellDeps. Scheduled maintenance uses an exact Type
 Script indexer query plus the `CSREGv1` prefix to discover commitments and
 reconcile their live lifecycle.
 
@@ -313,8 +346,10 @@ application's own Lock/Type Scripts, schemas, and replacement transactions.
 
 The website presents a single “Connect CKB wallet” entry. Its modal separates
 CCC-detected browser signers, which can connect immediately, from wallet
-directory entries, which open an official site and continue through the manual
-payload/signature path. A directory entry is never reported as connected.
+directory entries, which only open an external site and then require a
+compatible manually produced `wallet-signature.json`. A directory entry is a
+reference/import route, not proof that the wallet exposes a compatible message
+signing UI, and is never reported as connected.
 Network selection is not exposed because authorisation and deployment are
 mainnet-only.
 
@@ -324,8 +359,10 @@ never leave the wallet. Namespace ownership, capability scope, expiry,
 revocation, nonce consumption, idempotency, quotas, and audit events are
 enforced by the API.
 
-The submit form remains hidden until a wallet principal is connected or the
-publisher explicitly confirms that an active capability already exists.
+The submit form remains hidden until a direct signer is connected, a manual
+signature-import route is explicitly selected, or the publisher confirms that
+an active capability already exists. Manual payloads remain untrusted until
+the API verifies their principal binding and signature.
 
 ## Public Reads
 
@@ -378,8 +415,9 @@ that every artifact is installable.
   other mirror failures are audited and retried by verification sync, so an
   uncommitted release or deployment is never advertised as current.
 - State transitions append evidence; they do not mutate hash identity.
-- An unconfigured or partially configured Registry Type/Lock Script set cannot
-  produce a wallet transaction intent or current attestation.
+- An unconfigured, partially configured, spent, or insufficiently confirmed
+  Registry Type/Lock Script and CellDep set cannot produce a wallet transaction
+  intent or current commitment.
 
 ## Validation
 
