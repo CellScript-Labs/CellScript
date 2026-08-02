@@ -13,8 +13,10 @@ crons = ["*/15 * * * *"]
 
 [vars]
 ENVIRONMENT = "production"
+REGISTRY_ENVIRONMENT = "production"
 REGISTRY_ORIGIN = "https://api.registry.cellscript.dev"
 STATIC_REGISTRY_ORIGIN = "https://registry.cellscript.dev"
+CKB_RPC_URL = "https://mainnet.ckb.dev/rpc"
 JOYID_SERVER_URL = "https://api.joy.id/api/v1"
 MAX_JSON_BODY_BYTES = "6291456"
 CLEANUP_QUOTA_EVENT_RETENTION_HOURS = "48"

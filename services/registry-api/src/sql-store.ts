@@ -461,9 +461,12 @@ export class SqlRegistryStore implements RegistryStore {
                 source_hash, manifest_hash,
                 edition, compatibility_profile_hash,
                 capability_key_id, principal_type, principal_id, registry_entry,
-                snapshot_hash, direct_url, created_at
+                snapshot_hash, direct_url, created_at,
+                registry_environment, chain_network, expires_at, expired_at, purge_after,
+                static_purged_at, source_purged_at
          from package_versions
-         where namespace = $1 and name = $2 and version = $3`,
+         where namespace = $1 and name = $2 and version = $3
+           and (expires_at is null or expires_at > now())`,
         [namespace, name, version],
       );
       const row = result.rows[0];
@@ -480,7 +483,9 @@ export class SqlRegistryStore implements RegistryStore {
                 pv.source_hash, pv.manifest_hash,
                 pv.edition, pv.compatibility_profile_hash,
                 pv.capability_key_id, pv.principal_type, pv.principal_id, pv.registry_entry,
-                pv.snapshot_hash, pv.direct_url, pv.created_at
+                pv.snapshot_hash, pv.direct_url, pv.created_at,
+                pv.registry_environment, pv.chain_network, pv.expires_at, pv.expired_at, pv.purge_after,
+                pv.static_purged_at, pv.source_purged_at
          from package_versions pv
          join packages p on p.namespace = pv.namespace and p.name = pv.name
          where ($1::text is null or pv.namespace = $1)
@@ -492,6 +497,7 @@ export class SqlRegistryStore implements RegistryStore {
            and ($12::text[] is null or pv.verification_status = any($12::text[]))
            and ($10::text is null or pv.deployment_status = $10)
            and ($11::text is null or pv.availability_status = $11)
+           and (pv.expires_at is null or pv.expires_at > now())
            and (
              $4::text is null
              or pv.namespace ilike '%' || $4 || '%'
@@ -530,7 +536,9 @@ export class SqlRegistryStore implements RegistryStore {
                   pv.current_commitment_evidence_hash,
                   pv.source_hash, pv.manifest_hash, pv.edition, pv.compatibility_profile_hash,
                   pv.capability_key_id, pv.principal_type, pv.principal_id, pv.registry_entry,
-                  pv.snapshot_hash, pv.direct_url, pv.created_at
+                  pv.snapshot_hash, pv.direct_url, pv.created_at,
+                  pv.registry_environment, pv.chain_network, pv.expires_at, pv.expired_at, pv.purge_after,
+                  pv.static_purged_at, pv.source_purged_at
            from package_versions pv
            join packages p on p.namespace = pv.namespace and p.name = pv.name
            where ($1::text is null or pv.namespace = $1)
@@ -542,6 +550,7 @@ export class SqlRegistryStore implements RegistryStore {
              and ($12::text[] is null or pv.verification_status = any($12::text[]))
              and ($10::text is null or pv.deployment_status = $10)
              and ($11::text is null or pv.availability_status = $11)
+             and (pv.expires_at is null or pv.expires_at > now())
              and (
                $4::text is null
                or pv.namespace ilike '%' || $4 || '%'
@@ -593,9 +602,11 @@ export class SqlRegistryStore implements RegistryStore {
            source_hash, manifest_hash,
            edition, compatibility_profile_hash,
            capability_key_id, principal_type, principal_id, registry_entry,
-           snapshot_hash, direct_url
+           snapshot_hash, direct_url,
+           registry_environment, chain_network, expires_at, purge_after
          )
-         values ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17, $18)
+         values ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17, $18,
+                 $19, $20, $21, $22)
          on conflict (namespace, name, version) do nothing
          returning namespace`,
         [
@@ -617,6 +628,10 @@ export class SqlRegistryStore implements RegistryStore {
           JSON.stringify(input.registry_entry),
           input.snapshot_hash,
           input.direct_url,
+          input.registry_environment ?? "production",
+          input.network ?? "mainnet",
+          input.expires_at ?? null,
+          input.purge_after ?? null,
         ],
       );
       if (result.rowCount !== 1) {
@@ -656,9 +671,11 @@ export class SqlRegistryStore implements RegistryStore {
              source_hash, manifest_hash,
              edition, compatibility_profile_hash,
              capability_key_id, principal_type, principal_id, registry_entry,
-             snapshot_hash, direct_url
+             snapshot_hash, direct_url,
+             registry_environment, chain_network, expires_at, purge_after
            )
-           values ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17, $18)
+           values ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17, $18,
+                   $19, $20, $21, $22)
            on conflict (namespace, name, version) do nothing
            returning namespace`,
           [
@@ -680,6 +697,10 @@ export class SqlRegistryStore implements RegistryStore {
             JSON.stringify(input.version.registry_entry),
             input.version.snapshot_hash,
             input.version.direct_url,
+            input.version.registry_environment ?? "production",
+            input.version.network ?? "mainnet",
+            input.version.expires_at ?? null,
+            input.version.purge_after ?? null,
           ],
         );
         if (insertedVersion.rowCount !== 1) {
@@ -798,7 +819,9 @@ export class SqlRegistryStore implements RegistryStore {
                   source_hash, manifest_hash,
                   edition, compatibility_profile_hash,
                   capability_key_id, principal_type, principal_id, registry_entry,
-                  snapshot_hash, direct_url, created_at
+                  snapshot_hash, direct_url, created_at,
+                  registry_environment, chain_network, expires_at, expired_at, purge_after,
+                  static_purged_at, source_purged_at
            from package_versions
            where namespace = $1 and name = $2 and version = $3
            for update`,
@@ -861,7 +884,9 @@ export class SqlRegistryStore implements RegistryStore {
                      source_hash, manifest_hash,
                      edition, compatibility_profile_hash,
                      capability_key_id, principal_type, principal_id, registry_entry,
-                     snapshot_hash, direct_url, created_at`,
+                     snapshot_hash, direct_url, created_at,
+                     registry_environment, chain_network, expires_at, expired_at, purge_after,
+                     static_purged_at, source_purged_at`,
           [input.namespace, input.name, input.version, input.kind, input.evidence["verification_level"] ?? null, input.evidence_hash],
         );
         await client.query(
@@ -937,7 +962,9 @@ export class SqlRegistryStore implements RegistryStore {
                   current_commitment_evidence_hash,
                   source_hash, manifest_hash, edition, compatibility_profile_hash,
                   capability_key_id, principal_type, principal_id, registry_entry,
-                  snapshot_hash, direct_url, created_at
+                  snapshot_hash, direct_url, created_at,
+                  registry_environment, chain_network, expires_at, expired_at, purge_after,
+                  static_purged_at, source_purged_at
            from package_versions
            where namespace = $1 and name = $2 and version = $3
            for update`,
@@ -975,7 +1002,9 @@ export class SqlRegistryStore implements RegistryStore {
                      current_commitment_evidence_hash,
                      source_hash, manifest_hash, edition, compatibility_profile_hash,
                      capability_key_id, principal_type, principal_id, registry_entry,
-                     snapshot_hash, direct_url, created_at`,
+                     snapshot_hash, direct_url, created_at,
+                     registry_environment, chain_network, expires_at, expired_at, purge_after,
+                     static_purged_at, source_purged_at`,
           [input.namespace, input.name, input.version],
         );
         await client.query(
@@ -1057,7 +1086,9 @@ export class SqlRegistryStore implements RegistryStore {
                      current_commitment_evidence_hash,
                      source_hash, manifest_hash, edition, compatibility_profile_hash,
                      capability_key_id, principal_type, principal_id, registry_entry,
-                     snapshot_hash, direct_url, created_at`,
+                     snapshot_hash, direct_url, created_at,
+                     registry_environment, chain_network, expires_at, expired_at, purge_after,
+                     static_purged_at, source_purged_at`,
           [input.namespace, input.name, input.version, input.status, input.deployment_status],
         );
         const record = updated.rows[0];
@@ -1163,7 +1194,9 @@ export class SqlRegistryStore implements RegistryStore {
                      source_hash, manifest_hash,
                      edition, compatibility_profile_hash,
                      capability_key_id, principal_type, principal_id, registry_entry,
-                     snapshot_hash, direct_url, created_at`,
+                     snapshot_hash, direct_url, created_at,
+                     registry_environment, chain_network, expires_at, expired_at, purge_after,
+                     static_purged_at, source_purged_at`,
           [input.namespace, input.name, input.version, input.status, input.reason ?? null],
         );
         const record = updated.rows[0];
@@ -1544,7 +1577,9 @@ export class SqlRegistryStore implements RegistryStore {
                      source_hash, manifest_hash,
                      edition, compatibility_profile_hash, capability_key_id,
                      principal_type, principal_id, registry_entry, snapshot_hash,
-                     direct_url, created_at`,
+                     direct_url, created_at,
+                     registry_environment, chain_network, expires_at, expired_at, purge_after,
+                     static_purged_at, source_purged_at`,
           [current.namespace, current.name, current.version, input.evidence["verification_level"] ?? null],
         );
         await client.query(
@@ -1811,12 +1846,94 @@ export class SqlRegistryStore implements RegistryStore {
         const usedNonces = await client.query("delete from used_nonces where expires_at < $1", [input.now_iso]);
         const idempotencyKeys = await client.query("delete from idempotency_keys where expires_at < $1", [input.now_iso]);
         const quotaEvents = await client.query("delete from quota_events where created_at < $1", [input.quota_events_before_iso]);
+        const expiredVersions = await client.query(
+          `update package_versions
+           set expired_at = $1
+           where registry_environment = 'testnet-sandbox'
+             and expires_at <= $1
+             and expired_at is null`,
+          [input.now_iso],
+        );
+        const staticObjects = await client.query(
+          `select namespace, name, version
+           from package_versions
+           where registry_environment = 'testnet-sandbox'
+             and expires_at <= $1
+             and static_purged_at is null`,
+          [input.now_iso],
+        );
+        const sourceObjects = await client.query(
+          `select distinct ss.r2_key, ss.snapshot_hash
+           from source_snapshots ss
+           join package_versions due on due.snapshot_hash = ss.snapshot_hash
+           where due.registry_environment = 'testnet-sandbox'
+             and due.purge_after <= $1
+             and due.source_purged_at is null
+             and not exists (
+               select 1 from package_versions active
+               where active.snapshot_hash = ss.snapshot_hash
+                 and (active.purge_after is null or active.purge_after > $1)
+             )`,
+          [input.now_iso],
+        );
         await client.query("commit");
         return {
           used_nonces_deleted: usedNonces.rowCount ?? 0,
           idempotency_keys_deleted: idempotencyKeys.rowCount ?? 0,
           quota_events_deleted: quotaEvents.rowCount ?? 0,
+          package_versions_expired: expiredVersions.rowCount ?? 0,
+          static_objects: staticObjects.rows.map((row) => ({
+            key: `artifacts/${row.namespace}/${row.name}/releases/${row.version}.json`,
+            namespace: String(row.namespace),
+            name: String(row.name),
+            version: String(row.version),
+          })),
+          source_objects: sourceObjects.rows.map((row) => ({
+            key: String(row.r2_key),
+            snapshot_hash: String(row.snapshot_hash),
+          })),
         };
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      }
+    });
+  }
+
+  async markSandboxObjectsPurged(input: {
+    static_objects: import("./store").SandboxObjectCandidate[];
+    source_objects: import("./store").SandboxObjectCandidate[];
+    purged_at: string;
+  }): Promise<void> {
+    await this.withClient(async (client) => {
+      await client.query("begin");
+      try {
+        for (const candidate of input.static_objects) {
+          if (!candidate.namespace || !candidate.name || !candidate.version) continue;
+          await client.query(
+            `update package_versions set static_purged_at = $4
+             where namespace = $1 and name = $2 and version = $3
+               and registry_environment = 'testnet-sandbox'`,
+            [candidate.namespace, candidate.name, candidate.version, input.purged_at],
+          );
+        }
+        const snapshotHashes = input.source_objects
+          .map((candidate) => candidate.snapshot_hash)
+          .filter((value): value is string => !!value);
+        if (snapshotHashes.length > 0) {
+          await client.query(
+            `update package_versions set source_purged_at = $2
+             where snapshot_hash = any($1::text[])
+               and registry_environment = 'testnet-sandbox'`,
+            [snapshotHashes, input.purged_at],
+          );
+          await client.query(
+            `update source_snapshots set hidden_at = coalesce(hidden_at, $2), hidden_reason = 'testnet_sandbox_expired'
+             where snapshot_hash = any($1::text[])`,
+            [snapshotHashes, input.purged_at],
+          );
+        }
+        await client.query("commit");
       } catch (error) {
         await client.query("rollback");
         throw error;
@@ -1865,6 +1982,13 @@ function packageVersionFromRow(row: any): PackageVersionRecord {
     snapshot_hash: row.snapshot_hash,
     direct_url: row.direct_url,
     created_at: new Date(row.created_at).toISOString(),
+    registry_environment: row.registry_environment ?? "production",
+    network: row.chain_network ?? "mainnet",
+    expires_at: row.expires_at ? new Date(row.expires_at).toISOString() : null,
+    expired_at: row.expired_at ? new Date(row.expired_at).toISOString() : null,
+    purge_after: row.purge_after ? new Date(row.purge_after).toISOString() : null,
+    static_purged_at: row.static_purged_at ? new Date(row.static_purged_at).toISOString() : null,
+    source_purged_at: row.source_purged_at ? new Date(row.source_purged_at).toISOString() : null,
   };
   record.status = deriveRegistryEntryStatus(record, record.status);
   return record;

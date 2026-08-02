@@ -39,6 +39,12 @@ export class FilesystemObjectStore implements SnapshotWriter, RegistryObjectRead
     }
   }
 
+  async delete(key: string): Promise<void> {
+    await unlink(this.pathFor(key)).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== "ENOENT") throw error;
+    });
+  }
+
   pathFor(key: string): string {
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,1023}$/.test(key) || key.split("/").includes("..")) {
       throw new Error("registry object key is invalid");

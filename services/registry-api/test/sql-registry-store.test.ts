@@ -42,7 +42,8 @@ describePostgres("SqlRegistryStore PostgreSQL contract", () => {
         .filter((file) => /^[0-9]{4}_.+[.]sql$/.test(file))
         .sort();
       const currentCommitmentMigration = "0007_current_commitment_state.sql";
-      expect(migrationFiles.at(-1)).toBe(currentCommitmentMigration);
+      const sandboxRetentionMigration = "0008_testnet_sandbox_retention.sql";
+      expect(migrationFiles.at(-1)).toBe(sandboxRetentionMigration);
 
       for (const file of migrationFiles.filter((item) => item < currentCommitmentMigration)) {
         await client.query(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
@@ -103,7 +104,50 @@ describePostgres("SqlRegistryStore PostgreSQL contract", () => {
          where namespace = 'fixture' and name = 'contract' and version = '1.0.0'`,
       )).rows[0]?.kind).toBe("on_chain_committed");
 
+      await client.query(await readFile(new URL(`../migrations/${sandboxRetentionMigration}`, import.meta.url), "utf8"));
+
       const store = new SqlRegistryStore({ connectionString: scopedConnectionString });
+      await client.query(`
+        insert into source_snapshots(snapshot_hash, r2_key, source_hash, size_bytes, content_type)
+        values (
+          'sha256:${"b3".repeat(32)}', 'fixture/source-sandbox.tar', '${"c3".repeat(32)}', 1,
+          'application/vnd.cellscript.source+tar'
+        );
+        insert into package_versions(
+          namespace, name, version, status, artifact, verification_status, deployment_status,
+          availability_status, source_hash, manifest_hash, edition, compatibility_profile_hash,
+          capability_key_id, principal_type, principal_id, registry_entry, snapshot_hash, direct_url,
+          registry_environment, chain_network, expires_at, purge_after
+        ) values (
+          'fixture', 'contract', '2.0.0', 'source_published',
+          '{"kind":"deployable_contract","profile":"ckb_executable","consumption_mode":"deployment","language":"rust"}'::jsonb,
+          'pending', 'undeployed', 'active', '${"c3".repeat(32)}', '${"d4".repeat(32)}',
+          '2026', '${"e5".repeat(32)}', 'cap_fixturefixturefixturefixture12', 'joyid_ckb',
+          '0x1111111111111111111111111111111111111111', '{}'::jsonb,
+          'sha256:${"b3".repeat(32)}', 'https://objects.testnet.registry.cellscript.dev/artifacts/fixture/contract/releases/2.0.0.json',
+          'testnet-sandbox', 'testnet', '2026-06-23T12:00:00Z', '2026-06-24T12:00:00Z'
+        )
+      `);
+      const sandboxCleanup = await store.cleanupExpiredState({
+        now_iso: "2026-06-25T12:00:00Z",
+        quota_events_before_iso: "2026-06-23T12:00:00Z",
+      });
+      expect(sandboxCleanup).toMatchObject({
+        package_versions_expired: 1,
+        static_objects: [{ key: "artifacts/fixture/contract/releases/2.0.0.json" }],
+        source_objects: [{ key: "fixture/source-sandbox.tar", snapshot_hash: `sha256:${"b3".repeat(32)}` }],
+      });
+      expect(await store.getPackageVersion("fixture", "contract", "2.0.0")).toBeNull();
+      await store.markSandboxObjectsPurged({
+        static_objects: sandboxCleanup.static_objects ?? [],
+        source_objects: sandboxCleanup.source_objects ?? [],
+        purged_at: "2026-06-25T12:00:00Z",
+      });
+      expect((await client.query(
+        `select static_purged_at is not null as static_purged, source_purged_at is not null as source_purged
+         from package_versions where namespace = 'fixture' and name = 'contract' and version = '2.0.0'`,
+      )).rows[0]).toEqual({ static_purged: true, source_purged: true });
+
       await expect(client.query(
         `update package_versions
          set status = 'on_chain_committed', current_commitment_evidence_hash = null

@@ -70,9 +70,11 @@ export interface Env {
   MAX_SNAPSHOT_BYTES?: string;
   REGISTRY_ADMIN_TOKEN?: string;
   ENVIRONMENT?: string;
+  REGISTRY_ENVIRONMENT?: string;
   CLEANUP_QUOTA_EVENT_RETENTION_HOURS?: string;
   NAMESPACE_CLAIM_COOLDOWN_SECONDS?: string;
   CKB_MAINNET_RPC_URL?: string;
+  CKB_RPC_URL?: string;
   CKB_RPC_TIMEOUT_MS?: string;
   CKB_RPC_MAX_RESPONSE_BYTES?: string;
   CKB_DEP_GROUP_MAX_MEMBERS?: string;
@@ -87,6 +89,7 @@ export interface Env {
 
 export interface SnapshotWriter {
   put(key: string, body: Uint8Array, options: { contentType: string; metadata: Record<string, string> }): Promise<void>;
+  delete?(key: string): Promise<void>;
 }
 
 export interface RegistryObjectRead {
@@ -106,13 +109,23 @@ export interface AppDeps {
   snapshotWriter?: SnapshotWriter;
   registryObjectReader?: RegistryObjectReader;
   readinessCheck?: () => Promise<Record<string, string>>;
-  verifyMainnetDeployment?: (payload: DeploymentPayload) => Promise<VerifiedMainnetDeployment>;
+  verifyDeployment?: (payload: DeploymentPayload) => Promise<VerifiedDeployment>;
+  /** @deprecated Use verifyDeployment. */
+  verifyMainnetDeployment?: (payload: DeploymentPayload) => Promise<VerifiedDeployment>;
+  verifyRegistryCommitment?: (
+    evidence: Record<string, unknown>,
+    version: PackageVersionRecord,
+    deployed: PackageEvidenceRecord,
+  ) => Promise<Record<string, unknown>>;
+  /** @deprecated Use verifyRegistryCommitment. */
   verifyMainnetCommitment?: (
     evidence: Record<string, unknown>,
     version: PackageVersionRecord,
     deployed: PackageEvidenceRecord,
   ) => Promise<Record<string, unknown>>;
   verifyRegistryCommitmentConfiguration?: (configuration: RegistryCommitmentConfiguration) => Promise<void>;
+  listRegistryCommitmentCells?: (configuration: RegistryCommitmentConfiguration) => Promise<RegistryCommitmentCell[]>;
+  /** @deprecated Use listRegistryCommitmentCells. */
   listMainnetCommitmentCells?: (configuration: RegistryCommitmentConfiguration) => Promise<RegistryCommitmentCell[]>;
   now?: () => Date;
 }
@@ -139,6 +152,52 @@ const DEFAULT_MAX_JSON_BODY_BYTES = 6 * 1024 * 1024;
 const DEFAULT_MAX_SNAPSHOT_BYTES = 5 * 1024 * 1024;
 const DEFAULT_QUOTA_EVENT_RETENTION_HOURS = 48;
 const DEFAULT_NAMESPACE_CLAIM_COOLDOWN_SECONDS = 60 * 60;
+const TESTNET_SANDBOX_TTL_HOURS = 72;
+const TESTNET_SANDBOX_PURGE_GRACE_HOURS = 24;
+
+export type RegistryEnvironment = "production" | "testnet-sandbox";
+
+export interface RegistryRuntimeConfig {
+  environment: RegistryEnvironment;
+  network: DeploymentPayload["network"];
+  rpc_url: string;
+  record_ttl_hours: number | null;
+  object_purge_grace_hours: number | null;
+}
+
+export function registryRuntimeConfig(env: Env): RegistryRuntimeConfig {
+  const value = (env.REGISTRY_ENVIRONMENT ?? "production").trim().toLowerCase();
+  if (value === "production") {
+    return {
+      environment: "production",
+      network: "mainnet",
+      rpc_url: env.CKB_RPC_URL?.trim() || env.CKB_MAINNET_RPC_URL?.trim() || "https://mainnet.ckb.dev/rpc",
+      record_ttl_hours: null,
+      object_purge_grace_hours: null,
+    };
+  }
+  if (value === "testnet-sandbox") {
+    const registryOrigin = (env.REGISTRY_ORIGIN ?? "").trim();
+    const staticOrigin = (env.STATIC_REGISTRY_ORIGIN ?? "").trim();
+    if (!registryOrigin || !staticOrigin
+      || registryOrigin === DEFAULT_REGISTRY_ORIGIN
+      || staticOrigin === DEFAULT_STATIC_REGISTRY_ORIGIN) {
+      throw new ApiError(
+        503,
+        "testnet_sandbox_not_isolated",
+        "testnet-sandbox requires dedicated Registry API and object origins",
+      );
+    }
+    return {
+      environment: "testnet-sandbox",
+      network: "testnet",
+      rpc_url: env.CKB_RPC_URL?.trim() || "https://testnet.ckb.dev/rpc",
+      record_ttl_hours: TESTNET_SANDBOX_TTL_HOURS,
+      object_purge_grace_hours: TESTNET_SANDBOX_PURGE_GRACE_HOURS,
+    };
+  }
+  throw new ApiError(503, "invalid_registry_environment", "REGISTRY_ENVIRONMENT must be production or testnet-sandbox");
+}
 export const CANONICAL_REGISTRY_TYPE_SCRIPT = Object.freeze({
   code_hash: "0x8b6de99567accdca438818a55c16534ed10fc335f117709b1487fd2666808bfb",
   hash_type: "data1",
@@ -150,6 +209,13 @@ export const CKB_MAINNET_SIGHASH_LOCK = Object.freeze({
 export const CKB_MAINNET_SIGHASH_DEP_GROUP = Object.freeze({
   out_point: Object.freeze({
     tx_hash: "0x71a7ba8fc96349fea0ed3a5c47992e3b4084b031a42264a018e0072e8172e46c",
+    index: "0x0",
+  }),
+  dep_type: "dep_group",
+});
+export const CKB_TESTNET_SIGHASH_DEP_GROUP = Object.freeze({
+  out_point: Object.freeze({
+    tx_hash: "0xf8de3bb47d055cdf460d93a2a6e1b05f7432f9777c8c474abf4eec1d4aee5d37",
     index: "0x0",
   }),
   dep_type: "dep_group",
@@ -181,6 +247,7 @@ async function runScheduledMaintenance(env: Env, deps: AppDeps): Promise<void> {
 
 async function runScheduledMaintenanceUnderLease(env: Env, deps: AppDeps, store: RegistryStore): Promise<void> {
   const now = deps.now?.() ?? new Date();
+  const runtime = registryRuntimeConfig(env);
   const requestId = `scheduled:${now.toISOString()}`;
   const quotaCutoff = new Date(now.getTime() - quotaEventRetentionHours(env) * 60 * 60 * 1000).toISOString();
   const result = await store.cleanupExpiredState({
@@ -195,6 +262,9 @@ async function runScheduledMaintenanceUnderLease(env: Env, deps: AppDeps, store:
       ...result,
     },
   });
+  if (runtime.environment === "testnet-sandbox") {
+    await purgeExpiredSandboxObjects(env, deps, store, now, requestId, result);
+  }
   let configuration: RegistryCommitmentConfiguration | null;
   try {
     configuration = registryCommitmentConfiguration(env, false);
@@ -221,6 +291,7 @@ async function runScheduledMaintenanceUnderLease(env: Env, deps: AppDeps, store:
       "registry_commitment_cell_dep_invalid",
       "registry_commitment_code_hash_unresolved",
       "ckb_rpc_not_mainnet",
+      "ckb_rpc_not_testnet",
       "deployment_cell_not_live",
       "invalid_dep_group",
       "chain_observation_uncommitted",
@@ -244,6 +315,46 @@ async function runScheduledMaintenanceUnderLease(env: Env, deps: AppDeps, store:
   await reconcileRegistryChainState(env, deps, store, now, requestId);
 }
 
+async function purgeExpiredSandboxObjects(
+  env: Env,
+  deps: AppDeps,
+  store: RegistryStore,
+  now: Date,
+  requestId: string,
+  result: Awaited<ReturnType<RegistryStore["cleanupExpiredState"]>>,
+): Promise<void> {
+  const staticCandidates = result.static_objects ?? [];
+  const sourceCandidates = result.source_objects ?? [];
+  if (staticCandidates.length === 0 && sourceCandidates.length === 0) return;
+  const writer = deps.snapshotWriter ?? r2SnapshotWriter(env);
+  if (!writer.delete) {
+    throw new ApiError(503, "registry_object_delete_unconfigured", "testnet-sandbox requires an object store with delete support");
+  }
+  const deletedStatic = [];
+  const deletedSource = [];
+  for (const candidate of staticCandidates) {
+    await writer.delete(candidate.key);
+    deletedStatic.push(candidate);
+  }
+  for (const candidate of sourceCandidates) {
+    await writer.delete(candidate.key);
+    deletedSource.push(candidate);
+  }
+  await store.markSandboxObjectsPurged({
+    static_objects: deletedStatic,
+    source_objects: deletedSource,
+    purged_at: now.toISOString(),
+  });
+  await store.appendAuditEvent({
+    request_id: requestId,
+    event_type: "maintenance.testnet_sandbox_objects_purged",
+    data: {
+      static_objects_deleted: deletedStatic.length,
+      source_objects_deleted: deletedSource.length,
+    },
+  });
+}
+
 async function routeRequest(
   request: Request,
   env: Env,
@@ -257,16 +368,28 @@ async function routeRequest(
     return new Response(null, { status: 204, headers });
   }
   if (request.method === "GET" && url.pathname === "/health") {
-    return json({ status: "ok", request_id: requestId }, 200, headers);
+    const runtime = registryRuntimeConfig(env);
+    return json({
+      status: "ok",
+      request_id: requestId,
+      registry_environment: runtime.environment,
+      network: runtime.network,
+      record_ttl_hours: runtime.record_ttl_hours,
+    }, 200, headers);
   }
   if (request.method === "GET" && url.pathname === "/ready") {
     return handleReadiness(env, deps, requestId, headers);
   }
   const staticPackageVersionMatch = url.pathname.match(/^\/artifacts\/([^/]+)\/([^/]+)\/releases\/([^/]+)[.]json$/);
   if (request.method === "GET" && staticPackageVersionMatch) {
+    const runtime = registryRuntimeConfig(env);
+    const staticStore = runtime.environment === "testnet-sandbox"
+      ? deps.store ?? getProductionStore(env)
+      : deps.store;
     return handleStaticPackageVersionRead(
       env,
       deps,
+      staticStore,
       requestId,
       decodeURIComponent(staticPackageVersionMatch[1] ?? ""),
       decodeURIComponent(staticPackageVersionMatch[2] ?? ""),
@@ -276,6 +399,7 @@ async function routeRequest(
 
   const store = deps.store ?? getProductionStore(env);
   const now = deps.now?.() ?? new Date();
+  const runtime = registryRuntimeConfig(env);
   const registryOrigin = env.REGISTRY_ORIGIN ?? DEFAULT_REGISTRY_ORIGIN;
   const staticOrigin = env.STATIC_REGISTRY_ORIGIN ?? DEFAULT_STATIC_REGISTRY_ORIGIN;
 
@@ -320,6 +444,7 @@ async function routeRequest(
       staticOrigin,
       now,
       deps,
+      runtime,
       headers,
       decodeURIComponent(deploymentMatch[1] ?? ""),
       decodeURIComponent(deploymentMatch[2] ?? ""),
@@ -464,6 +589,7 @@ async function routeRequest(
 async function handleStaticPackageVersionRead(
   env: Env,
   deps: AppDeps,
+  store: RegistryStore | undefined,
   requestId: string,
   namespaceFromPath: string,
   nameFromPath: string,
@@ -472,6 +598,9 @@ async function handleStaticPackageVersionRead(
   const namespace = validatePackageIdent(namespaceFromPath, "namespace");
   const name = validatePackageIdent(nameFromPath, "name");
   const version = validateVersion(versionFromPath);
+  if (store && !await store.getPackageVersion(namespace, name, version)) {
+    throw new ApiError(404, "registry_object_not_found", "artifact release registry object was not found");
+  }
   const key = staticPackageVersionKey(namespace, name, version);
   const reader = deps.registryObjectReader ?? r2RegistryObjectReader(env);
   const object = await reader.get(key);
@@ -553,6 +682,8 @@ async function handleListPackages(
       categories: Array.isArray(entry["categories"]) ? entry["categories"] : [],
       releases: versions.map((version) => staticRegistryVersionPayload(version, snapshotForVersion(snapshots, version), staticOrigin)),
       updated_at: latest.created_at,
+      registry_environment: latest.registry_environment ?? "production",
+      network: latest.network ?? "mainnet",
     };
   });
   return json(
@@ -618,6 +749,8 @@ async function handlePublicPackageDetail(
       verification_status: latest.verification_status,
       deployment_status: latest.deployment_status,
       availability_status: latest.availability_status,
+      registry_environment: latest.registry_environment ?? "production",
+      network: latest.network ?? "mainnet",
       releases: payloads,
     },
     200,
@@ -664,7 +797,7 @@ async function handlePublicRegistryCommitment(
   const evidence = await store.listPackageEvidence(namespace, name, version);
   const deployed = evidence.filter((item) => item.kind === "deployed").at(-1);
   if (!deployed) {
-    throw new ApiError(409, "deployment_evidence_missing", "Registry commitment requires accepted mainnet deployment evidence");
+    throw new ApiError(409, "deployment_evidence_missing", "Registry commitment requires accepted deployment evidence for this environment");
   }
   if (!deployed.evidence["chain_verification"]) {
     throw new ApiError(409, "deployment_chain_evidence_missing", "Registry commitment requires RPC-verified deployment evidence");
@@ -704,7 +837,7 @@ async function handlePublicRegistryCommitment(
         ? {
             transaction_intent: {
               schema: "cellscript-registry-commitment-transaction-intent-v1",
-              network: "mainnet",
+              network: registryRuntimeConfig(env).network,
               output: {
                 lock: configuration.commitment_lock_script,
                 type: configuration.type_script,
@@ -739,6 +872,7 @@ async function handleRecordDeployment(
   staticOrigin: string,
   now: Date,
   deps: AppDeps,
+  runtime: RegistryRuntimeConfig,
   headers: Headers,
   namespaceFromPath: string,
   nameFromPath: string,
@@ -746,7 +880,7 @@ async function handleRecordDeployment(
 ): Promise<Response> {
   await throttleRequestSource(store, request, requestId, "deployment", 40, 60 * 60, now);
   const body = await readJson(request, Math.min(maxJsonBytes(env), 512 * 1024));
-  const payload = validateDeploymentPayload(body["payload"], registryOrigin, now);
+  const payload = validateDeploymentPayload(body["payload"], registryOrigin, now, runtime.network);
   const namespace = validatePackageIdent(namespaceFromPath, "namespace");
   const name = validatePackageIdent(nameFromPath, "name");
   const release = validateVersion(releaseFromPath);
@@ -823,9 +957,10 @@ async function handleRecordDeployment(
       principal_id: capability.principal_id,
       capability_key_id: capability.key_id,
     });
-    const chain = deps.verifyMainnetDeployment
-      ? await deps.verifyMainnetDeployment(payload)
-      : await verifyMainnetDeployment(env, payload);
+    const deploymentVerifier = deps.verifyDeployment ?? deps.verifyMainnetDeployment;
+    const chain = deploymentVerifier
+      ? await deploymentVerifier(payload)
+      : await verifyDeployment(env, payload);
     const previousEvidence = await store.listPackageEvidence(namespace, name, release);
     const buildEvidence = latestBuildEvidence(previousEvidence, version);
     const evidence = {
@@ -837,7 +972,7 @@ async function handleRecordDeployment(
       source_hash: version.source_hash,
       manifest_hash: version.manifest_hash,
       verified_build_evidence_hash: buildEvidence.evidence_hash,
-      network: "mainnet",
+      network: runtime.network,
       artifact_hash: payload.artifact_hash,
       data_hash: payload.data_hash,
       code_hash: payload.code_hash,
@@ -1083,7 +1218,7 @@ interface LiveCellRpcResult {
   block_hash?: string | null;
 }
 
-interface VerifiedMainnetDeployment {
+interface VerifiedDeployment {
   block_hash?: string | null;
   block_number?: string;
   tip_block_number?: string;
@@ -1092,14 +1227,18 @@ interface VerifiedMainnetDeployment {
   dep_group_size?: number;
 }
 
-export async function verifyMainnetDeployment(env: Env, payload: DeploymentPayload): Promise<VerifiedMainnetDeployment> {
-  const rpcUrl = env.CKB_MAINNET_RPC_URL?.trim() || "https://mainnet.ckb.dev/rpc";
+export async function verifyDeployment(env: Env, payload: DeploymentPayload): Promise<VerifiedDeployment> {
+  const runtime = registryRuntimeConfig(env);
+  if (payload.network !== runtime.network) {
+    throw new ApiError(400, "unsupported_deployment_network", `deployment must use ${runtime.network}`);
+  }
+  const rpcUrl = runtime.rpc_url;
   const rpcOptions = {
     timeout_ms: boundedIntegerEnv(env.CKB_RPC_TIMEOUT_MS, 10_000, 1_000, 30_000),
     maximum_bytes: boundedIntegerEnv(env.CKB_RPC_MAX_RESPONSE_BYTES, 2 * 1024 * 1024, 64 * 1024, 8 * 1024 * 1024),
   };
-  await requireMainnetRpc(rpcUrl, rpcOptions);
-  const declared = await getMainnetLiveCell(rpcUrl, payload.out_point, rpcOptions);
+  await requireRegistryRpc(rpcUrl, rpcOptions, runtime.network);
+  const declared = await getLiveCell(rpcUrl, payload.out_point, rpcOptions);
   const observation = await requireMinimumConfirmations(env, rpcUrl, declared.block_hash, rpcOptions, "deployment");
   if (payload.dep_type === "code") {
     verifyDeploymentCodeCell(declared.cell, payload);
@@ -1109,7 +1248,7 @@ export async function verifyMainnetDeployment(env: Env, payload: DeploymentPaylo
   const depGroupData = assertPlainObject(declared.cell["data"], "invalid_ckb_rpc_response");
   const content = depGroupData["content"];
   if (typeof content !== "string") {
-    throw new ApiError(409, "invalid_dep_group", "mainnet DepGroup Cell did not return output data");
+    throw new ApiError(409, "invalid_dep_group", `${runtime.network} DepGroup Cell did not return output data`);
   }
   const members = parseDepGroupOutPoints(content);
   const memberLimit = boundedIntegerEnv(env.CKB_DEP_GROUP_MAX_MEMBERS, 256, 1, 2048);
@@ -1119,7 +1258,7 @@ export async function verifyMainnetDeployment(env: Env, payload: DeploymentPaylo
   for (let offset = 0; offset < members.length; offset += 16) {
     const candidates = await Promise.all(members.slice(offset, offset + 16).map(async (member) => {
       try {
-        const candidate = await getMainnetLiveCell(rpcUrl, member, rpcOptions);
+        const candidate = await getLiveCell(rpcUrl, member, rpcOptions);
         verifyDeploymentCodeCell(candidate.cell, payload);
         await requireMinimumConfirmations(env, rpcUrl, candidate.block_hash, rpcOptions, "DepGroup code member");
         return member;
@@ -1143,7 +1282,12 @@ export async function verifyMainnetDeployment(env: Env, payload: DeploymentPaylo
   throw new ApiError(409, "dep_group_artifact_not_found", "DepGroup does not resolve to a live code Cell matching the published executable");
 }
 
-async function getMainnetLiveCell(
+/** Backward-compatible export for callers that predate the isolated testnet environment. */
+export async function verifyMainnetDeployment(env: Env, payload: DeploymentPayload): Promise<VerifiedDeployment> {
+  return verifyDeployment(env, payload);
+}
+
+async function getLiveCell(
   rpcUrl: string,
   outPoint: { tx_hash: string; index: number },
   options: { timeout_ms: number; maximum_bytes: number },
@@ -1156,7 +1300,7 @@ async function getMainnetLiveCell(
   );
   const result = assertPlainObject(rpc, "invalid_ckb_rpc_response");
   if (result["status"] !== "live") {
-    throw new ApiError(409, "deployment_cell_not_live", "deployment OutPoint is not a live mainnet Cell");
+    throw new ApiError(409, "deployment_cell_not_live", "deployment OutPoint is not a live Cell on the configured network");
   }
   const cell = assertPlainObject(result["cell"], "invalid_ckb_rpc_response");
   return {
@@ -1166,17 +1310,22 @@ async function getMainnetLiveCell(
   };
 }
 
-async function requireMainnetRpc(
+async function requireRegistryRpc(
   rpcUrl: string,
   options: { timeout_ms: number; maximum_bytes: number },
+  expectedNetwork: DeploymentPayload["network"] = "mainnet",
 ): Promise<void> {
   const info = assertPlainObject(await ckbRpcRequest(rpcUrl, "get_blockchain_info", [], options), "invalid_ckb_rpc_response");
   const chain = typeof info["chain"] === "string"
     ? info["chain"]
     : typeof info["chain_id"] === "string" ? info["chain_id"] : "";
   const normalized = chain.trim().toLowerCase().replaceAll("_", "-");
-  if (!(normalized === "ckb" || normalized === "ckb-mainnet")) {
-    throw new ApiError(503, "ckb_rpc_not_mainnet", `configured CKB RPC is not mainnet (reported chain '${chain || "unknown"}')`);
+  const accepted = expectedNetwork === "mainnet"
+    ? ["ckb", "ckb-mainnet"]
+    : ["ckb-testnet", "pudge", "pudge-testnet"];
+  if (!accepted.includes(normalized)) {
+    const code = expectedNetwork === "mainnet" ? "ckb_rpc_not_mainnet" : "ckb_rpc_not_testnet";
+    throw new ApiError(503, code, `configured CKB RPC is not ${expectedNetwork} (reported chain '${chain || "unknown"}')`);
   }
 }
 
@@ -1254,17 +1403,17 @@ async function ckbRpcRequest(
       signal: AbortSignal.timeout(options.timeout_ms),
     });
   } catch (error) {
-    throw new ApiError(503, "ckb_rpc_unavailable", `mainnet CKB RPC ${method} request failed: ${error instanceof Error ? error.message : String(error)}`);
+    throw new ApiError(503, "ckb_rpc_unavailable", `CKB RPC ${method} request failed: ${error instanceof Error ? error.message : String(error)}`);
   }
   if (!response.ok) {
-    throw new ApiError(503, "ckb_rpc_unavailable", `mainnet CKB RPC returned HTTP ${response.status}`);
+    throw new ApiError(503, "ckb_rpc_unavailable", `CKB RPC returned HTTP ${response.status}`);
   }
   const rpc = assertPlainObject(await readBoundedRpcJson(response, options.maximum_bytes), "invalid_ckb_rpc_response");
   if (rpc["error"]) {
-    throw new ApiError(503, "ckb_rpc_error", `mainnet CKB RPC rejected ${method}`);
+    throw new ApiError(503, "ckb_rpc_error", `CKB RPC rejected ${method}`);
   }
   if (!("result" in rpc)) {
-    throw new ApiError(503, "invalid_ckb_rpc_response", `mainnet CKB RPC ${method} returned no result`);
+    throw new ApiError(503, "invalid_ckb_rpc_response", `CKB RPC ${method} returned no result`);
   }
   return rpc["result"];
 }
@@ -1272,10 +1421,10 @@ async function ckbRpcRequest(
 async function readBoundedRpcJson(response: Response, maximumBytes: number): Promise<unknown> {
   const declaredLength = response.headers.get("content-length");
   if (declaredLength && Number(declaredLength) > maximumBytes) {
-    throw new ApiError(503, "ckb_rpc_response_too_large", "mainnet CKB RPC response exceeds the configured size limit");
+    throw new ApiError(503, "ckb_rpc_response_too_large", "CKB RPC response exceeds the configured size limit");
   }
   if (!response.body) {
-    throw new ApiError(503, "invalid_ckb_rpc_response", "mainnet CKB RPC returned an empty response");
+    throw new ApiError(503, "invalid_ckb_rpc_response", "CKB RPC returned an empty response");
   }
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -1286,7 +1435,7 @@ async function readBoundedRpcJson(response: Response, maximumBytes: number): Pro
     size += value.byteLength;
     if (size > maximumBytes) {
       await reader.cancel();
-      throw new ApiError(503, "ckb_rpc_response_too_large", "mainnet CKB RPC response exceeds the configured size limit");
+      throw new ApiError(503, "ckb_rpc_response_too_large", "CKB RPC response exceeds the configured size limit");
     }
     chunks.push(value);
   }
@@ -1299,7 +1448,7 @@ async function readBoundedRpcJson(response: Response, maximumBytes: number): Pro
   try {
     return JSON.parse(new TextDecoder().decode(body));
   } catch {
-    throw new ApiError(503, "invalid_ckb_rpc_response", "mainnet CKB RPC returned invalid JSON");
+    throw new ApiError(503, "invalid_ckb_rpc_response", "CKB RPC returned invalid JSON");
   }
 }
 
@@ -1426,7 +1575,37 @@ function validateCanonicalMainnetRegistryConfiguration(
   commitmentLockScript: Record<string, unknown>,
   commitmentLockCellDep: Record<string, unknown>,
 ): void {
+  if (env.REGISTRY_ENVIRONMENT?.trim().toLowerCase() === "testnet-sandbox") {
+    validateCanonicalRegistryScripts(
+      typeScript,
+      typeScriptCellDep,
+      commitmentLockScript,
+      commitmentLockCellDep,
+      CKB_TESTNET_SIGHASH_DEP_GROUP,
+      "testnet-sandbox",
+    );
+    return;
+  }
   if (env.ENVIRONMENT?.trim().toLowerCase() !== "production") return;
+
+  validateCanonicalRegistryScripts(
+    typeScript,
+    typeScriptCellDep,
+    commitmentLockScript,
+    commitmentLockCellDep,
+    CKB_MAINNET_SIGHASH_DEP_GROUP,
+    "production",
+  );
+}
+
+function validateCanonicalRegistryScripts(
+  typeScript: Record<string, unknown>,
+  typeScriptCellDep: Record<string, unknown>,
+  commitmentLockScript: Record<string, unknown>,
+  commitmentLockCellDep: Record<string, unknown>,
+  sighashDepGroup: { out_point: { tx_hash: string; index: string }; dep_type: string },
+  environment: RegistryEnvironment,
+): void {
 
   const typeScriptIsCanonical = sameCkbHash(
     String(typeScript["code_hash"]),
@@ -1440,7 +1619,7 @@ function validateCanonicalMainnetRegistryConfiguration(
     throw new ApiError(
       503,
       "registry_commitment_misconfigured",
-      "production Registry Type Script must use the tracked immutable data1 release and a direct code CellDep",
+      `${environment} Registry Type Script must use the tracked immutable data1 release and a direct code CellDep`,
     );
   }
 
@@ -1452,11 +1631,11 @@ function validateCanonicalMainnetRegistryConfiguration(
     && commitmentLockScript["hash_type"] === CKB_MAINNET_SIGHASH_LOCK.hash_type
     && typeof lockArgs === "string"
     && /^0x[0-9a-fA-F]{40}$/.test(lockArgs);
-  if (!lockIsCanonical || !sameConfiguredCellDep(commitmentLockCellDep, CKB_MAINNET_SIGHASH_DEP_GROUP)) {
+  if (!lockIsCanonical || !sameConfiguredCellDep(commitmentLockCellDep, sighashDepGroup)) {
     throw new ApiError(
       503,
       "registry_commitment_misconfigured",
-      "production commitment custody must use a 20-byte mainnet secp256k1-blake160 lock and the genesis DepGroup",
+      `${environment} commitment custody must use a 20-byte secp256k1-blake160 lock and the matching network genesis DepGroup`,
     );
   }
 }
@@ -1477,12 +1656,13 @@ async function verifyRegistryCommitmentConfigurationOnChain(
   env: Env,
   configuration: RegistryCommitmentConfiguration,
 ): Promise<void> {
-  const rpcUrl = env.CKB_MAINNET_RPC_URL?.trim() || "https://mainnet.ckb.dev/rpc";
+  const runtime = registryRuntimeConfig(env);
+  const rpcUrl = runtime.rpc_url;
   const rpcOptions = {
     timeout_ms: boundedIntegerEnv(env.CKB_RPC_TIMEOUT_MS, 10_000, 1_000, 30_000),
     maximum_bytes: boundedIntegerEnv(env.CKB_RPC_MAX_RESPONSE_BYTES, 2 * 1024 * 1024, 64 * 1024, 8 * 1024 * 1024),
   };
-  await requireMainnetRpc(rpcUrl, rpcOptions);
+  await requireRegistryRpc(rpcUrl, rpcOptions, runtime.network);
   await verifyConfiguredScriptCellDepOnChain(
     env,
     rpcUrl,
@@ -1526,7 +1706,7 @@ async function verifyConfiguredScriptCellDepOnChain(
     tx_hash: String(rawOutPoint["tx_hash"]),
     index: parseRpcUint32(rawOutPoint["index"], `${label} CellDep out_point.index`),
   };
-  const declared = await getMainnetLiveCell(rpcUrl, outPoint, rpcOptions);
+  const declared = await getLiveCell(rpcUrl, outPoint, rpcOptions);
   await requireMinimumConfirmations(env, rpcUrl, declared.block_hash, rpcOptions, `${label} CellDep`);
   const candidates: Record<string, unknown>[] = [];
   if (cellDep["dep_type"] === "code") {
@@ -1544,7 +1724,7 @@ async function verifyConfiguredScriptCellDepOnChain(
     for (let offset = 0; offset < members.length; offset += 16) {
       const page = await Promise.all(members.slice(offset, offset + 16).map(async (member) => {
         try {
-          const live = await getMainnetLiveCell(rpcUrl, member, rpcOptions);
+          const live = await getLiveCell(rpcUrl, member, rpcOptions);
           await requireMinimumConfirmations(env, rpcUrl, live.block_hash, rpcOptions, `${label} code Cell`);
           return live.cell;
         } catch (error) {
@@ -1624,16 +1804,17 @@ function validateConfiguredCellDep(cellDep: Record<string, unknown>, label: stri
   }
 }
 
-async function listMainnetRegistryCommitmentCells(
+async function listRegistryCommitmentCells(
   env: Env,
   configuration: RegistryCommitmentConfiguration,
 ): Promise<RegistryCommitmentCell[]> {
-  const rpcUrl = env.CKB_MAINNET_RPC_URL?.trim() || "https://mainnet.ckb.dev/rpc";
+  const runtime = registryRuntimeConfig(env);
+  const rpcUrl = runtime.rpc_url;
   const rpcOptions = {
     timeout_ms: boundedIntegerEnv(env.CKB_RPC_TIMEOUT_MS, 10_000, 1_000, 30_000),
     maximum_bytes: boundedIntegerEnv(env.CKB_RPC_MAX_RESPONSE_BYTES, 2 * 1024 * 1024, 64 * 1024, 8 * 1024 * 1024),
   };
-  await requireMainnetRpc(rpcUrl, rpcOptions);
+  await requireRegistryRpc(rpcUrl, rpcOptions, runtime.network);
   const tip = assertPlainObject(await ckbRpcRequest(rpcUrl, "get_tip_header", [], rpcOptions), "invalid_ckb_rpc_response");
   const tipNumber = parseRpcBlockNumber(tip["number"], "CKB tip block number");
   const minimumConfirmations = boundedIntegerEnv(env.CKB_MIN_CONFIRMATIONS, 24, 1, 10_000);
@@ -1657,7 +1838,7 @@ async function listMainnetRegistryCommitmentCells(
     const page = assertPlainObject(await ckbRpcRequest(rpcUrl, "get_cells", params, rpcOptions), "invalid_ckb_rpc_response");
     const objects = page["objects"];
     if (!Array.isArray(objects)) {
-      throw new ApiError(503, "invalid_ckb_rpc_response", "mainnet CKB Indexer get_cells returned no objects array");
+      throw new ApiError(503, "invalid_ckb_rpc_response", "CKB Indexer get_cells returned no objects array");
     }
     for (const raw of objects) {
       const cell = assertPlainObject(raw, "invalid_ckb_rpc_response");
@@ -1687,7 +1868,7 @@ async function listMainnetRegistryCommitmentCells(
     if (objects.length < 100) return cells;
     const cursor = page["last_cursor"];
     if (typeof cursor !== "string" || cursor === after) {
-      throw new ApiError(503, "invalid_ckb_rpc_response", "mainnet CKB Indexer pagination cursor is invalid");
+      throw new ApiError(503, "invalid_ckb_rpc_response", "CKB Indexer pagination cursor is invalid");
     }
     after = cursor;
   }
@@ -1710,9 +1891,10 @@ async function reconcileRegistryChainState(
   requestId: string,
 ): Promise<void> {
   const configuration = registryCommitmentConfiguration(env, true)!;
-  const cells = deps.listMainnetCommitmentCells
-    ? await deps.listMainnetCommitmentCells(configuration)
-    : await listMainnetRegistryCommitmentCells(env, configuration);
+  const listCommitmentCells = deps.listRegistryCommitmentCells ?? deps.listMainnetCommitmentCells;
+  const cells = listCommitmentCells
+    ? await listCommitmentCells(configuration)
+    : await listRegistryCommitmentCells(env, configuration);
   const cellsByHash = new Map(cells.map((cell) => [cell.commitment_hash.toLowerCase(), cell]));
   const staticOrigin = env.STATIC_REGISTRY_ORIGIN ?? DEFAULT_STATIC_REGISTRY_ORIGIN;
   let checked = 0;
@@ -1731,9 +1913,10 @@ async function reconcileRegistryChainState(
     const deployed = previous.filter((item) => item.kind === "deployed").at(-1);
     if (!deployed) continue;
     try {
-      const payload = deploymentPayloadFromEvidence(version, deployed.evidence);
-      if (deps.verifyMainnetDeployment) await deps.verifyMainnetDeployment(payload);
-      else await verifyMainnetDeployment(env, payload);
+      const payload = deploymentPayloadFromEvidence(version, deployed.evidence, registryRuntimeConfig(env).network);
+      const deploymentVerifier = deps.verifyDeployment ?? deps.verifyMainnetDeployment;
+      if (deploymentVerifier) await deploymentVerifier(payload);
+      else await verifyDeployment(env, payload);
     } catch (error) {
       if (error instanceof ApiError && [
         "deployment_cell_not_live",
@@ -1798,13 +1981,13 @@ async function reconcileRegistryChainState(
     let evidence: Record<string, unknown> = {
       schema: "cellscript-registry-evidence",
       kind: "on_chain_committed",
-      producer: "cellscript-registry-mainnet-indexer",
+      producer: `cellscript-registry-${registryRuntimeConfig(env).network}-indexer`,
       generated_at: now.toISOString(),
       verification_status: "passed",
       source_hash: version.source_hash,
       manifest_hash: version.manifest_hash,
       deployed_evidence_hash: deployed.evidence_hash,
-      network: "mainnet",
+      network: registryRuntimeConfig(env).network,
       commitment_tx_hash: cell.out_point.tx_hash,
       commitment_hash: commitmentHash,
       commitment_lock_hash: configuration.commitment_lock_hash,
@@ -1822,7 +2005,13 @@ async function reconcileRegistryChainState(
     if (version.compatibility_profile_hash) {
       evidence = { ...evidence, compatibility_profile_hash: version.compatibility_profile_hash };
     }
-    evidence = validatePromotionEvidence(evidence, "on_chain_committed", version, previous);
+    evidence = validatePromotionEvidence(
+      evidence,
+      "on_chain_committed",
+      version,
+      previous,
+      registryRuntimeConfig(env).network,
+    );
     const evidenceHash = `sha256:${await sha256Hex(canonicalJson(evidence))}`;
     const promoted = await store.promotePackageVersion({
       namespace: version.namespace,
@@ -1832,7 +2021,7 @@ async function reconcileRegistryChainState(
       evidence_hash: evidenceHash,
       evidence,
       request_id: requestId,
-      admin_actor: "registry-mainnet-indexer",
+      admin_actor: `registry-${registryRuntimeConfig(env).network}-indexer`,
     });
     committed += 1;
     await syncLifecycleStatic(env, deps, store, promoted.version, staticOrigin, requestId);
@@ -1880,7 +2069,11 @@ async function demoteCurrentCommitments(
   return demoted;
 }
 
-function deploymentPayloadFromEvidence(version: PackageVersionRecord, evidence: Record<string, unknown>): DeploymentPayload {
+function deploymentPayloadFromEvidence(
+  version: PackageVersionRecord,
+  evidence: Record<string, unknown>,
+  network: DeploymentPayload["network"],
+): DeploymentPayload {
   const outPoint = assertPlainObject(evidence["out_point"], "invalid_deployment_out_point");
   return {
     protocol: DEPLOYMENT_PROTOCOL,
@@ -1889,7 +2082,7 @@ function deploymentPayloadFromEvidence(version: PackageVersionRecord, evidence: 
     namespace: version.namespace,
     name: version.name,
     release: version.version,
-    network: "mainnet",
+    network,
     artifact_hash: String(evidence["artifact_hash"]),
     data_hash: String(evidence["data_hash"]),
     code_hash: String(evidence["code_hash"]),
@@ -1927,7 +2120,7 @@ async function syncLifecycleStatic(
   );
 }
 
-async function verifyMainnetRegistryCommitment(
+async function verifyRegistryCommitment(
   env: Env,
   evidence: Record<string, unknown>,
   version: PackageVersionRecord,
@@ -1940,13 +2133,14 @@ async function verifyMainnetRegistryCommitment(
   }
   const rawOutPoint = assertPlainObject(evidence["commitment_out_point"], "invalid_commitment_out_point");
   const outPoint = { tx_hash: String(rawOutPoint["tx_hash"]), index: Number(rawOutPoint["index"]) };
-  const rpcUrl = env.CKB_MAINNET_RPC_URL?.trim() || "https://mainnet.ckb.dev/rpc";
+  const runtime = registryRuntimeConfig(env);
+  const rpcUrl = runtime.rpc_url;
   const rpcOptions = {
     timeout_ms: boundedIntegerEnv(env.CKB_RPC_TIMEOUT_MS, 10_000, 1_000, 30_000),
     maximum_bytes: boundedIntegerEnv(env.CKB_RPC_MAX_RESPONSE_BYTES, 2 * 1024 * 1024, 64 * 1024, 8 * 1024 * 1024),
   };
-  await requireMainnetRpc(rpcUrl, rpcOptions);
-  const live = await getMainnetLiveCell(rpcUrl, outPoint, rpcOptions);
+  await requireRegistryRpc(rpcUrl, rpcOptions, runtime.network);
+  const live = await getLiveCell(rpcUrl, outPoint, rpcOptions);
   const observation = await requireMinimumConfirmations(env, rpcUrl, live.block_hash, rpcOptions, "Registry commitment");
   const data = assertPlainObject(live.cell["data"], "invalid_ckb_rpc_response");
   if (typeof data["content"] !== "string" || data["content"].toLowerCase() !== registryCommitmentCellData(expectedHash)) {
@@ -1979,6 +2173,7 @@ async function verifyMainnetRegistryCommitment(
 }
 
 async function handleReadiness(env: Env, deps: AppDeps, requestId: string, headers: Headers): Promise<Response> {
+  let runtime: RegistryRuntimeConfig | null = null;
   const storeConfigured = !!deps.store || !!env.HYPERDRIVE;
   const objectStoreConfigured =
     (!!deps.snapshotWriter && !!deps.registryObjectReader)
@@ -1991,6 +2186,24 @@ async function handleReadiness(env: Env, deps: AppDeps, requestId: string, heade
     admin_token: adminConfigured ? "configured" : "missing_secret",
   };
   let dependenciesHealthy = true;
+  try {
+    runtime = registryRuntimeConfig(env);
+    checks["registry_environment"] = runtime.environment;
+    checks["ckb_network"] = runtime.network;
+    if (runtime.environment === "testnet-sandbox" || env.CKB_RPC_URL || env.CKB_MAINNET_RPC_URL) {
+      await requireRegistryRpc(runtime.rpc_url, {
+        timeout_ms: boundedIntegerEnv(env.CKB_RPC_TIMEOUT_MS, 10_000, 1_000, 30_000),
+        maximum_bytes: boundedIntegerEnv(env.CKB_RPC_MAX_RESPONSE_BYTES, 2 * 1024 * 1024, 64 * 1024, 8 * 1024 * 1024),
+      }, runtime.network);
+      checks["ckb_rpc"] = "configured_network_confirmed";
+    } else {
+      checks["ckb_rpc"] = "default_mainnet";
+    }
+  } catch {
+    checks["registry_environment"] = "misconfigured";
+    checks["ckb_rpc"] = "wrong_network_or_unreachable";
+    dependenciesHealthy = false;
+  }
   try {
     const commitmentConfiguration = registryCommitmentConfiguration(env, false);
     if (commitmentConfiguration) {
@@ -2273,7 +2486,8 @@ async function handleAdminPackageVersionPromotion(
   if (kind === "deployed" && packageVersionRequiresReproduction(existing) && existing.verification_status !== "verified") {
     throw new ApiError(409, "reproduction_evidence_missing", "reproducible artifacts require accepted independent reproduction evidence before deployment");
   }
-  let evidence = validatePromotionEvidence(body["evidence"], kind, existing, previousEvidence);
+  const runtime = registryRuntimeConfig(env);
+  let evidence = validatePromotionEvidence(body["evidence"], kind, existing, previousEvidence, runtime.network);
   if (kind === "reproduced_build") {
     evidence = {
       ...evidence,
@@ -2291,7 +2505,7 @@ async function handleAdminPackageVersionPromotion(
       namespace,
       name,
       release: version,
-      network: "mainnet",
+      network: runtime.network,
       artifact_hash: String(evidence["artifact_hash"]),
       data_hash: String(evidence["data_hash"]),
       code_hash: String(evidence["code_hash"]),
@@ -2304,9 +2518,10 @@ async function handleAdminPackageVersionPromotion(
       expires_at: String(evidence["generated_at"]),
       cli_version: "admin-evidence-recovery",
     };
-    const chain = deps.verifyMainnetDeployment
-      ? await deps.verifyMainnetDeployment(deploymentPayload)
-      : await verifyMainnetDeployment(env, deploymentPayload);
+    const deploymentVerifier = deps.verifyDeployment ?? deps.verifyMainnetDeployment;
+    const chain = deploymentVerifier
+      ? await deploymentVerifier(deploymentPayload)
+      : await verifyDeployment(env, deploymentPayload);
     evidence = {
       ...evidence,
       chain_verification: "get_live_cell",
@@ -2324,9 +2539,10 @@ async function handleAdminPackageVersionPromotion(
     }
     const configuration = registryCommitmentConfiguration(env, true)!;
     await requireLiveRegistryCommitmentConfiguration(env, deps, configuration);
-    const chainEvidence = deps.verifyMainnetCommitment
-      ? await deps.verifyMainnetCommitment(evidence, existing, deployed)
-      : await verifyMainnetRegistryCommitment(env, evidence, existing, deployed);
+    const verifyCommitment = deps.verifyRegistryCommitment ?? deps.verifyMainnetCommitment;
+    const chainEvidence = verifyCommitment
+      ? await verifyCommitment(evidence, existing, deployed)
+      : await verifyRegistryCommitment(env, evidence, existing, deployed);
     evidence = { ...evidence, ...chainEvidence };
   }
   const evidenceHash = `sha256:${await sha256Hex(canonicalJson(evidence))}`;
@@ -2559,6 +2775,7 @@ async function handlePublishVersion(
   namespaceFromPath: string,
   nameFromPath: string,
 ): Promise<Response> {
+  const runtime = registryRuntimeConfig(env);
   await throttleRequestSource(store, request, requestId, "publish", 80, 60 * 60, now);
   const body = await readJson(request, maxJsonBytes(env));
   const payload = validatePublishPayload(body["payload"], registryOrigin, now);
@@ -2606,6 +2823,10 @@ async function handlePublishVersion(
   }
   await throttle(store, requestId, `capability:${capability.key_id}`, "publish", 60, 60 * 60, now);
   await throttle(store, requestId, `artifact:${payload.namespace}/${payload.name}`, "publish", 12, 60 * 60, now);
+  if (runtime.environment === "testnet-sandbox") {
+    await throttle(store, requestId, `sandbox-principal:${capability.principal_type}:${capability.principal_id}`, "sandbox_publish", 20, 24 * 60 * 60, now);
+    await throttle(store, requestId, `sandbox-artifact:${payload.namespace}/${payload.name}`, "sandbox_publish", 5, 24 * 60 * 60, now);
+  }
   if (await store.getPackageVersion(payload.namespace, payload.name, payload.version)) {
     throw new ApiError(409, "artifact_release_exists", "artifact release already exists and cannot be overwritten");
   }
@@ -2654,6 +2875,12 @@ async function handlePublishVersion(
     const directUrl = staticPackageVersionUrl(staticOrigin, payload.namespace, payload.name, payload.version);
     const publishedRegistryVersion = payload.registry_entry.versions[0];
     const states = initialArtifactStates(payload.artifact);
+    const expiresAt = runtime.record_ttl_hours === null
+      ? null
+      : new Date(now.getTime() + runtime.record_ttl_hours * 60 * 60 * 1000).toISOString();
+    const purgeAfter = expiresAt === null || runtime.object_purge_grace_hours === null
+      ? null
+      : new Date(Date.parse(expiresAt) + runtime.object_purge_grace_hours * 60 * 60 * 1000).toISOString();
     const versionInput = {
       namespace: payload.namespace,
       name: payload.name,
@@ -2674,6 +2901,10 @@ async function handlePublishVersion(
       snapshot_hash: snapshotRecord.snapshot_hash,
       direct_url: directUrl,
       created_at: now.toISOString(),
+      registry_environment: runtime.environment,
+      network: runtime.network,
+      expires_at: expiresAt,
+      purge_after: purgeAfter,
     } as const;
     const capabilityUsage = {
       key_id: capability.key_id,
@@ -2707,6 +2938,10 @@ async function handlePublishVersion(
       direct_url: directUrl,
       snapshot_hash: snapshotRecord.snapshot_hash,
       verification: "queued",
+      registry_environment: runtime.environment,
+      network: runtime.network,
+      expires_at: expiresAt,
+      purge_after: purgeAfter,
     };
     await store.admitPackageVersion({
       package: packageInput,
@@ -2960,6 +3195,10 @@ function staticRegistryVersionPayload(
     immutable_bundle: sourceSnapshotPayload(snapshot, staticOrigin),
     direct_url: version.direct_url,
     created_at: version.created_at,
+    registry_environment: version.registry_environment ?? "production",
+    network: version.network ?? "mainnet",
+    ...(version.expires_at ? { expires_at: version.expires_at } : {}),
+    ...(version.purge_after ? { purge_after: version.purge_after } : {}),
     evidence,
   };
 }
@@ -3064,6 +3303,9 @@ function r2SnapshotWriter(env: Env): SnapshotWriter {
         httpMetadata: { contentType: options.contentType },
         customMetadata: options.metadata,
       });
+    },
+    async delete(key) {
+      await bucket.delete(key);
     },
   };
 }
@@ -3356,6 +3598,7 @@ export function validatePromotionEvidence(
   kind: PackageEvidenceKind,
   version: PackageVersionRecord,
   previous: PackageEvidenceRecord[],
+  expectedNetwork: DeploymentPayload["network"] = "mainnet",
 ): Record<string, unknown> {
   const evidence = assertPlainObject(value, "invalid_promotion_evidence");
   if (evidence["schema"] !== "cellscript-registry-evidence") {
@@ -3419,8 +3662,8 @@ export function validatePromotionEvidence(
     if (!sameHash(artifactHash, verifiedArtifact)) {
       throw new ApiError(400, "deployment_artifact_mismatch", "deployed artifact_hash must match verified-build evidence");
     }
-    if (requireEvidenceString(evidence, "network", 1, 80) !== "mainnet") {
-      throw new ApiError(400, "unsupported_deployment_network", "Registry deployment evidence is mainnet-only");
+    if (requireEvidenceString(evidence, "network", 1, 80) !== expectedNetwork) {
+      throw new ApiError(400, "unsupported_deployment_network", `Registry deployment evidence must use ${expectedNetwork}`);
     }
     const codeHash = requireEvidenceHash(evidence, "code_hash");
     const dataHash = requireEvidenceHash(evidence, "data_hash");
@@ -3451,8 +3694,8 @@ export function validatePromotionEvidence(
   } else {
     const deployed = latestEvidence(previous, "deployed");
     requireEvidenceReference(evidence, "deployed_evidence_hash", deployed);
-    if (requireEvidenceString(evidence, "network", 1, 80) !== "mainnet") {
-      throw new ApiError(400, "unsupported_commitment_network", "Registry commitments are mainnet-only");
+    if (requireEvidenceString(evidence, "network", 1, 80) !== expectedNetwork) {
+      throw new ApiError(400, "unsupported_commitment_network", `Registry commitments must use ${expectedNetwork}`);
     }
     requireEvidenceHash(evidence, "commitment_tx_hash");
     requireEvidenceHash(evidence, "commitment_hash");

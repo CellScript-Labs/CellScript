@@ -11,8 +11,11 @@ CellScript path first, then the generic artifact path.
 ## 1. Connect a CKB wallet
 
 Open `https://cellscript.dev/registry/submit`. The page does not expose a
-network selector: Registry authorisation and deployment evidence are CKB
-mainnet-only.
+network selector. The production Registry is CKB mainnet-only. Pudge testing
+uses `https://testnet.cellscript.dev/registry`, with a different API origin,
+database, object store, wallet connection state, and testnet-only evidence.
+Sandbox records disappear from discovery after 72 hours and their source bytes
+are purged after a 24-hour grace period; this does not erase Pudge chain history.
 
 Choose a detected wallet from the modal. Wallets listed without an active
 connector link to their official installation page. The wallet signs only the
@@ -202,7 +205,7 @@ canonical SHA-256 and threshold in the accepted evidence. Only then does
 verification become `verified`; a reproducible executable cannot be recorded
 as deployed before this transition.
 
-## 5. Record a mainnet deployment
+## 5. Record a deployment on the Registry's fixed network
 
 The deployment request is a signed
 `cellscript-registry-deployment` / `record_deployment` payload sent to:
@@ -212,11 +215,12 @@ POST /v1/artifacts/acme/vault-lock/releases/1.0.0/deployments
 ```
 
 It includes the published `artifact_hash`, equal `data_hash`, `code_hash`,
-`hash_type`, `dep_type`, and the mainnet OutPoint. The API requires the same
+`hash_type`, `dep_type`, and the environment's OutPoint. The API requires the same
 namespace capability used for publishing and prior verified-build evidence.
 
-The API calls mainnet `get_live_cell`. It rejects a dead or missing Cell, a
-data-hash mismatch, a Type Script hash mismatch, a non-mainnet network, or an
+The API first verifies the configured RPC chain identity, then calls
+`get_live_cell`. It rejects a dead or missing Cell, a data-hash mismatch, a
+Type Script hash mismatch, a network mismatch, or an
 OutPoint that is not bound to the published executable. A successful request
 appends deployment evidence and changes only `deployment_status` to
 `chain_verified`.
@@ -252,7 +256,7 @@ cellc artifact fetch acme/vault-lock@1.0.0 --output vault-lock.bundle.json
 cellc artifact verify --bundle vault-lock.bundle.json --receipt vault-lock.bundle.json.receipt.json
 cellc artifact pin acme/vault-lock@1.0.0 --output Artifacts.lock --accept-hash-bound
 cellc artifact reproduction-evidence acme/vault-lock@1.0.0 --report builder-a.json --report builder-b.json --output reproduced-build-promotion.json
-cellc artifact record-deployment acme/vault-lock@1.0.0 --code-hash <hash> --hash-type data1 --dep-type code --tx-hash <tx_hash> --index 0 --capability-key-id <key_id>
+cellc artifact record-deployment acme/vault-lock@1.0.0 --network mainnet --code-hash <hash> --hash-type data1 --dep-type code --tx-hash <tx_hash> --index 0 --capability-key-id <key_id>
 cellc artifact cell-dep acme/vault-lock@1.0.0 --output CellDep.json --accept-hash-bound --rpc-url https://mainnet.ckb.dev/rpc
 cellc artifact set-availability acme/vault-lock@1.0.0 --status yanked --reason "security advisory" --capability-key-id <key_id>
 cellc artifact commitment acme/vault-lock@1.0.0 --output RegistryCommitment.json
@@ -277,6 +281,20 @@ evidence remains available for audit.
 The transaction-intent and scanner code is implemented, but production does
 not claim a chain commitment until operators deploy and configure the canonical
 mainnet Registry Type Script, commitment custody Lock, and both code CellDeps.
+
+For the isolated Pudge flow, use:
+
+```bash
+cellc publish --api-url https://api.testnet.registry.cellscript.dev
+cellc artifact record-deployment acme/vault-lock@1.0.0 \
+  --network testnet \
+  --api-url https://api.testnet.registry.cellscript.dev \
+  --code-hash <hash> --hash-type data1 --dep-type code \
+  --tx-hash <testnet_tx_hash> --index 0 --capability-key-id <key_id>
+```
+
+`cell-dep` reads the accepted evidence network and defaults to the matching
+official RPC; an explicit `--rpc-url` still has to report the same chain.
 
 ## 7. Other artifact kinds
 

@@ -112,7 +112,7 @@ export interface DeploymentPayload {
   namespace: string;
   name: string;
   release: string;
-  network: "mainnet";
+  network: "mainnet" | "testnet";
   artifact_hash: string;
   data_hash: string;
   code_hash: string;
@@ -369,6 +369,7 @@ export function validateDeploymentPayload(
   input: unknown,
   registryOrigin: string,
   now: Date,
+  expectedNetwork: DeploymentPayload["network"] = "mainnet",
 ): DeploymentPayload {
   const value = assertPlainObject(input, "invalid_deployment_payload");
   if (requireString(value, "protocol") !== DEPLOYMENT_PROTOCOL || requireString(value, "action") !== DEPLOYMENT_ACTION) {
@@ -378,8 +379,12 @@ export function validateDeploymentPayload(
     throw new ApiError(400, "invalid_registry_origin", "deployment payload registry_origin does not match this API");
   }
   const network = requireString(value, "network");
-  if (network !== "mainnet") {
-    throw new ApiError(400, "unsupported_deployment_network", "Registry deployment records are mainnet-only");
+  if (network !== expectedNetwork) {
+    throw new ApiError(
+      400,
+      "unsupported_deployment_network",
+      `Registry deployment records for this environment must use ${expectedNetwork}`,
+    );
   }
   const artifactHash = requireString(value, "artifact_hash");
   const dataHash = requireString(value, "data_hash");
@@ -422,7 +427,7 @@ export function validateDeploymentPayload(
     namespace: validatePackageIdent(requireString(value, "namespace"), "namespace"),
     name: validatePackageIdent(requireString(value, "name"), "name"),
     release: validateVersion(requireString(value, "release")),
-    network: "mainnet",
+    network: expectedNetwork,
     artifact_hash: artifactHash,
     data_hash: dataHash,
     code_hash: codeHash,

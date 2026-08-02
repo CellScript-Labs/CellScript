@@ -13733,8 +13733,16 @@ impl CliParser {
                     )
                     .subcommand(
                         ClapCommand::new("record-deployment")
-                            .about("Sign, submit, and RPC-verify a CKB mainnet deployment record")
+                            .about("Sign, submit, and RPC-verify a CKB deployment record")
                             .arg(Arg::new("coordinate").value_name("NAMESPACE/NAME@RELEASE").required(true))
+                            .arg(
+                                Arg::new("network")
+                                    .long("network")
+                                    .value_name("NETWORK")
+                                    .value_parser(["mainnet", "testnet"])
+                                    .default_value("mainnet")
+                                    .help("CKB network whose live Cell will be verified; testnet defaults to the isolated Pudge Registry API"),
+                            )
                             .arg(Arg::new("code-hash").long("code-hash").value_name("HASH").required(true))
                             .arg(
                                 Arg::new("hash-type")
@@ -14812,6 +14820,7 @@ impl CliParser {
                     },
                     Some(("record-deployment", action)) => ArtifactOperation::RecordDeployment {
                         coordinate: action.get_one::<String>("coordinate").cloned().expect("required coordinate"),
+                        network: action.get_one::<String>("network").cloned().expect("defaulted network"),
                         code_hash: action.get_one::<String>("code-hash").cloned().expect("required code hash"),
                         hash_type: action.get_one::<String>("hash-type").cloned().expect("required hash type"),
                         dep_type: action.get_one::<String>("dep-type").cloned().expect("required dep type"),
@@ -14999,6 +15008,40 @@ mod tests {
     #[test]
     fn test_command_execution() {
         let _cmd = Command::Clean(CleanArgs::default());
+    }
+
+    #[test]
+    fn record_deployment_parses_explicit_testnet_network() {
+        let code_hash = format!("0x{}", "11".repeat(32));
+        let tx_hash = format!("0x{}", "22".repeat(32));
+        let matches = CliParser::command()
+            .try_get_matches_from([
+                "cellc",
+                "artifact",
+                "record-deployment",
+                "acme/demo@1.0.0",
+                "--network",
+                "testnet",
+                "--code-hash",
+                &code_hash,
+                "--hash-type",
+                "data1",
+                "--dep-type",
+                "code",
+                "--tx-hash",
+                &tx_hash,
+                "--index",
+                "0",
+                "--capability-key-id",
+                "cap_test",
+            ])
+            .unwrap();
+        let Command::Artifact(ArtifactArgs { operation: ArtifactOperation::RecordDeployment { network, .. } }) =
+            CliParser::parse_matches(matches)
+        else {
+            panic!("expected artifact record-deployment command");
+        };
+        assert_eq!(network, "testnet");
     }
 
     #[test]

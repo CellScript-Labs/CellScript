@@ -66,6 +66,13 @@ export interface PackageVersionRecord {
   snapshot_hash: string;
   direct_url: string;
   created_at: string;
+  registry_environment?: "production" | "testnet-sandbox";
+  network?: "mainnet" | "testnet";
+  expires_at?: string | null;
+  expired_at?: string | null;
+  purge_after?: string | null;
+  static_purged_at?: string | null;
+  source_purged_at?: string | null;
 }
 
 export interface PackageVersionQuery {
@@ -131,6 +138,17 @@ export interface MaintenanceResult {
   used_nonces_deleted: number;
   idempotency_keys_deleted: number;
   quota_events_deleted: number;
+  package_versions_expired?: number;
+  static_objects?: SandboxObjectCandidate[];
+  source_objects?: SandboxObjectCandidate[];
+}
+
+export interface SandboxObjectCandidate {
+  key: string;
+  namespace?: string;
+  name?: string;
+  version?: string;
+  snapshot_hash?: string;
 }
 
 export type VerificationJobStatus =
@@ -387,6 +405,11 @@ export interface RegistryStore {
     now_iso: string;
     quota_events_before_iso: string;
   }): Promise<MaintenanceResult>;
+  markSandboxObjectsPurged(input: {
+    static_objects: SandboxObjectCandidate[];
+    source_objects: SandboxObjectCandidate[];
+    purged_at: string;
+  }): Promise<void>;
   claimVerificationJob(input: {
     worker_id: string;
     lease_seconds: number;
@@ -447,6 +470,14 @@ const DEFAULT_RESERVED_NAMESPACES: ReservedNamespaceRecord[] = [
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function packageVersionIsPublic(record: PackageVersionRecord, now = Date.now()): boolean {
+  return !record.expires_at || Date.parse(record.expires_at) > now;
+}
+
+function sandboxStaticObjectKey(namespace: string, name: string, version: string): string {
+  return `artifacts/${namespace}/${name}/releases/${version}.json`;
 }
 
 export class MemoryRegistryStore implements RegistryStore {
@@ -681,12 +712,14 @@ export class MemoryRegistryStore implements RegistryStore {
   }
 
   async getPackageVersion(namespace: string, name: string, version: string): Promise<PackageVersionRecord | null> {
-    return this.packageVersions.get(`${namespace}/${name}@${version}`) ?? null;
+    const record = this.packageVersions.get(`${namespace}/${name}@${version}`);
+    return record && packageVersionIsPublic(record) ? record : null;
   }
 
   async listPackageVersions(input: PackageVersionQuery): Promise<PackageVersionRecord[]> {
     const query = input.query?.toLowerCase();
     return [...this.packageVersions.values()]
+      .filter(packageVersionIsPublic)
       .filter((record) => !input.namespace || record.namespace === input.namespace)
       .filter((record) => !input.name || record.name === input.name)
       .filter((record) => !input.artifact_kind || record.artifact.kind === input.artifact_kind)
@@ -1129,6 +1162,7 @@ export class MemoryRegistryStore implements RegistryStore {
     const quotaCutoff = Date.parse(input.quota_events_before_iso);
     let usedNoncesDeleted = 0;
     let idempotencyKeysDeleted = 0;
+    let packageVersionsExpired = 0;
 
     for (const [key, record] of this.usedNonces.entries()) {
       if (Date.parse(record.expires_at) < now) {
@@ -1145,11 +1179,60 @@ export class MemoryRegistryStore implements RegistryStore {
     const quotaBefore = this.quotaEvents.length;
     this.quotaEvents = this.quotaEvents.filter((event) => Date.parse(event.at) >= quotaCutoff);
 
+    for (const [key, record] of this.packageVersions.entries()) {
+      if (record.expires_at && Date.parse(record.expires_at) <= now && !record.expired_at) {
+        this.packageVersions.set(key, { ...record, expired_at: input.now_iso });
+        packageVersionsExpired += 1;
+      }
+    }
+    const staticObjects = [...this.packageVersions.values()]
+      .filter((record) => record.expires_at && Date.parse(record.expires_at) <= now && !record.static_purged_at)
+      .map((record) => ({
+        key: sandboxStaticObjectKey(record.namespace, record.name, record.version),
+        namespace: record.namespace,
+        name: record.name,
+        version: record.version,
+      }));
+    const sourceObjects = [...new Set(
+      [...this.packageVersions.values()]
+        .filter((record) => record.purge_after && Date.parse(record.purge_after) <= now && !record.source_purged_at)
+        .map((record) => record.snapshot_hash),
+    )]
+      .filter((snapshotHash) => [...this.packageVersions.values()]
+        .filter((record) => record.snapshot_hash === snapshotHash)
+        .every((record) => !!record.purge_after && Date.parse(record.purge_after) <= now))
+      .flatMap((snapshotHash) => {
+        const snapshot = this.snapshots.get(snapshotHash);
+        return snapshot ? [{ key: snapshot.r2_key, snapshot_hash: snapshotHash }] : [];
+      });
+
     return {
       used_nonces_deleted: usedNoncesDeleted,
       idempotency_keys_deleted: idempotencyKeysDeleted,
       quota_events_deleted: quotaBefore - this.quotaEvents.length,
+      package_versions_expired: packageVersionsExpired,
+      static_objects: staticObjects,
+      source_objects: sourceObjects,
     };
+  }
+
+  async markSandboxObjectsPurged(input: {
+    static_objects: SandboxObjectCandidate[];
+    source_objects: SandboxObjectCandidate[];
+    purged_at: string;
+  }): Promise<void> {
+    for (const candidate of input.static_objects) {
+      if (!candidate.namespace || !candidate.name || !candidate.version) continue;
+      const key = `${candidate.namespace}/${candidate.name}@${candidate.version}`;
+      const record = this.packageVersions.get(key);
+      if (record) this.packageVersions.set(key, { ...record, static_purged_at: input.purged_at });
+    }
+    const snapshots = new Set(input.source_objects.map((candidate) => candidate.snapshot_hash).filter(Boolean));
+    for (const [key, record] of this.packageVersions.entries()) {
+      if (snapshots.has(record.snapshot_hash)) {
+        this.packageVersions.set(key, { ...record, source_purged_at: input.purged_at });
+      }
+    }
   }
 
   async claimVerificationJob(input: {

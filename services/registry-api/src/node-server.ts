@@ -31,6 +31,7 @@ const env: Env = {
   REGISTRY_ORIGIN: process.env["REGISTRY_ORIGIN"] ?? "https://api.registry.cellscript.dev",
   STATIC_REGISTRY_ORIGIN: process.env["STATIC_REGISTRY_ORIGIN"] ?? "https://registry.cellscript.dev",
   ENVIRONMENT: process.env["ENVIRONMENT"] ?? "production",
+  REGISTRY_ENVIRONMENT: process.env["REGISTRY_ENVIRONMENT"] ?? "production",
   ...(process.env["MAX_JSON_BODY_BYTES"] ? { MAX_JSON_BODY_BYTES: process.env["MAX_JSON_BODY_BYTES"] } : {}),
   ...(process.env["MAX_SNAPSHOT_BYTES"] ? { MAX_SNAPSHOT_BYTES: process.env["MAX_SNAPSHOT_BYTES"] } : {}),
   ...(process.env["CLEANUP_QUOTA_EVENT_RETENTION_HOURS"]
@@ -40,6 +41,7 @@ const env: Env = {
     ? { NAMESPACE_CLAIM_COOLDOWN_SECONDS: process.env["NAMESPACE_CLAIM_COOLDOWN_SECONDS"] }
     : {}),
   ...(process.env["CKB_MAINNET_RPC_URL"] ? { CKB_MAINNET_RPC_URL: process.env["CKB_MAINNET_RPC_URL"] } : {}),
+  ...(process.env["CKB_RPC_URL"] ? { CKB_RPC_URL: process.env["CKB_RPC_URL"] } : {}),
   ...(process.env["REGISTRY_TYPE_SCRIPT_JSON"]
     ? { REGISTRY_TYPE_SCRIPT_JSON: process.env["REGISTRY_TYPE_SCRIPT_JSON"] }
     : {}),

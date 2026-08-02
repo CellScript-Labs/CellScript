@@ -10,6 +10,8 @@ use std::path::{Component, Path, PathBuf};
 const MAX_REGISTRY_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_BUNDLE_BYTES: usize = 5 * 1024 * 1024;
 const DEFAULT_CKB_MAINNET_RPC_URL: &str = "https://mainnet.ckb.dev/rpc";
+const DEFAULT_CKB_TESTNET_RPC_URL: &str = "https://testnet.ckb.dev/rpc";
+const DEFAULT_TESTNET_REGISTRY_API_URL: &str = "https://api.testnet.registry.cellscript.dev";
 
 #[derive(Debug)]
 pub struct ArtifactArgs {
@@ -57,6 +59,7 @@ pub enum ArtifactOperation {
     },
     RecordDeployment {
         coordinate: String,
+        network: String,
         code_hash: String,
         hash_type: String,
         dep_type: String,
@@ -298,10 +301,16 @@ pub fn execute(args: ArtifactArgs) -> Result<()> {
             let release_identity = signed_release(&fetched.release)?;
             let evidence = object_field(deployed, "evidence", "deployed evidence")?;
             require_deployment_contract(&verified.profile_contract, evidence)?;
+            let evidence_network = map_string_field(evidence, "network", "deployed evidence")?;
+            let default_rpc = match evidence_network {
+                "mainnet" => DEFAULT_CKB_MAINNET_RPC_URL,
+                "testnet" => DEFAULT_CKB_TESTNET_RPC_URL,
+                other => return Err(error(format!("deployed evidence uses unsupported CKB network '{other}'"))),
+            };
             let rpc_url = rpc_url
                 .or_else(|| std::env::var(super::commands::CELLSCRIPT_CKB_RPC_URL_ENV).ok())
-                .unwrap_or_else(|| DEFAULT_CKB_MAINNET_RPC_URL.to_string());
-            revalidate_mainnet_deployment(evidence, &rpc_url)?;
+                .unwrap_or_else(|| default_rpc.to_string());
+            revalidate_deployment(evidence, &rpc_url, evidence_network)?;
             let descriptor = json!({
                 "schema": "cellscript-registry-cell-dep-v1",
                 "coordinate": coordinate,
@@ -317,6 +326,7 @@ pub fn execute(args: ArtifactArgs) -> Result<()> {
                     "hash_type": evidence["hash_type"],
                 },
                 "chain_verification": "get_live_cell:fresh",
+                "network": evidence_network,
                 "liveness_checked_at": super::commands::current_utc_timestamp(),
                 "resolved_code_out_point": evidence.get("resolved_code_out_point").cloned().unwrap_or(Value::Null),
                 "deployed_evidence_hash": deployed["evidence_hash"],
@@ -330,6 +340,7 @@ pub fn execute(args: ArtifactArgs) -> Result<()> {
         }
         ArtifactOperation::RecordDeployment {
             coordinate,
+            network,
             code_hash,
             hash_type,
             dep_type,
@@ -342,6 +353,7 @@ pub fn execute(args: ArtifactArgs) -> Result<()> {
             json,
         } => record_deployment(
             &coordinate,
+            &network,
             &code_hash,
             &hash_type,
             &dep_type,
@@ -426,6 +438,7 @@ pub fn execute(args: ArtifactArgs) -> Result<()> {
         ArtifactOperation::Commitment { coordinate, output, api_url, force, json } => {
             let fetched = fetch(&coordinate, api_url.as_deref())?;
             verify_fetched(&fetched)?;
+            let network = registry_release_network(&fetched.release)?;
             let deployed = chain_verified_deployment(&fetched.release)?;
             let release_identity = signed_release(&fetched.release)?;
             let deployed_evidence_hash = string_field(deployed, "evidence_hash", "deployed evidence")?;
@@ -443,13 +456,13 @@ pub fn execute(args: ArtifactArgs) -> Result<()> {
             let commitment_hash = format!("0x{}", hex::encode(crate::ckb_blake2b256(canonical.as_bytes())));
             let cell_data = format!("0x{}{}", hex::encode("CSREGv1"), commitment_hash.trim_start_matches("0x"));
             let proof = fetch_commitment_proof(&fetched)?;
-            let transaction_intent = validate_commitment_proof(&proof, &payload, &commitment_hash, &cell_data)?;
+            let transaction_intent = validate_commitment_proof(&proof, &payload, &commitment_hash, &cell_data, network)?;
             let commitment = json!({
                 "schema": "cellscript-registry-commitment-builder-v2",
                 "payload": payload,
                 "commitment_hash": commitment_hash,
                 "cell_data": cell_data,
-                "network": "mainnet",
+                "network": network,
                 "registry_type_hash": proof["registry_type_hash"],
                 "commitment_lock_hash": proof["commitment_lock_hash"],
                 "transaction_intent": transaction_intent,
@@ -458,7 +471,7 @@ pub fn execute(args: ArtifactArgs) -> Result<()> {
             emit(
                 json,
                 json!({ "status": "commitment_generated", "coordinate": coordinate, "output": output, "commitment_hash": commitment_hash }),
-                format!("Generated mainnet Registry commitment at {}", output.display()),
+                format!("Generated {network} Registry commitment at {}", output.display()),
             )
         }
     }
@@ -561,7 +574,13 @@ fn fetch_commitment_proof(fetched: &FetchedArtifact) -> Result<Value> {
     serde_json::from_slice(&bytes).map_err(|err| error(format!("Registry commitment response is invalid JSON: {err}")))
 }
 
-fn validate_commitment_proof(proof: &Value, payload: &Value, commitment_hash: &str, cell_data: &str) -> Result<Value> {
+fn validate_commitment_proof(
+    proof: &Value,
+    payload: &Value,
+    commitment_hash: &str,
+    cell_data: &str,
+    expected_network: &str,
+) -> Result<Value> {
     if proof.get("schema").and_then(Value::as_str) != Some("cellscript-registry-commitment-proof-v1") {
         return Err(error("Registry commitment proof schema is not supported"));
     }
@@ -588,7 +607,7 @@ fn validate_commitment_proof(proof: &Value, payload: &Value, commitment_hash: &s
         .ok_or_else(|| error("Registry commitment transaction construction is not configured by the service operator"))?;
     if string_field(&intent, "schema", "Registry commitment transaction intent")?
         != "cellscript-registry-commitment-transaction-intent-v1"
-        || string_field(&intent, "network", "Registry commitment transaction intent")? != "mainnet"
+        || string_field(&intent, "network", "Registry commitment transaction intent")? != expected_network
     {
         return Err(error("Registry commitment transaction intent schema or network is invalid"));
     }
@@ -756,6 +775,7 @@ fn verify_reproduction_report_signature(report: &ReproductionReport) -> Result<(
 #[allow(clippy::too_many_arguments)]
 fn record_deployment(
     coordinate: &str,
+    network: &str,
     code_hash: &str,
     hash_type: &str,
     dep_type: &str,
@@ -767,6 +787,9 @@ fn record_deployment(
     print_payload: bool,
     json_output: bool,
 ) -> Result<()> {
+    if !matches!(network, "mainnet" | "testnet") {
+        return Err(error("--network must be mainnet or testnet"));
+    }
     if !matches!(hash_type, "data" | "data1" | "data2" | "type") {
         return Err(error("--hash-type must be data, data1, data2, or type"));
     }
@@ -775,7 +798,15 @@ fn record_deployment(
     }
     require_hash_shape(code_hash, "code_hash")?;
     require_hash_shape(tx_hash, "tx_hash")?;
-    let api_base = super::commands::resolve_registry_api_base(api_url)?;
+    let api_base = if network == "testnet"
+        && api_url.is_none()
+        && std::env::var("CELLSCRIPT_REGISTRY_API_URL").is_err()
+        && std::env::var("CELLSCRIPT_REGISTRY_ORIGIN").is_err()
+    {
+        super::commands::resolve_registry_api_base(Some(DEFAULT_TESTNET_REGISTRY_API_URL.to_string()))?
+    } else {
+        super::commands::resolve_registry_api_base(api_url)?
+    };
     let registry_origin = super::commands::registry_origin_from_api_base(&api_base)?;
     let fetched = fetch(coordinate, Some(&api_base))?;
     let verified = verify_fetched(&fetched)?;
@@ -799,7 +830,7 @@ fn record_deployment(
         "namespace": fetched.coordinate.namespace,
         "name": fetched.coordinate.name,
         "release": fetched.coordinate.release,
-        "network": "mainnet",
+        "network": network,
         "artifact_hash": artifact_hash,
         "data_hash": artifact_hash,
         "code_hash": code_hash,
@@ -842,7 +873,7 @@ fn record_deployment(
         return Err(error(format!("deployment evidence request failed with HTTP {status}: {}", body.trim())));
     }
     let response_json = serde_json::from_str::<Value>(&body).unwrap_or_else(|_| json!({ "response": body }));
-    emit(json_output, response_json, format!("Recorded and chain-verified mainnet deployment for {coordinate}"))
+    emit(json_output, response_json, format!("Recorded and chain-verified {network} deployment for {coordinate}"))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1208,15 +1239,21 @@ fn require_deployment_contract_values(contract: &Value, hash_type: &str, dep_typ
     Ok(())
 }
 
-fn revalidate_mainnet_deployment(evidence: &serde_json::Map<String, Value>, rpc_url: &str) -> Result<()> {
+fn revalidate_deployment(evidence: &serde_json::Map<String, Value>, rpc_url: &str, expected_network: &str) -> Result<()> {
     let chain = ckb_rpc_call(rpc_url, "get_blockchain_info", json!([]))?;
     let chain_id = chain
         .get("chain")
         .or_else(|| chain.get("chain_id"))
         .and_then(Value::as_str)
         .ok_or_else(|| error("CKB RPC get_blockchain_info returned no chain identity"))?;
-    if !matches!(chain_id.trim().to_ascii_lowercase().replace('_', "-").as_str(), "ckb" | "ckb-mainnet") {
-        return Err(error(format!("artifact CellDep consumption is mainnet-only; RPC reports chain '{chain_id}'")));
+    let normalized = chain_id.trim().to_ascii_lowercase().replace('_', "-");
+    let matches_network = match expected_network {
+        "mainnet" => matches!(normalized.as_str(), "ckb" | "ckb-mainnet"),
+        "testnet" => matches!(normalized.as_str(), "ckb-testnet" | "pudge" | "pudge-testnet"),
+        _ => false,
+    };
+    if !matches_network {
+        return Err(error(format!("artifact CellDep expects {expected_network}; RPC reports chain '{chain_id}'")));
     }
 
     let declared_out_point =
@@ -1361,7 +1398,7 @@ fn validate_rpc_url(value: &str) -> Result<()> {
 
 fn chain_verified_deployment(release: &Value) -> Result<&Value> {
     if release.get("deployment_status").and_then(Value::as_str) != Some("chain_verified") {
-        return Err(error("a chain-verified mainnet deployment is required"));
+        return Err(error("a chain-verified deployment is required"));
     }
     release
         .get("evidence")
@@ -1373,6 +1410,13 @@ fn chain_verified_deployment(release: &Value) -> Result<&Value> {
             })
         })
         .ok_or_else(|| error("Registry release claims chain_verified but contains no RPC-verified deployment evidence"))
+}
+
+fn registry_release_network(release: &Value) -> Result<&str> {
+    match release.get("network").and_then(Value::as_str).unwrap_or("mainnet") {
+        network @ ("mainnet" | "testnet") => Ok(network),
+        other => Err(error(format!("Registry release uses unsupported CKB network '{other}'"))),
+    }
 }
 
 fn require_assurance(release: &Value, accept_hash_bound: bool) -> Result<()> {
@@ -1722,10 +1766,11 @@ mod tests {
             "transaction_intent": intent
         });
 
-        assert_eq!(validate_commitment_proof(&proof, &payload, &commitment_hash, &cell_data).unwrap(), intent);
+        assert_eq!(validate_commitment_proof(&proof, &payload, &commitment_hash, &cell_data, "mainnet").unwrap(), intent);
+        assert!(validate_commitment_proof(&proof, &payload, &commitment_hash, &cell_data, "testnet").is_err());
         let mut mismatched = proof;
         mismatched["cell_data"] = Value::String(format!("0x{}", "00".repeat(39)));
-        assert!(validate_commitment_proof(&mismatched, &payload, &commitment_hash, &cell_data).is_err());
+        assert!(validate_commitment_proof(&mismatched, &payload, &commitment_hash, &cell_data, "mainnet").is_err());
     }
 
     #[test]

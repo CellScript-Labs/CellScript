@@ -36,6 +36,8 @@ import {
   createApp,
   parseDepGroupOutPoints,
   registryCommitmentHash,
+  registryRuntimeConfig,
+  verifyDeployment,
   verifyMainnetDeployment,
   type AppDeps,
   type SnapshotWriter,
@@ -86,10 +88,11 @@ describe("CKB mainnet observations", () => {
   it("requires the configured confirmation depth for a live deployment Cell", async () => {
     const blockHash = `0x${"aa".repeat(32)}`;
     const artifactHash = `0x${"bb".repeat(32)}`;
+    let reportedChain = "ckb";
     vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
       const request = JSON.parse(String(init?.body)) as { method: string };
       const results: Record<string, unknown> = {
-        get_blockchain_info: { chain: "ckb" },
+        get_blockchain_info: { chain: reportedChain },
         get_live_cell: {
           status: "live",
           block_hash: blockHash,
@@ -132,6 +135,19 @@ describe("CKB mainnet observations", () => {
         .rejects.toMatchObject({ code: "chain_confirmation_depth_insufficient" });
       await expect(verifyMainnetDeployment({ CKB_MIN_CONFIRMATIONS: "7" }, payload))
         .resolves.toMatchObject({ block_number: "0x64", tip_block_number: "0x6a", confirmations: 7 });
+      reportedChain = "ckb_testnet";
+      await expect(verifyDeployment({
+        REGISTRY_ENVIRONMENT: "testnet-sandbox",
+        REGISTRY_ORIGIN: "https://api.testnet.registry.cellscript.dev",
+        STATIC_REGISTRY_ORIGIN: "https://objects.testnet.registry.cellscript.dev",
+        CKB_MIN_CONFIRMATIONS: "7",
+      }, { ...payload, network: "testnet" }))
+        .resolves.toMatchObject({ block_number: "0x64", tip_block_number: "0x6a", confirmations: 7 });
+      await expect(verifyDeployment({
+        REGISTRY_ENVIRONMENT: "testnet-sandbox",
+        REGISTRY_ORIGIN: "https://api.testnet.registry.cellscript.dev",
+        STATIC_REGISTRY_ORIGIN: "https://objects.testnet.registry.cellscript.dev",
+      }, payload)).rejects.toMatchObject({ code: "unsupported_deployment_network" });
     } finally {
       vi.unstubAllGlobals();
     }
@@ -2317,6 +2333,142 @@ describe("registry api", () => {
       used_nonces_deleted: 1,
       idempotency_keys_deleted: 1,
       quota_events_deleted: 1,
+    });
+  });
+
+  it("isolates the Pudge sandbox and purges records on the 72-hour lifecycle", async () => {
+    expect(() => registryRuntimeConfig({ REGISTRY_ENVIRONMENT: "testnet-sandbox" }))
+      .toThrow(/dedicated Registry API and object origins/);
+    const sandboxEnv = {
+      REGISTRY_ENVIRONMENT: "testnet-sandbox",
+      REGISTRY_ORIGIN: "https://api.testnet.registry.cellscript.dev",
+      STATIC_REGISTRY_ORIGIN: "https://objects.testnet.registry.cellscript.dev",
+    } as const;
+    expect(registryRuntimeConfig(sandboxEnv)).toMatchObject({
+      environment: "testnet-sandbox",
+      network: "testnet",
+      record_ttl_hours: 72,
+      object_purge_grace_hours: 24,
+    });
+
+    const deleted: string[] = [];
+    const writer: SnapshotWriter = {
+      async put() {},
+      async delete(key) { deleted.push(key); },
+    };
+    const { app, store } = testApp(undefined, writer);
+    const snapshotHash = `sha256:${"a1".repeat(32)}`;
+    store.snapshots.set(snapshotHash, {
+      snapshot_hash: snapshotHash,
+      r2_key: "source-snapshots/sandbox/demo/1.0.0/a1.tar",
+      source_hash: `0x${"a2".repeat(32)}`,
+      size_bytes: 1,
+      content_type: "application/x-tar",
+    });
+    store.packageVersions.set("sandbox/demo@1.0.0", {
+      namespace: "sandbox",
+      name: "demo",
+      version: "1.0.0",
+      status: "source_published",
+      artifact: { kind: "source_library", profile: "cellscript_source", consumption_mode: "dependency", language: "cellscript" },
+      verification_status: "pending",
+      deployment_status: "not_applicable",
+      availability_status: "active",
+      source_hash: `0x${"a2".repeat(32)}`,
+      manifest_hash: `0x${"a3".repeat(32)}`,
+      capability_key_id: "cap_sandbox",
+      principal_type: "joyid_ckb",
+      principal_id: "0x1111111111111111111111111111111111111111",
+      registry_entry: {
+        schema_version: 1,
+        namespace: "sandbox",
+        name: "demo",
+        artifact: { kind: "source_library", profile: "cellscript_source", consumption_mode: "dependency", language: "cellscript" },
+        versions: [{
+          version: "1.0.0",
+          tag: "v1.0.0",
+          source_hash: `0x${"a2".repeat(32)}`,
+          dependencies: {},
+          verification_status: "pending",
+          deployment_status: "not_applicable",
+          availability_status: "active",
+        }],
+      },
+      snapshot_hash: snapshotHash,
+      direct_url: "https://objects.testnet.registry.cellscript.dev/artifacts/sandbox/demo/releases/1.0.0.json",
+      created_at: "2026-06-20T11:00:00Z",
+      registry_environment: "testnet-sandbox",
+      network: "testnet",
+      expires_at: "2026-06-23T11:00:00Z",
+      purge_after: "2026-06-23T11:30:00Z",
+    });
+
+    await app.scheduled({ scheduledTime: now.getTime(), cron: "*/15 * * * *" } as ScheduledController, sandboxEnv);
+
+    expect(await store.getPackageVersion("sandbox", "demo", "1.0.0")).toBeNull();
+    expect(deleted).toEqual([
+      "artifacts/sandbox/demo/releases/1.0.0.json",
+      "source-snapshots/sandbox/demo/1.0.0/a1.tar",
+    ]);
+    expect(store.packageVersions.get("sandbox/demo@1.0.0")).toMatchObject({
+      expired_at: now.toISOString(),
+      static_purged_at: now.toISOString(),
+      source_purged_at: now.toISOString(),
+    });
+  });
+
+  it("stamps sandbox publishes with the isolated network and fixed retention window", async () => {
+    const sandboxEnv = {
+      REGISTRY_ENVIRONMENT: "testnet-sandbox",
+      REGISTRY_ORIGIN: "https://api.testnet.registry.cellscript.dev",
+      STATIC_REGISTRY_ORIGIN: "https://objects.testnet.registry.cellscript.dev",
+    } as const;
+    const { app, store, snapshots } = testApp();
+    const authorisation = authPayload();
+    authorisation.registry_origin = sandboxEnv.REGISTRY_ORIGIN;
+    const capabilityResponse = await post(app, "/v1/capabilities", {
+      payload: authorisation,
+      joyid_signature: joyidSignature(authorisation),
+    }, sandboxEnv);
+    expect(capabilityResponse.status).toBe(201);
+    const capability = await capabilityResponse.json() as any;
+    store.namespaces.set("cellscript", {
+      namespace: "cellscript",
+      status: "active",
+      owner_principal_type: "joyid_ckb",
+      owner_principal_id: authorisation.principal_id,
+    });
+    const publish = await publishPayload(capability.key_id);
+    publish.registry_origin = sandboxEnv.REGISTRY_ORIGIN;
+    const response = await post(app, "/v1/artifacts/cellscript/demo/releases", {
+      payload: publish,
+      capability_signature: { algorithm: "p256-sha256", signature: "sig" },
+      source_snapshot: {
+        content_base64: base64("sandbox source"),
+        content_type: "application/vnd.cellscript.source+tar",
+        size_bytes: "sandbox source".length,
+        source_hash: publish.source_hash,
+      },
+    }, sandboxEnv);
+
+    expect(response.status).toBe(202);
+    expect(await response.json()).toMatchObject({
+      registry_environment: "testnet-sandbox",
+      network: "testnet",
+      expires_at: "2026-06-26T12:00:00.000Z",
+      purge_after: "2026-06-27T12:00:00.000Z",
+    });
+    expect(store.packageVersions.get("cellscript/demo@1.2.3")).toMatchObject({
+      registry_environment: "testnet-sandbox",
+      network: "testnet",
+      expires_at: "2026-06-26T12:00:00.000Z",
+      purge_after: "2026-06-27T12:00:00.000Z",
+    });
+    const staticEntry = snapshots.find((snapshot) => snapshot.key === "artifacts/cellscript/demo/releases/1.2.3.json");
+    expect(JSON.parse(utf8(staticEntry!.body))).toMatchObject({
+      registry_environment: "testnet-sandbox",
+      network: "testnet",
+      expires_at: "2026-06-26T12:00:00.000Z",
     });
   });
 

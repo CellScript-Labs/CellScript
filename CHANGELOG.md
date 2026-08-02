@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Add an isolated Pudge Testnet Registry Sandbox. Its API, Postgres database,
+  object volume, signing origin, RPC identity, website build, wallet storage,
+  and deployment evidence are separate from production. Sandbox releases are
+  hidden 72 hours after admission; version JSON is deleted at expiry and source
+  objects are deleted after a 24-hour grace period, while minimal audit
+  tombstones remain. The API rejects a wrong-network RPC and cross-environment
+  deployment payloads. `cellc artifact record-deployment --network testnet`
+  defaults to the Pudge Registry API, and `cell-dep` revalidates liveness on the
+  network recorded in accepted evidence. Pudge chain history remains immutable:
+  expiry removes Registry indexing and off-chain objects, not on-chain Cells.
 - Complete the Registry's generalized artifact and chain-evidence path. Rust,
   C, JavaScript, and other CKB artifacts now keep explicit source, build,
   deployment, TCB, and copy-only identities instead of being presented as
@@ -53,8 +63,9 @@
   localized statuses and copyable audit values. Publisher authorisation now
   accepts both JoyID
   (`joyid_ckb`) and standard CKB secp256k1 (`ckb_secp256k1`) principals through
-  the CCC CKB-signer boundary on mainnet. The chooser no longer exposes a
-  testnet option or constructs a testnet client. The frontend never accepts
+  the CCC CKB-signer boundary. Production exposes only mainnet; the separately
+  built Pudge Sandbox constructs a testnet client without adding a network
+  selector to either environment. The frontend never accepts
   mnemonic words; traditional recovery phrases remain inside the wallet. CLI
   auth commands use `--wallet-signature`, with `--joyid-signature` retained as
   a visible compatibility alias, and the API adds the corresponding typed

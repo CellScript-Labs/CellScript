@@ -9,6 +9,18 @@ adapter.
 - `https://registry.cellscript.dev` serves immutable bundles and static release
   JSON independently from the write database.
 
+The Pudge test environment is a separate, ephemeral service:
+
+- `https://api.testnet.registry.cellscript.dev` is the sandbox API;
+- `https://objects.testnet.registry.cellscript.dev` is its object origin;
+- `https://testnet.cellscript.dev/registry` is its `noindex` UI.
+
+It uses a different Postgres volume, object volume, signing origin, wallet
+storage key, RPC identity, and Compose project. Do not put a network selector in
+the production Registry. `REGISTRY_ENVIRONMENT=testnet-sandbox` requires the
+dedicated origins and accepts only a Pudge/Testnet RPC. Unknown environments
+fail closed.
+
 Postgres is authoritative for publisher capabilities, namespace ownership,
 artifact releases, orthogonal release states, evidence, jobs, idempotency, and
 audit events. R2 or the filesystem adapter stores immutable content and static
@@ -155,8 +167,29 @@ The browser wallet directory lists Neuron, JoyID, imToken, CKBull, SafePal,
 Ledger, imKey, OneKey, UTXO Global, Rei Wallet, Gate, and QuantumPurse. Runtime
 connectivity is determined by CCC discovery. Directory entries without a live
 connector use the external signed-payload handoff and never bypass backend
-signature verification. The service accepts no testnet authorisation or
-deployment mode.
+signature verification. Production accepts only mainnet authorisation and
+deployment evidence. The isolated Pudge Sandbox accepts only testnet evidence;
+the two origins make wallet challenges and capability signatures non-replayable
+across environments.
+
+## Pudge Sandbox Retention
+
+Every sandbox release stores `registry_environment = testnet-sandbox`,
+`network = testnet`, `expires_at = created_at + 72h`, and
+`purge_after = expires_at + 24h`. Public SQL and in-memory reads filter by
+`expires_at` even if maintenance is delayed. At expiry, the version-addressed
+static JSON is deleted; after the grace period, a source object is deleted only
+when no non-expired release references its snapshot hash. Database identity and
+audit rows remain as tombstones so abuse and replay investigations are not
+erased. Reads never extend TTL.
+
+The sandbox additionally limits a wallet principal to 20 accepted publish
+attempts per 24 hours and one package coordinate to five; the ordinary IP,
+capability, namespace-cooldown, request-size, and snapshot-size controls still
+apply.
+
+This policy cannot delete Pudge chain history or consume a deployed code Cell.
+It only removes the Registry index and its off-chain object bytes.
 
 ## Release Admission
 
@@ -198,7 +231,7 @@ cellc publish --artifact-manifest Artifact.toml
 `CELLSCRIPT_CAPABILITY_PRIVATE_KEY_PKCS8_B64` supplies the delegated key in CI.
 `CELLSCRIPT_REGISTRY_IDEMPOTENCY_KEY` pins the exact retry key.
 
-## Mainnet Deployment Evidence
+## Network-Bound Deployment Evidence
 
 Executable publication begins at `deployment_status = undeployed`. A publisher
 records a deployment by signing canonical JSON for:
@@ -207,19 +240,21 @@ records a deployment by signing canonical JSON for:
 cellscript-registry-deployment / record_deployment
 ```
 
-The request must identify `network = mainnet`, the published executable hash,
-equal Cell data hash, code hash, hash type, dep type, and OutPoint. Prior
-verified-build evidence is mandatory.
+The request must identify the network fixed by the Registry environment
+(`mainnet` in production, `testnet` in the Pudge Sandbox), the published
+executable hash, equal Cell data hash, code hash, hash type, dep type, and
+OutPoint. Prior verified-build evidence is mandatory.
 
-The API calls CKB mainnet `get_live_cell(out_point, true, false)` and fails
+The API confirms the configured RPC chain identity, calls
+`get_live_cell(out_point, true, false)`, and fails
 closed unless the Cell is live and its data hash equals the published
 executable. For `hash_type = type`, it serializes the returned Type Script with
 Molecule and verifies its CKB Script hash against `code_hash`. Data-hash modes
 require `code_hash` to equal the data hash. Success appends hash-addressed
 evidence and sets only `deployment_status = chain_verified`.
 
-`CKB_MAINNET_RPC_URL` may override the default official mainnet RPC endpoint.
-No testnet network value is accepted.
+`CKB_RPC_URL` configures the environment RPC. `CKB_MAINNET_RPC_URL` remains a
+production compatibility alias.
 
 ## Registry Chain Commitments
 
