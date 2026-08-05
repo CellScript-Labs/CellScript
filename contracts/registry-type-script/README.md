@@ -16,6 +16,14 @@ The Script deliberately does not interpret off-chain JSON; the Registry API
 binds the 32-byte hash to accepted release and deployment evidence and
 revalidates live Cells independently.
 
+The custody requirement is the sole on-chain authority boundary. With the
+currently pinned standard sighash Lock, its one signer can create, replace, or
+destroy commitment Cells; this Type Script adds no multisig, timelock, or
+separate revocation path. A custody-key rotation changes the Lock Script hash
+in Type args and therefore creates a new Registry Type Script identity. The
+operator runbook and compromise procedure are documented under “Commitment
+custody boundary and incident response” in `services/registry-api/README.md`.
+
 Production uses the standard mainnet `secp256k1_blake160_sighash_all` genesis
 Script for custody. Type Script args are the CKB Script hash of that complete
 custody Script, including its 20-byte signer args. The Registry Type Script is

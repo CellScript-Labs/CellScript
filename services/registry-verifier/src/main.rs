@@ -81,11 +81,49 @@ fn main() -> ExitCode {
         }
         Err(error) => {
             let message = error.to_string();
-            let output = FailureOutput { status: "failed", error_code: "verification_failed", message: &message };
+            let output = FailureOutput { status: "failed", error_code: verifier_error_code(&error), message: &message };
             let _ = serde_json::to_writer(std::io::stdout(), &output);
             println!();
             ExitCode::from(1)
         }
+    }
+}
+
+fn verifier_error_code(error: &anyhow::Error) -> &'static str {
+    let messages = error.chain().map(ToString::to_string).collect::<Vec<_>>();
+    let contains = |needle: &str| messages.iter().any(|message| message.contains(needle));
+    let starts_with = |prefix: &str| messages.iter().any(|message| message.starts_with(prefix));
+
+    if starts_with("unexpected positional argument")
+        || starts_with("missing value for")
+        || starts_with("duplicate argument")
+        || starts_with("missing required argument")
+        || starts_with("unknown argument")
+        || contains("requires --")
+    {
+        "invalid_arguments"
+    } else if contains("failed to inspect source snapshot") || contains("failed to read source snapshot") {
+        "snapshot_unavailable"
+    } else if contains("source snapshot must be a non-empty regular file") {
+        "snapshot_invalid"
+    } else if contains("source snapshot authentication failed") {
+        "snapshot_authentication_failed"
+    } else if contains("unsupported artifact profile") || contains("unsupported artifact bundle profile") {
+        "unsupported_profile"
+    } else if contains("package identity does not match") || contains("artifact bundle identity does not match") {
+        "artifact_identity_mismatch"
+    } else if contains("_hash mismatch") {
+        "identity_hash_mismatch"
+    } else if contains("CellScript package compilation failed") {
+        "cellscript_compilation_failed"
+    } else if contains("artifact bundle") {
+        "artifact_bundle_invalid"
+    } else if contains("artifact profile contract") {
+        "profile_contract_invalid"
+    } else if contains("failed to read materialized Cell.toml") || contains("canonical package manifest") {
+        "manifest_invalid"
+    } else {
+        "verifier_internal_error"
     }
 }
 
@@ -182,7 +220,9 @@ fn verify_artifact_bundle(args: Args, snapshot: &[u8]) -> Result<VerificationOut
         bail!("artifact bundle manifest_json must encode a JSON object");
     }
     validate_bundle_roles(&bundle, &args.profile, &manifest)?;
-    let canonical_manifest = cellscript::package::registry::canonical_artifact_contract_json(&manifest).map_err(anyhow::Error::msg)?;
+    let canonical_manifest = cellscript::package::registry::canonical_artifact_contract_json(&manifest)
+        .map_err(anyhow::Error::msg)
+        .context("artifact profile contract canonicalization failed")?;
     let manifest_hash = hex::encode(cellscript::ckb_blake2b256(canonical_manifest.as_bytes()));
     require_matching_hash("manifest_hash", &manifest_hash, &args.manifest_hash)?;
     let source = bundle_object(&bundle, "source")?;
@@ -255,7 +295,8 @@ fn verify_artifact_bundle(args: Args, snapshot: &[u8]) -> Result<VerificationOut
             audit_report_hash: audit_report_hash.as_deref(),
         },
     )
-    .map_err(anyhow::Error::msg)?;
+    .map_err(anyhow::Error::msg)
+    .context("artifact profile contract validation failed")?;
     let metadata_hash = hex::encode(cellscript::ckb_blake2b256(snapshot));
     Ok(VerificationOutput {
         status: "passed",
@@ -388,6 +429,23 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn exposes_stable_machine_codes_for_verification_boundaries() {
+        let cases = [
+            (anyhow::anyhow!("missing required argument '--snapshot'"), "invalid_arguments"),
+            (anyhow::anyhow!("artifact_hash mismatch: signed identity differs"), "identity_hash_mismatch"),
+            (anyhow::anyhow!("artifact bundle must be valid JSON"), "artifact_bundle_invalid"),
+            (anyhow::anyhow!("CellScript package compilation failed"), "cellscript_compilation_failed"),
+            (anyhow::anyhow!("unsupported artifact profile 'unknown'"), "unsupported_profile"),
+        ];
+        for (error, expected) in cases {
+            assert_eq!(verifier_error_code(&error), expected, "unexpected code for {error:#}");
+        }
+
+        let authenticated = anyhow::anyhow!("invalid file hash").context("source snapshot authentication failed");
+        assert_eq!(verifier_error_code(&authenticated), "snapshot_authentication_failed");
+    }
 
     #[test]
     fn verifies_generated_snapshot_with_the_real_compiler() {

@@ -797,8 +797,8 @@ Non-CellScript artifact profiles still fail closed.
   are stored in the OS keychain for daily `cellc publish`; see
   [`docs/CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md`](docs/CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md)
 - `cellc auth capability create --principal-type <principal_type>
-  --principal-id <principal_id> --scope
-  publish:<namespace>/<package> --expires 90d --json >
+  --principal-id <principal_id>
+  --scope publish:<namespace>/<package> --expires 90d --json >
   capability-payload.json` creates the local P-256 capability key when
   `--capability-pubkey` is not supplied, stores the private key in the OS
   keychain, and prints the wallet-bound authorisation payload. The
@@ -812,6 +812,13 @@ Non-CellScript artifact profiles still fail closed.
   establishes the required namespace ownership. Bare
   `cellc publish` then signs the concrete publish payload and submits the
   source snapshot to the public registry.
+- These scopes are deliberately independent: `publish` admits immutable
+  releases, `deployment` attaches chain-checked deployment evidence, and
+  `availability` deprecates, yanks, or restores a release. A publish-only
+  capability cannot perform the other two operations. When the command runs
+  inside a package directory without explicit `--scope` flags, `cellc` infers
+  only the exact-coordinate `publish` scope. Deployment and availability access
+  must be granted explicitly.
 - The Registry chooser includes Neuron, JoyID, imToken, CKBull, SafePal,
   Ledger, imKey, OneKey, UTXO Global, Rei Wallet, Gate, and QuantumPurse.
   Compatible CCC signers connect directly; the remaining directory entries use

@@ -3,13 +3,14 @@ import { access, lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, resolve } from "node:path";
-import { spawn, type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 
 import { ApiError, canonicalJson, sha256Hex } from "./domain";
 import { FilesystemObjectStore } from "./filesystem-object-store";
 import { syncStaticRegistryVersionObject, validatePromotionEvidence, type Env } from "./index";
 import { SqlRegistryStore } from "./sql-store";
 import type { PackageVersionRecord, VerificationJobRecord } from "./store";
+import { executeVerifierSubprocess } from "./verifier-subprocess";
 
 const databaseUrl = requiredEnv("DATABASE_URL");
 const objectRoot = resolve(requiredEnv("REGISTRY_OBJECTS_DIR"));
@@ -23,7 +24,6 @@ const sharedHeartbeatFile = resolve(
   process.env["REGISTRY_VERIFIER_SHARED_HEARTBEAT"]?.trim() || `${objectRoot}/.health/verifier-ready`,
 );
 const staticOrigin = process.env["STATIC_REGISTRY_ORIGIN"]?.trim() || "https://registry.cellscript.dev";
-const maximumOutputBytes = 1024 * 1024;
 
 const store = new SqlRegistryStore({ connectionString: databaseUrl });
 const objectStore = new FilesystemObjectStore(objectRoot);
@@ -244,25 +244,24 @@ async function runBuildVerification(job: VerificationJobRecord, version: Package
   if (published.artifact_hash) verifierArgs.push("--artifact-hash", published.artifact_hash);
   if (published.abi_hash) verifierArgs.push("--abi-hash", published.abi_hash);
   if (published.build_recipe_hash) verifierArgs.push("--build-recipe-hash", published.build_recipe_hash);
-  const child = spawn(
-    verifierBinary,
-    verifierArgs,
-    {
-      cwd: "/tmp",
-      env: {
-        PATH: process.env["PATH"] ?? "/usr/local/bin:/usr/bin:/bin",
-        HOME: process.env["HOME"] ?? "/tmp/verifier-home",
-        XDG_CACHE_HOME: process.env["XDG_CACHE_HOME"] ?? "/tmp/verifier-cache",
-        CELLSCRIPT_REGISTRY_API_URL: process.env["CELLSCRIPT_REGISTRY_API_URL"] ?? "https://api.registry.cellscript.dev",
-        NO_COLOR: "1",
-      },
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
-  activeChild = child;
-  let result: Awaited<ReturnType<typeof collectChild>>;
+  let result: Awaited<ReturnType<typeof executeVerifierSubprocess>>;
   try {
-    result = await collectChild(child, jobTimeoutSeconds * 1_000);
+    result = await executeVerifierSubprocess(
+      verifierBinary,
+      verifierArgs,
+      {
+        cwd: "/tmp",
+        env: {
+          PATH: process.env["PATH"] ?? "/usr/local/bin:/usr/bin:/bin",
+          HOME: process.env["HOME"] ?? "/tmp/verifier-home",
+          XDG_CACHE_HOME: process.env["XDG_CACHE_HOME"] ?? "/tmp/verifier-cache",
+          CELLSCRIPT_REGISTRY_API_URL: process.env["CELLSCRIPT_REGISTRY_API_URL"] ?? "https://api.registry.cellscript.dev",
+          NO_COLOR: "1",
+        },
+        timeoutMs: jobTimeoutSeconds * 1_000,
+        onSpawn: (child) => { activeChild = child; },
+      },
+    );
   } finally {
     activeChild = undefined;
   }
@@ -277,7 +276,8 @@ async function runBuildVerification(job: VerificationJobRecord, version: Package
   if (result.timedOut) throw new Error("CellScript verifier timed out");
   if (result.exitCode !== 0) {
     const failure = plainObject(payload);
-    const code = safeToken(failure?.["error_code"]) ?? "verification_failed";
+    const code = safeToken(failure?.["error_code"]);
+    if (!code) throw new Error("CellScript verifier failure output omitted a stable error_code");
     const message = safeString(failure?.["message"]) ?? "CellScript package verification failed";
     throw new VerificationRejected(code, message);
   }
@@ -305,48 +305,6 @@ async function runBuildVerification(job: VerificationJobRecord, version: Package
     requireSameHash(parsed.compatibility_profile_hash, job.compatibility_profile_hash, "compatibility_profile_hash");
   }
   return parsed;
-}
-
-async function collectChild(child: ChildProcess, timeoutMs: number): Promise<{
-  exitCode: number | null;
-  timedOut: boolean;
-  stdout: string;
-  stderr: string;
-}> {
-  let stdout = "";
-  let stderr = "";
-  let overflow = false;
-  child.stdout?.setEncoding("utf8");
-  child.stderr?.setEncoding("utf8");
-  child.stdout?.on("data", (chunk: string) => {
-    if (overflow) return;
-    if (Buffer.byteLength(stdout) + Buffer.byteLength(chunk) > maximumOutputBytes) {
-      overflow = true;
-      child.kill("SIGKILL");
-      return;
-    }
-    stdout += chunk;
-  });
-  child.stderr?.on("data", (chunk: string) => {
-    if (overflow) return;
-    if (Buffer.byteLength(stderr) + Buffer.byteLength(chunk) > maximumOutputBytes) {
-      overflow = true;
-      child.kill("SIGKILL");
-      return;
-    }
-    stderr += chunk;
-  });
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    child.kill("SIGKILL");
-  }, timeoutMs);
-  const exitCode = await new Promise<number | null>((resolveExit, reject) => {
-    child.once("error", reject);
-    child.once("close", (code) => resolveExit(code));
-  }).finally(() => clearTimeout(timer));
-  if (overflow) throw new Error("CellScript verifier output exceeded the configured limit");
-  return { exitCode, timedOut, stdout, stderr };
 }
 
 class VerificationRejected extends Error {

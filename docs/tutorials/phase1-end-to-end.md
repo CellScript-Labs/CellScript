@@ -255,7 +255,11 @@ Authorise a local publisher credential the first time you publish, or whenever
 the credential expires or is revoked:
 
 ```bash
-cellc auth capability create --principal-id <principal_id> --scope publish:cellscript/amm_pool --expires 90d --json > capability-payload.json
+cellc auth capability create --principal-id <principal_id> \
+  --scope publish:cellscript/amm_pool \
+  --scope deployment:cellscript/amm_pool \
+  --scope availability:cellscript/amm_pool \
+  --expires 90d --json > capability-payload.json
 cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json
 cellc auth namespace claim --namespace cellscript --payload capability-payload.json --joyid-signature joyid-signature.json
 ```
@@ -264,8 +268,9 @@ This generates a local capability key, stores the private key in the OS
 keychain, and prints a capability authorisation payload. The registry submit
 page derives `<principal_id>` from the connected JoyID signer, and the
 browser/CCC/JoyID flow signs that exact payload, binding the local capability
-public key, requested scopes, expiry, and principal id. It does not create a
-separate registry account.
+public key, requested scopes, expiry, and principal id. Publishing, deployment
+evidence, and availability changes are separate scopes, so CI can receive only
+the actions it needs. This does not create a separate registry account.
 
 Namespace ownership is explicit and must be active before the first publish;
 capability registration alone does not claim it. Reserved namespaces may

@@ -255,7 +255,9 @@ cellc deploy plan . --target-profile ckb --json
 cellc deploy verify --plan Deployed.toml --json
 cellc registry verify --json
 cellc package verify --json
-cellc auth capability create --principal-id <principal_id> --scope publish:cellscript/my_contract --expires 90d --json
+cellc auth capability create --principal-id <principal_id> \
+  --scope publish:cellscript/my_contract \
+  --expires 90d --json
 cellc gen-builder . --target typescript --target-profile ckb --json
 ```
 
@@ -404,9 +406,12 @@ debugging dependency resolution.
 
 Registry source-package installation and registry-backed `update` are supported
 for the CellScript source-package profile. `cellc auth capability create
---principal-type <joyid_ckb|ckb_secp256k1> --principal-id <principal_id> --scope
-publish:namespace/package --expires 90d` creates the wallet payload for a
-scoped publisher capability, then `cellc publish` writes a real Registry entry.
+--principal-type <joyid_ckb|ckb_secp256k1> --principal-id <principal_id>` creates
+the wallet payload for a scoped publisher capability, then `cellc publish`
+writes a real Registry entry. Inside a package directory, omitting `--scope`
+infers only the exact `publish` scope. Add `deployment` or `availability`
+scopes explicitly when that delegated key genuinely needs those actions; none
+implies another.
 The `principal_id` is cryptographically derived from the signer, not from a
 display label. The same metadata can still be
 mirrored with `cellc publish --offline` to `registry.json` and Git tags for

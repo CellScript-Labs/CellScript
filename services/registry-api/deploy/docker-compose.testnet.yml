@@ -70,7 +70,7 @@ services:
     tmpfs: ["/tmp:size=32m,mode=1777"]
     security_opt: [no-new-privileges:true]
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 10
@@ -108,6 +108,12 @@ services:
     cpus: 1.0
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "node", "-e", "const s=require('node:fs').statSync('/tmp/registry-verifier-ready');if(Date.now()-s.mtimeMs>120000)process.exit(1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   static-registry:
     image: nginx:1.27-alpine

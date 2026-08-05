@@ -3739,7 +3739,7 @@ impl CommandExecutor {
                     .or_else(|| std::env::var("CELLSCRIPT_CAPABILITY_KEY_ID").ok())
                     .ok_or_else(|| {
                         crate::error::CompileError::without_span(format!(
-                            "capability key id is required for public publish; connect a supported CKB wallet through the registry submit page to derive <principal_type> and <principal_id>, run `cellc auth capability create --principal-type <principal_type> --principal-id <principal_id> --scope publish:{}/{} --expires 90d --json > capability-payload.json`, sign that payload through CCC, submit it with `cellc auth capability submit --payload capability-payload.json --wallet-signature wallet-signature.json`, then claim the namespace with `cellc auth namespace claim --namespace {} --payload capability-payload.json --wallet-signature wallet-signature.json`; after registration and an active namespace claim, pass --capability-key-id or set CELLSCRIPT_CAPABILITY_KEY_ID",
+                            "capability key id is required for public publish; connect a supported CKB wallet through the registry submit page to derive <principal_type> and <principal_id>, then run `cellc auth capability create --principal-type <principal_type> --principal-id <principal_id> --expires 90d --json > capability-payload.json` in this package directory (cellc infers only the exact publish scope for {}/{}; deployment and availability require explicit --scope grants), sign that payload through CCC, submit it with `cellc auth capability submit --payload capability-payload.json --wallet-signature wallet-signature.json`, then claim the namespace with `cellc auth namespace claim --namespace {} --payload capability-payload.json --wallet-signature wallet-signature.json`; after registration and an active namespace claim, pass --capability-key-id or set CELLSCRIPT_CAPABILITY_KEY_ID",
                             namespace, manifest.package.name, namespace
                         ))
                     })?;
@@ -4789,28 +4789,64 @@ fn utc_timestamp_from_unix_secs(secs: u64) -> String {
 }
 
 fn resolve_requested_scopes(mut scopes: Vec<String>) -> Result<Vec<String>> {
-    scopes.retain(|scope| !scope.trim().is_empty());
+    if scopes.iter().any(|scope| scope.trim().is_empty()) {
+        return Err(invalid_capability_scope(""));
+    }
+    scopes = scopes.into_iter().map(|scope| scope.trim().to_string()).collect();
     if !scopes.is_empty() {
+        validate_capability_scopes(&scopes)?;
         return Ok(scopes);
     }
 
     let manifest = PackageManager::new(".").read_manifest().map_err(|_| {
         crate::error::CompileError::without_span(
-            "at least one capability scope is required; pass --scope publish:<namespace>/<package> outside a package directory",
+            "at least one capability scope is required outside a package directory; pass --scope <publish|deployment|availability>:<namespace>/<package>",
         )
     })?;
     let namespace = manifest.package.namespace.ok_or_else(|| {
         crate::error::CompileError::without_span(
-            "cannot infer capability scope because [package].namespace is missing; pass --scope publish:<namespace>/<package>",
+            "cannot infer the publish capability scope because [package].namespace is missing; pass --scope publish:<namespace>/<package>",
         )
     })?;
     if manifest.package.name.is_empty() {
         return Err(crate::error::CompileError::without_span(
-            "cannot infer capability scope because [package].name is empty; pass --scope publish:<namespace>/<package>",
+            "cannot infer the publish capability scope because [package].name is empty; pass --scope publish:<namespace>/<package>",
         ));
     }
 
-    Ok(vec![format!("publish:{}/{}", namespace, manifest.package.name)])
+    let coordinate = format!("{}/{}", namespace, manifest.package.name);
+    Ok(vec![format!("publish:{coordinate}")])
+}
+
+fn validate_capability_scopes(scopes: &[String]) -> Result<()> {
+    let mut seen = BTreeSet::new();
+    for scope in scopes {
+        if !seen.insert(scope.as_str()) {
+            return Err(crate::error::CompileError::without_span(format!("duplicate capability scope '{scope}'"))
+                .with_category(crate::error::CompileErrorCategory::Usage));
+        }
+        let Some((action, coordinate)) = scope.split_once(':') else {
+            return Err(invalid_capability_scope(scope));
+        };
+        if !matches!(action, "publish" | "deployment" | "availability") {
+            return Err(invalid_capability_scope(scope));
+        }
+        let Some((namespace, name)) = coordinate.split_once('/') else {
+            return Err(invalid_capability_scope(scope));
+        };
+        validate_declared_artifact_ident(namespace, "capability scope namespace").map_err(|_| invalid_capability_scope(scope))?;
+        if name != "*" {
+            validate_declared_artifact_ident(name, "capability scope package").map_err(|_| invalid_capability_scope(scope))?;
+        }
+    }
+    Ok(())
+}
+
+fn invalid_capability_scope(scope: &str) -> CompileError {
+    crate::error::CompileError::without_span(format!(
+        "invalid capability scope '{scope}'; expected <publish|deployment|availability>:<namespace>/<package-or-*>",
+    ))
+    .with_category(crate::error::CompileErrorCategory::Usage)
 }
 
 fn resolve_capability_expires_at(explicit_timestamp: Option<String>, relative: Option<String>) -> Result<String> {
@@ -13979,7 +14015,7 @@ impl CliParser {
                                     .long("scope")
                                     .value_name("SCOPE")
                                     .action(ArgAction::Append)
-                                    .help("Capability scope, e.g. publish:namespace/package"),
+                                    .help("Repeatable least-privilege scope: publish, deployment, or availability for namespace/package (or namespace/*)"),
                             )
                             .arg(
                                 Arg::new("expires")
@@ -14038,7 +14074,7 @@ impl CliParser {
                                             .long("scope")
                                             .value_name("SCOPE")
                                             .action(ArgAction::Append)
-                                            .help("Capability scope, e.g. publish:namespace/package"),
+                                            .help("Repeatable least-privilege scope: publish, deployment, or availability for namespace/package (or namespace/*)"),
                                     )
                                     .arg(
                                         Arg::new("expires")

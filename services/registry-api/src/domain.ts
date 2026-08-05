@@ -30,6 +30,7 @@ export const ARTIFACT_KINDS = [
 export const ARTIFACT_PROFILES = ["cellscript_source", "ckb_executable", "reproducible_build", "copy_material"] as const;
 export const ARTIFACT_LANGUAGES = ["cellscript", "rust", "c", "javascript", "other", "unspecified"] as const;
 export const CONSUMPTION_MODES = ["dependency", "tcb", "deployment", "copy"] as const;
+export const CAPABILITY_SCOPE_ACTIONS = ["publish", "deployment", "availability"] as const;
 export const JOYID_CKB_PRINCIPAL_BINDING_CONTEXT = "cellscript-registry-joyid-ckb-principal-v1";
 export const CKB_SECP256K1_PRINCIPAL_BINDING_CONTEXT = "cellscript-registry-ckb-secp256k1-principal-v1";
 
@@ -38,6 +39,7 @@ export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
 export type ArtifactProfile = (typeof ARTIFACT_PROFILES)[number];
 export type ArtifactLanguage = (typeof ARTIFACT_LANGUAGES)[number];
 export type ConsumptionMode = (typeof CONSUMPTION_MODES)[number];
+export type CapabilityScopeAction = (typeof CAPABILITY_SCOPE_ACTIONS)[number];
 export type VerificationStatus = "pending" | "hash_bound" | "verified" | "evidence_required" | "rejected";
 export type DeploymentStatus = "not_applicable" | "undeployed" | "deployed" | "chain_verified";
 export type AvailabilityStatus = "active" | "deprecated" | "yanked" | "quarantined";
@@ -546,7 +548,11 @@ export function validateCapabilityPayload(
   const principalType = validatePrincipalType(requireString(obj, "principal_type"));
   const principalId = validatePrincipalId(requireString(obj, "principal_id"), principalType);
   const capabilityPubkey = requireString(obj, "capability_pubkey");
-  const requestedScopes = requireStringArray(obj, "requested_scopes");
+  const requestedScopesValue = obj["requested_scopes"];
+  if (!Array.isArray(requestedScopesValue) || requestedScopesValue.some((scope) => typeof scope !== "string" || scope.trim() === "")) {
+    throw new ApiError(400, "invalid_field", "requested_scopes must be a string array");
+  }
+  const requestedScopes = requestedScopesValue.map((scope) => scope.trim());
   const capabilityExpiresAt = requireString(obj, "capability_expires_at");
   const nonce = requireString(obj, "nonce");
   const issuedAt = requireString(obj, "issued_at");
@@ -560,8 +566,17 @@ export function validateCapabilityPayload(
     throw new ApiError(400, "invalid_registry_origin", "capability payload registry_origin does not match this API");
   }
   const ident = "[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?";
-  if (requestedScopes.some((scope) => !(new RegExp(`^publish:${ident}/${ident}$`)).test(scope))) {
-    throw new ApiError(400, "invalid_scope", "requested_scopes may only contain publish:namespace/package scopes");
+  const scopeActionsPattern = CAPABILITY_SCOPE_ACTIONS.join("|");
+  const scopePattern = new RegExp(`^(?:${scopeActionsPattern}):${ident}/(?:${ident}|\\*)$`);
+  if (requestedScopes.length === 0 || requestedScopes.some((scope) => !scopePattern.test(scope))) {
+    throw new ApiError(
+      400,
+      "invalid_scope",
+      "requested_scopes must contain publish, deployment, or availability scopes for namespace/package or namespace/*",
+    );
+  }
+  if (new Set(requestedScopes).size !== requestedScopes.length) {
+    throw new ApiError(400, "duplicate_scope", "requested_scopes must not contain duplicates");
   }
   if (!/^0x[0-9a-fA-F]{16,}$/.test(nonce)) {
     throw new ApiError(400, "invalid_nonce", "nonce must be hex and at least 8 bytes");
@@ -1143,8 +1158,13 @@ function normalizeCkbSecp256k1PublicKey(publicKey: string): string {
   return `0x${clean}`;
 }
 
-export function scopeAllowsPublish(scopes: string[], namespace: string, name: string): boolean {
-  return scopes.includes(`publish:${namespace}/${name}`) || scopes.includes(`publish:${namespace}/*`);
+export function scopeAllows(
+  scopes: string[],
+  action: CapabilityScopeAction,
+  namespace: string,
+  name: string,
+): boolean {
+  return scopes.includes(`${action}:${namespace}/${name}`) || scopes.includes(`${action}:${namespace}/*`);
 }
 
 export async function capabilityKeyId(capabilityPubkey: string): Promise<string> {

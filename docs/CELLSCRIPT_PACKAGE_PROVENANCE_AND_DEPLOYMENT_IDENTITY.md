@@ -120,7 +120,11 @@ revocation payloads; display addresses are presentation data only.
 The intended interactive flow is:
 
 ```text
-cellc auth capability create --principal-id <principal_id> --scope publish:namespace/package --expires 90d --json > capability-payload.json
+cellc auth capability create --principal-id <principal_id> \
+  --scope publish:namespace/package \
+  --scope deployment:namespace/package \
+  --scope availability:namespace/package \
+  --expires 90d --json > capability-payload.json
   -> CLI creates a registry signing key and stores it in the OS keychain
   -> CLI prints an authorize_capability payload with capability_pubkey and requested scopes
   -> browser/CCC/JoyID signs that exact payload
@@ -148,7 +152,10 @@ registry_origin: https://api.registry.cellscript.dev
 principal_type: joyid_ckb
 principal_id: <normalized JoyID-CKB identity binding>
 capability_pubkey: ...
-requested_scopes: [publish:cellscript/amm_pool]
+requested_scopes:
+  - publish:cellscript/amm_pool
+  - deployment:cellscript/amm_pool
+  - availability:cellscript/amm_pool
 capability_expires_at: ...
 nonce: ...
 issued_at: ...
@@ -178,14 +185,19 @@ package   -> maintainer principals
 credential -> scoped permissions
 ```
 
-Example scopes:
+Current write scopes:
 
 ```text
 publish:cellscript/amm_pool
-yank:cellscript/amm_pool
-attest:cellscript/amm_pool
-manage-maintainers:cellscript/*
+deployment:cellscript/amm_pool
+availability:cellscript/amm_pool
+publish:cellscript/*
 ```
+
+The actions are independent. `publish` admits an immutable release,
+`deployment` attaches chain-checked CKB deployment evidence, and
+`availability` deprecates, yanks, or restores a release. Namespace wildcards
+are accepted, but granting one action never grants another.
 
 This keeps the user-facing identity simple — "my JoyID is my CellScript
 publisher identity" — while the engineering surface remains revocable, scoped,
@@ -767,7 +779,11 @@ identify the already locked bytes.
 The developer publishes a new version:
 
 ```bash
-cellc auth capability create --principal-id <principal_id> --scope publish:cellscript/amm_pool --expires 90d --json > capability-payload.json
+cellc auth capability create --principal-id <principal_id> \
+  --scope publish:cellscript/amm_pool \
+  --scope deployment:cellscript/amm_pool \
+  --scope availability:cellscript/amm_pool \
+  --expires 90d --json > capability-payload.json
 cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json
 cellc publish
 ```
@@ -1173,7 +1189,11 @@ a separate archive storage layer.
 
 ```bash
 # First use, or after credential expiry/revocation
-cellc auth capability create --principal-id <principal_id> --scope publish:cellscript/amm_pool --expires 90d --json > capability-payload.json
+cellc auth capability create --principal-id <principal_id> \
+  --scope publish:cellscript/amm_pool \
+  --scope deployment:cellscript/amm_pool \
+  --scope availability:cellscript/amm_pool \
+  --expires 90d --json > capability-payload.json
 cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json
 
 # Publish a new version to the registry
@@ -1296,7 +1316,11 @@ deleted, so exact pins and incident reviews remain reproducible.
 
 ```bash
 # Authorise a local publisher credential with JoyID-rooted identity
-cellc auth capability create --principal-id <principal_id> --scope publish:cellscript/amm --expires 90d --json > capability-payload.json
+cellc auth capability create --principal-id <principal_id> \
+  --scope publish:cellscript/amm \
+  --scope deployment:cellscript/amm \
+  --scope availability:cellscript/amm \
+  --expires 90d --json > capability-payload.json
 cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json
 
 # Publish a new version to the registry
@@ -1738,7 +1762,7 @@ registry admission authority.
 
 | Policy | Evidence |
 |---|---|
-| JoyID-rooted publisher identity | `cellc auth capability create --principal-id <principal_id> --scope publish:ns/pkg --expires 90d --json > capability-payload.json` plus `cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json` uses the CCC-backed JoyID flow, records `principal_type = joyid_ckb`, binds `principal_id` to a local publisher credential, and stores that credential in the OS keychain |
+| Wallet-rooted publisher identity | `cellc auth capability create --principal-type <joyid_ckb\|ckb_secp256k1> --principal-id <principal_id> --scope publish:ns/pkg --scope deployment:ns/pkg --scope availability:ns/pkg --expires 90d --json > capability-payload.json` plus `cellc auth capability submit --payload capability-payload.json --wallet-signature wallet-signature.json` uses the CCC-backed wallet flow, records the typed principal binding, and stores the delegated private key in the OS keychain |
 | Scoped publisher credentials | Capability-style signing key with namespace/package/action scopes, expiry, revocation, nonce/origin checks, and CI-safe delegation |
 | Namespace/package ACL | Namespace owners, package maintainers, yanking authority, commitment authority, maintainer rotation, and source-location update permissions |
 | Abuse controls | Separate static read path from write API; WAF/rate limits/body caps/hash dedup/bounded queues/quarantine/cooldown; fee/bond rules remain later policy hooks |

@@ -68,8 +68,11 @@ struct PackageArtifactApi {
 impl Drop for PackageArtifactApi {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
-        if let Some(handle) = self.handle.take() {
-            handle.join().unwrap();
+        if let Some(handle) = self.handle.take()
+            && let Err(payload) = handle.join()
+            && !std::thread::panicking()
+        {
+            std::panic::resume_unwind(payload);
         }
     }
 }
@@ -78,7 +81,14 @@ fn read_mock_http_path(stream: &mut std::net::TcpStream) -> String {
     let mut request = Vec::new();
     let mut buffer = [0_u8; 1024];
     loop {
-        let read = stream.read(&mut buffer).unwrap();
+        let read = match stream.read(&mut buffer) {
+            Ok(read) => read,
+            Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted) => {
+                std::thread::yield_now();
+                continue;
+            }
+            Err(error) => panic!("artifact API fixture request read failed: {error}"),
+        };
         assert_ne!(read, 0, "artifact API request ended before headers");
         request.extend_from_slice(&buffer[..read]);
         if let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n") {

@@ -1156,6 +1156,58 @@ fn cellc_auth_login_outputs_capability_authorisation_payload() {
 }
 
 #[test]
+fn cellc_auth_capability_create_infers_only_the_exact_publish_scope() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        temp.path().join("Cell.toml"),
+        r#"[package]
+edition = "2026"
+name = "amm"
+version = "0.1.0"
+namespace = "cellscript"
+"#,
+    )
+    .unwrap();
+
+    let output = cellc_command()
+        .args(["auth", "capability", "create"])
+        .arg("--principal-id")
+        .arg("0xjoyidprincipal")
+        .arg("--capability-pubkey")
+        .arg("0xcapabilitypubkey")
+        .arg("--json")
+        .current_dir(temp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let payload: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(payload["requested_scopes"], serde_json::json!(["publish:cellscript/amm"]));
+}
+
+#[test]
+fn cellc_auth_capability_create_rejects_unknown_or_duplicate_scopes() {
+    for scopes in [vec!["admin:cellscript/amm"], vec!["publish:cellscript/amm", "publish:cellscript/amm"]] {
+        let mut command = cellc_command();
+        command
+            .args(["auth", "capability", "create"])
+            .arg("--principal-id")
+            .arg("0xjoyidprincipal")
+            .arg("--capability-pubkey")
+            .arg("0xcapabilitypubkey")
+            .arg("--json");
+        for scope in scopes {
+            command.arg("--scope").arg(scope);
+        }
+        let output = command.output().unwrap();
+        assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+        let failure: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let message = failure["diagnostics"][0]["message"].as_str().unwrap_or_default();
+        assert!(message.contains("capability scope"), "unexpected failure: {failure}");
+    }
+}
+
+#[test]
 fn cellc_auth_capability_create_requires_principal_id() {
     let output = cellc_command()
         .arg("auth")

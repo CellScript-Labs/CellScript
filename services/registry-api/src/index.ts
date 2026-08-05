@@ -21,7 +21,7 @@ import {
   isCanonicalP256SpkiPublicKey,
   isImportableP256SpkiPublicKey,
   isPrincipalType,
-  scopeAllowsPublish,
+  scopeAllows,
   sha256Hex,
   sameCkbHash,
   validateCapabilityPayload,
@@ -486,6 +486,18 @@ async function routeRequest(
     return handleCreateCapability(request, env, store, requestId, registryOrigin, now, deps, headers);
   }
 
+  const capabilityCheckMatch = url.pathname.match(/^\/v1\/capabilities\/([^/]+)\/check$/);
+  if (request.method === "GET" && capabilityCheckMatch) {
+    return handleCapabilityCheck(
+      request,
+      store,
+      requestId,
+      now,
+      headers,
+      decodeURIComponent(capabilityCheckMatch[1] ?? ""),
+    );
+  }
+
   if (request.method === "POST" && url.pathname === "/v1/admin/reserved-namespaces") {
     return handleAdminReservedNamespace(request, env, store, requestId, headers);
   }
@@ -903,7 +915,7 @@ async function handleRecordDeployment(
   if (!capability || capability.revoked_at || new Date(capability.expires_at).getTime() <= now.getTime()) {
     throw new ApiError(401, "capability_inactive", "deployment capability is missing, revoked, or expired");
   }
-  if (!scopeAllowsPublish(capability.scopes, namespace, name)) {
+  if (!scopeAllows(capability.scopes, "deployment", namespace, name)) {
     throw new ApiError(403, "capability_scope_denied", "capability scope does not allow this artifact deployment");
   }
   const namespaceRecord = await store.getNamespace(namespace);
@@ -1083,7 +1095,7 @@ async function handlePublisherAvailability(
   if (!capability || capability.revoked_at || new Date(capability.expires_at).getTime() <= now.getTime()) {
     throw new ApiError(401, "capability_inactive", "availability capability is missing, revoked, or expired");
   }
-  if (!scopeAllowsPublish(capability.scopes, namespace, name)) {
+  if (!scopeAllows(capability.scopes, "availability", namespace, name)) {
     throw new ApiError(403, "capability_scope_denied", "capability scope does not allow this artifact update");
   }
   const namespaceRecord = await store.getNamespace(namespace);
@@ -2283,7 +2295,7 @@ async function handleAdminReservedNamespace(
   requestId: string,
   headers: Headers,
 ): Promise<Response> {
-  const adminActor = requireAdminActor(request, env);
+  const adminActor = await requireAdminActor(request, env);
   const body = await readJson(request, maxJsonBytes(env));
   const namespace = validatePackageIdent(String(body["namespace"] ?? ""), "namespace");
   const matchType = requireOneOf(String(body["match_type"] ?? "exact"), ["exact", "prefix", "typosquat"], "invalid_reserved_match_type");
@@ -2305,7 +2317,7 @@ async function handleAdminAuditEvents(
   requestId: string,
   headers: Headers,
 ): Promise<Response> {
-  requireAdminActor(request, env);
+  await requireAdminActor(request, env);
   const params = new URL(request.url).searchParams;
   const eventType = optionalAuditParam(params, "event_type");
   const principalType = optionalAuditParam(params, "principal_type");
@@ -2351,7 +2363,7 @@ async function handleAdminVerificationQueue(
   requestId: string,
   headers: Headers,
 ): Promise<Response> {
-  requireAdminActor(request, env);
+  await requireAdminActor(request, env);
   const metrics = await store.getVerificationQueueMetrics();
   return json(
     {
@@ -2372,7 +2384,7 @@ async function handleAdminVerificationRetry(
   headers: Headers,
   jobIdFromPath: string,
 ): Promise<Response> {
-  const adminActor = requireAdminActor(request, env);
+  const adminActor = await requireAdminActor(request, env);
   const jobId = requireUuid(jobIdFromPath, "verification_job_id");
   const job = await store.retryVerificationJob({ job_id: jobId, request_id: requestId, admin_actor: adminActor });
   return json({ request_id: requestId, job }, 200, headers);
@@ -2386,7 +2398,7 @@ async function handleAdminNamespaceStatus(
   headers: Headers,
   namespaceFromPath: string,
 ): Promise<Response> {
-  const adminActor = requireAdminActor(request, env);
+  const adminActor = await requireAdminActor(request, env);
   const body = await readJson(request, maxJsonBytes(env));
   const namespace = validatePackageIdent(namespaceFromPath, "namespace");
   const status = requireOneOf(
@@ -2417,7 +2429,7 @@ async function handleAdminPackageVersionStatus(
   nameFromPath: string,
   versionFromPath: string,
 ): Promise<Response> {
-  const adminActor = requireAdminActor(request, env);
+  const adminActor = await requireAdminActor(request, env);
   const body = await readJson(request, maxJsonBytes(env));
   const namespace = validatePackageIdent(namespaceFromPath, "namespace");
   const name = validatePackageIdent(nameFromPath, "name");
@@ -2481,7 +2493,7 @@ async function handleAdminPackageVersionPromotion(
   nameFromPath: string,
   versionFromPath: string,
 ): Promise<Response> {
-  const adminActor = requireAdminActor(request, env);
+  const adminActor = await requireAdminActor(request, env);
   const namespace = validatePackageIdent(namespaceFromPath, "namespace");
   const name = validatePackageIdent(nameFromPath, "name");
   const version = validateVersion(versionFromPath);
@@ -2711,6 +2723,79 @@ async function handleClaimNamespace(
   return json({ request_id: requestId, ...claim }, claim.status === "active" ? 201 : 202, headers);
 }
 
+async function handleCapabilityCheck(
+  request: Request,
+  store: RegistryStore,
+  requestId: string,
+  now: Date,
+  headers: Headers,
+  keyIdFromPath: string,
+): Promise<Response> {
+  await throttleRequestSource(store, request, requestId, "capability_check", 240, 60, now);
+  const keyId = keyIdFromPath.trim().toLowerCase();
+  if (!/^cap_[0-9a-f]{32}$/.test(keyId)) {
+    throw new ApiError(400, "invalid_capability_key_id", "capability key ID must use the canonical cap_<32 lowercase hex> form");
+  }
+  const url = new URL(request.url);
+  const namespace = validatePackageIdent(url.searchParams.get("namespace") ?? "", "namespace");
+  const name = validatePackageIdent(url.searchParams.get("name") ?? "", "name");
+  const capability = await store.getCapability(keyId);
+  if (!capability) {
+    throw new ApiError(404, "capability_not_found", "capability key is not known to the registry");
+  }
+
+  const namespaceRecord = await store.getNamespace(namespace);
+  const revoked = Boolean(capability.revoked_at);
+  const expiry = new Date(capability.expires_at).getTime();
+  const invalidExpiry = !Number.isFinite(expiry);
+  const expired = invalidExpiry || expiry <= now.getTime();
+  const active = !revoked && !expired;
+  const ownsNamespace = Boolean(
+    namespaceRecord
+    && namespaceRecord.owner_principal_type === capability.principal_type
+    && namespaceRecord.owner_principal_id === capability.principal_id,
+  );
+  const namespaceActive = namespaceRecord?.status === "active";
+  const allows = {
+    publish: scopeAllows(capability.scopes, "publish", namespace, name),
+    deployment: scopeAllows(capability.scopes, "deployment", namespace, name),
+    availability: scopeAllows(capability.scopes, "availability", namespace, name),
+  };
+  const reasons = [];
+  if (revoked) reasons.push("capability_revoked");
+  else if (invalidExpiry) reasons.push("capability_expiry_invalid");
+  else if (expired) reasons.push("capability_expired");
+  if (!allows.publish) reasons.push("publish_scope_missing");
+  if (!namespaceRecord) reasons.push("namespace_not_claimed");
+  else {
+    if (!namespaceActive) reasons.push("namespace_not_active");
+    if (!ownsNamespace) reasons.push("namespace_owner_mismatch");
+  }
+
+  return json(
+    {
+      schema: "cellscript-registry-capability-check-v1",
+      request_id: requestId,
+      key_id: capability.key_id,
+      principal_type: capability.principal_type,
+      scopes: capability.scopes,
+      expires_at: capability.expires_at,
+      status: revoked ? "revoked" : expired ? "expired" : "active",
+      namespace: {
+        name: namespace,
+        status: namespaceRecord?.status ?? "unclaimed",
+        owned_by_capability_principal: ownsNamespace,
+      },
+      artifact: { namespace, name },
+      allows,
+      usable_for_publish: active && allows.publish && namespaceActive && ownsNamespace,
+      reasons,
+    },
+    200,
+    headers,
+  );
+}
+
 async function handleRevokeCapability(
   request: Request,
   env: Env,
@@ -2815,7 +2900,7 @@ async function handlePublishVersion(
   if (new Date(capability.expires_at).getTime() <= now.getTime()) {
     throw new ApiError(401, "capability_expired", "capability key has expired");
   }
-  if (!scopeAllowsPublish(capability.scopes, payload.namespace, payload.name)) {
+  if (!scopeAllows(capability.scopes, "publish", payload.namespace, payload.name)) {
     throw new ApiError(403, "capability_scope_denied", "capability scope does not allow this artifact publish");
   }
   const namespace = await store.getNamespace(payload.namespace);
@@ -3520,19 +3605,34 @@ function requireCapabilitySignature(value: unknown): CapabilitySignature {
   return { algorithm, signature };
 }
 
-function requireAdminActor(request: Request, env: Env): string {
-  const expected = env.REGISTRY_ADMIN_TOKEN;
-  if (!expected || expected.trim() === "") {
+async function requireAdminActor(request: Request, env: Env): Promise<string> {
+  const expected = env.REGISTRY_ADMIN_TOKEN?.trim();
+  if (!expected) {
     throw new ApiError(503, "admin_unconfigured", "REGISTRY_ADMIN_TOKEN must be configured for admin operations");
   }
   const auth = request.headers.get("authorization") ?? "";
   const bearer = auth.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
-  const supplied = bearer || request.headers.get("x-registry-admin-token")?.trim();
-  if (supplied !== expected) {
+  const supplied = bearer || request.headers.get("x-registry-admin-token")?.trim() || "";
+  if (!(await constantTimeSecretEqual(supplied, expected))) {
     throw new ApiError(401, "admin_unauthorized", "admin token is missing or invalid");
   }
   const actor = request.headers.get("x-registry-admin-actor")?.trim();
   return actor && actor.length <= 128 ? actor : "registry-admin";
+}
+
+async function constantTimeSecretEqual(left: string, right: string): Promise<boolean> {
+  const encoder = new TextEncoder();
+  const [leftDigest, rightDigest] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(left)),
+    crypto.subtle.digest("SHA-256", encoder.encode(right)),
+  ]);
+  const leftBytes = new Uint8Array(leftDigest);
+  const rightBytes = new Uint8Array(rightDigest);
+  let mismatch = 0;
+  for (let index = 0; index < leftBytes.length; index += 1) {
+    mismatch |= leftBytes[index]! ^ rightBytes[index]!;
+  }
+  return mismatch === 0;
 }
 
 function requireNonEmptyAdminString(value: unknown, field: string): string {

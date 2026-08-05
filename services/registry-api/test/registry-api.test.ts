@@ -20,6 +20,7 @@ import {
   ckbScriptHash,
   ckbSecp256k1PrincipalIdFromPublicKey,
   joyidPrincipalIdFromBinding,
+  scopeAllows,
   validatePublishPayload,
   type CapabilityAuthorisationPayload,
   type CapabilityRevocationPayload,
@@ -68,6 +69,17 @@ describe("Node CKB RPC environment", () => {
       CKB_RPC_MAX_RESPONSE_BYTES: "8388608",
       CKB_DEP_GROUP_MAX_MEMBERS: "256",
     });
+  });
+});
+
+describe("capability scopes", () => {
+  it("keeps publishing, deployment evidence, and availability changes independent", () => {
+    const scopes = ["publish:cellscript/demo", "deployment:cellscript/*"];
+
+    expect(scopeAllows(scopes, "publish", "cellscript", "demo")).toBe(true);
+    expect(scopeAllows(scopes, "deployment", "cellscript", "other")).toBe(true);
+    expect(scopeAllows(scopes, "availability", "cellscript", "demo")).toBe(false);
+    expect(scopeAllows(scopes, "publish", "cellscript", "other")).toBe(false);
   });
 });
 
@@ -212,7 +224,11 @@ function authPayload(principalId = "0x1111111111111111111111111111111111111111")
     principal_type: "joyid_ckb",
     principal_id: principalId,
     capability_pubkey: `p256-spki:${principalId.slice(2)}`,
-    requested_scopes: ["publish:cellscript/demo"],
+    requested_scopes: [
+      "publish:cellscript/demo",
+      "deployment:cellscript/demo",
+      "availability:cellscript/demo",
+    ],
     capability_expires_at: "2026-09-21T12:00:00Z",
     nonce: "0x1111111111111111",
     issued_at: "2026-06-23T12:00:00Z",
@@ -531,6 +547,9 @@ describe("registry api", () => {
 
   it("reports readiness only when production bindings are configured", async () => {
     const app = createApp();
+    const live = await get(app, "/health");
+    expect(live.status).toBe(200);
+    expect(await live.json()).toMatchObject({ status: "ok" });
     const missing = await get(app, "/ready");
     expect(missing.status).toBe(503);
     expect(await missing.json()).toMatchObject({
@@ -685,6 +704,23 @@ describe("registry api", () => {
     expect(body.error.code).toBe("joyid_challenge_mismatch");
   });
 
+  it("rejects empty, duplicate, and unknown capability scopes", async () => {
+    for (const [requestedScopes, expectedCode] of [
+      [[], "invalid_scope"],
+      [["publish:cellscript/demo", "publish:cellscript/demo"], "duplicate_scope"],
+      [["admin:cellscript/demo"], "invalid_scope"],
+    ] as const) {
+      const { app } = testApp();
+      const payload = { ...authPayload(), requested_scopes: [...requestedScopes] };
+      const response = await post(app, "/v1/capabilities", {
+        payload,
+        joyid_signature: joyidSignature(payload),
+      });
+      expect(response.status).toBe(400);
+      expect((await response.json() as any).error.code).toBe(expectedCode);
+    }
+  });
+
   it("rejects JoyID signatures whose signer does not match principal_id", async () => {
     const { app } = testApp();
     const payload = authPayload("0x1111111111111111111111111111111111111111");
@@ -749,6 +785,104 @@ describe("registry api", () => {
       principal_id: payload.principal_id,
       status: "active",
     });
+  });
+
+  it("checks an existing capability against its exact artifact and namespace owner", async () => {
+    const { app, store } = testApp();
+    const payload = authPayload();
+    const capabilityResponse = await post(app, "/v1/capabilities", {
+      payload,
+      joyid_signature: joyidSignature(payload),
+    });
+    expect(capabilityResponse.status).toBe(201);
+    const capability = await capabilityResponse.json() as any;
+    store.namespaces.set("cellscript", {
+      namespace: "cellscript",
+      status: "active",
+      owner_principal_type: payload.principal_type,
+      owner_principal_id: payload.principal_id,
+    });
+
+    const ready = await get(app, `/v1/capabilities/${capability.key_id}/check?namespace=cellscript&name=demo`);
+    expect(ready.status).toBe(200);
+    expect(await ready.json()).toMatchObject({
+      schema: "cellscript-registry-capability-check-v1",
+      key_id: capability.key_id,
+      status: "active",
+      namespace: {
+        name: "cellscript",
+        status: "active",
+        owned_by_capability_principal: true,
+      },
+      allows: { publish: true, deployment: true, availability: true },
+      usable_for_publish: true,
+      reasons: [],
+    });
+
+    store.namespaces.set("cellscript", {
+      namespace: "cellscript",
+      status: "active",
+      owner_principal_type: payload.principal_type,
+      owner_principal_id: "0x2222222222222222222222222222222222222222",
+    });
+    const wrongOwner = await get(app, `/v1/capabilities/${capability.key_id}/check?namespace=cellscript&name=demo`);
+    expect(await wrongOwner.json()).toMatchObject({
+      namespace: { owned_by_capability_principal: false },
+      usable_for_publish: false,
+      reasons: ["namespace_owner_mismatch"],
+    });
+
+    store.namespaces.set("cellscript", {
+      namespace: "cellscript",
+      status: "active",
+      owner_principal_type: payload.principal_type,
+      owner_principal_id: payload.principal_id,
+    });
+    const storedCapability = store.capabilities.get(capability.key_id)!;
+    storedCapability.scopes = ["deployment:cellscript/demo"];
+    const missingScope = await get(app, `/v1/capabilities/${capability.key_id}/check?namespace=cellscript&name=demo`);
+    expect(await missingScope.json()).toMatchObject({
+      allows: { publish: false, deployment: true, availability: false },
+      usable_for_publish: false,
+      reasons: ["publish_scope_missing"],
+    });
+
+    storedCapability.scopes = [...payload.requested_scopes];
+    storedCapability.expires_at = "2026-06-23T11:59:59Z";
+    const expired = await get(app, `/v1/capabilities/${capability.key_id}/check?namespace=cellscript&name=demo`);
+    expect(await expired.json()).toMatchObject({
+      status: "expired",
+      usable_for_publish: false,
+      reasons: ["capability_expired"],
+    });
+
+    storedCapability.expires_at = "not-a-timestamp";
+    const invalidExpiry = await get(app, `/v1/capabilities/${capability.key_id}/check?namespace=cellscript&name=demo`);
+    expect(await invalidExpiry.json()).toMatchObject({
+      status: "expired",
+      usable_for_publish: false,
+      reasons: ["capability_expiry_invalid"],
+    });
+
+    storedCapability.expires_at = payload.capability_expires_at;
+    storedCapability.revoked_at = "2026-06-23T11:59:59Z";
+    const revoked = await get(app, `/v1/capabilities/${capability.key_id}/check?namespace=cellscript&name=demo`);
+    expect(await revoked.json()).toMatchObject({
+      status: "revoked",
+      usable_for_publish: false,
+      reasons: ["capability_revoked"],
+    });
+  });
+
+  it("rejects malformed or unknown capability IDs from the check route", async () => {
+    const { app } = testApp();
+    const malformed = await get(app, "/v1/capabilities/not-a-capability/check?namespace=cellscript&name=demo");
+    expect(malformed.status).toBe(400);
+    expect((await malformed.json() as any).error.code).toBe("invalid_capability_key_id");
+
+    const missing = await get(app, "/v1/capabilities/cap_11111111111111111111111111111111/check?namespace=cellscript&name=demo");
+    expect(missing.status).toBe(404);
+    expect((await missing.json() as any).error.code).toBe("capability_not_found");
   });
 
   it("lets a standard CKB wallet claim a namespace and revoke its capability", async () => {
@@ -1904,6 +2038,11 @@ describe("registry api", () => {
       payload: deployment,
       capability_signature: { algorithm: "p256-sha256", signature: "sig" },
     };
+    store.capabilities.get(capability.key_id)!.scopes = ["publish:cellscript/demo"];
+    const publishOnlyDeployment = await post(app, "/v1/artifacts/cellscript/demo/releases/1.2.3/deployments", deploymentRequest);
+    expect(publishOnlyDeployment.status).toBe(403);
+    expect((await publishOnlyDeployment.json() as any).error.code).toBe("capability_scope_denied");
+    store.capabilities.get(capability.key_id)!.scopes = root.requested_scopes;
     const response = await post(app, "/v1/artifacts/cellscript/demo/releases/1.2.3/deployments", deploymentRequest);
     expect(response.status).toBe(201);
     const deploymentResponse = await response.json();
@@ -1977,6 +2116,14 @@ describe("registry api", () => {
     })).status).toBe(202);
 
     const yank = availabilityPayload(capability.key_id);
+    store.capabilities.get(capability.key_id)!.scopes = ["publish:cellscript/demo"];
+    const publishOnlyYank = await post(app, "/v1/artifacts/cellscript/demo/releases/1.2.3/availability", {
+      payload: yank,
+      capability_signature: { algorithm: "p256-sha256", signature: "sig" },
+    });
+    expect(publishOnlyYank.status).toBe(403);
+    expect((await publishOnlyYank.json() as any).error.code).toBe("capability_scope_denied");
+    store.capabilities.get(capability.key_id)!.scopes = root.requested_scopes;
     const yanked = await post(app, "/v1/artifacts/cellscript/demo/releases/1.2.3/availability", {
       payload: yank,
       capability_signature: { algorithm: "p256-sha256", signature: "sig" },
@@ -2252,6 +2399,15 @@ describe("registry api", () => {
     const unauthorized = await get(app, "/v1/admin/audit-events", { REGISTRY_ADMIN_TOKEN: "secret" });
     expect(unauthorized.status).toBe(401);
     expect((await unauthorized.json() as any).error.code).toBe("admin_unauthorized");
+
+    const wrongToken = await get(
+      app,
+      "/v1/admin/audit-events",
+      { REGISTRY_ADMIN_TOKEN: "secret" },
+      { authorization: "Bearer secres" },
+    );
+    expect(wrongToken.status).toBe(401);
+    expect((await wrongToken.json() as any).error.code).toBe("admin_unauthorized");
 
     const invalidLimit = await get(
       app,

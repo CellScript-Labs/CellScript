@@ -71,6 +71,12 @@ Publisher input can create only the initial states. Verification and deployment
 states are derived from accepted evidence. Availability is the operator safety
 axis and does not rewrite identity or evidence.
 
+Legacy `status` values such as `source_published` and `verified_build` are a
+compatibility projection of those three axes, not an additional trust claim.
+New clients must read `verification_status`, `deployment_status`, and
+`availability_status` independently; in particular, `hash_bound` means object
+integrity only, not semantic correctness or security review.
+
 For a reproducible profile, `verified_build` with level `evidence_required` is
 only the hash-bound predecessor. An admin promotion to `reproduced_build`
 requires two to sixteen P-256-signed `cellscript-reproduction-report-v2`
@@ -122,6 +128,7 @@ POST /v1/artifacts/:namespace/:name/releases/:release/deployments
 POST /v1/artifacts/:namespace/:name/releases/:release/availability
 
 POST /v1/capabilities
+GET  /v1/capabilities/:key_id/check?namespace=:namespace&name=:name
 POST /v1/capabilities/:key_id/revoke
 POST /v1/namespaces/claim
 
@@ -147,16 +154,37 @@ Wallet-rooted capability authorisation supports:
   `principal_type = ckb_secp256k1`.
 
 The signature public key is bound to `principal_id`; a display address is not
-an ACL key. The capability is P-256, scoped to `publish:namespace/name` or
-`publish:namespace/*`, expiring, revocable, and stored separately from the
-wallet root. Namespace ownership must match the capability principal.
+an ACL key. The delegated P-256 capability is expiring, revocable, and stored
+separately from the wallet root. Namespace ownership must match the capability
+principal. Each write family has its own exact-coordinate or namespace-wide
+scope:
+
+- `publish:namespace/name` admits immutable releases;
+- `deployment:namespace/name` attaches verified CKB deployment evidence;
+- `availability:namespace/name` deprecates, yanks, or restores a release.
+
+Each form also accepts `namespace/*`. Possessing one action does not imply either
+of the others.
 
 ```bash
-cellc auth capability create --principal-type <principal_type> --principal-id <principal_id> --scope publish:ns/name --expires 90d --json > capability-payload.json
+cellc auth capability create --principal-type <principal_type> --principal-id <principal_id> \
+  --scope publish:ns/name \
+  --expires 90d --json > capability-payload.json
 # Sign the canonical payload in a supported CKB wallet.
 cellc auth capability submit --payload capability-payload.json --wallet-signature wallet-signature.json
 cellc auth namespace claim --namespace ns --payload capability-payload.json --wallet-signature wallet-signature.json
 ```
+
+The browser defaults to the single exact `publish:ns/name` scope. Add
+`deployment:ns/name` or `availability:ns/name` only when the delegated key must
+perform those later maintenance actions; they are not required to publish a
+release.
+
+The read-only capability check returns public status, expiry and scopes plus an
+artifact-specific evaluation of publish/deployment/availability access and
+namespace ownership. It never returns the delegated public key, wallet
+signature or capability signature. The Submit UI uses this endpoint before it
+reveals a publish command for either a newly authorised or existing cellc key.
 
 Capability registration does not silently claim a namespace. Publish remains
 blocked until the claim is active. Signed nonces are one-use; publish requests
@@ -306,12 +334,42 @@ also fail readiness. Deploying and pinning the canonical mainnet Registry Type
 and commitment Lock Scripts remains an operator action; checked-in code does
 not itself prove that a public commitment exists.
 
+### Commitment custody boundary and incident response
+
+The currently pinned production policy uses one standard
+`secp256k1_blake160_sighash_all` custody Lock. This is deliberately simple, but
+it is a single-key trust boundary: whoever can satisfy that Lock can create,
+replace, or destroy commitment Cells. The Type Script has no independent
+multisig, timelock, or revocation mechanism, and the API never holds that
+private key. Do not describe a commitment as consensus over Registry
+operators; it is an attributable statement by the configured custody key.
+
+Operators must keep the custody key outside the API and verifier hosts, review
+the complete transaction intent in the signing wallet, monitor the configured
+Type Script for unexpected spends, and retain the prior commitment evidence in
+the Registry audit store. On suspected compromise, stop issuing commitment
+intents, remove the four commitment configuration values from traffic-serving
+instances, preserve the last observed Cells and audit events, rotate to a new
+custody Lock and therefore a new Type Script identity, and publish that
+transition explicitly. Rotating the 20-byte signer args changes the custody
+Script hash embedded in Type args; it is not an in-place key revocation.
+
 ## Verification Worker
 
 The leased Postgres queue uses `FOR UPDATE SKIP LOCKED`, three-attempt bounded
 retry/dead-letter handling, crash recovery, and a static-publication checkpoint.
 The verifier subprocess has timeout, output, CPU, memory, process, capability,
 filesystem, and temporary-storage bounds.
+
+Verifier rejection output uses stable machine-readable codes. Current boundary
+codes include `invalid_arguments`, `snapshot_unavailable`, `snapshot_invalid`,
+`snapshot_authentication_failed`, `unsupported_profile`,
+`artifact_identity_mismatch`, `identity_hash_mismatch`,
+`cellscript_compilation_failed`, `artifact_bundle_invalid`,
+`profile_contract_invalid`, `manifest_invalid`, and
+`verifier_internal_error`. The Node worker preserves terminal verifier codes in
+the job record; transport, timeout, malformed-output, and store failures remain
+retryable infrastructure errors.
 
 For CellScript source, the verifier compiles the authenticated snapshot using
 the current real compiler. For generic artifact bundles it validates the
@@ -389,9 +447,13 @@ renames historical chain evidence, adds the current-commitment pointer and
 status projection constraints, and deliberately demotes legacy current claims
 until the mainnet indexer re-observes a sufficiently confirmed live Cell.
 
-`GET /health` is liveness. `GET /ready` checks store/object access, admin
-configuration, and—when `REQUIRE_REGISTRY_VERIFIER_READY=true`—a fresh verifier
-heartbeat.
+`GET /health` is process liveness and is the Compose container healthcheck.
+`GET /ready` is the traffic and operator gate: it checks store/object access,
+admin configuration, CKB/commitment dependencies, and—when
+`REQUIRE_REGISTRY_VERIFIER_READY=true`—a fresh verifier heartbeat. External
+load balancers and deployment automation should use `/ready`; a transient RPC,
+database, object-store, or verifier dependency failure must not be mistaken for
+a dead Node process by the container runtime.
 
 ## Backups
 
@@ -412,8 +474,22 @@ volumes with an untested restore.
 
 ## Cloudflare
 
-Configure Neon, R2, Hyperdrive, the scheduled cleanup trigger, and
-`REGISTRY_ADMIN_TOKEN`; then apply migrations and deploy:
+The Worker and the isolated verifier are different processes. Cloudflare
+Workers cannot spawn the Rust verifier binary. A Worker-only deployment can
+serve the API, write R2 objects, and enqueue Postgres jobs, but it cannot advance
+those jobs to `hash_bound` or `verified`; releases will remain pending.
+
+The checked-in Node verifier currently consumes a Postgres queue and a shared
+filesystem object store. It does not yet include an R2/S3 object adapter.
+Therefore the supported production write topology is the self-hosted Node API +
+Rust verifier Compose stack above. Treat the Worker configuration as an edge/API
+deployment template until an external verifier is given both the same database
+and an implemented immutable R2 object adapter. Do not route production publish
+traffic to a Worker deployment that has no queue consumer.
+
+For an API-only or development Worker deployment, configure Neon, R2,
+Hyperdrive, the scheduled cleanup trigger, and `REGISTRY_ADMIN_TOKEN`; then
+apply migrations and deploy:
 
 ```bash
 DATABASE_URL='postgres://...' npm run migrate

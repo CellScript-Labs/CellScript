@@ -389,7 +389,9 @@ run_registry_api_check() {
         run npm --prefix services/registry-api ci
     fi
     run npm --prefix services/registry-api run check
-    run npm --prefix services/registry-api test
+    run cargo build --locked --manifest-path services/registry-verifier/Cargo.toml
+    run env CELLSCRIPT_REGISTRY_VERIFIER_TEST_BINARY="$ROOT_DIR/services/registry-verifier/target/debug/cellscript-registry-verify" \
+        npm --prefix services/registry-api test
     run npm --prefix services/registry-api run build
     run npm --prefix services/registry-api run build:node
     run cargo fmt --manifest-path services/registry-verifier/Cargo.toml -- --check
