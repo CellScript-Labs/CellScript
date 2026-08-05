@@ -176,16 +176,21 @@ registration, namespace claim or review state, session completion, and audit
 events in one store transaction. A concurrent call returns the committed
 session instead of creating a second capability use. Expired sessions, stale
 challenge tokens, and conflicting namespace owners leave the session pending
-and create none of those records.
+and create none of those records. The 15-minute expiry applies only while a
+session is pending. `authorised` and `review_pending` results remain readable
+to the polling CLI for 24 hours, then cleanup removes them; this lets a CLI
+recover a wallet approval committed immediately before the approval window
+closed.
 
 For an interactive first publish, `cellc publish --authorise` creates a
 15-minute, exact-coordinate browser session and opens the matching Registry
 site. The CLI generates the delegated P-256 key first and keeps its private key
 in the OS keychain as pending before opening the browser, then promotes it to
 active only after `authorised` or `review_pending` returns the same key ID.
-Cancellation and expiry remove the pending entry; an interrupted CLI can still
-recover the key through the key ID printed before the browser opens if the
-wallet completed first. The API stores only the public key plus hashes of separate
+Only Registry-confirmed cancellation or pending-session expiry removes the
+pending entry. A local polling deadline performs one final Registry read and
+otherwise leaves the pending key recoverable through the key ID printed before
+the browser opens. The API stores only the public key plus hashes of separate
 one-time CLI-polling and browser-approval tokens. The browser token travels in
 the URL fragment, not the query string, so it is absent from HTTP logs and
 Referer headers; browser reads never return the polling token or resulting

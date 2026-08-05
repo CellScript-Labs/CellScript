@@ -69,14 +69,19 @@ The CLI coverage includes both first-publish admission paths: the explicit
 `cellc publish` sequence, and the short-lived `cellc publish --authorise`
 browser session in which the private publishing key remains in the local OS
 keychain as pending while the CLI polls with a one-time secret, becomes active
-only after the server returns the matching key ID, and is removed on terminal
-cancellation or expiry. The browser token survives a same-tab refresh but is
-cleared after completion or expiry. Browser-session completion is one atomic admission boundary across
+only after the server returns the matching key ID, and is removed only after
+the server confirms terminal cancellation or pending-session expiry. A local
+polling deadline performs a final authoritative read and preserves the pending
+key if the result is still pending or unreachable. Completed sessions remain
+poll-readable for a bounded 24-hour recovery window. The browser token survives
+a same-tab refresh but is cleared after completion or expiry; the website build
+runs the fragment-store-refresh-clear lifecycle regression. Browser-session
+completion is one atomic admission boundary across
 nonce consumption, publishing-key registration, namespace claim/review,
 session state, and audit events. API tests cover expiry, wrong browser/poll/
 challenge tokens, challenge replay, concurrent completion, conflicting
-namespace ownership, review-pending admission, and injected mid-transaction
-failure. Publisher maintenance additionally uses the capability-signed
+namespace ownership, review-pending admission, post-expiry terminal reads, and
+injected mid-transaction failure. Publisher maintenance additionally uses the capability-signed
 `cellc artifact set-availability` path, and `cellc artifact cell-dep` performs a
 fresh mainnet liveness check before producing a transaction-builder descriptor.
 Independent reproducibility builders use `cellc auth reproducer create`; CLI

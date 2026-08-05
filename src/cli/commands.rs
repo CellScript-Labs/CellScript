@@ -6142,6 +6142,91 @@ struct RegistryAuthorisationSessionPollResponse {
     namespace_status: Option<String>,
 }
 
+enum RegistryAuthorisationSessionPollOutcome {
+    Expired,
+    State(RegistryAuthorisationSessionPollResponse),
+}
+
+fn fetch_registry_authorisation_session(
+    client: &reqwest::blocking::Client,
+    endpoint: &str,
+    poll_token: &str,
+) -> Result<RegistryAuthorisationSessionPollOutcome> {
+    let response = client.get(endpoint).bearer_auth(poll_token).send().map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to poll browser authorisation session: {error}"))
+            .with_category(crate::error::CompileErrorCategory::Network)
+            .with_source(error)
+    })?;
+    let status = response.status();
+    let body = response.text().map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to read authorisation session status: {error}"))
+            .with_category(crate::error::CompileErrorCategory::Network)
+            .with_source(error)
+    })?;
+    if status == reqwest::StatusCode::GONE {
+        return Ok(RegistryAuthorisationSessionPollOutcome::Expired);
+    }
+    if !status.is_success() {
+        return Err(crate::error::CompileError::without_span(format!(
+            "browser authorisation session failed with HTTP {status}: {}",
+            body.trim()
+        ))
+        .with_category(registry_http_error_category(status)));
+    }
+    let poll = serde_json::from_str::<RegistryAuthorisationSessionPollResponse>(&body).map_err(|error| {
+        crate::error::CompileError::without_span(format!("registry returned an invalid authorisation status: {error}"))
+            .with_category(crate::error::CompileErrorCategory::Network)
+            .with_source(error)
+    })?;
+    Ok(RegistryAuthorisationSessionPollOutcome::State(poll))
+}
+
+fn registry_authorisation_status_removes_pending_key(status: &str) -> bool {
+    matches!(status, "cancelled" | "expired")
+}
+
+fn resolve_registry_authorisation_session_poll(
+    poll: RegistryAuthorisationSessionPollResponse,
+    generated: &GeneratedRegistryKeyMaterial,
+    namespace: &str,
+) -> Result<Option<String>> {
+    activate_registry_key_after_wallet_approval(&poll.status, poll.capability_key_id.as_deref(), &generated.key_id, || {
+        store_registry_private_key(&generated.key_id, &generated.private_key_pkcs8)
+    })?;
+    match poll.status.as_str() {
+        "pending" => Ok(None),
+        "authorised" => {
+            let key_id = poll
+                .capability_key_id
+                .ok_or_else(|| crate::error::CompileError::without_span("authorised session did not return a capability key"))?;
+            eprintln!("Publishing authorisation confirmed; continuing with cellc.");
+            Ok(Some(key_id))
+        }
+        "review_pending" => {
+            let key_id = poll.capability_key_id.as_deref().ok_or_else(|| {
+                crate::error::CompileError::without_span("review_pending session did not return a capability key")
+                    .with_category(crate::error::CompileErrorCategory::Authentication)
+            })?;
+            Err(crate::error::CompileError::without_span(format!(
+                "wallet authorisation succeeded, but namespace '{namespace}' is awaiting Registry review; rerun publish with --capability-key-id {key_id} after approval"
+            ))
+            .with_category(crate::error::CompileErrorCategory::Authentication))
+        }
+        status if registry_authorisation_status_removes_pending_key(status) => {
+            remove_registry_private_key(&generated.key_id)?;
+            Err(crate::error::CompileError::without_span(format!(
+                "browser authorisation session was {status}; run `cellc publish --authorise` again"
+            ))
+            .with_category(crate::error::CompileErrorCategory::Authentication))
+        }
+        other => Err(crate::error::CompileError::without_span(format!(
+            "registry returned unknown authorisation session status '{other}' (namespace status: {})",
+            poll.namespace_status.as_deref().unwrap_or("unknown")
+        ))
+        .with_category(crate::error::CompileErrorCategory::Network)),
+    }
+}
+
 fn activate_registry_key_after_wallet_approval<F>(
     status: &str,
     returned_key_id: Option<&str>,
@@ -6225,77 +6310,45 @@ fn authorise_registry_publish_key(api_base: &str, namespace: &str, name: &str, a
     let poll_endpoint = format!("{}/v1/authorisation-sessions/{}", api_base.trim_end_matches('/'), session.session_id);
     let deadline = std::time::Instant::now() + Duration::from_secs(15 * 60);
     while std::time::Instant::now() < deadline {
-        let response = client.get(&poll_endpoint).bearer_auth(&session.poll_token).send().map_err(|error| {
-            crate::error::CompileError::without_span(format!("failed to poll browser authorisation session: {error}"))
-                .with_category(crate::error::CompileErrorCategory::Network)
-                .with_source(error)
-        })?;
-        let status = response.status();
-        let body = response.text().map_err(|error| {
-            crate::error::CompileError::without_span(format!("failed to read authorisation session status: {error}"))
-                .with_category(crate::error::CompileErrorCategory::Network)
-                .with_source(error)
-        })?;
-        if status == reqwest::StatusCode::GONE {
-            remove_registry_private_key(&generated.key_id)?;
-        }
-        if !status.is_success() {
-            return Err(crate::error::CompileError::without_span(format!(
-                "browser authorisation session failed with HTTP {status}: {}",
-                body.trim()
-            ))
-            .with_category(registry_http_error_category(status)));
-        }
-        let poll: RegistryAuthorisationSessionPollResponse = serde_json::from_str(&body).map_err(|error| {
-            crate::error::CompileError::without_span(format!("registry returned an invalid authorisation status: {error}"))
-                .with_category(crate::error::CompileErrorCategory::Network)
-                .with_source(error)
-        })?;
-        activate_registry_key_after_wallet_approval(&poll.status, poll.capability_key_id.as_deref(), &generated.key_id, || {
-            store_registry_private_key(&generated.key_id, &generated.private_key_pkcs8)
-        })?;
-        match poll.status.as_str() {
-            "pending" => std::thread::sleep(Duration::from_secs(2)),
-            "authorised" => {
-                let key_id = poll
-                    .capability_key_id
-                    .ok_or_else(|| crate::error::CompileError::without_span("authorised session did not return a capability key"))?;
-                eprintln!("Publishing authorisation confirmed; continuing with cellc.");
-                return Ok(key_id);
-            }
-            "review_pending" => {
-                let key_id = poll.capability_key_id.as_deref().ok_or_else(|| {
-                    crate::error::CompileError::without_span("review_pending session did not return a capability key")
-                        .with_category(crate::error::CompileErrorCategory::Authentication)
-                })?;
-                return Err(crate::error::CompileError::without_span(format!(
-                    "wallet authorisation succeeded, but namespace '{namespace}' is awaiting Registry review; rerun publish with --capability-key-id {} after approval",
-                    key_id
-                ))
-                .with_category(crate::error::CompileErrorCategory::Authentication));
-            }
-            "cancelled" | "expired" => {
+        match fetch_registry_authorisation_session(&client, &poll_endpoint, &session.poll_token)? {
+            RegistryAuthorisationSessionPollOutcome::Expired => {
                 remove_registry_private_key(&generated.key_id)?;
-                return Err(crate::error::CompileError::without_span(format!(
-                    "browser authorisation session was {}; run `cellc publish --authorise` again",
-                    poll.status
-                ))
+                return Err(crate::error::CompileError::without_span(
+                    "browser authorisation session expired before wallet approval; run `cellc publish --authorise` again",
+                )
                 .with_category(crate::error::CompileErrorCategory::Authentication));
             }
-            other => {
-                return Err(crate::error::CompileError::without_span(format!(
-                    "registry returned unknown authorisation session status '{other}' (namespace status: {})",
-                    poll.namespace_status.as_deref().unwrap_or("unknown")
-                ))
-                .with_category(crate::error::CompileErrorCategory::Network));
+            RegistryAuthorisationSessionPollOutcome::State(poll) => {
+                if let Some(key_id) = resolve_registry_authorisation_session_poll(poll, &generated, namespace)? {
+                    return Ok(key_id);
+                }
+                std::thread::sleep(Duration::from_secs(2));
             }
         }
     }
-    remove_registry_private_key(&generated.key_id)?;
-    Err(crate::error::CompileError::without_span(
-        "browser authorisation session expired before wallet approval; run `cellc publish --authorise` again",
-    )
-    .with_category(crate::error::CompileErrorCategory::Authentication))
+
+    // The server may have committed wallet approval immediately before the local
+    // deadline. One final authoritative read closes that race. A still-pending or
+    // unreachable session keeps its pending key so a later CLI invocation can recover it.
+    match fetch_registry_authorisation_session(&client, &poll_endpoint, &session.poll_token)? {
+        RegistryAuthorisationSessionPollOutcome::Expired => {
+            remove_registry_private_key(&generated.key_id)?;
+            Err(crate::error::CompileError::without_span(
+                "browser authorisation session expired before wallet approval; run `cellc publish --authorise` again",
+            )
+            .with_category(crate::error::CompileErrorCategory::Authentication))
+        }
+        RegistryAuthorisationSessionPollOutcome::State(poll) => {
+            if let Some(key_id) = resolve_registry_authorisation_session_poll(poll, &generated, namespace)? {
+                return Ok(key_id);
+            }
+            Err(crate::error::CompileError::without_span(format!(
+                "browser authorisation is still pending; publishing key {} remains in the OS keychain for recovery",
+                generated.key_id
+            ))
+            .with_category(crate::error::CompileErrorCategory::Authentication))
+        }
+    }
 }
 
 fn validate_registry_authorisation_session(session: &RegistryAuthorisationSessionCreateResponse, api_base: &str) -> Result<()> {
@@ -15468,6 +15521,16 @@ mod tests {
             });
             assert!(missing.is_err(), "{status} must require a returned key id");
             assert!(!activated.get(), "{status} must not activate a key without its id");
+        }
+    }
+
+    #[test]
+    fn browser_authorisation_removes_pending_keys_only_for_explicit_terminal_failure() {
+        for status in ["pending", "authorised", "review_pending", "unreachable", "deadline_elapsed"] {
+            assert!(!registry_authorisation_status_removes_pending_key(status), "{status} must preserve the pending key");
+        }
+        for status in ["cancelled", "expired"] {
+            assert!(registry_authorisation_status_removes_pending_key(status), "{status} must remove the pending key");
         }
     }
 

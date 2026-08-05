@@ -35,6 +35,7 @@ export interface CapabilityRecord {
 }
 
 export type AuthorisationSessionStatus = "pending" | "authorised" | "review_pending";
+export const AUTHORISATION_SESSION_TERMINAL_RETENTION_HOURS = 24;
 
 export interface AuthorisationSessionRecord {
   session_id: string;
@@ -666,10 +667,10 @@ export class MemoryRegistryStore implements RegistryStore {
     return this.withAuthorisationSessionCompletionLock("authorisation-store", async () => {
       const existing = this.authorisationSessions.get(input.session_id);
       if (!existing) throw new ApiError(404, "authorisation_session_not_found", "authorisation session was not found");
+      if (existing.status !== "pending") return { session: existing, replayed: true };
       if (Date.parse(existing.expires_at) <= Date.parse(input.now_iso)) {
         throw new ApiError(410, "authorisation_session_expired", "authorisation session has expired");
       }
-      if (existing.status !== "pending") return { session: existing, replayed: true };
       if (existing.challenge_token_hash !== input.expected_challenge_token_hash
         || !existing.payload
         || canonicalJson(existing.payload) !== canonicalJson(input.payload)) {
@@ -1405,7 +1406,12 @@ export class MemoryRegistryStore implements RegistryStore {
       }
     }
     for (const [key, record] of this.authorisationSessions.entries()) {
-      if (Date.parse(record.expires_at) < now) {
+      const terminalRetentionDeadline = Date.parse(record.completed_at ?? record.updated_at)
+        + AUTHORISATION_SESSION_TERMINAL_RETENTION_HOURS * 60 * 60 * 1000;
+      const shouldDelete = record.status === "pending"
+        ? Date.parse(record.expires_at) < now
+        : terminalRetentionDeadline < now;
+      if (shouldDelete) {
         this.authorisationSessions.delete(key);
         authorisationSessionsDeleted += 1;
       }

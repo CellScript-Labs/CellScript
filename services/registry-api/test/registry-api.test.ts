@@ -916,6 +916,43 @@ describe("registry api", () => {
     expect(store.usedNonces.size).toBe(0);
   });
 
+  it("keeps a completed authorisation session readable after its approval window closes", async () => {
+    const store = new MemoryRegistryStore();
+    const { app } = testApp(store);
+    const { created, browserToken } = await createBrowserAuthorisationSession(app, "terminalread", "demo");
+    const challenge = await prepareBrowserAuthorisationChallenge(app, created.session_id, browserToken);
+    const completed = await completeBrowserAuthorisationSession(app, created.session_id, browserToken, challenge);
+    expect(completed.status).toBe(201);
+
+    const afterExpiry = testApp(store, undefined, {
+      now: () => new Date("2026-06-23T12:16:00Z"),
+    }).app;
+    const poll = await get(afterExpiry, `/v1/authorisation-sessions/${created.session_id}`, {}, {
+      authorization: `Bearer ${created.poll_token}`,
+    });
+
+    expect(poll.status).toBe(200);
+    expect(await poll.json()).toMatchObject({
+      status: "authorised",
+      namespace_status: "active",
+      capability_key_id: await capabilityKeyId(reproducerPublicKeys["builder-a"]),
+    });
+
+    const retained = await store.cleanupExpiredState({
+      now_iso: "2026-06-23T12:16:00.000Z",
+      quota_events_before_iso: "2026-06-22T12:16:00.000Z",
+    });
+    expect(retained.authorisation_sessions_deleted).toBe(0);
+    expect(await store.getAuthorisationSession(created.session_id)).not.toBeNull();
+
+    const purged = await store.cleanupExpiredState({
+      now_iso: "2026-06-24T12:01:00.000Z",
+      quota_events_before_iso: "2026-06-23T12:01:00.000Z",
+    });
+    expect(purged.authorisation_sessions_deleted).toBe(1);
+    expect(await store.getAuthorisationSession(created.session_id)).toBeNull();
+  });
+
   it("rejects browser, poll, and challenge token substitution", async () => {
     const { app, store } = testApp();
     const { created, browserToken } = await createBrowserAuthorisationSession(app);

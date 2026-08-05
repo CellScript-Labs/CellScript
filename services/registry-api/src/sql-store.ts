@@ -1,6 +1,7 @@
 import { Client } from "pg";
 import {
   assertPromotionTransition,
+  AUTHORISATION_SESSION_TERMINAL_RETENTION_HOURS,
   deriveRegistryEntryStatus,
   packageVersionRequiresReproduction,
   type AuditEventInput,
@@ -281,12 +282,12 @@ export class SqlRegistryStore implements RegistryStore {
         const sessionRow = sessionResult.rows[0];
         if (!sessionRow) throw new ApiError(404, "authorisation_session_not_found", "authorisation session was not found");
         const session = authorisationSessionFromRow(sessionRow);
-        if (Date.parse(session.expires_at) <= Date.parse(input.now_iso)) {
-          throw new ApiError(410, "authorisation_session_expired", "authorisation session has expired");
-        }
         if (session.status !== "pending") {
           await client.query("commit");
           return { session, replayed: true };
+        }
+        if (Date.parse(session.expires_at) <= Date.parse(input.now_iso)) {
+          throw new ApiError(410, "authorisation_session_expired", "authorisation session has expired");
         }
         if (session.challenge_token_hash !== input.expected_challenge_token_hash
           || !session.payload
@@ -2177,7 +2178,13 @@ export class SqlRegistryStore implements RegistryStore {
       try {
         const usedNonces = await client.query("delete from used_nonces where expires_at < $1", [input.now_iso]);
         const idempotencyKeys = await client.query("delete from idempotency_keys where expires_at < $1", [input.now_iso]);
-        const authorisationSessions = await client.query("delete from authorisation_sessions where expires_at < $1", [input.now_iso]);
+        const authorisationSessions = await client.query(
+          `delete from authorisation_sessions
+           where (status = 'pending' and expires_at < $1)
+              or (status <> 'pending'
+                  and coalesce(completed_at, updated_at) < $1::timestamptz - ($2 * interval '1 hour'))`,
+          [input.now_iso, AUTHORISATION_SESSION_TERMINAL_RETENTION_HOURS],
+        );
         const quotaEvents = await client.query("delete from quota_events where created_at < $1", [input.quota_events_before_iso]);
         const expiredVersions = await client.query(
           `update package_versions

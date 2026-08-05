@@ -2768,7 +2768,7 @@ async function handleGetAuthorisationSession(
   sessionIdFromPath: string,
 ): Promise<Response> {
   const sessionId = validateAuthorisationSessionId(sessionIdFromPath);
-  const session = await requireLiveAuthorisationSession(store, sessionId, now);
+  const session = await requireReadableAuthorisationSession(store, sessionId, now);
   const authorization = request.headers.get("authorization");
   const token = authorization?.startsWith("Bearer ") ? authorization.slice("Bearer ".length).trim() : "";
   if (!token) throw new ApiError(401, "authorisation_session_token_required", "authorisation session bearer token is required");
@@ -2804,8 +2804,11 @@ async function handlePrepareAuthorisationSession(
 ): Promise<Response> {
   await throttleRequestSource(store, request, requestId, "authorisation_session_challenge", 60, 60, now);
   const sessionId = validateAuthorisationSessionId(sessionIdFromPath);
-  const session = await requireLiveAuthorisationSession(store, sessionId, now);
+  const session = await requireReadableAuthorisationSession(store, sessionId, now);
   await requireAuthorisationBrowserToken(request, session.browser_token_hash);
+  if (session.status !== "pending") {
+    throw new ApiError(409, "authorisation_session_complete", "authorisation session has already completed");
+  }
   if (session.registry_origin !== registryOrigin) {
     throw new ApiError(409, "authorisation_session_origin_mismatch", "authorisation session belongs to another Registry origin");
   }
@@ -2857,7 +2860,7 @@ async function handleCompleteAuthorisationSession(
 ): Promise<Response> {
   await throttleRequestSource(store, request, requestId, "authorisation_session_complete", 40, 60, now);
   const sessionId = validateAuthorisationSessionId(sessionIdFromPath);
-  const session = await requireLiveAuthorisationSession(store, sessionId, now);
+  const session = await requireReadableAuthorisationSession(store, sessionId, now);
   await requireAuthorisationBrowserToken(request, session.browser_token_hash);
   if (session.status !== "pending") {
     return json({
@@ -2928,10 +2931,10 @@ function validateAuthorisationSessionId(value: string): string {
   return sessionId;
 }
 
-async function requireLiveAuthorisationSession(store: RegistryStore, sessionId: string, now: Date) {
+async function requireReadableAuthorisationSession(store: RegistryStore, sessionId: string, now: Date) {
   const session = await store.getAuthorisationSession(sessionId);
   if (!session) throw new ApiError(404, "authorisation_session_not_found", "authorisation session was not found");
-  if (Date.parse(session.expires_at) <= now.getTime()) {
+  if (session.status === "pending" && Date.parse(session.expires_at) <= now.getTime()) {
     throw new ApiError(410, "authorisation_session_expired", "authorisation session has expired; start again from cellc");
   }
   return session;
