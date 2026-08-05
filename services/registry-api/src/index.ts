@@ -66,6 +66,7 @@ export interface Env {
   SOURCE_SNAPSHOTS?: R2Bucket;
   REGISTRY_ORIGIN?: string;
   STATIC_REGISTRY_ORIGIN?: string;
+  REGISTRY_WEBSITE_ORIGIN?: string;
   MAX_JSON_BODY_BYTES?: string;
   MAX_SNAPSHOT_BYTES?: string;
   REGISTRY_ADMIN_TOKEN?: string;
@@ -154,6 +155,7 @@ const DEFAULT_QUOTA_EVENT_RETENTION_HOURS = 48;
 const DEFAULT_NAMESPACE_CLAIM_COOLDOWN_SECONDS = 60 * 60;
 const TESTNET_SANDBOX_TTL_HOURS = 72;
 const TESTNET_SANDBOX_PURGE_GRACE_HOURS = 24;
+const AUTHORISATION_SESSION_TTL_MINUTES = 15;
 
 export type RegistryEnvironment = "production" | "testnet-sandbox";
 
@@ -402,6 +404,51 @@ async function routeRequest(
   const runtime = registryRuntimeConfig(env);
   const registryOrigin = env.REGISTRY_ORIGIN ?? DEFAULT_REGISTRY_ORIGIN;
   const staticOrigin = env.STATIC_REGISTRY_ORIGIN ?? DEFAULT_STATIC_REGISTRY_ORIGIN;
+
+  if (request.method === "POST" && url.pathname === "/v1/authorisation-sessions") {
+    return handleCreateAuthorisationSession(request, env, store, requestId, registryOrigin, now, headers);
+  }
+
+  const authorisationSessionMatch = url.pathname.match(/^\/v1\/authorisation-sessions\/([^/]+)$/);
+  if (request.method === "GET" && authorisationSessionMatch) {
+    return handleGetAuthorisationSession(
+      request,
+      store,
+      requestId,
+      now,
+      headers,
+      decodeURIComponent(authorisationSessionMatch[1] ?? ""),
+    );
+  }
+
+  const authorisationChallengeMatch = url.pathname.match(/^\/v1\/authorisation-sessions\/([^/]+)\/challenge$/);
+  if (request.method === "POST" && authorisationChallengeMatch) {
+    return handlePrepareAuthorisationSession(
+      request,
+      env,
+      store,
+      requestId,
+      registryOrigin,
+      now,
+      headers,
+      decodeURIComponent(authorisationChallengeMatch[1] ?? ""),
+    );
+  }
+
+  const authorisationCompleteMatch = url.pathname.match(/^\/v1\/authorisation-sessions\/([^/]+)\/complete$/);
+  if (request.method === "POST" && authorisationCompleteMatch) {
+    return handleCompleteAuthorisationSession(
+      request,
+      env,
+      store,
+      requestId,
+      registryOrigin,
+      now,
+      deps,
+      headers,
+      decodeURIComponent(authorisationCompleteMatch[1] ?? ""),
+    );
+  }
 
   if (request.method === "GET" && url.pathname === "/v1/artifacts") {
     return handleListPackages(request, store, requestId, staticOrigin, headers);
@@ -2626,6 +2673,322 @@ function optionalStore(env: Env, deps: AppDeps): RegistryStore | undefined {
     return deps.store;
   }
   return env.HYPERDRIVE ? new SqlRegistryStore(env.HYPERDRIVE) : undefined;
+}
+
+async function handleCreateAuthorisationSession(
+  request: Request,
+  env: Env,
+  store: RegistryStore,
+  requestId: string,
+  registryOrigin: string,
+  now: Date,
+  headers: Headers,
+): Promise<Response> {
+  await throttleRequestSource(store, request, requestId, "authorisation_session_create", 30, 60, now);
+  const body = await readJson(request, Math.min(maxJsonBytes(env), 64 * 1024));
+  const capabilityPubkey = String(body["capability_pubkey"] ?? "").trim();
+  if (!isCanonicalP256SpkiPublicKey(capabilityPubkey) || !await isImportableP256SpkiPublicKey(capabilityPubkey)) {
+    throw new ApiError(400, "invalid_capability_pubkey", "capability_pubkey must be an importable canonical P-256 SPKI key");
+  }
+  const scopesValue = body["requested_scopes"];
+  if (!Array.isArray(scopesValue) || scopesValue.length !== 1 || typeof scopesValue[0] !== "string") {
+    throw new ApiError(400, "invalid_authorisation_session_scope", "browser authorisation requires one exact publish scope");
+  }
+  const scope = scopesValue[0].trim();
+  const scopeMatch = scope.match(/^publish:([^/]+)\/([^/]+)$/);
+  if (!scopeMatch) {
+    throw new ApiError(400, "invalid_authorisation_session_scope", "browser authorisation requires publish:namespace/name");
+  }
+  const namespace = validatePackageIdent(scopeMatch[1] ?? "", "namespace");
+  const name = validatePackageIdent(scopeMatch[2] ?? "", "name");
+  const artifactKind = String(body["artifact_kind"] ?? "").trim() as ArtifactKind;
+  if (!ARTIFACT_KINDS.includes(artifactKind)) {
+    throw new ApiError(400, "invalid_artifact_kind", `artifact_kind must be one of ${ARTIFACT_KINDS.join(", ")}`);
+  }
+  const capabilityExpiresAt = String(body["capability_expires_at"] ?? "").trim();
+  const capabilityExpiry = new Date(capabilityExpiresAt);
+  if (!Number.isFinite(capabilityExpiry.getTime()) || capabilityExpiry.getTime() <= now.getTime()) {
+    throw new ApiError(400, "invalid_capability_expiry", "capability_expires_at must be a future ISO timestamp");
+  }
+  if (capabilityExpiry.getTime() > now.getTime() + 366 * 24 * 60 * 60 * 1_000) {
+    throw new ApiError(400, "capability_expiry_too_long", "browser-authorised capabilities may last no longer than 366 days");
+  }
+  const cliVersion = String(body["cli_version"] ?? "").trim();
+  if (!cliVersion || cliVersion.length > 64) throw new ApiError(400, "invalid_cli_version", "cli_version is required");
+
+  const sessionId = `auth_${crypto.randomUUID().replaceAll("-", "")}`;
+  const pollToken = `poll_${crypto.randomUUID().replaceAll("-", "")}`;
+  const browserToken = `browser_${crypto.randomUUID().replaceAll("-", "")}`;
+  const expiresAt = new Date(now.getTime() + AUTHORISATION_SESSION_TTL_MINUTES * 60 * 1_000).toISOString();
+  const websiteOrigin = registryWebsiteOrigin(env);
+  const record = await store.createAuthorisationSession({
+    session_id: sessionId,
+    poll_token_hash: `sha256:${await sha256Hex(pollToken)}`,
+    browser_token_hash: `sha256:${await sha256Hex(browserToken)}`,
+    registry_origin: registryOrigin,
+    website_origin: websiteOrigin,
+    capability_pubkey: capabilityPubkey,
+    requested_scopes: [scope],
+    capability_expires_at: capabilityExpiry.toISOString(),
+    cli_version: cliVersion,
+    namespace,
+    name,
+    artifact_kind: artifactKind,
+    status: "pending",
+    created_at: now.toISOString(),
+    updated_at: now.toISOString(),
+    expires_at: expiresAt,
+    request_id: requestId,
+  });
+  await store.appendAuditEvent({
+    request_id: requestId,
+    event_type: "authorisation_session.created",
+    namespace,
+    name,
+    data: { session_id: record.session_id, capability_key_id: await capabilityKeyId(capabilityPubkey), expires_at: expiresAt },
+  });
+  return json({
+    schema: "cellscript-registry-authorisation-session-v1",
+    request_id: requestId,
+    session_id: record.session_id,
+    poll_token: pollToken,
+    browser_url: `${websiteOrigin}/registry/submit#authorisation_session=${encodeURIComponent(record.session_id)}&browser_token=${encodeURIComponent(browserToken)}`,
+    artifact: { namespace, name, kind: artifactKind },
+    requested_scopes: record.requested_scopes,
+    expires_at: record.expires_at,
+  }, 201, headers);
+}
+
+async function handleGetAuthorisationSession(
+  request: Request,
+  store: RegistryStore,
+  requestId: string,
+  now: Date,
+  headers: Headers,
+  sessionIdFromPath: string,
+): Promise<Response> {
+  const sessionId = validateAuthorisationSessionId(sessionIdFromPath);
+  const session = await requireLiveAuthorisationSession(store, sessionId, now);
+  const authorization = request.headers.get("authorization");
+  const token = authorization?.startsWith("Bearer ") ? authorization.slice("Bearer ".length).trim() : "";
+  if (!token) throw new ApiError(401, "authorisation_session_token_required", "authorisation session bearer token is required");
+  const tokenHash = `sha256:${await sha256Hex(token)}`;
+  const isCliPoll = await constantTimeSecretEqual(tokenHash, session.poll_token_hash);
+  const isBrowser = await constantTimeSecretEqual(tokenHash, session.browser_token_hash);
+  if (!isCliPoll && !isBrowser) {
+    throw new ApiError(401, "invalid_authorisation_session_token", "authorisation session bearer token is invalid");
+  }
+  return json({
+    schema: "cellscript-registry-authorisation-session-v1",
+    request_id: requestId,
+    session_id: session.session_id,
+    status: session.status,
+    artifact: { namespace: session.namespace, name: session.name, kind: session.artifact_kind },
+    requested_scopes: session.requested_scopes,
+    capability_expires_at: session.capability_expires_at,
+    expires_at: session.expires_at,
+    ...(isCliPoll && session.capability_key_id ? { capability_key_id: session.capability_key_id } : {}),
+    ...(isCliPoll && session.namespace_status ? { namespace_status: session.namespace_status } : {}),
+  }, 200, headers);
+}
+
+async function handlePrepareAuthorisationSession(
+  request: Request,
+  env: Env,
+  store: RegistryStore,
+  requestId: string,
+  registryOrigin: string,
+  now: Date,
+  headers: Headers,
+  sessionIdFromPath: string,
+): Promise<Response> {
+  await throttleRequestSource(store, request, requestId, "authorisation_session_challenge", 60, 60, now);
+  const sessionId = validateAuthorisationSessionId(sessionIdFromPath);
+  const session = await requireLiveAuthorisationSession(store, sessionId, now);
+  await requireAuthorisationBrowserToken(request, session.browser_token_hash);
+  if (session.registry_origin !== registryOrigin) {
+    throw new ApiError(409, "authorisation_session_origin_mismatch", "authorisation session belongs to another Registry origin");
+  }
+  const body = await readJson(request, Math.min(maxJsonBytes(env), 16 * 1024));
+  const issuedAt = now.toISOString();
+  const challengeExpiresAt = new Date(Math.min(Date.parse(session.expires_at), now.getTime() + 10 * 60 * 1_000)).toISOString();
+  const payload = validateCapabilityPayload({
+    protocol: "cellscript-registry-auth-v1",
+    action: "authorize_capability",
+    registry_origin: registryOrigin,
+    principal_type: body["principal_type"],
+    principal_id: body["principal_id"],
+    capability_pubkey: session.capability_pubkey,
+    requested_scopes: session.requested_scopes,
+    capability_expires_at: session.capability_expires_at,
+    nonce: `0x${crypto.randomUUID().replaceAll("-", "")}`,
+    issued_at: issuedAt,
+    expires_at: challengeExpiresAt,
+    cli_version: session.cli_version,
+  }, registryOrigin, now);
+  const challengeToken = `challenge_${crypto.randomUUID().replaceAll("-", "")}`;
+  await store.prepareAuthorisationSession({
+    session_id: sessionId,
+    principal_type: payload.principal_type,
+    principal_id: payload.principal_id,
+    payload,
+    challenge_token_hash: `sha256:${await sha256Hex(challengeToken)}`,
+    request_id: requestId,
+  });
+  return json({
+    schema: "cellscript-registry-authorisation-challenge-v1",
+    request_id: requestId,
+    session_id: sessionId,
+    challenge_token: challengeToken,
+    payload,
+  }, 200, headers);
+}
+
+async function handleCompleteAuthorisationSession(
+  request: Request,
+  env: Env,
+  store: RegistryStore,
+  requestId: string,
+  registryOrigin: string,
+  now: Date,
+  deps: AppDeps,
+  headers: Headers,
+  sessionIdFromPath: string,
+): Promise<Response> {
+  await throttleRequestSource(store, request, requestId, "authorisation_session_complete", 40, 60, now);
+  const sessionId = validateAuthorisationSessionId(sessionIdFromPath);
+  const session = await requireLiveAuthorisationSession(store, sessionId, now);
+  await requireAuthorisationBrowserToken(request, session.browser_token_hash);
+  if (session.status !== "pending") {
+    return json({
+      schema: "cellscript-registry-authorisation-session-v1",
+      request_id: requestId,
+      session_id: session.session_id,
+      status: session.status,
+    }, 200, headers);
+  }
+  if (!session.payload || !session.challenge_token_hash) {
+    throw new ApiError(409, "authorisation_challenge_missing", "request a wallet challenge before completing this session");
+  }
+  const body = await readJson(request, Math.min(maxJsonBytes(env), 128 * 1024));
+  const challengeToken = String(body["challenge_token"] ?? "").trim();
+  if (!challengeToken || `sha256:${await sha256Hex(challengeToken)}` !== session.challenge_token_hash) {
+    throw new ApiError(401, "invalid_authorisation_challenge_token", "authorisation challenge token is invalid or stale");
+  }
+  const payload = validateCapabilityPayload(session.payload, registryOrigin, now);
+  const signature = requirePrincipalSignature(body, payload.principal_type);
+  await verifyPrincipalAuthorisationPayload(payload, signature, deps.joyidVerifier ?? productionJoyidVerifier());
+  await throttle(store, requestId, `principal:${payload.principal_type}:${payload.principal_id}`, "capability", 8, 60 * 60, now);
+  await throttle(store, requestId, `principal:${payload.principal_type}:${payload.principal_id}`, "namespace_claim", 12, 24 * 60 * 60, now);
+  const existing = await store.getNamespace(session.namespace);
+  if (existing && (existing.owner_principal_type !== payload.principal_type || existing.owner_principal_id !== payload.principal_id)) {
+    throw new ApiError(409, "namespace_already_claimed", "namespace is already claimed by another principal");
+  }
+  if (!existing) {
+    await enforceNamespaceClaimCooldown(
+      store,
+      requestId,
+      payload.principal_type,
+      payload.principal_id,
+      now,
+      namespaceClaimCooldownSeconds(env),
+    );
+  }
+  const nonceKey = await consumeSignedNonce(store, requestId, {
+    protocol: payload.protocol,
+    action: `${payload.action}:capability_create`,
+    nonce: payload.nonce,
+    expires_at: payload.expires_at,
+    principal_type: payload.principal_type,
+    principal_id: payload.principal_id,
+  });
+  let capability;
+  try {
+    capability = await store.recordCapability({ payload, principal_signature: signature, request_id: requestId });
+  } catch (error) {
+    await store.releaseNonce({ nonce_key: nonceKey, request_id: requestId });
+    throw error;
+  }
+  let namespaceStatus: "active" | "review_pending";
+  if (existing) {
+    namespaceStatus = existing.status === "active" ? "active" : "review_pending";
+  } else {
+    const claim = await store.claimNamespace({
+      namespace: session.namespace,
+      principal_type: payload.principal_type,
+      principal_id: payload.principal_id,
+      request_id: requestId,
+    });
+    namespaceStatus = claim.status;
+  }
+  const completed = await store.completeAuthorisationSession({
+    session_id: sessionId,
+    capability_key_id: capability.key_id,
+    namespace_status: namespaceStatus,
+    request_id: requestId,
+  });
+  await store.appendAuditEvent({
+    request_id: requestId,
+    event_type: "authorisation_session.completed",
+    principal_type: payload.principal_type,
+    principal_id: payload.principal_id,
+    capability_key_id: capability.key_id,
+    namespace: session.namespace,
+    name: session.name,
+    data: { session_id: session.session_id, namespace_status: namespaceStatus },
+  });
+  return json({
+    schema: "cellscript-registry-authorisation-session-v1",
+    request_id: requestId,
+    session_id: completed.session_id,
+    status: completed.status,
+    namespace_status: namespaceStatus,
+  }, namespaceStatus === "active" ? 201 : 202, headers);
+}
+
+function validateAuthorisationSessionId(value: string): string {
+  const sessionId = value.trim().toLowerCase();
+  if (!/^auth_[0-9a-f]{32}$/.test(sessionId)) {
+    throw new ApiError(400, "invalid_authorisation_session_id", "authorisation session ID is malformed");
+  }
+  return sessionId;
+}
+
+async function requireLiveAuthorisationSession(store: RegistryStore, sessionId: string, now: Date) {
+  const session = await store.getAuthorisationSession(sessionId);
+  if (!session) throw new ApiError(404, "authorisation_session_not_found", "authorisation session was not found");
+  if (Date.parse(session.expires_at) <= now.getTime()) {
+    throw new ApiError(410, "authorisation_session_expired", "authorisation session has expired; start again from cellc");
+  }
+  return session;
+}
+
+async function requireAuthorisationBrowserToken(request: Request, expectedHash: string): Promise<void> {
+  const authorization = request.headers.get("authorization");
+  const token = authorization?.startsWith("Bearer ") ? authorization.slice("Bearer ".length).trim() : "";
+  if (!token || !token.startsWith("browser_")) {
+    throw new ApiError(401, "authorisation_browser_token_required", "browser authorisation token is required");
+  }
+  if (!await constantTimeSecretEqual(`sha256:${await sha256Hex(token)}`, expectedHash)) {
+    throw new ApiError(401, "invalid_authorisation_browser_token", "browser authorisation token is invalid");
+  }
+}
+
+function registryWebsiteOrigin(env: Env): string {
+  const configured = (env.REGISTRY_WEBSITE_ORIGIN ?? (
+    registryRuntimeConfig(env).environment === "testnet-sandbox"
+      ? "https://testnet.registry.cellscript.dev"
+      : "https://cellscript.dev"
+  )).trim().replace(/\/$/, "");
+  let url: URL;
+  try { url = new URL(configured); }
+  catch { throw new ApiError(503, "invalid_registry_website_origin", "REGISTRY_WEBSITE_ORIGIN must be an absolute URL"); }
+  const loopback = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
+  if ((url.protocol !== "https:" && !(url.protocol === "http:" && loopback))
+    || !url.hostname || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
+    throw new ApiError(503, "invalid_registry_website_origin", "REGISTRY_WEBSITE_ORIGIN must be a credential-free HTTPS origin (HTTP is allowed only on loopback)");
+  }
+  return url.origin;
 }
 
 async function handleCreateCapability(

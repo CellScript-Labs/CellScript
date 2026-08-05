@@ -787,6 +787,70 @@ describe("registry api", () => {
     });
   });
 
+  it("completes a short-lived CLI-to-browser authorisation session without exposing the poll result", async () => {
+    const { app, store } = testApp();
+    const createdResponse = await post(app, "/v1/authorisation-sessions", {
+      capability_pubkey: reproducerPublicKeys["builder-a"],
+      requested_scopes: ["publish:walletdemo/demo"],
+      artifact_kind: "source_library",
+      capability_expires_at: "2026-09-21T12:00:00Z",
+      cli_version: "0.23.0",
+    });
+    expect(createdResponse.status).toBe(201);
+    const created = await createdResponse.json() as any;
+    const browserUrl = new URL(created.browser_url);
+    const browserParams = new URLSearchParams(browserUrl.hash.slice(1));
+    const browserToken = browserParams.get("browser_token");
+    expect(browserUrl.origin + browserUrl.pathname).toBe("https://cellscript.dev/registry/submit");
+    expect(browserParams.get("authorisation_session")).toBe(created.session_id);
+    expect(browserToken).toMatch(/^browser_[0-9a-f]{32}$/);
+
+    const publicPending = await get(app, `/v1/authorisation-sessions/${created.session_id}`);
+    expect(publicPending.status).toBe(401);
+    const browserPending = await get(app, `/v1/authorisation-sessions/${created.session_id}`, {}, {
+      authorization: `Bearer ${browserToken}`,
+    });
+    expect(await browserPending.json()).not.toHaveProperty("capability_key_id");
+
+    const wallet = await ckbAuthPayload();
+    const challengeResponse = await post(app, `/v1/authorisation-sessions/${created.session_id}/challenge`, {
+      principal_type: wallet.principal_type,
+      principal_id: wallet.principal_id,
+    }, {}, { authorization: `Bearer ${browserToken}` });
+    expect(challengeResponse.status).toBe(200);
+    const challenge = await challengeResponse.json() as any;
+    expect(challenge.payload).toMatchObject({
+      principal_type: "ckb_secp256k1",
+      principal_id: wallet.principal_id,
+      requested_scopes: ["publish:walletdemo/demo"],
+      capability_pubkey: reproducerPublicKeys["builder-a"],
+    });
+
+    const completeResponse = await post(app, `/v1/authorisation-sessions/${created.session_id}/complete`, {
+      challenge_token: challenge.challenge_token,
+      wallet_signature: ckbWalletSignature(challenge.payload),
+    }, {}, { authorization: `Bearer ${browserToken}` });
+    expect(completeResponse.status).toBe(201);
+    expect(await completeResponse.json()).toMatchObject({ status: "authorised", namespace_status: "active" });
+
+    const browserComplete = await get(app, `/v1/authorisation-sessions/${created.session_id}`, {}, {
+      authorization: `Bearer ${browserToken}`,
+    });
+    expect(await browserComplete.json()).not.toHaveProperty("capability_key_id");
+    const cliPoll = await get(app, `/v1/authorisation-sessions/${created.session_id}`, {}, {
+      authorization: `Bearer ${created.poll_token}`,
+    });
+    expect(await cliPoll.json()).toMatchObject({
+      status: "authorised",
+      namespace_status: "active",
+      capability_key_id: await capabilityKeyId(reproducerPublicKeys["builder-a"]),
+    });
+    expect(store.namespaces.get("walletdemo")).toMatchObject({
+      owner_principal_type: "ckb_secp256k1",
+      owner_principal_id: wallet.principal_id,
+    });
+  });
+
   it("checks an existing capability against its exact artifact and namespace owner", async () => {
     const { app, store } = testApp();
     const payload = authPayload();

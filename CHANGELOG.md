@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Close the first-publish browser/CLI loop with `cellc publish --authorise`.
+  cellc now creates and stores the delegated P-256 publishing key locally,
+  opens a 15-minute exact-coordinate wallet session, and resumes publishing
+  automatically after Registry approval; `--no-open` supports remote and
+  terminal-only environments. Session reads expose neither the polling secret
+  nor the resulting key ID to the browser. Submit distinguishes detected
+  in-browser connectors from the complete external-signature directory, uses
+  plain publishing-access language on the first-run path, states the
+  non-replaceable release rule directly, and preserves the explicit CLI path
+  for external wallets and CI. Artifact details now derive one recommended
+  action from availability, verification, deployment, and consumption state.
 - Add an isolated Pudge Testnet Registry Sandbox. Its API, Postgres database,
   object volume, signing origin, RPC identity, website build, wallet storage,
   and deployment evidence are separate from production. Sandbox releases are

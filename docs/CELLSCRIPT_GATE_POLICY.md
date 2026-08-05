@@ -64,9 +64,11 @@ mainnet deployment evidence, additive migrations, worker boundary, and
 database/static-object shape to the CLI-generated Registry entry. It is local
 service coverage, not evidence
 that Cloudflare, R2, Hyperdrive, Neon, DNS, or a production deployment works.
-The CLI coverage includes the explicit first-publish admission sequence:
+The CLI coverage includes both first-publish admission paths: the explicit
 `cellc auth capability submit`, `cellc auth namespace claim`, then
-`cellc publish`; publisher maintenance additionally uses the capability-signed
+`cellc publish` sequence, and the short-lived `cellc publish --authorise`
+browser session in which the private publishing key remains in the local OS
+keychain while the CLI polls with a one-time secret. Publisher maintenance additionally uses the capability-signed
 `cellc artifact set-availability` path, and `cellc artifact cell-dep` performs a
 fresh mainnet liveness check before producing a transaction-builder descriptor.
 Independent reproducibility builders use `cellc auth reproducer create`; CLI

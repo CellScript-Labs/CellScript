@@ -543,6 +543,8 @@ pub struct PublishArgs {
     pub allow_dirty: bool,
     pub api_url: Option<String>,
     pub capability_key_id: Option<String>,
+    pub authorise: bool,
+    pub no_open: bool,
     pub capability_signature: Option<String>,
     pub idempotency_key: Option<String>,
     pub payload: Option<PathBuf>,
@@ -3734,15 +3736,19 @@ impl CommandExecutor {
             let payload = if let Some(payload_path) = args.payload.as_deref() {
                 read_registry_publish_payload(payload_path)?
             } else {
-                let capability_key_id = args
-                    .capability_key_id
-                    .or_else(|| std::env::var("CELLSCRIPT_CAPABILITY_KEY_ID").ok())
-                    .ok_or_else(|| {
-                        crate::error::CompileError::without_span(format!(
-                            "capability key id is required for public publish; connect a supported CKB wallet through the registry submit page to derive <principal_type> and <principal_id>, then run `cellc auth capability create --principal-type <principal_type> --principal-id <principal_id> --expires 90d --json > capability-payload.json` in this package directory (cellc infers only the exact publish scope for {}/{}; deployment and availability require explicit --scope grants), sign that payload through CCC, submit it with `cellc auth capability submit --payload capability-payload.json --wallet-signature wallet-signature.json`, then claim the namespace with `cellc auth namespace claim --namespace {} --payload capability-payload.json --wallet-signature wallet-signature.json`; after registration and an active namespace claim, pass --capability-key-id or set CELLSCRIPT_CAPABILITY_KEY_ID",
-                            namespace, manifest.package.name, namespace
+                let capability_key_id = match args.capability_key_id.or_else(|| std::env::var("CELLSCRIPT_CAPABILITY_KEY_ID").ok()) {
+                    Some(key_id) => key_id,
+                    None if args.authorise => {
+                        authorise_registry_publish_key(&api_base, &namespace, &manifest.package.name, &artifact.kind, args.no_open)?
+                    }
+                    None => {
+                        return Err(crate::error::CompileError::without_span(format!(
+                            "publishing {}/{} requires a wallet-authorised publishing key; run `cellc publish --authorise` for the continuous browser flow, or pass an existing --capability-key-id",
+                            namespace, manifest.package.name
                         ))
-                    })?;
+                        .with_category(crate::error::CompileErrorCategory::Authentication));
+                    }
+                };
                 let issued_at = current_utc_timestamp();
                 let expires_at = utc_timestamp_after_seconds(10 * 60);
                 let nonce = registry_publish_nonce(
@@ -5369,10 +5375,19 @@ fn publish_declared_artifact(args: PublishArgs, manifest_path: &Path) -> Result<
     let api_base = resolve_registry_api_base(args.api_url)?;
     let registry_origin = registry_origin_from_api_base(&api_base)?;
     let endpoint = registry_publish_endpoint(&api_base, &manifest.namespace, &manifest.name);
-    let capability_key_id = args
-        .capability_key_id
-        .or_else(|| std::env::var("CELLSCRIPT_CAPABILITY_KEY_ID").ok())
-        .ok_or_else(|| crate::error::CompileError::without_span("capability key id is required for artifact publish"))?;
+    let capability_key_id = match args.capability_key_id.or_else(|| std::env::var("CELLSCRIPT_CAPABILITY_KEY_ID").ok()) {
+        Some(key_id) => key_id,
+        None if args.authorise => {
+            authorise_registry_publish_key(&api_base, &manifest.namespace, &manifest.name, &artifact.kind, args.no_open)?
+        }
+        None => {
+            return Err(crate::error::CompileError::without_span(format!(
+                "publishing {}/{} requires a wallet-authorised publishing key; run `cellc publish --authorise` for the continuous browser flow, or pass an existing --capability-key-id",
+                manifest.namespace, manifest.name
+            ))
+            .with_category(crate::error::CompileErrorCategory::Authentication));
+        }
+    };
     let issued_at = current_utc_timestamp();
     let expires_at = utc_timestamp_after_seconds(10 * 60);
     let nonce = registry_publish_nonce(
@@ -6012,6 +6027,208 @@ pub(super) fn registry_http_client() -> Result<reqwest::blocking::Client> {
                 .with_source(error)
         },
     )
+}
+
+#[derive(serde::Serialize)]
+struct RegistryAuthorisationSessionCreateRequest {
+    capability_pubkey: String,
+    requested_scopes: Vec<String>,
+    artifact_kind: String,
+    capability_expires_at: String,
+    cli_version: String,
+}
+
+#[derive(serde::Deserialize)]
+struct RegistryAuthorisationSessionCreateResponse {
+    session_id: String,
+    poll_token: String,
+    browser_url: String,
+}
+
+#[derive(serde::Deserialize)]
+struct RegistryAuthorisationSessionPollResponse {
+    status: String,
+    capability_key_id: Option<String>,
+    namespace_status: Option<String>,
+}
+
+fn authorise_registry_publish_key(api_base: &str, namespace: &str, name: &str, artifact_kind: &str, no_open: bool) -> Result<String> {
+    let generated = generate_registry_key_material()?;
+    let client = registry_http_client()?;
+    let endpoint = format!("{}/v1/authorisation-sessions", api_base.trim_end_matches('/'));
+    let response = client
+        .post(&endpoint)
+        .json(&RegistryAuthorisationSessionCreateRequest {
+            capability_pubkey: generated.public_key.clone(),
+            requested_scopes: vec![format!("publish:{namespace}/{name}")],
+            artifact_kind: artifact_kind.to_string(),
+            capability_expires_at: utc_timestamp_after_seconds(90 * 24 * 60 * 60),
+            cli_version: crate::VERSION.to_string(),
+        })
+        .send()
+        .map_err(|error| {
+            crate::error::CompileError::without_span(format!("failed to create browser authorisation session: {error}"))
+                .with_category(crate::error::CompileErrorCategory::Network)
+                .with_source(error)
+        })?;
+    let status = response.status();
+    let body = response.text().map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to read browser authorisation session response: {error}"))
+            .with_category(crate::error::CompileErrorCategory::Network)
+            .with_source(error)
+    })?;
+    if !status.is_success() {
+        return Err(crate::error::CompileError::without_span(format!(
+            "registry refused browser authorisation session with HTTP {status}: {}",
+            body.trim()
+        ))
+        .with_category(registry_http_error_category(status)));
+    }
+    let session: RegistryAuthorisationSessionCreateResponse = serde_json::from_str(&body).map_err(|error| {
+        crate::error::CompileError::without_span(format!("registry returned an invalid authorisation session: {error}"))
+            .with_category(crate::error::CompileErrorCategory::Network)
+            .with_source(error)
+    })?;
+    validate_registry_authorisation_session(&session, api_base)?;
+    if generated.key_id != registry_capability_key_id(&generated.public_key) {
+        return Err(crate::error::CompileError::without_span(
+            "generated capability key identity changed before browser authorisation",
+        )
+        .with_category(crate::error::CompileErrorCategory::Authentication));
+    }
+    store_registry_private_key(&generated.key_id, &generated.private_key_pkcs8)?;
+
+    eprintln!("Authorise publishing {namespace}/{name} in your CKB wallet:");
+    eprintln!("  {}", session.browser_url);
+    if !no_open {
+        if let Err(error) = open_registry_authorisation_url(&session.browser_url) {
+            eprintln!("Browser did not open automatically: {error}");
+        }
+    }
+    eprintln!("Waiting for wallet approval…");
+
+    let poll_endpoint = format!("{}/v1/authorisation-sessions/{}", api_base.trim_end_matches('/'), session.session_id);
+    let deadline = std::time::Instant::now() + Duration::from_secs(15 * 60);
+    while std::time::Instant::now() < deadline {
+        let response = client.get(&poll_endpoint).bearer_auth(&session.poll_token).send().map_err(|error| {
+            crate::error::CompileError::without_span(format!("failed to poll browser authorisation session: {error}"))
+                .with_category(crate::error::CompileErrorCategory::Network)
+                .with_source(error)
+        })?;
+        let status = response.status();
+        let body = response.text().map_err(|error| {
+            crate::error::CompileError::without_span(format!("failed to read authorisation session status: {error}"))
+                .with_category(crate::error::CompileErrorCategory::Network)
+                .with_source(error)
+        })?;
+        if !status.is_success() {
+            return Err(crate::error::CompileError::without_span(format!(
+                "browser authorisation session failed with HTTP {status}: {}",
+                body.trim()
+            ))
+            .with_category(registry_http_error_category(status)));
+        }
+        let poll: RegistryAuthorisationSessionPollResponse = serde_json::from_str(&body).map_err(|error| {
+            crate::error::CompileError::without_span(format!("registry returned an invalid authorisation status: {error}"))
+                .with_category(crate::error::CompileErrorCategory::Network)
+                .with_source(error)
+        })?;
+        match poll.status.as_str() {
+            "pending" => std::thread::sleep(Duration::from_secs(2)),
+            "authorised" => {
+                let key_id = poll
+                    .capability_key_id
+                    .ok_or_else(|| crate::error::CompileError::without_span("authorised session did not return a capability key"))?;
+                if key_id != generated.key_id {
+                    return Err(crate::error::CompileError::without_span(
+                        "registry authorised a different capability key than the one held locally",
+                    )
+                    .with_category(crate::error::CompileErrorCategory::Authentication));
+                }
+                eprintln!("Publishing authorisation confirmed; continuing with cellc.");
+                return Ok(key_id);
+            }
+            "review_pending" => {
+                return Err(crate::error::CompileError::without_span(format!(
+                    "wallet authorisation succeeded, but namespace '{namespace}' is awaiting Registry review; rerun publish with --capability-key-id {} after approval",
+                    poll.capability_key_id.as_deref().unwrap_or(&generated.key_id)
+                ))
+                .with_category(crate::error::CompileErrorCategory::Authentication));
+            }
+            other => {
+                return Err(crate::error::CompileError::without_span(format!(
+                    "registry returned unknown authorisation session status '{other}' (namespace status: {})",
+                    poll.namespace_status.as_deref().unwrap_or("unknown")
+                ))
+                .with_category(crate::error::CompileErrorCategory::Network));
+            }
+        }
+    }
+    Err(crate::error::CompileError::without_span(
+        "browser authorisation session expired before wallet approval; run `cellc publish --authorise` again",
+    )
+    .with_category(crate::error::CompileErrorCategory::Authentication))
+}
+
+fn validate_registry_authorisation_session(session: &RegistryAuthorisationSessionCreateResponse, api_base: &str) -> Result<()> {
+    if !session.session_id.starts_with("auth_")
+        || session.session_id.len() != 37
+        || !session.session_id[5..].bytes().all(|byte| byte.is_ascii_hexdigit())
+        || !session.poll_token.starts_with("poll_")
+        || session.poll_token.len() != 37
+        || !session.poll_token[5..].bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(crate::error::CompileError::without_span("registry returned malformed authorisation credentials")
+            .with_category(crate::error::CompileErrorCategory::Network));
+    }
+    let browser = reqwest::Url::parse(&session.browser_url).map_err(|error| {
+        crate::error::CompileError::without_span(format!("registry returned an invalid browser URL: {error}"))
+            .with_category(crate::error::CompileErrorCategory::Network)
+    })?;
+    let api = parse_registry_api_url(api_base)?;
+    let browser_host = browser.host_str().unwrap_or_default();
+    let fragment = browser.fragment().unwrap_or_default();
+    let fragment_value = |name: &str| {
+        fragment.split('&').find_map(|part| {
+            let (key, value) = part.split_once('=')?;
+            (key == name).then_some(value)
+        })
+    };
+    let browser_session_id = fragment_value("authorisation_session");
+    let browser_token = fragment_value("browser_token").unwrap_or_default();
+    let loopback = browser_host.parse::<std::net::IpAddr>().is_ok_and(|address| address.is_loopback())
+        || browser_host.eq_ignore_ascii_case("localhost");
+    if (browser.scheme() != "https" && !(browser.scheme() == "http" && loopback))
+        || !browser.username().is_empty()
+        || browser.password().is_some()
+        || browser.query().is_some()
+        || browser_session_id != Some(session.session_id.as_str())
+        || !browser_token.starts_with("browser_")
+        || browser_token.len() != 40
+        || !browser_token[8..].bytes().all(|byte| byte.is_ascii_hexdigit())
+        || !browser.path().ends_with("/registry/submit")
+        || (api.scheme() == "https" && browser.scheme() != "https")
+    {
+        return Err(crate::error::CompileError::without_span("registry returned an unsafe browser authorisation URL")
+            .with_category(crate::error::CompileErrorCategory::Network));
+    }
+    Ok(())
+}
+
+fn open_registry_authorisation_url(url: &str) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    let status = std::process::Command::new("open").arg(url).status()?;
+    #[cfg(target_os = "windows")]
+    let status = std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", url]).status()?;
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let status = std::process::Command::new("xdg-open").arg(url).status()?;
+    #[cfg(not(any(unix, windows)))]
+    return Err(std::io::Error::other("automatic browser opening is unsupported on this platform"));
+    if status.success() {
+        Ok(())
+    } else {
+        Err(std::io::Error::other("browser launcher returned a failure status"))
+    }
 }
 
 fn submit_registry_publish_request_with_retry(
@@ -13897,6 +14114,20 @@ impl CliParser {
                             .help("Registry capability key id authorised by a root wallet"),
                     )
                     .arg(
+                        Arg::new("authorise")
+                            .long("authorise")
+                            .action(ArgAction::SetTrue)
+                            .conflicts_with_all(["capability-key-id", "capability-signature", "payload", "offline", "dry-run", "print-payload"])
+                            .help("Create a short-lived browser wallet session, wait for approval, then continue publishing"),
+                    )
+                    .arg(
+                        Arg::new("no-open")
+                            .long("no-open")
+                            .action(ArgAction::SetTrue)
+                            .requires("authorise")
+                            .help("Print the browser authorisation URL without opening it automatically"),
+                    )
+                    .arg(
                         Arg::new("capability-signature")
                             .long("capability-signature")
                             .value_name("SIGNATURE")
@@ -14922,6 +15153,8 @@ impl CliParser {
                 allow_dirty: m.get_flag("allow-dirty"),
                 api_url: m.get_one::<String>("api-url").cloned(),
                 capability_key_id: m.get_one::<String>("capability-key-id").cloned(),
+                authorise: m.get_flag("authorise"),
+                no_open: m.get_flag("no-open"),
                 capability_signature: m.get_one::<String>("capability-signature").cloned(),
                 idempotency_key: m.get_one::<String>("idempotency-key").cloned(),
                 payload: m.get_one::<String>("payload").map(PathBuf::from),
@@ -15044,6 +15277,29 @@ mod tests {
     #[test]
     fn test_command_execution() {
         let _cmd = Command::Clean(CleanArgs::default());
+    }
+
+    #[test]
+    fn publish_parses_continuous_browser_authorisation() {
+        let matches = CliParser::command().try_get_matches_from(["cellc", "publish", "--authorise", "--no-open"]).unwrap();
+        let Command::Publish(args) = CliParser::parse_matches(matches) else {
+            panic!("expected publish command");
+        };
+        assert!(args.authorise);
+        assert!(args.no_open);
+        assert!(args.capability_key_id.is_none());
+    }
+
+    #[test]
+    fn publish_authorisation_rejects_an_existing_key_override() {
+        let result = CliParser::command().try_get_matches_from([
+            "cellc",
+            "publish",
+            "--authorise",
+            "--capability-key-id",
+            "cap_0123456789abcdef0123456789abcdef",
+        ]);
+        assert!(result.is_err());
     }
 
     #[test]

@@ -131,6 +131,10 @@ POST /v1/capabilities
 GET  /v1/capabilities/:key_id/check?namespace=:namespace&name=:name
 POST /v1/capabilities/:key_id/revoke
 POST /v1/namespaces/claim
+POST /v1/authorisation-sessions
+GET  /v1/authorisation-sessions/:session_id
+POST /v1/authorisation-sessions/:session_id/challenge
+POST /v1/authorisation-sessions/:session_id/complete
 
 GET  /v1/admin/audit-events
 GET  /v1/admin/verification-queue
@@ -165,6 +169,21 @@ scope:
 
 Each form also accepts `namespace/*`. Possessing one action does not imply either
 of the others.
+
+For an interactive first publish, `cellc publish --authorise` creates a
+15-minute, exact-coordinate browser session and opens the matching Registry
+site. The CLI generates the delegated P-256 key first and keeps its private key
+in the OS keychain. The API stores only the public key plus hashes of separate
+one-time CLI-polling and browser-approval tokens. The browser token travels in
+the URL fragment, not the query string, so it is absent from HTTP logs and
+Referer headers; browser reads never return the polling token or resulting
+capability key ID. After the wallet approves the
+server-built challenge, the Registry records the capability, claims the
+namespace, and the polling CLI continues the original publish automatically.
+Use `--no-open` to print the browser URL without launching it.
+
+The explicit commands below remain the auditable/manual route for CI, external
+wallet signing, and recovery:
 
 ```bash
 cellc auth capability create --principal-type <principal_type> --principal-id <principal_id> \

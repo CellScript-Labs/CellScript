@@ -53,6 +53,7 @@ services:
       REGISTRY_ADMIN_TOKEN: ${REGISTRY_ADMIN_TOKEN:?REGISTRY_ADMIN_TOKEN is required}
       REGISTRY_ORIGIN: ${REGISTRY_ORIGIN:-https://api.registry.cellscript.dev}
       STATIC_REGISTRY_ORIGIN: ${STATIC_REGISTRY_ORIGIN:-https://registry.cellscript.dev}
+      REGISTRY_WEBSITE_ORIGIN: ${REGISTRY_WEBSITE_ORIGIN:-https://cellscript.dev}
       CKB_MAINNET_RPC_URL: ${CKB_MAINNET_RPC_URL:-https://mainnet.ckb.dev/rpc}
       CKB_RPC_URL: ${CKB_RPC_URL:-https://mainnet.ckb.dev/rpc}
       CKB_RPC_MAX_RESPONSE_BYTES: "8388608"

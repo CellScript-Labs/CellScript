@@ -31,6 +31,7 @@ const env: Env = {
   REGISTRY_ADMIN_TOKEN: adminToken,
   REGISTRY_ORIGIN: process.env["REGISTRY_ORIGIN"] ?? "https://api.registry.cellscript.dev",
   STATIC_REGISTRY_ORIGIN: process.env["STATIC_REGISTRY_ORIGIN"] ?? "https://registry.cellscript.dev",
+  REGISTRY_WEBSITE_ORIGIN: process.env["REGISTRY_WEBSITE_ORIGIN"] ?? "https://cellscript.dev",
   ENVIRONMENT: process.env["ENVIRONMENT"] ?? "production",
   REGISTRY_ENVIRONMENT: process.env["REGISTRY_ENVIRONMENT"] ?? "production",
   ...(process.env["MAX_JSON_BODY_BYTES"] ? { MAX_JSON_BODY_BYTES: process.env["MAX_JSON_BODY_BYTES"] } : {}),

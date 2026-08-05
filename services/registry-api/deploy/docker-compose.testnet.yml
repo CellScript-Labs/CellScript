@@ -43,6 +43,7 @@ services:
       REGISTRY_ADMIN_TOKEN: ${REGISTRY_TESTNET_ADMIN_TOKEN:?REGISTRY_TESTNET_ADMIN_TOKEN is required}
       REGISTRY_ORIGIN: ${REGISTRY_TESTNET_ORIGIN:-https://api.testnet.registry.cellscript.dev}
       STATIC_REGISTRY_ORIGIN: ${STATIC_REGISTRY_TESTNET_ORIGIN:-https://objects.testnet.registry.cellscript.dev}
+      REGISTRY_WEBSITE_ORIGIN: ${REGISTRY_TESTNET_WEBSITE_ORIGIN:-https://testnet.registry.cellscript.dev}
       CKB_RPC_URL: ${CKB_TESTNET_RPC_URL:-https://testnet.ckb.dev/rpc}
       CKB_RPC_MAX_RESPONSE_BYTES: "8388608"
       CKB_MIN_CONFIRMATIONS: "4"

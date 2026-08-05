@@ -34,6 +34,34 @@ export interface CapabilityRecord {
   last_used_at?: string | null;
 }
 
+export type AuthorisationSessionStatus = "pending" | "authorised" | "review_pending";
+
+export interface AuthorisationSessionRecord {
+  session_id: string;
+  poll_token_hash: string;
+  browser_token_hash: string;
+  registry_origin: string;
+  website_origin: string;
+  capability_pubkey: string;
+  requested_scopes: string[];
+  capability_expires_at: string;
+  cli_version: string;
+  namespace: string;
+  name: string;
+  artifact_kind: ArtifactKind;
+  status: AuthorisationSessionStatus;
+  principal_type?: PrincipalType | null;
+  principal_id?: string | null;
+  payload?: CapabilityAuthorisationPayload | null;
+  challenge_token_hash?: string | null;
+  capability_key_id?: string | null;
+  namespace_status?: NamespaceClaimResult["status"] | null;
+  created_at: string;
+  updated_at: string;
+  expires_at: string;
+  completed_at?: string | null;
+}
+
 export interface SnapshotRecord {
   snapshot_hash: string;
   r2_key: string;
@@ -139,6 +167,7 @@ export interface MaintenanceResult {
   idempotency_keys_deleted: number;
   quota_events_deleted: number;
   package_versions_expired?: number;
+  authorisation_sessions_deleted?: number;
   static_objects?: SandboxObjectCandidate[];
   source_objects?: SandboxObjectCandidate[];
 }
@@ -283,6 +312,22 @@ export interface RegistryStore {
     request_id: string;
   }): Promise<CapabilityRecord>;
   getCapability(keyId: string): Promise<CapabilityRecord | null>;
+  createAuthorisationSession(input: AuthorisationSessionRecord & { request_id: string }): Promise<AuthorisationSessionRecord>;
+  getAuthorisationSession(sessionId: string): Promise<AuthorisationSessionRecord | null>;
+  prepareAuthorisationSession(input: {
+    session_id: string;
+    principal_type: PrincipalType;
+    principal_id: string;
+    payload: CapabilityAuthorisationPayload;
+    challenge_token_hash: string;
+    request_id: string;
+  }): Promise<AuthorisationSessionRecord>;
+  completeAuthorisationSession(input: {
+    session_id: string;
+    capability_key_id: string;
+    namespace_status: NamespaceClaimResult["status"];
+    request_id: string;
+  }): Promise<AuthorisationSessionRecord>;
   revokeCapability(input: {
     key_id: string;
     principal_type: PrincipalType;
@@ -482,6 +527,7 @@ function sandboxStaticObjectKey(namespace: string, name: string, version: string
 
 export class MemoryRegistryStore implements RegistryStore {
   capabilities = new Map<string, CapabilityRecord>();
+  authorisationSessions = new Map<string, AuthorisationSessionRecord>();
   namespaces = new Map<string, NamespaceRecord>();
   packageVersions = new Map<string, PackageVersionRecord>();
   packageEvidence = new Map<string, PackageEvidenceRecord>();
@@ -550,6 +596,68 @@ export class MemoryRegistryStore implements RegistryStore {
 
   async getCapability(keyId: string): Promise<CapabilityRecord | null> {
     return this.capabilities.get(keyId) ?? null;
+  }
+
+  async createAuthorisationSession(
+    input: AuthorisationSessionRecord & { request_id: string },
+  ): Promise<AuthorisationSessionRecord> {
+    if (this.authorisationSessions.has(input.session_id)) {
+      throw new ApiError(409, "authorisation_session_exists", "authorisation session already exists");
+    }
+    const { request_id: _requestId, ...record } = input;
+    this.authorisationSessions.set(record.session_id, record);
+    return record;
+  }
+
+  async getAuthorisationSession(sessionId: string): Promise<AuthorisationSessionRecord | null> {
+    return this.authorisationSessions.get(sessionId) ?? null;
+  }
+
+  async prepareAuthorisationSession(input: {
+    session_id: string;
+    principal_type: PrincipalType;
+    principal_id: string;
+    payload: CapabilityAuthorisationPayload;
+    challenge_token_hash: string;
+    request_id: string;
+  }): Promise<AuthorisationSessionRecord> {
+    const existing = this.authorisationSessions.get(input.session_id);
+    if (!existing) throw new ApiError(404, "authorisation_session_not_found", "authorisation session was not found");
+    if (existing.status !== "pending") {
+      throw new ApiError(409, "authorisation_session_complete", "authorisation session has already completed");
+    }
+    const updated: AuthorisationSessionRecord = {
+      ...existing,
+      principal_type: input.principal_type,
+      principal_id: input.principal_id,
+      payload: input.payload,
+      challenge_token_hash: input.challenge_token_hash,
+      updated_at: nowIso(),
+    };
+    this.authorisationSessions.set(input.session_id, updated);
+    return updated;
+  }
+
+  async completeAuthorisationSession(input: {
+    session_id: string;
+    capability_key_id: string;
+    namespace_status: NamespaceClaimResult["status"];
+    request_id: string;
+  }): Promise<AuthorisationSessionRecord> {
+    const existing = this.authorisationSessions.get(input.session_id);
+    if (!existing) throw new ApiError(404, "authorisation_session_not_found", "authorisation session was not found");
+    const completedAt = nowIso();
+    const updated: AuthorisationSessionRecord = {
+      ...existing,
+      status: input.namespace_status === "active" ? "authorised" : "review_pending",
+      capability_key_id: input.capability_key_id,
+      namespace_status: input.namespace_status,
+      challenge_token_hash: null,
+      updated_at: completedAt,
+      completed_at: completedAt,
+    };
+    this.authorisationSessions.set(input.session_id, updated);
+    return updated;
   }
 
   async revokeCapability(input: {
@@ -1163,6 +1271,7 @@ export class MemoryRegistryStore implements RegistryStore {
     let usedNoncesDeleted = 0;
     let idempotencyKeysDeleted = 0;
     let packageVersionsExpired = 0;
+    let authorisationSessionsDeleted = 0;
 
     for (const [key, record] of this.usedNonces.entries()) {
       if (Date.parse(record.expires_at) < now) {
@@ -1174,6 +1283,12 @@ export class MemoryRegistryStore implements RegistryStore {
       if (Date.parse(record.expires_at) < now) {
         this.idempotencyKeys.delete(key);
         idempotencyKeysDeleted += 1;
+      }
+    }
+    for (const [key, record] of this.authorisationSessions.entries()) {
+      if (Date.parse(record.expires_at) < now) {
+        this.authorisationSessions.delete(key);
+        authorisationSessionsDeleted += 1;
       }
     }
     const quotaBefore = this.quotaEvents.length;
@@ -1211,6 +1326,7 @@ export class MemoryRegistryStore implements RegistryStore {
       idempotency_keys_deleted: idempotencyKeysDeleted,
       quota_events_deleted: quotaBefore - this.quotaEvents.length,
       package_versions_expired: packageVersionsExpired,
+      authorisation_sessions_deleted: authorisationSessionsDeleted,
       static_objects: staticObjects,
       source_objects: sourceObjects,
     };

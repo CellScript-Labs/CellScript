@@ -1430,13 +1430,9 @@ fn cellc_publish_default_requires_capability_inputs_without_writing_registry_jso
 
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("capability key id is required for public publish"), "unexpected stderr: {stderr}");
-    assert!(
-        stderr.contains("cellc auth capability create --principal-type <principal_type> --principal-id <principal_id>",),
-        "unexpected stderr: {stderr}"
-    );
-    assert!(stderr.contains("--wallet-signature wallet-signature.json"), "unexpected stderr: {stderr}");
-    assert!(stderr.contains("cellc auth namespace claim --namespace cellscript"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("wallet-authorised publishing key"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("cellc publish --authorise"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("--capability-key-id"), "unexpected stderr: {stderr}");
     assert!(!temp.path().join("registry.json").exists(), "default public publish must not silently write offline registry.json");
 }
 

@@ -5,6 +5,7 @@ import {
   packageVersionRequiresReproduction,
   type AuditEventInput,
   type AuditEventRecord,
+  type AuthorisationSessionRecord,
   type CapabilityRecord,
   type IdempotencyRecord,
   type IdempotencyReservation,
@@ -169,6 +170,128 @@ export class SqlRegistryStore implements RegistryStore {
         last_used_at: row.last_used_at ? new Date(row.last_used_at).toISOString() : null,
       };
     });
+  }
+
+  async createAuthorisationSession(
+    input: AuthorisationSessionRecord & { request_id: string },
+  ): Promise<AuthorisationSessionRecord> {
+    await this.withClient(async (client) => {
+      const inserted = await client.query(
+        `insert into authorisation_sessions(
+           session_id, poll_token_hash, browser_token_hash, registry_origin, website_origin,
+           capability_pubkey, requested_scopes, capability_expires_at, cli_version,
+           namespace, name, artifact_kind, status, expires_at, audit_request_id
+         ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending', $13, $14)
+         on conflict (session_id) do nothing`,
+        [
+          input.session_id,
+          input.poll_token_hash,
+          input.browser_token_hash,
+          input.registry_origin,
+          input.website_origin,
+          input.capability_pubkey,
+          input.requested_scopes,
+          input.capability_expires_at,
+          input.cli_version,
+          input.namespace,
+          input.name,
+          input.artifact_kind,
+          input.expires_at,
+          input.request_id,
+        ],
+      );
+      if (inserted.rowCount !== 1) {
+        throw new ApiError(409, "authorisation_session_exists", "authorisation session already exists");
+      }
+    });
+    const record = await this.getAuthorisationSession(input.session_id);
+    if (!record) throw new Error("authorisation session insert did not return a readable record");
+    return record;
+  }
+
+  async getAuthorisationSession(sessionId: string): Promise<AuthorisationSessionRecord | null> {
+    return this.withClient(async (client) => {
+      const result = await client.query(
+        `select session_id, poll_token_hash, browser_token_hash, registry_origin, website_origin,
+                capability_pubkey, requested_scopes, capability_expires_at, cli_version,
+                namespace, name, artifact_kind, status, principal_type, principal_id, payload,
+                challenge_token_hash, capability_key_id, namespace_status,
+                created_at, updated_at, expires_at, completed_at
+         from authorisation_sessions where session_id = $1`,
+        [sessionId],
+      );
+      return result.rows[0] ? authorisationSessionFromRow(result.rows[0]) : null;
+    });
+  }
+
+  async prepareAuthorisationSession(input: {
+    session_id: string;
+    principal_type: PrincipalType;
+    principal_id: string;
+    payload: CapabilityAuthorisationPayload;
+    challenge_token_hash: string;
+    request_id: string;
+  }): Promise<AuthorisationSessionRecord> {
+    await this.withClient(async (client) => {
+      const updated = await client.query(
+        `update authorisation_sessions
+         set principal_type = $2,
+             principal_id = $3,
+             payload = $4::jsonb,
+             challenge_token_hash = $5,
+             updated_at = now()
+         where session_id = $1 and status = 'pending' and expires_at > now()`,
+        [input.session_id, input.principal_type, input.principal_id, JSON.stringify(input.payload), input.challenge_token_hash],
+      );
+      if (updated.rowCount !== 1) {
+        const existing = await client.query("select status, expires_at from authorisation_sessions where session_id = $1", [input.session_id]);
+        if (!existing.rows[0]) throw new ApiError(404, "authorisation_session_not_found", "authorisation session was not found");
+        if (new Date(existing.rows[0].expires_at).getTime() <= Date.now()) {
+          throw new ApiError(410, "authorisation_session_expired", "authorisation session has expired");
+        }
+        throw new ApiError(409, "authorisation_session_complete", "authorisation session has already completed");
+      }
+    });
+    const record = await this.getAuthorisationSession(input.session_id);
+    if (!record) throw new Error("prepared authorisation session was not readable");
+    return record;
+  }
+
+  async completeAuthorisationSession(input: {
+    session_id: string;
+    capability_key_id: string;
+    namespace_status: NamespaceClaimResult["status"];
+    request_id: string;
+  }): Promise<AuthorisationSessionRecord> {
+    await this.withClient(async (client) => {
+      const updated = await client.query(
+        `update authorisation_sessions
+         set status = $2,
+             capability_key_id = $3,
+             namespace_status = $4,
+             challenge_token_hash = null,
+             completed_at = now(),
+             updated_at = now()
+         where session_id = $1 and status = 'pending' and expires_at > now()`,
+        [
+          input.session_id,
+          input.namespace_status === "active" ? "authorised" : "review_pending",
+          input.capability_key_id,
+          input.namespace_status,
+        ],
+      );
+      if (updated.rowCount !== 1) {
+        const existing = await client.query("select status, expires_at from authorisation_sessions where session_id = $1", [input.session_id]);
+        if (!existing.rows[0]) throw new ApiError(404, "authorisation_session_not_found", "authorisation session was not found");
+        if (new Date(existing.rows[0].expires_at).getTime() <= Date.now()) {
+          throw new ApiError(410, "authorisation_session_expired", "authorisation session has expired");
+        }
+        throw new ApiError(409, "authorisation_session_complete", "authorisation session has already completed");
+      }
+    });
+    const record = await this.getAuthorisationSession(input.session_id);
+    if (!record) throw new Error("completed authorisation session was not readable");
+    return record;
   }
 
   async revokeCapability(input: {
@@ -1845,6 +1968,7 @@ export class SqlRegistryStore implements RegistryStore {
       try {
         const usedNonces = await client.query("delete from used_nonces where expires_at < $1", [input.now_iso]);
         const idempotencyKeys = await client.query("delete from idempotency_keys where expires_at < $1", [input.now_iso]);
+        const authorisationSessions = await client.query("delete from authorisation_sessions where expires_at < $1", [input.now_iso]);
         const quotaEvents = await client.query("delete from quota_events where created_at < $1", [input.quota_events_before_iso]);
         const expiredVersions = await client.query(
           `update package_versions
@@ -1880,6 +2004,7 @@ export class SqlRegistryStore implements RegistryStore {
         return {
           used_nonces_deleted: usedNonces.rowCount ?? 0,
           idempotency_keys_deleted: idempotencyKeys.rowCount ?? 0,
+          authorisation_sessions_deleted: authorisationSessions.rowCount ?? 0,
           quota_events_deleted: quotaEvents.rowCount ?? 0,
           package_versions_expired: expiredVersions.rowCount ?? 0,
           static_objects: staticObjects.rows.map((row) => ({
@@ -1992,6 +2117,34 @@ function packageVersionFromRow(row: any): PackageVersionRecord {
   };
   record.status = deriveRegistryEntryStatus(record, record.status);
   return record;
+}
+
+function authorisationSessionFromRow(row: any): AuthorisationSessionRecord {
+  return {
+    session_id: String(row.session_id),
+    poll_token_hash: String(row.poll_token_hash),
+    browser_token_hash: String(row.browser_token_hash),
+    registry_origin: String(row.registry_origin),
+    website_origin: String(row.website_origin),
+    capability_pubkey: String(row.capability_pubkey),
+    requested_scopes: Array.isArray(row.requested_scopes) ? row.requested_scopes.map(String) : [],
+    capability_expires_at: new Date(row.capability_expires_at).toISOString(),
+    cli_version: String(row.cli_version),
+    namespace: String(row.namespace),
+    name: String(row.name),
+    artifact_kind: row.artifact_kind,
+    status: row.status,
+    principal_type: row.principal_type ?? null,
+    principal_id: row.principal_id ? String(row.principal_id) : null,
+    payload: row.payload && typeof row.payload === "object" && !Array.isArray(row.payload) ? row.payload : null,
+    challenge_token_hash: row.challenge_token_hash ? String(row.challenge_token_hash) : null,
+    capability_key_id: row.capability_key_id ? String(row.capability_key_id) : null,
+    namespace_status: row.namespace_status ?? null,
+    created_at: new Date(row.created_at).toISOString(),
+    updated_at: new Date(row.updated_at).toISOString(),
+    expires_at: new Date(row.expires_at).toISOString(),
+    completed_at: row.completed_at ? new Date(row.completed_at).toISOString() : null,
+  };
 }
 
 function packageEvidenceFromRow(row: any): PackageEvidenceRecord {
