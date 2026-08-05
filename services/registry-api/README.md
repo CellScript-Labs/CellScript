@@ -170,10 +170,22 @@ scope:
 Each form also accepts `namespace/*`. Possessing one action does not imply either
 of the others.
 
+`POST /v1/authorisation-sessions/:session_id/complete` is idempotent after a
+successful completion. Its first successful call commits nonce use, capability
+registration, namespace claim or review state, session completion, and audit
+events in one store transaction. A concurrent call returns the committed
+session instead of creating a second capability use. Expired sessions, stale
+challenge tokens, and conflicting namespace owners leave the session pending
+and create none of those records.
+
 For an interactive first publish, `cellc publish --authorise` creates a
 15-minute, exact-coordinate browser session and opens the matching Registry
 site. The CLI generates the delegated P-256 key first and keeps its private key
-in the OS keychain. The API stores only the public key plus hashes of separate
+in the OS keychain as pending before opening the browser, then promotes it to
+active only after `authorised` or `review_pending` returns the same key ID.
+Cancellation and expiry remove the pending entry; an interrupted CLI can still
+recover the key through the key ID printed before the browser opens if the
+wallet completed first. The API stores only the public key plus hashes of separate
 one-time CLI-polling and browser-approval tokens. The browser token travels in
 the URL fragment, not the query string, so it is absent from HTTP logs and
 Referer headers; browser reads never return the polling token or resulting

@@ -2865,6 +2865,7 @@ async function handleCompleteAuthorisationSession(
       request_id: requestId,
       session_id: session.session_id,
       status: session.status,
+      ...(session.namespace_status ? { namespace_status: session.namespace_status } : {}),
     }, 200, headers);
   }
   if (!session.payload || !session.challenge_token_hash) {
@@ -2872,7 +2873,8 @@ async function handleCompleteAuthorisationSession(
   }
   const body = await readJson(request, Math.min(maxJsonBytes(env), 128 * 1024));
   const challengeToken = String(body["challenge_token"] ?? "").trim();
-  if (!challengeToken || `sha256:${await sha256Hex(challengeToken)}` !== session.challenge_token_hash) {
+  const challengeTokenHash = `sha256:${await sha256Hex(challengeToken)}`;
+  if (!challengeToken || !await constantTimeSecretEqual(challengeTokenHash, session.challenge_token_hash)) {
     throw new ApiError(401, "invalid_authorisation_challenge_token", "authorisation challenge token is invalid or stale");
   }
   const payload = validateCapabilityPayload(session.payload, registryOrigin, now);
@@ -2884,17 +2886,7 @@ async function handleCompleteAuthorisationSession(
   if (existing && (existing.owner_principal_type !== payload.principal_type || existing.owner_principal_id !== payload.principal_id)) {
     throw new ApiError(409, "namespace_already_claimed", "namespace is already claimed by another principal");
   }
-  if (!existing) {
-    await enforceNamespaceClaimCooldown(
-      store,
-      requestId,
-      payload.principal_type,
-      payload.principal_id,
-      now,
-      namespaceClaimCooldownSeconds(env),
-    );
-  }
-  const nonceKey = await consumeSignedNonce(store, requestId, {
+  const nonce = await signedNonceUse(requestId, {
     protocol: payload.protocol,
     action: `${payload.action}:capability_create`,
     nonce: payload.nonce,
@@ -2902,48 +2894,30 @@ async function handleCompleteAuthorisationSession(
     principal_type: payload.principal_type,
     principal_id: payload.principal_id,
   });
-  let capability;
-  try {
-    capability = await store.recordCapability({ payload, principal_signature: signature, request_id: requestId });
-  } catch (error) {
-    await store.releaseNonce({ nonce_key: nonceKey, request_id: requestId });
-    throw error;
-  }
-  let namespaceStatus: "active" | "review_pending";
-  if (existing) {
-    namespaceStatus = existing.status === "active" ? "active" : "review_pending";
-  } else {
-    const claim = await store.claimNamespace({
-      namespace: session.namespace,
+  const completion = await store.finaliseAuthorisationSession({
+    session_id: sessionId,
+    expected_challenge_token_hash: challengeTokenHash,
+    payload,
+    principal_signature: signature,
+    nonce: {
+      ...nonce,
       principal_type: payload.principal_type,
       principal_id: payload.principal_id,
-      request_id: requestId,
-    });
-    namespaceStatus = claim.status;
-  }
-  const completed = await store.completeAuthorisationSession({
-    session_id: sessionId,
-    capability_key_id: capability.key_id,
-    namespace_status: namespaceStatus,
+    },
     request_id: requestId,
+    now_iso: now.toISOString(),
+    namespace_claim_cooldown_seconds: namespaceClaimCooldownSeconds(env),
   });
-  await store.appendAuditEvent({
-    request_id: requestId,
-    event_type: "authorisation_session.completed",
-    principal_type: payload.principal_type,
-    principal_id: payload.principal_id,
-    capability_key_id: capability.key_id,
-    namespace: session.namespace,
-    name: session.name,
-    data: { session_id: session.session_id, namespace_status: namespaceStatus },
-  });
+  const completed = completion.session;
+  const namespaceStatus = completed.namespace_status;
+  if (!namespaceStatus) throw new Error("completed authorisation session did not record namespace status");
   return json({
     schema: "cellscript-registry-authorisation-session-v1",
     request_id: requestId,
     session_id: completed.session_id,
     status: completed.status,
     namespace_status: namespaceStatus,
-  }, namespaceStatus === "active" ? 201 : 202, headers);
+  }, completion.replayed ? 200 : namespaceStatus === "active" ? 201 : 202, headers);
 }
 
 function validateAuthorisationSessionId(value: string): string {
@@ -3490,19 +3464,17 @@ function idempotencyResponse(record: IdempotencyRecord, headers: Headers): Respo
   return json(record.response_body, record.response_status, replayHeaders);
 }
 
-async function consumeSignedNonce(
-  store: RegistryStore,
-  requestId: string,
-  input: {
-    protocol: string;
-    action: string;
-    nonce: string;
-    expires_at: string;
-    principal_type?: string;
-    principal_id?: string;
-    capability_key_id?: string;
-  },
-): Promise<string> {
+type SignedNonceUseSource = {
+  protocol: string;
+  action: string;
+  nonce: string;
+  expires_at: string;
+  principal_type?: PrincipalType;
+  principal_id?: string;
+  capability_key_id?: string;
+};
+
+async function signedNonceUse(requestId: string, input: SignedNonceUseSource) {
   const nonceKey = `nonce_${await sha256Hex(canonicalJson({
     protocol: input.protocol,
     action: input.action,
@@ -3511,7 +3483,7 @@ async function consumeSignedNonce(
     principal_id: input.principal_id ?? null,
     capability_key_id: input.capability_key_id ?? null,
   }))}`;
-  const accepted = await store.consumeNonce({
+  return {
     nonce_key: nonceKey,
     protocol: input.protocol,
     action: input.action,
@@ -3521,7 +3493,16 @@ async function consumeSignedNonce(
     ...(input.principal_type ? { principal_type: input.principal_type } : {}),
     ...(input.principal_id ? { principal_id: input.principal_id } : {}),
     ...(input.capability_key_id ? { capability_key_id: input.capability_key_id } : {}),
-  });
+  };
+}
+
+async function consumeSignedNonce(
+  store: RegistryStore,
+  requestId: string,
+  input: SignedNonceUseSource,
+): Promise<string> {
+  const nonceUse = await signedNonceUse(requestId, input);
+  const accepted = await store.consumeNonce(nonceUse);
   if (!accepted) {
     await store.appendAuditEvent({
       request_id: requestId,
@@ -3532,12 +3513,12 @@ async function consumeSignedNonce(
       data: {
         protocol: input.protocol,
         action: input.action,
-        nonce_key: nonceKey,
+        nonce_key: nonceUse.nonce_key,
       },
     });
     throw new ApiError(409, "nonce_replay", "signed nonce has already been used");
   }
-  return nonceKey;
+  return nonceUse.nonce_key;
 }
 
 async function writeStaticRegistryVersionObject(

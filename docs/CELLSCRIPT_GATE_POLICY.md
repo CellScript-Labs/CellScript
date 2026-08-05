@@ -68,7 +68,15 @@ The CLI coverage includes both first-publish admission paths: the explicit
 `cellc auth capability submit`, `cellc auth namespace claim`, then
 `cellc publish` sequence, and the short-lived `cellc publish --authorise`
 browser session in which the private publishing key remains in the local OS
-keychain while the CLI polls with a one-time secret. Publisher maintenance additionally uses the capability-signed
+keychain as pending while the CLI polls with a one-time secret, becomes active
+only after the server returns the matching key ID, and is removed on terminal
+cancellation or expiry. The browser token survives a same-tab refresh but is
+cleared after completion or expiry. Browser-session completion is one atomic admission boundary across
+nonce consumption, publishing-key registration, namespace claim/review,
+session state, and audit events. API tests cover expiry, wrong browser/poll/
+challenge tokens, challenge replay, concurrent completion, conflicting
+namespace ownership, review-pending admission, and injected mid-transaction
+failure. Publisher maintenance additionally uses the capability-signed
 `cellc artifact set-availability` path, and `cellc artifact cell-dep` performs a
 fresh mainnet liveness check before producing a transaction-builder descriptor.
 Independent reproducibility builders use `cellc auth reproducer create`; CLI

@@ -303,6 +303,30 @@ export interface NamespaceRecord {
   owner_principal_id: string;
 }
 
+export interface AuthorisationSessionCompletionInput {
+  session_id: string;
+  expected_challenge_token_hash: string;
+  payload: CapabilityAuthorisationPayload;
+  principal_signature: unknown;
+  nonce: {
+    nonce_key: string;
+    protocol: string;
+    action: string;
+    nonce: string;
+    expires_at: string;
+    principal_type: PrincipalType;
+    principal_id: string;
+  };
+  request_id: string;
+  now_iso: string;
+  namespace_claim_cooldown_seconds: number;
+}
+
+export interface AuthorisationSessionCompletionResult {
+  session: AuthorisationSessionRecord;
+  replayed: boolean;
+}
+
 export interface RegistryStore {
   healthCheck(): Promise<void>;
   withMaintenanceLease<T>(name: string, task: () => Promise<T>): Promise<T | null>;
@@ -322,12 +346,7 @@ export interface RegistryStore {
     challenge_token_hash: string;
     request_id: string;
   }): Promise<AuthorisationSessionRecord>;
-  completeAuthorisationSession(input: {
-    session_id: string;
-    capability_key_id: string;
-    namespace_status: NamespaceClaimResult["status"];
-    request_id: string;
-  }): Promise<AuthorisationSessionRecord>;
+  finaliseAuthorisationSession(input: AuthorisationSessionCompletionInput): Promise<AuthorisationSessionCompletionResult>;
   revokeCapability(input: {
     key_id: string;
     principal_type: PrincipalType;
@@ -549,6 +568,7 @@ export class MemoryRegistryStore implements RegistryStore {
   idempotencyKeys = new Map<string, IdempotencyRecord>();
   verificationJobs = new Map<string, VerificationJobRecord>();
   maintenanceLeases = new Set<string>();
+  private authorisationSessionCompletionLocks = new Map<string, Promise<void>>();
 
   async healthCheck(): Promise<void> {}
 
@@ -621,43 +641,142 @@ export class MemoryRegistryStore implements RegistryStore {
     challenge_token_hash: string;
     request_id: string;
   }): Promise<AuthorisationSessionRecord> {
-    const existing = this.authorisationSessions.get(input.session_id);
-    if (!existing) throw new ApiError(404, "authorisation_session_not_found", "authorisation session was not found");
-    if (existing.status !== "pending") {
-      throw new ApiError(409, "authorisation_session_complete", "authorisation session has already completed");
-    }
-    const updated: AuthorisationSessionRecord = {
-      ...existing,
-      principal_type: input.principal_type,
-      principal_id: input.principal_id,
-      payload: input.payload,
-      challenge_token_hash: input.challenge_token_hash,
-      updated_at: nowIso(),
-    };
-    this.authorisationSessions.set(input.session_id, updated);
-    return updated;
+    return this.withAuthorisationSessionCompletionLock("authorisation-store", async () => {
+      const existing = this.authorisationSessions.get(input.session_id);
+      if (!existing) throw new ApiError(404, "authorisation_session_not_found", "authorisation session was not found");
+      if (existing.status !== "pending") {
+        throw new ApiError(409, "authorisation_session_complete", "authorisation session has already completed");
+      }
+      const updated: AuthorisationSessionRecord = {
+        ...existing,
+        principal_type: input.principal_type,
+        principal_id: input.principal_id,
+        payload: input.payload,
+        challenge_token_hash: input.challenge_token_hash,
+        updated_at: nowIso(),
+      };
+      this.authorisationSessions.set(input.session_id, updated);
+      return updated;
+    });
   }
 
-  async completeAuthorisationSession(input: {
-    session_id: string;
-    capability_key_id: string;
-    namespace_status: NamespaceClaimResult["status"];
-    request_id: string;
-  }): Promise<AuthorisationSessionRecord> {
-    const existing = this.authorisationSessions.get(input.session_id);
-    if (!existing) throw new ApiError(404, "authorisation_session_not_found", "authorisation session was not found");
-    const completedAt = nowIso();
-    const updated: AuthorisationSessionRecord = {
-      ...existing,
-      status: input.namespace_status === "active" ? "authorised" : "review_pending",
-      capability_key_id: input.capability_key_id,
-      namespace_status: input.namespace_status,
-      challenge_token_hash: null,
-      updated_at: completedAt,
-      completed_at: completedAt,
-    };
-    this.authorisationSessions.set(input.session_id, updated);
-    return updated;
+  async finaliseAuthorisationSession(
+    input: AuthorisationSessionCompletionInput,
+  ): Promise<AuthorisationSessionCompletionResult> {
+    return this.withAuthorisationSessionCompletionLock("authorisation-store", async () => {
+      const existing = this.authorisationSessions.get(input.session_id);
+      if (!existing) throw new ApiError(404, "authorisation_session_not_found", "authorisation session was not found");
+      if (Date.parse(existing.expires_at) <= Date.parse(input.now_iso)) {
+        throw new ApiError(410, "authorisation_session_expired", "authorisation session has expired");
+      }
+      if (existing.status !== "pending") return { session: existing, replayed: true };
+      if (existing.challenge_token_hash !== input.expected_challenge_token_hash
+        || !existing.payload
+        || canonicalJson(existing.payload) !== canonicalJson(input.payload)) {
+        throw new ApiError(409, "authorisation_challenge_stale", "authorisation challenge was replaced; request a new wallet challenge");
+      }
+
+      const capabilities = new Map(this.capabilities);
+      const namespaces = new Map(this.namespaces);
+      const usedNonces = new Map(this.usedNonces);
+      const quotaEventCount = this.quotaEvents.length;
+      const sessionBefore = existing;
+      const auditEventCount = this.auditEvents.length;
+      try {
+        if (!await this.consumeNonce({ ...input.nonce, request_id: input.request_id })) {
+          throw new ApiError(409, "nonce_replay", "signed nonce has already been used");
+        }
+        const namespace = this.namespaces.get(existing.namespace);
+        if (namespace
+          && (namespace.owner_principal_type !== input.payload.principal_type
+            || namespace.owner_principal_id !== input.payload.principal_id)) {
+          throw new ApiError(409, "namespace_already_claimed", "namespace is already claimed by another principal");
+        }
+        const namespaceClaim = namespace
+          ? {
+              namespace: namespace.namespace,
+              status: namespace.status === "active" ? "active" as const : "review_pending" as const,
+              ...(namespace.review_reason ? { review_reason: namespace.review_reason } : {}),
+            }
+          : await (async () => {
+              if (input.namespace_claim_cooldown_seconds > 0) {
+                const quotaKey = `principal:${input.payload.principal_type}:${input.payload.principal_id}`;
+                const since = new Date(
+                  Date.parse(input.now_iso) - input.namespace_claim_cooldown_seconds * 1000,
+                ).toISOString();
+                if (await this.countRecentQuotaEvents(quotaKey, "namespace_claim_cooldown", since) >= 1) {
+                  throw new ApiError(429, "namespace_claim_cooldown", "namespace claim cooldown is active");
+                }
+                await this.recordQuotaEvent(quotaKey, "namespace_claim_cooldown");
+              }
+              return this.claimNamespace({
+                namespace: existing.namespace,
+                principal_type: input.payload.principal_type,
+                principal_id: input.payload.principal_id,
+                request_id: input.request_id,
+              });
+            })();
+        const capabilityKey = await capabilityKeyId(input.payload.capability_pubkey);
+        const existingCapability = this.capabilities.get(capabilityKey);
+        if (existingCapability
+          && (existingCapability.principal_type !== input.payload.principal_type
+            || existingCapability.principal_id !== input.payload.principal_id)) {
+          throw new ApiError(409, "capability_principal_mismatch", "publishing key is already bound to another principal");
+        }
+        const capability = await this.recordCapability({
+          payload: input.payload,
+          principal_signature: input.principal_signature,
+          request_id: input.request_id,
+        });
+        const completedAt = input.now_iso;
+        const completed: AuthorisationSessionRecord = {
+          ...existing,
+          status: namespaceClaim.status === "active" ? "authorised" : "review_pending",
+          capability_key_id: capability.key_id,
+          namespace_status: namespaceClaim.status,
+          challenge_token_hash: null,
+          updated_at: completedAt,
+          completed_at: completedAt,
+        };
+        this.authorisationSessions.set(input.session_id, completed);
+        await this.appendAuditEvent({
+          request_id: input.request_id,
+          event_type: "authorisation_session.completed",
+          principal_type: input.payload.principal_type,
+          principal_id: input.payload.principal_id,
+          capability_key_id: capability.key_id,
+          namespace: existing.namespace,
+          name: existing.name,
+          data: { session_id: existing.session_id, namespace_status: namespaceClaim.status },
+        });
+        return { session: completed, replayed: false };
+      } catch (error) {
+        this.capabilities = capabilities;
+        this.namespaces = namespaces;
+        this.usedNonces = usedNonces;
+        this.quotaEvents.splice(quotaEventCount);
+        this.authorisationSessions.set(input.session_id, sessionBefore);
+        this.auditEvents.splice(auditEventCount);
+        throw error;
+      }
+    });
+  }
+
+  private async withAuthorisationSessionCompletionLock<T>(sessionId: string, task: () => Promise<T>): Promise<T> {
+    const previous = this.authorisationSessionCompletionLocks.get(sessionId) ?? Promise.resolve();
+    let release = () => {};
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    const queued = previous.then(() => current);
+    this.authorisationSessionCompletionLocks.set(sessionId, queued);
+    await previous;
+    try {
+      return await task();
+    } finally {
+      release();
+      if (this.authorisationSessionCompletionLocks.get(sessionId) === queued) {
+        this.authorisationSessionCompletionLocks.delete(sessionId);
+      }
+    }
   }
 
   async revokeCapability(input: {

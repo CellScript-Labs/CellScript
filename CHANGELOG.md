@@ -7,8 +7,22 @@
   opens a 15-minute exact-coordinate wallet session, and resumes publishing
   automatically after Registry approval; `--no-open` supports remote and
   terminal-only environments. Session reads expose neither the polling secret
-  nor the resulting key ID to the browser. Submit distinguishes detected
-  in-browser connectors from the complete external-signature directory, uses
+  nor the resulting key ID to the browser. The publishing key is written to
+  the OS keychain as `pending` before the browser opens, promoted to `active`
+  only when either successful status returns the matching key ID, and removed
+  on cancellation or expiry. This closes the process-exit window after wallet
+  approval without treating local state as Registry authority. The browser
+  token survives same-tab refresh in `sessionStorage` and is removed on
+  completion or expiry. Session mode now
+  lists only connectors that can actually complete the browser flow and folds
+  challenge creation, wallet signing, and completion into one **Approve
+  publishing access** action; the full external-wallet directory remains in
+  the explicit manual CLI path. Session completion atomically consumes the
+  nonce, records the publishing key, claims or reviews the namespace, updates
+  the session, and writes its audit trail. Concurrent or replayed completion
+  returns the committed result without duplicating authority. Submit
+  distinguishes detected in-browser connectors from the complete
+  external-signature directory, uses
   plain publishing-access language on the first-run path, states the
   non-replaceable release rule directly, and preserves the explicit CLI path
   for external wallets and CI. Artifact details now derive one recommended

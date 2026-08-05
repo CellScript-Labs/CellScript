@@ -522,6 +522,52 @@ async function get(
   );
 }
 
+async function createBrowserAuthorisationSession(
+  app: ReturnType<typeof createApp>,
+  namespace = "walletdemo",
+  name = "demo",
+) {
+  const response = await post(app, "/v1/authorisation-sessions", {
+    capability_pubkey: reproducerPublicKeys["builder-a"],
+    requested_scopes: [`publish:${namespace}/${name}`],
+    artifact_kind: "source_library",
+    capability_expires_at: "2026-09-21T12:00:00Z",
+    cli_version: "0.23.0",
+  });
+  expect(response.status).toBe(201);
+  const created = await response.json() as any;
+  const browserParams = new URLSearchParams(new URL(created.browser_url).hash.slice(1));
+  const browserToken = browserParams.get("browser_token");
+  expect(browserToken).toMatch(/^browser_[0-9a-f]{32}$/);
+  return { created, browserToken: String(browserToken) };
+}
+
+async function prepareBrowserAuthorisationChallenge(
+  app: ReturnType<typeof createApp>,
+  sessionId: string,
+  browserToken: string,
+) {
+  const wallet = await ckbAuthPayload();
+  const response = await post(app, `/v1/authorisation-sessions/${sessionId}/challenge`, {
+    principal_type: wallet.principal_type,
+    principal_id: wallet.principal_id,
+  }, {}, { authorization: `Bearer ${browserToken}` });
+  expect(response.status).toBe(200);
+  return await response.json() as any;
+}
+
+async function completeBrowserAuthorisationSession(
+  app: ReturnType<typeof createApp>,
+  sessionId: string,
+  browserToken: string,
+  challenge: any,
+) {
+  return post(app, `/v1/authorisation-sessions/${sessionId}/complete`, {
+    challenge_token: challenge.challenge_token,
+    wallet_signature: ckbWalletSignature(challenge.payload),
+  }, {}, { authorization: `Bearer ${browserToken}` });
+}
+
 describe("registry api", () => {
   it("matches the canonical CKB Molecule Script hash", () => {
     expect(ckbScriptHash({
@@ -848,6 +894,153 @@ describe("registry api", () => {
     expect(store.namespaces.get("walletdemo")).toMatchObject({
       owner_principal_type: "ckb_secp256k1",
       owner_principal_id: wallet.principal_id,
+    });
+  });
+
+  it("expires browser authorisation sessions without creating Registry authority", async () => {
+    const store = new MemoryRegistryStore();
+    const { app } = testApp(store);
+    const { created, browserToken } = await createBrowserAuthorisationSession(app);
+    const expiredApp = testApp(store, undefined, {
+      now: () => new Date("2026-06-23T12:16:00Z"),
+    }).app;
+
+    const response = await get(expiredApp, `/v1/authorisation-sessions/${created.session_id}`, {}, {
+      authorization: `Bearer ${browserToken}`,
+    });
+
+    expect(response.status).toBe(410);
+    expect(await response.json()).toMatchObject({ error: { code: "authorisation_session_expired" } });
+    expect(store.capabilities.size).toBe(0);
+    expect(store.namespaces.size).toBe(0);
+    expect(store.usedNonces.size).toBe(0);
+  });
+
+  it("rejects browser, poll, and challenge token substitution", async () => {
+    const { app, store } = testApp();
+    const { created, browserToken } = await createBrowserAuthorisationSession(app);
+    const wrongSessionToken = await get(app, `/v1/authorisation-sessions/${created.session_id}`, {}, {
+      authorization: "Bearer browser_00000000000000000000000000000000",
+    });
+    expect(wrongSessionToken.status).toBe(401);
+
+    const pollAsBrowser = await post(app, `/v1/authorisation-sessions/${created.session_id}/challenge`, {
+      principal_type: "ckb_secp256k1",
+      principal_id: `0x${"11".repeat(20)}`,
+    }, {}, { authorization: `Bearer ${created.poll_token}` });
+    expect(pollAsBrowser.status).toBe(401);
+
+    const challenge = await prepareBrowserAuthorisationChallenge(app, created.session_id, browserToken);
+    const wrongChallenge = await post(app, `/v1/authorisation-sessions/${created.session_id}/complete`, {
+      challenge_token: "challenge_00000000000000000000000000000000",
+      wallet_signature: ckbWalletSignature(challenge.payload),
+    }, {}, { authorization: `Bearer ${browserToken}` });
+    expect(wrongChallenge.status).toBe(401);
+    expect(await wrongChallenge.json()).toMatchObject({ error: { code: "invalid_authorisation_challenge_token" } });
+    expect(store.capabilities.size).toBe(0);
+    expect(store.namespaces.size).toBe(0);
+    expect(store.usedNonces.size).toBe(0);
+  });
+
+  it("treats a completed challenge replay as an idempotent session read", async () => {
+    const { app, store } = testApp();
+    const { created, browserToken } = await createBrowserAuthorisationSession(app);
+    const challenge = await prepareBrowserAuthorisationChallenge(app, created.session_id, browserToken);
+
+    const first = await completeBrowserAuthorisationSession(app, created.session_id, browserToken, challenge);
+    const replay = await completeBrowserAuthorisationSession(app, created.session_id, browserToken, challenge);
+
+    expect(first.status).toBe(201);
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({ status: "authorised", namespace_status: "active" });
+    expect(store.capabilities.size).toBe(1);
+    expect(store.namespaces.size).toBe(1);
+    expect(store.usedNonces.size).toBe(1);
+    expect(store.auditEvents.filter((event) => event.event_type === "authorisation_session.completed")).toHaveLength(1);
+  });
+
+  it("serialises concurrent complete calls into one atomic authorisation", async () => {
+    const { app, store } = testApp();
+    const { created, browserToken } = await createBrowserAuthorisationSession(app, "concurrent", "demo");
+    const challenge = await prepareBrowserAuthorisationChallenge(app, created.session_id, browserToken);
+
+    const responses = await Promise.all([
+      completeBrowserAuthorisationSession(app, created.session_id, browserToken, challenge),
+      completeBrowserAuthorisationSession(app, created.session_id, browserToken, challenge),
+    ]);
+    const statuses = responses.map((response) => response.status).sort();
+    const bodies = await Promise.all(responses.map((response) => response.json()));
+
+    expect(statuses).toEqual([200, 201]);
+    expect(bodies).toEqual([
+      expect.objectContaining({ status: "authorised", namespace_status: "active" }),
+      expect.objectContaining({ status: "authorised", namespace_status: "active" }),
+    ]);
+    expect(store.capabilities.size).toBe(1);
+    expect(store.namespaces.size).toBe(1);
+    expect(store.usedNonces.size).toBe(1);
+    expect(store.auditEvents.filter((event) => event.event_type === "capability.created")).toHaveLength(1);
+    expect(store.auditEvents.filter((event) => event.event_type === "authorisation_session.completed")).toHaveLength(1);
+  });
+
+  it("rolls back capability, namespace, nonce, and session changes when completion fails", async () => {
+    const { app, store } = testApp();
+    const { created, browserToken } = await createBrowserAuthorisationSession(app, "rollback", "demo");
+    const challenge = await prepareBrowserAuthorisationChallenge(app, created.session_id, browserToken);
+    const appendAuditEvent = store.appendAuditEvent.bind(store);
+    vi.spyOn(store, "appendAuditEvent").mockImplementation(async (event) => {
+      if (event.event_type === "authorisation_session.completed") throw new Error("injected completion failure");
+      await appendAuditEvent(event);
+    });
+
+    const response = await completeBrowserAuthorisationSession(app, created.session_id, browserToken, challenge);
+
+    expect(response.status).toBe(500);
+    expect(store.capabilities.size).toBe(0);
+    expect(store.namespaces.size).toBe(0);
+    expect(store.usedNonces.size).toBe(0);
+    expect(store.authorisationSessions.get(created.session_id)).toMatchObject({ status: "pending" });
+    expect(store.authorisationSessions.get(created.session_id)?.capability_key_id).toBeFalsy();
+    expect(store.auditEvents.some((event) => event.event_type === "capability.created")).toBe(false);
+    expect(store.auditEvents.some((event) => event.event_type === "namespace.claimed")).toBe(false);
+  });
+
+  it("keeps a session pending when another identity owns its namespace", async () => {
+    const { app, store } = testApp();
+    const { created, browserToken } = await createBrowserAuthorisationSession(app, "occupied", "demo");
+    const challenge = await prepareBrowserAuthorisationChallenge(app, created.session_id, browserToken);
+    store.namespaces.set("occupied", {
+      namespace: "occupied",
+      status: "active",
+      owner_principal_type: "joyid_ckb",
+      owner_principal_id: `0x${"44".repeat(20)}`,
+    });
+
+    const response = await completeBrowserAuthorisationSession(app, created.session_id, browserToken, challenge);
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: { code: "namespace_already_claimed" } });
+    expect(store.capabilities.size).toBe(0);
+    expect(store.usedNonces.size).toBe(0);
+    expect(store.authorisationSessions.get(created.session_id)).toMatchObject({ status: "pending" });
+    expect(store.authorisationSessions.get(created.session_id)?.capability_key_id).toBeFalsy();
+  });
+
+  it("records review_pending atomically for a namespace that requires review", async () => {
+    const { app, store } = testApp();
+    const { created, browserToken } = await createBrowserAuthorisationSession(app, "abc", "demo");
+    const challenge = await prepareBrowserAuthorisationChallenge(app, created.session_id, browserToken);
+
+    const response = await completeBrowserAuthorisationSession(app, created.session_id, browserToken, challenge);
+
+    expect(response.status).toBe(202);
+    expect(await response.json()).toMatchObject({ status: "review_pending", namespace_status: "review_pending" });
+    expect(store.capabilities.size).toBe(1);
+    expect(store.usedNonces.size).toBe(1);
+    expect(store.namespaces.get("abc")).toMatchObject({ status: "review_pending", review_reason: "short_namespace_review" });
+    expect(store.authorisationSessions.get(created.session_id)).toMatchObject({
+      status: "review_pending",
+      namespace_status: "review_pending",
     });
   });
 

@@ -5,6 +5,8 @@ import {
   packageVersionRequiresReproduction,
   type AuditEventInput,
   type AuditEventRecord,
+  type AuthorisationSessionCompletionInput,
+  type AuthorisationSessionCompletionResult,
   type AuthorisationSessionRecord,
   type CapabilityRecord,
   type IdempotencyRecord,
@@ -257,41 +259,248 @@ export class SqlRegistryStore implements RegistryStore {
     return record;
   }
 
-  async completeAuthorisationSession(input: {
-    session_id: string;
-    capability_key_id: string;
-    namespace_status: NamespaceClaimResult["status"];
-    request_id: string;
-  }): Promise<AuthorisationSessionRecord> {
-    await this.withClient(async (client) => {
-      const updated = await client.query(
-        `update authorisation_sessions
-         set status = $2,
-             capability_key_id = $3,
-             namespace_status = $4,
-             challenge_token_hash = null,
-             completed_at = now(),
-             updated_at = now()
-         where session_id = $1 and status = 'pending' and expires_at > now()`,
-        [
-          input.session_id,
-          input.namespace_status === "active" ? "authorised" : "review_pending",
-          input.capability_key_id,
-          input.namespace_status,
-        ],
-      );
-      if (updated.rowCount !== 1) {
-        const existing = await client.query("select status, expires_at from authorisation_sessions where session_id = $1", [input.session_id]);
-        if (!existing.rows[0]) throw new ApiError(404, "authorisation_session_not_found", "authorisation session was not found");
-        if (new Date(existing.rows[0].expires_at).getTime() <= Date.now()) {
+  async finaliseAuthorisationSession(
+    input: AuthorisationSessionCompletionInput,
+  ): Promise<AuthorisationSessionCompletionResult> {
+    const keyId = await capabilityKeyId(input.payload.capability_pubkey);
+    const payloadHash = await sha256Hex(canonicalJson(input.payload));
+    return this.withClient(async (client) => {
+      await client.query("begin");
+      try {
+        const sessionResult = await client.query(
+          `select session_id, poll_token_hash, browser_token_hash, registry_origin, website_origin,
+                  capability_pubkey, requested_scopes, capability_expires_at, cli_version,
+                  namespace, name, artifact_kind, status, principal_type, principal_id, payload,
+                  challenge_token_hash, capability_key_id, namespace_status,
+                  created_at, updated_at, expires_at, completed_at
+           from authorisation_sessions
+           where session_id = $1
+           for update`,
+          [input.session_id],
+        );
+        const sessionRow = sessionResult.rows[0];
+        if (!sessionRow) throw new ApiError(404, "authorisation_session_not_found", "authorisation session was not found");
+        const session = authorisationSessionFromRow(sessionRow);
+        if (Date.parse(session.expires_at) <= Date.parse(input.now_iso)) {
           throw new ApiError(410, "authorisation_session_expired", "authorisation session has expired");
         }
-        throw new ApiError(409, "authorisation_session_complete", "authorisation session has already completed");
+        if (session.status !== "pending") {
+          await client.query("commit");
+          return { session, replayed: true };
+        }
+        if (session.challenge_token_hash !== input.expected_challenge_token_hash
+          || !session.payload
+          || canonicalJson(session.payload) !== canonicalJson(input.payload)) {
+          throw new ApiError(409, "authorisation_challenge_stale", "authorisation challenge was replaced; request a new wallet challenge");
+        }
+
+        const nonceInsert = await client.query(
+          `insert into used_nonces(
+             nonce_key, protocol, action, nonce, request_id, expires_at,
+             principal_type, principal_id, capability_key_id
+           ) values ($1, $2, $3, $4, $5, $6, $7, $8, null)
+           on conflict (nonce_key) do nothing`,
+          [
+            input.nonce.nonce_key,
+            input.nonce.protocol,
+            input.nonce.action,
+            input.nonce.nonce,
+            input.request_id,
+            input.nonce.expires_at,
+            input.nonce.principal_type,
+            input.nonce.principal_id,
+          ],
+        );
+        if (nonceInsert.rowCount !== 1) {
+          throw new ApiError(409, "nonce_replay", "signed nonce has already been used");
+        }
+
+        await client.query(
+          `insert into principals(principal_type, principal_id)
+           values ($1, $2)
+           on conflict (principal_type, principal_id)
+           do update set updated_at = now()`,
+          [input.payload.principal_type, input.payload.principal_id],
+        );
+
+        let namespaceResult = await client.query(
+          `select namespace, owner_principal_type, owner_principal_id, status, review_reason
+           from namespaces where namespace = $1 for update`,
+          [session.namespace],
+        );
+        let namespaceInserted = false;
+        if (!namespaceResult.rows[0]) {
+          if (input.namespace_claim_cooldown_seconds > 0) {
+            const cooldownSince = new Date(
+              Date.parse(input.now_iso) - input.namespace_claim_cooldown_seconds * 1000,
+            ).toISOString();
+            const recentClaims = await client.query(
+              `select count(*)::bigint as count
+               from quota_events
+               where quota_key = $1 and bucket = 'namespace_claim_cooldown' and created_at >= $2`,
+              [`principal:${input.payload.principal_type}:${input.payload.principal_id}`, cooldownSince],
+            );
+            if (Number(recentClaims.rows[0]?.count ?? 0) >= 1) {
+              throw new ApiError(429, "namespace_claim_cooldown", "namespace claim cooldown is active");
+            }
+            await client.query(
+              `insert into quota_events(quota_key, bucket)
+               values ($1, 'namespace_claim_cooldown')`,
+              [`principal:${input.payload.principal_type}:${input.payload.principal_id}`],
+            );
+          }
+          const reserved = await client.query(
+            `select reason from reserved_namespaces
+             where (match_type in ('exact', 'typosquat') and namespace = $1)
+                or (match_type = 'prefix' and $1 like namespace || '%')
+             limit 1`,
+            [session.namespace],
+          );
+          const reviewReason = reserved.rows[0]?.reason as string | undefined
+            ?? (session.namespace.length <= 3 ? "short_namespace_review" : undefined);
+          const inserted = await client.query(
+            `insert into namespaces(
+               namespace, owner_principal_type, owner_principal_id, status, review_reason, audit_request_id
+             ) values ($1, $2, $3, $4, $5, $6)
+             on conflict (namespace) do nothing`,
+            [
+              session.namespace,
+              input.payload.principal_type,
+              input.payload.principal_id,
+              reviewReason ? "review_pending" : "active",
+              reviewReason ?? null,
+              input.request_id,
+            ],
+          );
+          namespaceInserted = inserted.rowCount === 1;
+          namespaceResult = await client.query(
+            `select namespace, owner_principal_type, owner_principal_id, status, review_reason
+             from namespaces where namespace = $1 for update`,
+            [session.namespace],
+          );
+        }
+        const namespace = namespaceResult.rows[0];
+        if (!namespace) throw new Error("namespace claim did not return a readable record");
+        if (namespace.owner_principal_type !== input.payload.principal_type
+          || namespace.owner_principal_id !== input.payload.principal_id) {
+          throw new ApiError(409, "namespace_already_claimed", "namespace is already claimed by another principal");
+        }
+        const namespaceStatus: NamespaceClaimResult["status"] = namespace.status === "active" ? "active" : "review_pending";
+        if (namespaceInserted) {
+          await client.query(
+            `insert into audit_events(request_id, event_type, principal_type, principal_id, namespace, data)
+             values ($1, 'namespace.claimed', $2, $3, $4, $5::jsonb)`,
+            [
+              input.request_id,
+              input.payload.principal_type,
+              input.payload.principal_id,
+              session.namespace,
+              JSON.stringify({ review_reason: namespace.review_reason ?? null }),
+            ],
+          );
+        }
+
+        const capabilityInsert = await client.query(
+          `insert into capabilities(
+             key_id, principal_type, principal_id, capability_pubkey, scopes,
+             expires_at, authorisation_payload, joyid_signature
+           ) values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)
+           on conflict (key_id)
+           do update set scopes = excluded.scopes,
+                         expires_at = excluded.expires_at,
+                         authorisation_payload = excluded.authorisation_payload,
+                         joyid_signature = excluded.joyid_signature
+           where capabilities.revoked_at is null
+           returning key_id, principal_type, principal_id`,
+          [
+            keyId,
+            input.payload.principal_type,
+            input.payload.principal_id,
+            input.payload.capability_pubkey,
+            input.payload.requested_scopes,
+            input.payload.capability_expires_at,
+            JSON.stringify(input.payload),
+            JSON.stringify(input.principal_signature),
+          ],
+        );
+        const capabilityRow = capabilityInsert.rows[0];
+        if (!capabilityRow) {
+          throw new ApiError(409, "capability_key_revoked", "revoked capability keys cannot be reactivated");
+        }
+        if (capabilityRow.principal_type !== input.payload.principal_type
+          || capabilityRow.principal_id !== input.payload.principal_id) {
+          throw new ApiError(409, "capability_principal_mismatch", "publishing key is already bound to another principal");
+        }
+        await client.query(
+          `insert into audit_events(
+             request_id, event_type, principal_type, principal_id, capability_key_id, data
+           ) values ($1, 'capability.created', $2, $3, $4, $5::jsonb)`,
+          [
+            input.request_id,
+            input.payload.principal_type,
+            input.payload.principal_id,
+            keyId,
+            JSON.stringify({ scopes: input.payload.requested_scopes, payload_hash: payloadHash }),
+          ],
+        );
+
+        const completedResult = await client.query(
+          `update authorisation_sessions
+           set status = $2,
+               capability_key_id = $3,
+               namespace_status = $4,
+               challenge_token_hash = null,
+               completed_at = $5,
+               updated_at = $5
+           where session_id = $1
+           returning session_id, poll_token_hash, browser_token_hash, registry_origin, website_origin,
+                     capability_pubkey, requested_scopes, capability_expires_at, cli_version,
+                     namespace, name, artifact_kind, status, principal_type, principal_id, payload,
+                     challenge_token_hash, capability_key_id, namespace_status,
+                     created_at, updated_at, expires_at, completed_at`,
+          [
+            input.session_id,
+            namespaceStatus === "active" ? "authorised" : "review_pending",
+            keyId,
+            namespaceStatus,
+            input.now_iso,
+          ],
+        );
+        const completedRow = completedResult.rows[0];
+        if (!completedRow) throw new Error("completed authorisation session was not readable");
+        await client.query(
+          `insert into audit_events(
+             request_id, event_type, principal_type, principal_id, capability_key_id, namespace, name, data
+           ) values ($1, 'authorisation_session.completed', $2, $3, $4, $5, $6, $7::jsonb)`,
+          [
+            input.request_id,
+            input.payload.principal_type,
+            input.payload.principal_id,
+            keyId,
+            session.namespace,
+            session.name,
+            JSON.stringify({ session_id: session.session_id, namespace_status: namespaceStatus }),
+          ],
+        );
+        await client.query("commit");
+        return { session: authorisationSessionFromRow(completedRow), replayed: false };
+      } catch (error) {
+        await client.query("rollback");
+        if (error instanceof ApiError && error.code === "nonce_replay") {
+          await client.query(
+            `insert into audit_events(request_id, event_type, principal_type, principal_id, data)
+             values ($1, 'nonce.replay_blocked', $2, $3, $4::jsonb)`,
+            [
+              input.request_id,
+              input.payload.principal_type,
+              input.payload.principal_id,
+              JSON.stringify({ protocol: input.nonce.protocol, action: input.nonce.action, nonce_key: input.nonce.nonce_key }),
+            ],
+          );
+        }
+        throw error;
       }
     });
-    const record = await this.getAuthorisationSession(input.session_id);
-    if (!record) throw new Error("completed authorisation session was not readable");
-    return record;
   }
 
   async revokeCapability(input: {

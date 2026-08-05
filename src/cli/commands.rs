@@ -4943,6 +4943,21 @@ struct GeneratedRegistryKeyMaterial {
     private_key_pkcs8: Vec<u8>,
 }
 
+const REGISTRY_KEYCHAIN_SECRET_SCHEMA: &str = "cellscript-registry-private-key-v1";
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct RegistryKeychainSecret {
+    schema: String,
+    status: String,
+    pkcs8_b64: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expires_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pending_expires_at_unix_seconds: Option<u64>,
+}
+
 fn generate_registry_key_material() -> Result<GeneratedRegistryKeyMaterial> {
     let rng = ring::rand::SystemRandom::new();
     let pkcs8 = ring::signature::EcdsaKeyPair::generate_pkcs8(&ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING, &rng)
@@ -4987,13 +5002,46 @@ fn p256_spki_der_from_uncompressed_public_key(public_key: &[u8]) -> Result<Vec<u
 }
 
 fn store_registry_private_key(key_id: &str, pkcs8: &[u8]) -> Result<()> {
-    let secret = base64::engine::general_purpose::STANDARD.encode(pkcs8);
+    store_registry_keychain_secret(
+        key_id,
+        &RegistryKeychainSecret {
+            schema: REGISTRY_KEYCHAIN_SECRET_SCHEMA.to_string(),
+            status: "active".to_string(),
+            pkcs8_b64: base64::engine::general_purpose::STANDARD.encode(pkcs8),
+            session_id: None,
+            expires_at: None,
+            pending_expires_at_unix_seconds: None,
+        },
+    )
+}
+
+fn store_pending_registry_private_key(key_id: &str, pkcs8: &[u8], session_id: &str, expires_at: &str) -> Result<()> {
+    let pending_expires_at_unix_seconds =
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs().saturating_add(15 * 60);
+    store_registry_keychain_secret(
+        key_id,
+        &RegistryKeychainSecret {
+            schema: REGISTRY_KEYCHAIN_SECRET_SCHEMA.to_string(),
+            status: "pending".to_string(),
+            pkcs8_b64: base64::engine::general_purpose::STANDARD.encode(pkcs8),
+            session_id: Some(session_id.to_string()),
+            expires_at: Some(expires_at.to_string()),
+            pending_expires_at_unix_seconds: Some(pending_expires_at_unix_seconds),
+        },
+    )
+}
+
+fn store_registry_keychain_secret(key_id: &str, secret: &RegistryKeychainSecret) -> Result<()> {
+    let encoded = serde_json::to_string(secret).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to encode registry private-key state: {error}"))
+            .with_category(crate::error::CompileErrorCategory::Authentication)
+    })?;
     let entry = keyring::Entry::new("cellscript-registry", key_id).map_err(|error| {
         crate::error::CompileError::without_span(format!("failed to open OS keychain: {}", error))
             .with_category(crate::error::CompileErrorCategory::Authentication)
             .with_source(error)
     })?;
-    entry.set_password(&secret).map_err(|error| {
+    entry.set_password(&encoded).map_err(|error| {
         crate::error::CompileError::without_span(format!(
             "failed to store registry P-256 private key '{}' in OS keychain: {}",
             key_id, error
@@ -5001,6 +5049,23 @@ fn store_registry_private_key(key_id: &str, pkcs8: &[u8]) -> Result<()> {
         .with_category(crate::error::CompileErrorCategory::Authentication)
         .with_source(error)
     })
+}
+
+fn remove_registry_private_key(key_id: &str) -> Result<()> {
+    let entry = keyring::Entry::new("cellscript-registry", key_id).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to open OS keychain: {}", error))
+            .with_category(crate::error::CompileErrorCategory::Authentication)
+            .with_source(error)
+    })?;
+    match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(error) => Err(crate::error::CompileError::without_span(format!(
+            "failed to remove pending registry private key '{}' from OS keychain: {}",
+            key_id, error
+        ))
+        .with_category(crate::error::CompileErrorCategory::Authentication)
+        .with_source(error)),
+    }
 }
 
 fn write_new_reproducer_private_key(path: &Path, pkcs8: &[u8]) -> Result<()> {
@@ -5123,7 +5188,31 @@ fn load_registry_keychain_private_key(key_id: &str) -> Result<Option<Vec<u8>>> {
     })?;
     match entry.get_password() {
         Ok(secret) => {
-            let decoded = base64::engine::general_purpose::STANDARD.decode(secret.trim()).map_err(|error| {
+            let trimmed = secret.trim();
+            let encoded = if trimmed.starts_with('{') {
+                let stored: RegistryKeychainSecret = serde_json::from_str(trimmed).map_err(|error| {
+                    crate::error::CompileError::without_span(format!(
+                        "failed to decode registry private-key state '{}' from OS keychain: {}",
+                        key_id, error
+                    ))
+                    .with_category(crate::error::CompileErrorCategory::Authentication)
+                })?;
+                if stored.schema != REGISTRY_KEYCHAIN_SECRET_SCHEMA || !matches!(stored.status.as_str(), "pending" | "active") {
+                    return Err(crate::error::CompileError::without_span(format!(
+                        "registry private key '{}' has an unsupported OS keychain state",
+                        key_id
+                    ))
+                    .with_category(crate::error::CompileErrorCategory::Authentication));
+                }
+                // A process may exit after the wallet commits authority but before the CLI
+                // observes it. Only an observed terminal session state may remove a pending
+                // key; local time alone cannot distinguish that case from an abandoned session.
+                stored.pkcs8_b64
+            } else {
+                // Compatibility with keys written before the key lifecycle envelope was introduced.
+                trimmed.to_string()
+            };
+            let decoded = base64::engine::general_purpose::STANDARD.decode(encoded.trim()).map_err(|error| {
                 crate::error::CompileError::without_span(format!(
                     "failed to decode capability private key '{}' from OS keychain: {}",
                     key_id, error
@@ -6043,6 +6132,7 @@ struct RegistryAuthorisationSessionCreateResponse {
     session_id: String,
     poll_token: String,
     browser_url: String,
+    expires_at: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -6050,6 +6140,31 @@ struct RegistryAuthorisationSessionPollResponse {
     status: String,
     capability_key_id: Option<String>,
     namespace_status: Option<String>,
+}
+
+fn activate_registry_key_after_wallet_approval<F>(
+    status: &str,
+    returned_key_id: Option<&str>,
+    generated_key_id: &str,
+    persist: F,
+) -> Result<()>
+where
+    F: FnOnce() -> Result<()>,
+{
+    if !matches!(status, "authorised" | "review_pending") {
+        return Ok(());
+    }
+    let Some(returned_key_id) = returned_key_id else {
+        return Err(crate::error::CompileError::without_span(format!("{status} session did not return a publishing key"))
+            .with_category(crate::error::CompileErrorCategory::Authentication));
+    };
+    if returned_key_id != generated_key_id {
+        return Err(crate::error::CompileError::without_span(
+            "registry approved a different publishing key than the one held locally",
+        )
+        .with_category(crate::error::CompileErrorCategory::Authentication));
+    }
+    persist()
 }
 
 fn authorise_registry_publish_key(api_base: &str, namespace: &str, name: &str, artifact_kind: &str, no_open: bool) -> Result<String> {
@@ -6096,10 +6211,10 @@ fn authorise_registry_publish_key(api_base: &str, namespace: &str, name: &str, a
         )
         .with_category(crate::error::CompileErrorCategory::Authentication));
     }
-    store_registry_private_key(&generated.key_id, &generated.private_key_pkcs8)?;
-
+    store_pending_registry_private_key(&generated.key_id, &generated.private_key_pkcs8, &session.session_id, &session.expires_at)?;
     eprintln!("Authorise publishing {namespace}/{name} in your CKB wallet:");
     eprintln!("  {}", session.browser_url);
+    eprintln!("Pending publishing key: {}", generated.key_id);
     if !no_open {
         if let Err(error) = open_registry_authorisation_url(&session.browser_url) {
             eprintln!("Browser did not open automatically: {error}");
@@ -6121,6 +6236,9 @@ fn authorise_registry_publish_key(api_base: &str, namespace: &str, name: &str, a
                 .with_category(crate::error::CompileErrorCategory::Network)
                 .with_source(error)
         })?;
+        if status == reqwest::StatusCode::GONE {
+            remove_registry_private_key(&generated.key_id)?;
+        }
         if !status.is_success() {
             return Err(crate::error::CompileError::without_span(format!(
                 "browser authorisation session failed with HTTP {status}: {}",
@@ -6133,25 +6251,34 @@ fn authorise_registry_publish_key(api_base: &str, namespace: &str, name: &str, a
                 .with_category(crate::error::CompileErrorCategory::Network)
                 .with_source(error)
         })?;
+        activate_registry_key_after_wallet_approval(&poll.status, poll.capability_key_id.as_deref(), &generated.key_id, || {
+            store_registry_private_key(&generated.key_id, &generated.private_key_pkcs8)
+        })?;
         match poll.status.as_str() {
             "pending" => std::thread::sleep(Duration::from_secs(2)),
             "authorised" => {
                 let key_id = poll
                     .capability_key_id
                     .ok_or_else(|| crate::error::CompileError::without_span("authorised session did not return a capability key"))?;
-                if key_id != generated.key_id {
-                    return Err(crate::error::CompileError::without_span(
-                        "registry authorised a different capability key than the one held locally",
-                    )
-                    .with_category(crate::error::CompileErrorCategory::Authentication));
-                }
                 eprintln!("Publishing authorisation confirmed; continuing with cellc.");
                 return Ok(key_id);
             }
             "review_pending" => {
+                let key_id = poll.capability_key_id.as_deref().ok_or_else(|| {
+                    crate::error::CompileError::without_span("review_pending session did not return a capability key")
+                        .with_category(crate::error::CompileErrorCategory::Authentication)
+                })?;
                 return Err(crate::error::CompileError::without_span(format!(
                     "wallet authorisation succeeded, but namespace '{namespace}' is awaiting Registry review; rerun publish with --capability-key-id {} after approval",
-                    poll.capability_key_id.as_deref().unwrap_or(&generated.key_id)
+                    key_id
+                ))
+                .with_category(crate::error::CompileErrorCategory::Authentication));
+            }
+            "cancelled" | "expired" => {
+                remove_registry_private_key(&generated.key_id)?;
+                return Err(crate::error::CompileError::without_span(format!(
+                    "browser authorisation session was {}; run `cellc publish --authorise` again",
+                    poll.status
                 ))
                 .with_category(crate::error::CompileErrorCategory::Authentication));
             }
@@ -6164,6 +6291,7 @@ fn authorise_registry_publish_key(api_base: &str, namespace: &str, name: &str, a
             }
         }
     }
+    remove_registry_private_key(&generated.key_id)?;
     Err(crate::error::CompileError::without_span(
         "browser authorisation session expired before wallet approval; run `cellc publish --authorise` again",
     )
@@ -15300,6 +15428,74 @@ mod tests {
             "cap_0123456789abcdef0123456789abcdef",
         ]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn browser_authorisation_activates_only_the_server_confirmed_key() {
+        for status in ["pending", "cancelled", "expired"] {
+            let persisted = std::cell::Cell::new(false);
+            activate_registry_key_after_wallet_approval(status, None, "cap_local", || {
+                persisted.set(true);
+                Ok(())
+            })
+            .unwrap();
+            assert!(!persisted.get(), "{status} must not activate a publishing key");
+        }
+
+        for status in ["authorised", "review_pending"] {
+            let persisted = std::cell::Cell::new(false);
+            activate_registry_key_after_wallet_approval(status, Some("cap_local"), "cap_local", || {
+                persisted.set(true);
+                Ok(())
+            })
+            .unwrap();
+            assert!(persisted.get(), "{status} must preserve the approved publishing key");
+        }
+
+        let persisted = std::cell::Cell::new(false);
+        let mismatch = activate_registry_key_after_wallet_approval("authorised", Some("cap_remote"), "cap_local", || {
+            persisted.set(true);
+            Ok(())
+        });
+        assert!(mismatch.is_err());
+        assert!(!persisted.get(), "a mismatched server key must not be persisted");
+
+        for status in ["authorised", "review_pending"] {
+            let activated = std::cell::Cell::new(false);
+            let missing = activate_registry_key_after_wallet_approval(status, None, "cap_local", || {
+                activated.set(true);
+                Ok(())
+            });
+            assert!(missing.is_err(), "{status} must require a returned key id");
+            assert!(!activated.get(), "{status} must not activate a key without its id");
+        }
+    }
+
+    #[test]
+    fn registry_keychain_state_distinguishes_pending_and_active_keys() {
+        let pending = RegistryKeychainSecret {
+            schema: REGISTRY_KEYCHAIN_SECRET_SCHEMA.to_string(),
+            status: "pending".to_string(),
+            pkcs8_b64: "cGVuZGluZw==".to_string(),
+            session_id: Some("auth_0123456789abcdef0123456789abcdef".to_string()),
+            expires_at: Some("2026-08-05T12:00:00.000Z".to_string()),
+            pending_expires_at_unix_seconds: Some(1_786_000_000),
+        };
+        let encoded = serde_json::to_string(&pending).unwrap();
+        let decoded: RegistryKeychainSecret = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded.schema, REGISTRY_KEYCHAIN_SECRET_SCHEMA);
+        assert_eq!(decoded.status, "pending");
+        assert_eq!(decoded.session_id.as_deref(), Some("auth_0123456789abcdef0123456789abcdef"));
+
+        let active = RegistryKeychainSecret {
+            schema: REGISTRY_KEYCHAIN_SECRET_SCHEMA.to_string(),
+            status: "active".to_string(),
+            pkcs8_b64: pending.pkcs8_b64,
+            session_id: None,
+            expires_at: None,
+            pending_expires_at_unix_seconds: None,
+        };
+        assert_eq!(serde_json::from_str::<RegistryKeychainSecret>(&serde_json::to_string(&active).unwrap()).unwrap().status, "active");
     }
 
     #[test]
