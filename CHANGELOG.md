@@ -103,7 +103,15 @@
   expiry, exact publish scope, and active namespace ownership; entering a key
   ID never unlocks the UI locally. Final publish commands include the
   server-confirmed `--capability-key-id`. Primary authorisation controls use
-  larger, shorter-reach interaction targets.
+  larger, shorter-reach interaction targets. Client-routed returns now
+  reinitialize Submit and artifact-detail behavior instead of leaving stale
+  event handlers behind. The advanced publisher keeps a per-environment,
+  same-tab draft of non-secret artifact fields and UI state while explicitly
+  excluding wallet signatures, challenge/browser tokens, capability payloads,
+  and private keys. Registry, Publish, and API also share one route-transition,
+  vertical-rhythm, active-tab, and localized-title contract; Browse reuses its
+  latest in-memory result during background refresh rather than flashing a
+  skeleton on every return.
   Browse uses a no-flash loading state, URL-backed server search, and API
   pagination; bundled data appears only as an explicitly labelled error
   fallback. Static and live package details share one responsive view with
