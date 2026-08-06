@@ -11,7 +11,9 @@
   of generic placeholder panels. Redesign the global navigation around three
   primary destinations, quieter utility controls, Phosphor SVG icons, and a
   touch-safe mobile drawer with focus containment, Escape/backdrop dismissal,
-  scroll locking, and persistent theme and language controls.
+  scroll locking, and persistent theme and language controls. Source discovery
+  now has a quiet hover/focus label, while fixed full and compact language
+  controls prevent locale changes from shifting the desktop navigation.
 - Close the first-publish browser/CLI loop with `cellc publish --authorise`.
   cellc now creates and stores the delegated P-256 publishing key locally,
   opens a 15-minute exact-coordinate wallet session, and resumes publishing
