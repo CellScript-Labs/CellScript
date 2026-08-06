@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Bound Registry discovery requests so the interface can no longer remain in
+  an indefinite loading state. The browser now delays skeletons to avoid
+  flashes on fast responses, reports slow and retrying requests, retries once
+  with a strict deadline, preserves stale or mirrored results when available,
+  and otherwise presents an explicit recovery action. Registry rows and empty
+  states use compact artifact identity marks and low-motion transitions instead
+  of generic placeholder panels. Redesign the global navigation around three
+  primary destinations, quieter utility controls, Phosphor SVG icons, and a
+  touch-safe mobile drawer with focus containment, Escape/backdrop dismissal,
+  scroll locking, and persistent theme and language controls.
 - Close the first-publish browser/CLI loop with `cellc publish --authorise`.
   cellc now creates and stores the delegated P-256 publishing key locally,
   opens a 15-minute exact-coordinate wallet session, and resumes publishing
