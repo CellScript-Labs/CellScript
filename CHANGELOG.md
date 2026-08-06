@@ -10,7 +10,12 @@
   metadata-derived Cell Flow view, source-linked action/type selection, a
   contextual Inspector, and an optional three-step guide while keeping raw
   actions, types, metadata, diagnostics, and the existing no-ELF WASM boundary
-  available.
+  available. Unify the site's interactive controls around dense, standard, and
+  workflow button sizes with distinct neutral, selected, and primary states.
+  Registry and Playground actions now share the same contrast-safe treatment,
+  compact copy controls, focus rings, press feedback, and Phosphor interaction
+  icons. The Playground compile action keeps a stable label and exposes busy
+  state without turning the action itself into a transient status display.
 - Bound Registry discovery requests so the interface can no longer remain in
   an indefinite loading state. The browser now delays skeletons to avoid
   flashes on fast responses, reports slow and retrying requests, retries once
