@@ -14,6 +14,11 @@
   scroll locking, and persistent theme and language controls. Source discovery
   now has a quiet hover/focus label, while fixed full and compact language
   controls prevent locale changes from shifting the desktop navigation.
+  The Playground now places its toolbar, compiler panels, and status bar in a
+  centred wide-screen Studio frame instead of switching ambiguously between
+  the site frame and an edge-to-edge editor. An explicit, persisted focus mode
+  removes site chrome and expands the same workbench to the viewport without a
+  first-paint flash; phones retain the existing panel switcher and site header.
   Registry discovery now translates verification, deployment, availability,
   and consumption mode into one consumer-facing use conclusion, supports
   URL-restored intent filters, and shows the latest release date without
