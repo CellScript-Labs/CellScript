@@ -14,6 +14,15 @@
   scroll locking, and persistent theme and language controls. Source discovery
   now has a quiet hover/focus label, while fixed full and compact language
   controls prevent locale changes from shifting the desktop navigation.
+  Registry discovery now translates verification, deployment, availability,
+  and consumption mode into one consumer-facing use conclusion, supports
+  URL-restored intent filters, and shows the latest release date without
+  replacing the canonical status axes. Artifact details split the consumer
+  action from the maintainer's current evidence or deployment task, explain
+  each accepted evidence kind while keeping full hashes and raw JSON
+  accessible, and avoid presenting build verification as a security audit.
+  Maintenance keeps the selected task visible while progressively disclosing
+  alternate and destructive operations.
 - Close the first-publish browser/CLI loop with `cellc publish --authorise`.
   cellc now creates and stores the delegated P-256 publishing key locally,
   opens a 15-minute exact-coordinate wallet session, and resumes publishing
@@ -47,8 +56,10 @@
   checks remain available in a deliberately secondary advanced workspace.
   Technical scope and session identifiers stay collapsed by default, and
   loading, expiry, retry, review-pending, and terminal-continuation states keep
-  the same stable layout. Artifact details now derive one recommended
-  action from availability, verification, deployment, and consumption state.
+  the same stable layout. Safe publishing-access reads retry once with bounded
+  deadlines, while signed writes are never retried automatically; an unchanged
+  failed request keeps its signature, and any coordinate or payload change
+  clears it with an explicit explanation.
 - Add an isolated Pudge Testnet Registry Sandbox. Its API, Postgres database,
   object volume, signing origin, RPC identity, website build, wallet storage,
   and deployment evidence are separate from production. Sandbox releases are
