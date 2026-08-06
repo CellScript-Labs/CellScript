@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Turn the browser Playground into a recoverable Cell-oriented workbench.
+  Browser-local workspace snapshots now retain source files, entry selection,
+  active panels, and an honest saved/dirty state across refreshes. Failed
+  compiles preserve the last valid output as explicitly stale evidence, and a
+  failed compiler Worker can be restarted without reloading the page. Add a
+  metadata-derived Cell Flow view, source-linked action/type selection, a
+  contextual Inspector, and an optional three-step guide while keeping raw
+  actions, types, metadata, diagnostics, and the existing no-ELF WASM boundary
+  available.
 - Bound Registry discovery requests so the interface can no longer remain in
   an indefinite loading state. The browser now delays skeletons to avoid
   flashes on fast responses, reports slow and retrying requests, retries once
