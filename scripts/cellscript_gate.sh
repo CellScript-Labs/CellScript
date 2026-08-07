@@ -390,7 +390,11 @@ run_registry_api_check() {
     fi
     run npm --prefix services/registry-api run check
     run cargo build --locked --manifest-path services/registry-verifier/Cargo.toml
-    run env CELLSCRIPT_REGISTRY_VERIFIER_TEST_BINARY="$ROOT_DIR/services/registry-verifier/target/debug/cellscript-registry-verify" \
+    local verifier_target_dir="${CARGO_TARGET_DIR:-$ROOT_DIR/services/registry-verifier/target}"
+    if [[ "$verifier_target_dir" != /* ]]; then
+        verifier_target_dir="$ROOT_DIR/$verifier_target_dir"
+    fi
+    run env CELLSCRIPT_REGISTRY_VERIFIER_TEST_BINARY="$verifier_target_dir/debug/cellscript-registry-verify" \
         npm --prefix services/registry-api test
     run npm --prefix services/registry-api run build
     run npm --prefix services/registry-api run build:node

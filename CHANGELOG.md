@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Close the 0.23 Registry audit findings across admission, verification, and
+  delivery. Publisher-controlled repository and homepage fields now require
+  credential-free HTTPS URLs, malformed base64 is a stable client error, and
+  unexpected server failures no longer disclose internal messages. Source
+  hashing confines manifest entry/source-root paths to the package, the
+  isolated verifier rejects path/Git dependencies, and signed dependency
+  metadata must exactly match the materialized `Cell.toml`. The Node adapter
+  derives quota identity only across an explicitly configured trusted-proxy
+  boundary. Fix Registry CI under a shared `CARGO_TARGET_DIR` and additive
+  migrations, pin GitHub Actions by commit, add Dependabot coverage, and
+  update vulnerable Registry/website build dependencies. The website filters
+  Registry navigation URLs and adds a defense-in-depth CSP.
 - Make Registry chain confirmation compatible with the standard CKB v0.207.0
   RPC schema by resolving a live Cell's committed block through
   `get_transaction.tx_status` instead of depending on a proxy-specific

@@ -43,7 +43,7 @@ describePostgres("SqlRegistryStore PostgreSQL contract", () => {
         .sort();
       const currentCommitmentMigration = "0007_current_commitment_state.sql";
       const sandboxRetentionMigration = "0008_testnet_sandbox_retention.sql";
-      expect(migrationFiles.at(-1)).toBe(sandboxRetentionMigration);
+      expect(migrationFiles).toEqual(expect.arrayContaining([currentCommitmentMigration, sandboxRetentionMigration]));
 
       for (const file of migrationFiles.filter((item) => item < currentCommitmentMigration)) {
         await client.query(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
@@ -105,6 +105,9 @@ describePostgres("SqlRegistryStore PostgreSQL contract", () => {
       )).rows[0]?.kind).toBe("on_chain_committed");
 
       await client.query(await readFile(new URL(`../migrations/${sandboxRetentionMigration}`, import.meta.url), "utf8"));
+      for (const file of migrationFiles.filter((item) => item > sandboxRetentionMigration)) {
+        await client.query(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
+      }
 
       const store = new SqlRegistryStore({ connectionString: scopedConnectionString });
       await client.query(`

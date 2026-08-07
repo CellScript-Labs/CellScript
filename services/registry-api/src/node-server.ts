@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { createApp, type Env } from "./index";
 import { FilesystemObjectStore } from "./filesystem-object-store";
 import { nodeCkbRpcEnv } from "./node-runtime-env";
+import { trustedClientIp } from "./node-request-identity";
 import { SqlRegistryStore } from "./sql-store";
 
 const port = integerEnv("PORT", 8787, 1, 65_535);
@@ -17,6 +18,7 @@ const maxIncomingBodyBytes = integerEnv("MAX_INCOMING_BODY_BYTES", 7 * 1024 * 10
 const requireVerifierReady = process.env["REQUIRE_REGISTRY_VERIFIER_READY"] === "true";
 const verifierHeartbeatPath = resolve(process.env["REGISTRY_VERIFIER_SHARED_HEARTBEAT"] ?? `${objectRoot}/.health/verifier-ready`);
 const verifierHeartbeatMaxAgeSeconds = integerEnv("REGISTRY_VERIFIER_HEARTBEAT_MAX_AGE_SECONDS", 120, 30, 600);
+const trustedProxyHops = integerEnv("REGISTRY_TRUST_PROXY_HOPS", 0, 0, 8);
 
 await mkdir(objectRoot, { recursive: true, mode: 0o750 });
 const managedObjectPrefixes = ["source-snapshots", "artifacts"].map((prefix) => resolve(objectRoot, prefix));
@@ -97,6 +99,9 @@ const server = createServer(async (request, response) => {
     const headers = new Headers();
     for (const [name, value] of Object.entries(request.headers)) {
       if (value === undefined) continue;
+      if (["cf-connecting-ip", "cf-asn", "x-forwarded-for", "x-registry-client-ip", "x-registry-client-asn"].includes(name)) {
+        continue;
+      }
       if (Array.isArray(value)) {
         for (const item of value) headers.append(name, item);
       } else {
@@ -104,6 +109,12 @@ const server = createServer(async (request, response) => {
       }
     }
     headers.set("x-request-id", requestId);
+    const clientIp = trustedClientIp(
+      firstHeader(request.headers["x-forwarded-for"]),
+      request.socket.remoteAddress,
+      trustedProxyHops,
+    );
+    if (clientIp) headers.set("x-registry-client-ip", clientIp);
     const method = request.method ?? "GET";
     const body = method === "GET" || method === "HEAD" ? undefined : await readIncomingBody(request, maxIncomingBodyBytes);
     const requestInit: RequestInit = { method, headers };
@@ -148,7 +159,7 @@ const server = createServer(async (request, response) => {
 server.requestTimeout = 30_000;
 server.headersTimeout = 15_000;
 server.keepAliveTimeout = 5_000;
-server.listen(port, "0.0.0.0", () => log("server.started", { port, object_root: objectRoot }));
+server.listen(port, "0.0.0.0", () => log("server.started", { port, object_root: objectRoot, trusted_proxy_hops: trustedProxyHops }));
 
 let maintenanceRunning = false;
 const runMaintenance = () => {

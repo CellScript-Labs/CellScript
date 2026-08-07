@@ -250,7 +250,12 @@ export function ckbBlake2bHex(input: string | Uint8Array): string {
 }
 
 export function base64ToBytes(value: string): Uint8Array<ArrayBuffer> {
-  const binary = atob(value);
+  let binary: string;
+  try {
+    binary = atob(value);
+  } catch {
+    throw new ApiError(400, "invalid_base64", "base64 content is malformed");
+  }
   const out = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) {
     out[i] = binary.charCodeAt(i);
@@ -745,6 +750,9 @@ function validateRegistryEntry(
   if (requireString(published, "tag") !== `v${outer.version}`) {
     throw new ApiError(400, "invalid_registry_tag", "registry version tag must be v<version>");
   }
+  validateOptionalHttpsUrl(entry, "repository");
+  validateOptionalHttpsUrl(entry, "homepage");
+  validateOptionalDocumentationLocation(entry);
   const initialStates = initialArtifactStates(artifact);
   if (
     published["verification_status"] !== initialStates.verification_status
@@ -765,6 +773,9 @@ function validateRegistryEntry(
     const compatibilityProfileHash = requireString(published, "compatibility_profile_hash");
     validateHash(compatibilityProfileHash, "compatibility_profile_hash", "invalid_compatibility_profile_hash");
     const dependencies = assertPlainObject(published["dependencies"], "invalid_registry_dependencies");
+    if (Object.keys(dependencies).length > 128) {
+      throw new ApiError(400, "invalid_registry_dependencies", "registry version dependencies must contain at most 128 entries");
+    }
     for (const [dependencyName, dependencyValue] of Object.entries(dependencies)) {
       validatePackageIdent(dependencyName, "dependency name");
       const dependency = assertPlainObject(dependencyValue, "invalid_registry_dependency");
@@ -785,6 +796,45 @@ function validateRegistryEntry(
   }
 
   return entry as unknown as RegistryIndexEntry;
+}
+
+function validateOptionalHttpsUrl(entry: Record<string, unknown>, field: "repository" | "homepage" | "documentation"): void {
+  const value = entry[field];
+  if (value === undefined) return;
+  if (typeof value !== "string" || value.length === 0 || value.length > 2_048 || value !== value.trim()) {
+    throw new ApiError(400, `invalid_${field}`, `registry_entry.${field} must be a non-empty HTTPS URL`);
+  }
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new ApiError(400, `invalid_${field}`, `registry_entry.${field} must be a valid HTTPS URL`);
+  }
+  if (url.protocol !== "https:" || url.username !== "" || url.password !== "") {
+    throw new ApiError(400, `invalid_${field}`, `registry_entry.${field} must be a credential-free HTTPS URL`);
+  }
+}
+
+function validateOptionalDocumentationLocation(entry: Record<string, unknown>): void {
+  const value = entry["documentation"];
+  if (value === undefined) return;
+  if (typeof value !== "string" || value.length === 0 || value.length > 2_048 || value !== value.trim()) {
+    throw new ApiError(400, "invalid_documentation", "registry_entry.documentation must be a non-empty HTTPS URL or package-relative path");
+  }
+  try {
+    new URL(value);
+    validateOptionalHttpsUrl(entry, "documentation");
+    return;
+  } catch {
+    // Package-relative documentation is handled below.
+  }
+  if (
+    !/^[A-Za-z0-9._~/-]+$/.test(value)
+    || value.startsWith("/")
+    || value.split("/").some((segment) => segment === ".." || segment === "")
+  ) {
+    throw new ApiError(400, "invalid_documentation", "registry_entry.documentation package path must stay within the package");
+  }
 }
 
 function validateArtifactProfileContract(
