@@ -120,14 +120,18 @@ describe("CKB mainnet observations", () => {
   it("requires the configured confirmation depth for a live deployment Cell", async () => {
     const blockHash = `0x${"aa".repeat(32)}`;
     const artifactHash = `0x${"bb".repeat(32)}`;
+    const deploymentTxHash = `0x${"dd".repeat(32)}`;
     let reportedChain = "ckb";
+    let transactionStatus = "committed";
+    let transactionBlockHash: string | null = blockHash;
+    const transactionRequests: unknown[][] = [];
     vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
-      const request = JSON.parse(String(init?.body)) as { method: string };
+      const request = JSON.parse(String(init?.body)) as { method: string; params: unknown[] };
+      if (request.method === "get_transaction") transactionRequests.push(request.params);
       const results: Record<string, unknown> = {
         get_blockchain_info: { chain: reportedChain },
         get_live_cell: {
           status: "live",
-          block_hash: blockHash,
           cell: {
             data: { hash: artifactHash, content: "0x00" },
             output: {
@@ -135,6 +139,20 @@ describe("CKB mainnet observations", () => {
               lock: { code_hash: `0x${"cc".repeat(32)}`, hash_type: "type", args: "0x" },
               type: null,
             },
+          },
+        },
+        get_transaction: {
+          transaction: null,
+          cycles: null,
+          fee: null,
+          min_replace_fee: null,
+          time_added_to_pool: null,
+          tx_status: {
+            status: transactionStatus,
+            block_hash: transactionStatus === "committed" ? transactionBlockHash : null,
+            block_number: transactionStatus === "committed" ? "0x64" : null,
+            tx_index: transactionStatus === "committed" ? "0x0" : null,
+            reason: null,
           },
         },
         get_header: { number: "0x64" },
@@ -155,7 +173,7 @@ describe("CKB mainnet observations", () => {
       code_hash: artifactHash,
       hash_type: "data1",
       dep_type: "code",
-      out_point: { tx_hash: `0x${"dd".repeat(32)}`, index: 0 },
+      out_point: { tx_hash: deploymentTxHash, index: 0 },
       capability_key_id: "cap_11111111111111111111111111111111",
       nonce: "0x1111111111111111",
       issued_at: "2026-06-23T12:00:00Z",
@@ -166,7 +184,15 @@ describe("CKB mainnet observations", () => {
       await expect(verifyMainnetDeployment({ CKB_MIN_CONFIRMATIONS: "8" }, payload))
         .rejects.toMatchObject({ code: "chain_confirmation_depth_insufficient" });
       await expect(verifyMainnetDeployment({ CKB_MIN_CONFIRMATIONS: "7" }, payload))
-        .resolves.toMatchObject({ block_number: "0x64", tip_block_number: "0x6a", confirmations: 7 });
+        .resolves.toMatchObject({ block_hash: blockHash, block_number: "0x64", tip_block_number: "0x6a", confirmations: 7 });
+      transactionStatus = "pending";
+      await expect(verifyMainnetDeployment({ CKB_MIN_CONFIRMATIONS: "7" }, payload))
+        .rejects.toMatchObject({ code: "chain_observation_uncommitted" });
+      transactionStatus = "committed";
+      transactionBlockHash = null;
+      await expect(verifyMainnetDeployment({ CKB_MIN_CONFIRMATIONS: "7" }, payload))
+        .rejects.toMatchObject({ code: "invalid_ckb_rpc_response", status: 503 });
+      transactionBlockHash = blockHash;
       reportedChain = "ckb_testnet";
       await expect(verifyDeployment({
         REGISTRY_ENVIRONMENT: "testnet-sandbox",
@@ -180,6 +206,13 @@ describe("CKB mainnet observations", () => {
         REGISTRY_ORIGIN: "https://api.testnet.registry.cellscript.dev",
         STATIC_REGISTRY_ORIGIN: "https://objects.testnet.registry.cellscript.dev",
       }, payload)).rejects.toMatchObject({ code: "unsupported_deployment_network" });
+      expect(transactionRequests).toEqual([
+        [deploymentTxHash],
+        [deploymentTxHash],
+        [deploymentTxHash],
+        [deploymentTxHash],
+        [deploymentTxHash],
+      ]);
     } finally {
       vi.unstubAllGlobals();
     }
@@ -2348,7 +2381,7 @@ describe("registry api", () => {
         evidence: {
           network: "mainnet",
           deployment_status: "live",
-          chain_verification: "get_live_cell",
+          chain_verification: "get_transaction+get_live_cell",
         },
       },
     });

@@ -56,6 +56,20 @@ fn require_with<F: FnOnce() -> String>(condition: bool, msg: F) -> Result<()> {
     }
 }
 
+fn require_ordered_script_steps(script_name: &str, command: &str, required_steps: &[&str]) -> Result<()> {
+    let steps = command.split(" && ").map(str::trim).collect::<Vec<_>>();
+    let mut next_index = 0;
+    for required_step in required_steps {
+        let Some(relative_index) = steps[next_index..].iter().position(|step| step == required_step) else {
+            return Err(anyhow!(
+                "invalid CellScript tooling release boundary: website package script '{script_name}' must run '{required_step}' in order"
+            ));
+        };
+        next_index += relative_index + 1;
+    }
+    Ok(())
+}
+
 /// Capture semver from the first `## <semver> - ` heading. `(?m)` lets `^`
 /// match every line start.
 fn changelog_head() -> &'static Regex {
@@ -82,6 +96,8 @@ pub fn run(root: &Path) -> Result<()> {
     let cargo_lock: toml::Value = read_text(root, "Cargo.lock")?.parse().map_err(|e| anyhow!("Cargo.lock is not valid TOML: {e}"))?;
     let package_json: serde_json::Value = serde_json::from_str(&read_text(root, "editors/vscode-cellscript/package.json")?)
         .map_err(|e| anyhow!("VS Code package.json is not valid JSON: {e}"))?;
+    let website_package_json: serde_json::Value = serde_json::from_str(&read_text(root, "website/package.json")?)
+        .map_err(|e| anyhow!("website/package.json is not valid JSON: {e}"))?;
     let changelog = read_text(root, "CHANGELOG.md")?;
     let extension_changelog = read_text(root, "editors/vscode-cellscript/CHANGELOG.md")?;
     let extension_readme = read_text(root, "editors/vscode-cellscript/README.md")?;
@@ -382,14 +398,34 @@ pub fn run(root: &Path) -> Result<()> {
         "README.md",
         &["cellc action build", "cellc gen-builder --target typescript", "cellc package verify", "cellc registry verify --live"],
     )?;
-    require_contains(
-        root,
-        "website/package.json",
+    let website_scripts = website_package_json
+        .get("scripts")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| anyhow!("website/package.json scripts object is missing"))?;
+    for (script_name, expected_command) in [
+        ("prepare:registry", "node scripts/generate-registry-data.mjs"),
+        ("check:docs", "node scripts/check-doc-links.mjs"),
+        ("check:dist", "node scripts/check-dist-regressions.mjs"),
+        ("check:deploy", "node scripts/check-production-deploy.mjs"),
+    ] {
+        require_with(website_scripts.get(script_name).and_then(serde_json::Value::as_str) == Some(expected_command), || {
+            format!("website package script '{script_name}' must remain '{expected_command}'")
+        })?;
+    }
+    let website_build = website_scripts
+        .get("build")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| anyhow!("invalid CellScript tooling release boundary: website package script 'build' is missing"))?;
+    require_ordered_script_steps(
+        "build",
+        website_build,
         &[
-            r#""prepare:registry": "node scripts/generate-registry-data.mjs""#,
-            r#""build": "npm run prepare:registry && astro check && astro build && npm run check:docs && npm run check:dist && npm run check:deploy""#,
-            r#""check:docs": "node scripts/check-doc-links.mjs""#,
-            r#""check:dist": "node scripts/check-dist-regressions.mjs""#,
+            "npm run prepare:registry",
+            "astro check",
+            "astro build",
+            "npm run check:docs",
+            "npm run check:dist",
+            "npm run check:deploy",
         ],
     )?;
     require_contains(root, "website/src/pages/index.astro", &[r#"href="/registry""#, r#"data-i18n="nav.registryBrowse""#])?;
@@ -512,4 +548,37 @@ pub fn run(root: &Path) -> Result<()> {
     // --- Stage P: success -------------------------------------------------
     println!("valid CellScript tooling release boundary");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::require_ordered_script_steps;
+
+    #[test]
+    fn website_build_contract_accepts_additional_ordered_checks() {
+        require_ordered_script_steps(
+            "build",
+            "npm run prepare:registry && npm run test:registry && astro check && astro build && npm run test:ui && npm run check:docs && npm run check:dist && npm run check:deploy",
+            &[
+                "npm run prepare:registry",
+                "astro check",
+                "astro build",
+                "npm run check:docs",
+                "npm run check:dist",
+                "npm run check:deploy",
+            ],
+        )
+        .expect("additional website checks must not invalidate the stable build contract");
+    }
+
+    #[test]
+    fn website_build_contract_rejects_missing_or_reordered_steps() {
+        let error = require_ordered_script_steps(
+            "build",
+            "npm run prepare:registry && astro build && astro check && npm run check:docs && npm run check:dist",
+            &["npm run prepare:registry", "astro check", "astro build", "npm run check:deploy"],
+        )
+        .expect_err("reordered or missing required steps must fail closed");
+        assert!(error.to_string().contains("must run 'astro build' in order"));
+    }
 }

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Make Registry chain confirmation compatible with the standard CKB v0.207.0
+  RPC schema by resolving a live Cell's committed block through
+  `get_transaction.tx_status` instead of depending on a proxy-specific
+  `get_live_cell.block_hash` extension. Recorded evidence now names both RPC
+  methods while historical evidence identifiers remain readable. Make the
+  tooling-release gate parse website scripts structurally and enforce the
+  stable build steps in order, so adding intermediate regression checks no
+  longer breaks CI through an obsolete exact-string comparison.
 - Turn the browser Playground into a recoverable Cell-oriented workbench.
   Browser-local workspace snapshots now retain source files, entry selection,
   active panels, and an honest saved/dirty state across refreshes. Failed

@@ -866,7 +866,12 @@ async function handlePublicRegistryCommitment(
       .filter((item) => item.kind === "on_chain_committed"
         && item.evidence_hash === record.current_commitment_evidence_hash
         && item.evidence["deployed_evidence_hash"] === deployed.evidence_hash
-        && ["get_live_cell+type_index", "get_live_cell+configured_type_index", "get_cells+configured_type_index"]
+        && [
+          "get_live_cell+type_index",
+          "get_live_cell+configured_type_index",
+          "get_cells+configured_type_index",
+          "get_transaction+get_live_cell+configured_type_index",
+        ]
           .includes(String(item.evidence["chain_verification"])))
       .at(-1)
     : undefined;
@@ -1039,7 +1044,7 @@ async function handleRecordDeployment(
       dep_type: payload.dep_type,
       out_point: payload.out_point,
       deployment_status: "live",
-      chain_verification: "get_live_cell",
+      chain_verification: "get_transaction+get_live_cell",
       ...(chain.block_hash ? { block_hash: chain.block_hash } : {}),
       ...(chain.block_number ? { block_number: chain.block_number } : {}),
       ...(chain.tip_block_number ? { observed_tip_block_number: chain.tip_block_number } : {}),
@@ -1274,7 +1279,7 @@ async function handlePublisherAvailability(
 interface LiveCellRpcResult {
   status: string;
   cell: Record<string, unknown>;
-  block_hash?: string | null;
+  block_hash: string;
 }
 
 interface VerifiedDeployment {
@@ -1362,11 +1367,40 @@ async function getLiveCell(
     throw new ApiError(409, "deployment_cell_not_live", "deployment OutPoint is not a live Cell on the configured network");
   }
   const cell = assertPlainObject(result["cell"], "invalid_ckb_rpc_response");
+  const blockHash = await getCommittedTransactionBlockHash(rpcUrl, outPoint.tx_hash, options);
   return {
     status: "live",
     cell,
-    block_hash: typeof result["block_hash"] === "string" ? result["block_hash"] : null,
+    block_hash: blockHash,
   };
+}
+
+async function getCommittedTransactionBlockHash(
+  rpcUrl: string,
+  txHash: string,
+  options: { timeout_ms: number; maximum_bytes: number },
+): Promise<string> {
+  const rawTransaction = await ckbRpcRequest(rpcUrl, "get_transaction", [txHash], options);
+  if (!rawTransaction || typeof rawTransaction !== "object" || Array.isArray(rawTransaction)) {
+    throw new ApiError(503, "invalid_ckb_rpc_response", "CKB RPC get_transaction returned no transaction status");
+  }
+  const transaction = rawTransaction as Record<string, unknown>;
+  const rawStatus = transaction["tx_status"];
+  if (!rawStatus || typeof rawStatus !== "object" || Array.isArray(rawStatus)) {
+    throw new ApiError(503, "invalid_ckb_rpc_response", "CKB RPC get_transaction returned no tx_status object");
+  }
+  const txStatus = rawStatus as Record<string, unknown>;
+  if (typeof txStatus["status"] !== "string") {
+    throw new ApiError(503, "invalid_ckb_rpc_response", "CKB RPC get_transaction returned no transaction status value");
+  }
+  if (txStatus["status"] !== "committed") {
+    throw new ApiError(409, "chain_observation_uncommitted", "Cell creation transaction is not committed");
+  }
+  const blockHash = txStatus["block_hash"];
+  if (typeof blockHash !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(blockHash)) {
+    throw new ApiError(503, "invalid_ckb_rpc_response", "committed CKB transaction has no valid block hash");
+  }
+  return blockHash;
 }
 
 async function requireRegistryRpc(
@@ -2236,7 +2270,7 @@ async function verifyRegistryCommitment(
   return {
     commitment_schema: "cellscript-registry-commitment-v1",
     commitment_payload: registryCommitmentPayload(version, deployed.evidence_hash),
-    chain_verification: "get_live_cell+configured_type_index",
+    chain_verification: "get_transaction+get_live_cell+configured_type_index",
     observed_block_hash: live.block_hash ?? null,
     observed_block_number: observation.block_number,
     observed_tip_block_number: observation.tip_block_number,
@@ -2596,7 +2630,7 @@ async function handleAdminPackageVersionPromotion(
       : await verifyDeployment(env, deploymentPayload);
     evidence = {
       ...evidence,
-      chain_verification: "get_live_cell",
+      chain_verification: "get_transaction+get_live_cell",
       ...(chain.block_hash ? { block_hash: chain.block_hash } : {}),
       ...(chain.block_number ? { block_number: chain.block_number } : {}),
       ...(chain.tip_block_number ? { observed_tip_block_number: chain.tip_block_number } : {}),
