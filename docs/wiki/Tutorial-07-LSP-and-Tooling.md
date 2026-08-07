@@ -24,6 +24,7 @@ instead of only the message. The same record is available through
 ## What You Will Learn
 
 - what the LSP server supports;
+- how the CLI, LSP, WASM, and playground share Edition 2026;
 - how the VS Code extension starts the server;
 - which settings matter for local development;
 - where editor tooling helps;
@@ -59,6 +60,26 @@ cellc --lsp
 ```
 
 In practice you usually let the editor start it for you.
+
+## One Edition Across Tooling
+
+The editor is not an edition compatibility layer. Package-backed LSP documents
+take `edition = "2026"` from `Cell.toml` and carry it into the same compiler
+path as `cellc`. A missing or non-2026 value is a package error; the LSP does
+not infer or migrate it.
+
+The browser boundary is equally explicit. The WASM metadata exports take an
+edition argument:
+
+```text
+compile_metadata_json(source, edition, target?)
+compile_metadata_json_diagnostics(source, edition, target?)
+compile_metadata_json_sources(sources_json, entry_path, edition, target?)
+```
+
+The only accepted value is `"2026"`. The playground worker passes that value
+and records it in compiler-output provenance, so browser metadata cannot
+silently use a different compatibility contract from native builds.
 
 On `nightly-0.22`, qualified enum completion includes concrete payload
 constructors: after `Limit::`, `Some` advertises `Some(u64)` and inserts
@@ -131,6 +152,13 @@ The extension contributes commands for the local compiler and builder loop:
 | `CellScript: Verify Registry` | `cellc registry verify --json` |
 | `CellScript: Verify Live Registry` | `cellc registry verify --live --json` |
 | `CellScript: Show Production Report` | compiler version + metadata + constraints + release-audit boundary |
+
+Entry-witness commands report placement ABI
+`cellscript-witnessargs-input-type-v2` within the resolved compatibility profile:
+`CSARGv1` is stored in Molecule `WitnessArgs.input_type` on the selected
+script-group witness. Tooling must preserve `lock` and `output_type`; it must
+not emit the entry payload as raw witness bytes. Edition 2026 independently
+identifies how the source was understood.
 
 `CellScript: Show Production Report` is useful while editing because it displays
 compiler version, metadata, constraints, and release-audit boundaries.

@@ -237,7 +237,7 @@ impl LspServer {
         let report = uri_path
             .as_ref()
             .map(|path| crate::compile_path_metadata_with_diagnostics_for_source(path, content, crate::CompileOptions::default()))
-            .unwrap_or_else(|| crate::compile_metadata_with_diagnostics(content, None));
+            .unwrap_or_else(|| crate::compile_metadata_with_diagnostics(content, crate::CURRENT_EDITION, None));
         let mut diagnostics = report
             .diagnostics
             .iter()
@@ -1298,7 +1298,7 @@ impl LspServer {
 
         // 1. Try top-level item hover (existing logic).
         if let (Some(ast), Some(source)) = (self.ast_cache.get(uri), self.documents.get(uri)) {
-            let metadata = crate::compile_metadata(source, None).ok();
+            let metadata = crate::compile_metadata(source, crate::CURRENT_EDITION, None).ok();
             if let Some(hover) = ast.items.iter().find_map(|item| {
                 if item_name(item) == Some(symbol.as_str()) {
                     self.item_hover(source, item, metadata.as_ref())
@@ -1322,7 +1322,7 @@ impl LspServer {
 
         // 4. Try workspace modules.
         for module in self.workspace_modules(uri) {
-            let metadata = crate::compile_metadata(&module.source, None).ok();
+            let metadata = crate::compile_metadata(&module.source, module.edition, None).ok();
             if let Some(hover) = module.ast.items.iter().find_map(|item| {
                 if item_name(item) == Some(symbol.as_str()) {
                     self.item_hover(&module.source, item, metadata.as_ref())
@@ -1980,7 +1980,7 @@ impl LspServer {
                 module.source = content.clone();
                 module.ast = ast.clone();
             } else {
-                modules.push(crate::LoadedModule { path, source: content.clone(), ast: ast.clone() });
+                modules.push(crate::LoadedModule { path, source: content.clone(), ast: ast.clone(), edition: crate::CURRENT_EDITION });
             }
         }
 
@@ -3349,8 +3349,11 @@ action update(amount: u64) -> u64 {
         let temp = tempdir().unwrap();
         let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
         std::fs::create_dir_all(root.join("src")).unwrap();
-        std::fs::write(root.join("Cell.toml"), "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n")
-            .unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            "[package]\nedition = \"2026\"\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n",
+        )
+        .unwrap();
         std::fs::write(root.join("src/types.cell"), "module demo::types\n\nresource Token {\n    amount: u64,\n}\n").unwrap();
         let main_source =
             "module demo::main\n\nuse demo::types::Token\n\naction inspect(token: Token) -> u64 {\n    verification\n        token.amount\n}\n";
@@ -3371,8 +3374,11 @@ action update(amount: u64) -> u64 {
         let temp = tempdir().unwrap();
         let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
         std::fs::create_dir_all(root.join("src")).unwrap();
-        std::fs::write(root.join("Cell.toml"), "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n")
-            .unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            "[package]\nedition = \"2026\"\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n",
+        )
+        .unwrap();
         let types_source = "module demo::types\n\nresource Token {\n    amount: u64,\n}\n";
         let types_path = root.join("src/types.cell");
         std::fs::write(&types_path, types_source).unwrap();
@@ -3395,8 +3401,11 @@ action update(amount: u64) -> u64 {
         let temp = tempdir().unwrap();
         let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
         std::fs::create_dir_all(root.join("src")).unwrap();
-        std::fs::write(root.join("Cell.toml"), "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n")
-            .unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            "[package]\nedition = \"2026\"\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n",
+        )
+        .unwrap();
         let types_source = "module demo::types\n\nresource Token {\n    amount: u64,\n}\n";
         let types_path = root.join("src/types.cell");
         std::fs::write(&types_path, types_source).unwrap();

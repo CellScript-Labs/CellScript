@@ -1,0 +1,12 @@
+// audit: phase=accept
+module cellscript::audit::seed_field_commas_canonical
+
+struct CanonicalFields {
+    amount: u64,
+    enabled: bool,
+}
+
+action inspect(value: CanonicalFields) -> bool {
+    verification
+        return value.enabled
+}

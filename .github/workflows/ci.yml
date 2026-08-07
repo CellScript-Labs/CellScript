@@ -20,11 +20,26 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: cellscript_registry_test
+          POSTGRES_USER: cellscript_test
+          POSTGRES_PASSWORD: cellscript_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cellscript_test -d cellscript_registry_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       CARGO_INCREMENTAL: "0"
       CARGO_TARGET_DIR: /tmp/cellscript-ci-target
       CELLSCRIPT_BACKEND_SHAPE_REPORT: /tmp/cellscript-backend-shape/backend-shape-report.json
       CKB_SDK_RUST_REF: v5.1.0
+      REGISTRY_TEST_DATABASE_URL: postgresql://cellscript_test:cellscript_test_password@127.0.0.1:5432/cellscript_registry_test
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -40,7 +55,8 @@ jobs:
 
       - name: Install Rust toolchain
         run: |
-          rustup toolchain install 1.97.1 --profile minimal --component rustfmt --component clippy
+          rustup toolchain install 1.97.1 --profile minimal --component rustfmt --component clippy --component llvm-tools-preview
+          rustup target add --toolchain 1.97.1 riscv64imac-unknown-none-elf wasm32-unknown-unknown
           rustup default 1.97.1
           rustc --version
           cargo --version

@@ -1,4 +1,5 @@
 [package]
+edition = "2026"
 name = "nft"
 version = "0.1.0"
 

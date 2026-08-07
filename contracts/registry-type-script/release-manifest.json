@@ -1,0 +1,19 @@
+{
+  "schema": "cellscript-registry-type-script-release-v1",
+  "version": "0.22.0",
+  "target": "riscv64imac-unknown-none-elf",
+  "artifact": "artifacts/v0.22.0/cellscript-registry-type-script",
+  "canonical_build_host": "x86_64-unknown-linux-gnu",
+  "canonical_builder_image": "rust@sha256:77fac8b98f9f46062bb680b6d25d5bcaabfc400143952ebc572e924bcbedc3fa",
+  "artifact_bytes": 3352,
+  "sha256": "6a7ab8eaa2281fe77ca8c7b092006c52f96006ac2c7e4b013f8f88b7bf1f742a",
+  "ckb_data_hash": "0x8b6de99567accdca438818a55c16534ed10fc335f117709b1487fd2666808bfb",
+  "script_template": {
+    "code_hash": "0x8b6de99567accdca438818a55c16534ed10fc335f117709b1487fd2666808bfb",
+    "hash_type": "data1",
+    "args_schema": "ckb_script_hash(custody_lock)",
+    "args_bytes": 32
+  },
+  "deployment_policy": "immutable_data_cell",
+  "custody_lock": "ckb_mainnet_secp256k1_blake160_sighash_all"
+}

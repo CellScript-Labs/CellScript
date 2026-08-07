@@ -1,422 +1,287 @@
 # ADR: CellScript Registry Production Boundary
 
-**Status**: Accepted design note
+**Status**: accepted and implemented; amended 2026-08-01 for the unified
+artifact model and mainnet deployment-evidence path.
 
-**Date**: 2026-06-23
+**Decision date**: 2026-06-23
+**Current amendment**: 2026-08-01
 
-**Scope**: Public CellScript source-package registry, publisher identity,
-capability authorisation, write/read separation, abuse controls, resolver
-visibility, and first production deployment boundary.
+## Context
 
-**Out of scope**: Code implementation, dependency selection inside the
-repository, and on-chain deployment record submission.
+CKB ecosystem discovery spans objects with materially different trust and use
+contracts: CellScript dependency source, profile libraries, CKB-VM executables,
+deployed Script Cells, reproducible tooling, and copy-only starters. Treating
+all of them as “packages” hides whether an object can be installed, executed,
+deployed, or only copied. Treating publication, build verification, deployment,
+and availability as one status creates false assurance.
+
+The service also needs a wallet-rooted publisher identity without taking
+custody of seed material, a static hash-verifiable read path, and an auditable
+operator boundary.
 
 ## Decision
 
-The production registry uses a JoyID-rooted publisher identity, a
-capability-based daily publish flow, an authenticated write API, and a
-static/CDN read path. `cellc publish` creates a real registry entry. Git tags,
-Git URLs, and `registry.json` remain audit, mirror, fixture, and offline
-fallback material; they are not the public write authority.
+The production Registry uses:
 
-The first production slice is source package publish, registry entry creation,
-immutable source snapshot/mirror storage, and verification pipeline admission.
-On-chain deployment attestation uses the same identity model, but it is a
-separate feature-gated production slice and must not be mixed into the first
-write API.
+1. one public `/v1/artifacts` resource family;
+2. a closed artifact descriptor for kind, verification profile, language, and
+   consumption mode;
+3. independent verification, deployment, and availability states;
+4. typed CKB wallet principals that authorise scoped delegated capabilities;
+5. Postgres as the write authority and immutable static objects as the normal
+   content transport;
+6. an isolated, profile-aware verification worker;
+7. signed, live-RPC-verified CKB mainnet deployment evidence;
+8. fail-closed CellScript dependency resolution that accepts only the
+   `cellscript_source` + `dependency` contract.
 
-## Product Entry
+There is no account-style Registry identity, no Git convention as public
+resolver authority, no testnet deployment option, and no second public package
+route.
 
-The production frontend exposes JoyID as the publisher identity entry. The
-connection layer still goes through CCC adapters so the implementation is not
-coupled to JoyID SDK internals.
+## Artifact Profiles
 
-Product policy:
+The accepted contracts are:
 
-- users see JoyID as the only publisher root identity;
-- the frontend uses CCC as the connection layer;
-- the production submit page can sign `authorize_capability` payloads through
-  the CCC JoyID CKB signer and submit them to the registry write API;
-- the backend data model stores typed principals instead of `owner = joyid`;
-- no separate registry account, email account, or GitHub account is introduced.
+| Kinds | Profile | Consumption | Verification boundary |
+|---|---|---|---|
+| source/profile library | `cellscript_source` | dependency | compile authenticated snapshot |
+| runtime verifier | `ckb_executable` | TCB | source + executable + ABI + optional recipe hashes |
+| deployable contract | `ckb_executable` | deployment | source + executable + ABI + optional recipe hashes |
+| reproducible binary | `reproducible_build` | TCB | source + output + recipe hashes and evidence |
+| template | `copy_material` | copy | authenticated file-map hash |
 
-## Publisher Principal
+The coordinate is shared discovery vocabulary, not shared consumption
+semantics. A caller must select on profile and consumption mode, not infer them
+from a name or file extension.
 
-The current accepted publisher principal is:
+## State Model
 
-```text
-principal_type = joyid_ckb
-principal_id = <normalized JoyID-CKB identity binding>
-```
-
-Display addresses may be stored for UI and support workflows, but they are not
-unique primary keys and must not be used as the registry authority.
-
-The production submit flow derives the preferred `principal_id` from the JoyID
-signer key as `sha256("cellscript-registry-joyid-ckb-principal-v1\n" ||
-key_type || "\n" || normalized_pubkey)`, encoded as `0x` + lowercase hex. The
-registry verifies that the `principal_id` inside an `authorize_capability` or
-revocation payload matches the JoyID signer that produced the signature. A
-display address may help users recognise the account, but it is not accepted as
-the ACL key.
-
-The principal model is intentionally typed:
+Every release records:
 
 ```text
-principal_type
-principal_id
-display_address
-created_at
-last_seen_at
-status
+verification_status = pending | hash_bound | verified | evidence_required | rejected
+deployment_status   = not_applicable | undeployed | deployed | chain_verified
+availability_status = active | deprecated | yanked | quarantined
 ```
 
-Current production policy accepts only `joyid_ckb`.
+The axes are independent. Publication sets initial values only. Verification
+and deployment claims require accepted evidence. Operator actions modify only
+availability. Evidence and immutable identities are append-only.
 
-## Capability Authorisation
+The implementation may retain a derived internal status column while migrating
+the deployed schema, but public responses and frontend decisions use the three
+orthogonal fields.
 
-`cellc auth capability create --principal-id <principal_id> --scope
-publish:namespace/package --expires 90d` is not a generic login. It authorises
-a local capability key. JoyID signs a structured capability authorisation
-payload that binds the local capability public key, requested scopes, expiry,
-and the normalized JoyID-CKB principal binding.
+## Publisher Principal and Capability
 
-Required authorisation payload:
+Accepted principals are:
 
 ```text
-protocol: cellscript-registry-auth-v1
-action: authorize_capability
-registry_origin: https://api.registry.cellscript.dev
-principal_type: joyid_ckb
-principal_id: <normalized JoyID-CKB identity binding>
-capability_pubkey: <public key generated by the CLI>
-requested_scopes:
-  - publish:namespace/package
-capability_expires_at: <timestamp>
-nonce: <server nonce or stateless signed nonce>
-issued_at: <timestamp>
-expires_at: <timestamp>
-cli_version: <cellc version>
+joyid_ckb       = normalized JoyID CKB public-key binding
+ckb_secp256k1   = normalized compressed secp256k1 public-key binding
 ```
 
-The registry verifies the JoyID signature and records the capability public key,
-scope set, expiry, revocation state, principal type, and principal id. The
-capability private key is generated locally by the CLI and stored in the OS
-keychain.
+Display addresses may be retained for support but are not authority keys. The
+API verifies scheme, canonical challenge, public-key recovery/binding, and
+principal identity before storing a capability.
 
-The command flow is intentionally two-step:
+The wallet root authorises a P-256 capability scoped to a namespace/artifact,
+with expiry and revocation. Daily publish and deployment requests use the
+delegated key. Seed phrases and private wallet keys never cross the wallet
+boundary.
 
-```bash
-cellc auth capability create --principal-id <principal_id> --scope publish:namespace/package --expires 90d --json > capability-payload.json
-# Sign capability-payload.json through the production JoyID flow exposed by CCC.
-cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json
-```
+Capabilities do not claim namespaces implicitly. The namespace must be active
+and owned by the capability principal. Reserved names may require attributed
+operator review.
 
-Renewal repeats the same authorisation shape with a new expiry. Revocation is
-also JoyID-bound and does not depend on a registry password:
+## Wallet Product Boundary
 
-```bash
-cellc auth capability revoke --principal-id <principal_id> --capability-key-id <capability_key_id> --json > revoke-payload.json
-# Sign revoke-payload.json through JoyID.
-cellc auth capability revoke --payload revoke-payload.json --joyid-signature joyid-signature.json --reason "rotate delegated key"
-```
+The website exposes one CKB wallet entry that opens a compact chooser. The
+chooser contains the supported CKB wallet directory; CCC-discovered signers can
+connect directly, and unavailable connectors link to the official wallet or
+use the external signature handoff.
 
-Daily publish uses the capability key:
+The Registry does not pretend that catalog presence means runtime support.
+Backend signature verification is identical for browser and external handoff
+flows. Recovery phrases are never accepted by the frontend or API.
 
-```text
-cellc publish
-  -> sign publish payload with capability private key
-  -> registry checks signature, nonce, expiry, origin, revocation, ACL, quota
-  -> registry admits the entry as source_published / indexed_pending
-```
+The network is fixed to CKB mainnet and is not shown as a selectable control.
 
-JoyID only participates when creating, renewing, or revoking a capability. It
-does not sign every `cellc publish`.
+## Write Path
 
-The CLI must also expose the exact publish payload for CI and external signing:
+Release admission verifies the active capability, scope, namespace ownership,
+route/payload equality, closed artifact descriptor, immutable coordinate,
+manifest/source hashes, signature, nonce, idempotency record, snapshot/bundle,
+and initial state claims.
 
-```bash
-cellc publish --print-payload --json > publish-payload.json
-# sign the canonical_payload field with the authorised capability private key
-cellc publish --payload publish-payload.json --capability-signature <signature>
-# optional for CI retries of the same signed request
-cellc publish --payload publish-payload.json --capability-signature <signature> --idempotency-key ci-ns-pkg-1.2.3
-```
+Immutable bundle and static release writes happen before database admission.
+The release, verifier job, capability use, audit event, nonce, and completed
+idempotency response commit transactionally. Admission reports verification as
+queued; it is not verification evidence.
 
-CI may provide `CELLSCRIPT_CAPABILITY_PRIVATE_KEY_PKCS8_B64` instead of using
-the OS keychain, but it still signs only the delegated capability payload. CI
-must never receive the JoyID passkey or wallet secret.
+Non-CellScript artifacts use an explicit `Artifact.toml` and JSON bundle. The
+closed `cellscript-registry-profile-contract-v1` binds build, declared security,
+CKB/ABI, verifier IPC, reproducibility, or copy semantics to the immutable
+objects. The bundle is bounded to 5 MiB. Unknown fields and unknown or duplicate
+roles fail closed in admission, publisher CLI, and isolated verifier.
 
-The CLI sends an `Idempotency-Key` on publish; it can derive the key from the
-exact request or accept `--idempotency-key` /
-`CELLSCRIPT_REGISTRY_IDEMPOTENCY_KEY`. If admission fails after reserving the
-key but before the package version is accepted, the registry releases that
-`processing` reservation. Because the signed publish nonce may already be
-consumed, retrying with the same CI retry key requires a new publish payload and
-capability signature.
+## Verification Boundary
 
-## CI Publishing
+The worker leases jobs with `FOR UPDATE SKIP LOCKED`, bounded retry, dead-letter
+handling, and crash recovery. The verifier runs under resource and filesystem
+bounds.
 
-CI publishing is part of the first production boundary. CI must not access the
-JoyID private key/passkey. A maintainer creates a scoped capability:
+For CellScript source it authenticates and compiles the real snapshot. For
+other profiles it validates bundle identity, required roles, and published
+hashes. Reproducible output remains `evidence_required` until appropriate
+evidence exists. A copied template is never promoted into dependency or TCB
+semantics.
 
-```bash
-cellc auth capability create --principal-id <principal_id> --scope publish:ns/pkg --expires 90d --json > capability-payload.json
-cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json
-```
+Evidence insertion and the worker publishing checkpoint commit together.
+Static-object refresh happens afterward; reclaiming a crashed publishing job
+repeats only the static write.
 
-The resulting CI credential is scoped, expiring, revocable, and limited to its
-declared package/action set. A leaked CI credential must not compromise the
-namespace root principal.
+## Mainnet Deployment Boundary
 
-## Namespace Claims And Governance
+A CKB executable begins as `undeployed`. Deployment evidence uses a separate
+signed protocol and requires prior verified-build evidence.
 
-Ordinary namespace claims are first-come-first-served with cooldown. The
-registry must ship with a reserved namespace list and review hooks.
+The API accepts only `network = mainnet`, calls `get_live_cell` for the declared
+OutPoint, and requires a live Cell whose data hash equals the published
+executable hash. For Type-hash references it computes the returned Type Script
+hash from canonical Molecule serialization; for data-hash references it
+requires code hash and data hash equality.
 
-Claims enter manual review when they match any of these categories:
+For DepGroups, the API decodes the live container data as canonical Molecule
+`OutPointVec`, loads the members, and verifies the matching live code Cell. The
+container hash is not substituted for the member executable identity.
 
-- short names;
-- known brands or protocol names;
-- core ecosystem names;
-- obvious typosquatting or confusables;
-- repeated failed claims from the same principal, IP range, ASN, or credential;
-- names reported by maintainers or admins.
+Success appends hash-addressed evidence and sets `deployment_status` to
+`chain_verified`. It does not alter verification or availability.
 
-Registry admins may reserve, approve, reject, quarantine, or override namespace
-claims. The production write API exposes these operations through a
-`REGISTRY_ADMIN_TOKEN`-gated admin role, and every manual operation writes an
-audit record with an admin actor.
+The Registry may additionally commit the release/deployment tuple in a live
+mainnet Cell. Canonical `cellscript-registry-commitment-v1` JSON is CKB
+Blake2b-hashed into `CSREGv1 || hash` Cell data. Acceptance checks that exact
+data, the commitment custody Lock hash, a Registry Type Script hash used for
+chain indexing, minimum confirmation depth, and the live Type/Lock code
+CellDeps. A public commitment-proof route returns the preimage, expected Cell
+data, and accepted commitment evidence. The full source, ABI, build recipe,
+compiler metadata, audit corpus, and publisher history remain off-chain and
+content-addressed.
 
-## Abuse And DDoS Boundary
-
-JoyID provides accountability. It is not the only anti-spam mechanism.
-
-The first production slice does not require on-chain fees and does not require a
-bond. However, the schema and policy layer leaves hooks for later bond or
-refundable deposit rules through `policy_hooks` and `bond_policy_hooks` tables.
-
-Current production abuse controls:
-
-- read and write paths are separated;
-- write API sits behind WAF and edge rate limits;
-- quotas apply per IP, ASN, JoyID principal, capability, namespace, package, and
-  source hash;
-- principal-scoped quota and namespace-claim cooldown are counted only after
-  the JoyID signature has been verified, so forged payloads cannot burn another
-  publisher's principal quota;
-- signed publish nonces are consumed before object storage writes, so replayed
-  publish payloads fail before expensive work;
-- `Idempotency-Key` is supported for publish retries: the same logical request
-  replays the stored response, while the same key with different payload content
-  is rejected; failed pre-admission writes release a matching `processing`
-  reservation so CI can retry with the same retry key and a newly signed publish
-  payload;
-- request body, metadata field, source snapshot, and artifact sizes are capped;
-- duplicate source/manifest hashes are deduplicated or throttled;
-- existing package versions are rejected before source snapshot writes;
-- namespace claims have cooldown and review hooks;
-- high-risk publishes can enter quarantine;
-- expensive work goes through bounded queues;
-- manual review can suppress search visibility without deleting history.
-
-The write path must fail fast before object storage, database writes, chain RPC,
-or build workers are invoked.
-
-## Write API And Storage
-
-The preferred production stack is:
-
-```text
-Cloudflare Pages / Workers
-R2 for immutable source snapshots, mirrors, and exported static indexes
-Neon Postgres for ACL, audit log, namespace ownership, capabilities, quota,
-publish state, and revocation records
-```
-
-D1 is not the default production database. The registry needs relational
-constraints, audit queries, revocation checks, namespace ownership, quota
-accounting, and a publish state machine; those are better suited to Postgres for
-the first production implementation.
-
-The first write API implementation is `services/registry-api`:
-
-- Cloudflare Worker entrypoint;
-- Hyperdrive-bound Neon Postgres store;
-- R2 source snapshot writer;
-- R2 static package-version JSON writer before package-version admission;
-- JoyID `verifySignature` authorisation check;
-- canonical challenge binding for capability creation;
-- one-time nonce consumption for capability creation, capability revocation, and
-  package publish;
-- publish idempotency records with `processing` and `completed` states;
-- P-256 capability-signature verification for daily publish;
-- namespace ownership check before publish admission;
-- scheduled cleanup for expired nonce, idempotency, and quota records;
-- audit/event log and quota hook tables.
+The canonical Registry Type Script binds its 32-byte args to the complete
+custody Lock Script hash, requires every group Cell to use that Lock, and
+requires every creation, replacement, or destruction transaction to consume a
+Cell under that Lock. This closes the CKB creation-authority gap: sending a new
+Cell to the Registry Lock is not sufficient to manufacture an official
+commitment without exercising the Registry signer. Production API readiness
+also pins the Type code data hash and standard mainnet secp Lock/DepGroup.
 
 ## Read Path
 
 Production domains:
 
 ```text
-registry.cellscript.dev      -> static/CDN read path backed by R2 registry objects
-api.registry.cellscript.dev  -> authenticated write API
+api.registry.cellscript.dev  -> authenticated writes and dynamic artifact reads
+registry.cellscript.dev      -> immutable bundles and static release JSON
+cellscript.dev/registry      -> static Astro discovery and publishing UI
 ```
 
-Staging uses `staging-registry.cellscript.dev` or an equivalent staging subdomain.
-
-The read path serves website pages, package metadata, cached indexes, source
-mirrors, immutable snapshot URLs, and package status. It must not perform
-ordinary registry reads by calling chain RPC or write API internals.
-The `registry.cellscript.dev/packages/*` route is served from R2 registry
-objects with CDN cache headers; it does not require Hyperdrive or write-store
-access. The broader website can still be hosted as static Pages content.
-
-DNS availability is operational state, not an architecture requirement. The
-registry design assumes the domains above once their records are live.
-
-## Source Snapshot Requirement
-
-Production must store an immutable source snapshot or mirror object for each
-accepted package version. Git URL and tag are audit and fallback fields only.
-They are not availability guarantees.
-
-The source snapshot and the static package-version JSON object must both be
-persisted before the version is accepted into the registry store. If the direct
-read object cannot be written, the publish must fail without recording an
-accepted package version.
-
-Minimum source metadata:
+Static release objects use:
 
 ```text
-source_url
-source_tag
-source_revision
-source_hash
-manifest_hash
-snapshot_object_key
-snapshot_hash
-snapshot_size
-created_at
+https://registry.cellscript.dev/artifacts/:namespace/:name/releases/:release.json
 ```
 
-The resolver and verifier still check hashes. The snapshot exists to prevent
-source availability from depending on a third-party Git host.
+The static origin does not require Postgres. Objects include immutable bundle
+identity, artifact descriptor, all state axes, and accepted evidence. Consumers
+verify object, file, source, build, and deployment hashes independently.
 
-## Entry State And Resolver Policy
+Public list/detail/evidence routes suppress quarantined releases. The API list
+supports explicit kind, verification, deployment, availability, namespace,
+query, and pagination filters.
 
-Publish success creates an immediately addressable package-version JSON entry:
+Generic consumers use explicit `cellc artifact` operations. Fetch/verify check
+the receipt and all immutable identities; pin records TCB/deployment inputs;
+copy safely materializes only an authenticated file map; record-deployment
+submits mainnet evidence; CellDep generation requires attached RPC evidence;
+commitment generation produces the canonical chain payload. Generic artifacts
+never flow through dependency installation.
 
-```text
-https://registry.cellscript.dev/packages/:namespace/:name/versions/:version.json
-```
+## Resolver Boundary
 
-It does not automatically make the package eligible for default resolver
-selection, default search, recommendations, or production-visible lists.
+`cellc install` resolves through the public artifact API and rejects profiles
+other than `cellscript_source` or consumption modes other than `dependency`.
+The resolver downloads the immutable source snapshot, verifies its object and
+file identities, and only then materializes it.
 
-State boundary:
+Unverified releases require an explicit `--allow-unverified`; quarantined
+releases are absent from public reads and require operator remediation rather
+than accidental fallback. Resolver failure never falls back to a conventional
+Git URL. Path and explicit Git dependencies remain independent user-selected
+dependency sources.
 
-```text
-source_published  -> direct URL available, author dashboard visible
-indexed_pending   -> async validation/indexing pending
-verified_build    -> basic source/build checks passed
-deployed          -> off-chain deployment evidence attached and verified
-on_chain_attested -> feature-gated later slice, not first production write API
-deprecated        -> retained, default selection suppressed
-yanked            -> retained, default selection suppressed
-quarantined       -> retained, public visibility restricted
-```
+## Abuse and Operations
 
-Default resolver policy:
+The service enforces bounded bodies, per-IP/ASN/principal/capability/artifact
+quota hooks, namespace claim cooldown, reserved-name policy, signed one-use
+nonces, and idempotency conflict detection. Successful and rejected sensitive
+actions are attributable through the audit log.
 
-- default resolution must not auto-select `source_published`,
-  `indexed_pending`, or `quarantined` entries;
-- missing status in a mirrored `registry.json` is treated as unverified
-  (`source_published`), not as `verified_build`;
-- direct install may allow unverified entries only with an explicit flag such as
-  `--allow-unverified`;
-- quarantined entries require a stronger explicit flag such as
-  `--allow-quarantined`;
-- default search, recommendations, and production-visible package lists show
-  only entries that passed the required baseline checks;
-- exact pins keep reproducibility, but warning and explicit-allow policy must
-  make risk visible to the caller.
+Admin availability changes accept only `active`, `deprecated`, `yanked`, and
+`quarantined`. Generic admin mutation cannot manufacture build or deployment
+assurance. Evidence-specific recovery paths validate identity and predecessor
+evidence.
 
-## Yank, Quarantine, Deprecation, And Deletion
+API and static responses use HSTS, no-sniff, anti-framing, no-referrer,
+restrictive browser permissions, and deny-all JSON CSP. Postgres is internal;
+static serving is read-only.
 
-Package versions are not hard-deleted from registry history.
+## Deployment Choice
 
-Allowed state changes:
+The live self-hosted slice uses Postgres 17, Node 22, an isolated verifier,
+persistent object storage, and read-only nginx behind the production TLS proxy.
+Cloudflare Worker, Hyperdrive, Neon, and R2 remain a supported equivalent
+deployment shape.
 
-- `yanked`: maintainer/admin action that suppresses default selection while
-  preserving exact-pin history;
-- `deprecated`: maintainer/admin action that points users to a replacement or
-  successor;
-- `quarantined`: admin/review action for abuse, malware, typosquatting, legal,
-  or high-risk content.
+Migrations are additive after the frozen `0001` baseline. The artifact-model
+migration intentionally refuses to transform non-empty legacy release data
+because no released public contract exists that would justify a lossy mapping.
 
-Suppressive admin transitions (`deprecated`, `yanked`, `quarantined`) must make
-the static read object conservative before committing the write-store status
-change. This prevents an incident response where the database says
-`quarantined` but `registry.cellscript.dev` still serves an older accepted
-status.
+Readiness covers database/object access, admin configuration, and the verifier
+heartbeat. Backups contain a Postgres custom dump, object archive, image
+identity, and checksum manifest; restores are rehearsed into empty volumes
+before traffic cut-over.
 
-If content is illegal, security-sensitive, or clearly malicious, the registry
-may hide public access to the artifact or source snapshot. Even then it must
-retain:
+## Consequences
 
-- tombstone record;
-- package/version history;
-- audit log;
-- action reason;
-- actor identity;
-- timestamps;
-- replacement or incident reference when available.
+Benefits:
 
-## Deployment Attestation Boundary
+- broad CKB discovery without weakening CellScript dependency safety;
+- deployed and undeployed executables are distinguishable;
+- publication cannot masquerade as verification;
+- mainnet deployment claims are independently checked against live Cells;
+- static content survives write-database incidents;
+- wallet authority stays outside the Registry.
 
-The first production slice does not submit on-chain deployment records and does
-not make on-chain attestation part of the initial write API.
+Costs:
 
-Deployment evidence may appear in schemas as optional metadata, and local
-verification can continue to use `Deployed.toml` and `Cell.lock`. On-chain
-attestation uses the same JoyID/capability identity model, but it is
-feature-gated as a second production slice.
+- publishers of generic artifacts must construct an explicit bundle;
+- reproducibility needs evidence beyond uploaded bytes;
+- deployment recording requires live mainnet RPC availability;
+- internal storage still carries derived compatibility fields during the
+  additive migration.
 
-## Observability And Audit
+## Rejected Alternatives
 
-Production must include:
-
-- request id on write API responses;
-- audit log for publish, namespace claim, capability create/revoke, quarantine,
-  review, yank, deprecation, and admin override;
-- token-gated audit event read path for review, incident response, and
-  production debugging;
-- publish event log;
-- admin action log;
-- auth failure log;
-- capability usage log, including `last_used_at` updates and
-  `capability.used` audit events for accepted publish operations;
-- nonce replay rejection log;
-- namespace claim event log;
-- quarantine transition log;
-- rate-limit metrics;
-- quota metrics;
-- maintenance cleanup event log;
-- verification queue metrics;
-- source snapshot/mirror metrics.
-
-Logs must be queryable by request id, package coordinate, namespace, principal
-id, capability key id, and admin actor.
-
-## Non-Goals
-
-- Do not introduce a separate registry account.
-- Do not expose generic wallet selection in the production publisher UI.
-- Do not bind the backend data model to JoyID SDK-specific fields.
-- Do not make JoyID a standalone anti-spam system.
-- Do not depend on Git availability for production package availability.
-- Do not make on-chain deployment attestation part of the first production write
-  API.
-- Do not use hard delete as ordinary package lifecycle management.
+- **One `status` field**: conflates assurance, deployment, and availability.
+- **Infer artifact type from content**: ambiguous and unsafe for resolution.
+- **Treat every entry as installable**: permits executable/template confusion.
+- **Git convention as resolver authority**: conflates naming with ownership and
+  availability.
+- **Store the full evidence corpus on chain**: expensive and unnecessary; the
+  chain should carry runtime commitments while full evidence remains
+  content-addressed off chain.
+- **Accept testnet deployment records**: creates a misleading production state
+  in a public Registry whose deployed status is used for mainnet discovery.

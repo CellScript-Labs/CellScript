@@ -1753,8 +1753,8 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
             "proposals/novaseal/fungible-xudt-profile-v0/src",
             "proposals/novaseal/fungible-xudt-profile-v0/schemas",
             VERIFIER_ROOT,
-            "scripts/novaseal_planned_profiles_devnet_stateful_live.py",
-            "scripts/novaseal_devnet_stateful_live.py",
+            "crates/cellscript-tools/src/novaseal_planned_fungible.rs",
+            "crates/cellscript-tools/src/ckb_devnet.rs",
         ],
         &[("issue", "/issue/commit/tx_hash"), ("transfer", "/transfer/commit/tx_hash"), ("settle", "/settle/commit/tx_hash")],
         &[
@@ -1783,8 +1783,8 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
             "proposals/novaseal/rwa-receipt-profile-v0/src",
             "proposals/novaseal/rwa-receipt-profile-v0/schemas",
             VERIFIER_ROOT,
-            "scripts/novaseal_planned_profiles_devnet_stateful_live.py",
-            "scripts/novaseal_devnet_stateful_live.py",
+            "crates/cellscript-tools/src/novaseal_planned_rwa.rs",
+            "crates/cellscript-tools/src/ckb_devnet.rs",
         ],
         &[("materialize", "/materialize/commit/tx_hash"), ("claim", "/claim/commit/tx_hash"), ("settle", "/settle/commit/tx_hash")],
         &[
@@ -1813,8 +1813,8 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
             "proposals/novaseal/btc-transaction-commitment-profile-v0/src",
             "proposals/novaseal/btc-transaction-commitment-profile-v0/schemas",
             VERIFIER_ROOT,
-            "scripts/novaseal_planned_profiles_devnet_stateful_live.py",
-            "scripts/novaseal_devnet_stateful_live.py",
+            "crates/cellscript-tools/src/novaseal_planned_btc_tx.rs",
+            "crates/cellscript-tools/src/ckb_devnet.rs",
         ],
         &[("commit_transaction", "/commit_transaction/commit/tx_hash")],
         &[
@@ -1840,8 +1840,8 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
             "proposals/novaseal/btc-utxo-seal-profile-v0/src",
             "proposals/novaseal/btc-utxo-seal-profile-v0/schemas",
             VERIFIER_ROOT,
-            "scripts/novaseal_planned_profiles_devnet_stateful_live.py",
-            "scripts/novaseal_devnet_stateful_live.py",
+            "crates/cellscript-tools/src/novaseal_planned_btc_utxo.rs",
+            "crates/cellscript-tools/src/ckb_devnet.rs",
         ],
         &[("close_utxo_seal", "/close_utxo_seal/commit/tx_hash")],
         &[
@@ -1867,8 +1867,8 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
             "proposals/novaseal/dual-seal-profile-v0/src",
             "proposals/novaseal/dual-seal-profile-v0/schemas",
             VERIFIER_ROOT,
-            "scripts/novaseal_planned_profiles_devnet_stateful_live.py",
-            "scripts/novaseal_devnet_stateful_live.py",
+            "crates/cellscript-tools/src/novaseal_planned_dual.rs",
+            "crates/cellscript-tools/src/ckb_devnet.rs",
         ],
         &[("finalize_dual_seal", "/finalize_dual_seal/commit/tx_hash")],
         &[
@@ -1893,8 +1893,8 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
             "proposals/novaseal/fiber-candidate-profile-v0/src",
             "proposals/novaseal/fiber-candidate-profile-v0/schemas",
             VERIFIER_ROOT,
-            "scripts/novaseal_planned_profiles_devnet_stateful_live.py",
-            "scripts/novaseal_devnet_stateful_live.py",
+            "crates/cellscript-tools/src/novaseal_planned_fiber.rs",
+            "crates/cellscript-tools/src/ckb_devnet.rs",
         ],
         &[("settle_fiber_candidate", "/settle_fiber_candidate/commit/tx_hash")],
         &[
@@ -2961,7 +2961,8 @@ fn live_core_summary(repo_root: &Path, report: Option<&Value>) -> Result<Value> 
             "proposals/novaseal/v0-mvp-skeleton/src",
             "proposals/novaseal/v0-mvp-skeleton/schemas",
             VERIFIER_ROOT,
-            "scripts/novaseal_devnet_stateful_live.py",
+            "crates/cellscript-tools/src/novaseal_core_live.rs",
+            "crates/cellscript-tools/src/ckb_devnet.rs",
         ],
     )?;
     Ok(json!({
@@ -2998,8 +2999,8 @@ fn live_agreement_summary(repo_root: &Path, report: Option<&Value>) -> Result<Va
             "proposals/novaseal/agreement-profile-v0/src",
             "proposals/novaseal/agreement-profile-v0/schemas",
             VERIFIER_ROOT,
-            "scripts/novaseal_agreement_devnet_stateful_live.py",
-            "scripts/novaseal_devnet_stateful_live.py",
+            "crates/cellscript-tools/src/novaseal_agreement_live.rs",
+            "crates/cellscript-tools/src/ckb_devnet.rs",
         ],
     )?;
     Ok(json!({
@@ -3233,7 +3234,7 @@ fn collect_source_tree_files(
         let entry = entry?;
         let child = entry.path();
         let relative_parts = child.strip_prefix(root).unwrap_or(&child).components().map(|part| part.as_os_str().to_string_lossy());
-        if relative_parts.clone().any(|part| matches!(part.as_ref(), "target" | "build" | ".git" | "__pycache__")) {
+        if relative_parts.clone().any(|part| matches!(part.as_ref(), "target" | "build" | ".git")) {
             continue;
         }
         let metadata = std::fs::symlink_metadata(&child)?;
@@ -5492,7 +5493,7 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str, external_evidence
         let tx_checks = validate_btc_transaction_binding(profile, case, expected_binding);
         let mut checks = Map::new();
         macro_rules! check {
-            ($name:literal, $value:expr_2021) => {
+            ($name:literal, $value:expr) => {
                 checks.insert($name.to_string(), Value::Bool($value));
             };
         }
@@ -8384,7 +8385,7 @@ mod tests {
     }
 
     #[test]
-    fn novaseal_handoff_hash_matches_python_generator_vector() {
+    fn novaseal_handoff_hash_matches_reference_generator_vector() {
         let value = json!({
             "z": 1,
             "a": ["b", true, null],

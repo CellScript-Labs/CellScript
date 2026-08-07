@@ -1,3 +1,4 @@
+use crate::edition::{CellScriptEdition, CURRENT_EDITION};
 use crate::error::{CompileError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -28,6 +29,7 @@ pub struct PackageManifest {
 pub struct PackageInfo {
     pub name: String,
     pub version: String,
+    pub edition: CellScriptEdition,
     #[serde(default)]
     pub namespace: Option<String>,
     #[serde(default)]
@@ -155,6 +157,17 @@ pub struct DetailedDependency {
     pub features: Vec<String>,
     #[serde(default = "default_true")]
     pub default_features: bool,
+    /// Persisted acknowledgement that this dependency may resolve from a
+    /// source_published or indexed_pending Registry entry.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub allow_unverified: bool,
+    /// Persisted incident-review acknowledgement for quarantined entries.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub allow_quarantined: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 fn default_true() -> bool {
@@ -403,6 +416,7 @@ impl PackageManager {
             package: PackageInfo {
                 name: name.to_string(),
                 version: "0.1.0".to_string(),
+                edition: CURRENT_EDITION,
                 namespace: None,
                 authors: vec![],
                 description: String::new(),
@@ -535,7 +549,10 @@ dist/
                         name,
                         &detailed.version,
                         ns,
-                        registry::RegistryResolutionPolicy::default(),
+                        registry::RegistryResolutionPolicy {
+                            allow_unverified: detailed.allow_unverified,
+                            allow_quarantined: detailed.allow_quarantined,
+                        },
                     )?;
                     (resolved, manifest.dependencies)
                 }
@@ -595,36 +612,45 @@ dist/
                 ))
             })?;
 
-        // 2. Clone/update discovery index → find source repo URL
+        // 2. Resolve accepted public-registry state (or an explicitly selected
+        //    offline Git mirror) → find the source repository URL.
         let cache_dir = self.registry_cache_dir();
-        let registry_url = registry::default_registry_url();
-        let discovery = registry::DiscoveryIndex::new(&registry_url, &cache_dir);
-        let entry = discovery.lookup(&resolved_namespace, name).map_err(|e| {
+        let registry_resolution = registry::lookup_for_resolution(&resolved_namespace, name, &cache_dir).map_err(|e| {
             CompileError::without_span(format!(
-                "failed to resolve registry dependency '{}/{}@{}' via discovery index '{}': {}",
-                resolved_namespace, name, version, registry_url, e
+                "failed to resolve registry dependency '{}/{}@{}': {}",
+                resolved_namespace, name, version, e
             ))
         })?;
+        let registry::RegistryResolution { registry_url, entry, authoritative_index, mut source_snapshots } = registry_resolution;
+        let repository_url = entry.source;
 
-        // 3. Clone source repo
-        let source_url = &entry.source;
+        // 3. Prepare the immutable Registry snapshot cache, or clone the
+        //    explicitly selected legacy Git mirror.
         let source_cache = self.git_cache_dir();
         std::fs::create_dir_all(&source_cache)
             .map_err(|e| CompileError::without_span(format!("failed to create source cache directory: {}", e)))?;
-
-        let cache_key = format!("{}#{}", source_url, version);
-        let cache_name = format!("{}-{:016x}", name, simple_hash(&cache_key));
-        let clone_dir = source_cache.join(&cache_name);
-
-        if clone_dir.exists() && clone_dir.join(".git").exists() {
-            registry::git_update(&clone_dir).map_err(CompileError::without_span)?;
+        let public_registry_authoritative = authoritative_index.is_some();
+        let legacy_clone = if public_registry_authoritative {
+            None
         } else {
-            let _ = std::fs::remove_dir_all(&clone_dir);
-            registry::git_clone(source_url, &clone_dir).map_err(CompileError::without_span)?;
-        }
+            let cache_key = format!("{}#{}", repository_url, version);
+            let cache_name = format!("{}-{:016x}", name, simple_hash(&cache_key));
+            let clone_dir = source_cache.join(&cache_name);
+            if clone_dir.exists() && clone_dir.join(".git").exists() {
+                registry::git_update(&clone_dir).map_err(CompileError::without_span)?;
+            } else {
+                let _ = std::fs::remove_dir_all(&clone_dir);
+                registry::git_clone(&repository_url, &clone_dir).map_err(CompileError::without_span)?;
+            }
+            Some(clone_dir)
+        };
 
-        // 4. Resolve version from registry.json and check out its declared tag.
-        let reg_index = registry::RegistryIndex::read_from_repo(&clone_dir)?;
+        // 4. Resolve versions against production-accepted status. A legacy
+        //    Git override retains the historical registry.json authority.
+        let reg_index = match authoritative_index {
+            Some(index) => index,
+            None => registry::RegistryIndex::read_from_repo(legacy_clone.as_ref().expect("legacy clone exists"))?,
+        };
         if reg_index.schema_version != registry::RegistryIndex::CURRENT_SCHEMA_VERSION {
             return Err(CompileError::without_span(format!(
                 "registry package '{}/{}' uses unsupported registry.json schema_version {}; expected {}",
@@ -653,47 +679,77 @@ dist/
                 resolved_namespace, name, selected_version.version
             )));
         }
-        registry::git_checkout(&clone_dir, &selected_version.tag).map_err(CompileError::without_span)?;
 
-        let revision = registry::git_revision(&clone_dir).unwrap_or_else(|_| "unknown".to_string());
-
-        // 5. Re-read registry.json at the checked-out tag and verify source_hash.
-        let tagged_index = registry::RegistryIndex::read_from_repo(&clone_dir)?;
-        if tagged_index.schema_version != registry::RegistryIndex::CURRENT_SCHEMA_VERSION {
-            return Err(CompileError::without_span(format!(
-                "registry package '{}/{}@{}' uses unsupported registry.json schema_version {}; expected {}",
-                resolved_namespace,
+        // 5. Public resolution materializes the content-addressed Registry
+        //    snapshot. The explicit Git override retains tag/registry.json
+        //    cross-checking for offline and private mirrors.
+        let (package_dir, revision, source_url, tagged_version) = if public_registry_authoritative {
+            let snapshot = source_snapshots.remove(&selected_version.version).ok_or_else(|| {
+                CompileError::without_span(format!(
+                    "public registry package '{}/{}@{}' has no immutable source snapshot",
+                    resolved_namespace, name, selected_version.version
+                ))
+            })?;
+            let source_url = snapshot.url.clone();
+            let revision = snapshot.snapshot_hash.clone();
+            let package_dir = registry::materialize_public_source_snapshot(
+                &snapshot,
+                &source_cache,
+                &resolved_namespace,
                 name,
-                selected_version.version,
-                tagged_index.schema_version,
-                registry::RegistryIndex::CURRENT_SCHEMA_VERSION
-            )));
-        }
-        if tagged_index.name != name || tagged_index.namespace != resolved_namespace {
-            return Err(CompileError::without_span(format!(
-                "registry.json identity mismatch for checked-out '{}/{}@{}': found '{}/{}'",
-                resolved_namespace, name, selected_version.version, tagged_index.namespace, tagged_index.name
-            )));
-        }
-        let tagged_version = tagged_index.versions.iter().find(|v| v.version == selected_version.version).ok_or_else(|| {
-            CompileError::without_span(format!(
-                "registry package '{}/{}@{}' tag '{}' does not contain a matching registry.json version entry",
-                resolved_namespace, name, selected_version.version, selected_version.tag
-            ))
-        })?;
-        if tagged_version.source_hash.is_empty() {
-            return Err(CompileError::without_span(format!(
-                "registry package '{}/{}@{}' has no source_hash in registry.json",
-                resolved_namespace, name, tagged_version.version
-            )));
-        }
-        if tagged_version
-            .resolver_block_reason(policy, matches!(crate::package::version::parse_version_req(version), Ok(VersionReq::Exact(_))))
-            .is_some()
-        {
-            return Err(registry_resolution_blocked_error(&resolved_namespace, name, version, tagged_version, policy));
-        }
-        let computed_source_hash = registry::compute_source_hash(&clone_dir)?;
+                &selected_version.version,
+                &selected_version.source_hash,
+            )?;
+            (package_dir, revision, source_url, selected_version.clone())
+        } else {
+            let clone_dir = legacy_clone.expect("legacy clone exists");
+            registry::git_checkout(&clone_dir, &selected_version.tag).map_err(CompileError::without_span)?;
+            let revision = registry::git_revision(&clone_dir).unwrap_or_else(|_| "unknown".to_string());
+            let tagged_index = registry::RegistryIndex::read_from_repo(&clone_dir)?;
+            if tagged_index.schema_version != registry::RegistryIndex::CURRENT_SCHEMA_VERSION {
+                return Err(CompileError::without_span(format!(
+                    "registry package '{}/{}@{}' uses unsupported registry.json schema_version {}; expected {}",
+                    resolved_namespace,
+                    name,
+                    selected_version.version,
+                    tagged_index.schema_version,
+                    registry::RegistryIndex::CURRENT_SCHEMA_VERSION
+                )));
+            }
+            if tagged_index.name != name || tagged_index.namespace != resolved_namespace {
+                return Err(CompileError::without_span(format!(
+                    "registry.json identity mismatch for checked-out '{}/{}@{}': found '{}/{}'",
+                    resolved_namespace, name, selected_version.version, tagged_index.namespace, tagged_index.name
+                )));
+            }
+            let tagged_version =
+                tagged_index.versions.iter().find(|candidate| candidate.version == selected_version.version).cloned().ok_or_else(
+                    || {
+                        CompileError::without_span(format!(
+                            "registry package '{}/{}@{}' tag '{}' does not contain a matching registry.json version entry",
+                            resolved_namespace, name, selected_version.version, selected_version.tag
+                        ))
+                    },
+                )?;
+            if tagged_version.source_hash != selected_version.source_hash
+                || tagged_version.tag != selected_version.tag
+                || tagged_version.edition != selected_version.edition
+                || tagged_version.compatibility_profile_hash != selected_version.compatibility_profile_hash
+            {
+                return Err(CompileError::without_span(format!(
+                    "registry identity mismatch for '{}/{}@{}' between the selected index and checked-out tag",
+                    resolved_namespace, name, tagged_version.version
+                )));
+            }
+            if tagged_version
+                .resolver_block_reason(policy, matches!(crate::package::version::parse_version_req(version), Ok(VersionReq::Exact(_))))
+                .is_some()
+            {
+                return Err(registry_resolution_blocked_error(&resolved_namespace, name, version, &tagged_version, policy));
+            }
+            (clone_dir, revision, repository_url.clone(), tagged_version)
+        };
+        let computed_source_hash = registry::compute_source_hash(&package_dir)?;
         if computed_source_hash != tagged_version.source_hash {
             return Err(CompileError::without_span(format!(
                 "source_hash mismatch for '{}/{}@{}': expected '{}', got '{}'",
@@ -702,7 +758,7 @@ dist/
         }
 
         // 6. Read Cell.toml and resolve transitive dependencies
-        let manifest_path = clone_dir.join("Cell.toml");
+        let manifest_path = package_dir.join("Cell.toml");
         if !manifest_path.exists() {
             return Err(CompileError::without_span(format!(
                 "registry package '{}/{}' does not contain Cell.toml",
@@ -720,7 +776,7 @@ dist/
         }
         if manifest.package.version != tagged_version.version {
             return Err(CompileError::without_span(format!(
-                "registry package '{}/{}' registry.json version '{}' does not match Cell.toml version '{}'",
+                "registry package '{}/{}' selected version '{}' does not match Cell.toml version '{}'",
                 resolved_namespace, name, tagged_version.version, manifest.package.version
             )));
         }
@@ -735,10 +791,10 @@ dist/
             ResolvedPackage {
                 name: name.to_string(),
                 version: manifest.package.version.clone(),
-                path: clone_dir.clone(),
+                path: package_dir,
                 source: PackageSource::Registry {
                     registry: registry_url,
-                    url: source_url.clone(),
+                    url: source_url,
                     revision,
                     namespace: resolved_namespace.clone(),
                     version: manifest.package.version.clone(),
@@ -1031,7 +1087,6 @@ fn simple_hash(s: &str) -> u64 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Lockfile {
     pub version: u32,
-    #[serde(default)]
     pub package: LockfilePackageInfo,
     pub dependencies: BTreeMap<String, LockedDependency>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1042,6 +1097,7 @@ pub struct Lockfile {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LockfilePackageInfo {
+    pub edition: CellScriptEdition,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub name: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -1069,7 +1125,7 @@ pub struct LockfileDeploymentRef {
 }
 
 impl Lockfile {
-    pub const CURRENT_VERSION: u32 = 1;
+    pub const CURRENT_VERSION: u32 = 2;
 
     pub fn new() -> Self {
         Self {
@@ -1088,15 +1144,39 @@ impl Lockfile {
         }
         let content = std::fs::read_to_string(&lock_path)
             .map_err(|error| CompileError::without_span(format!("failed to read lockfile '{}': {}", lock_path.display(), error)))?;
-        let lockfile = toml::from_str(&content)
+        let lockfile: Self = toml::from_str(&content)
             .map_err(|error| CompileError::without_span(format!("failed to parse lockfile '{}': {}", lock_path.display(), error)))?;
+        lockfile.validate_schema()?;
         Ok(Some(lockfile))
     }
 
     pub fn write_to_root(&self, root: &Path) -> Result<()> {
+        self.validate_schema()?;
         let lock_path = root.join("Cell.lock");
         let content = toml::to_string_pretty(self)?;
         std::fs::write(&lock_path, content)?;
+        Ok(())
+    }
+
+    pub fn validate_schema(&self) -> Result<()> {
+        if self.version != Self::CURRENT_VERSION {
+            return Err(CompileError::without_span(format!(
+                "unsupported Cell.lock version {}; expected {}",
+                self.version,
+                Self::CURRENT_VERSION
+            )));
+        }
+        if let Some(build) = &self.package_build {
+            if build.edition != self.package.edition {
+                return Err(CompileError::without_span(format!(
+                    "Cell.lock package/build edition mismatch: package is '{}' but build is '{}'",
+                    self.package.edition, build.edition
+                )));
+            }
+            if build.compatibility_profile_hash.is_empty() {
+                return Err(CompileError::without_span("Cell.lock v2 package_build requires compatibility_profile_hash"));
+            }
+        }
         Ok(())
     }
 
@@ -1151,6 +1231,12 @@ impl Lockfile {
         let mut issues = Vec::new();
         if self.version != Self::CURRENT_VERSION {
             issues.push(format!("Cell.lock version {} is not supported; expected {}", self.version, Self::CURRENT_VERSION));
+        }
+        if self.package.edition != manifest.package.edition {
+            issues.push(format!(
+                "package edition mismatch: Cell.toml has '{}' but Cell.lock records '{}'",
+                manifest.package.edition, self.package.edition
+            ));
         }
 
         for name in manifest.dependencies.keys() {
@@ -1340,6 +1426,8 @@ impl Default for Lockfile {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LockedBuildInfo {
+    pub edition: CellScriptEdition,
+    pub compatibility_profile_hash: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compiler_version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1494,13 +1582,13 @@ pub mod version {
 // Deployed.toml — Deployment Fact Record
 // ---------------------------------------------------------------------------
 
-/// The schema identifier for Deployed.toml files produced by CellScript v0.19+.
-pub const DEPLOYED_MANIFEST_SCHEMA: &str = "cellscript-deployed-v0.19";
+/// The only supported Deployed.toml schema for edition 2026.
+pub const DEPLOYED_MANIFEST_SCHEMA: &str = "cellscript-deployed-v0.23-edition-2026";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeployedManifest {
     pub version: u32,
-    pub schema: Option<String>,
+    pub schema: String,
     pub package: DeployedPackageInfo,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub build: Option<DeployedBuildInfo>,
@@ -1509,7 +1597,7 @@ pub struct DeployedManifest {
 }
 
 impl DeployedManifest {
-    pub const CURRENT_VERSION: u32 = 1;
+    pub const CURRENT_VERSION: u32 = 2;
 
     pub fn read_from_root(root: &Path) -> Result<Option<Self>> {
         let path = root.join("Deployed.toml");
@@ -1520,13 +1608,59 @@ impl DeployedManifest {
             .map_err(|e| CompileError::without_span(format!("failed to read Deployed.toml '{}': {}", path.display(), e)))?;
         let manifest: Self = toml::from_str(&content)
             .map_err(|e| CompileError::without_span(format!("failed to parse Deployed.toml '{}': {}", path.display(), e)))?;
+        manifest.validate_schema()?;
         Ok(Some(manifest))
     }
 
     pub fn write_to_root(&self, root: &Path) -> Result<()> {
+        self.validate_schema()?;
         let path = root.join("Deployed.toml");
         let content = toml::to_string_pretty(self)?;
         std::fs::write(&path, content)?;
+        Ok(())
+    }
+
+    pub fn validate_schema(&self) -> Result<()> {
+        if self.version != Self::CURRENT_VERSION || self.schema != DEPLOYED_MANIFEST_SCHEMA {
+            return Err(CompileError::without_span(format!(
+                "unsupported Deployed.toml identity; expected version {} and schema '{}'",
+                Self::CURRENT_VERSION,
+                DEPLOYED_MANIFEST_SCHEMA
+            )));
+        }
+        if let Some(build) = &self.build {
+            if build.edition != self.package.edition {
+                return Err(CompileError::without_span(format!(
+                    "Deployed.toml package/build edition mismatch: package is '{}' but build is '{}'",
+                    self.package.edition, build.edition
+                )));
+            }
+            if build.compatibility_profile_hash.is_empty() {
+                return Err(CompileError::without_span("Deployed.toml v2 build requires compatibility_profile_hash"));
+            }
+        }
+        for deployment in &self.deployments {
+            if deployment.edition != self.package.edition {
+                return Err(CompileError::without_span(format!(
+                    "Deployed.toml package/deployment edition mismatch for network '{}': package is '{}' but deployment is '{}'",
+                    deployment.network, self.package.edition, deployment.edition
+                )));
+            }
+            if deployment.compatibility_profile_hash.is_empty() {
+                return Err(CompileError::without_span(format!(
+                    "Deployed.toml v2 deployment for network '{}' requires compatibility_profile_hash",
+                    deployment.network
+                )));
+            }
+            if let Some(build) = &self.build {
+                if deployment.compatibility_profile_hash != build.compatibility_profile_hash {
+                    return Err(CompileError::without_span(format!(
+                        "Deployed.toml build/deployment compatibility profile mismatch for network '{}'",
+                        deployment.network
+                    )));
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -1535,12 +1669,15 @@ impl DeployedManifest {
 pub struct DeployedPackageInfo {
     pub name: String,
     pub version: String,
+    pub edition: CellScriptEdition,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeployedBuildInfo {
+    pub edition: CellScriptEdition,
+    pub compatibility_profile_hash: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compiler_version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1582,6 +1719,7 @@ pub enum ScriptRole {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeploymentRecord {
     // Required fields (Phase 1)
+    pub edition: CellScriptEdition,
     pub network: String,
     pub chain_id: String,
     pub tx_hash: String,
@@ -1607,6 +1745,7 @@ pub struct DeploymentRecord {
     pub constraints_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compiler_version: Option<String>,
+    pub compatibility_profile_hash: String,
 
     // Optional fields (Phase 2 — governance and upgrade)
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1653,6 +1792,7 @@ mod tests {
             package: PackageInfo {
                 name: "test".to_string(),
                 version: "0.1.0".to_string(),
+                edition: CURRENT_EDITION,
                 namespace: None,
                 authors: vec!["Test Author".to_string()],
                 description: "Test package".to_string(),
@@ -1680,6 +1820,43 @@ mod tests {
         let toml_str = toml::to_string(&manifest).unwrap();
         assert!(toml_str.contains("name = \"test\""));
         assert!(toml_str.contains("version = \"0.1.0\""));
+        assert!(toml_str.contains("edition = \"2026\""));
+        let parsed: PackageManifest = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.package.edition, CURRENT_EDITION);
+    }
+
+    #[test]
+    fn package_manifest_requires_edition_2026() {
+        let missing = toml::from_str::<PackageManifest>(
+            r#"
+[package]
+name = "demo"
+version = "0.1.0"
+"#,
+        )
+        .unwrap_err();
+        assert!(missing.to_string().contains("missing field `edition`"));
+
+        let unsupported = toml::from_str::<PackageManifest>(
+            r#"
+[package]
+edition = "unsupported"
+name = "demo"
+version = "0.1.0"
+"#,
+        )
+        .unwrap_err();
+        assert!(unsupported.to_string().contains("2026"));
+    }
+
+    #[test]
+    fn package_manager_init_writes_current_edition() {
+        let temp = tempdir().unwrap();
+        PackageManager::new(temp.path()).init("demo").unwrap();
+        let source = std::fs::read_to_string(temp.path().join("Cell.toml")).unwrap();
+        assert!(source.contains("edition = \"2026\""));
+        let manifest: PackageManifest = toml::from_str(&source).unwrap();
+        assert_eq!(manifest.package.edition, CURRENT_EDITION);
     }
 
     #[test]
@@ -1721,6 +1898,7 @@ mod tests {
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "app"
 version = "0.1.0"
 
@@ -1734,6 +1912,7 @@ path = "deps/math"
             root.join("deps/math/Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "math"
 version = "0.1.0"
 "#,
@@ -1759,6 +1938,7 @@ version = "0.1.0"
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "app"
 version = "0.1.0"
 
@@ -1771,6 +1951,7 @@ path = "deps/math"
             root.join("deps/math/Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "math"
 version = "0.2.0"
 "#,
@@ -1794,6 +1975,7 @@ version = "0.2.0"
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "app"
 version = "0.1.0"
 
@@ -1807,6 +1989,7 @@ path = "deps/math"
             root.join("deps/math/Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "math"
 version = "0.1.0"
 
@@ -1820,6 +2003,7 @@ path = "../util"
             root.join("deps/util/Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "util"
 version = "0.1.0"
 "#,
@@ -1844,6 +2028,7 @@ version = "0.1.0"
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "app"
 version = "0.1.0"
 
@@ -1856,6 +2041,7 @@ path = "deps/a"
             root.join("deps/a/Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "a"
 version = "0.1.0"
 
@@ -1868,6 +2054,7 @@ path = "../b"
             root.join("deps/b/Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "b"
 version = "0.1.0"
 
@@ -1889,6 +2076,7 @@ path = "../a"
         let manifest: PackageManifest = toml::from_str(
             r#"
 [package]
+edition = "2026"
 name = "app"
 version = "0.1.0"
 
@@ -1937,6 +2125,7 @@ path = "deps/math"
         let manifest: PackageManifest = toml::from_str(
             r#"
 [package]
+edition = "2026"
 name = "app"
 version = "0.1.0"
 
@@ -2046,12 +2235,42 @@ path = "deps/math"
     }
 
     #[test]
+    fn lockfile_requires_package_and_build_profile_identity() {
+        let missing_package = toml::from_str::<Lockfile>(
+            r#"
+version = 2
+
+[dependencies]
+"#,
+        )
+        .unwrap_err();
+        assert!(missing_package.to_string().contains("missing field `package`"));
+
+        let missing_profile = toml::from_str::<Lockfile>(
+            r#"
+version = 2
+
+[package]
+edition = "2026"
+
+[package_build]
+edition = "2026"
+
+[dependencies]
+"#,
+        )
+        .unwrap_err();
+        assert!(missing_profile.to_string().contains("missing field `compatibility_profile_hash`"));
+    }
+
+    #[test]
     fn package_manager_rejects_registry_dependencies_fail_closed() {
         let temp = tempdir().unwrap();
         std::fs::write(
             temp.path().join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "app"
 version = "0.1.0"
 
@@ -2076,6 +2295,7 @@ remote = "1.2.3"
             temp.path().join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "app"
 version = "0.1.0"
 
@@ -2098,14 +2318,17 @@ rev = "abc123"
     #[test]
     fn deployed_manifest_round_trip() {
         let manifest = DeployedManifest {
-            version: 1,
-            schema: Some(DEPLOYED_MANIFEST_SCHEMA.to_string()),
+            version: DeployedManifest::CURRENT_VERSION,
+            schema: DEPLOYED_MANIFEST_SCHEMA.to_string(),
             package: DeployedPackageInfo {
+                edition: CURRENT_EDITION,
                 name: "amm_pool".to_string(),
                 version: "1.2.0".to_string(),
                 source_hash: Some("blake2b:0xabcd".to_string()),
             },
             build: Some(DeployedBuildInfo {
+                edition: CURRENT_EDITION,
+                compatibility_profile_hash: "test-compatibility-profile".to_string(),
                 compiler_version: Some("0.19.0".to_string()),
                 artifact_hash: Some("blake2b:0x1234".to_string()),
                 metadata_hash: None,
@@ -2115,6 +2338,8 @@ rev = "abc123"
                 constraints_hash: None,
             }),
             deployments: vec![DeploymentRecord {
+                edition: CURRENT_EDITION,
+                compatibility_profile_hash: "test-compatibility-profile".to_string(),
                 network: "aggron4".to_string(),
                 chain_id: "ckb-testnet".to_string(),
                 tx_hash: "0xaaaa".to_string(),
@@ -2154,7 +2379,7 @@ rev = "abc123"
         assert!(toml_str.contains("code_hash = \"0xbbbb\""));
 
         let parsed: DeployedManifest = toml::from_str(&toml_str).unwrap();
-        assert_eq!(parsed.version, 1);
+        assert_eq!(parsed.version, DeployedManifest::CURRENT_VERSION);
         assert_eq!(parsed.package.name, "amm_pool");
         assert_eq!(parsed.deployments.len(), 1);
         assert_eq!(parsed.deployments[0].network, "aggron4");
@@ -2162,12 +2387,12 @@ rev = "abc123"
     }
 
     #[test]
-    fn deployed_manifest_backward_compatible() {
-        // Old format without new optional fields should parse successfully
+    fn deployed_manifest_rejects_legacy_identity() {
         let toml_str = r#"
 version = 1
 
 [package]
+edition = "2026"
 name = "token"
 version = "0.3.0"
 
@@ -2180,13 +2405,36 @@ code_hash = "0x2222"
 hash_type = "type"
 dep_type = "code"
 data_hash = "0x3333"
+        out_point = "0x1111:0"
+"#;
+        let error = toml::from_str::<DeployedManifest>(toml_str).unwrap_err();
+        assert!(error.to_string().contains("missing field"));
+    }
+
+    #[test]
+    fn deployed_manifest_requires_profile_identity() {
+        let toml_str = r#"
+version = 2
+schema = "cellscript-deployed-v0.23-edition-2026"
+
+[package]
+edition = "2026"
+name = "token"
+version = "0.3.0"
+
+[[deployments]]
+edition = "2026"
+network = "ckb-mainnet"
+chain_id = "ckb-mainnet"
+tx_hash = "0x1111"
+output_index = 0
+code_hash = "0x2222"
+hash_type = "type"
+dep_type = "code"
+data_hash = "0x3333"
 out_point = "0x1111:0"
 "#;
-        let parsed: DeployedManifest = toml::from_str(toml_str).unwrap();
-        assert_eq!(parsed.package.name, "token");
-        assert_eq!(parsed.deployments.len(), 1);
-        assert!(parsed.deployments[0].type_id.is_none());
-        assert!(parsed.deployments[0].status.is_none());
-        assert!(parsed.build.is_none());
+        let error = toml::from_str::<DeployedManifest>(toml_str).unwrap_err();
+        assert!(error.to_string().contains("missing field `compatibility_profile_hash`"));
     }
 }

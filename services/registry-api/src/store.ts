@@ -2,9 +2,16 @@ import {
   ApiError,
   capabilityKeyId,
   canonicalJson,
+  type ArtifactDescriptor,
+  type ArtifactKind,
+  type AvailabilityStatus,
   type CapabilityAuthorisationPayload,
+  type DeploymentStatus,
+  type PrincipalType,
   type PublishPayload,
   type RegistryEntryStatus,
+  type RegistryIndexEntry,
+  type VerificationStatus,
 } from "./domain";
 
 export type NamespaceStatus = "active" | "review_pending" | "reserved" | "rejected" | "quarantined";
@@ -17,7 +24,7 @@ export interface ReservedNamespaceRecord {
 
 export interface CapabilityRecord {
   key_id: string;
-  principal_type: "joyid_ckb";
+  principal_type: PrincipalType;
   principal_id: string;
   capability_pubkey: string;
   scopes: string[];
@@ -25,6 +32,35 @@ export interface CapabilityRecord {
   revoked_at?: string | null;
   created_at: string;
   last_used_at?: string | null;
+}
+
+export type AuthorisationSessionStatus = "pending" | "authorised" | "review_pending";
+export const AUTHORISATION_SESSION_TERMINAL_RETENTION_HOURS = 24;
+
+export interface AuthorisationSessionRecord {
+  session_id: string;
+  poll_token_hash: string;
+  browser_token_hash: string;
+  registry_origin: string;
+  website_origin: string;
+  capability_pubkey: string;
+  requested_scopes: string[];
+  capability_expires_at: string;
+  cli_version: string;
+  namespace: string;
+  name: string;
+  artifact_kind: ArtifactKind;
+  status: AuthorisationSessionStatus;
+  principal_type?: PrincipalType | null;
+  principal_id?: string | null;
+  payload?: CapabilityAuthorisationPayload | null;
+  challenge_token_hash?: string | null;
+  capability_key_id?: string | null;
+  namespace_status?: NamespaceClaimResult["status"] | null;
+  created_at: string;
+  updated_at: string;
+  expires_at: string;
+  completed_at?: string | null;
 }
 
 export interface SnapshotRecord {
@@ -40,15 +76,79 @@ export interface PackageVersionRecord {
   name: string;
   version: string;
   status: RegistryEntryStatus;
+  artifact: ArtifactDescriptor;
+  verification_status: VerificationStatus;
+  deployment_status: DeploymentStatus;
+  availability_status: AvailabilityStatus;
+  /** Accepted commitment evidence that was observed in a currently live mainnet Cell. */
+  current_commitment_evidence_hash?: string | null;
   source_hash: string;
-  manifest_hash?: string;
+  manifest_hash: string;
+  /** Source-language semantics, not a compiler or wire-ABI version. */
+  edition?: "2026";
+  /** Complete resolved compatibility identity across independent axes. */
+  compatibility_profile_hash?: string;
   capability_key_id: string;
-  principal_type: string;
+  principal_type: PrincipalType;
   principal_id: string;
-  registry_entry: Record<string, unknown>;
+  registry_entry: RegistryIndexEntry;
   snapshot_hash: string;
   direct_url: string;
   created_at: string;
+  registry_environment?: "production" | "testnet-sandbox";
+  network?: "mainnet" | "testnet";
+  expires_at?: string | null;
+  expired_at?: string | null;
+  purge_after?: string | null;
+  static_purged_at?: string | null;
+  source_purged_at?: string | null;
+}
+
+export interface PackageVersionQuery {
+  query?: string;
+  namespace?: string;
+  name?: string;
+  artifact_kind?: ArtifactKind;
+  verification_status?: VerificationStatus;
+  verification_statuses?: VerificationStatus[];
+  deployment_status?: DeploymentStatus;
+  availability_status?: AvailabilityStatus;
+  status?: RegistryEntryStatus;
+  statuses?: RegistryEntryStatus[];
+  limit: number;
+  offset: number;
+}
+
+export interface ArtifactPackagePage {
+  records: PackageVersionRecord[];
+  has_more: boolean;
+}
+
+export type PackageEvidenceKind = "verified_build" | "reproduced_build" | "deployed" | "on_chain_committed";
+
+export interface PackageEvidenceRecord {
+  namespace: string;
+  name: string;
+  version: string;
+  kind: PackageEvidenceKind;
+  evidence_hash: string;
+  evidence: Record<string, unknown>;
+  request_id: string;
+  admin_actor: string;
+  created_at: string;
+}
+
+export interface PromotePackageVersionInput {
+  namespace: string;
+  name: string;
+  version: string;
+  kind: PackageEvidenceKind;
+  evidence_hash: string;
+  evidence: Record<string, unknown>;
+  request_id: string;
+  admin_actor: string;
+  capability_usage?: PublishAdmissionInput["capability_usage"];
+  idempotency?: PublishAdmissionInput["idempotency"];
 }
 
 export interface IdempotencyRecord {
@@ -67,6 +167,61 @@ export interface MaintenanceResult {
   used_nonces_deleted: number;
   idempotency_keys_deleted: number;
   quota_events_deleted: number;
+  package_versions_expired?: number;
+  authorisation_sessions_deleted?: number;
+  static_objects?: SandboxObjectCandidate[];
+  source_objects?: SandboxObjectCandidate[];
+}
+
+export interface SandboxObjectCandidate {
+  key: string;
+  namespace?: string;
+  name?: string;
+  version?: string;
+  snapshot_hash?: string;
+}
+
+export type VerificationJobStatus =
+  | "queued"
+  | "running"
+  | "publishing"
+  | "retry_wait"
+  | "succeeded"
+  | "dead_letter";
+
+export interface VerificationJobRecord {
+  id: string;
+  namespace: string;
+  name: string;
+  version: string;
+  status: VerificationJobStatus;
+  attempt_count: number;
+  max_attempts: number;
+  available_at: string;
+  lease_owner?: string | null;
+  lease_expires_at?: string | null;
+  evidence_hash?: string | null;
+  evidence?: Record<string, unknown> | null;
+  last_error_code?: string | null;
+  last_error_message?: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  source_hash: string;
+  manifest_hash: string;
+  artifact: ArtifactDescriptor;
+  compatibility_profile_hash?: string;
+  snapshot_hash: string;
+  snapshot_object_key: string;
+  snapshot_size_bytes: number;
+  snapshot_content_type: string;
+}
+
+export interface VerificationQueueMetrics {
+  counts: Record<VerificationJobStatus, number>;
+  oldest_available_at?: string | null;
+  oldest_dead_letter_at?: string | null;
 }
 
 export type IdempotencyReservation =
@@ -94,6 +249,36 @@ export interface AuditEventRecord extends AuditEventInput {
   created_at: string;
 }
 
+export interface PublishAdmissionInput {
+  package: {
+    namespace: string;
+    name: string;
+    principal_type: PrincipalType;
+    principal_id: string;
+    source_repo?: string;
+    request_id: string;
+  };
+  snapshot: SnapshotRecord;
+  version: PackageVersionRecord;
+  capability_usage: {
+    key_id: string;
+    principal_type: PrincipalType;
+    principal_id: string;
+    request_id: string;
+    action: string;
+    namespace?: string;
+    name?: string;
+    version?: string;
+  };
+  audit_event: AuditEventInput;
+  idempotency?: {
+    key: string;
+    request_hash: string;
+    response_status: number;
+    response_body: Record<string, unknown>;
+  };
+}
+
 export interface ListAuditEventsInput {
   event_type?: string;
   principal_type?: string;
@@ -115,20 +300,57 @@ export interface NamespaceRecord {
   namespace: string;
   status: NamespaceStatus;
   review_reason?: string;
-  owner_principal_type: "joyid_ckb";
+  owner_principal_type: PrincipalType;
   owner_principal_id: string;
 }
 
+export interface AuthorisationSessionCompletionInput {
+  session_id: string;
+  expected_challenge_token_hash: string;
+  payload: CapabilityAuthorisationPayload;
+  principal_signature: unknown;
+  nonce: {
+    nonce_key: string;
+    protocol: string;
+    action: string;
+    nonce: string;
+    expires_at: string;
+    principal_type: PrincipalType;
+    principal_id: string;
+  };
+  request_id: string;
+  now_iso: string;
+  namespace_claim_cooldown_seconds: number;
+}
+
+export interface AuthorisationSessionCompletionResult {
+  session: AuthorisationSessionRecord;
+  replayed: boolean;
+}
+
 export interface RegistryStore {
+  healthCheck(): Promise<void>;
+  withMaintenanceLease<T>(name: string, task: () => Promise<T>): Promise<T | null>;
   recordCapability(input: {
     payload: CapabilityAuthorisationPayload;
-    joyid_signature: unknown;
+    principal_signature: unknown;
     request_id: string;
   }): Promise<CapabilityRecord>;
   getCapability(keyId: string): Promise<CapabilityRecord | null>;
+  createAuthorisationSession(input: AuthorisationSessionRecord & { request_id: string }): Promise<AuthorisationSessionRecord>;
+  getAuthorisationSession(sessionId: string): Promise<AuthorisationSessionRecord | null>;
+  prepareAuthorisationSession(input: {
+    session_id: string;
+    principal_type: PrincipalType;
+    principal_id: string;
+    payload: CapabilityAuthorisationPayload;
+    challenge_token_hash: string;
+    request_id: string;
+  }): Promise<AuthorisationSessionRecord>;
+  finaliseAuthorisationSession(input: AuthorisationSessionCompletionInput): Promise<AuthorisationSessionCompletionResult>;
   revokeCapability(input: {
     key_id: string;
-    principal_type: "joyid_ckb";
+    principal_type: PrincipalType;
     principal_id: string;
     request_id: string;
     reason?: string;
@@ -136,7 +358,7 @@ export interface RegistryStore {
   getNamespace(namespace: string): Promise<NamespaceRecord | null>;
   claimNamespace(input: {
     namespace: string;
-    principal_type: "joyid_ckb";
+    principal_type: PrincipalType;
     principal_id: string;
     request_id: string;
   }): Promise<NamespaceClaimResult>;
@@ -154,17 +376,41 @@ export interface RegistryStore {
   ensurePackage(input: {
     namespace: string;
     name: string;
-    principal_type: string;
+    principal_type: PrincipalType;
     principal_id: string;
     source_repo?: string;
     request_id: string;
   }): Promise<void>;
   recordSnapshot(input: SnapshotRecord): Promise<void>;
+  getSnapshot(snapshotHash: string): Promise<SnapshotRecord | null>;
+  getSnapshots(snapshotHashes: string[]): Promise<Map<string, SnapshotRecord>>;
   getPackageVersion(namespace: string, name: string, version: string): Promise<PackageVersionRecord | null>;
+  listPackageVersions(input: PackageVersionQuery): Promise<PackageVersionRecord[]>;
+  listArtifactPackagePage(input: PackageVersionQuery): Promise<ArtifactPackagePage>;
   recordPackageVersion(input: PackageVersionRecord): Promise<PackageVersionRecord>;
+  admitPackageVersion(input: PublishAdmissionInput): Promise<PackageVersionRecord>;
+  listPackageEvidence(namespace: string, name: string, version: string): Promise<PackageEvidenceRecord[]>;
+  listPackageEvidenceForPackage(namespace: string, name: string): Promise<PackageEvidenceRecord[]>;
+  promotePackageVersion(input: PromotePackageVersionInput): Promise<{
+    version: PackageVersionRecord;
+    evidence: PackageEvidenceRecord;
+  }>;
+  recordChainVerifiedDeployment(input: PromotePackageVersionInput): Promise<{
+    version: PackageVersionRecord;
+    evidence: PackageEvidenceRecord;
+  }>;
+  reconcilePackageVersionLifecycle(input: {
+    namespace: string;
+    name: string;
+    version: string;
+    status: "verified_build" | "deployed";
+    deployment_status: "undeployed" | "deployed" | "chain_verified";
+    request_id: string;
+    reason: string;
+  }): Promise<PackageVersionRecord>;
   recordCapabilityUsage(input: {
     key_id: string;
-    principal_type: string;
+    principal_type: PrincipalType;
     principal_id: string;
     request_id: string;
     action: string;
@@ -176,10 +422,13 @@ export interface RegistryStore {
     namespace: string;
     name: string;
     version: string;
-    status: RegistryEntryStatus;
+    status: AvailabilityStatus;
     reason?: string;
     request_id: string;
     admin_actor: string;
+    audit_event_type?: string;
+    capability_usage?: PublishAdmissionInput["capability_usage"];
+    idempotency?: PublishAdmissionInput["idempotency"];
   }): Promise<PackageVersionRecord>;
   appendAuditEvent(event: AuditEventInput): Promise<void>;
   listAuditEvents(input: ListAuditEventsInput): Promise<AuditEventRecord[]>;
@@ -196,6 +445,10 @@ export interface RegistryStore {
     principal_id?: string;
     capability_key_id?: string;
   }): Promise<boolean>;
+  releaseNonce(input: {
+    nonce_key: string;
+    request_id: string;
+  }): Promise<void>;
   reserveIdempotencyKey(input: {
     key: string;
     request_hash: string;
@@ -217,6 +470,53 @@ export interface RegistryStore {
     now_iso: string;
     quota_events_before_iso: string;
   }): Promise<MaintenanceResult>;
+  markSandboxObjectsPurged(input: {
+    static_objects: SandboxObjectCandidate[];
+    source_objects: SandboxObjectCandidate[];
+    purged_at: string;
+  }): Promise<void>;
+  claimVerificationJob(input: {
+    worker_id: string;
+    lease_seconds: number;
+    now_iso: string;
+  }): Promise<VerificationJobRecord | null>;
+  promoteVerifiedBuildForJob(input: {
+    job_id: string;
+    worker_id: string;
+    evidence_hash: string;
+    evidence: Record<string, unknown>;
+    request_id: string;
+    admin_actor: string;
+  }): Promise<{
+    job: VerificationJobRecord;
+    version: PackageVersionRecord;
+    evidence: PackageEvidenceRecord;
+  }>;
+  completeVerificationJob(input: {
+    job_id: string;
+    worker_id: string;
+  }): Promise<VerificationJobRecord>;
+  requestStaticSync(input: {
+    namespace: string;
+    name: string;
+    version: string;
+    error_message: string;
+  }): Promise<void>;
+  failVerificationJob(input: {
+    job_id: string;
+    worker_id: string;
+    error_code: string;
+    error_message: string;
+    retryable: boolean;
+    retry_after_seconds: number;
+    request_id: string;
+  }): Promise<VerificationJobRecord>;
+  retryVerificationJob(input: {
+    job_id: string;
+    request_id: string;
+    admin_actor: string;
+  }): Promise<VerificationJobRecord>;
+  getVerificationQueueMetrics(): Promise<VerificationQueueMetrics>;
 }
 
 const DEFAULT_RESERVED_NAMESPACES: ReservedNamespaceRecord[] = [
@@ -237,10 +537,20 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+function packageVersionIsPublic(record: PackageVersionRecord, now = Date.now()): boolean {
+  return !record.expires_at || Date.parse(record.expires_at) > now;
+}
+
+function sandboxStaticObjectKey(namespace: string, name: string, version: string): string {
+  return `artifacts/${namespace}/${name}/releases/${version}.json`;
+}
+
 export class MemoryRegistryStore implements RegistryStore {
   capabilities = new Map<string, CapabilityRecord>();
+  authorisationSessions = new Map<string, AuthorisationSessionRecord>();
   namespaces = new Map<string, NamespaceRecord>();
   packageVersions = new Map<string, PackageVersionRecord>();
+  packageEvidence = new Map<string, PackageEvidenceRecord>();
   snapshots = new Map<string, SnapshotRecord>();
   reservedNamespaces = new Map<string, ReservedNamespaceRecord>(DEFAULT_RESERVED_NAMESPACES.map((record) => [record.namespace, record]));
   auditEvents: AuditEventRecord[] = [];
@@ -257,10 +567,25 @@ export class MemoryRegistryStore implements RegistryStore {
     created_at: string;
   }>();
   idempotencyKeys = new Map<string, IdempotencyRecord>();
+  verificationJobs = new Map<string, VerificationJobRecord>();
+  maintenanceLeases = new Set<string>();
+  private authorisationSessionCompletionLocks = new Map<string, Promise<void>>();
+
+  async healthCheck(): Promise<void> {}
+
+  async withMaintenanceLease<T>(name: string, task: () => Promise<T>): Promise<T | null> {
+    if (this.maintenanceLeases.has(name)) return null;
+    this.maintenanceLeases.add(name);
+    try {
+      return await task();
+    } finally {
+      this.maintenanceLeases.delete(name);
+    }
+  }
 
   async recordCapability(input: {
     payload: CapabilityAuthorisationPayload;
-    joyid_signature: unknown;
+    principal_signature: unknown;
     request_id: string;
   }): Promise<CapabilityRecord> {
     const key_id = await capabilityKeyId(input.payload.capability_pubkey);
@@ -285,7 +610,7 @@ export class MemoryRegistryStore implements RegistryStore {
       principal_type: record.principal_type,
       principal_id: record.principal_id,
       capability_key_id: key_id,
-      data: { scopes: record.scopes, payload_hash: await hashForMemory(input.payload), joyid_signature_present: !!input.joyid_signature },
+      data: { scopes: record.scopes, payload_hash: await hashForMemory(input.payload), principal_signature_present: !!input.principal_signature },
     });
     return record;
   }
@@ -294,9 +619,170 @@ export class MemoryRegistryStore implements RegistryStore {
     return this.capabilities.get(keyId) ?? null;
   }
 
+  async createAuthorisationSession(
+    input: AuthorisationSessionRecord & { request_id: string },
+  ): Promise<AuthorisationSessionRecord> {
+    if (this.authorisationSessions.has(input.session_id)) {
+      throw new ApiError(409, "authorisation_session_exists", "authorisation session already exists");
+    }
+    const { request_id: _requestId, ...record } = input;
+    this.authorisationSessions.set(record.session_id, record);
+    return record;
+  }
+
+  async getAuthorisationSession(sessionId: string): Promise<AuthorisationSessionRecord | null> {
+    return this.authorisationSessions.get(sessionId) ?? null;
+  }
+
+  async prepareAuthorisationSession(input: {
+    session_id: string;
+    principal_type: PrincipalType;
+    principal_id: string;
+    payload: CapabilityAuthorisationPayload;
+    challenge_token_hash: string;
+    request_id: string;
+  }): Promise<AuthorisationSessionRecord> {
+    return this.withAuthorisationSessionCompletionLock("authorisation-store", async () => {
+      const existing = this.authorisationSessions.get(input.session_id);
+      if (!existing) throw new ApiError(404, "authorisation_session_not_found", "authorisation session was not found");
+      if (existing.status !== "pending") {
+        throw new ApiError(409, "authorisation_session_complete", "authorisation session has already completed");
+      }
+      const updated: AuthorisationSessionRecord = {
+        ...existing,
+        principal_type: input.principal_type,
+        principal_id: input.principal_id,
+        payload: input.payload,
+        challenge_token_hash: input.challenge_token_hash,
+        updated_at: nowIso(),
+      };
+      this.authorisationSessions.set(input.session_id, updated);
+      return updated;
+    });
+  }
+
+  async finaliseAuthorisationSession(
+    input: AuthorisationSessionCompletionInput,
+  ): Promise<AuthorisationSessionCompletionResult> {
+    return this.withAuthorisationSessionCompletionLock("authorisation-store", async () => {
+      const existing = this.authorisationSessions.get(input.session_id);
+      if (!existing) throw new ApiError(404, "authorisation_session_not_found", "authorisation session was not found");
+      if (existing.status !== "pending") return { session: existing, replayed: true };
+      if (Date.parse(existing.expires_at) <= Date.parse(input.now_iso)) {
+        throw new ApiError(410, "authorisation_session_expired", "authorisation session has expired");
+      }
+      if (existing.challenge_token_hash !== input.expected_challenge_token_hash
+        || !existing.payload
+        || canonicalJson(existing.payload) !== canonicalJson(input.payload)) {
+        throw new ApiError(409, "authorisation_challenge_stale", "authorisation challenge was replaced; request a new wallet challenge");
+      }
+
+      const capabilities = new Map(this.capabilities);
+      const namespaces = new Map(this.namespaces);
+      const usedNonces = new Map(this.usedNonces);
+      const quotaEventCount = this.quotaEvents.length;
+      const sessionBefore = existing;
+      const auditEventCount = this.auditEvents.length;
+      try {
+        if (!await this.consumeNonce({ ...input.nonce, request_id: input.request_id })) {
+          throw new ApiError(409, "nonce_replay", "signed nonce has already been used");
+        }
+        const namespace = this.namespaces.get(existing.namespace);
+        if (namespace
+          && (namespace.owner_principal_type !== input.payload.principal_type
+            || namespace.owner_principal_id !== input.payload.principal_id)) {
+          throw new ApiError(409, "namespace_already_claimed", "namespace is already claimed by another principal");
+        }
+        const namespaceClaim = namespace
+          ? {
+              namespace: namespace.namespace,
+              status: namespace.status === "active" ? "active" as const : "review_pending" as const,
+              ...(namespace.review_reason ? { review_reason: namespace.review_reason } : {}),
+            }
+          : await (async () => {
+              if (input.namespace_claim_cooldown_seconds > 0) {
+                const quotaKey = `principal:${input.payload.principal_type}:${input.payload.principal_id}`;
+                const since = new Date(
+                  Date.parse(input.now_iso) - input.namespace_claim_cooldown_seconds * 1000,
+                ).toISOString();
+                if (await this.countRecentQuotaEvents(quotaKey, "namespace_claim_cooldown", since) >= 1) {
+                  throw new ApiError(429, "namespace_claim_cooldown", "namespace claim cooldown is active");
+                }
+                await this.recordQuotaEvent(quotaKey, "namespace_claim_cooldown");
+              }
+              return this.claimNamespace({
+                namespace: existing.namespace,
+                principal_type: input.payload.principal_type,
+                principal_id: input.payload.principal_id,
+                request_id: input.request_id,
+              });
+            })();
+        const capabilityKey = await capabilityKeyId(input.payload.capability_pubkey);
+        const existingCapability = this.capabilities.get(capabilityKey);
+        if (existingCapability
+          && (existingCapability.principal_type !== input.payload.principal_type
+            || existingCapability.principal_id !== input.payload.principal_id)) {
+          throw new ApiError(409, "capability_principal_mismatch", "publishing key is already bound to another principal");
+        }
+        const capability = await this.recordCapability({
+          payload: input.payload,
+          principal_signature: input.principal_signature,
+          request_id: input.request_id,
+        });
+        const completedAt = input.now_iso;
+        const completed: AuthorisationSessionRecord = {
+          ...existing,
+          status: namespaceClaim.status === "active" ? "authorised" : "review_pending",
+          capability_key_id: capability.key_id,
+          namespace_status: namespaceClaim.status,
+          challenge_token_hash: null,
+          updated_at: completedAt,
+          completed_at: completedAt,
+        };
+        this.authorisationSessions.set(input.session_id, completed);
+        await this.appendAuditEvent({
+          request_id: input.request_id,
+          event_type: "authorisation_session.completed",
+          principal_type: input.payload.principal_type,
+          principal_id: input.payload.principal_id,
+          capability_key_id: capability.key_id,
+          namespace: existing.namespace,
+          name: existing.name,
+          data: { session_id: existing.session_id, namespace_status: namespaceClaim.status },
+        });
+        return { session: completed, replayed: false };
+      } catch (error) {
+        this.capabilities = capabilities;
+        this.namespaces = namespaces;
+        this.usedNonces = usedNonces;
+        this.quotaEvents.splice(quotaEventCount);
+        this.authorisationSessions.set(input.session_id, sessionBefore);
+        this.auditEvents.splice(auditEventCount);
+        throw error;
+      }
+    });
+  }
+
+  private async withAuthorisationSessionCompletionLock<T>(sessionId: string, task: () => Promise<T>): Promise<T> {
+    const previous = this.authorisationSessionCompletionLocks.get(sessionId) ?? Promise.resolve();
+    let release = () => {};
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    const queued = previous.then(() => current);
+    this.authorisationSessionCompletionLocks.set(sessionId, queued);
+    await previous;
+    try {
+      return await task();
+    } finally {
+      release();
+      if (this.authorisationSessionCompletionLocks.get(sessionId) === queued) {
+        this.authorisationSessionCompletionLocks.delete(sessionId);
+      }
+    }
+  }
+
   async revokeCapability(input: {
     key_id: string;
-    principal_type: "joyid_ckb";
+    principal_type: PrincipalType;
     principal_id: string;
     request_id: string;
     reason?: string;
@@ -325,7 +811,7 @@ export class MemoryRegistryStore implements RegistryStore {
 
   async claimNamespace(input: {
     namespace: string;
-    principal_type: "joyid_ckb";
+    principal_type: PrincipalType;
     principal_id: string;
     request_id: string;
   }): Promise<NamespaceClaimResult> {
@@ -412,7 +898,7 @@ export class MemoryRegistryStore implements RegistryStore {
   async ensurePackage(input: {
     namespace: string;
     name: string;
-    principal_type: string;
+    principal_type: PrincipalType;
     principal_id: string;
     source_repo?: string;
     request_id: string;
@@ -421,7 +907,7 @@ export class MemoryRegistryStore implements RegistryStore {
       this.namespaces.set(input.namespace, {
         namespace: input.namespace,
         status: "active",
-        owner_principal_type: input.principal_type as "joyid_ckb",
+        owner_principal_type: input.principal_type,
         owner_principal_id: input.principal_id,
       });
     }
@@ -440,23 +926,262 @@ export class MemoryRegistryStore implements RegistryStore {
     this.snapshots.set(input.snapshot_hash, input);
   }
 
+  async getSnapshot(snapshotHash: string): Promise<SnapshotRecord | null> {
+    return this.snapshots.get(snapshotHash) ?? null;
+  }
+
+  async getSnapshots(snapshotHashes: string[]): Promise<Map<string, SnapshotRecord>> {
+    const records = new Map<string, SnapshotRecord>();
+    for (const hash of new Set(snapshotHashes)) {
+      const snapshot = this.snapshots.get(hash);
+      if (snapshot) records.set(hash, snapshot);
+    }
+    return records;
+  }
+
   async getPackageVersion(namespace: string, name: string, version: string): Promise<PackageVersionRecord | null> {
-    return this.packageVersions.get(`${namespace}/${name}@${version}`) ?? null;
+    const record = this.packageVersions.get(`${namespace}/${name}@${version}`);
+    return record && packageVersionIsPublic(record) ? record : null;
+  }
+
+  async listPackageVersions(input: PackageVersionQuery): Promise<PackageVersionRecord[]> {
+    const query = input.query?.toLowerCase();
+    return [...this.packageVersions.values()]
+      .filter(packageVersionIsPublic)
+      .filter((record) => !input.namespace || record.namespace === input.namespace)
+      .filter((record) => !input.name || record.name === input.name)
+      .filter((record) => !input.artifact_kind || record.artifact.kind === input.artifact_kind)
+      .filter((record) => !input.verification_status || record.verification_status === input.verification_status)
+      .filter((record) => !input.verification_statuses || input.verification_statuses.includes(record.verification_status))
+      .filter((record) => !input.deployment_status || record.deployment_status === input.deployment_status)
+      .filter((record) => !input.availability_status || record.availability_status === input.availability_status)
+      .filter((record) => !input.status || record.status === input.status)
+      .filter((record) => !input.statuses || input.statuses.includes(record.status))
+      .filter((record) => {
+        if (!query) return true;
+        return `${record.namespace}/${record.name}@${record.version} ${JSON.stringify(record.registry_entry)}`
+          .toLowerCase()
+          .includes(query);
+      })
+      .sort((left, right) => right.created_at.localeCompare(left.created_at))
+      .slice(input.offset, input.offset + input.limit);
+  }
+
+  async listArtifactPackagePage(input: PackageVersionQuery): Promise<ArtifactPackagePage> {
+    const all = await this.listPackageVersions({ ...input, limit: Number.MAX_SAFE_INTEGER, offset: 0 });
+    const coordinates = [...new Set(all.map((record) => `${record.namespace}/${record.name}`))];
+    const pageCoordinates = coordinates.slice(input.offset, input.offset + input.limit);
+    const selected = new Set(pageCoordinates);
+    return {
+      records: all.filter((record) => selected.has(`${record.namespace}/${record.name}`)),
+      has_more: coordinates.length > input.offset + input.limit,
+    };
   }
 
   async recordPackageVersion(input: PackageVersionRecord): Promise<PackageVersionRecord> {
     const key = `${input.namespace}/${input.name}@${input.version}`;
     const existing = this.packageVersions.get(key);
     if (existing) {
-      throw new ApiError(409, "package_version_exists", "package version already exists and cannot be overwritten");
+      throw new ApiError(409, "artifact_release_exists", "artifact release already exists and cannot be overwritten");
     }
     this.packageVersions.set(key, input);
     return input;
   }
 
+  async admitPackageVersion(input: PublishAdmissionInput): Promise<PackageVersionRecord> {
+    const versionKey = `${input.version.namespace}/${input.version.name}@${input.version.version}`;
+    if (this.packageVersions.has(versionKey)) {
+      throw new ApiError(409, "artifact_release_exists", "artifact release already exists and cannot be overwritten");
+    }
+    this.assertProcessingIdempotency(input.idempotency);
+
+    await this.ensurePackage(input.package);
+    await this.recordSnapshot(input.snapshot);
+    await this.recordPackageVersion(input.version);
+    this.enqueueVerificationJob(input.version, input.snapshot);
+    await this.recordCapabilityUsage(input.capability_usage);
+    await this.appendAuditEvent(input.audit_event);
+    if (input.idempotency) {
+      await this.completeIdempotencyKey(input.idempotency);
+    }
+    return input.version;
+  }
+
+  async listPackageEvidence(namespace: string, name: string, version: string): Promise<PackageEvidenceRecord[]> {
+    const prefix = `${namespace}/${name}@${version}:`;
+    return [...this.packageEvidence.entries()]
+      .filter(([key]) => key.startsWith(prefix))
+      .map(([, record]) => record)
+      .sort((left, right) => left.created_at.localeCompare(right.created_at));
+  }
+
+  async listPackageEvidenceForPackage(namespace: string, name: string): Promise<PackageEvidenceRecord[]> {
+    const prefix = `${namespace}/${name}@`;
+    return [...this.packageEvidence.entries()]
+      .filter(([key]) => key.startsWith(prefix))
+      .map(([, record]) => record)
+      .sort((left, right) => left.created_at.localeCompare(right.created_at));
+  }
+
+  async promotePackageVersion(input: PromotePackageVersionInput): Promise<{
+    version: PackageVersionRecord;
+    evidence: PackageEvidenceRecord;
+  }> {
+    const versionKey = `${input.namespace}/${input.name}@${input.version}`;
+    const existing = this.packageVersions.get(versionKey);
+    if (!existing) {
+      throw new ApiError(404, "artifact_release_not_found", "artifact release is not known to the registry");
+    }
+    assertPromotionTransition(existing, input.kind);
+    this.assertProcessingIdempotency(input.idempotency);
+    const evidenceKey = `${versionKey}:${input.kind}:${input.evidence_hash}`;
+    const prior = this.packageEvidence.get(evidenceKey);
+    const evidence: PackageEvidenceRecord = prior ?? {
+      namespace: input.namespace,
+      name: input.name,
+      version: input.version,
+      kind: input.kind,
+      evidence_hash: input.evidence_hash,
+      evidence: input.evidence,
+      request_id: input.request_id,
+      admin_actor: input.admin_actor,
+      created_at: nowIso(),
+    };
+    this.packageEvidence.set(evidenceKey, evidence);
+    const versionRecord: PackageVersionRecord = {
+      ...existing,
+      verification_status: verificationStatusForAcceptedEvidence(existing.verification_status, input.kind, input.evidence),
+      deployment_status: input.kind === "on_chain_committed"
+        ? "chain_verified"
+        : input.kind === "deployed"
+          ? "deployed"
+          : existing.deployment_status,
+      current_commitment_evidence_hash: input.kind === "on_chain_committed"
+        ? input.evidence_hash
+        : existing.current_commitment_evidence_hash ?? null,
+    };
+    versionRecord.status = deriveRegistryEntryStatus(versionRecord, existing.status);
+    this.packageVersions.set(versionKey, versionRecord);
+    await this.appendAuditEvent({
+      request_id: input.request_id,
+      event_type: `evidence.${input.kind}.accepted`,
+      principal_type: existing.principal_type,
+      principal_id: existing.principal_id,
+      capability_key_id: existing.capability_key_id,
+      namespace: input.namespace,
+      name: input.name,
+      version: input.version,
+      data: { admin_actor: input.admin_actor, evidence_hash: input.evidence_hash },
+    });
+    if (input.capability_usage) {
+      await this.recordCapabilityUsage(input.capability_usage);
+    }
+    if (input.idempotency) {
+      await this.completeIdempotencyKey(input.idempotency);
+    }
+    return { version: versionRecord, evidence };
+  }
+
+  async recordChainVerifiedDeployment(input: PromotePackageVersionInput): Promise<{
+    version: PackageVersionRecord;
+    evidence: PackageEvidenceRecord;
+  }> {
+    if (input.kind !== "deployed") {
+      throw new ApiError(500, "invalid_deployment_evidence_kind", "chain-verified deployment evidence must use kind deployed");
+    }
+    const versionKey = `${input.namespace}/${input.name}@${input.version}`;
+    const existing = this.packageVersions.get(versionKey);
+    if (!existing) {
+      throw new ApiError(404, "artifact_release_not_found", "artifact release is not known to the registry");
+    }
+    if (existing.deployment_status === "not_applicable") {
+      throw new ApiError(409, "deployment_not_applicable", "this artifact profile cannot have a CKB deployment");
+    }
+    if (!(existing.verification_status === "verified" || existing.verification_status === "hash_bound" || existing.verification_status === "evidence_required")) {
+      throw new ApiError(409, "artifact_not_verified", "artifact verification must finish before recording a deployment");
+    }
+    if (packageVersionRequiresReproduction(existing) && existing.verification_status !== "verified") {
+      throw new ApiError(409, "reproduction_evidence_missing", "reproducible artifacts require accepted independent reproduction evidence before deployment");
+    }
+    this.assertProcessingIdempotency(input.idempotency);
+    const evidenceKey = `${versionKey}:${input.kind}:${input.evidence_hash}`;
+    const evidence: PackageEvidenceRecord = this.packageEvidence.get(evidenceKey) ?? {
+      namespace: input.namespace,
+      name: input.name,
+      version: input.version,
+      kind: input.kind,
+      evidence_hash: input.evidence_hash,
+      evidence: input.evidence,
+      request_id: input.request_id,
+      admin_actor: input.admin_actor,
+      created_at: nowIso(),
+    };
+    this.packageEvidence.set(evidenceKey, evidence);
+    const versionRecord: PackageVersionRecord = {
+      ...existing,
+      deployment_status: "chain_verified",
+      current_commitment_evidence_hash: null,
+    };
+    versionRecord.status = deriveRegistryEntryStatus(versionRecord, existing.status);
+    this.packageVersions.set(versionKey, versionRecord);
+    await this.appendAuditEvent({
+      request_id: input.request_id,
+      event_type: "deployment.chain_verified",
+      principal_type: existing.principal_type,
+      principal_id: existing.principal_id,
+      capability_key_id: existing.capability_key_id,
+      namespace: input.namespace,
+      name: input.name,
+      version: input.version,
+      data: { actor: input.admin_actor, evidence_hash: input.evidence_hash },
+    });
+    if (input.capability_usage) {
+      await this.recordCapabilityUsage(input.capability_usage);
+    }
+    if (input.idempotency) {
+      await this.completeIdempotencyKey(input.idempotency);
+    }
+    return { version: versionRecord, evidence };
+  }
+
+  async reconcilePackageVersionLifecycle(input: {
+    namespace: string;
+    name: string;
+    version: string;
+    status: "verified_build" | "deployed";
+    deployment_status: "undeployed" | "deployed" | "chain_verified";
+    request_id: string;
+    reason: string;
+  }): Promise<PackageVersionRecord> {
+    const key = `${input.namespace}/${input.name}@${input.version}`;
+    const existing = this.packageVersions.get(key);
+    if (!existing) {
+      throw new ApiError(404, "artifact_release_not_found", "artifact release is not known to the registry");
+    }
+    const updated: PackageVersionRecord = {
+      ...existing,
+      deployment_status: input.deployment_status,
+      current_commitment_evidence_hash: null,
+    };
+    updated.status = deriveRegistryEntryStatus(updated, input.status);
+    this.packageVersions.set(key, updated);
+    await this.appendAuditEvent({
+      request_id: input.request_id,
+      event_type: "lifecycle.chain_state_reconciled",
+      principal_type: existing.principal_type,
+      principal_id: existing.principal_id,
+      capability_key_id: existing.capability_key_id,
+      namespace: input.namespace,
+      name: input.name,
+      version: input.version,
+      data: { status: input.status, deployment_status: input.deployment_status, reason: input.reason },
+    });
+    return updated;
+  }
+
   async recordCapabilityUsage(input: {
     key_id: string;
-    principal_type: string;
+    principal_type: PrincipalType;
     principal_id: string;
     request_id: string;
     action: string;
@@ -485,21 +1210,29 @@ export class MemoryRegistryStore implements RegistryStore {
     namespace: string;
     name: string;
     version: string;
-    status: RegistryEntryStatus;
+    status: AvailabilityStatus;
     reason?: string;
     request_id: string;
     admin_actor: string;
+    audit_event_type?: string;
+    capability_usage?: PublishAdmissionInput["capability_usage"];
+    idempotency?: PublishAdmissionInput["idempotency"];
   }): Promise<PackageVersionRecord> {
     const key = `${input.namespace}/${input.name}@${input.version}`;
     const existing = this.packageVersions.get(key);
     if (!existing) {
-      throw new ApiError(404, "package_version_not_found", "package version is not known to the registry");
+      throw new ApiError(404, "artifact_release_not_found", "artifact release is not known to the registry");
     }
-    const updated = { ...existing, status: input.status };
+    this.assertProcessingIdempotency(input.idempotency);
+    const updated: PackageVersionRecord = {
+      ...existing,
+      availability_status: input.status,
+    };
+    updated.status = deriveRegistryEntryStatus(updated, existing.status);
     this.packageVersions.set(key, updated);
     await this.appendAuditEvent({
       request_id: input.request_id,
-      event_type: "admin.package_version.status_updated",
+      event_type: input.audit_event_type ?? "admin.package_version.status_updated",
       principal_type: existing.principal_type,
       principal_id: existing.principal_id,
       capability_key_id: existing.capability_key_id,
@@ -508,6 +1241,12 @@ export class MemoryRegistryStore implements RegistryStore {
       version: input.version,
       data: { admin_actor: input.admin_actor, status: input.status, reason: input.reason ?? null },
     });
+    if (input.capability_usage) {
+      await this.recordCapabilityUsage(input.capability_usage);
+    }
+    if (input.idempotency) {
+      await this.completeIdempotencyKey(input.idempotency);
+    }
     return updated;
   }
 
@@ -572,6 +1311,13 @@ export class MemoryRegistryStore implements RegistryStore {
     return true;
   }
 
+  async releaseNonce(input: { nonce_key: string; request_id: string }): Promise<void> {
+    const existing = this.usedNonces.get(input.nonce_key);
+    if (existing?.request_id === input.request_id) {
+      this.usedNonces.delete(input.nonce_key);
+    }
+  }
+
   async reserveIdempotencyKey(input: {
     key: string;
     request_hash: string;
@@ -612,7 +1358,7 @@ export class MemoryRegistryStore implements RegistryStore {
     response_body: Record<string, unknown>;
   }): Promise<IdempotencyRecord> {
     const existing = this.idempotencyKeys.get(input.key);
-    if (!existing || existing.request_hash !== input.request_hash) {
+    if (!existing || existing.status !== "processing" || existing.request_hash !== input.request_hash) {
       throw new ApiError(409, "idempotency_key_conflict", "idempotency key is reserved for another request");
     }
     const completed: IdempotencyRecord = {
@@ -644,6 +1390,8 @@ export class MemoryRegistryStore implements RegistryStore {
     const quotaCutoff = Date.parse(input.quota_events_before_iso);
     let usedNoncesDeleted = 0;
     let idempotencyKeysDeleted = 0;
+    let packageVersionsExpired = 0;
+    let authorisationSessionsDeleted = 0;
 
     for (const [key, record] of this.usedNonces.entries()) {
       if (Date.parse(record.expires_at) < now) {
@@ -657,14 +1405,334 @@ export class MemoryRegistryStore implements RegistryStore {
         idempotencyKeysDeleted += 1;
       }
     }
+    for (const [key, record] of this.authorisationSessions.entries()) {
+      const terminalRetentionDeadline = Date.parse(record.completed_at ?? record.updated_at)
+        + AUTHORISATION_SESSION_TERMINAL_RETENTION_HOURS * 60 * 60 * 1000;
+      const shouldDelete = record.status === "pending"
+        ? Date.parse(record.expires_at) < now
+        : terminalRetentionDeadline < now;
+      if (shouldDelete) {
+        this.authorisationSessions.delete(key);
+        authorisationSessionsDeleted += 1;
+      }
+    }
     const quotaBefore = this.quotaEvents.length;
     this.quotaEvents = this.quotaEvents.filter((event) => Date.parse(event.at) >= quotaCutoff);
+
+    for (const [key, record] of this.packageVersions.entries()) {
+      if (record.expires_at && Date.parse(record.expires_at) <= now && !record.expired_at) {
+        this.packageVersions.set(key, { ...record, expired_at: input.now_iso });
+        packageVersionsExpired += 1;
+      }
+    }
+    const staticObjects = [...this.packageVersions.values()]
+      .filter((record) => record.expires_at && Date.parse(record.expires_at) <= now && !record.static_purged_at)
+      .map((record) => ({
+        key: sandboxStaticObjectKey(record.namespace, record.name, record.version),
+        namespace: record.namespace,
+        name: record.name,
+        version: record.version,
+      }));
+    const sourceObjects = [...new Set(
+      [...this.packageVersions.values()]
+        .filter((record) => record.purge_after && Date.parse(record.purge_after) <= now && !record.source_purged_at)
+        .map((record) => record.snapshot_hash),
+    )]
+      .filter((snapshotHash) => [...this.packageVersions.values()]
+        .filter((record) => record.snapshot_hash === snapshotHash)
+        .every((record) => !!record.purge_after && Date.parse(record.purge_after) <= now))
+      .flatMap((snapshotHash) => {
+        const snapshot = this.snapshots.get(snapshotHash);
+        return snapshot ? [{ key: snapshot.r2_key, snapshot_hash: snapshotHash }] : [];
+      });
 
     return {
       used_nonces_deleted: usedNoncesDeleted,
       idempotency_keys_deleted: idempotencyKeysDeleted,
       quota_events_deleted: quotaBefore - this.quotaEvents.length,
+      package_versions_expired: packageVersionsExpired,
+      authorisation_sessions_deleted: authorisationSessionsDeleted,
+      static_objects: staticObjects,
+      source_objects: sourceObjects,
     };
+  }
+
+  async markSandboxObjectsPurged(input: {
+    static_objects: SandboxObjectCandidate[];
+    source_objects: SandboxObjectCandidate[];
+    purged_at: string;
+  }): Promise<void> {
+    for (const candidate of input.static_objects) {
+      if (!candidate.namespace || !candidate.name || !candidate.version) continue;
+      const key = `${candidate.namespace}/${candidate.name}@${candidate.version}`;
+      const record = this.packageVersions.get(key);
+      if (record) this.packageVersions.set(key, { ...record, static_purged_at: input.purged_at });
+    }
+    const snapshots = new Set(input.source_objects.map((candidate) => candidate.snapshot_hash).filter(Boolean));
+    for (const [key, record] of this.packageVersions.entries()) {
+      if (snapshots.has(record.snapshot_hash)) {
+        this.packageVersions.set(key, { ...record, source_purged_at: input.purged_at });
+      }
+    }
+  }
+
+  async claimVerificationJob(input: {
+    worker_id: string;
+    lease_seconds: number;
+    now_iso: string;
+  }): Promise<VerificationJobRecord | null> {
+    const now = Date.parse(input.now_iso);
+    const candidate = [...this.verificationJobs.values()]
+      .filter((job) => {
+        if ((job.status === "queued" || job.status === "retry_wait") && Date.parse(job.available_at) <= now) return true;
+        if ((job.status === "running" || job.status === "publishing") && job.lease_expires_at) {
+          return Date.parse(job.lease_expires_at) <= now;
+        }
+        return false;
+      })
+      .sort((left, right) => left.available_at.localeCompare(right.available_at) || left.created_at.localeCompare(right.created_at))[0];
+    if (!candidate) return null;
+
+    const hasEvidence = !!candidate.evidence_hash && !!candidate.evidence;
+    const claimed: VerificationJobRecord = {
+      ...candidate,
+      status: hasEvidence ? "publishing" : "running",
+      attempt_count: candidate.attempt_count + 1,
+      lease_owner: input.worker_id,
+      lease_expires_at: new Date(now + input.lease_seconds * 1_000).toISOString(),
+      started_at: candidate.started_at ?? input.now_iso,
+      updated_at: input.now_iso,
+    };
+    this.verificationJobs.set(claimed.id, claimed);
+    return claimed;
+  }
+
+  async promoteVerifiedBuildForJob(input: {
+    job_id: string;
+    worker_id: string;
+    evidence_hash: string;
+    evidence: Record<string, unknown>;
+    request_id: string;
+    admin_actor: string;
+  }): Promise<{ job: VerificationJobRecord; version: PackageVersionRecord; evidence: PackageEvidenceRecord }> {
+    const job = this.requireOwnedVerificationJob(input.job_id, input.worker_id, "running");
+    const promoted = await this.promotePackageVersion({
+      namespace: job.namespace,
+      name: job.name,
+      version: job.version,
+      kind: "verified_build",
+      evidence_hash: input.evidence_hash,
+      evidence: input.evidence,
+      request_id: input.request_id,
+      admin_actor: input.admin_actor,
+    });
+    const updated: VerificationJobRecord = {
+      ...job,
+      status: "publishing",
+      evidence_hash: input.evidence_hash,
+      evidence: input.evidence,
+      updated_at: nowIso(),
+    };
+    this.verificationJobs.set(job.id, updated);
+    return { job: updated, ...promoted };
+  }
+
+  async completeVerificationJob(input: { job_id: string; worker_id: string }): Promise<VerificationJobRecord> {
+    const job = this.requireOwnedVerificationJob(input.job_id, input.worker_id, "publishing");
+    const completedAt = nowIso();
+    const completed: VerificationJobRecord = {
+      ...job,
+      status: "succeeded",
+      lease_owner: null,
+      lease_expires_at: null,
+      completed_at: completedAt,
+      updated_at: completedAt,
+      last_error_code: null,
+      last_error_message: null,
+    };
+    this.verificationJobs.set(job.id, completed);
+    await this.appendAuditEvent({
+      request_id: `verification:${job.id}`,
+      event_type: "verification.succeeded",
+      namespace: job.namespace,
+      name: job.name,
+      version: job.version,
+      data: { job_id: job.id, attempt_count: job.attempt_count, evidence_hash: job.evidence_hash },
+    });
+    return completed;
+  }
+
+  async requestStaticSync(input: { namespace: string; name: string; version: string; error_message: string }): Promise<void> {
+    const job = [...this.verificationJobs.values()].find((candidate) =>
+      candidate.namespace === input.namespace && candidate.name === input.name && candidate.version === input.version
+    );
+    if (!job) return;
+    if (job.status === "running" || job.status === "publishing") return;
+    const requestedAt = nowIso();
+    this.verificationJobs.set(job.id, {
+      ...job,
+      status: "retry_wait",
+      lease_owner: null,
+      lease_expires_at: null,
+      available_at: requestedAt,
+      completed_at: null,
+      last_error_code: "static_registry_sync_deferred",
+      last_error_message: input.error_message,
+      updated_at: requestedAt,
+    });
+  }
+
+  async failVerificationJob(input: {
+    job_id: string;
+    worker_id: string;
+    error_code: string;
+    error_message: string;
+    retryable: boolean;
+    retry_after_seconds: number;
+    request_id: string;
+  }): Promise<VerificationJobRecord> {
+    const job = this.requireOwnedVerificationJob(input.job_id, input.worker_id);
+    const retry = input.retryable && job.attempt_count < job.max_attempts;
+    const now = new Date();
+    const failed: VerificationJobRecord = {
+      ...job,
+      status: retry ? "retry_wait" : "dead_letter",
+      available_at: new Date(now.getTime() + (retry ? input.retry_after_seconds : 0) * 1_000).toISOString(),
+      lease_owner: null,
+      lease_expires_at: null,
+      last_error_code: input.error_code,
+      last_error_message: input.error_message,
+      updated_at: now.toISOString(),
+    };
+    this.verificationJobs.set(job.id, failed);
+    await this.appendAuditEvent({
+      request_id: input.request_id,
+      event_type: retry ? "verification.retry_scheduled" : "verification.dead_lettered",
+      namespace: job.namespace,
+      name: job.name,
+      version: job.version,
+      data: {
+        job_id: job.id,
+        attempt_count: job.attempt_count,
+        error_code: input.error_code,
+        retry_after_seconds: retry ? input.retry_after_seconds : null,
+      },
+    });
+    return failed;
+  }
+
+  async retryVerificationJob(input: {
+    job_id: string;
+    request_id: string;
+    admin_actor: string;
+  }): Promise<VerificationJobRecord> {
+    const job = this.verificationJobs.get(input.job_id);
+    if (!job) throw new ApiError(404, "verification_job_not_found", "verification job was not found");
+    if (job.status !== "dead_letter") {
+      throw new ApiError(409, "verification_job_not_dead_letter", "only dead-letter verification jobs can be retried manually");
+    }
+    const now = nowIso();
+    const retried: VerificationJobRecord = {
+      ...job,
+      status: "queued",
+      attempt_count: 0,
+      available_at: now,
+      lease_owner: null,
+      lease_expires_at: null,
+      last_error_code: null,
+      last_error_message: null,
+      updated_at: now,
+    };
+    this.verificationJobs.set(job.id, retried);
+    await this.appendAuditEvent({
+      request_id: input.request_id,
+      event_type: "verification.requeued",
+      namespace: job.namespace,
+      name: job.name,
+      version: job.version,
+      data: { job_id: job.id, admin_actor: input.admin_actor },
+    });
+    return retried;
+  }
+
+  async getVerificationQueueMetrics(): Promise<VerificationQueueMetrics> {
+    const counts: Record<VerificationJobStatus, number> = {
+      queued: 0,
+      running: 0,
+      publishing: 0,
+      retry_wait: 0,
+      succeeded: 0,
+      dead_letter: 0,
+    };
+    let oldestAvailable: string | undefined;
+    let oldestDeadLetter: string | undefined;
+    for (const job of this.verificationJobs.values()) {
+      counts[job.status] += 1;
+      if ((job.status === "queued" || job.status === "retry_wait") && (!oldestAvailable || job.available_at < oldestAvailable)) {
+        oldestAvailable = job.available_at;
+      }
+      if (job.status === "dead_letter" && (!oldestDeadLetter || job.updated_at < oldestDeadLetter)) {
+        oldestDeadLetter = job.updated_at;
+      }
+    }
+    return {
+      counts,
+      oldest_available_at: oldestAvailable ?? null,
+      oldest_dead_letter_at: oldestDeadLetter ?? null,
+    };
+  }
+
+  private enqueueVerificationJob(version: PackageVersionRecord, snapshot: SnapshotRecord): void {
+    const existing = [...this.verificationJobs.values()].find(
+      (job) => job.namespace === version.namespace && job.name === version.name && job.version === version.version,
+    );
+    if (existing) return;
+    const createdAt = nowIso();
+    const job: VerificationJobRecord = {
+      id: crypto.randomUUID(),
+      namespace: version.namespace,
+      name: version.name,
+      version: version.version,
+      status: "queued",
+      attempt_count: 0,
+      max_attempts: 3,
+      available_at: createdAt,
+      created_at: createdAt,
+      updated_at: createdAt,
+      source_hash: version.source_hash,
+      manifest_hash: version.manifest_hash,
+      artifact: version.artifact,
+      ...(version.compatibility_profile_hash ? { compatibility_profile_hash: version.compatibility_profile_hash } : {}),
+      snapshot_hash: snapshot.snapshot_hash,
+      snapshot_object_key: snapshot.r2_key,
+      snapshot_size_bytes: snapshot.size_bytes,
+      snapshot_content_type: snapshot.content_type,
+    };
+    this.verificationJobs.set(job.id, job);
+  }
+
+  private requireOwnedVerificationJob(
+    jobId: string,
+    workerId: string,
+    requiredStatus?: "running" | "publishing",
+  ): VerificationJobRecord {
+    const job = this.verificationJobs.get(jobId);
+    if (!job) throw new ApiError(404, "verification_job_not_found", "verification job was not found");
+    if (job.lease_owner !== workerId || !job.lease_expires_at || Date.parse(job.lease_expires_at) <= Date.now()) {
+      throw new ApiError(409, "verification_job_lease_lost", "verification job lease is no longer owned by this worker");
+    }
+    if (requiredStatus ? job.status !== requiredStatus : job.status !== "running" && job.status !== "publishing") {
+      throw new ApiError(409, "verification_job_state_conflict", "verification job is not in an active worker state");
+    }
+    return job;
+  }
+
+  private assertProcessingIdempotency(input: PublishAdmissionInput["idempotency"]): void {
+    if (!input) return;
+    const reservation = this.idempotencyKeys.get(input.key);
+    if (reservation?.status !== "processing" || reservation.request_hash !== input.request_hash) {
+      throw new ApiError(409, "idempotency_key_conflict", "idempotency key is reserved for another request");
+    }
   }
 
   private reservedNamespaceFor(namespace: string): ReservedNamespaceRecord | undefined {
@@ -678,6 +1746,67 @@ export class MemoryRegistryStore implements RegistryStore {
     }
     return undefined;
   }
+}
+
+export function assertPromotionTransition(current: PackageVersionRecord, next: PackageEvidenceKind): void {
+  let allowed = false;
+  if (next === "verified_build") {
+    allowed = true;
+  } else if (next === "reproduced_build") {
+    allowed = current.verification_status !== "pending" && current.verification_status !== "rejected";
+  } else if (next === "deployed") {
+    allowed = current.deployment_status !== "not_applicable"
+      && ["hash_bound", "verified", "evidence_required"].includes(current.verification_status)
+      && (!packageVersionRequiresReproduction(current) || current.verification_status === "verified");
+  } else if (next === "on_chain_committed") {
+    allowed = current.deployment_status === "deployed" || current.deployment_status === "chain_verified";
+  }
+  if (!allowed) {
+    throw new ApiError(
+      409,
+      "invalid_evidence_transition",
+      `cannot accept '${next}' evidence for verification='${current.verification_status}', deployment='${current.deployment_status}', availability='${current.availability_status}'`,
+    );
+  }
+}
+
+export function deriveRegistryEntryStatus(
+  version: Pick<PackageVersionRecord, "verification_status" | "deployment_status" | "availability_status" | "current_commitment_evidence_hash">,
+  pendingStatus: RegistryEntryStatus = "source_published",
+): RegistryEntryStatus {
+  if (version.availability_status !== "active") return version.availability_status;
+  if (version.current_commitment_evidence_hash) return "on_chain_committed";
+  if (version.deployment_status === "deployed" || version.deployment_status === "chain_verified") return "deployed";
+  if (["hash_bound", "verified", "evidence_required"].includes(version.verification_status)) return "verified_build";
+  return pendingStatus === "indexed_pending" ? "indexed_pending" : "source_published";
+}
+
+function verificationStatusForAcceptedEvidence(
+  current: VerificationStatus,
+  kind: PackageEvidenceKind,
+  evidence: Record<string, unknown>,
+): VerificationStatus {
+  if (kind === "reproduced_build") return "verified";
+  if (kind !== "verified_build") return current;
+  switch (evidence["verification_level"]) {
+    case "compiled":
+      return "verified";
+    case "hash_bound":
+      return "hash_bound";
+    case "evidence_required":
+      return "evidence_required";
+    default:
+      throw new ApiError(500, "invalid_verification_level", "accepted build evidence has no recognised verification level");
+  }
+}
+
+export function packageVersionRequiresReproduction(version: PackageVersionRecord): boolean {
+  if (version.artifact.profile === "reproducible_build") return true;
+  const release = version.registry_entry.versions.find((entry) => entry.version === version.version);
+  const contract = release?.profile_contract;
+  if (!contract || typeof contract !== "object" || Array.isArray(contract)) return false;
+  const build = (contract as Record<string, unknown>)["build"];
+  return Boolean(build && typeof build === "object" && !Array.isArray(build) && (build as Record<string, unknown>)["reproducible"] === true);
 }
 
 async function hashForMemory(value: unknown): Promise<string> {

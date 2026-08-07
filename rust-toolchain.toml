@@ -1,5 +1,5 @@
 [toolchain]
 channel = "1.97.1"
 profile = "minimal"
-components = ["clippy", "rustfmt"]
+components = ["clippy", "llvm-tools-preview", "rustfmt"]
 targets = ["riscv64imac-unknown-none-elf", "wasm32-unknown-unknown"]

@@ -87,13 +87,17 @@ crates/cellscript-ckb-adapter/
 It parses compiler `ActionPlan` JSON, materializes `ResolvedActionTx` values
 with `ckb-sdk-rust` / CKB packed types, rejects under-capacity outputs before
 RPC, and exposes signer, `estimate_cycles`, `test_tx_pool_accept`, and optional
-submission as adapter-owned node calls. It also builds headless deploy
-transactions that create TYPE_ID code cells from a `DeployArtifactSpec`, and
+submission as adapter-owned node calls. It also builds unsigned deploy
+transactions that create either TYPE_ID code Cells or immutable data Cells from
+a `DeployArtifactSpec`, and
 generates `DeploymentManifest` records from the resulting evidence. It also
-tests that CellScript entry witness bytes are placed into an explicit
-`WitnessArgs` field without overwriting lock signatures, and that TYPE_ID
-args are computed from the packed first input plus output index before
-adapter submission.
+tests that CellScript entry witness bytes use the versioned
+`cellscript-witnessargs-input-type-v2` contract and are placed into
+`WitnessArgs.input_type` before SDK signing while preserving the lock
+placeholder. A signed multisig-v2 CKB-VM regression verifies both the lock and
+the CellScript type script, and proves that post-signing witness mutation is
+rejected. TYPE_ID args are computed from the packed first input plus output
+index before adapter submission.
 
 The full transaction lifecycle bridge includes:
 
@@ -143,23 +147,29 @@ CKB code cell deployment transaction
 deployment manifest + evidence
 ```
 
-`build_deploy_transaction()` constructs a headless CKB transaction that
-deploys a CellScript artifact as an on-chain code cell with TYPE_ID. It:
+`build_deploy_transaction()` constructs an unsigned CKB transaction that
+deploys a CellScript artifact as an on-chain code Cell. It:
 
-- computes TYPE_ID args from the first input tx_hash + output index;
-- constructs the type script (TYPE_ID) and lock script for the code cell;
+- verifies that the supplied artifact hash matches the artifact bytes;
+- computes TYPE_ID args for `type` deployments, while `data`, `data1`, and
+  `data2` deployments omit the Type Script and bind to the artifact data hash;
+- constructs the lock script for the code Cell;
 - calculates occupied capacity for the code cell from artifact size;
 - constructs a change output with remaining capacity minus fee;
 - validates that both outputs meet occupied-capacity floors;
+- inserts the 65-byte zeroed secp-sighash signing placeholder and enforces the
+  default 1,000 shannons/KB relay-policy fee floor;
 - assembles the transaction and returns `ResolvedDeployEvidence`.
 
 `build_deployment_manifest_from_evidence()` produces a `DeploymentManifest`
 from the evidence after a successful commit, recording the on-chain code cell
 reference.
 
-This is headless: no RPC, no live-cell selection, no signing. The caller
-provides a pre-resolved capacity input. Use `CkbSdkAcceptance` for node
-interaction after building.
+The library builder is headless: no RPC, no live-cell selection, no signing.
+The caller provides a pre-resolved capacity input and all required CellDeps.
+The CLI adds an RPC boundary: it requires CKB mainnet and verifies that the
+selected input is live, owned by the requested secp lock, has no Type Script,
+and has empty data before it calls the library builder.
 
 The output manifest should bind the CellScript artifact to the on-chain code
 cell:
@@ -418,7 +428,7 @@ load_compile_metadata(path) -> CompileMetadata
 load_action_plan(path) -> ActionPlan
 load_deployment_manifest(path) -> DeploymentManifest
 
-deploy_artifact_with_type_id(...)
+build_deploy_transaction(spec)
 build_action_transaction(...)
 emit_acceptance_report(...)
 ```
@@ -428,31 +438,26 @@ The currently landed stable subset includes `load_action_plan`,
 script-ref helpers, WitnessArgs placement helpers, TYPE_ID args helpers, and
 acceptance report emission.
 
-For convenience, `CellScriptAdapter` provides a high-level facade:
+`CellScriptAdapter` provides RPC validation and node-interaction helpers. The
+legacy `deploy_artifact` and `build_deploy` convenience methods fail closed
+because automatic coin selection and signing are not implemented:
 
 ```rust
 // Connect to a CKB node
 let adapter = CellScriptAdapter::connect("http://127.0.0.1:8114")?;
 
-// Deploy an artifact (finds capacity, builds, submits, waits for commit)
-let (manifest, evidence) = adapter.deploy_artifact(
-    "my-token",
-    artifact_bytes,
-    deployer_lock_script,
-    1_000,  // fee in shannons
-)?;
+// Registry deployment tooling rejects non-mainnet nodes.
+adapter.require_mainnet()?;
 
-// Or build without submitting (for external signing)
-let (tx, evidence) = adapter.build_deploy(
-    "my-token",
-    artifact_bytes,
-    deployer_lock_script,
-    1_000,
-)?;
+// Validate a caller-selected live input before constructing DeployArtifactSpec.
+let (capacity, data) =
+    adapter.resolve_pure_capacity_input(&capacity_out_point, &deployer_lock_script)?;
+
+// Build with build_deploy_transaction(&spec), then send the unsigned
+// transaction to an external wallet. Never submit it before signing.
 
 // Node interaction helpers
-adapter.estimate_cycles(&tx)?;
-adapter.test_tx_pool_accept(&tx)?;
+adapter.submit_transaction(&signed_tx)?;
 adapter.submit_transaction(&tx)?;
 adapter.wait_for_commitment(&tx_hash, 30, 500)?;
 ```
@@ -506,26 +511,28 @@ reported.
 
 ## CLI: `cellscript-deploy`
 
-The adapter crate ships a CLI binary for script-driven deploy and status
-querying without writing Rust code.
+The adapter crate ships a CLI binary for building mainnet deployment
+transactions and querying status without writing Rust code. It does not own
+wallet keys. Consequently, `deploy` fails closed and `build-deploy` emits an
+unsigned transaction with `can_submit: false`; a CKB wallet must sign and
+broadcast it.
 
 ```bash
 # Build the binary
 cargo build -p cellscript-ckb-adapter --bin cellscript-deploy
 
-# Deploy an artifact
+# Build the canonical Registry Type Script deployment for external signing
 export LOCK_ARG=0x$(cat ~/.ckb/default-lock-arg)  # your secp256k1 lock arg
-cellscript-deploy deploy \
-  --artifact token.s \
+cellscript-deploy --rpc http://127.0.0.1:8114 --json build-deploy \
+  --artifact contracts/registry-type-script/artifacts/v0.22.0/cellscript-registry-type-script \
   --lock-arg $LOCK_ARG \
-  --name token \
-  --fee 1000 \
-  --capacity-out-point 0x<tx_hash>:<index> \
-  --manifest-out .cell/deployment-manifest.json
+  --name cellscript-registry-type-script \
+  --hash-type data1 \
+  --capacity-out-point 0x<LIVE_PURE_CAPACITY_TX_HASH>:<INDEX>
 
-# Build without submitting (for external signing)
+# TYPE_ID remains available for upgradeable deployments
 cellscript-deploy build-deploy \
-  --artifact token.s \
+  --artifact contract.elf \
   --lock-arg $LOCK_ARG \
   --capacity-out-point 0x<tx_hash>:<index>
 
@@ -536,8 +543,13 @@ cellscript-deploy status --tx-hash 0x<tx_hash>
 cellscript-deploy info
 ```
 
-All commands support `--json` for structured output and `--rpc` to override
-the default `http://127.0.0.1:8114` endpoint.
+The build command validates the RPC genesis hash against CKB mainnet and
+resolves the actual input capacity/data instead of trusting command-line
+values. The canonical mainnet secp-sighash dep group
+`0x71a7ba8fc96349fea0ed3a5c47992e3b4084b031a42264a018e0072e8172e46c:0`
+is the default. All commands support `--json` for
+structured output and `--rpc` to override the default
+`http://127.0.0.1:8114` endpoint.
 
 ## External Positioning
 

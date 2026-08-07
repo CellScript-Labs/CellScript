@@ -36,18 +36,45 @@ as token split/merge, often do not have an identity-bearing state continuation.
    `destroy` validate transaction shape; they are not VM-side allocation or
    mutation effects.
 
+## Canonical Field Separators
+
+Type declarations use a trailing comma after every field:
+
+```cellscript
+resource Vault has store, create, consume {
+    owner: Address,
+    balance: u64,
+}
+```
+
+This is the output produced by `cellc fmt` and the form used by the canonical
+language example. The parser continues to accept newline-separated fields
+without commas as compatibility input, but new source and documentation should
+not use that spelling as the canonical style.
+
+Do not apply this rule to lifecycle field blocks. A `preserve` or
+`std::lifecycle` block contains newline-separated field names, not a comma
+list:
+
+```cellscript
+preserve vault_after from vault_before {
+    owner
+    balance
+}
+```
+
 ## State Continuation
 
 Use `transition old -> new` for a same-type Cell continuation:
 
 ```cellscript
 shared Pool has store {
-    token_a_symbol: [u8; 8]
-    token_b_symbol: [u8; 8]
-    reserve_a: u64
-    reserve_b: u64
-    total_lp: u64
-    fee_rate_bps: u16
+    token_a_symbol: [u8; 8],
+    token_b_symbol: [u8; 8],
+    reserve_a: u64,
+    reserve_b: u64,
+    total_lp: u64,
+    fee_rate_bps: u16,
 }
 
 action swap_a_for_b(pool_before: Pool, input: Token, min_output: u64, to: Address) -> (pool_after: Pool, token_out: Token) {
@@ -117,11 +144,11 @@ continues:
 
 ```cellscript
 receipt Listing has consume, burn {
-    nft_hash: Hash
-    seller: Address
-    price: u64
-    payment_symbol: [u8; 8]
-    expires_at: u64
+    nft_hash: Hash,
+    seller: Address,
+    price: u64,
+    payment_symbol: [u8; 8],
+    expires_at: u64,
 }
 
 action buy_listing(listing: Listing, nft_before: NFT, payment: Token, buyer: Address) -> (nft_after: NFT, seller_payment: Token) {

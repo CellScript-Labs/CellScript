@@ -1239,7 +1239,6 @@ impl CodeGenerator {
         let has_dynamic_payload = payload.iter().any(|arg| arg.schema_dynamic);
         let min_witness_len = ENTRY_WITNESS_HEADER_SIZE + payload_len;
         let loaded_label = self.fresh_label("entry_witness_loaded");
-        let try_group_input_label = self.fresh_label("entry_witness_try_group_input");
         let try_group_output_label = self.fresh_label("entry_witness_try_group_output");
         let buffer_ok_label = self.fresh_label("entry_witness_buffer_ok");
         let size_ok_label = self.fresh_label("entry_witness_size_ok");
@@ -1249,10 +1248,10 @@ impl CodeGenerator {
         self.emit_global(ENTRY_WITNESS_LABEL);
         self.emit_label(ENTRY_WITNESS_LABEL);
         self.emit(format!(
-            "# cellscript entry abi: {} loads Input#0 witness args for {} and falls back to GroupInput#0/GroupOutput#0",
+            "# cellscript entry abi: {} loads GroupInput#0 witness args for {} and falls back to GroupOutput#0",
             ENTRY_WITNESS_LABEL, target
         ));
-        self.emit("# cellscript entry abi: witness magic CSARGv1 followed by positional fixed/scalar payload");
+        self.emit("# cellscript entry abi: placement profile requires CSARGv1 inside WitnessArgs.input_type");
         self.emit_large_addi("sp", "sp", -(ENTRY_WITNESS_FRAME_SIZE as i64));
         self.emit_stack_store("ra", ENTRY_WITNESS_RA_OFFSET);
         if has_lock_args {
@@ -1261,18 +1260,7 @@ impl CodeGenerator {
         if has_witness_payload {
             self.emit_load_witness_syscall_to_offsets(
                 "entry_args",
-                CKB_SOURCE_INPUT,
-                0,
-                ENTRY_WITNESS_SIZE_OFFSET,
-                ENTRY_WITNESS_BUFFER_OFFSET,
-                ENTRY_WITNESS_BUFFER_SIZE,
-            );
-            self.emit(format!("beqz a0, {}", loaded_label));
-            self.emit(format!("j {}", try_group_input_label));
-            self.emit_label(&try_group_input_label);
-            self.emit_load_witness_syscall_to_offsets(
-                "entry_args_fallback_group_input",
-                self.runtime_abi().source_group_input,
+                CKB_SOURCE_GROUP_INPUT,
                 0,
                 ENTRY_WITNESS_SIZE_OFFSET,
                 ENTRY_WITNESS_BUFFER_OFFSET,
@@ -1300,6 +1288,10 @@ impl CodeGenerator {
             self.emit(format!("bnez t2, {}", buffer_ok_label));
             self.emit(format!("j {}", fail_label));
             self.emit_label(&buffer_ok_label);
+
+            self.emit_entry_normalize_witness_args_input_type_v2(&fail_label);
+
+            self.emit_stack_load("t0", ENTRY_WITNESS_SIZE_OFFSET);
             self.emit(format!("li t1, {}", min_witness_len));
             self.emit("sltu t2, t0, t1");
             self.emit(format!("beqz t2, {}", size_ok_label));
@@ -1566,6 +1558,94 @@ impl CodeGenerator {
         self.emit_large_addi("sp", "sp", ENTRY_WITNESS_FRAME_SIZE as i64);
         self.emit("ret");
         Ok(())
+    }
+
+    /// Normalize the selected entry placement ABI into the payload buffer
+    /// shape consumed by the positional decoder.
+    ///
+    /// The wrapper requires a canonical CKB `WitnessArgs` from the current
+    /// script group and copies its `input_type` Bytes payload to the start of
+    /// the local buffer. A raw `CSARGv1\0` witness is not a valid alias.
+    fn emit_entry_normalize_witness_args_input_type_v2(&mut self, fail_label: &str) {
+        let validate_loop_label = self.fresh_label("entry_witness_v2_validate_loop");
+        let field_end_ready_label = self.fresh_label("entry_witness_v2_field_end_ready");
+        let field_done_label = self.fresh_label("entry_witness_v2_field_done");
+        let copy_loop_label = self.fresh_label("entry_witness_v2_copy_loop");
+        let copy_done_label = self.fresh_label("entry_witness_v2_copy_done");
+
+        self.emit("# cellscript entry placement profile: validate the exact three-field WitnessArgs table");
+        self.emit_stack_load("t0", ENTRY_WITNESS_SIZE_OFFSET);
+        self.emit("li t1, 16");
+        self.emit(format!("bltu t0, t1, {}", fail_label));
+        self.emit_sp_addi("t3", ENTRY_WITNESS_BUFFER_OFFSET);
+
+        // The table header and local buffer are eight-byte aligned, so load its
+        // four u32 words in two pairs. Keep variable-offset Bytes lengths below
+        // on byte loads because Molecule payload offsets need not be aligned.
+        self.emit("ld a4, 0(t3)");
+        self.emit("slli t1, a4, 32");
+        self.emit("srli t1, t1, 32");
+        self.emit(format!("bne t1, t0, {}", fail_label));
+        self.emit("srli t4, a4, 32");
+        self.emit("li t1, 16");
+        self.emit(format!("bne t4, t1, {}", fail_label));
+        self.emit("ld a4, 8(t3)");
+        self.emit("slli t5, a4, 32");
+        self.emit("srli t5, t5, 32");
+        self.emit(format!("bltu t5, t4, {}", fail_label));
+        self.emit("srli t6, a4, 32");
+        self.emit(format!("bltu t6, t5, {}", fail_label));
+        self.emit(format!("bltu t0, t6, {}", fail_label));
+
+        // Validate lock, input_type, and output_type through one compact loop.
+        // a5 is the field index and t4 the current start. The three ends are
+        // the preserved input_type offset, output_type offset, and total_size.
+        self.emit("li t4, 16");
+        self.emit("li a5, 0");
+        self.emit_label(&validate_loop_label);
+        self.emit("addi a6, t5, 0");
+        self.emit(format!("beqz a5, {}", field_end_ready_label));
+        self.emit("addi a6, t6, 0");
+        self.emit("li a0, 1");
+        self.emit(format!("beq a5, a0, {}", field_end_ready_label));
+        self.emit("addi a6, t0, 0");
+        self.emit_label(&field_end_ready_label);
+        self.emit("sub a1, a6, t4");
+        self.emit(format!("beqz a1, {}", field_done_label));
+        self.emit("li a0, 4");
+        self.emit(format!("bltu a1, a0, {}", fail_label));
+        self.emit("add a2, t3, t4");
+        self.emit_u32_le_from_base_to("t1", "a2", 0, "t2");
+        self.emit("addi a1, a1, -4");
+        self.emit(format!("bne t1, a1, {}", fail_label));
+        self.emit_label(&field_done_label);
+        self.emit("addi t4, a6, 0");
+        self.emit("addi a5, a5, 1");
+        self.emit("li a0, 3");
+        self.emit(format!("bltu a5, a0, {}", validate_loop_label));
+
+        // input_type is mandatory for v2, while lock and output_type remain
+        // optional. t5 and t6 still hold its start and end offsets.
+        self.emit("sub t1, t6, t5");
+        self.emit(format!("beqz t1, {}", fail_label));
+        self.emit("addi t1, t1, -4");
+        self.emit("add t4, t3, t5");
+
+        self.emit("# cellscript entry placement v2: copy input_type payload over the table envelope");
+        self.emit("addi t4, t4, 4");
+        self.emit_sp_addi("t5", ENTRY_WITNESS_BUFFER_OFFSET);
+        self.emit("li t2, 0");
+        self.emit_label(&copy_loop_label);
+        self.emit("sltu t6, t2, t1");
+        self.emit(format!("beqz t6, {}", copy_done_label));
+        self.emit("add t3, t4, t2");
+        self.emit("lbu t6, 0(t3)");
+        self.emit("add t3, t5, t2");
+        self.emit("sb t6, 0(t3)");
+        self.emit("addi t2, t2, 1");
+        self.emit(format!("j {}", copy_loop_label));
+        self.emit_label(&copy_done_label);
+        self.emit_stack_store("t1", ENTRY_WITNESS_SIZE_OFFSET);
     }
 
     fn emit_entry_call_target(&mut self, target: &str, outgoing_stack_arg_bytes: usize) {

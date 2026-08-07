@@ -15,4 +15,5 @@ if [[ -z "${CELLC_BIN:-}" ]]; then
     export CELLC_BIN="$TARGET_DIR/debug/cellc"
 fi
 
-python3 scripts/cellscript_syntax_combo_audit.py "$MODE" "$@"
+cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
+    --root "$ROOT_DIR" syntax-combo-audit "$MODE" "$@"

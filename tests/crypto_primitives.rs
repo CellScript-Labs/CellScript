@@ -1,8 +1,10 @@
 #![allow(dead_code)]
 
+use cellscript_ckb_adapter::{place_entry_witness_payload_before_signing, EntryWitnessPlacementAbi};
 use ckb_testtool::ckb_hash::blake2b_256;
 use ckb_testtool::ckb_types::bytes::Bytes;
 use ckb_testtool::ckb_types::packed;
+use ckb_testtool::ckb_types::prelude::{Builder, Entity};
 use sha2::{Digest, Sha256};
 
 #[path = "support/ckb_script_runner.rs"]
@@ -50,7 +52,14 @@ fn sha256d(bytes: &[u8]) -> [u8; 32] {
     sha256(&sha256(bytes))
 }
 
-fn sha256_merkle_witness(expected_root: [u8; 32]) -> Vec<u8> {
+fn canonical_entry_witness(payload: Vec<u8>) -> Bytes {
+    let base = packed::WitnessArgs::new_builder().build();
+    place_entry_witness_payload_before_signing(&base, EntryWitnessPlacementAbi::WitnessArgsInputTypeV2, Bytes::from(payload))
+        .expect("place CellScript entry payload in WitnessArgs.input_type")
+        .as_bytes()
+}
+
+fn sha256_merkle_witness(expected_root: [u8; 32]) -> Bytes {
     let leaf = std::array::from_fn::<_, 32, _>(|index| index as u8);
     let other = std::array::from_fn::<_, 32, _>(|index| (0xff - index) as u8);
     let expected_sha256 = sha256(&leaf);
@@ -69,7 +78,7 @@ fn sha256_merkle_witness(expected_root: [u8; 32]) -> Vec<u8> {
     witness.extend_from_slice(&expected_sha256d);
     witness.extend_from_slice(&expected_pair);
     witness.extend_from_slice(&expected_root);
-    witness
+    canonical_entry_witness(witness)
 }
 
 #[test]
@@ -85,7 +94,7 @@ fn bounded_sha256_sha256d_and_merkle_execute_in_ckb_vm() {
 
     let elf = compile_cellscript_source_to_elf(SHA256_MERKLE_PROGRAM, "verify", None);
     let mut fixture = build_simple_fixture(Bytes::default(), 1, 1, true, None);
-    fixture.witnesses = vec![Bytes::from(witness)];
+    fixture.witnesses = vec![witness];
     let result = execute_cellscript_script(&elf, &fixture);
 
     assert_eq!(result.exit_code, 0, "bounded SHA-256/SHA256d/Merkle helpers failed in CKB VM: {:?}", result.captured_debug);
@@ -96,7 +105,7 @@ fn bounded_sha256_sha256d_and_merkle_execute_in_ckb_vm() {
 fn bounded_merkle_rejects_wrong_root_in_ckb_vm() {
     let elf = compile_cellscript_source_to_elf(SHA256_MERKLE_PROGRAM, "verify", None);
     let mut fixture = build_simple_fixture(Bytes::default(), 1, 1, true, None);
-    fixture.witnesses = vec![Bytes::from(sha256_merkle_witness([0x5a; 32]))];
+    fixture.witnesses = vec![sha256_merkle_witness([0x5a; 32])];
     let result = execute_cellscript_script(&elf, &fixture);
 
     assert_eq!(result.exit_code, 64, "wrong Merkle root must fail closed with the stable runtime code: {:?}", result.captured_debug);
@@ -111,7 +120,7 @@ fn bounded_cell_dep_scan_and_exact_identity_execute_in_ckb_vm() {
 
     let elf = compile_cellscript_source_to_elf(BOUNDED_CELL_DEP_PROGRAM, "verify", None);
     let mut fixture = build_simple_fixture(Bytes::default(), 1, 1, true, None);
-    fixture.witnesses = vec![Bytes::from(witness)];
+    fixture.witnesses = vec![canonical_entry_witness(witness)];
     fixture.cell_deps.push(FixtureCell { capacity: 0, lock: packed::Script::default(), type_script: None, data: dep_data });
     let result = execute_cellscript_script(&elf, &fixture);
 
@@ -126,7 +135,7 @@ fn bounded_cell_dep_scan_rejects_missing_dep_in_ckb_vm() {
 
     let elf = compile_cellscript_source_to_elf(BOUNDED_CELL_DEP_PROGRAM, "verify", None);
     let mut fixture = build_simple_fixture(Bytes::default(), 1, 1, true, None);
-    fixture.witnesses = vec![Bytes::from(witness)];
+    fixture.witnesses = vec![canonical_entry_witness(witness)];
     let result = execute_cellscript_script(&elf, &fixture);
 
     assert_eq!(result.exit_code, 63, "missing CellDep must fail closed with the stable runtime code: {:?}", result.captured_debug);

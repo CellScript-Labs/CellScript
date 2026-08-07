@@ -4,6 +4,6 @@ use_try_shorthand = true
 use_small_heuristics = "Max"
 newline_style = "auto"
 edition = "2024"
-# Keep the established layout while the language edition migrates. A future
-# style-edition change can be reviewed as a dedicated mechanical diff.
+# Formatting dialect only; this is not a CellScript or Rust language
+# compatibility edition.
 style_edition = "2021"

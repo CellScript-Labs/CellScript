@@ -3,7 +3,7 @@
 
 // Rust 2024 makes let-chains available, so Clippy 1.97 newly proposes folding
 // a large legacy control-flow surface. Keep that mechanical rewrite separate
-// from the edition migration so each semantic branch remains reviewable.
+// from the edition rollout so each semantic branch remains reviewable.
 #![allow(clippy::collapsible_if, clippy::collapsible_match, clippy::ptr_arg, clippy::too_many_arguments)]
 
 pub(crate) mod aggregate_lowering;
@@ -21,6 +21,7 @@ pub mod codegen;
 #[cfg(not(feature = "wasm"))]
 pub mod debug;
 pub mod docgen;
+pub mod edition;
 pub mod error;
 pub mod flow;
 pub mod fmt;
@@ -43,6 +44,9 @@ pub mod types;
 pub mod wasm;
 
 pub use assumptions::{BuilderAssumptionMetadata, TxValidationReport, TxValidationViolation};
+pub use edition::{
+    resolve_compatibility_profile, CellScriptEdition, ResolvedCompatibilityProfile, COMPATIBILITY_PROFILE_SCHEMA, CURRENT_EDITION,
+};
 pub use proof_plan::soundness::{ProofPlanSoundnessIssue, ProofPlanSoundnessReport};
 pub use proof_plan::{EvidenceTier, ProofPlanDiagnosticMetadata, ProofPlanMetadata, ProofPlanSourceSpanMetadata};
 
@@ -56,6 +60,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 /// Compile options
 #[derive(Debug, Clone, Default)]
 pub struct CompileOptions {
+    /// Source-language edition for in-memory or standalone-file compilation.
+    /// Package compilation uses the mandatory edition in `Cell.toml`.
+    pub edition: CellScriptEdition,
     /// Optimization level (0-3)
     pub opt_level: u8,
     /// Output file path
@@ -203,11 +210,11 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
-const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v8";
-pub const METADATA_SCHEMA_VERSION: u32 = 55;
-pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 1;
+const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v9-edition";
+pub const METADATA_SCHEMA_VERSION: u32 = 57;
+pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 2;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
-pub const CONSTRAINTS_METADATA_SCHEMA_VERSION: u32 = 1;
+pub const CONSTRAINTS_METADATA_SCHEMA_VERSION: u32 = 2;
 /// Maximum UTF-8 source bytes accepted by a single compiler input.
 ///
 /// This is a process-safety boundary shared by native, LSP, and WASM callers.
@@ -215,6 +222,12 @@ pub const MAX_SOURCE_BYTES: usize = 1024 * 1024;
 const STACK_COLLECTION_BACKING_BYTES: usize = 256;
 pub const ENTRY_WITNESS_ABI: &str = "cellscript-entry-witness-v1";
 pub(crate) const ENTRY_WITNESS_ABI_MAGIC: &[u8; 8] = b"CSARGv1\0";
+/// Versioned CKB placement contract for parameterized entry payloads.
+pub const ENTRY_WITNESS_PLACEMENT_ABI: &str = "cellscript-witnessargs-input-type-v2";
+/// Canonical `WitnessArgs` field owned by the CellScript entry placement ABI.
+pub const ENTRY_WITNESS_PLACEMENT_FIELD: &str = "input_type";
+/// Script-group-relative witness lookup order used by generated CKB entries.
+pub const ENTRY_WITNESS_PLACEMENT_SOURCE: &str = "group-input-0-then-group-output-0";
 pub const CKB_DEFAULT_HASH_PERSONALIZATION: &[u8; 16] = b"ckb-default-hash";
 pub const CKB_BLANK_HASH: [u8; 32] = [
     68, 244, 198, 151, 68, 213, 248, 197, 93, 100, 32, 98, 148, 157, 202, 228, 155, 196, 231, 239, 67, 211, 136, 197, 161, 47, 66,
@@ -284,7 +297,7 @@ impl TargetProfile {
                 },
                 header_abi: "ckb-header".to_string(),
                 scheduler_abi: "none".to_string(),
-                witness_abi: "ckb-molecule-witness-args+cellscript-entry-witness-v1".to_string(),
+                witness_abi: "ckb-molecule-witness-args-input-type-v2+cellscript-entry-witness-v1".to_string(),
                 lock_args_abi: "ckb-script-args-typed-fixed-bytes".to_string(),
                 source_encoding: "ckb-source-group-high-bit".to_string(),
                 spawn_ipc_abi: "ckb-vm-v2-spawn-ipc-syscalls-2601-2608".to_string(),
@@ -384,6 +397,8 @@ pub struct CompileMetadata {
     #[serde(default = "missing_metadata_component_schema_version")]
     pub constraints_metadata_schema_version: u32,
     pub compiler_version: String,
+    pub edition: CellScriptEdition,
+    pub compatibility_profile: ResolvedCompatibilityProfile,
     pub module: String,
     pub artifact_format: String,
     pub target_profile: TargetProfileMetadata,
@@ -597,6 +612,8 @@ pub struct TemplateLayoutLeafSchemaMetadata {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ConstraintsMetadata {
+    pub edition: CellScriptEdition,
+    pub compatibility_profile: String,
     pub target_profile: String,
     pub status: String,
     pub entry_abi: Vec<EntryAbiConstraintsMetadata>,
@@ -1100,6 +1117,24 @@ pub fn validate_compile_metadata(metadata: &CompileMetadata, artifact_format: Ar
             "metadata compiler_version '{}' does not match current compiler '{}'",
             metadata.compiler_version, VERSION
         )));
+    }
+    let primitive_assurance = (metadata.compatibility_profile.primitive_assurance != "default")
+        .then_some(metadata.compatibility_profile.primitive_assurance.as_str());
+    let expected_compatibility_profile =
+        resolve_compatibility_profile(metadata.edition, &metadata.target_profile.name, primitive_assurance);
+    if metadata.compatibility_profile != expected_compatibility_profile {
+        return Err(CompileError::without_span(format!(
+            "metadata compatibility_profile '{}' does not match the resolved compatibility axes for edition {} and target profile '{}'",
+            metadata.compatibility_profile.id, metadata.edition, metadata.target_profile.name
+        )));
+    }
+    if !metadata.constraints.status.is_empty()
+        && (metadata.constraints.edition != metadata.edition
+            || metadata.constraints.compatibility_profile != metadata.compatibility_profile.id)
+    {
+        return Err(CompileError::without_span(
+            "metadata constraints edition/compatibility_profile does not match the top-level compile identity",
+        ));
     }
 
     if metadata.artifact_format != artifact_format.display_name() {
@@ -2038,6 +2073,8 @@ fn constraints_metadata(
     .to_string();
 
     ConstraintsMetadata {
+        edition: metadata.edition,
+        compatibility_profile: metadata.compatibility_profile.id.clone(),
         target_profile: metadata.target_profile.name.clone(),
         status,
         entry_abi,
@@ -5052,6 +5089,7 @@ pub struct LoadedModule {
     pub path: Utf8PathBuf,
     pub source: String,
     pub ast: ast::Module,
+    pub edition: CellScriptEdition,
 }
 
 #[derive(Debug)]
@@ -5213,6 +5251,7 @@ fn load_project_for_entry_diagnostics(
 fn load_virtual_project_for_entry_diagnostics(
     sources: &[InMemorySource],
     entry_path: &str,
+    edition: CellScriptEdition,
 ) -> std::result::Result<LoadedProject, Vec<CompileError>> {
     if sources.is_empty() {
         return Err(vec![CompileError::without_span("multi-file compile requires at least one source")]);
@@ -5237,7 +5276,7 @@ fn load_virtual_project_for_entry_diagnostics(
             diagnostics.push(CompileError::without_span(format!("duplicate multi-file compile source path '{}'", source.path)));
             continue;
         }
-        match parse_loaded_module_diagnostics(Utf8PathBuf::from(source.path.clone()), source.source.clone()) {
+        match parse_loaded_module_diagnostics(Utf8PathBuf::from(source.path.clone()), source.source.clone(), edition) {
             Ok(module) => modules.push(module),
             Err(errors) => diagnostics.extend(errors),
         }
@@ -5258,6 +5297,7 @@ fn load_project_modules_for_entry(entry_path: &Utf8Path, entry_source_override: 
     source_paths
         .into_iter()
         .map(|path| {
+            let edition = source_edition(&path)?;
             let source = if path == entry_path {
                 if let Some(source) = entry_source_override {
                     source.to_string()
@@ -5267,7 +5307,7 @@ fn load_project_modules_for_entry(entry_path: &Utf8Path, entry_source_override: 
             } else {
                 read_module_source(&path)?
             };
-            parse_loaded_module(path, source)
+            parse_loaded_module(path, source, edition)
         })
         .collect()
 }
@@ -5281,6 +5321,13 @@ fn load_project_modules_for_entry_diagnostics(
     let mut modules = Vec::with_capacity(source_paths.len());
     let mut diagnostics = Vec::new();
     for path in source_paths {
+        let edition = match source_edition(&path) {
+            Ok(edition) => edition,
+            Err(error) => {
+                diagnostics.push(error);
+                continue;
+            }
+        };
         let source = if path == entry_path {
             if let Some(source) = entry_source_override {
                 source.to_string()
@@ -5302,7 +5349,7 @@ fn load_project_modules_for_entry_diagnostics(
                 }
             }
         };
-        match parse_loaded_module_diagnostics(path, source) {
+        match parse_loaded_module_diagnostics(path, source, edition) {
             Ok(module) => modules.push(module),
             Err(errors) => diagnostics.extend(errors),
         }
@@ -5319,17 +5366,28 @@ fn read_module_source(path: &Utf8Path) -> Result<String> {
         .map_err(|e| CompileError::new(format!("failed to read module '{}': {}", path, e), error::Span::default()))
 }
 
-fn parse_loaded_module(path: Utf8PathBuf, source: String) -> Result<LoadedModule> {
+fn parse_loaded_module(path: Utf8PathBuf, source: String, edition: CellScriptEdition) -> Result<LoadedModule> {
     let tokens = lexer::lex(&source).map_err(|e| e.with_file(path.clone()))?;
     let ast = parser::parse(&tokens).map_err(|e| e.with_file(path.clone()))?;
-    Ok(LoadedModule { path, source, ast })
+    Ok(LoadedModule { path, source, ast, edition })
 }
 
-fn parse_loaded_module_diagnostics(path: Utf8PathBuf, source: String) -> std::result::Result<LoadedModule, Vec<CompileError>> {
+fn parse_loaded_module_diagnostics(
+    path: Utf8PathBuf,
+    source: String,
+    edition: CellScriptEdition,
+) -> std::result::Result<LoadedModule, Vec<CompileError>> {
     let tokens = lexer::lex(&source).map_err(|e| vec![e.with_file(path.clone())])?;
     let ast = parser::parse_diagnostics(&tokens)
         .map_err(|errors| errors.into_iter().map(|error| error.with_file(path.clone())).collect::<Vec<_>>())?;
-    Ok(LoadedModule { path, source, ast })
+    Ok(LoadedModule { path, source, ast, edition })
+}
+
+fn source_edition(path: &Utf8Path) -> Result<CellScriptEdition> {
+    find_package_root(path)?
+        .map(|root| load_manifest(&root).map(|manifest| manifest.package.edition))
+        .transpose()
+        .map(|edition| edition.unwrap_or(CURRENT_EDITION))
 }
 
 fn build_module_resolver_from_loaded_modules(modules: &[LoadedModule]) -> Result<ModuleResolver> {
@@ -5406,7 +5464,7 @@ pub fn compile_fungible_type_group_entry_for(
 }
 
 /// Only generate compile metadata, without asm/elf artifact.
-pub fn compile_metadata(source: &str, target: Option<String>) -> Result<CompileMetadata> {
+pub fn compile_metadata(source: &str, edition: CellScriptEdition, target: Option<String>) -> Result<CompileMetadata> {
     let tokens = lexer::lex(source)?;
     let ast = parser::parse(&tokens)?;
     let artifact_format = ArtifactFormat::from_target(target.as_deref().unwrap_or(DEFAULT_TARGET))?;
@@ -5414,7 +5472,7 @@ pub fn compile_metadata(source: &str, target: Option<String>) -> Result<CompileM
     types::check(&ast)?;
     flow::check(&ast)?;
     let ir = ir::generate(&ast)?;
-    let mut metadata = compile_metadata_from_ir(&ir, artifact_format, target_profile);
+    let mut metadata = compile_metadata_from_ir(&ir, artifact_format, target_profile, edition, None);
     bind_source_metadata(&mut metadata, vec![source_unit_from_bytes("<memory>", "memory", source.as_bytes())]);
     validate_compile_metadata(&metadata, artifact_format)?;
     Ok(metadata)
@@ -5444,7 +5502,11 @@ pub struct InMemorySource {
 /// Lexer failures remain fatal single diagnostics. Parser recovery collects
 /// independent item and statement errors, then semantic phases collect type,
 /// flow, and IR diagnostics when parsing succeeds.
-pub fn compile_metadata_with_diagnostics(source: &str, target: Option<String>) -> CompileMetadataDiagnosticReport {
+pub fn compile_metadata_with_diagnostics(
+    source: &str,
+    edition: CellScriptEdition,
+    target: Option<String>,
+) -> CompileMetadataDiagnosticReport {
     let tokens = match lexer::lex(source) {
         Ok(tokens) => tokens,
         Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error] },
@@ -5476,7 +5538,7 @@ pub fn compile_metadata_with_diagnostics(source: &str, target: Option<String>) -
             return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
         }
     };
-    let mut metadata = compile_metadata_from_ir(&ir, artifact_format, target_profile);
+    let mut metadata = compile_metadata_from_ir(&ir, artifact_format, target_profile, edition, None);
     bind_source_metadata(&mut metadata, vec![source_unit_from_bytes("<memory>", "memory", source.as_bytes())]);
     if let Err(error) = validate_compile_metadata(&metadata, artifact_format) {
         diagnostics.push(error);
@@ -5489,13 +5551,14 @@ pub fn compile_metadata_with_diagnostics(source: &str, target: Option<String>) -
 pub fn compile_sources_metadata_with_diagnostics(
     sources: &[InMemorySource],
     entry_path: &str,
+    edition: CellScriptEdition,
     target: Option<String>,
 ) -> CompileMetadataDiagnosticReport {
-    let project = match load_virtual_project_for_entry_diagnostics(sources, entry_path) {
+    let project = match load_virtual_project_for_entry_diagnostics(sources, entry_path, edition) {
         Ok(project) => project,
         Err(diagnostics) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics },
     };
-    let options = CompileOptions { target, ..CompileOptions::default() };
+    let options = CompileOptions { edition, target, ..CompileOptions::default() };
     let artifact_format = match ArtifactFormat::from_target(resolve_target(&options, None)) {
         Ok(format) => format,
         Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error] },
@@ -5515,7 +5578,7 @@ pub fn compile_sources_metadata_with_diagnostics(
             return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
         }
     };
-    let mut metadata = compile_metadata_from_ir(&ir, artifact_format, target_profile);
+    let mut metadata = compile_metadata_from_ir(&ir, artifact_format, target_profile, edition, None);
     let source_units = sources
         .iter()
         .map(|source| {
@@ -5567,16 +5630,19 @@ pub fn compile_path_metadata_with_diagnostics_for_source<P: AsRef<Utf8Path>>(
 
 fn compile_file_metadata_with_diagnostics(
     path: &Utf8Path,
-    options: CompileOptions,
+    mut options: CompileOptions,
     entry_source_override: Option<&str>,
 ) -> CompileMetadataDiagnosticReport {
-    let project = match load_project_for_entry_diagnostics(path, entry_source_override) {
-        Ok(project) => project,
-        Err(diagnostics) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics },
-    };
     let manifest = match find_package_root(path).and_then(|root| root.map(|root| load_manifest(&root)).transpose()) {
         Ok(manifest) => manifest,
         Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error] },
+    };
+    if let Some(manifest) = manifest.as_ref() {
+        options.edition = manifest.package.edition;
+    }
+    let project = match load_project_for_entry_diagnostics(path, entry_source_override) {
+        Ok(project) => project,
+        Err(diagnostics) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics },
     };
     let build = manifest.as_ref().map(|manifest| &manifest.build);
 
@@ -5610,7 +5676,8 @@ fn compile_file_metadata_with_diagnostics(
             return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
         }
     };
-    let mut metadata = compile_metadata_from_ir(&ir, artifact_format, target_profile);
+    let mut metadata =
+        compile_metadata_from_ir(&ir, artifact_format, target_profile, options.edition, options.primitive_compat.as_deref());
     match collect_source_units_for_compile_file(path).and_then(|source_units| {
         bind_source_metadata(&mut metadata, source_units);
         if let Some(manifest) = manifest.as_ref() {
@@ -5696,7 +5763,7 @@ action bad_two() -> bool {
         return 1
 }
 "#;
-        let report = compile_metadata_with_diagnostics(source, None);
+        let report = compile_metadata_with_diagnostics(source, CURRENT_EDITION, None);
         assert!(report.metadata.is_none());
         assert_eq!(report.diagnostics.len(), 2);
         assert!(report.diagnostics.iter().any(|error| error.message.contains("expected U64, found Bool")));
@@ -5715,7 +5782,7 @@ action bad() -> bool {
         return true
 }
 "#;
-        let report = compile_metadata_with_diagnostics(source, None);
+        let report = compile_metadata_with_diagnostics(source, CURRENT_EDITION, None);
         assert!(report.metadata.is_none());
         assert_eq!(report.diagnostics.len(), 2);
         assert!(report.diagnostics.iter().any(|error| error.message.contains("expected '=', found 'true'")));
@@ -5754,7 +5821,7 @@ action also_bad() -> bool {
                 .to_string(),
             },
         ];
-        let report = compile_sources_metadata_with_diagnostics(&sources, "src/main.cell", None);
+        let report = compile_sources_metadata_with_diagnostics(&sources, "src/main.cell", CURRENT_EDITION, None);
         assert!(report.metadata.is_none());
         assert_eq!(report.diagnostics.len(), 2);
         assert!(report.diagnostics.iter().any(|error| error.file.as_ref().is_some_and(|file| file.as_str() == "src/main.cell")));
@@ -5773,7 +5840,7 @@ action bad() -> bool {
         return true
 }
 "#;
-        let report = compile_metadata_with_diagnostics(source, None);
+        let report = compile_metadata_with_diagnostics(source, CURRENT_EDITION, None);
         assert!(report.metadata.is_none());
         assert_eq!(report.diagnostics.len(), 2);
         assert!(report.diagnostics.iter().any(|error| error.message.contains("expected U64, found Bool")));
@@ -5790,7 +5857,7 @@ action bad() -> bool {
         return 1
 }
 "#;
-        let report = compile_metadata_with_diagnostics(source, None);
+        let report = compile_metadata_with_diagnostics(source, CURRENT_EDITION, None);
         assert!(report.metadata.is_none());
         assert_eq!(report.diagnostics.len(), 1);
         let diagnostic = &report.diagnostics[0];
@@ -5827,7 +5894,7 @@ action issue_two(amount: u64) -> Token {
         return out
 }
 "#;
-        let report = compile_metadata_with_diagnostics(source, None);
+        let report = compile_metadata_with_diagnostics(source, CURRENT_EDITION, None);
         assert!(report.metadata.is_none());
         assert_eq!(report.diagnostics.len(), 2);
         assert!(report.diagnostics.iter().any(|error| error.message.contains("action 'issue_one'")));
@@ -5900,7 +5967,8 @@ fn compile_ast_with_build(
     };
     let ir = scoped_ir.as_ref().unwrap_or(&ir);
 
-    let mut metadata = compile_metadata_from_ir(ir, artifact_format, target_profile);
+    let mut metadata =
+        compile_metadata_from_ir(ir, artifact_format, target_profile, options.edition, options.primitive_compat.as_deref());
     let target_policy_violations = target_profile_artifact_policy_violations(&metadata, target_profile);
     if !target_policy_violations.is_empty() {
         return Err(CompileError::without_span(format!(
@@ -6048,11 +6116,15 @@ pub fn compile_path_with_fungible_type_group_entry_for<P: AsRef<Utf8Path>>(
 
 fn compile_file_with_entry_scope<P: AsRef<Utf8Path>>(
     path: P,
-    options: CompileOptions,
+    mut options: CompileOptions,
     entry_scope: Option<CompileEntryScope>,
 ) -> Result<CompileResult> {
     let path = path.as_ref();
     let path = canonical_utf8_path(path)?;
+    let manifest = find_package_root(&path)?.map(|root| load_manifest(&root)).transpose()?;
+    if let Some(manifest) = manifest.as_ref() {
+        options.edition = manifest.package.edition;
+    }
     let source_units = collect_source_units_for_compile_file(&path)?;
     let cache_units = collect_cache_units_for_compile_file(&path, &source_units)?;
 
@@ -6065,7 +6137,6 @@ fn compile_file_with_entry_scope<P: AsRef<Utf8Path>>(
     }
 
     let project = load_project_for_entry(&path, None)?;
-    let manifest = find_package_root(&path)?.map(|root| load_manifest(&root)).transpose()?;
     let diagnostics = project_frontend_diagnostics(&project, &options, manifest.is_some());
     if diagnostics.iter().any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error) {
         return Err(diagnostics_to_compile_error(diagnostics));
@@ -6200,6 +6271,10 @@ fn incremental_cache_key(cache_units: &[SourceUnitMetadata], options: &CompileOp
     key_input.push_str(&format!("-O{}", options.opt_level));
     key_input.push_str(&format!("-{}", options.target.as_deref().unwrap_or("default")));
     key_input.push_str(&format!("-{}", options.target_profile.as_deref().unwrap_or("default")));
+    key_input.push_str(&format!("-edition-{}", options.edition));
+    let target_profile = options.target_profile.as_deref().unwrap_or(DEFAULT_TARGET_PROFILE);
+    let compatibility_profile = resolve_compatibility_profile(options.edition, target_profile, options.primitive_compat.as_deref());
+    key_input.push_str(&format!("-compatibility-profile-{}", compatibility_profile.id));
     key_input.push_str(&format!("-debug{}", options.debug));
     key_input.push_str(&format!("-primitive-{}", options.primitive_compat.as_deref().unwrap_or("default")));
     hex_encode(&ckb_blake2b256(key_input.as_bytes()))
@@ -6495,7 +6570,13 @@ fn metadata_output_path_from_artifact(artifact_path: &Utf8Path) -> Utf8PathBuf {
     artifact_path.with_file_name(metadata_name)
 }
 
-fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, target_profile: TargetProfile) -> CompileMetadata {
+fn compile_metadata_from_ir(
+    ir: &ir::IrModule,
+    artifact_format: ArtifactFormat,
+    target_profile: TargetProfile,
+    edition: CellScriptEdition,
+    primitive_assurance: Option<&str>,
+) -> CompileMetadata {
     let type_layouts = metadata_type_layouts(ir);
     let type_defs = metadata_type_defs_by_name(ir);
     let flow_states = metadata_flow_states(ir);
@@ -6554,12 +6635,15 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
     let transaction_view_handles = transaction_view_handle_metadata(ir);
     let borrow_regions = borrow_region_metadata(ir);
     let capability_proofs = capability_proof_metadata(ir);
+    let compatibility_profile = resolve_compatibility_profile(edition, target_profile.name(), primitive_assurance);
     let mut metadata = CompileMetadata {
         metadata_schema_version: METADATA_SCHEMA_VERSION,
         source_metadata_schema_version: SOURCE_METADATA_SCHEMA_VERSION,
         artifact_metadata_schema_version: ARTIFACT_METADATA_SCHEMA_VERSION,
         constraints_metadata_schema_version: CONSTRAINTS_METADATA_SCHEMA_VERSION,
         compiler_version: VERSION.to_string(),
+        edition,
+        compatibility_profile,
         module: ir.name.clone(),
         artifact_format: artifact_format.display_name().to_string(),
         target_profile: target_profile.metadata(artifact_format),
@@ -18068,7 +18152,8 @@ mod tests {
         crate::types::check(&ast).unwrap();
         crate::flow::check(&ast).unwrap();
         let ir = ir::generate(&ast).unwrap();
-        let metadata = crate::compile_metadata_from_ir(&ir, ArtifactFormat::RiscvAssembly, target_profile);
+        let metadata =
+            crate::compile_metadata_from_ir(&ir, ArtifactFormat::RiscvAssembly, target_profile, crate::CURRENT_EDITION, None);
         crate::validate_compile_metadata(&metadata, ArtifactFormat::RiscvAssembly).unwrap();
         metadata
     }
@@ -26138,7 +26223,42 @@ action inspect() -> u64 {
         let result =
             compile(SIMPLE_PROGRAM, CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() }).unwrap();
 
+        assert_eq!(result.metadata.edition, crate::CURRENT_EDITION);
+        assert_eq!(result.metadata.compatibility_profile.schema, crate::COMPATIBILITY_PROFILE_SCHEMA);
+        assert_eq!(result.metadata.compatibility_profile.source_semantics, crate::CURRENT_EDITION.source_semantics());
+        assert_eq!(result.metadata.compatibility_profile.metadata_schema_version, crate::METADATA_SCHEMA_VERSION);
+        assert_eq!(result.metadata.compatibility_profile.source_metadata_schema_version, crate::SOURCE_METADATA_SCHEMA_VERSION);
+        assert_eq!(result.metadata.compatibility_profile.artifact_metadata_schema_version, crate::ARTIFACT_METADATA_SCHEMA_VERSION);
+        assert_eq!(
+            result.metadata.compatibility_profile.constraints_metadata_schema_version,
+            crate::CONSTRAINTS_METADATA_SCHEMA_VERSION
+        );
+        assert_eq!(result.metadata.compatibility_profile.entry_witness_payload_abi, crate::ENTRY_WITNESS_ABI);
+        assert_eq!(result.metadata.compatibility_profile.entry_witness_placement_abi, crate::ENTRY_WITNESS_PLACEMENT_ABI);
+        assert_eq!(result.metadata.compatibility_profile.entry_witness_placement_field, crate::ENTRY_WITNESS_PLACEMENT_FIELD);
+        assert_eq!(result.metadata.constraints.edition, crate::CURRENT_EDITION);
+        assert_eq!(result.metadata.constraints.compatibility_profile, result.metadata.compatibility_profile.id);
         result.validate().unwrap();
+    }
+
+    #[test]
+    fn compile_result_validation_rejects_tampered_compatibility_profile() {
+        let mut result = compile(SIMPLE_PROGRAM, CompileOptions::default()).unwrap();
+        result.metadata.compatibility_profile.entry_witness_placement_source = "global-input-0".to_string();
+
+        let err = result.validate().unwrap_err();
+
+        assert!(err.message.contains("compatibility_profile"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_result_validation_rejects_tampered_profile_schema_axis() {
+        let mut result = compile(SIMPLE_PROGRAM, CompileOptions::default()).unwrap();
+        result.metadata.compatibility_profile.metadata_schema_version -= 1;
+
+        let err = result.validate().unwrap_err();
+
+        assert!(err.message.contains("compatibility_profile"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -26342,6 +26462,7 @@ action mint(amount: u64) -> Receipt {
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "deploy_manifest"
 version = "0.1.0"
 entry = "src/main.cell"
@@ -26435,6 +26556,7 @@ action mint(amount: u64) -> Token {
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "conflicting_cell_dep_location"
 version = "0.1.0"
 entry = "src/main.cell"
@@ -26481,6 +26603,7 @@ action add(a: u64, b: u64) -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "incomplete_cell_dep_location"
 version = "0.1.0"
 entry = "src/main.cell"
@@ -26525,6 +26648,7 @@ action add(a: u64, b: u64) -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "bad_deploy_manifest"
 version = "0.1.0"
 entry = "src/main.cell"
@@ -26563,6 +26687,7 @@ action add(a: u64, b: u64) -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "bad_hash_type_manifest"
 version = "0.1.0"
 entry = "src/main.cell"
@@ -28400,6 +28525,7 @@ flow Offer.state {
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "demo"
 version = "0.1.0"
 source_roots = ["src", "shared"]
@@ -31168,14 +31294,24 @@ action spend(amount: u64) -> u64 {
 
         assert!(asm.contains(".global _cellscript_entry"), "parameterized entrypoints need a generated ELF entry wrapper:\n{}", asm);
         assert!(
-            asm.contains("# cellscript entry abi: _cellscript_entry loads Input#0 witness args for spend and falls back to GroupInput#0/GroupOutput#0"),
+            asm.contains(
+                "# cellscript entry abi: _cellscript_entry loads GroupInput#0 witness args for spend and falls back to GroupOutput#0"
+            ),
             "entry wrapper did not document its target ABI:\n{}",
             asm
         );
         assert!(
-            asm.contains("# cellscript abi: LOAD_WITNESS reason=entry_args source=Input index=0")
-                && asm.contains("# cellscript abi: LOAD_WITNESS reason=entry_args_fallback_group_input source=GroupInput index=0"),
-            "entry wrapper did not load positional arguments from Input witness with GroupInput fallback:\n{}",
+            asm.contains("# cellscript abi: LOAD_WITNESS reason=entry_args source=GroupInput index=0")
+                && asm.contains("# cellscript abi: LOAD_WITNESS reason=entry_args_fallback_group_output source=GroupOutput index=0")
+                && !asm.contains("LOAD_WITNESS reason=entry_args source=Input index=0"),
+            "entry wrapper did not use script-group-relative witness sourcing:\n{}",
+            asm
+        );
+        assert!(
+            asm.contains("# cellscript entry placement profile: validate the exact three-field WitnessArgs table")
+                && asm.contains("# cellscript entry placement v2: copy input_type payload over the table envelope")
+                && !asm.contains("detect raw-v1"),
+            "entry wrapper did not expose the versioned WitnessArgs.input_type placement ABI:\n{}",
             asm
         );
         assert!(
@@ -31409,6 +31545,7 @@ action raw(data: Vec<u8>) -> u64 {
             dep_root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "dep_pkg"
 version = "0.1.0"
 "#,
@@ -31430,6 +31567,7 @@ resource Token has store, replace, relock, consume, burn {
             app_root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "app_pkg"
 version = "0.1.0"
 
@@ -31473,6 +31611,7 @@ action pass_through(token: Token) -> Token {
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "nested_layout"
 version = "0.1.0"
 "#,
@@ -31528,6 +31667,7 @@ action inspect(witness signed: Signed) -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -31562,6 +31702,7 @@ action ping() -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -31595,6 +31736,7 @@ action ping() -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -31632,6 +31774,7 @@ action ping() -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "demo"
 version = "0.1.0"
 
@@ -31669,6 +31812,7 @@ action ping() -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "demo"
 version = "0.1.0"
 
@@ -31706,6 +31850,7 @@ action ping() -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "demo"
 version = "0.1.0"
 
@@ -31744,6 +31889,7 @@ action ping() -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "demo"
 version = "0.1.0"
 
@@ -31782,6 +31928,7 @@ action ping() -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "demo"
 version = "0.1.0"
 
@@ -31818,6 +31965,7 @@ action ping() -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "demo"
 version = "0.1.0"
 
@@ -31855,6 +32003,7 @@ action ping() -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -31889,6 +32038,7 @@ action ping() -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "demo"
 version = "0.1.0"
 entry = "contracts/main.cell"
@@ -31940,6 +32090,7 @@ action pass(token: Token) -> Token {
             dep_root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "dep_pkg"
 version = "0.1.0"
 
@@ -31965,6 +32116,7 @@ action dep_ping() -> u64 {
             app_root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "app_pkg"
 version = "0.1.0"
 
@@ -32001,6 +32153,7 @@ action app_ping() -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "demo"
 version = "0.1.0"
 entry = "contracts/main.cell"
@@ -32049,6 +32202,7 @@ action pass(token: Token) -> Token {
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "bad-import"
 version = "0.1.0"
 entry = "src/main.cell"
@@ -32096,6 +32250,7 @@ action pass(token: Token) -> Token {
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "unreferenced-bad"
 version = "0.1.0"
 entry = "src/main.cell"
@@ -32143,6 +32298,7 @@ action broken() -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "cache-drift"
 version = "0.1.0"
 entry = "src/main.cell"
@@ -32206,6 +32362,7 @@ resource Pair {
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "demo"
 version = "0.1.0"
 entry = "contracts/main.cell"
@@ -32242,6 +32399,7 @@ action ping() -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+edition = "2026"
 name = "demo"
 version = "0.1.0"
 entry = "contracts/main.cell"
@@ -32795,7 +32953,7 @@ resource Token has store, create {
                 .to_string(),
             },
         ];
-        let report = crate::compile_sources_metadata_with_diagnostics(&sources, "src/main.cell", None);
+        let report = crate::compile_sources_metadata_with_diagnostics(&sources, "src/main.cell", crate::CURRENT_EDITION, None);
         assert!(report.diagnostics.is_empty(), "unexpected diagnostics: {:?}", report.diagnostics);
         let metadata = report.metadata.expect("imported validity metadata");
         let token = metadata.types.iter().find(|ty| ty.name == "Token").expect("imported Token metadata");

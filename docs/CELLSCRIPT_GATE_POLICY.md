@@ -14,14 +14,22 @@ deciding whether a change is ready.
 
 | Mode | When to run | Evidence boundary |
 |---|---|---|
-| `dev` | Local development before pushing | Formatting, all workspace-package Rust checks (including `cellscript-tools`), strict backend quick audit, syntax-combination quick audit, parity-gated skill-pack freshness, README-linked CellScript doc Status freshness, local markdown link check, whitespace diff check |
-| `ci` | Pull requests, pushes, and routine merge readiness | Tests and clippy for the compiler, Fiber adapter, CKB adapter, WASM crate, CKB SDK builder example, and `cellscript-tools`; strict backend CI audit; package verification; parity-gated skill-pack/doc freshness; local-link and script syntax checks |
+| `dev` | Local development before pushing | Rust formatting, canonical CellScript example formatting, all workspace-package Rust checks (including `cellscript-tools`) plus the independent Registry verifier crate; reproducible Registry Type Script build and CKB-VM tests; strict backend quick audit, syntax-combination quick audit, parity-gated skill-pack freshness, README-linked CellScript doc Status freshness, local markdown link check, whitespace diff check |
+| `ci` | Pull requests, pushes, and routine merge readiness | Canonical CellScript example formatting; tests and clippy for the compiler, Fiber adapter, CKB adapter, WASM crate, CKB SDK builder example, `cellscript-tools`, and the Registry verifier; reproducible Registry Type Script identity plus CKB-VM tests and clippy; Registry API typecheck/tests, Node API/verifier bundles, and dry-run Worker build; strict backend CI audit; package verification; parity-gated skill-pack/doc freshness; local-link and script syntax checks |
 | `backend` | Changes touching IR, codegen, assembler, ABI, ELF, or RISC-V behavior | Full Rust tests, clippy, and strict backend full audit, including stateful CKB scenarios |
 | `release` | Nightly/stable release candidates and any production CKB claim | Clean tagged source plus `ci`, a fresh size-gated website WASM rebuild, tooling/docs and VS Code checks, pinned-CKB acceptance harnesses, public builder-contract generation, and mandatory stateful scenario/action coverage |
 | `release-quick` | Wrapper compatibility and local compile-only preflight | `ci` plus compile-only production acceptance; not external live/devnet evidence |
 
 `release-quick` is kept for `scripts/cellscript_ckb_release_gate.sh quick`.
 Use `release` for any production or external live/devnet claim.
+
+`dev` and `ci` run `cellc fmt --check` against
+`examples/language/canonical_style.cell`. The formatter's comma-terminated
+field form is the canonical checked-in surface; the parser may continue to
+accept comma-free fields as compatibility input. The same modes reject raw
+`u64` maximum and `MAX - delta` magic literals in the checked NFT, timelock,
+atomic-swap, and multi-phase-DAO example pairs; boundary arithmetic must use
+their local `U64_MAX` constants.
 
 Both release modes fail before doing expensive work unless the CellScript tree
 is completely clean, including untracked files. CI additionally requires the
@@ -30,13 +38,79 @@ the same version as the root `[package].version`. The GitHub Release workflow
 runs the full `release` gate first, and binary builds plus publication depend on
 that job succeeding.
 
-The 0.23 tooling migration is staged. `cellscript-tools` currently ports only
-`check_cellscript_skill_pack.py` and
-`validate_cellscript_tooling_release.py`. The relevant dev, CI, and release
-checks run each Rust port beside the retained Python implementation and require
-byte-identical stdout plus the same exit code. Other Python tooling remains the
-authoritative implementation until its own parity evidence exists; a partial
-port is not sufficient grounds for deleting the Python baseline.
+The 0.23 tooling migration is complete. `cellscript-tools` owns the backend,
+syntax-combination, skill-pack, tooling-release, CKB production-evidence,
+NovaSeal, and Evolving-DOB gate logic. Website data generation is implemented
+by Node scripts in `website/scripts/`. Dev, CI, backend, and release gates have
+no Python runtime dependency and reject tracked Python source files.
+
+The 0.23 line also has one edition contract: every package declares
+`edition = "2026"`, and all emitted evidence binds the resolved compatibility
+profile. The edition owns source semantics only; target, primitive assurance,
+metadata schemas, and entry/witness ABIs remain independent profile axes.
+Missing/non-2026 editions and superseded lock, deployment, receipt, builder, or
+raw-witness placement identities are rejected rather than migrated. See
+[`CELLSCRIPT_EDITION_POLICY.md`](CELLSCRIPT_EDITION_POLICY.md). Edition-owned
+source changes require complete frontend closure. Independently versioned ABI
+changes require the `backend` gate in addition to ordinary `dev` and `ci`
+coverage.
+
+The `ci` gate also typechecks/tests `services/registry-api`, builds both Node
+entrypoints, performs its Wrangler dry-run build, and runs tests and clippy for
+the independent real-compiler Registry verifier crate. `dev` at least checks
+that verifier crate. This pins the single `/v1/artifacts` contract, orthogonal
+verification/deployment/availability states, generic artifact bundles,
+mainnet deployment evidence, additive migrations, worker boundary, and
+database/static-object shape to the CLI-generated Registry entry. It is local
+service coverage, not evidence
+that Cloudflare, R2, Hyperdrive, Neon, DNS, or a production deployment works.
+The CLI coverage includes both first-publish admission paths: the explicit
+`cellc auth capability submit`, `cellc auth namespace claim`, then
+`cellc publish` sequence, and the short-lived `cellc publish --authorise`
+browser session in which the private publishing key remains in the local OS
+keychain as pending while the CLI polls with a one-time secret, becomes active
+only after the server returns the matching key ID, and is removed only after
+the server confirms terminal cancellation or pending-session expiry. A local
+polling deadline performs a final authoritative read and preserves the pending
+key if the result is still pending or unreachable. Completed sessions remain
+poll-readable for a bounded 24-hour recovery window. The browser token survives
+a same-tab refresh but is cleared after completion or expiry; the website build
+runs the fragment-store-refresh-clear lifecycle regression. Browser-session
+completion is one atomic admission boundary across
+nonce consumption, publishing-key registration, namespace claim/review,
+session state, and audit events. API tests cover expiry, wrong browser/poll/
+challenge tokens, challenge replay, concurrent completion, conflicting
+namespace ownership, review-pending admission, post-expiry terminal reads, and
+injected mid-transaction failure. Publisher maintenance additionally uses the capability-signed
+`cellc artifact set-availability` path, and `cellc artifact cell-dep` performs a
+fresh mainnet liveness check before producing a transaction-builder descriptor.
+Independent reproducibility builders use `cellc auth reproducer create`; CLI
+coverage verifies that its public enrollment contains an importable P-256 SPKI,
+that private PKCS#8 material never appears in JSON output, and that explicit CI
+secret files are mode 0600 on Unix and no-overwrite.
+Capability registration does not silently claim a namespace;
+the claim response must be `active` before the write API accepts a version.
+Registry API tests pin both accepted publisher roots: JoyID signatures under
+`principal_type = joyid_ckb` and recoverable CKB message signatures under
+`principal_type = ckb_secp256k1`. CLI fixtures use the generic
+`--wallet-signature` surface; the former `--joyid-signature` spelling remains a
+visible compatibility alias and does not define a second request shape.
+Explicit `--allow-unverified` and `--allow-quarantined` install choices are
+persisted per dependency so the lock refresh and later builds exercise the
+same auditable resolver policy.
+
+Both `dev` and `ci` also build the independent
+`contracts/registry-type-script` crate for
+`riscv64imac-unknown-none-elf`, strip it with the pinned toolchain, verify the
+tracked canonical ELF's SHA-256 and CKB data hash, and execute that ELF's
+positive and negative lifecycle matrix in CKB-VM through `ckb-testtool`.
+Linux x86_64 additionally requires the fresh build to match the tracked ELF
+byte-for-byte. Other build hosts record their host artifact hash and make no
+cross-host reproduction claim; the pinned container builder provides that
+canonical check there.
+Passing this local boundary proves the deployed bytes' behavior and identity;
+it does not prove that the code Cell or custody Lock CellDep is live on
+mainnet. Production readiness still performs live RPC and confirmation checks.
 
 The full gate reads `scripts/ckb_acceptance_pin.json` and rejects a CKB checkout
 whose revision or worktree differs from the pin. Its report binds the CKB
@@ -49,13 +123,14 @@ and validates every step's commit, spent-input liveness, live outputs, cycles,
 serialized size, and occupied capacity. `--stateful-scenarios` remains only as
 an explicit option for bounded runs.
 
-The transaction matrix is intentionally described as a Python acceptance
-harness. It is not relabelled as generated-builder output. Separately, the gate
-runs the public `cellc action build` and `cellc gen-builder` surfaces for every
-production action and hashes their generated contracts. Resource Type Scripts
-in these local transactions remain `always_success` fixtures; the report
-records that this proves verifier behaviour and transaction shape, not a
-production passive-resource-identity deployment.
+The transaction matrix is produced by the native Rust acceptance harness and
+is intentionally labelled as recipe-replayer evidence, not generated-builder
+output. Separately, the gate runs the public `cellc action build` and
+`cellc gen-builder` surfaces for every production action and hashes their
+generated contracts. Resource Type Scripts in these local transactions remain
+`always_success` fixtures; the report records that this proves verifier
+behaviour and transaction shape, not a production passive-resource-identity
+deployment.
 
 ### Fiber integration evidence
 

@@ -491,6 +491,7 @@ or CellFabric intent engine.
 
 - [VS Code extension](editors/vscode-cellscript)
 - [Runtime error codes](docs/CELLSCRIPT_RUNTIME_ERROR_CODES.md)
+- [Edition policy](docs/CELLSCRIPT_EDITION_POLICY.md)
 - [Entry witness ABI](docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md)
 - [BIP340 verifier CellDep ABI](docs/CELLSCRIPT_SIGNATURE_VERIFIER_ABI.md)
 - [Collections support matrix](docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md)
@@ -643,7 +644,7 @@ CKB cycle/capacity estimates.
 
 | Module | What it does |
 |---|---|
-| **Package workflow** (`package/`) | `Cell.toml` parsing, path/git/registry source-package dependency resolution, transitive `Cell.lock` reproducibility, `cellc init`/`add`/`remove`/`install --path`/`install namespace/pkg@version`/`update`/`info`. Registry source packages are resolved through discovery, tag-pinned Git provenance, `registry.json`, and verified `source_hash`; non-CellScript registry artifact profiles remain fail-closed. |
+| **Package workflow** (`package/`) | `Cell.toml` parsing, path/git/registry source-package dependency resolution, transitive `Cell.lock` reproducibility, `cellc init`/`add`/`remove`/`install --path`/`install namespace/pkg@version`/`update`/`info`. Registry source packages are selected from the production API's accepted status, then installed from a content-addressed Registry snapshot after descriptor SHA-256, per-file BLAKE2b, Edition/profile identity, and whole-tree `source_hash` verification; non-CellScript registry artifact profiles remain fail-closed. |
 | **Incremental compiler** (`incremental/`) | Dependency-graph-aware build cache — skips recompilation when inputs are unchanged. |
 | **Build integration** (`lib.rs`) | Resolves `Cell.toml` → `CellBuildConfig`, merges CLI + manifest options, selects entry scope, runs policy gates, writes artifacts + metadata. |
 
@@ -716,6 +717,7 @@ policy defaults:
 
 ```toml
 [package]
+edition = "2026"
 name = "token"
 version = "0.22.0"
 entry = "src/main.cell"
@@ -732,7 +734,15 @@ deny_ckb_runtime = false
 deny_runtime_obligations = false
 ```
 
-Command-line flags can tighten policy checks for a build or CI job.
+`edition = "2026"` is mandatory and is the only supported source-semantics
+edition. The year is a long-lived epoch label, not an annual release cadence.
+Target profile, primitive assurance, metadata schemas, and entry/witness ABIs
+remain independently versioned; the resolved compatibility profile combines
+those axes with the edition and is bound into lock, deployment, receipt,
+registry, and builder identities. Older or missing persisted identities are
+rejected rather than migrated. Command-line flags can tighten policy checks
+for a build or CI job. The full contract is in the
+[edition policy](docs/CELLSCRIPT_EDITION_POLICY.md).
 
 ### Package Workflow
 
@@ -740,9 +750,11 @@ CellScript ships a local-first package workflow in `cellc`. Local packages,
 source roots, path/git/registry source-package dependencies, lockfile refresh,
 and package build/check/doc/fmt flows are production-style. Registry resolution
 is deliberately narrow: `cellc install`, `cellc build`, and `cellc update`
-accept CellScript source packages with `Cell.toml`, `registry.json`, tag-pinned
-Git provenance, and verified `source_hash`; non-CellScript artifact profiles
-still fail closed.
+query the public API for an accepted CellScript source-package version, then
+download its immutable Registry source snapshot, reject unsafe paths or opaque
+archive formats, and verify snapshot SHA-256, every file's BLAKE2b, `Cell.toml`
+identity, Edition/profile identity, and the whole-tree `source_hash`.
+Non-CellScript artifact profiles still fail closed.
 
 **Supported today:**
 
@@ -754,8 +766,9 @@ still fail closed.
 - `cellc install --path` and `cellc update` — resolve local path dependency
   graphs and refresh `Cell.lock`
 - `cellc install cellscript/pkg@1.2.0` — resolve a registry source-package
-  dependency through discovery, tag checkout, `registry.json`, and
-  `source_hash` verification
+  dependency through the production public API, accepted-status selection,
+  immutable snapshot materialisation, Edition/profile checks, and layered hash
+  verification
 - Local path dependencies are resolved recursively and included in module
   loading, source hashing, and metadata
 - `Cell.lock` — captures direct and transitive resolved dependency identity
@@ -777,43 +790,76 @@ still fail closed.
 
 **Public registry boundary / fail-closed:**
 
-- Public registry publishing is designed around JoyID-rooted publisher
-  identity: CCC is the connection layer, JoyID is the accepted publisher root,
-  and delegated publisher credentials are stored in the OS keychain for daily
-  `cellc publish`; see
+- Public registry publishing uses typed wallet-rooted publisher identities:
+  CCC is the browser connection layer, `joyid_ckb` accepts JoyID passkeys, and
+  `ckb_secp256k1` accepts standard CKB wallets that expose a compressed public
+  key and recoverable CKB message signature. Delegated publisher credentials
+  are stored in the OS keychain for daily `cellc publish`; see
   [`docs/CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md`](docs/CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md)
-- `cellc auth capability create --principal-id <principal_id> --scope
-  publish:<namespace>/<package> --expires 90d --json >
+- `cellc auth capability create --principal-type <principal_type>
+  --principal-id <principal_id>
+  --scope publish:<namespace>/<package> --expires 90d --json >
   capability-payload.json` creates the local P-256 capability key when
   `--capability-pubkey` is not supplied, stores the private key in the OS
-  keychain, and prints the JoyID-bound authorisation payload. The
-  `principal_id` is the normalized JoyID/CKB identity binding derived by the
-  CCC-backed JoyID submit flow, not the display address.
-  After the same payload is signed through JoyID/CCC, `cellc auth capability
-  submit --payload capability-payload.json --joyid-signature
-  joyid-signature.json` registers the delegated key with the write API. Bare
+  keychain, and prints the wallet-bound authorisation payload. The
+  `principal_id` is the normalized binding derived from the connected signer,
+  not the display address. After the same payload is signed through CCC,
+  `cellc auth capability submit --payload capability-payload.json
+  --wallet-signature wallet-signature.json` registers the delegated key with
+  the write API.
+  `cellc auth namespace claim --namespace <namespace> --payload
+  capability-payload.json --wallet-signature wallet-signature.json` then
+  establishes the required namespace ownership. Bare
   `cellc publish` then signs the concrete publish payload and submits the
   source snapshot to the public registry.
+- These scopes are deliberately independent: `publish` admits immutable
+  releases, `deployment` attaches chain-checked deployment evidence, and
+  `availability` deprecates, yanks, or restores a release. A publish-only
+  capability cannot perform the other two operations. When the command runs
+  inside a package directory without explicit `--scope` flags, `cellc` infers
+  only the exact-coordinate `publish` scope. Deployment and availability access
+  must be granted explicitly.
+- The Registry chooser includes Neuron, JoyID, imToken, CKBull, SafePal,
+  Ledger, imKey, OneKey, UTXO Global, Rei Wallet, Gate, and QuantumPurse.
+  Compatible CCC signers connect directly; the remaining directory entries use
+  the same verified `wallet-signature.json` handoff without exposing mnemonic
+  words to the site.
 - `cellc auth capability revoke --principal-id <principal_id>
   --capability-key-id <capability_key_id> --json > revoke-payload.json`
-  generates a JoyID-bound revocation challenge; after signing that challenge,
+  generates a wallet-bound revocation challenge; after signing that challenge,
   `cellc auth capability revoke --payload revoke-payload.json
-  --joyid-signature joyid-signature.json` revokes the delegated key without
+  --wallet-signature wallet-signature.json` revokes the delegated key without
   creating a separate registry account.
 - CI can avoid interactive keychain access by using
   `cellc publish --print-payload --json`, signing the `canonical_payload`
   externally, then submitting with `--payload <file> --capability-signature
   <signature>`, or by setting `CELLSCRIPT_CAPABILITY_PRIVATE_KEY_PKCS8_B64`.
-- The first write API implementation lives under
-  [`services/registry-api`](services/registry-api/README.md): Cloudflare
-  Workers, R2 source snapshots, Neon Postgres through Hyperdrive, JoyID
-  capability authorisation, namespace ACL checks, quota hooks, and audit events.
+- The production write API lives under
+  [`services/registry-api`](services/registry-api/README.md). The deployed slice
+  uses Node 22, Postgres 17, a bounded real-compiler verification worker, a
+  persistent filesystem object store, and a separate read-only nginx static
+  path behind trusted TLS. Publish transactionally queues source/build
+  verification; default search/list visibility begins at `verified_build`, and
+  direct URLs preserve admitted `source_published` history. The same typed app
+  retains a Cloudflare Worker/Hyperdrive/R2 deployment option. Both paths share
+  typed wallet capability authorisation, namespace ACLs, quota hooks, ordered evidence
+  promotion, and audit events.
+- Public version responses bind a content-addressed source snapshot URL. The
+  read-only service exposes `/source-snapshots/*` independently of Postgres and
+  the API; the lockfile records that URL plus its `sha256:` revision so Registry
+  installs do not silently depend on Git availability.
 - Non-CellScript registry artifact profiles remain future-facing or fail-closed
 - Git dependencies are explicit remote source fetches; treat them as
   review-required inputs, not the registry production path
 
 **Registry resolver boundary:**
 
+- The default source-package authority is
+  `https://api.registry.cellscript.dev`; only publicly accepted statuses enter
+  ordinary version selection. `CELLSCRIPT_REGISTRY_API_URL` changes that API
+  origin, while `CELLSCRIPT_REGISTRY_URL` explicitly selects the legacy
+  Git/offline discovery authority. An unavailable production API does not
+  silently downgrade to Git discovery.
 - Registry discovery may grow to include CellScript packages, verifier
   artifacts, deployed artifact records, reproducible artifacts, and external
   CKB tooling artifacts. Dependency resolution stays narrower than discovery.
@@ -868,7 +914,7 @@ still fail closed.
 | `cellc repl` | Start the interactive REPL |
 | `cellc run` | Run ELF entrypoints via VM runner or simulator; `--json` includes cycles for VM execution and `cycles: null` for simulation |
 | `cellc publish` / `cellc publish --offline` / `cellc registry add` / `cellc registry edit --yank` | Public publish plus explicit local/offline registry metadata flow; public registry policy makes bare `cellc publish` an authenticated registry write, with Git/static metadata retained for audit and fallback |
-| `cellc auth capability create/submit/revoke` / public registry write API / non-CellScript artifact install | JoyID-rooted publication policy and future-facing artifact profiles; fail-closed where unsupported |
+| `cellc auth capability create/submit/revoke` / public registry write API / non-CellScript artifact install | Typed wallet-rooted publication policy and future-facing artifact profiles; fail-closed where unsupported |
 
 ### CLI Options
 

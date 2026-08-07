@@ -6,8 +6,9 @@
 //! (that would inflate the bundle beyond the 600KB budget and is
 //! tracked as RFC path B / v2).
 //!
-//! The single exported function `compile_metadata_json` takes source
-//! text and an optional target profile, and returns a JSON string.
+//! The single exported function `compile_metadata_json` takes source text, a
+//! mandatory edition, and an optional target profile, and returns a JSON
+//! string.
 //! On success the string is the serialized `CompileMetadata`; on
 //! failure it is `{"error": "..."}` so the playground can parse it
 //! uniformly and render diagnostics.
@@ -81,11 +82,15 @@ struct LanguageServiceResult {
 /// consume_set / create_set / estimated_cycles, etc.). On error it
 /// is `{"error": "<message>"}`.
 ///
-/// The `target` argument is optional; pass `None` for the default
-/// (ckb) target profile.
+/// `edition` is mandatory and currently only accepts `"2026"`.
+/// The `target` argument is optional; pass `None` for the default target.
 #[wasm_bindgen]
-pub fn compile_metadata_json(source: &str, target: Option<String>) -> String {
-    match cellscript::compile_metadata(source, target) {
+pub fn compile_metadata_json(source: &str, edition: &str, target: Option<String>) -> String {
+    let edition = match edition.parse::<cellscript::CellScriptEdition>() {
+        Ok(edition) => edition,
+        Err(error) => return error_json(&error.to_string()),
+    };
+    match cellscript::compile_metadata(source, edition, target) {
         Ok(metadata) => serde_json::to_string(&metadata).unwrap_or_else(|e| error_json(&format!("failed to serialize metadata: {e}"))),
         Err(e) => error_json(&e.to_string()),
     }
@@ -103,8 +108,12 @@ pub fn compile_metadata_json(source: &str, target: Option<String>) -> String {
 /// span. Offsets are UTF-8 byte offsets from the original source; line and
 /// column are 1-based.
 #[wasm_bindgen]
-pub fn compile_metadata_json_diagnostics(source: &str, target: Option<String>) -> String {
-    let report = cellscript::compile_metadata_with_diagnostics(source, target);
+pub fn compile_metadata_json_diagnostics(source: &str, edition: &str, target: Option<String>) -> String {
+    let edition = match edition.parse::<cellscript::CellScriptEdition>() {
+        Ok(edition) => edition,
+        Err(error) => return diagnostic_error_json(&error.to_string(), source),
+    };
+    let report = cellscript::compile_metadata_with_diagnostics(source, edition, target);
     let diagnostics = report.diagnostics.iter().map(|error| diagnostic_from_error(error, source)).collect();
     let result = CompileDiagnosticResult::new(report.metadata, diagnostics);
     serde_json::to_string(&result)
@@ -117,7 +126,7 @@ pub fn compile_metadata_json_diagnostics(source: &str, target: Option<String>) -
 /// `entry_path` selects the source that should produce metadata. This is an
 /// additive API; the single-source functions remain stable.
 #[wasm_bindgen]
-pub fn compile_metadata_json_sources(sources_json: &str, entry_path: &str, target: Option<String>) -> String {
+pub fn compile_metadata_json_sources(sources_json: &str, entry_path: &str, edition: &str, target: Option<String>) -> String {
     if sources_json.len() > MAX_SOURCE_SET_JSON_BYTES {
         return diagnostic_error_json(&format!("source set JSON exceeds the {} byte WASM input limit", MAX_SOURCE_SET_JSON_BYTES), "");
     }
@@ -131,7 +140,11 @@ pub fn compile_metadata_json_sources(sources_json: &str, entry_path: &str, targe
         .collect::<Vec<_>>();
     let source_by_path = sources.iter().map(|source| (source.path.clone(), source.source.clone())).collect::<HashMap<_, _>>();
     let fallback_source = sources.iter().find(|source| source.path == entry_path).map(|source| source.source.as_str()).unwrap_or("");
-    let report = cellscript::compile_sources_metadata_with_diagnostics(&sources, entry_path, target);
+    let edition = match edition.parse::<cellscript::CellScriptEdition>() {
+        Ok(edition) => edition,
+        Err(error) => return diagnostic_error_json(&error.to_string(), fallback_source),
+    };
+    let report = cellscript::compile_sources_metadata_with_diagnostics(&sources, entry_path, edition, target);
     let diagnostics =
         report.diagnostics.iter().map(|error| diagnostic_from_error_for_sources(error, &source_by_path, fallback_source)).collect();
     let result = CompileDiagnosticResult::new(report.metadata, diagnostics);
@@ -248,7 +261,7 @@ mod tests {
     #[test]
     fn wasm_single_source_entrypoints_reject_oversized_input() {
         let source = " ".repeat(cellscript::MAX_SOURCE_BYTES + 1);
-        let compile: serde_json::Value = serde_json::from_str(&compile_metadata_json(&source, None)).unwrap();
+        let compile: serde_json::Value = serde_json::from_str(&compile_metadata_json(&source, "2026", None)).unwrap();
         assert!(compile["error"].as_str().is_some_and(|message| message.contains("source exceeds")));
 
         let language: serde_json::Value = serde_json::from_str(&language_service_json(&source, 0, 0)).unwrap();
@@ -263,7 +276,8 @@ mod tests {
             { "path": "b.cell", "source": " ".repeat(half) }
         ])
         .to_string();
-        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json_sources(&sources, "a.cell", None)).unwrap();
+        let result: serde_json::Value =
+            serde_json::from_str(&compile_metadata_json_sources(&sources, "a.cell", "2026", None)).unwrap();
         assert!(result["diagnostics"][0]["message"].as_str().is_some_and(|message| message.contains("source set exceeds")));
     }
 }

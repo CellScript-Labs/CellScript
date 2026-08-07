@@ -1,0 +1,24 @@
+[package]
+name = "cellscript-registry-verifier"
+version = "0.22.0"
+edition = "2024"
+rust-version = "1.97.1"
+publish = false
+
+[[bin]]
+name = "cellscript-registry-verify"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+base64 = "0.22"
+camino = "1.1"
+cellscript = { path = "../.." }
+hex = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[workspace]
+
+[dev-dependencies]
+tempfile = "3.10"

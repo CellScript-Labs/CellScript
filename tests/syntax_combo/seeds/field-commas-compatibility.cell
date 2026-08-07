@@ -1,0 +1,12 @@
+// audit: phase=accept
+module cellscript::audit::seed_field_commas_compatibility
+
+struct CompatibilityFields {
+    amount: u64
+    enabled: bool
+}
+
+action inspect(value: CompatibilityFields) -> bool {
+    verification
+        return value.enabled
+}

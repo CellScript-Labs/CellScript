@@ -1,21 +1,17 @@
-//! Port of `scripts/validate_cellscript_tooling_release.py`.
+//! Tooling-release boundary validator used by the repository gate.
 //!
 //! Asserts that the CellScript release boundary is consistent across
 //! `Cargo.toml`, `Cargo.lock`, the VS Code extension, the changelogs, the
 //! wiki, the gate script, the website, and the source pin points.
 //!
-//! Behavioural contract (must match the Python script byte-for-byte on stdout
-//! and on exit code; stderr text is allowed to differ):
+//! Stable behavioural contract:
 //! - success: prints exactly `valid CellScript tooling release boundary` to
 //!   stdout and returns exit code 0;
 //! - assertion failure: prints
 //!   `invalid CellScript tooling release boundary: <message>` to stderr and
 //!   returns exit code 1;
 //! - structural failure (missing file / malformed JSON or TOML / missing gate
-//!   marker): the Python original raises an uncaught traceback and exits 1;
-//!   this port returns exit code 1 with a clean `anyhow` message. The dev/CI
-//!   gate only compares stdout and exit code, so this is a strictly-better
-//!   diagnostic without changing the contract.
+//!   marker): returns exit code 1 with a clean `anyhow` diagnostic.
 
 use std::path::Path;
 use std::sync::OnceLock;
@@ -27,11 +23,8 @@ use crate::shared::{contains, read_text, slice_between};
 
 /// A small helper for the substring-check idiom `token in text`.
 ///
-/// Mirrors `require_contains(path, tokens)` from the Python script: re-reads
-/// the file once per call (the Python original also re-reads on every call) so
-/// the behaviour is preserved exactly, including the per-token error message
-/// format `<path> is missing '<token>'` (single quotes, matching Python
-/// `repr()` of a string that contains double quotes).
+/// Re-reads the file once per call and retains the stable per-token error
+/// format `<path> is missing '<token>'`.
 fn require_contains(root: &Path, path: &str, tokens: &[impl AsRef<str>]) -> Result<()> {
     let text = read_text(root, path)?;
     for token in tokens {
@@ -43,10 +36,9 @@ fn require_contains(root: &Path, path: &str, tokens: &[impl AsRef<str>]) -> Resu
     Ok(())
 }
 
-/// Mirror `require(condition, message)` from the Python script. The message is
-/// the inner text only; the wrapping
+/// The message is the inner text only; the wrapping
 /// `invalid CellScript tooling release boundary: ` prefix is added here so
-/// that callers can use the bare inner message, matching the Python source.
+/// callers can use the bare inner message.
 fn require(condition: bool, message: impl Into<String>) -> Result<()> {
     if condition {
         Ok(())
@@ -55,9 +47,7 @@ fn require(condition: bool, message: impl Into<String>) -> Result<()> {
     }
 }
 
-/// Same as `require`, but the message is constructed only when the condition
-/// fails. Mirrors Python's eager `f""` interpolation while skipping the work
-/// in the common (passing) case.
+/// Same as `require`, but constructs the message only on failure.
 fn require_with<F: FnOnce() -> String>(condition: bool, msg: F) -> Result<()> {
     if condition {
         Ok(())
@@ -66,10 +56,8 @@ fn require_with<F: FnOnce() -> String>(condition: bool, msg: F) -> Result<()> {
     }
 }
 
-/// The single regex used by the script: capture the semver from the first
-/// `## <semver> - ` heading. Python uses `re.MULTILINE`, equivalent to `(?m)`
-/// here, so `^` matches at every line start; `re.search` returns the first
-/// match anywhere in the text.
+/// Capture semver from the first `## <semver> - ` heading. `(?m)` lets `^`
+/// match every line start.
 fn changelog_head() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -85,8 +73,8 @@ fn release_surface(crate_version: &str) -> String {
     base.split('.').take(2).collect::<Vec<_>>().join(".")
 }
 
-/// Entry point. Returns `Ok(())` (exit 0) on a valid boundary; otherwise an
-/// error whose display string is the full Python-shaped message.
+/// Entry point. Returns `Ok(())` on a valid boundary and a stable diagnostic on
+/// failure.
 pub fn run(root: &Path) -> Result<()> {
     // --- Stage A: load inputs and derive version-dependent values ---------
     let cargo_toml = read_text(root, "Cargo.toml")?;
@@ -171,7 +159,7 @@ pub fn run(root: &Path) -> Result<()> {
     }
 
     // --- Stage E: ckb_acceptance ------------------------------------------
-    let ckb_acceptance = read_text(root, "scripts/ckb_cellscript_acceptance.sh")?;
+    let ckb_acceptance = read_text(root, "crates/cellscript-tools/src/ckb_acceptance.rs")?;
     require(
         !ckb_acceptance.contains(r#""--primitive-strict", "0.15""#),
         "CKB acceptance runner must not use the retired 0.15 assurance gate",
@@ -181,26 +169,36 @@ pub fn run(root: &Path) -> Result<()> {
         "CKB acceptance runner must use the current 0.16 assurance gate",
     )?;
     require(
-        ckb_acceptance.contains("ORIGINAL_SCOPED_ACTION_FAIL_CLOSED = {}"),
+        ckb_acceptance.contains(r#""strict_original_ckb_compile_policy_fail_closed":[]"#),
         "CKB acceptance runner must keep token/AMM/launch out of strict 0.16 fail-closed coverage",
     )?;
+    let production_evidence = read_text(root, "crates/cellscript-tools/src/production_evidence.rs")?;
     require(
-        ckb_acceptance.contains(r#""token.cell": ["mint_with_authority", "transfer_token", "burn", "merge"]"#),
+        production_evidence
+            .contains(r#"("token_action_runs", "token.cell", &["mint_with_authority", "transfer_token", "burn", "merge"])"#),
         "CKB acceptance runner must compile token actions as original strict scoped actions",
     )?;
     require(
-        ckb_acceptance.contains(r#""amm_pool.cell": ["seed_pool", "swap_a_for_b", "add_liquidity", "remove_liquidity"]"#),
+        production_evidence
+            .contains(r#"("amm_action_runs", "amm_pool.cell", &["seed_pool", "swap_a_for_b", "add_liquidity", "remove_liquidity"])"#),
         "CKB acceptance runner must compile AMM actions as original strict scoped actions",
     )?;
     require(
-        ckb_acceptance.contains(r#""launch.cell": ["launch_token", "bootstrap_token"]"#),
+        production_evidence.contains(r#"("launch_action_runs", "launch.cell", &["launch_token", "bootstrap_token"])"#),
         "CKB acceptance runner must compile launch actions as original strict scoped actions",
     )?;
+    let ckb_acceptance_shell = read_text(root, "scripts/ckb_cellscript_acceptance.sh")?;
     require(
-        !ckb_acceptance.contains("mapfile") && !ckb_acceptance.contains("readarray"),
+        ckb_acceptance_shell.contains("ckb-acceptance")
+            && !ckb_acceptance_shell.contains("mapfile")
+            && !ckb_acceptance_shell.contains("readarray"),
         "CKB acceptance runner must remain compatible with macOS Bash 3.2",
     )?;
-    require(ckb_acceptance.contains("while IFS= read -r value"), "CKB acceptance pin parsing must use the portable read loop")?;
+    let ckb_acceptance_live = read_text(root, "crates/cellscript-tools/src/ckb_acceptance_live.rs")?;
+    require(
+        ckb_acceptance_live.contains("ckb_acceptance_pin.json"),
+        "CKB acceptance runner must validate the pinned CKB source identity",
+    )?;
 
     // --- Stage F: Tutorial-08 ---------------------------------------------
     let tutorial_08 = read_text(root, "docs/wiki/Tutorial-08-Bundled-Example-Contracts.md")?;
@@ -388,8 +386,8 @@ pub fn run(root: &Path) -> Result<()> {
         root,
         "website/package.json",
         &[
-            r#""prepare:registry": "python3 scripts/generate-registry-data.py""#,
-            r#""build": "npm run prepare:registry && astro check && astro build && npm run check:docs && npm run check:dist""#,
+            r#""prepare:registry": "node scripts/generate-registry-data.mjs""#,
+            r#""build": "npm run prepare:registry && astro check && astro build && npm run check:docs && npm run check:dist && npm run check:deploy""#,
             r#""check:docs": "node scripts/check-doc-links.mjs""#,
             r#""check:dist": "node scripts/check-dist-regressions.mjs""#,
         ],
@@ -421,11 +419,11 @@ pub fn run(root: &Path) -> Result<()> {
         "CKB transaction measure tooling must use CellScript's pinned Rust toolchain",
     )?;
     require(
-        gate_script.contains(r#"print(manifest["package"]["version"])"#),
+        gate_script.contains("--root \"$ROOT_DIR\" workspace-version"),
         "release source identity must read the root package version from Cargo.toml",
     )?;
     require(
-        !gate_script.contains(r#"manifest["workspace"]["package"]"#),
+        !gate_script.contains("workspace.package.version"),
         "release source identity must not assume a virtual workspace package table",
     )?;
 
@@ -469,9 +467,11 @@ pub fn run(root: &Path) -> Result<()> {
         root,
         "src/package/mod.rs",
         &[
-            "failed to resolve registry dependency '{}/{}@{}' via discovery index '{}': {}",
+            "failed to resolve registry dependency '{}/{}@{}': {}",
             "registry package '{}/{}@{}' has no source_hash in registry.json",
+            "public registry package '{}/{}@{}' has no immutable source snapshot",
             "source_hash mismatch for '{}/{}@{}': expected '{}', got '{}'",
+            "allow_unverified: detailed.allow_unverified",
             "Git { url: String, revision: String }",
             "pub fn consistency_issues(&self, manifest: &PackageManifest) -> Vec<String>",
             "pub fn replace_with_resolved(&mut self, resolved: &HashMap<String, ResolvedPackage>)",
@@ -482,7 +482,8 @@ pub fn run(root: &Path) -> Result<()> {
         "tests/cli.rs",
         &[
             "cellc_rejects_registry_dependency_without_namespace",
-            "cellc_build_resolves_registry_dependency_and_writes_phase1_lockfile",
+            "cellc_build_resolves_artifact_api_dependency_and_writes_lockfile",
+            "cellc_auth_namespace_claim_posts_signed_capability_payload_to_registry_api",
             "cellc_install_path_updates_lockfile_and_remove_prunes_it",
             "cellc_fmt_subcommand_formats_sources",
             "cellc_run_subcommand_executes_pure_elf_package",
@@ -494,7 +495,8 @@ pub fn run(root: &Path) -> Result<()> {
         root,
         "tests/registry.rs",
         &[
-            "package_manager_resolves_registry_dependency_with_source_hash_from_local_git_fixture",
+            "package_manager_resolves_artifact_api_dependency_with_source_hash",
+            "package_manager_persists_unverified_registry_policy_in_dependency_manifest",
             "package_manager_rejects_registry_source_hash_mismatch",
             "lockfile_consistency_accepts_matching_registry_source",
         ],
@@ -503,18 +505,11 @@ pub fn run(root: &Path) -> Result<()> {
     // --- Stage O: Cargo.toml exclude array --------------------------------
     // The `excluded` literals include the surrounding double quotes so they
     // match the TOML array element verbatim via substring on the raw text.
-    for excluded in
-        &[r#"".github/""#, r#""docs/""#, r#""docs/wiki/""#, r#""editors/""#, r#""proposals/""#, r#""scripts/__pycache__/""#]
-    {
+    for excluded in &[r#"".github/""#, r#""docs/""#, r#""docs/wiki/""#, r#""editors/""#, r#""proposals/""#] {
         require(cargo_toml.contains(excluded), format!("Cargo.toml package exclude is missing {excluded}"))?;
     }
 
-    // --- Stage P: .gitignore ----------------------------------------------
-    let gitignore = read_text(root, ".gitignore")?;
-    require(gitignore.contains("__pycache__/"), ".gitignore must ignore generated Python bytecode directories")?;
-    require(gitignore.contains("*.py[cod]"), ".gitignore must ignore generated Python bytecode files")?;
-
-    // --- Stage Q: success -------------------------------------------------
+    // --- Stage P: success -------------------------------------------------
     println!("valid CellScript tooling release boundary");
     Ok(())
 }

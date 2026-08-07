@@ -1,4 +1,4 @@
-//! Integration tests for the Phase 1 Registry system.
+//! Integration tests for the Registry artifact model and offline index tools.
 //!
 //! Tests cover:
 //! - Source hash computation determinism
@@ -6,22 +6,28 @@
 //! - Discovery index lookup with local Git fixture
 //! - Deployed.toml file round-trip
 //! - Cell.lock new fields (package.build, deployment.*)
-//! - Full publish → verify flow with local Git fixtures
+//! - Public artifact API dependency resolution with immutable snapshots
+//! - Explicit offline Git fixture editing and verification
 //! - Fail-closed verification on hash mismatch
 
+use base64::Engine as _;
 use cellscript::package::registry::{
     compute_source_hash, DiscoveryEntry, DiscoveryIndex, RegistryAuditInfo, RegistryDependencyRef, RegistryEntryStatus, RegistryIndex,
-    RegistryResolutionPolicy, RegistryVersion,
+    RegistryVersion,
 };
 use cellscript::package::{
     DeployedBuildInfo, DeployedManifest, DeployedPackageInfo, DeploymentCellDep, DeploymentRecord, DeploymentStatus, LockedBuildInfo,
     LockedDependency, LockedSource, Lockfile, LockfileDeploymentRef, LockfilePackageInfo, PackageManager, ScriptRole,
     DEPLOYED_MANIFEST_SCHEMA,
 };
+use sha2::{Digest as _, Sha256};
 use std::collections::BTreeMap;
 use std::ffi::OsString;
+use std::io::{Read, Write};
+use std::net::TcpListener;
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 static REGISTRY_ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -31,12 +37,12 @@ struct RegistryEnvGuard {
 }
 
 impl RegistryEnvGuard {
-    fn new(url: &Path) -> Self {
-        let guard = REGISTRY_ENV_LOCK.lock().unwrap();
-        let previous = std::env::var_os(cellscript::package::registry::REGISTRY_URL_ENV);
+    fn new(url: &str) -> Self {
+        let guard = REGISTRY_ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let previous = std::env::var_os(cellscript::package::registry::REGISTRY_API_URL_ENV);
         // SAFETY: CI runs tests with one test thread, and this guard serializes
         // registry URL changes within this test binary.
-        unsafe { std::env::set_var(cellscript::package::registry::REGISTRY_URL_ENV, url) };
+        unsafe { std::env::set_var(cellscript::package::registry::REGISTRY_API_URL_ENV, url) };
         Self { previous, _guard: guard }
     }
 }
@@ -45,12 +51,136 @@ impl Drop for RegistryEnvGuard {
     fn drop(&mut self) {
         if let Some(previous) = &self.previous {
             // SAFETY: See `RegistryEnvGuard::new`; the guard still owns the lock.
-            unsafe { std::env::set_var(cellscript::package::registry::REGISTRY_URL_ENV, previous) };
+            unsafe { std::env::set_var(cellscript::package::registry::REGISTRY_API_URL_ENV, previous) };
         } else {
             // SAFETY: See `RegistryEnvGuard::new`; the guard still owns the lock.
-            unsafe { std::env::remove_var(cellscript::package::registry::REGISTRY_URL_ENV) };
+            unsafe { std::env::remove_var(cellscript::package::registry::REGISTRY_API_URL_ENV) };
         }
     }
+}
+
+struct PackageArtifactApi {
+    origin: String,
+    stop: Arc<AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for PackageArtifactApi {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(handle) = self.handle.take()
+            && let Err(payload) = handle.join()
+            && !std::thread::panicking()
+        {
+            std::panic::resume_unwind(payload);
+        }
+    }
+}
+
+fn read_mock_http_path(stream: &mut std::net::TcpStream) -> String {
+    let mut request = Vec::new();
+    let mut buffer = [0_u8; 1024];
+    loop {
+        let read = match stream.read(&mut buffer) {
+            Ok(read) => read,
+            Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted) => {
+                std::thread::yield_now();
+                continue;
+            }
+            Err(error) => panic!("artifact API fixture request read failed: {error}"),
+        };
+        assert_ne!(read, 0, "artifact API request ended before headers");
+        request.extend_from_slice(&buffer[..read]);
+        if let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+            let headers = String::from_utf8_lossy(&request[..header_end]);
+            return headers.lines().next().and_then(|line| line.split_whitespace().nth(1)).unwrap_or("/").to_string();
+        }
+    }
+}
+
+fn start_package_artifact_api(source_root: &Path, verification_status: &str) -> PackageArtifactApi {
+    let index = RegistryIndex::read_from_repo(source_root).unwrap();
+    assert_eq!(index.versions.len(), 1, "single-package API fixture expects one release");
+    let version = &index.versions[0];
+    let snapshot_files = ["Cell.toml", "src/main.cell"]
+        .into_iter()
+        .map(|path| {
+            let content = std::fs::read(source_root.join(path)).unwrap();
+            serde_json::json!({
+                "path": path,
+                "blake2b256": hex::encode(cellscript::ckb_blake2b256(&content)),
+                "content_base64": base64::engine::general_purpose::STANDARD.encode(content),
+            })
+        })
+        .collect::<Vec<_>>();
+    let snapshot = serde_json::to_vec(&serde_json::json!({
+        "schema": "cellscript-source-snapshot-v1",
+        "package": { "namespace": index.namespace, "name": index.name, "version": version.version },
+        "files": snapshot_files,
+    }))
+    .unwrap();
+    let snapshot_hash = format!("sha256:{}", hex::encode(Sha256::digest(&snapshot)));
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let artifact_path = format!("/v1/artifacts/{}/{}", index.namespace, index.name);
+    let snapshot_path = format!("/source-snapshots/{}/{}/{}/fixture.json", index.namespace, index.name, version.version);
+    let artifact = serde_json::to_vec(&serde_json::json!({
+        "schema": "cellscript-registry-artifact",
+        "namespace": index.namespace,
+        "name": index.name,
+        "repository": format!("https://example.test/{}/{}", index.namespace, index.name),
+        "artifact": {
+            "kind": "source_library",
+            "profile": "cellscript_source",
+            "consumption_mode": "dependency",
+            "language": "cellscript"
+        },
+        "releases": [{
+            "release": version.version,
+            "verification_status": verification_status,
+            "availability_status": "active",
+            "registry_entry": index,
+            "immutable_bundle": {
+                "schema": "cellscript-registry-immutable-bundle",
+                "url": format!("{origin}{snapshot_path}"),
+                "snapshot_hash": snapshot_hash,
+                "source_hash": version.source_hash,
+                "size_bytes": snapshot.len(),
+                "content_type": "application/vnd.cellscript.source-snapshot+json"
+            }
+        }]
+    }))
+    .unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let server_stop = Arc::clone(&stop);
+    let handle = std::thread::spawn(move || {
+        while !server_stop.load(Ordering::Acquire) {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    let path = read_mock_http_path(&mut stream);
+                    let (status, content_type, body) = if path == artifact_path {
+                        ("200 OK", "application/json", artifact.as_slice())
+                    } else if path == snapshot_path {
+                        ("200 OK", "application/vnd.cellscript.source-snapshot+json", snapshot.as_slice())
+                    } else {
+                        ("404 Not Found", "application/json", b"{}".as_slice())
+                    };
+                    let headers = format!(
+                        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    );
+                    stream.write_all(headers.as_bytes()).unwrap();
+                    stream.write_all(body).unwrap();
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Err(error) => panic!("artifact API fixture failed: {error}"),
+            }
+        }
+    });
+    PackageArtifactApi { origin, stop, handle: Some(handle) }
 }
 
 // ---------------------------------------------------------------------------
@@ -97,7 +227,7 @@ fn git_tag(repo_dir: &Path, tag: &str) {
 fn create_minimal_package(dir: &Path, name: &str, version: &str, namespace: Option<&str>) {
     std::fs::create_dir_all(dir.join("src")).unwrap();
 
-    let mut toml = String::from("[package]\n");
+    let mut toml = String::from("[package]\nedition = \"2026\"\n");
     toml.push_str(&format!("name = \"{}\"\n", name));
     toml.push_str(&format!("version = \"{}\"\n", version));
     if let Some(ns) = namespace {
@@ -161,6 +291,7 @@ fn compute_source_hash_includes_configured_source_roots() {
         temp.path().join("Cell.toml"),
         r#"
 [package]
+edition = "2026"
 name = "hash-test"
 version = "0.1.0"
 entry = "contracts/main.cell"
@@ -185,10 +316,12 @@ source_roots = ["contracts"]
 fn registry_index_write_read_round_trip() {
     let temp = tempfile::tempdir().unwrap();
     let index = RegistryIndex {
-        schema_version: 1,
+        schema_version: RegistryIndex::CURRENT_SCHEMA_VERSION,
         name: "token".to_string(),
         namespace: "cellscript".to_string(),
         versions: vec![RegistryVersion {
+            edition: cellscript::CURRENT_EDITION,
+            compatibility_profile_hash: "test-compatibility-profile".to_string(),
             version: "0.3.0".to_string(),
             tag: "v0.3.0".to_string(),
             source_hash: "abcd1234".to_string(),
@@ -210,7 +343,7 @@ fn registry_index_write_read_round_trip() {
     index.write_to_repo(temp.path()).unwrap();
     let read_back = RegistryIndex::read_from_repo(temp.path()).unwrap();
 
-    assert_eq!(read_back.schema_version, 1);
+    assert_eq!(read_back.schema_version, RegistryIndex::CURRENT_SCHEMA_VERSION);
     assert_eq!(read_back.name, "token");
     assert_eq!(read_back.namespace, "cellscript");
     assert_eq!(read_back.versions.len(), 1);
@@ -224,6 +357,8 @@ fn registry_index_append_version_creates_new_file() {
     let temp = tempfile::tempdir().unwrap();
 
     let version = RegistryVersion {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         version: "0.1.0".to_string(),
         tag: "v0.1.0".to_string(),
         source_hash: "hash_of_source".to_string(),
@@ -255,6 +390,8 @@ fn registry_index_append_version_updates_existing() {
     let temp = tempfile::tempdir().unwrap();
 
     let v1 = RegistryVersion {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         version: "0.1.0".to_string(),
         tag: "v0.1.0".to_string(),
         source_hash: "h1".to_string(),
@@ -274,6 +411,8 @@ fn registry_index_append_version_updates_existing() {
     RegistryIndex::append_version(temp.path(), "pkg", "ns", v1).unwrap();
 
     let v2 = RegistryVersion {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         version: "0.2.0".to_string(),
         tag: "v0.2.0".to_string(),
         source_hash: "h2".to_string(),
@@ -297,6 +436,8 @@ fn registry_index_append_version_updates_existing() {
 
     // Re-appending same version should update (not duplicate)
     let v1_updated = RegistryVersion {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         version: "0.1.0".to_string(),
         tag: "v0.1.0".to_string(),
         source_hash: "h1_updated".to_string(),
@@ -332,6 +473,8 @@ fn registry_index_with_dependencies_and_audit() {
     )]);
 
     let version = RegistryVersion {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         version: "1.0.0".to_string(),
         tag: "v1.0.0".to_string(),
         source_hash: "deadbeef".to_string(),
@@ -453,14 +596,17 @@ fn deployed_manifest_file_round_trip() {
     let temp = tempfile::tempdir().unwrap();
 
     let manifest = DeployedManifest {
-        version: 1,
-        schema: Some(DEPLOYED_MANIFEST_SCHEMA.to_string()),
+        version: DeployedManifest::CURRENT_VERSION,
+        schema: DEPLOYED_MANIFEST_SCHEMA.to_string(),
         package: DeployedPackageInfo {
+            edition: cellscript::CURRENT_EDITION,
             name: "token".to_string(),
             version: "1.0.0".to_string(),
             source_hash: Some("blake2b:0xabc".to_string()),
         },
         build: Some(DeployedBuildInfo {
+            edition: cellscript::CURRENT_EDITION,
+            compatibility_profile_hash: "test-compatibility-profile".to_string(),
             compiler_version: Some("0.19.0".to_string()),
             artifact_hash: Some("blake2b:0xdef".to_string()),
             metadata_hash: None,
@@ -470,6 +616,8 @@ fn deployed_manifest_file_round_trip() {
             constraints_hash: None,
         }),
         deployments: vec![DeploymentRecord {
+            edition: cellscript::CURRENT_EDITION,
+            compatibility_profile_hash: "test-compatibility-profile".to_string(),
             network: "aggron4".to_string(),
             chain_id: "ckb-testnet".to_string(),
             tx_hash: "0xaaaa1111".to_string(),
@@ -507,7 +655,7 @@ fn deployed_manifest_file_round_trip() {
     manifest.write_to_root(temp.path()).unwrap();
     let read_back = DeployedManifest::read_from_root(temp.path()).unwrap().unwrap();
 
-    assert_eq!(read_back.version, 1);
+    assert_eq!(read_back.version, DeployedManifest::CURRENT_VERSION);
     assert_eq!(read_back.package.name, "token");
     assert_eq!(read_back.package.version, "1.0.0");
     assert_eq!(read_back.package.source_hash.as_deref(), Some("blake2b:0xabc"));
@@ -521,13 +669,14 @@ fn deployed_manifest_file_round_trip() {
 }
 
 #[test]
-fn deployed_manifest_backward_compatible_minimal() {
+fn deployed_manifest_rejects_legacy_minimal() {
     let temp = tempfile::tempdir().unwrap();
 
     let toml_str = r#"
 version = 1
 
 [package]
+edition = "2026"
 name = "minimal"
 version = "0.1.0"
 
@@ -544,13 +693,12 @@ out_point = "0x1111:0"
 "#;
     std::fs::write(temp.path().join("Deployed.toml"), toml_str).unwrap();
 
-    let parsed = DeployedManifest::read_from_root(temp.path()).unwrap().unwrap();
-    assert_eq!(parsed.package.name, "minimal");
-    assert!(parsed.build.is_none());
-    assert_eq!(parsed.deployments.len(), 1);
-    assert!(parsed.deployments[0].type_id.is_none());
-    assert!(parsed.deployments[0].status.is_none());
-    assert!(parsed.deployments[0].cell_deps.is_empty());
+    let error = DeployedManifest::read_from_root(temp.path()).unwrap_err();
+    assert!(
+        error.message.contains("missing field") || error.message.contains("unsupported Deployed.toml identity"),
+        "unexpected error: {}",
+        error.message
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -563,6 +711,7 @@ fn lockfile_with_build_and_deployment_round_trip() {
 
     let mut lockfile = Lockfile::new();
     lockfile.package = LockfilePackageInfo {
+        edition: cellscript::CURRENT_EDITION,
         name: "amm_pool".to_string(),
         version: "1.0.0".to_string(),
         namespace: Some("cellscript".to_string()),
@@ -570,6 +719,8 @@ fn lockfile_with_build_and_deployment_round_trip() {
         compiler_source_hash: None,
     };
     lockfile.package_build = Some(LockedBuildInfo {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         compiler_version: Some("0.19.0".to_string()),
         target_profile: Some("ckb-release".to_string()),
         artifact_hash: Some("blake2b:0x1234".to_string()),
@@ -601,6 +752,8 @@ fn lockfile_with_build_and_deployment_round_trip() {
             },
             source_hash: Some("blake2b:0xaaaa".to_string()),
             build: Some(LockedBuildInfo {
+                edition: cellscript::CURRENT_EDITION,
+                compatibility_profile_hash: "test-compatibility-profile".to_string(),
                 artifact_hash: Some("blake2b:0xtoken".to_string()),
                 constraints_hash: Some("blake2b:0xtoken_constraints".to_string()),
                 ..Default::default()
@@ -636,6 +789,7 @@ fn lockfile_consistency_with_registry_source() {
     let manifest: PackageManifest = toml::from_str(
         r#"
 [package]
+edition = "2026"
 name = "app"
 version = "0.1.0"
 namespace = "cellscript"
@@ -683,6 +837,8 @@ fn publish_flow_computes_source_hash_and_writes_registry_json() {
     assert!(!source_hash.is_empty());
 
     let version = RegistryVersion {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         version: "0.1.0".to_string(),
         tag: "v0.1.0".to_string(),
         source_hash,
@@ -728,6 +884,8 @@ fn full_publish_install_verify_flow_with_local_git() {
     let source_hash = compute_source_hash(&source_repo).unwrap();
 
     let version = RegistryVersion {
+        edition: cellscript::CURRENT_EDITION,
+        compatibility_profile_hash: "test-compatibility-profile".to_string(),
         version: "0.3.0".to_string(),
         tag: "v0.3.0".to_string(),
         source_hash: source_hash.clone(),
@@ -785,7 +943,7 @@ fn full_publish_install_verify_flow_with_local_git() {
 }
 
 #[test]
-fn package_manager_resolves_registry_dependency_with_source_hash_from_local_git_fixture() {
+fn package_manager_resolves_artifact_api_dependency_with_source_hash() {
     let temp = tempfile::tempdir().unwrap();
 
     let source_repo = temp.path().join("source-repo");
@@ -797,6 +955,8 @@ fn package_manager_resolves_registry_dependency_with_source_hash_from_local_git_
         "token",
         "cellscript",
         RegistryVersion {
+            edition: cellscript::CURRENT_EDITION,
+            compatibility_profile_hash: "test-compatibility-profile".to_string(),
             version: "0.3.0".to_string(),
             tag: "v0.3.0".to_string(),
             source_hash: source_hash.clone(),
@@ -838,6 +998,7 @@ fn package_manager_resolves_registry_dependency_with_source_hash_from_local_git_
         consumer.join("Cell.toml"),
         r#"
 [package]
+edition = "2026"
 name = "consumer"
 version = "0.1.0"
 namespace = "app"
@@ -850,7 +1011,8 @@ namespace = "cellscript"
     .unwrap();
     std::fs::write(consumer.join("src/main.cell"), "module consumer;\n").unwrap();
 
-    let _env = RegistryEnvGuard::new(&registry_repo);
+    let api = start_package_artifact_api(&source_repo, "verified");
+    let _env = RegistryEnvGuard::new(&api.origin);
     let mut manager = PackageManager::new(&consumer);
     manager.resolve_dependencies().unwrap();
     let resolved = manager.get_resolved().get("token").unwrap();
@@ -878,6 +1040,8 @@ fn package_manager_rejects_unverified_registry_entry_by_default() {
         "token",
         "cellscript",
         RegistryVersion {
+            edition: cellscript::CURRENT_EDITION,
+            compatibility_profile_hash: "test-compatibility-profile".to_string(),
             version: "0.3.0".to_string(),
             tag: "v0.3.0".to_string(),
             source_hash,
@@ -919,6 +1083,7 @@ fn package_manager_rejects_unverified_registry_entry_by_default() {
         consumer.join("Cell.toml"),
         r#"
 [package]
+edition = "2026"
 name = "consumer"
 version = "0.1.0"
 namespace = "app"
@@ -931,7 +1096,8 @@ namespace = "cellscript"
     .unwrap();
     std::fs::write(consumer.join("src/main.cell"), "module consumer;\n").unwrap();
 
-    let _env = RegistryEnvGuard::new(&registry_repo);
+    let api = start_package_artifact_api(&source_repo, "pending");
+    let _env = RegistryEnvGuard::new(&api.origin);
     let mut manager = PackageManager::new(&consumer);
     let err = manager.resolve_dependencies().unwrap_err();
     assert!(err.message.contains("status 'source_published'"), "unexpected error: {}", err.message);
@@ -939,7 +1105,7 @@ namespace = "cellscript"
 }
 
 #[test]
-fn package_manager_allows_unverified_registry_entry_with_explicit_policy() {
+fn package_manager_persists_unverified_registry_policy_in_dependency_manifest() {
     let temp = tempfile::tempdir().unwrap();
 
     let source_repo = temp.path().join("source-repo");
@@ -951,6 +1117,8 @@ fn package_manager_allows_unverified_registry_entry_with_explicit_policy() {
         "token",
         "cellscript",
         RegistryVersion {
+            edition: cellscript::CURRENT_EDITION,
+            compatibility_profile_hash: "test-compatibility-profile".to_string(),
             version: "0.3.0".to_string(),
             tag: "v0.3.0".to_string(),
             source_hash: source_hash.clone(),
@@ -992,25 +1160,25 @@ fn package_manager_allows_unverified_registry_entry_with_explicit_policy() {
         consumer.join("Cell.toml"),
         r#"
 [package]
+edition = "2026"
 name = "consumer"
 version = "0.1.0"
 namespace = "app"
+
+[dependencies.token]
+version = "0.3.0"
+namespace = "cellscript"
+allow_unverified = true
 "#,
     )
     .unwrap();
     std::fs::write(consumer.join("src/main.cell"), "module consumer;\n").unwrap();
 
-    let _env = RegistryEnvGuard::new(&registry_repo);
-    let manager = PackageManager::new(&consumer);
-    let resolved = manager
-        .resolve_from_registry_with_namespace_and_policy(
-            "token",
-            "0.3.0",
-            Some("cellscript"),
-            RegistryResolutionPolicy { allow_unverified: true, allow_quarantined: false },
-        )
-        .unwrap();
-    assert_eq!(resolved.source_hash.as_deref(), Some(source_hash.as_str()));
+    let api = start_package_artifact_api(&source_repo, "pending");
+    let _env = RegistryEnvGuard::new(&api.origin);
+    let mut manager = PackageManager::new(&consumer);
+    manager.resolve_dependencies().unwrap();
+    assert_eq!(manager.get_resolved()["token"].source_hash.as_deref(), Some(source_hash.as_str()));
 }
 
 #[test]
@@ -1025,6 +1193,8 @@ fn package_manager_rejects_registry_source_hash_mismatch() {
         "token",
         "cellscript",
         RegistryVersion {
+            edition: cellscript::CURRENT_EDITION,
+            compatibility_profile_hash: "test-compatibility-profile".to_string(),
             version: "0.3.0".to_string(),
             tag: "v0.3.0".to_string(),
             source_hash: "deliberately_wrong_hash".to_string(),
@@ -1066,6 +1236,7 @@ fn package_manager_rejects_registry_source_hash_mismatch() {
         consumer.join("Cell.toml"),
         r#"
 [package]
+edition = "2026"
 name = "consumer"
 version = "0.1.0"
 namespace = "app"
@@ -1078,10 +1249,15 @@ namespace = "cellscript"
     .unwrap();
     std::fs::write(consumer.join("src/main.cell"), "module consumer;\n").unwrap();
 
-    let _env = RegistryEnvGuard::new(&registry_repo);
+    let api = start_package_artifact_api(&source_repo, "verified");
+    let _env = RegistryEnvGuard::new(&api.origin);
     let mut manager = PackageManager::new(&consumer);
     let err = manager.resolve_dependencies().unwrap_err();
-    assert!(err.message.contains("source_hash mismatch"), "unexpected error: {}", err.message);
+    assert!(
+        err.message.contains("source_hash") && err.message.contains("deliberately_wrong_hash"),
+        "unexpected error: {}",
+        err.message
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1100,6 +1276,7 @@ fn package_verify_detects_missing_source_hash() {
 
     let mut lockfile = Lockfile::new();
     lockfile.package = LockfilePackageInfo {
+        edition: cellscript::CURRENT_EDITION,
         name: "verify-test".to_string(),
         version: "0.1.0".to_string(),
         namespace: None,
@@ -1122,6 +1299,7 @@ fn lockfile_consistency_rejects_wrong_registry_namespace() {
     let manifest: PackageManifest = toml::from_str(
         r#"
 [package]
+edition = "2026"
 name = "app"
 version = "0.1.0"
 namespace = "cellscript"
@@ -1165,6 +1343,7 @@ fn lockfile_consistency_accepts_matching_registry_source() {
     let manifest: PackageManifest = toml::from_str(
         r#"
 [package]
+edition = "2026"
 name = "app"
 version = "0.1.0"
 namespace = "cellscript"
@@ -1206,12 +1385,19 @@ fn deployed_manifest_supports_multiple_deployments() {
     let temp = tempfile::tempdir().unwrap();
 
     let manifest = DeployedManifest {
-        version: 1,
-        schema: Some(DEPLOYED_MANIFEST_SCHEMA.to_string()),
-        package: DeployedPackageInfo { name: "token".to_string(), version: "1.0.0".to_string(), source_hash: None },
+        version: DeployedManifest::CURRENT_VERSION,
+        schema: DEPLOYED_MANIFEST_SCHEMA.to_string(),
+        package: DeployedPackageInfo {
+            edition: cellscript::CURRENT_EDITION,
+            name: "token".to_string(),
+            version: "1.0.0".to_string(),
+            source_hash: None,
+        },
         build: None,
         deployments: vec![
             DeploymentRecord {
+                edition: cellscript::CURRENT_EDITION,
+                compatibility_profile_hash: "test-compatibility-profile".to_string(),
                 network: "ckb-mainnet".to_string(),
                 chain_id: "ckb-mainnet".to_string(),
                 tx_hash: "0x1111".to_string(),
@@ -1237,6 +1423,8 @@ fn deployed_manifest_supports_multiple_deployments() {
                 cell_deps: vec![],
             },
             DeploymentRecord {
+                edition: cellscript::CURRENT_EDITION,
+                compatibility_profile_hash: "test-compatibility-profile".to_string(),
                 network: "aggron4".to_string(),
                 chain_id: "ckb-testnet".to_string(),
                 tx_hash: "0x4444".to_string(),

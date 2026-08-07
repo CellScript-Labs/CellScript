@@ -92,7 +92,9 @@ create table if not exists package_versions (
   version text not null,
   status text not null,
   source_hash text not null,
-  manifest_hash text,
+  manifest_hash text not null,
+  edition text not null,
+  compatibility_profile_hash text not null,
   capability_key_id text not null references capabilities(key_id),
   principal_type text not null,
   principal_id text not null,
@@ -117,8 +119,35 @@ create table if not exists package_versions (
     'deprecated',
     'yanked',
     'quarantined'
-  ))
+  )),
+  check (source_hash ~ '^(0x)?[0-9A-Fa-f]{64}$'),
+  check (manifest_hash ~ '^(0x)?[0-9A-Fa-f]{64}$'),
+  check (edition = '2026'),
+  check (compatibility_profile_hash ~ '^(0x)?[0-9A-Fa-f]{64}$')
 );
+
+create index if not exists package_versions_public_idx
+  on package_versions(status, created_at desc, namespace, name);
+
+create table if not exists package_version_evidence (
+  namespace text not null,
+  name text not null,
+  version text not null,
+  kind text not null,
+  evidence_hash text not null,
+  evidence jsonb not null,
+  request_id text not null,
+  admin_actor text not null,
+  created_at timestamptz not null default now(),
+  primary key (namespace, name, version, kind, evidence_hash),
+  foreign key (namespace, name, version)
+    references package_versions(namespace, name, version),
+  check (kind in ('verified_build', 'deployed', 'on_chain_attested')),
+  check (evidence_hash ~ '^sha256:[0-9A-Fa-f]{64}$')
+);
+
+create index if not exists package_version_evidence_lookup_idx
+  on package_version_evidence(namespace, name, version, created_at);
 
 create table if not exists idempotency_keys (
   key text primary key,

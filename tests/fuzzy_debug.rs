@@ -367,6 +367,7 @@ fn fuzzy_unicode_hex_inputs_are_controlled_errors() {
         root.join("Cell.toml"),
         r#"
 [package]
+edition = "2026"
 name = "fuzzy_cli_hex"
 version = "0.1.0"
 "#,

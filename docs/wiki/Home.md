@@ -6,7 +6,7 @@ and the locks that decide whether a Cell may be spent. The compiler then turns
 that `.cell` source into ckb-vm compatible RISC-V assembly or ELF artifacts, and
 writes metadata that explains what was built.
 
-Last updated: 2026-07-21 (CellScript 0.22.0).
+Last updated: 2026-07-31 (`nightly-0.23`).
 
 This wiki is a guided path. It starts with one compiled example, then slowly
 builds the mental model: source files, Cell effects, packages, the CKB profile,
@@ -36,6 +36,9 @@ After that, the wiki continues outward:
   collections, payload enums, validity predicates, borrow regions, stable
   `E2xxx` diagnostics, and bounded Fiber interoperability extend that evidence
   without hiding builder or chain obligations;
+- v0.23 makes Edition 2026 the single source-semantics epoch, composes it with
+  independently versioned target/assurance/ABI/schema axes, and places
+  CellScript entry payloads only in canonical `WitnessArgs.input_type`;
 - production evidence proves more than compiler success;
 - editor tooling shortens the local loop;
 - bundled examples show the style in real contracts.
@@ -89,8 +92,8 @@ If you already know what you need, jump directly:
 11. [Scoped Invariants and ProofPlan](Tutorial-11-Scoped-Invariants-and-ProofPlan.md):
    inspect 0.15 invariant trigger/scope/read metadata and understand
    metadata-only ProofPlan gaps.
-12. [Phase 1 Registry: End-to-End](Tutorial-12-Phase1-Registry-End-to-End.md):
-   follow the registry package flow from init through verification.
+12. [Registry Artifacts: End-to-End](Tutorial-12-Phase1-Registry-End-to-End.md):
+   publish and inspect CellScript and non-CellScript artifacts.
 13. [Agentic Loops and cellscript-mcp](Tutorial-13-Agentic-Loops-and-cellscript-mcp.md):
    drive the read-oriented compiler surface from an automated writer in a
    write -> check -> explain -> fix loop.

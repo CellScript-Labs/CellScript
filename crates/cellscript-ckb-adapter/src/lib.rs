@@ -343,11 +343,20 @@ pub struct ScriptCodeDepEvidence {
     pub dep_type: String,
 }
 
+pub const ENTRY_WITNESS_PLACEMENT_ABI: &str = "cellscript-witnessargs-input-type-v2";
+pub const ENTRY_WITNESS_PAYLOAD_MAGIC: &[u8; 8] = b"CSARGv1\0";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum WitnessPlacement {
-    Lock,
-    InputType,
-    OutputType,
+pub enum EntryWitnessPlacementAbi {
+    WitnessArgsInputTypeV2,
+}
+
+impl EntryWitnessPlacementAbi {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::WitnessArgsInputTypeV2 => ENTRY_WITNESS_PLACEMENT_ABI,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -520,8 +529,9 @@ pub fn deployment_evidence(manifest: &DeploymentManifest) -> DeploymentEvidence 
 /// Specification for deploying a compiled CellScript artifact as an on-chain code cell.
 ///
 /// The caller provides the artifact binary, the deployer lock script, and the
-/// capacity input cell. The adapter computes TYPE_ID args, constructs the code
-/// output, validates occupied capacity, and builds a headless CKB transaction.
+/// capacity input cell. The adapter constructs either a TYPE_ID-backed code Cell
+/// or an immutable data Cell, validates occupied capacity, and builds an unsigned
+/// CKB transaction.
 #[derive(Debug, Clone)]
 pub struct DeployArtifactSpec {
     /// Name for the deployment (used in manifest and evidence).
@@ -592,27 +602,30 @@ pub struct ResolvedDeployEvidence {
     pub tx_pool_acceptance: bool,
 }
 
-/// Build a headless CKB transaction that deploys a CellScript artifact as an
-/// on-chain code cell with TYPE_ID.
+/// Build an unsigned CKB transaction that deploys a CellScript artifact as an
+/// on-chain code Cell.
 ///
 /// The function:
-/// 1. Computes TYPE_ID args from the first input tx_hash + output index 0.
-/// 2. Constructs the type script (TYPE_ID) and lock script for the code cell.
+/// 1. Computes TYPE_ID args when `type_id_hash_type` is `Type`.
+/// 2. Constructs the optional Type Script and lock script for the code Cell.
 /// 3. Calculates occupied capacity for the code cell from artifact size.
 /// 4. Constructs a change output with remaining capacity minus fee.
 /// 5. Validates that both outputs meet occupied-capacity floors.
 /// 6. Assembles the transaction and returns evidence.
 ///
 /// This is headless: no RPC, no live-cell selection, no signing. The caller
-/// provides a pre-resolved capacity input. Use `CkbSdkAcceptance` for node
-/// interaction after building.
+/// provides a pre-resolved capacity input and every required CellDep. The first
+/// witness contains the standard 65-byte zeroed secp-sighash placeholder; an
+/// external signer must replace it before submission.
 pub fn build_deploy_transaction(spec: &DeployArtifactSpec) -> Result<(TransactionView, ResolvedDeployEvidence)> {
     // Validate artifact is non-empty.
     if spec.artifact_binary.is_empty() {
         bail!("artifact binary must be non-empty");
     }
-    if spec.artifact_hash.is_empty() {
-        bail!("artifact hash must be provided");
+    let calculated_artifact_hash = hex::encode(blake2b_256(&spec.artifact_binary));
+    let supplied_artifact_hash = spec.artifact_hash.strip_prefix("0x").unwrap_or(&spec.artifact_hash);
+    if !supplied_artifact_hash.eq_ignore_ascii_case(&calculated_artifact_hash) {
+        bail!("artifact hash mismatch: supplied {}, calculated {}", spec.artifact_hash, calculated_artifact_hash);
     }
     if spec.capacity_input_shannons == 0 {
         bail!("capacity input must have non-zero capacity");
@@ -631,7 +644,7 @@ pub fn build_deploy_transaction(spec: &DeployArtifactSpec) -> Result<(Transactio
     };
     let type_id_args = type_script.as_ref().map(|script| script.args().raw_data().to_vec()).unwrap_or_default();
 
-    // Step 3: Build code cell output with TYPE_ID type script.
+    // Step 3: Build the code Cell output with the optional Type Script.
     let code_data_capacity = Capacity::bytes(spec.artifact_binary.len())?;
     // We need to compute the actual code_hash which is blake2b of the artifact.
     let data_hash = blake2b_256(&spec.artifact_binary);
@@ -685,12 +698,24 @@ pub fn build_deploy_transaction(spec: &DeployArtifactSpec) -> Result<(Transactio
     for dep in &spec.header_deps {
         builder.dedup_header_dep(dep.clone());
     }
-    // Placeholder witness for the first input (required by CKB protocol).
-    let placeholder_witness = WitnessArgs::new_builder().build();
+    // Standard secp256k1-sighash-all signing placeholder. External wallets sign
+    // against this shape and replace the zero bytes with a recoverable signature.
+    let placeholder_witness = WitnessArgs::new_builder().lock(Some(Bytes::from(vec![0u8; 65])).pack()).build();
     builder.witness(placeholder_witness.as_bytes().pack());
 
     let tx = builder.build();
-    let serialized_tx_size_bytes = tx.data().as_slice().len();
+    let serialized_tx_size_bytes = tx.data().serialized_size_in_block();
+    // CKB's default relay policy is 1,000 shannons per 1,000 bytes, so the
+    // numeric minimum at that rate equals the serialized byte count.
+    let minimum_fee_shannons = u64::try_from(serialized_tx_size_bytes)?;
+    if spec.fee_shannons < minimum_fee_shannons {
+        bail!(
+            "fee {} shannons is below the 1,000 shannons/KB policy floor of {} shannons for a {}-byte transaction",
+            spec.fee_shannons,
+            minimum_fee_shannons,
+            serialized_tx_size_bytes
+        );
+    }
 
     // Verify outputs/outputs_data pairing.
     assert_eq!(tx.outputs().len(), 2, "deploy tx must have 2 outputs");
@@ -710,7 +735,7 @@ pub fn build_deploy_transaction(spec: &DeployArtifactSpec) -> Result<(Transactio
         schema: DEPLOY_EVIDENCE_SCHEMA,
         state: "ResolvedDeployTx",
         name: spec.name.clone(),
-        artifact_hash: spec.artifact_hash.clone(),
+        artifact_hash: calculated_artifact_hash,
         code_output_index: 0,
         change_output_index: 1,
         type_id_args,
@@ -1421,29 +1446,27 @@ pub fn require_script_code_dep(script: &Script, deps: &[ScriptCodeDep]) -> Resul
     Ok(dep.to_cell_dep())
 }
 
-pub fn place_entry_witness_payload(base: &WitnessArgs, placement: WitnessPlacement, payload: Bytes) -> Result<WitnessArgs> {
-    if payload.is_empty() {
-        bail!("CellScript entry witness payload must be non-empty");
+/// Places a CellScript entry payload before any lock-script signing occurs.
+///
+/// `base.lock` may contain an SDK placeholder, but it must not contain live
+/// signatures. CKB lock signers commit to the complete serialized
+/// `WitnessArgs`, including `input_type`; mutating this field after signing
+/// invalidates the signatures.
+pub fn place_entry_witness_payload_before_signing(
+    base: &WitnessArgs,
+    placement: EntryWitnessPlacementAbi,
+    payload: Bytes,
+) -> Result<WitnessArgs> {
+    if !payload.starts_with(ENTRY_WITNESS_PAYLOAD_MAGIC) {
+        bail!("CellScript entry witness payload must start with CSARGv1\\0");
     }
 
     match placement {
-        WitnessPlacement::Lock => {
-            if base.lock().to_opt().is_some() {
-                bail!("refusing to overwrite WitnessArgs.lock; lock signatures must stay explicit");
-            }
-            Ok(base.clone().as_builder().lock(Some(payload).pack()).build())
-        }
-        WitnessPlacement::InputType => {
+        EntryWitnessPlacementAbi::WitnessArgsInputTypeV2 => {
             if base.input_type().to_opt().is_some() {
                 bail!("refusing to overwrite WitnessArgs.input_type");
             }
             Ok(base.clone().as_builder().input_type(Some(payload).pack()).build())
-        }
-        WitnessPlacement::OutputType => {
-            if base.output_type().to_opt().is_some() {
-                bail!("refusing to overwrite WitnessArgs.output_type");
-            }
-            Ok(base.clone().as_builder().output_type(Some(payload).pack()).build())
         }
     }
 }
@@ -1751,24 +1774,12 @@ pub fn signing_boundary_type() -> &'static str {
 ///
 /// ```no_run
 /// # fn main() -> anyhow::Result<()> {
-/// use ckb_types::packed::Script;
 /// use cellscript_ckb_adapter::CellScriptAdapter;
 ///
 /// // Connect to a CKB node
 /// let adapter = CellScriptAdapter::connect("http://127.0.0.1:8114")?;
-///
-/// // Deploy an artifact
-/// let deployer_lock_script = Script::default();
-/// let (manifest, evidence) = adapter.deploy_artifact(
-///     "my-token",
-///     std::fs::read("artifact.bin")?.into(),
-///     deployer_lock_script,
-///     1_000,  // fee in shannons
-/// )?;
-///
-/// // Load an action plan and build a transaction
-/// let plan = adapter.load_action_plan("action.json")?;
-/// let resolved = adapter.resolve_action(&plan)?;
+/// let tip = adapter.get_tip_block_number()?;
+/// println!("CKB tip: {tip}");
 /// # Ok(())
 /// # }
 /// ```
@@ -1793,17 +1804,12 @@ impl CellScriptAdapter {
 
     // ---- Deploy workflow ----
 
-    /// Deploy a CellScript artifact as an on-chain code cell with TYPE_ID.
+    /// Automatic collection, signing, and submission are deliberately disabled.
     ///
-    /// This is the one-call deploy workflow that combines:
-    /// 1. Finding a spendable capacity cell from the node
-    /// 2. Building the deploy transaction (headless)
-    /// 3. Estimating cycles and testing tx-pool acceptance
-    /// 4. Submitting the transaction
-    /// 5. Waiting for commitment
-    /// 6. Building the deployment manifest
-    ///
-    /// Returns the `DeploymentManifest` and full `TransactionLifecycleEvidence`.
+    /// Use [`build_deploy_transaction`] with an RPC-verified
+    /// [`DeployArtifactSpec`], sign the resulting transaction externally, and
+    /// submit the signed transaction through [`Self::submit_transaction`].
+    #[deprecated(note = "automatic deployment has no signer; use build_deploy_transaction and an external CKB wallet")]
     pub fn deploy_artifact(
         &self,
         name: &str,
@@ -1811,75 +1817,15 @@ impl CellScriptAdapter {
         deployer_lock: Script,
         fee_shannons: u64,
     ) -> Result<(DeploymentManifest, TransactionLifecycleEvidence)> {
-        let artifact_hash = blake2b_256(&artifact_binary).iter().map(|b| format!("{:02x}", b)).collect::<String>();
-
-        // Find a spendable capacity cell.
-        let capacity_input = self.find_capacity_for_deploy(&deployer_lock, &artifact_binary, fee_shannons)?;
-
-        let spec = DeployArtifactSpec {
-            name: name.to_string(),
-            artifact_binary,
-            artifact_hash,
-            deployer_lock: deployer_lock.clone(),
-            capacity_input: capacity_input.input,
-            capacity_input_shannons: capacity_input.capacity_shannons,
-            capacity_input_data: capacity_input.data,
-            type_id_hash_type: ScriptHashType::Type,
-            type_script: None,
-            cell_deps: Vec::new(),
-            header_deps: Vec::new(),
-            fee_shannons,
-        };
-
-        let (tx, deploy_evidence) = build_deploy_transaction(&spec)?;
-
-        // Estimate cycles.
-        let estimate = self.client.estimate_cycles(to_rpc_transaction(&tx)).ok();
-        let estimate_cycles = estimate.as_ref().map(|e| e.cycles.value());
-
-        // Test tx-pool acceptance.
-        let tx_pool_accepted = self.client.test_tx_pool_accept(to_rpc_transaction(&tx), Some(OutputsValidator::Passthrough)).is_ok();
-
-        // Submit.
-        let submitted = self.client.send_transaction(to_rpc_transaction(&tx), Some(OutputsValidator::Passthrough)).is_ok();
-        let tx_hash = self.client.send_transaction(to_rpc_transaction(&tx), Some(OutputsValidator::Passthrough)).ok();
-
-        // Wait for commitment.
-        let committed = if let Some(ref hash) = tx_hash { self.wait_for_commitment(hash, 30, 500).ok() } else { None };
-
-        // Build manifest from committed evidence.
-        let manifest = if let Some(ref hash) = tx_hash {
-            let mut hash_bytes = [0u8; 32];
-            hash_bytes.copy_from_slice(hash.as_bytes());
-            build_deployment_manifest_from_evidence(&deploy_evidence, &hash_bytes, 0)
-        } else {
-            build_deployment_manifest_from_evidence(&deploy_evidence, &[0u8; 32], 0)
-        };
-
-        let mut signing = SigningAdapter::new(vec!["deployer".to_string()]);
-        if submitted {
-            signing.mark_signed();
-        }
-
-        let lifecycle = TransactionLifecycleEvidence {
-            schema: "cellscript-ckb-tx-lifecycle-v0.19",
-            deploy_evidence: Some(deploy_evidence),
-            action_evidence: None,
-            signing: signing.evidence(),
-            capacity: Some(CapacityBridge::new(deployer_lock, 1000).evidence()),
-            estimate_cycles,
-            tx_pool_accepted,
-            submitted,
-            committed,
-        };
-
-        Ok((manifest, lifecycle))
+        let _ = (self, name, artifact_binary, deployer_lock, fee_shannons);
+        bail!(
+            "automatic deployment is disabled because the adapter has no signer; build an unsigned transaction with build_deploy_transaction(), sign it externally, then submit the signed transaction"
+        )
     }
 
-    /// Build a headless deploy transaction without submitting it.
-    ///
-    /// Use this when you want to inspect the transaction before submitting,
-    /// or when you need to add signing externally.
+    /// Legacy automatic-capacity build entry point; fails closed because live
+    /// Cell collection has no implemented ownership or coin-selection policy.
+    #[deprecated(note = "capacity collection is undefined; use build_deploy_transaction with a verified DeployArtifactSpec")]
     pub fn build_deploy(
         &self,
         name: &str,
@@ -1887,26 +1833,10 @@ impl CellScriptAdapter {
         deployer_lock: Script,
         fee_shannons: u64,
     ) -> Result<(TransactionView, ResolvedDeployEvidence)> {
-        let artifact_hash = blake2b_256(&artifact_binary).iter().map(|b| format!("{:02x}", b)).collect::<String>();
-
-        let capacity_input = self.find_capacity_for_deploy(&deployer_lock, &artifact_binary, fee_shannons)?;
-
-        let spec = DeployArtifactSpec {
-            name: name.to_string(),
-            artifact_binary,
-            artifact_hash,
-            deployer_lock,
-            capacity_input: capacity_input.input,
-            capacity_input_shannons: capacity_input.capacity_shannons,
-            capacity_input_data: capacity_input.data,
-            type_id_hash_type: ScriptHashType::Type,
-            type_script: None,
-            cell_deps: Vec::new(),
-            header_deps: Vec::new(),
-            fee_shannons,
-        };
-
-        build_deploy_transaction(&spec)
+        let _ = (self, name, artifact_binary, deployer_lock, fee_shannons);
+        bail!(
+            "automatic capacity collection is disabled; resolve and verify a live capacity Cell, then call build_deploy_transaction()"
+        )
     }
 
     // ---- Action workflow ----
@@ -1968,22 +1898,45 @@ impl CellScriptAdapter {
         self.client.get_transaction(tx_hash.clone())
     }
 
-    // ---- Internal helpers ----
-
-    fn find_capacity_for_deploy(&self, _lock: &Script, artifact: &[u8], fee: u64) -> Result<CapacityInput> {
-        // TODO: use CellCollector to find a real spendable cell.
-        // For now, requires the caller to provide capacity input manually
-        // via the lower-level `build_deploy_transaction` API.
-        let _ = (_lock, artifact, fee);
-        bail!("automatic live-cell collection is not yet implemented; use build_deploy_transaction() with a manually provided DeployArtifactSpec")
+    /// Fail closed unless the connected node is CKB mainnet.
+    pub fn require_mainnet(&self) -> Result<()> {
+        let consensus = self.client.get_consensus()?;
+        if consensus.genesis_hash != ckb_sdk::constants::GENESIS_BLOCK_HASH_MAINNET {
+            bail!(
+                "mainnet required: connected chain {} has genesis {}, expected {}",
+                consensus.id,
+                consensus.genesis_hash,
+                ckb_sdk::constants::GENESIS_BLOCK_HASH_MAINNET
+            );
+        }
+        Ok(())
     }
-}
 
-/// A found capacity input cell for deployment.
-struct CapacityInput {
-    input: CellInput,
-    capacity_shannons: u64,
-    data: Bytes,
+    /// Resolve and validate a live, pure-capacity input owned by `expected_lock`.
+    ///
+    /// State-bearing Cells are rejected: the deployment flow must not silently
+    /// discard a Type Script or transform non-empty input data into untyped data.
+    pub fn resolve_pure_capacity_input(&self, out_point: &OutPoint, expected_lock: &Script) -> Result<(u64, Bytes)> {
+        let response = self.client.get_live_cell(out_point.clone().into(), true)?;
+        if response.status != "live" {
+            bail!("capacity input is not live (status: {})", response.status);
+        }
+        let cell = response.cell.ok_or_else(|| anyhow::anyhow!("live capacity input response is missing cell data"))?;
+        let output: CellOutput = cell.output.into();
+        if output.lock() != *expected_lock {
+            bail!("capacity input lock does not match the requested deployer lock");
+        }
+        if output.type_().to_opt().is_some() {
+            bail!("capacity input must not have a Type Script");
+        }
+        let data = cell.data.ok_or_else(|| anyhow::anyhow!("capacity input RPC response omitted cell data"))?.content.into_bytes();
+        if !data.is_empty() {
+            bail!("capacity input must have empty data");
+        }
+        Ok((output.capacity().unpack(), data))
+    }
+
+    // ---- Internal helpers ----
 }
 
 pub fn sample_resolved_action_tx() -> ResolvedActionTx {
@@ -2352,16 +2305,24 @@ mod tests {
     }
 
     #[test]
-    fn places_cellscript_entry_payload_without_hiding_lock_signatures() {
-        let base = WitnessArgs::new_builder().lock(Some(Bytes::from(vec![0x77u8; 65])).pack()).build();
+    fn places_cellscript_entry_payload_before_signing() {
+        let base = WitnessArgs::new_builder().lock(Some(Bytes::from(vec![0u8; 65])).pack()).build();
         let payload = Bytes::from(b"CSARGv1\0\x4d\0\0\0\0\0\0\0".to_vec());
-        let witness = place_entry_witness_payload(&base, WitnessPlacement::InputType, payload.clone()).unwrap();
+        let placement = EntryWitnessPlacementAbi::WitnessArgsInputTypeV2;
+        assert_eq!(placement.name(), "cellscript-witnessargs-input-type-v2");
+        let witness = place_entry_witness_payload_before_signing(&base, placement, payload.clone()).unwrap();
         assert_eq!(witness.lock().to_opt().expect("lock preserved").raw_data().len(), 65);
         assert_eq!(witness.input_type().to_opt().expect("entry payload").raw_data(), payload);
         assert!(witness.output_type().to_opt().is_none());
 
-        let error = place_entry_witness_payload(&base, WitnessPlacement::Lock, Bytes::from(vec![1u8])).unwrap_err().to_string();
-        assert!(error.contains("lock signatures must stay explicit"), "{error}");
+        let occupied = witness;
+        let error = place_entry_witness_payload_before_signing(&occupied, placement, payload.clone()).unwrap_err().to_string();
+        assert!(error.contains("refusing to overwrite WitnessArgs.input_type"), "{error}");
+
+        let error = place_entry_witness_payload_before_signing(&base, placement, Bytes::from_static(b"not-cellscript"))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("must start with CSARGv1"), "{error}");
     }
 
     #[test]
@@ -2545,13 +2506,46 @@ mod tests {
     #[test]
     fn deploy_data_hash_type_uses_artifact_hash_and_no_type_script() {
         let mut spec = sample_deploy_spec();
-        spec.type_id_hash_type = ScriptHashType::Data2;
+        spec.type_id_hash_type = ScriptHashType::Data1;
         let (tx, evidence) = build_deploy_transaction(&spec).unwrap();
 
         assert!(tx.outputs().get(0).unwrap().type_().to_opt().is_none());
         assert_eq!(evidence.code_hash, blake2b_256(&spec.artifact_binary).to_vec());
-        assert_eq!(evidence.hash_type, "data2");
+        assert_eq!(evidence.hash_type, "data1");
         assert!(evidence.type_id_args.is_empty());
+    }
+
+    #[test]
+    fn deploy_rejects_artifact_hash_mismatch() {
+        let mut spec = sample_deploy_spec();
+        spec.artifact_hash = "00".repeat(32);
+        let error = build_deploy_transaction(&spec).unwrap_err().to_string();
+        assert!(error.contains("artifact hash mismatch"), "{error}");
+    }
+
+    #[test]
+    fn deploy_canonicalizes_equivalent_artifact_hash_text() {
+        let mut spec = sample_deploy_spec();
+        spec.artifact_hash = format!("0x{}", spec.artifact_hash.to_ascii_uppercase());
+        let (_, evidence) = build_deploy_transaction(&spec).unwrap();
+        assert_eq!(evidence.artifact_hash, hex::encode(blake2b_256(&spec.artifact_binary)));
+    }
+
+    #[test]
+    fn deploy_uses_standard_secp_signing_placeholder() {
+        let spec = sample_deploy_spec();
+        let (tx, _) = build_deploy_transaction(&spec).unwrap();
+        let witness = WitnessArgs::from_slice(tx.witnesses().get(0).unwrap().raw_data().as_ref()).unwrap();
+        let lock = witness.lock().to_opt().expect("secp placeholder lock").raw_data();
+        assert_eq!(lock.as_ref(), &[0u8; 65]);
+    }
+
+    #[test]
+    fn deploy_rejects_fee_below_default_relay_floor() {
+        let mut spec = sample_deploy_spec();
+        spec.fee_shannons = 1;
+        let error = build_deploy_transaction(&spec).unwrap_err().to_string();
+        assert!(error.contains("policy floor"), "{error}");
     }
 
     #[test]

@@ -1,3 +1,4 @@
 [package]
+edition = "2026"
 name = "spore-identity-adapter"
 version = "0.1.0"

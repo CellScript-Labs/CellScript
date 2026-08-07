@@ -12,7 +12,7 @@
 - [Tutorial 09: Action Model and Canonical Syntax](https://github.com/CellScript-Labs/CellScript/wiki/Tutorial-09-Action-Model-and-Canonical-Syntax)
 - [Tutorial 10: Standard Library](https://github.com/CellScript-Labs/CellScript/wiki/Tutorial-10-Standard-Library)
 - [Tutorial 11: Scoped Invariants and ProofPlan](https://github.com/CellScript-Labs/CellScript/wiki/Tutorial-11-Scoped-Invariants-and-ProofPlan)
-- [Tutorial 12: Phase 1 Registry: End-to-End](https://github.com/CellScript-Labs/CellScript/wiki/Tutorial-12-Phase1-Registry-End-to-End)
+- [Tutorial 12: Registry Artifacts End-to-End](https://github.com/CellScript-Labs/CellScript/wiki/Tutorial-12-Phase1-Registry-End-to-End)
 - [Tutorial 13: Agentic Loops and cellscript-mcp](https://github.com/CellScript-Labs/CellScript/wiki/Tutorial-13-Agentic-Loops-and-cellscript-mcp)
 - [Cookbook Recipes](https://github.com/CellScript-Labs/CellScript/wiki/Cookbook-Recipes)
 - [CKB Glossary](https://github.com/CellScript-Labs/CellScript/wiki/CKB-Glossary)

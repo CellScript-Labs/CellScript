@@ -1,4 +1,4 @@
-# Matrix metadata for scripts/cellscript_syntax_combo_audit.py.
+# Matrix metadata for the Rust `cellscript-tools syntax-combo-audit` runner.
 # The first runner version keeps generation deterministic and small, while this
 # file records the axes that must stay covered as the generator grows.
 
@@ -25,6 +25,8 @@ required_origins = [
     "tests/syntax_combo/seeds/explicit-borrow-effect-reject.cell",
     "tests/syntax_combo/seeds/explicit-borrow-escape-reject.cell",
     "tests/syntax_combo/seeds/explicit-borrow-cross-consume-reject.cell",
+    "tests/syntax_combo/seeds/field-commas-canonical.cell",
+    "tests/syntax_combo/seeds/field-commas-compatibility.cell",
     "tests/syntax_combo/seeds/capability-entailment.cell",
     "tests/syntax_combo/seeds/capability-missing-identity-reject.cell",
     "tests/syntax_combo/seeds/capability-transitive-grant-reject.cell",
@@ -72,6 +74,8 @@ required_origins = [
     "tests/syntax_combo/seeds/explicit-borrow-effect-reject.cell",
     "tests/syntax_combo/seeds/explicit-borrow-escape-reject.cell",
     "tests/syntax_combo/seeds/explicit-borrow-cross-consume-reject.cell",
+    "tests/syntax_combo/seeds/field-commas-canonical.cell",
+    "tests/syntax_combo/seeds/field-commas-compatibility.cell",
     "tests/syntax_combo/seeds/capability-entailment.cell",
     "tests/syntax_combo/seeds/capability-missing-identity-reject.cell",
     "tests/syntax_combo/seeds/capability-transitive-grant-reject.cell",
@@ -122,6 +126,8 @@ required_origins = [
     "tests/syntax_combo/seeds/explicit-borrow-effect-reject.cell",
     "tests/syntax_combo/seeds/explicit-borrow-escape-reject.cell",
     "tests/syntax_combo/seeds/explicit-borrow-cross-consume-reject.cell",
+    "tests/syntax_combo/seeds/field-commas-canonical.cell",
+    "tests/syntax_combo/seeds/field-commas-compatibility.cell",
     "tests/syntax_combo/seeds/capability-entailment.cell",
     "tests/syntax_combo/seeds/capability-missing-identity-reject.cell",
     "tests/syntax_combo/seeds/capability-transitive-grant-reject.cell",

@@ -16,6 +16,14 @@ By the end of this tutorial you will understand:
 - how a verifier downstream of you can confirm that what they
   imported, compiled, and deployed is the same thing you published.
 
+The production surfaces are live at `https://cellscript.dev/registry/`,
+`https://api.registry.cellscript.dev`, and
+`https://registry.cellscript.dev`. The first publisher-owned JoyID publication
+and clean-machine install remain the final interactive adoption checkpoint.
+The automatic compiler-backed worker is deployed and has passed a live
+publish-to-install smoke; that one-time seeded identity is deployment evidence,
+not a substitute for the remaining publisher-owned JoyID flow.
+
 ## Audience
 
 You are writing or porting a contract for CKB. You have a working
@@ -180,18 +188,20 @@ The architecture splits the paths:
 | Path | Responsibility |
 |---|---|
 | Write API | Authentication, namespace/package ACL, quota, schema checks, hash sanity, yanking, quarantine, and queue admission. |
-| Static read path | CDN/cacheable package indexes, source mirrors, direct package URLs, and website browsing. |
+| Static read path | Cacheable package indexes, immutable source snapshots, direct package URLs, and website browsing. |
 | Verifier | Source/build/deployment hash checks, optional live-chain checks, and fail-closed policy. |
 
-The source still lives somewhere content-addressed, usually Git. The build hash
-is computed locally from the source and toolchain. The deployment record is a
-small text file with chain facts that a verifier can re-check. The registry
-service admits and indexes metadata, but consumers still verify the selected
-package.
+The Registry stores a content-addressed source snapshot for every accepted
+version. A Git repository and tag remain useful provenance and offline-mirror
+material, but the normal install path does not require that host to be online.
+The build hash is computed locally from the verified source and toolchain. The
+deployment record is a small text file with chain facts that a verifier can
+re-check. The registry service admits and indexes metadata, but consumers still
+verify the selected package.
 
-The discovery index maps a `(namespace, name)` pair to a Git URL and ownership
-metadata. It changes when a package is claimed, transferred, or moved. It does
-not need to change for every version publish.
+The public API maps a `(namespace, name)` pair to accepted versions, immutable
+snapshot descriptors, provenance, and ownership-governed state. The explicit
+Git/offline index remains available for private mirrors and air-gapped use.
 
 ## Authoring a package from scratch
 
@@ -225,9 +235,9 @@ later lock against. You do not need to write the lockfile yourself.
 If your contract imports another contract, declare it in the
 manifest's dependency section. There are three dependency kinds:
 
-- a **registry** dependency, named by `(namespace, name)` plus a
-  version range. The toolchain resolves it via the discovery index
-  when present, or via the default convention when not.
+- a **registry** dependency, named by `(namespace, name)` plus a version range.
+  The toolchain queries the production API, selects an accepted version, and
+  materializes its verified immutable snapshot.
 - a **git** dependency, named by a Git URL plus an optional tag,
   branch, or revision. The toolchain clones the URL into a local
   cache.
@@ -245,18 +255,28 @@ Authorise a local publisher credential the first time you publish, or whenever
 the credential expires or is revoked:
 
 ```bash
-cellc auth capability create --principal-id <principal_id> --scope publish:cellscript/amm_pool --expires 90d --json > capability-payload.json
+cellc auth capability create --principal-id <principal_id> \
+  --scope publish:cellscript/amm_pool \
+  --scope deployment:cellscript/amm_pool \
+  --scope availability:cellscript/amm_pool \
+  --expires 90d --json > capability-payload.json
 cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json
+cellc auth namespace claim --namespace cellscript --payload capability-payload.json --joyid-signature joyid-signature.json
 ```
 
 This generates a local capability key, stores the private key in the OS
 keychain, and prints a capability authorisation payload. The registry submit
 page derives `<principal_id>` from the connected JoyID signer, and the
 browser/CCC/JoyID flow signs that exact payload, binding the local capability
-public key, requested scopes, expiry, and principal id. It does not create a
-separate registry account.
+public key, requested scopes, expiry, and principal id. Publishing, deployment
+evidence, and availability changes are separate scopes, so CI can receive only
+the actions it needs. This does not create a separate registry account.
 
-Then run the toolchain's `publish` command. It does five things:
+Namespace ownership is explicit and must be active before the first publish;
+capability registration alone does not claim it. Reserved namespaces may
+require operator review.
+
+Then run the toolchain's `publish` command. The request does six things:
 
 1. Recomputes the source hash from the current working tree and the
    current manifest, so the published hash matches the source you
@@ -266,8 +286,17 @@ Then run the toolchain's `publish` command. It does five things:
 3. Signs the publish payload with the local publisher credential.
 4. Uploads an immutable source snapshot.
 5. Submits the version entry to the registry write API.
-6. Receives a canonical registry URL and an initial visibility state such as
-   `source_published` or `indexed_pending`.
+6. Receives a canonical registry URL, `source_published`, and
+   `verification: queued`.
+
+The version and its verification job commit in one transaction. A separate
+leased worker then authenticates the generated source snapshot, compiles it
+with the current CellScript compiler, verifies the canonical manifest and
+resolved compatibility-profile hashes, atomically records `verified_build`
+evidence, and refreshes the version-addressed static object. Attempts are
+bounded and operator-visible. Default search and normal resolution include the
+package only after this baseline passes; the direct version URL and explicit
+unverified policy remain available for audit.
 
 You should still commit the mirrored metadata file, tag the commit, and push
 both. That mirror travels with the source: every clone of your repo at that tag
@@ -295,15 +324,21 @@ path dependencies take a filesystem path.
 Run the toolchain's resolver. It performs three checks per
 dependency:
 
-1. It fetches the source through the right channel (discovery
-   index, Git clone, or local read).
-2. It computes the source hash and compares it to the recorded
-   source hash from the metadata. A mismatch is a hard error.
+1. It fetches the source through the right channel (Registry snapshot, explicit
+   Git dependency, or local path).
+2. For Registry sources it verifies descriptor size/SHA-256, safe paths,
+   per-file BLAKE2b, and then the complete source hash. A mismatch is a hard
+   error.
 3. It transitively resolves any dependencies that the dependency
    itself declares.
 
 The resolver writes a snapshot of the resolved graph into the
 lockfile so subsequent builds do not need network access.
+
+Normal resolution accepts `verified_build`, `deployed`, and
+`on_chain_committed`. An exact `source_published` or `indexed_pending` version
+requires `--allow-unverified`; a quarantined version requires the stronger
+`--allow-quarantined`. These acknowledgements persist in the dependency table.
 
 ### Step 3 — Build
 
@@ -416,11 +451,10 @@ scope.
 
 ## Operating without GitHub
 
-Phase 1 has no dependency on GitHub. The discovery index is a tiny
-JSON file that lives anywhere you want it to live. The package
-metadata lives inside the source repo and travels with it. The
-resolver clones from any Git URL it can reach, including self-hosted
-Gitea, GitLab, or a bare repo on a file share.
+Production Registry installs have no dependency on GitHub: they use the
+Registry's immutable source object. Repository metadata still travels with the
+entry for audit and may point to GitHub, self-hosted Gitea, GitLab, or another
+Git server without changing the installed bytes.
 
 For air-gapped environments, declare dependencies as `path` or as
 `git` URLs pointing at a local mirror. The lockfile pins the
@@ -464,9 +498,9 @@ specific command. Substitute your toolchain's CLI for each step.
    Commit and push.
 
 3. **Consumer pulls.** A second developer adds the package as a
-   dependency and resolves. The resolver fetches the source through
-   Git (or the discovery index) and verifies that the recorded
-   source hash matches the actual source tree. The resolution writes
+   dependency and resolves. The resolver fetches the immutable Registry
+   snapshot, verifies its object and file hashes, and confirms that the
+   recorded source hash matches the reconstructed source tree. Resolution writes
    a fresh lockfile for the consumer.
 
 4. **Consumer builds.** The consumer's build computes the six
@@ -492,7 +526,7 @@ which layer disagrees.
 
 Phase 1 gives you:
 
-- content-addressed source identity, with no central server;
+- content-addressed source identity served by a separated read-only path;
 - per-build identity that survives toolchain upgrades being treated
   as a deliberate action;
 - per-network deployment identity that can be checked locally or
@@ -500,12 +534,12 @@ Phase 1 gives you:
 - fail-closed verification at every layer, with structured
   disagreements rather than silent overrides.
 
-In exchange, you give up:
+The deliberate constraints are:
 
 - mutable channels like `latest` and `stable`;
-- a canonical index that resolves a namespace globally;
 - automatic cross-profile reuse;
-- the convenience of "yank" and re-publish.
+- mutable version overwrite or re-publish; yanking preserves history and
+  suppresses normal selection instead of deleting an accepted version.
 
 For long-lived, auditable, multi-team contracts, those trade-offs
 are usually worth it. For toy experiments, the lack of a `latest`

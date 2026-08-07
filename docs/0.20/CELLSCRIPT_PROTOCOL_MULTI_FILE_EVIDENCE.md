@@ -64,7 +64,8 @@ package: nova_fungible_xudt_type.cell
 Artifact preparation also includes the shared schema source unit:
 
 ```bash
-python3 scripts/novaseal_planned_profiles_devnet_stateful_live.py \
+cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
+  --root . novaseal-planned-devnet \
   --profile fungible-xudt \
   --prepare-artifacts \
   --pretty
@@ -88,7 +89,8 @@ also visible in metadata: `NovaFungibleXudtSignedIntentV0` field offsets are
 Command:
 
 ```bash
-python3 scripts/novaseal_planned_profiles_devnet_stateful_live.py \
+cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
+  --root . novaseal-planned-devnet \
   --profile fungible-xudt \
   --ckb-repo ../ckb \
   --ckb-bin ../ckb-bin/ckb_v0.207.0_x86_64-unknown-linux-gnu-portable/ckb \

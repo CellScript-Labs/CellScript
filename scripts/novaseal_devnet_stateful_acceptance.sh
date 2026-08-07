@@ -66,33 +66,8 @@ if [[ ! -f "$REPORT" ]]; then
   exit 1
 fi
 
-summary="$(python3 - "$REPORT" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], "r", encoding="utf-8") as handle:
-    report = json.load(handle)
-
-def field(name):
-    value = report.get(name, "unknown")
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    return str(value)
-
-print(
-    "\t".join(
-        [
-            field("status"),
-            field("live_devnet_rpc_executed"),
-            field("local_blocker_count"),
-            field("acceptance_blocker_count"),
-            field("blocker_count"),
-            str(report.get("external_endpoint_coverage", {}).get("status", "unknown")),
-        ]
-    )
-)
-PY
-)"
+summary="$(cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
+  --root "$ROOT_DIR" novaseal-acceptance-summary "$REPORT")"
 IFS=$'\t' read -r status live_devnet_rpc_executed local_blockers acceptance_blockers blockers external_endpoint_status <<< "$summary"
 printf 'wrote %s status=%s live_devnet_rpc_executed=%s local_blockers=%s acceptance_blockers=%s blockers=%s external_endpoint_status=%s certifier_status=%s\n' \
   "$REPORT" "$status" "$live_devnet_rpc_executed" "$local_blockers" "$acceptance_blockers" "$blockers" "$external_endpoint_status" "$certifier_status"

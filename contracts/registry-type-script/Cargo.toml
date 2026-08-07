@@ -1,0 +1,46 @@
+[package]
+name = "cellscript-registry-type-script"
+version = "0.22.0"
+edition = "2024"
+rust-version = "1.97.1"
+publish = false
+
+[[bin]]
+name = "cellscript-registry-type-script"
+path = "src/main.rs"
+test = false
+doctest = false
+bench = false
+required-features = ["ckb-script"]
+
+[[bin]]
+name = "cellscript-registry-type-script-hash"
+path = "src/bin/ckb_data_hash.rs"
+test = false
+doctest = false
+bench = false
+required-features = ["hash-tool"]
+
+[features]
+ckb-script = []
+hash-tool = ["dep:ckb-hash"]
+
+[dependencies]
+ckb-hash = { version = "=1.1.1", optional = true }
+ckb-std = { version = "=1.1.0", default-features = false, features = ["allocator"] }
+
+[dev-dependencies]
+ckb-testtool = "=1.1.1"
+
+[workspace]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "z"
+overflow-checks = true
+panic = "abort"
+strip = false

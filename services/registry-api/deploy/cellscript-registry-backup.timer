@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the CellScript Registry backup daily
+
+[Timer]
+OnCalendar=*-*-* 03:17:00
+Persistent=true
+RandomizedDelaySec=15m
+Unit=cellscript-registry-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -395,7 +395,7 @@ Current implementation note:
 - write, signing, publish, deployment submission, registry mutation, and
   shell/editor configuration tools are intentionally absent by default;
 - the CellScript skill pack lives under `docs/skills/cellscript-*` and
-  `scripts/check_cellscript_skill_pack.py` verifies that referenced docs,
+  `cellscript-tools check-skill-pack` verifies that referenced docs,
   examples, and command names still exist.
 
 ## P1: Derived Cyclic ProtocolGraph View

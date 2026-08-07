@@ -1,0 +1,2028 @@
+{
+  "bug_class_contracts": [
+    {
+      "id": "SCA-BUG-STD-LIFECYCLE-LOCKED-OUTPUT",
+      "min_mode": "quick",
+      "name": "stdlib lifecycle pattern must create and lock the declared output",
+      "release_boundary": "std::lifecycle::transfer(input, output, to) cannot drop to or omit create output with_lock(to)",
+      "required_cases": [
+        "stdlib-transfer"
+      ],
+      "required_origins": [
+        "generated"
+      ]
+    },
+    {
+      "id": "SCA-BUG-PRESERVE-TYPE-EQUIVALENCE",
+      "min_mode": "quick",
+      "name": "preserve sugar must be type-equivalent to canonical require equality",
+      "release_boundary": "preserve output from input { field } must reject field type mismatches",
+      "required_cases": [
+        "reject-preserve-type-mismatch"
+      ],
+      "required_origins": [
+        "generated"
+      ]
+    },
+    {
+      "id": "SCA-BUG-REQUIRE-BLOCK-PURITY",
+      "min_mode": "quick",
+      "name": "anonymous require block cannot hide lifecycle or verifier-boundary operations",
+      "release_boundary": "require { ... } remains pure boolean grouping sugar",
+      "required_cases": [
+        "reject-require-block-lifecycle",
+        "seed-require-block-lifecycle"
+      ],
+      "required_origins": [
+        "generated",
+        "tests/syntax_combo/seeds/require-block-lifecycle.cell"
+      ]
+    },
+    {
+      "id": "SCA-BUG-STDLIB-NAMESPACE-FAIL-CLOSED",
+      "min_mode": "quick",
+      "name": "unknown stdlib namespaces and helper names fail closed",
+      "release_boundary": "unsupported std::* calls cannot compile as inert boolean expressions",
+      "required_cases": [
+        "reject-unknown-stdlib"
+      ],
+      "required_origins": [
+        "generated"
+      ]
+    },
+    {
+      "id": "SCA-BUG-SOURCE-QUALIFIER-LINEARITY",
+      "min_mode": "quick",
+      "name": "source-qualified values cannot be consumed by lifecycle operations",
+      "release_boundary": "read/protected/witness/lock_args values do not escape into consume/destroy/stdlib lifecycle",
+      "required_cases": [
+        "reject-consume-read-param"
+      ],
+      "required_origins": [
+        "generated"
+      ]
+    },
+    {
+      "id": "SCA-BUG-RECEIPT-CLAIM-CONTRACT",
+      "min_mode": "quick",
+      "name": "receipt claim helpers require receipt inputs and declared claim output type",
+      "release_boundary": "claim semantics come from stdlib helper validation, not action names",
+      "required_cases": [
+        "reject-claim-without-output-arrow"
+      ],
+      "required_origins": [
+        "generated"
+      ]
+    },
+    {
+      "id": "SCA-BUG-LOCK-SOURCE-QUALIFIERS",
+      "min_mode": "quick",
+      "name": "lock protected, witness, and lock_args source qualifiers stay parse/type checked",
+      "release_boundary": "lock authorization data sources remain explicit in the surface and metadata path",
+      "required_cases": [
+        "lock-source-qualifiers"
+      ],
+      "required_origins": [
+        "generated"
+      ]
+    },
+    {
+      "id": "SCA-BUG-0.22-CELLSET-UNBOUNDED",
+      "min_mode": "quick",
+      "name": "transaction-backed Cell collections require an explicit finite maximum cardinality",
+      "release_boundary": "BoundedCellSet<T, N> cannot omit N or use an unbounded transaction source",
+      "required_cases": [
+        "seed-bounded-collection-missing-cardinality-reject"
+      ],
+      "required_origins": [
+        "tests/syntax_combo/seeds/bounded-collection-missing-cardinality-reject.cell"
+      ]
+    },
+    {
+      "id": "SCA-BUG-0.22-CELLSET-VEC-RESOURCE",
+      "min_mode": "quick",
+      "name": "generic Vec<Resource> cannot stand in for a source-aware Cell set",
+      "release_boundary": "transaction Cell membership and ownership are never inferred from local Vec storage",
+      "required_cases": [
+        "seed-bounded-collection-vec-resource-reject"
+      ],
+      "required_origins": [
+        "tests/syntax_combo/seeds/bounded-collection-vec-resource-reject.cell"
+      ]
+    },
+    {
+      "id": "SCA-BUG-0.22-CONSUME-EACH-DUPLICATE",
+      "min_mode": "quick",
+      "name": "consume_each consumes one bounded Cell set exactly once",
+      "release_boundary": "linear bounded input sets cannot be consumed twice or silently partially consumed",
+      "required_cases": [
+        "seed-bounded-collection-duplicate-consume-reject"
+      ],
+      "required_origins": [
+        "tests/syntax_combo/seeds/bounded-collection-duplicate-consume-reject.cell"
+      ]
+    },
+    {
+      "id": "SCA-BUG-0.22-CREATE-EACH-CARDINALITY-MISSING",
+      "min_mode": "quick",
+      "name": "create_each carries output cardinality and capacity builder obligations",
+      "release_boundary": "bounded output plans compile only with metadata and ProofPlan builder-evidence contracts",
+      "required_cases": [
+        "seed-bounded-collection"
+      ],
+      "required_origins": [
+        "tests/syntax_combo/seeds/bounded-collection.cell"
+      ]
+    },
+    {
+      "id": "SCA-BUG-0.22-VALIDITY-EVIDENCE-MISSING",
+      "min_mode": "quick",
+      "name": "type validity predicates carry canonical metadata and ProofPlan evidence tiers",
+      "release_boundary": "every accepted validity predicate is paired with a canonical evidence tier and ProofPlan record",
+      "required_cases": [
+        "seed-type-validity"
+      ],
+      "required_origins": [
+        "tests/syntax_combo/seeds/type-validity.cell"
+      ]
+    },
+    {
+      "id": "SCA-BUG-0.22-VALIDITY-ENV-UNKNOWN",
+      "min_mode": "quick",
+      "name": "unknown validity environment reads fail closed",
+      "release_boundary": "env::block_number is the only approved 0.22 validity environment read",
+      "required_cases": [
+        "seed-type-validity-unknown-env-reject"
+      ],
+      "required_origins": [
+        "tests/syntax_combo/seeds/type-validity-unknown-env-reject.cell"
+      ]
+    },
+    {
+      "id": "SCA-BUG-0.22-BORROW-EFFECT-COMPAT",
+      "min_mode": "quick",
+      "name": "borrowed linear views may reach only Pure or ReadOnly helpers with dedicated &T parameters",
+      "release_boundary": "borrow calls are checked against authenticated callable effects and explicit read-only reference parameters",
+      "required_cases": [
+        "seed-explicit-borrow",
+        "seed-explicit-borrow-effect-reject"
+      ],
+      "required_origins": [
+        "tests/syntax_combo/seeds/explicit-borrow.cell",
+        "tests/syntax_combo/seeds/explicit-borrow-effect-reject.cell"
+      ]
+    },
+    {
+      "id": "SCA-BUG-0.22-BORROW-ESCAPE",
+      "min_mode": "quick",
+      "name": "borrowed View<T> markers cannot acquire layout, storage, ABI, or return representation",
+      "release_boundary": "borrow markers cannot escape through local aggregates, assignments, returns, or generic calls",
+      "required_cases": [
+        "seed-explicit-borrow-escape-reject"
+      ],
+      "required_origins": [
+        "tests/syntax_combo/seeds/explicit-borrow-escape-reject.cell"
+      ]
+    },
+    {
+      "id": "SCA-BUG-0.22-BORROW-CROSSES-CONSUME",
+      "min_mode": "quick",
+      "name": "borrowed views cannot cross lifecycle discharge of their linear root",
+      "release_boundary": "every path rejects consume, destroy, transfer, claim, or settle of a root while its borrow block is active",
+      "required_cases": [
+        "seed-explicit-borrow-cross-consume-reject"
+      ],
+      "required_origins": [
+        "tests/syntax_combo/seeds/explicit-borrow-cross-consume-reject.cell"
+      ]
+    },
+    {
+      "id": "SCA-BUG-0.22-CAPABILITY-OVERGRANT",
+      "min_mode": "quick",
+      "name": "composite lifecycle authority is derived only by the closed versioned entailment relation",
+      "release_boundary": "destroy requires consume+burn and replace_unique requires replace plus an exact declared identity condition",
+      "required_cases": [
+        "seed-capability-entailment",
+        "seed-capability-missing-identity-reject"
+      ],
+      "required_origins": [
+        "tests/syntax_combo/seeds/capability-entailment.cell",
+        "tests/syntax_combo/seeds/capability-missing-identity-reject.cell"
+      ]
+    },
+    {
+      "id": "SCA-BUG-0.22-CAPABILITY-TRANSITIVE-GRANT",
+      "min_mode": "quick",
+      "name": "container capability sets never grant authority over another Cell resource",
+      "release_boundary": "capability lookup uses the exact lifecycle operand type and does not traverse container-like declarations",
+      "required_cases": [
+        "seed-capability-transitive-grant-reject"
+      ],
+      "required_origins": [
+        "tests/syntax_combo/seeds/capability-transitive-grant-reject.cell"
+      ]
+    },
+    {
+      "id": "SCA-BUG-0.22-PAYLOAD-MATCH-NONEXHAUSTIVE",
+      "min_mode": "quick",
+      "name": "payload enum matches remain exhaustive after destructuring",
+      "release_boundary": "every concrete payload variant is covered exactly once unless a final non-linear wildcard arm is explicit",
+      "required_cases": [
+        "seed-payload-enum",
+        "seed-payload-enum-nonexhaustive-reject"
+      ],
+      "required_origins": [
+        "tests/syntax_combo/seeds/payload-enum.cell",
+        "tests/syntax_combo/seeds/payload-enum-nonexhaustive-reject.cell"
+      ]
+    },
+    {
+      "id": "SCA-BUG-0.22-PAYLOAD-DYNAMIC-ACCEPTED",
+      "min_mode": "quick",
+      "name": "payload enum layout accepts only concrete fixed-width values",
+      "release_boundary": "dynamic and generic payload ADTs fail closed before IR, ABI, or metadata claims are emitted",
+      "required_cases": [
+        "seed-payload-enum-dynamic-reject",
+        "seed-payload-enum-generic-reject"
+      ],
+      "required_origins": [
+        "tests/syntax_combo/seeds/payload-enum-dynamic-reject.cell",
+        "tests/syntax_combo/seeds/payload-enum-generic-reject.cell"
+      ]
+    },
+    {
+      "id": "SCA-BUG-0.22-PAYLOAD-LINEAR-DROP",
+      "min_mode": "quick",
+      "name": "linear Cell payload ownership is discharged inside every match arm",
+      "release_boundary": "a Cell payload cannot disappear through wildcard binding or implicit arm-local drop",
+      "required_cases": [
+        "seed-payload-enum-linear-drop-reject"
+      ],
+      "required_origins": [
+        "tests/syntax_combo/seeds/payload-enum-linear-drop-reject.cell"
+      ]
+    },
+    {
+      "id": "SCA-BUG-0.22-PROTOCOLGRAPH-ROLE-OVERCLAIM",
+      "min_mode": "quick",
+      "name": "field-name role hints remain weak metadata and never authorization evidence",
+      "release_boundary": "a participant-like Address field records source=field-name, evidence_tier=metadata-only, and authorization_proven=false",
+      "required_cases": [
+        "seed-protocolgraph-role-weak"
+      ],
+      "required_origins": [
+        "tests/syntax_combo/seeds/protocolgraph-role-weak.cell"
+      ]
+    },
+    {
+      "id": "SCA-BUG-0.22-PROTOCOLGRAPH-ROLE-CONFLICT",
+      "min_mode": "quick",
+      "name": "conflicting ProtocolGraph role sources remain attributed and deterministically ordered",
+      "release_boundary": "explicit predicates precede witness/lock_args bindings and weak field names without entering ProofPlan",
+      "required_cases": [
+        "seed-protocolgraph-role-conflict"
+      ],
+      "required_origins": [
+        "tests/syntax_combo/seeds/protocolgraph-role-conflict.cell"
+      ]
+    },
+    {
+      "id": "SCA-BUG-STDLIB-ARGUMENT-VALIDATION",
+      "min_mode": "ci",
+      "name": "stdlib lifecycle helpers validate arity, cell kind, lock target, and claim output",
+      "release_boundary": "stdlib lifecycle patterns fail closed before lowering when arguments, lock targets, or claim outputs are invalid",
+      "required_cases": [
+        "matrix-reject-claim-non-receipt",
+        "matrix-reject-claim-extra-args",
+        "matrix-reject-transfer-extra-args",
+        "matrix-reject-settle-missing-args",
+        "matrix-reject-claim-output-type-mismatch",
+        "matrix-reject-settle-lock-target-type"
+      ],
+      "required_origins": [
+        "matrix:reject/stdlib-lifecycle"
+      ]
+    },
+    {
+      "id": "SCA-BUG-METADATA-HELPER-VALIDATION",
+      "min_mode": "ci",
+      "name": "cell metadata helpers reject non-cell arguments",
+      "release_boundary": "std::cell::* metadata helpers cannot be used as generic boolean predicates",
+      "required_cases": [
+        "matrix-reject-cell-metadata-non-cell"
+      ],
+      "required_origins": [
+        "matrix:reject/metadata"
+      ]
+    },
+    {
+      "id": "SCA-BUG-RECEIPT-LIFECYCLE-OUTPUT",
+      "min_mode": "ci",
+      "name": "receipt claim and settle helpers emit locked output obligations",
+      "release_boundary": "claim/settle helpers must lower to explicit consume/create/lock obligations",
+      "required_cases": [
+        "matrix-stdlib-claim-require-block",
+        "matrix-stdlib-settle-preserve-capacity"
+      ],
+      "required_origins": [
+        "matrix:receipt/proof",
+        "matrix:receipt/metadata"
+      ]
+    },
+    {
+      "id": "SCA-BUG-DEEP-HIDDEN-LIFECYCLE",
+      "min_mode": "deep",
+      "name": "deep reject variants keep stdlib lifecycle out of pure proof positions",
+      "release_boundary": "release-local deep replay covers hidden lifecycle mutations beyond the quick corpus",
+      "required_cases": [
+        "matrix-deep-reject-require-block-transfer"
+      ],
+      "required_origins": [
+        "matrix:deep/reject/proof-purity",
+        "seeded:deep/reject"
+      ]
+    },
+    {
+      "id": "SCA-BUG-DEEP-READ-STDLIB-LIFECYCLE",
+      "min_mode": "deep",
+      "name": "deep reject variants cover stdlib lifecycle on read parameters",
+      "release_boundary": "read-param lifecycle rejection is covered for both explicit consume and stdlib lifecycle syntax",
+      "required_cases": [
+        "matrix-deep-reject-transfer-read-param"
+      ],
+      "required_origins": [
+        "matrix:deep/reject/source-qualifier"
+      ]
+    },
+    {
+      "id": "SCA-BUG-DEEP-UNKNOWN-STDLIB",
+      "min_mode": "deep",
+      "name": "deep reject variants cover unknown stdlib helper families",
+      "release_boundary": "unsupported helper families stay rejected under release-local deep replay",
+      "required_cases": [
+        "matrix-deep-reject-unknown-accounting"
+      ],
+      "required_origins": [
+        "matrix:deep/reject/stdlib-namespace"
+      ]
+    },
+    {
+      "id": "SCA-BUG-FLOW-EDGE-UNDECLARED",
+      "min_mode": "ci",
+      "name": "flow state transitions must use edges declared in the flow block",
+      "release_boundary": "transition input.state: A -> output.state: B must fail closed when A -> B is not a declared flow edge",
+      "required_cases": [
+        "reject-flow-undeclared-edge",
+        "accept-flow-declared-cyclic-edge"
+      ],
+      "required_origins": [
+        "generated"
+      ]
+    },
+    {
+      "id": "SCA-BUG-FLOW-CREATE-STATE-CONTRACT",
+      "min_mode": "ci",
+      "name": "initial create of a flow type must set a statically known declared state",
+      "release_boundary": "flow-typed create must set the state field to a declared state literal, not a runtime value",
+      "required_cases": [
+        "reject-flow-create-missing-state",
+        "reject-flow-create-non-static-initial"
+      ],
+      "required_origins": [
+        "generated"
+      ]
+    },
+    {
+      "id": "SCA-BUG-AGGREGATE-INVARIANT-CONTRACT",
+      "min_mode": "ci",
+      "name": "xUDT group amount conservation invariant must lower to the matching runtime helper",
+      "release_boundary": "assert_sum(group_outputs<T>.amount) == assert_sum(group_inputs<T>.amount) is recognised as the xUDT conserved aggregate and surfaces the runtime-helper-required gap",
+      "required_cases": [
+        "accept-invariant-xudt-conserved"
+      ],
+      "required_origins": [
+        "generated"
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "explicit-transfer",
+      "oracle": {
+        "action": "transfer_coin",
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [
+          "coin"
+        ],
+        "create_bindings": [
+          "next_coin"
+        ],
+        "create_fields": {
+          "next_coin": [
+            "amount",
+            "nonce"
+          ]
+        },
+        "locked_outputs": [
+          "next_coin"
+        ],
+        "obligation_contains": [
+          "create-output-lock"
+        ],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "generated",
+      "source": "module cellscript::audit::explicit_transfer\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction transfer_coin(coin: Coin, to: Address) -> next_coin: Coin {\n    verification\n    consume coin\n\n    create next_coin = Coin {\n        amount: coin.amount,\n        nonce: coin.nonce\n    } with_lock(to)\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "pure-require-block",
+      "oracle": {
+        "action": "keep_fields",
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [
+          "coin"
+        ],
+        "create_bindings": [
+          "next_coin"
+        ],
+        "create_fields": {
+          "next_coin": [
+            "amount",
+            "nonce"
+          ]
+        },
+        "locked_outputs": [
+          "next_coin"
+        ],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "generated",
+      "source": "module cellscript::audit::pure_require_block\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction keep_fields(coin: Coin, to: Address) -> next_coin: Coin {\n    verification\n    consume coin\n\n    create next_coin = Coin {\n        amount: coin.amount,\n        nonce: coin.nonce\n    } with_lock(to)\n\n    require {\n        next_coin.amount == coin.amount\n        next_coin.nonce == coin.nonce\n    }\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "preserve-sugar",
+      "oracle": {
+        "action": "preserve_fields",
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [
+          "coin"
+        ],
+        "create_bindings": [
+          "next_coin"
+        ],
+        "create_fields": {
+          "next_coin": [
+            "amount",
+            "nonce"
+          ]
+        },
+        "locked_outputs": [
+          "next_coin"
+        ],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "generated",
+      "source": "module cellscript::audit::preserve_sugar\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction preserve_fields(coin: Coin, to: Address) -> next_coin: Coin {\n    verification\n    consume coin\n\n    create next_coin = Coin {\n        amount: coin.amount,\n        nonce: coin.nonce\n    } with_lock(to)\n\n    preserve next_coin from coin {\n        amount\n        nonce\n    }\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "stdlib-transfer",
+      "oracle": {
+        "action": "transfer_coin",
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [
+          "coin"
+        ],
+        "create_bindings": [
+          "next_coin"
+        ],
+        "create_fields": {
+          "next_coin": [
+            "amount",
+            "nonce"
+          ]
+        },
+        "locked_outputs": [
+          "next_coin"
+        ],
+        "obligation_contains": [
+          "create-output-lock",
+          "consume-input:Coin:coin"
+        ],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "generated",
+      "source": "module cellscript::audit::stdlib_transfer\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction transfer_coin(coin: Coin, to: Address) -> next_coin: Coin {\n    verification\n    std::lifecycle::transfer(coin, next_coin, to) {\n        amount\n        nonce\n    }\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "stdlib-claim",
+      "oracle": {
+        "action": "claim_voucher",
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [
+          "voucher"
+        ],
+        "create_bindings": [
+          "coin"
+        ],
+        "create_fields": {
+          "coin": [
+            "amount",
+            "nonce"
+          ]
+        },
+        "locked_outputs": [
+          "coin"
+        ],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "generated",
+      "source": "module cellscript::audit::stdlib_claim\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction claim_voucher(voucher: Voucher) -> coin: Coin {\n    verification\n    std::receipt::claim(voucher, coin, voucher.holder) {\n        amount\n        nonce\n    }\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "stdlib-settle",
+      "oracle": {
+        "action": "settle_voucher",
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [
+          "voucher"
+        ],
+        "create_bindings": [
+          "coin"
+        ],
+        "create_fields": {
+          "coin": [
+            "amount",
+            "nonce"
+          ]
+        },
+        "locked_outputs": [
+          "coin"
+        ],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "generated",
+      "source": "module cellscript::audit::stdlib_settle\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction settle_voucher(voucher: Voucher) -> coin: Coin {\n    verification\n    std::lifecycle::settle(voucher, coin, voucher.holder) {\n        amount\n        nonce\n    }\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "cell-metadata-helpers",
+      "oracle": {
+        "action": "preserve_boundary",
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [
+          "cell-metadata-equality:lock_hash",
+          "cell-metadata-equality:capacity"
+        ],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "generated",
+      "source": "module cellscript::audit::cell_metadata_helpers\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction preserve_boundary(coin_before: Coin) -> coin_after: Coin {\n    verification\n    std::cell::preserve_type(coin_after, coin_before)\n    std::cell::preserve_lock(coin_after, coin_before)\n    std::cell::preserve_capacity(coin_after, coin_before)\n    std::accounting::conserved(coin_after, coin_before)\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "lock-source-qualifiers",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "generated",
+      "source": "module cellscript::audit::lock_source_qualifiers\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\nlock owner_only(\n    protected wallet: Wallet,\n    lock_args owner: Address,\n    witness claimed_owner: Address\n) -> bool {\n    verification\n    require wallet.owner == owner\n    require claimed_owner == owner\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "if-tuple-projection",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:edge/tuple-projection",
+      "source": "module cellscript::audit::if_tuple_projection\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction choose(flag: bool) -> u64 {\n    verification\n    let pair = if flag { (1, 2) } else { (3, 4) }\n    return pair.0\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "match-tuple-projection",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:edge/tuple-projection",
+      "source": "module cellscript::audit::match_tuple_projection\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\nenum Flag {\n    Off,\n    On,\n}\n\naction choose(flag: Flag) -> u64 {\n    verification\n    let pair = match flag {\n        Flag::Off => { (1, 2) },\n        _ => { (3, 4) },\n    }\n    return pair.1\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "byte-string-fixed-length",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:edge/bytestring-length",
+      "source": "module cellscript::audit::byte_string_fixed_length\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction symbol() -> [u8; 4] {\n    verification\n    return b\"TEST\"\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [
+          "require block",
+          "verifier-boundary syntax"
+        ],
+        "phase": "reject_compile"
+      },
+      "name": "reject-require-block-lifecycle",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "generated",
+      "source": "module cellscript::audit::reject_require_block_lifecycle\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad(voucher: Voucher) -> coin: Coin {\n    verification\n    require {\n        std::receipt::claim(voucher, coin, voucher.holder) {\n            amount\n            nonce\n        }\n    }\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [
+          "wildcard pattern '_'",
+          "last match arm"
+        ],
+        "phase": "reject_compile"
+      },
+      "name": "reject-wildcard-match-non-last",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:edge/wildcard-match-order",
+      "source": "module cellscript::audit::reject_wildcard_match_non_last\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\nenum Flag {\n    Off,\n    On,\n}\n\naction bad(flag: Flag) -> u64 {\n    verification\n    return match flag {\n        _ => { 1 },\n        Flag::Off => { 2 },\n    }\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [
+          "type mismatch"
+        ],
+        "phase": "reject_compile"
+      },
+      "name": "reject-byte-string-length-mismatch",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:edge/bytestring-length",
+      "source": "module cellscript::audit::reject_byte_string_length_mismatch\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad() -> [u8; 3] {\n    verification\n    return b\"TEST\"\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [
+          "type mismatch"
+        ],
+        "phase": "reject_compile"
+      },
+      "name": "reject-preserve-type-mismatch",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "generated",
+      "source": "module cellscript::audit::reject_preserve_type_mismatch\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n}\n\nresource BadCoin has store, create, consume, replace, burn, relock {\n    amount: bool,\n}\n\naction bad(coin: Coin) -> bad_coin: BadCoin {\n    verification\n    preserve bad_coin from coin {\n        amount\n    }\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [
+          "missing nonce"
+        ],
+        "phase": "reject_compile"
+      },
+      "name": "reject-transfer-missing-field",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "generated",
+      "source": "module cellscript::audit::reject_transfer_missing_field\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad(coin: Coin, to: Address) -> next_coin: Coin {\n    verification\n    std::lifecycle::transfer(coin, next_coin, to) {\n        amount\n    }\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [
+          "cell-backed linear"
+        ],
+        "phase": "reject_compile"
+      },
+      "name": "reject-consume-read-param",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "generated",
+      "source": "module cellscript::audit::reject_consume_read_param\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad(read coin: Coin) {\n    verification\n    consume coin\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [
+          "unknown stdlib pattern"
+        ],
+        "phase": "reject_compile"
+      },
+      "name": "reject-unknown-stdlib",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "generated",
+      "source": "module cellscript::audit::reject_unknown_stdlib\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad(coin_before: Coin) -> coin_after: Coin {\n    verification\n    std::cell::teleport(coin_after, coin_before)\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [
+          "declare a claim output type"
+        ],
+        "phase": "reject_compile"
+      },
+      "name": "reject-claim-without-output-arrow",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "generated",
+      "source": "module cellscript::audit::reject_claim_without_output_arrow\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\naction bad(voucher: Voucher) -> coin: Coin {\n    verification\n    std::receipt::claim(voucher, coin, voucher.holder) {\n        amount\n        nonce\n    }\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [
+          "is not declared in the flow"
+        ],
+        "phase": "reject_compile"
+      },
+      "name": "reject-flow-undeclared-edge",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "generated",
+      "source": "module cellscript::audit::reject_flow_undeclared_edge\n\nresource Offer has store {\n    state: u8\n    amount: u64\n}\n\nflow Offer.state {\n    Live -> Filled;\n    Filled -> Cancelled;\n    Cancelled -> Filled;\n}\n\naction cancel(input: Offer) -> output: Offer {\n    transition input.state: Live -> output.state: Cancelled\n    verification\n        require input.amount == output.amount\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "accept-flow-declared-cyclic-edge",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "generated",
+      "source": "module cellscript::audit::accept_flow_declared_cyclic_edge\n\nresource Pool has store {\n    state: u8\n    reserve: u64\n}\n\nflow Pool.state {\n    Open -> Closed;\n    Closed -> Open;\n}\n\naction close(pool_before: Pool) -> pool_after: Pool {\n    transition pool_before.state: Open -> pool_after.state: Closed\n    verification\n        require pool_after.reserve == pool_before.reserve\n}\n\naction reopen(pool_before: Pool) -> pool_after: Pool {\n    transition pool_before.state: Closed -> pool_after.state: Open\n    verification\n        require pool_after.reserve == pool_before.reserve\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [
+          "must set its state field"
+        ],
+        "phase": "reject_compile"
+      },
+      "name": "reject-flow-create-missing-state",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "generated",
+      "source": "module cellscript::audit::reject_flow_create_missing_state\n\nresource Offer has store, create {\n    state: u8\n    amount: u64\n}\n\nflow Offer.state {\n    Live -> Filled;\n}\n\naction seed(recipient: Address) -> output: Offer {\n    verification\n        create output = Offer { amount: 0 } with_lock(recipient)\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [
+          "must use a statically known declared state"
+        ],
+        "phase": "reject_compile"
+      },
+      "name": "reject-flow-create-non-static-initial",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "generated",
+      "source": "module cellscript::audit::reject_flow_create_non_static_initial\n\nresource Offer has store, create {\n    state: u8\n    amount: u64\n}\n\nflow Offer.state {\n    Live -> Filled;\n}\n\naction seed(dynamic_state: u8, recipient: Address) -> output: Offer {\n    verification\n        create output = Offer { state: dynamic_state, amount: 0 } with_lock(recipient)\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "accept-invariant-xudt-conserved",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "generated",
+      "source": "module cellscript::audit::accept_invariant_xudt_conserved\n\nresource Token has store, create, consume {\n    amount: u128,\n}\n\ninvariant xudt_group_transfer_conservation {\n    trigger: type_group\n    scope: group\n    reads: group_inputs<Token>.amount, group_outputs<Token>.amount\n    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount)\n}\n\naction transfer(input: Token) -> output: Token {\n    verification\n        xudt::require_group_amount_conserved()\n        preserve output from input {\n            amount\n        }\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "matrix-cell-helper-preserve_type",
+      "oracle": {
+        "action": "matrix_preserve_type",
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:continuity/std-cell",
+      "source": "module cellscript::audit::matrix_cell_helper_preserve_type\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction matrix_preserve_type(coin_before: Coin) -> coin_after: Coin {\n    verification\n    std::cell::preserve_type(coin_after, coin_before)\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "matrix-cell-helper-same_lock",
+      "oracle": {
+        "action": "matrix_same_lock",
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [
+          "cell-metadata-equality:lock_hash"
+        ],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:continuity/std-cell",
+      "source": "module cellscript::audit::matrix_cell_helper_same_lock\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction matrix_same_lock(coin_before: Coin) -> coin_after: Coin {\n    verification\n    std::cell::same_lock(coin_after, coin_before)\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "matrix-cell-helper-preserve_lock",
+      "oracle": {
+        "action": "matrix_preserve_lock",
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [
+          "cell-metadata-equality:lock_hash"
+        ],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:continuity/std-cell",
+      "source": "module cellscript::audit::matrix_cell_helper_preserve_lock\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction matrix_preserve_lock(coin_before: Coin) -> coin_after: Coin {\n    verification\n    std::cell::preserve_lock(coin_after, coin_before)\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "matrix-cell-helper-preserve_capacity",
+      "oracle": {
+        "action": "matrix_preserve_capacity",
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [
+          "cell-metadata-equality:capacity"
+        ],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:continuity/std-cell",
+      "source": "module cellscript::audit::matrix_cell_helper_preserve_capacity\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction matrix_preserve_capacity(coin_before: Coin) -> coin_after: Coin {\n    verification\n    std::cell::preserve_capacity(coin_after, coin_before)\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "matrix-cell-helper-conserved",
+      "oracle": {
+        "action": "matrix_conserved",
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:continuity/std-cell",
+      "source": "module cellscript::audit::matrix_cell_helper_conserved\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction matrix_conserved(coin_before: Coin) -> coin_after: Coin {\n    verification\n    std::accounting::conserved(coin_after, coin_before)\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "matrix-explicit-transfer-branch-require",
+      "oracle": {
+        "action": "branch_keep",
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [
+          "coin"
+        ],
+        "create_bindings": [
+          "next_coin"
+        ],
+        "create_fields": {
+          "next_coin": [
+            "amount",
+            "nonce"
+          ]
+        },
+        "locked_outputs": [
+          "next_coin"
+        ],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:lifecycle/proof/control-flow",
+      "source": "module cellscript::audit::matrix_explicit_transfer_branch_require\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction branch_keep(coin: Coin, to: Address) -> next_coin: Coin {\n    verification\n    consume coin\n\n    create next_coin = Coin {\n        amount: coin.amount,\n        nonce: coin.nonce\n    } with_lock(to)\n\n    if next_coin.amount == coin.amount {\n        require next_coin.nonce == coin.nonce\n    } else {\n        require next_coin.nonce == coin.nonce\n    }\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "matrix-explicit-transfer-let-proof",
+      "oracle": {
+        "action": "let_keep",
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [
+          "coin"
+        ],
+        "create_bindings": [
+          "next_coin"
+        ],
+        "create_fields": {
+          "next_coin": [
+            "amount",
+            "nonce"
+          ]
+        },
+        "locked_outputs": [
+          "next_coin"
+        ],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:lifecycle/proof/local-binding",
+      "source": "module cellscript::audit::matrix_explicit_transfer_let_proof\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction let_keep(coin: Coin, to: Address) -> next_coin: Coin {\n    verification\n    consume coin\n\n    create next_coin = Coin {\n        amount: coin.amount,\n        nonce: coin.nonce\n    } with_lock(to)\n\n    let same_amount = next_coin.amount == coin.amount\n    require same_amount\n    require next_coin.nonce == coin.nonce\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "matrix-stdlib-transfer-require-block",
+      "oracle": {
+        "action": "transfer_with_block",
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [
+          "coin"
+        ],
+        "create_bindings": [
+          "next_coin"
+        ],
+        "create_fields": {
+          "next_coin": [
+            "amount",
+            "nonce"
+          ]
+        },
+        "locked_outputs": [
+          "next_coin"
+        ],
+        "obligation_contains": [
+          "create-output-lock",
+          "consume-input:Coin:coin"
+        ],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:stdlib-lifecycle/proof",
+      "source": "module cellscript::audit::matrix_stdlib_transfer_require_block\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction transfer_with_block(coin: Coin, to: Address) -> next_coin: Coin {\n    verification\n    std::lifecycle::transfer(coin, next_coin, to) {\n        amount\n        nonce\n    }\n\n    require {\n        next_coin.amount == coin.amount\n        next_coin.nonce == coin.nonce\n    }\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "matrix-stdlib-transfer-lock-capacity",
+      "oracle": {
+        "action": "transfer_with_metadata",
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [
+          "coin"
+        ],
+        "create_bindings": [
+          "next_coin"
+        ],
+        "create_fields": {
+          "next_coin": [
+            "amount",
+            "nonce"
+          ]
+        },
+        "locked_outputs": [
+          "next_coin"
+        ],
+        "obligation_contains": [
+          "cell-metadata-equality:lock_hash",
+          "cell-metadata-equality:capacity"
+        ],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:stdlib-lifecycle/metadata",
+      "source": "module cellscript::audit::matrix_stdlib_transfer_lock_capacity\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction transfer_with_metadata(coin: Coin, to: Address) -> next_coin: Coin {\n    verification\n    std::lifecycle::transfer(coin, next_coin, to) {\n        amount\n        nonce\n    }\n    std::cell::preserve_lock(next_coin, coin)\n    std::cell::preserve_capacity(next_coin, coin)\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "matrix-stdlib-claim-require-block",
+      "oracle": {
+        "action": "claim_with_block",
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [
+          "voucher"
+        ],
+        "create_bindings": [
+          "coin"
+        ],
+        "create_fields": {
+          "coin": [
+            "amount",
+            "nonce"
+          ]
+        },
+        "locked_outputs": [
+          "coin"
+        ],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:receipt/proof",
+      "source": "module cellscript::audit::matrix_stdlib_claim_require_block\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction claim_with_block(voucher: Voucher) -> coin: Coin {\n    verification\n    std::receipt::claim(voucher, coin, voucher.holder) {\n        amount\n        nonce\n    }\n\n    require {\n        coin.amount == voucher.amount\n        coin.nonce == voucher.nonce\n    }\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "matrix-stdlib-settle-preserve-capacity",
+      "oracle": {
+        "action": "settle_with_capacity",
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [
+          "voucher"
+        ],
+        "create_bindings": [
+          "coin"
+        ],
+        "create_fields": {
+          "coin": [
+            "amount",
+            "nonce"
+          ]
+        },
+        "locked_outputs": [
+          "coin"
+        ],
+        "obligation_contains": [
+          "cell-metadata-equality:capacity"
+        ],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:receipt/metadata",
+      "source": "module cellscript::audit::matrix_stdlib_settle_preserve_capacity\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction settle_with_capacity(voucher: Voucher) -> coin: Coin {\n    verification\n    std::lifecycle::settle(voucher, coin, voucher.holder) {\n        amount\n        nonce\n    }\n    std::cell::preserve_capacity(coin, voucher)\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "matrix-lock-protected-only",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:lock/source-qualifier",
+      "source": "module cellscript::audit::matrix_lock_protected_only\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\nlock protected_wallet(protected wallet: Wallet) -> bool {\n    verification\n    require wallet.owner == wallet.owner\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "matrix-lock-witness-only",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:lock/source-qualifier",
+      "source": "module cellscript::audit::matrix_lock_witness_only\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\nlock witness_owner(witness owner: Address) -> bool {\n    verification\n    require owner == owner\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [],
+        "phase": "accept"
+      },
+      "name": "matrix-lock-args-only",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:lock/source-qualifier",
+      "source": "module cellscript::audit::matrix_lock_args_only\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\nlock args_owner(lock_args owner: Address) -> bool {\n    verification\n    require owner == owner\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [
+          "require block",
+          "assignment"
+        ],
+        "phase": "reject_compile"
+      },
+      "name": "matrix-reject-require-block-assignment",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:reject/proof-purity",
+      "source": "module cellscript::audit::matrix_reject_require_block_assignment\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction hidden_mutation(flag: bool) {\n    verification\n    let mut ok = flag\n    require {\n        ok = false\n    }\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [
+          "claim requires a receipt"
+        ],
+        "phase": "reject_compile"
+      },
+      "name": "matrix-reject-claim-non-receipt",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:reject/stdlib-lifecycle",
+      "source": "module cellscript::audit::matrix_reject_claim_non_receipt\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad_claim(coin: Coin, to: Address) -> next_coin: Coin {\n    verification\n    std::receipt::claim(coin, next_coin, to) {\n        amount\n        nonce\n    }\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [
+          "claim expects 3 arguments"
+        ],
+        "phase": "reject_compile"
+      },
+      "name": "matrix-reject-claim-extra-args",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:reject/stdlib-lifecycle",
+      "source": "module cellscript::audit::matrix_reject_claim_extra_args\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad_claim(voucher: Voucher) -> coin: Coin {\n    verification\n    std::receipt::claim(voucher, coin, voucher.holder, voucher.holder) {\n        amount\n        nonce\n    }\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [
+          "transfer expects 3 arguments"
+        ],
+        "phase": "reject_compile"
+      },
+      "name": "matrix-reject-transfer-extra-args",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:reject/stdlib-lifecycle",
+      "source": "module cellscript::audit::matrix_reject_transfer_extra_args\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad_transfer(coin: Coin, to: Address) -> next_coin: Coin {\n    verification\n    std::lifecycle::transfer(coin, next_coin, to, to) {\n        amount\n        nonce\n    }\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [
+          "settle expects 3 arguments"
+        ],
+        "phase": "reject_compile"
+      },
+      "name": "matrix-reject-settle-missing-args",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:reject/stdlib-lifecycle",
+      "source": "module cellscript::audit::matrix_reject_settle_missing_args\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad_settle(voucher: Voucher) -> coin: Coin {\n    verification\n    std::lifecycle::settle(voucher, coin) {\n        amount\n        nonce\n    }\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [
+          "claim output type mismatch"
+        ],
+        "phase": "reject_compile"
+      },
+      "name": "matrix-reject-claim-output-type-mismatch",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:reject/stdlib-lifecycle",
+      "source": "module cellscript::audit::matrix_reject_claim_output_type_mismatch\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\nresource Badge has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\naction bad_claim_output(voucher: Voucher, to: Address) -> badge: Badge {\n    verification\n    std::receipt::claim(voucher, badge, to) {\n        amount\n        nonce\n    }\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [
+          "settle lock target must be Address or Hash"
+        ],
+        "phase": "reject_compile"
+      },
+      "name": "matrix-reject-settle-lock-target-type",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:reject/stdlib-lifecycle",
+      "source": "module cellscript::audit::matrix_reject_settle_lock_target_type\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad_settle_lock(voucher: Voucher) -> coin: Coin {\n    verification\n    std::lifecycle::settle(voucher, coin, voucher.amount) {\n        amount\n        nonce\n    }\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [
+          "preserve_capacity input must be a cell-backed value"
+        ],
+        "phase": "reject_compile"
+      },
+      "name": "matrix-reject-cell-metadata-non-cell",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:reject/metadata",
+      "source": "module cellscript::audit::matrix_reject_cell_metadata_non_cell\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad_metadata(amount: u64) -> out: Coin {\n    verification\n    std::cell::preserve_capacity(out, amount)\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [
+          "cell-backed linear"
+        ],
+        "phase": "reject_compile"
+      },
+      "name": "matrix-deep-reject-transfer-read-param",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:deep/reject/source-qualifier",
+      "source": "module cellscript::audit::matrix_deep_reject_transfer_read_param\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad_transfer(read coin: Coin, to: Address) -> next_coin: Coin {\n    verification\n    std::lifecycle::transfer(coin, next_coin, to) {\n        amount\n        nonce\n    }\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [
+          "require block",
+          "verifier-boundary syntax"
+        ],
+        "phase": "reject_compile"
+      },
+      "name": "matrix-deep-reject-require-block-transfer",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:deep/reject/proof-purity",
+      "source": "module cellscript::audit::matrix_deep_reject_require_block_transfer\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction hidden_transfer(coin: Coin, to: Address) -> next_coin: Coin {\n    verification\n    require {\n        std::lifecycle::transfer(coin, next_coin, to) {\n            amount\n            nonce\n        }\n    }\n}\n"
+    },
+    {
+      "expected": {
+        "contains": [
+          "unknown stdlib pattern"
+        ],
+        "phase": "reject_compile"
+      },
+      "name": "matrix-deep-reject-unknown-accounting",
+      "oracle": {
+        "action": null,
+        "borrow_scope": null,
+        "borrow_view_type": null,
+        "capability_operation": null,
+        "capability_type": null,
+        "consume_bindings": [],
+        "create_bindings": [],
+        "create_fields": {},
+        "locked_outputs": [],
+        "obligation_contains": [],
+        "payload_enum": null,
+        "protocol_role": null,
+        "protocol_role_action": null,
+        "protocol_role_conflict": null,
+        "protocol_role_source": null,
+        "validity_tiers": [],
+        "validity_type": null
+      },
+      "origin": "matrix:deep/reject/stdlib-namespace",
+      "source": "module cellscript::audit::matrix_deep_reject_unknown_accounting\n\nresource Coin has store, create, consume, replace, burn, relock {\n    amount: u64,\n    nonce: u64,\n}\n\nreceipt Voucher -> Coin has create, consume, burn {\n    amount: u64,\n    nonce: u64,\n    holder: Address,\n}\n\nresource Wallet has store, create, consume, replace, burn, relock {\n    owner: Address,\n}\n\naction bad_accounting(coin_before: Coin) -> coin_after: Coin {\n    verification\n    std::accounting::minted(coin_after, coin_before)\n}\n"
+    }
+  ],
+  "governance_release_matrix": [
+    {
+      "evidence": "action and lock cases parse, format, and use the verification section",
+      "gate": "syntax-combo accepted action/lock cases plus VS Code validate/dry-run in release gate",
+      "layer": "parser_formatter_lsp_docs",
+      "status": "covered_by_gate",
+      "track": "canonical_action_lock_surface"
+    },
+    {
+      "evidence": "preserve and anonymous require-block cases are type/effect checked and metadata-checked",
+      "gate": "syntax-combo preserve/require-block positive and negative cases",
+      "layer": "type_lowering_metadata",
+      "status": "covered_by_gate",
+      "track": "local_explicit_sugar"
+    },
+    {
+      "evidence": "transfer/claim/settle emit consume, create, locked output, and field obligations",
+      "gate": "syntax-combo stdlib lifecycle metadata oracles",
+      "layer": "type_lowering_metadata_codegen",
+      "status": "covered_by_gate",
+      "track": "stdlib_lifecycle_patterns"
+    },
+    {
+      "evidence": "read/protected/witness/lock_args boundaries reject linear lifecycle misuse",
+      "gate": "syntax-combo lock source qualifier and read-param reject cases",
+      "layer": "type_effect",
+      "status": "covered_by_gate",
+      "track": "source_qualifier_boundary"
+    },
+    {
+      "evidence": "unknown stdlib patterns and hidden lifecycle proof forms fail closed",
+      "gate": "syntax-combo reject seeds and required bug classes",
+      "layer": "parser_type_policy",
+      "status": "covered_by_gate",
+      "track": "deferred_rejected_surfaces"
+    },
+    {
+      "evidence": "accepted cases compile to non-empty assembly and metadata matches consume/create/lock obligations",
+      "gate": "syntax-combo metadata/codegen oracles",
+      "layer": "ir_metadata_codegen",
+      "status": "covered_by_gate",
+      "track": "metadata_fidelity"
+    }
+  ]
+}
