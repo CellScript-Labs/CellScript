@@ -104,8 +104,7 @@ describePostgres("SqlRegistryStore PostgreSQL contract", () => {
          where namespace = 'fixture' and name = 'contract' and version = '1.0.0'`,
       )).rows[0]?.kind).toBe("on_chain_committed");
 
-      await client.query(await readFile(new URL(`../migrations/${sandboxRetentionMigration}`, import.meta.url), "utf8"));
-      for (const file of migrationFiles.filter((item) => item > sandboxRetentionMigration)) {
+      for (const file of migrationFiles.filter((item) => item > currentCommitmentMigration)) {
         await client.query(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
       }
 
