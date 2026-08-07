@@ -428,7 +428,7 @@ pub fn run(root: &Path) -> Result<()> {
             "npm run check:deploy",
         ],
     )?;
-    require_contains(root, "website/src/pages/index.astro", &[r#"href="/registry""#, r#"data-i18n="nav.registryBrowse""#])?;
+    require_contains(root, "website/src/pages/index.astro", &[r#"href="/registry/""#, r#"data-i18n="nav.registryBrowse""#])?;
     require_contains(
         root,
         "scripts/cellscript_gate.sh",
