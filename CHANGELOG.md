@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Complete the browser-facing package and artifact lifecycle. Playground ZIP
+  exports now emit a valid Edition 2026 `Cell.toml`. Artifact detail views let
+  readers select a release and scope status, evidence, deployments, immutable
+  links, and consumer commands to that exact release. Registry maintenance now
+  supports active/deprecated/yanked transitions, least-privilege deployment
+  and availability capability requests, live scope checks, and wallet-signed
+  capability revocation; the API page documents the corresponding public
+  authorisation endpoints.
 - Close the 0.23 Registry audit findings across admission, verification, and
   delivery. Publisher-controlled repository and homepage fields now require
   credential-free HTTPS URLs, malformed base64 is a stable client error, and
