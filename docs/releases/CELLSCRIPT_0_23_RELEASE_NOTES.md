@@ -3,7 +3,7 @@
 **Status**: Development release notes for `nightly-0.23`; not a stable release
 certificate.
 
-**Updated**: 2026-08-02.
+**Updated**: 2026-08-08.
 
 CellScript 0.23 makes its source semantics and compatibility axes explicit.
 Edition 2026 is the first and only CellScript source-semantics epoch. The
@@ -30,12 +30,14 @@ work.
 | Build identity | The resolved profile independently combines edition, target, primitive assurance, metadata schemas, and entry/witness ABIs, then binds them into metadata, registry, lock, deployment, receipt, and builder records. |
 | Registry contract | The deployed publish contract requires Edition 2026 plus its compatibility-profile hash from CLI signature through API, Postgres, version-addressed JSON, and website; assurance states require ordered evidence. |
 | Registry operations | `api.registry.cellscript.dev` and `registry.cellscript.dev` run as an isolated self-hosted Postgres/Node/object-volume/read-only-nginx stack behind trusted TLS. |
+| Registry testnet | Pudge runs as a separate short-lived testnet sandbox with distinct API, object, database, wallet-session, RPC, and website state; it is not a mode of the production Registry. |
 | Registry retry safety | Pre-admission failures release only the failed request's nonce and retry reservation; accepted metadata commits transactionally, and readiness covers the actual managed object prefixes. |
 | Registry verification | Publish transactionally queues a leased, bounded real-compiler verification job; verified evidence/status commit atomically before crash-safe static-index convergence, and default search stays hidden until the baseline passes. |
 | Registry artifact profiles | CellScript dependencies, CKB executables, runtime verifiers, reproducible binaries, and copy-only templates share discovery but retain different resolver, TCB, deployment, and copy contracts. |
 | Registry reproducibility | Reproducible profiles stay `evidence_required` until independent builder reports bind the signed environment, source, recipe, executable, and build logs. |
 | Registry chain evidence | Mainnet deployment records are RPC-checked; configured Registry Type/Lock Scripts produce wallet transaction intents and a bounded Type-Script indexer reconciles live commitments without erasing history. |
 | Production HTTP boundary | API/static JSON responses use HSTS, deny-all content policy, anti-framing, no-sniff, and restrictive browser permissions; the website ships a reproducible read-only nginx deployment with health checks and bounded logs/temp storage. |
+| Audit closure | Registry links are HTTPS-only, source paths and dependency sources are verifier-confined, signed dependencies are manifest-bound, proxy identity is explicit, and CI/supply-chain dependencies are deterministic and monitored. |
 | Registry install policy | Explicit unverified/quarantined install acknowledgements persist per dependency, so lock refresh and subsequent builds retain the same auditable risk choice. |
 | Tooling | CLI, LSP, WASM, website bindings, examples, and package tooling use the same edition contract. |
 | Syntax audit | Canonical type fields use trailing commas, checked examples use named `u64` boundaries, and compatibility plus CKB-VM regressions cover both source and witness placement. |

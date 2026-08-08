@@ -241,6 +241,12 @@ async function runBuildVerification(job: VerificationJobRecord, version: Package
     job.artifact.profile,
   ];
   if (job.compatibility_profile_hash) verifierArgs.push("--compatibility-profile-hash", job.compatibility_profile_hash);
+  if (job.artifact.profile === "cellscript_source") {
+    verifierArgs.push(
+      "--expected-dependencies-base64",
+      Buffer.from(canonicalJson(published.dependencies ?? {}), "utf8").toString("base64url"),
+    );
+  }
   if (published.artifact_hash) verifierArgs.push("--artifact-hash", published.artifact_hash);
   if (published.abi_hash) verifierArgs.push("--abi-hash", published.abi_hash);
   if (published.build_recipe_hash) verifierArgs.push("--build-recipe-hash", published.build_recipe_hash);

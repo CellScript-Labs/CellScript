@@ -42,7 +42,7 @@ jobs:
       REGISTRY_TEST_DATABASE_URL: postgresql://cellscript_test:cellscript_test_password@127.0.0.1:5432/cellscript_registry_test
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
 
@@ -73,7 +73,7 @@ jobs:
           git config --global user.email "ci@cellscript.dev"
 
       - name: Cache Cargo dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/git
@@ -90,7 +90,7 @@ jobs:
 
       - name: Upload backend shape report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: cellscript-backend-shape-report
           if-no-files-found: error
@@ -98,7 +98,7 @@ jobs:
 
       - name: Upload syntax combination audit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: cellscript-syntax-combo-audit
           if-no-files-found: ignore
@@ -106,7 +106,7 @@ jobs:
 
       - name: Upload strict backend audit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: cellscript-strict-backend-audit
           if-no-files-found: ignore

@@ -144,7 +144,7 @@ Source documents:
 
 ## Pillar 1: Public Registry Production Deployment
 
-**Status (2026-08-02): production infrastructure, public reads, website, CLI
+**Status (2026-08-08): production infrastructure, public reads, website, CLI
 resolution, evidence promotion, and the bounded automatic source/build
 verification pipeline are implemented and deployed. The generalized artifact,
 independent reproduction, mainnet deployment, and configured chain-commitment
@@ -320,7 +320,9 @@ runtime or the optional Cloudflare/R2/Hyperdrive/Neon adapter.
   remain under their own Lock/Type Scripts and transaction protocols.
 - No bond or refundable deposit mechanism; the schema leaves `policy_hooks`
   and `bond_policy_hooks` for later.
-- No testnet Registry authorisation, deployment, or commitment state.
+- No testnet state or network selector inside the production Registry. Pudge
+  authorisation, deployment, and commitment testing runs in a separately
+  isolated, expiring sandbox.
 - No D1 as primary database.
 
 Source documents:

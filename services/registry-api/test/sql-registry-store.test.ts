@@ -42,8 +42,8 @@ describePostgres("SqlRegistryStore PostgreSQL contract", () => {
         .filter((file) => /^[0-9]{4}_.+[.]sql$/.test(file))
         .sort();
       const currentCommitmentMigration = "0007_current_commitment_state.sql";
-      const authorisationSessionsMigration = "0009_authorisation_sessions.sql";
-      expect(migrationFiles.at(-1)).toBe(authorisationSessionsMigration);
+      const sandboxRetentionMigration = "0008_testnet_sandbox_retention.sql";
+      expect(migrationFiles).toEqual(expect.arrayContaining([currentCommitmentMigration, sandboxRetentionMigration]));
 
       for (const file of migrationFiles.filter((item) => item < currentCommitmentMigration)) {
         await client.query(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));

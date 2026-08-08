@@ -1307,6 +1307,7 @@ pub fn compute_source_hash(root: &Path) -> Result<String> {
     let manifest_path = root.join("Cell.toml");
     let mut manifest = SourceHashManifest::default();
     if manifest_path.exists() {
+        reject_source_symlink(&manifest_path)?;
         let content = std::fs::read_to_string(&manifest_path)?;
         manifest = toml::from_str(&content)
             .map_err(|e| CompileError::without_span(format!("failed to parse Cell.toml for source hashing: {}", e)))?;
@@ -1352,7 +1353,7 @@ fn collect_hash_source_files(root: &Path, manifest: &SourceHashManifest) -> Resu
 
     if let Some(package) = &manifest.package {
         for source_root in &package.source_roots {
-            let source_root_path = root.join(source_root);
+            let source_root_path = package_relative_path(root, source_root, "configured source root")?;
             if !source_root_path.exists() {
                 return Err(CompileError::without_span(format!(
                     "configured source root '{}' does not exist",
@@ -1365,6 +1366,8 @@ fn collect_hash_source_files(root: &Path, manifest: &SourceHashManifest) -> Resu
                     source_root_path.display()
                 )));
             }
+            ensure_source_path_confined(root, &source_root_path, "configured source root")?;
+            reject_source_symlink(&source_root_path)?;
             if seen_roots.insert(source_root_path.clone()) {
                 roots.push(source_root_path);
             }
@@ -1373,19 +1376,27 @@ fn collect_hash_source_files(root: &Path, manifest: &SourceHashManifest) -> Resu
 
     if roots.is_empty() {
         let src_dir = root.join("src");
-        if src_dir.exists() && src_dir.is_dir() && seen_roots.insert(src_dir.clone()) {
-            roots.push(src_dir);
+        if src_dir.exists() && src_dir.is_dir() {
+            ensure_source_path_confined(root, &src_dir, "default source root")?;
+            reject_source_symlink(&src_dir)?;
+            if seen_roots.insert(src_dir.clone()) {
+                roots.push(src_dir);
+            }
         }
     }
 
     let mut explicit_entry = None;
     if let Some(entry) = manifest.package.as_ref().and_then(|package| package.entry.as_deref()) {
-        let entry_path = root.join(entry);
+        let entry_path = package_relative_path(root, entry, "package entry")?;
         if !entry_path.exists() {
             return Err(CompileError::without_span(format!("package entry '{}' does not exist", entry_path.display())));
         }
+        ensure_source_path_confined(root, &entry_path, "package entry")?;
+        reject_source_symlink(&entry_path)?;
         if let Some(parent) = entry_path.parent() {
             let parent = parent.to_path_buf();
+            ensure_source_path_confined(root, &parent, "package entry parent")?;
+            reject_source_symlink(&parent)?;
             if seen_roots.insert(parent.clone()) {
                 roots.push(parent);
             }
@@ -1395,7 +1406,7 @@ fn collect_hash_source_files(root: &Path, manifest: &SourceHashManifest) -> Resu
 
     let mut files = Vec::new();
     for source_root in roots {
-        files.extend(collect_cell_files(&source_root)?);
+        files.extend(collect_cell_files(root, &source_root)?);
     }
     if let Some(entry_path) = explicit_entry {
         files.push(entry_path);
@@ -1403,7 +1414,38 @@ fn collect_hash_source_files(root: &Path, manifest: &SourceHashManifest) -> Resu
     Ok(files)
 }
 
-fn collect_cell_files(dir: &Path) -> Result<Vec<PathBuf>> {
+fn package_relative_path(root: &Path, configured: &str, label: &str) -> Result<PathBuf> {
+    let relative = Path::new(configured);
+    if configured.is_empty()
+        || relative.is_absolute()
+        || relative.components().any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err(CompileError::without_span(format!("{label} '{configured}' must stay within the package root")));
+    }
+    Ok(root.join(relative))
+}
+
+fn ensure_source_path_confined(root: &Path, path: &Path, label: &str) -> Result<()> {
+    let canonical_root = std::fs::canonicalize(root)
+        .map_err(|e| CompileError::without_span(format!("failed to canonicalize package root '{}': {e}", root.display())))?;
+    let canonical_path = std::fs::canonicalize(path)
+        .map_err(|e| CompileError::without_span(format!("failed to canonicalize {label} '{}': {e}", path.display())))?;
+    if !canonical_path.starts_with(&canonical_root) {
+        return Err(CompileError::without_span(format!("{label} '{}' escapes the package root", path.display())));
+    }
+    Ok(())
+}
+
+fn reject_source_symlink(path: &Path) -> Result<()> {
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|e| CompileError::without_span(format!("failed to inspect source path '{}': {e}", path.display())))?;
+    if metadata.file_type().is_symlink() {
+        return Err(CompileError::without_span(format!("source hashing does not permit symbolic link '{}'", path.display())));
+    }
+    Ok(())
+}
+
+fn collect_cell_files(package_root: &Path, dir: &Path) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     if !dir.exists() {
         return Ok(files);
@@ -1413,8 +1455,10 @@ fn collect_cell_files(dir: &Path) -> Result<Vec<PathBuf>> {
     for entry in entries {
         let entry = entry.map_err(|e| CompileError::without_span(format!("failed to read directory entry: {}", e)))?;
         let path = entry.path();
+        ensure_source_path_confined(package_root, &path, "source path")?;
+        reject_source_symlink(&path)?;
         if path.is_dir() {
-            files.extend(collect_cell_files(&path)?);
+            files.extend(collect_cell_files(package_root, &path)?);
         } else if path.extension().is_some_and(|ext| ext == "cell") {
             files.push(path);
         }
@@ -1723,6 +1767,33 @@ left = "a"
         assert_eq!(index.versions[0].status, RegistryEntryStatus::VerifiedBuild);
         assert!(!index.versions[0].yanked);
         assert_eq!(snapshots["1.2.3"].source_hash, "source-hash");
+    }
+
+    #[test]
+    fn source_hash_rejects_manifest_paths_outside_the_package() {
+        let root = tempfile::tempdir().unwrap();
+        let package = root.path().join("package");
+        let outside_sources = root.path().join("outside");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::create_dir_all(&outside_sources).unwrap();
+        std::fs::write(root.path().join("outside.cell"), "script Outside {}\n").unwrap();
+        std::fs::write(outside_sources.join("lib.cell"), "script OutsideLib {}\n").unwrap();
+
+        std::fs::write(package.join("Cell.toml"), "[package]\nentry = \"../outside.cell\"\n").unwrap();
+        let entry_error = compute_source_hash(&package).unwrap_err();
+        assert!(entry_error.to_string().contains("must stay within the package root"));
+
+        std::fs::write(package.join("Cell.toml"), "[package]\nsource_roots = [\"../outside\"]\n").unwrap();
+        let root_error = compute_source_hash(&package).unwrap_err();
+        assert!(root_error.to_string().contains("must stay within the package root"));
+
+        std::fs::write(
+            package.join("Cell.toml"),
+            format!("[package]\nentry = {:?}\n", root.path().join("outside.cell").to_string_lossy()),
+        )
+        .unwrap();
+        let absolute_error = compute_source_hash(&package).unwrap_err();
+        assert!(absolute_error.to_string().contains("must stay within the package root"));
     }
 
     #[cfg(feature = "cli")]

@@ -4476,13 +4476,13 @@ function namespaceClaimCooldownSeconds(env: Env): number {
 }
 
 async function requestIpHash(request: Request): Promise<string | undefined> {
-  const ip = request.headers.get("cf-connecting-ip") ?? request.headers.get("x-forwarded-for");
+  const ip = request.headers.get("x-registry-client-ip");
   return ip ? `sha256:${await sha256Hex(ip)}` : undefined;
 }
 
 function requestAsn(request: Request): string | undefined {
   const cf = (request as Request & { cf?: { asn?: number | string } }).cf;
-  const asn = cf?.asn ?? request.headers.get("cf-asn");
+  const asn = cf?.asn ?? request.headers.get("x-registry-client-asn");
   return asn === undefined || asn === null || `${asn}`.trim() === "" ? undefined : `${asn}`.trim();
 }
 
@@ -4514,7 +4514,7 @@ function errorResponse(error: unknown, requestId: string): Response {
   const headers = corsHeaders(requestId);
   const status = error instanceof ApiError ? error.status : 500;
   const code = error instanceof ApiError ? error.code : "internal_error";
-  const message = error instanceof Error ? error.message : "internal error";
+  const message = error instanceof ApiError ? error.message : "internal error";
   return json({ request_id: requestId, error: { code, message } }, status, headers);
 }
 

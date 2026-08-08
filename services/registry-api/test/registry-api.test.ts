@@ -14,6 +14,7 @@ import {
   PUBLISH_ACTION,
   PUBLISH_PROTOCOL,
   ApiError,
+  base64ToBytes,
   canonicalJson,
   capabilityKeyId,
   ckbBlake2bHex,
@@ -52,6 +53,18 @@ const reproducerPublicKeys = {
   "builder-a": "p256-spki:MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE2GpMwoWK1SO7Vrd_Rn3kxf_VllpSMGMu1Mo40vH2IotxFkJwZwO7acw8A-lZB7z4l5QAYDKTP4ua7YilwZQfBw",
   "builder-b": "p256-spki:MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEcZljLFjOhAdes8hm88phoxoMmsya3kKGRbmwjtH1eW4tWV_sn81NRL5EwkrqhjPuYxXfEbYBfuSVPMVD3at7hQ",
 } as const;
+
+describe("binary input validation", () => {
+  it("reports malformed base64 as a stable client error", () => {
+    let error: unknown;
+    try {
+      base64ToBytes("%%%not-base64%%%");
+    } catch (value) {
+      error = value;
+    }
+    expect(error).toMatchObject({ status: 400, code: "invalid_base64" });
+  });
+});
 
 describe("Node CKB RPC environment", () => {
   it("forwards every bounded RPC control used by the shared API", () => {
@@ -442,6 +455,29 @@ function declareReproducibleBuild(payload: PublishPayload): void {
 }
 
 describe("generic artifact profile contracts", () => {
+  it("rejects executable and credential-bearing registry links", async () => {
+    for (const [field, value] of [
+      ["repository", "javascript:alert(document.domain)"],
+      ["homepage", "https://user:secret@example.com/project"],
+      ["documentation", "../private/notes.md"],
+      ["documentation", " javascript:alert(document.domain)"],
+    ] as const) {
+      const payload = await publishPayload("cap_test");
+      payload.registry_entry[field] = value;
+      expect(() => validatePublishPayload(payload, DEFAULT_REGISTRY_ORIGIN, now)).toThrow(`registry_entry.${field}`);
+    }
+  });
+
+  it("accepts HTTPS links and package-relative documentation", async () => {
+    const payload = await publishPayload("cap_test");
+    payload.registry_entry.homepage = "https://cellscript.dev/packages/demo";
+    payload.registry_entry.documentation = "docs/PROFILE.md";
+    expect(validatePublishPayload(payload, DEFAULT_REGISTRY_ORIGIN, now).registry_entry).toMatchObject({
+      homepage: payload.registry_entry.homepage,
+      documentation: payload.registry_entry.documentation,
+    });
+  });
+
   it("requires a typed profile contract for non-CellScript releases", async () => {
     const payload = await ckbExecutablePublishPayload("cap_test");
     delete payload.registry_entry.versions[0].profile_contract;
@@ -533,7 +569,7 @@ async function post(
   return app.fetch(
     new Request(`https://api.registry.cellscript.dev${path}`, {
       method: "POST",
-      headers: { "content-type": "application/json", "cf-connecting-ip": "203.0.113.5", ...headers },
+      headers: { "content-type": "application/json", "x-registry-client-ip": "203.0.113.5", ...headers },
       body: JSON.stringify(body),
     }),
     { REGISTRY_ORIGIN: DEFAULT_REGISTRY_ORIGIN, ...env },
@@ -549,7 +585,7 @@ async function get(
   return app.fetch(
     new Request(`https://api.registry.cellscript.dev${path}`, {
       method: "GET",
-      headers: { "cf-connecting-ip": "203.0.113.5", ...headers },
+      headers: { "x-registry-client-ip": "203.0.113.5", ...headers },
     }),
     { REGISTRY_ORIGIN: DEFAULT_REGISTRY_ORIGIN, ...env },
   );
@@ -2562,7 +2598,7 @@ describe("registry api", () => {
     );
 
     expect(response.status).toBe(500);
-    expect((await response.json() as any).error.code).toBe("internal_error");
+    expect((await response.json() as any).error).toEqual({ code: "internal_error", message: "internal error" });
     expect(store.packageVersions.get("cellscript/demo@1.2.3")?.availability_status).toBe("active");
     expect(store.auditEvents.some((event) => event.event_type === "admin.package_version.status_updated")).toBe(false);
     const staticEntryWrites = snapshots.filter((snapshot) => snapshot.key === "artifacts/cellscript/demo/releases/1.2.3.json");

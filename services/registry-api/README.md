@@ -472,6 +472,14 @@ use `CKB_MIN_CONFIRMATIONS` to raise or lower the default 24-block confirmation
 floor. The Node adapter, production Compose file, and Worker example pass the
 same settings.
 
+The Node adapter never trusts client-supplied `CF-Connecting-IP`,
+`CF-ASN`, or internal Registry identity headers. `REGISTRY_TRUST_PROXY_HOPS`
+defaults to `0`; the checked-in Compose stacks set it to `1` because ingress is
+restricted to the external TLS proxy. That proxy must overwrite or append the
+actual peer to `X-Forwarded-For`, and direct client access to the API container
+must remain blocked. Change the hop count only when the ingress topology
+changes.
+
 The API container applies tracked additive migrations before serving traffic.
 `0001_initial.sql` is the frozen deployed baseline. `0002` adds the verifier
 queue; `0003` adds multi-wallet principals; `0004` converts an empty legacy
@@ -482,6 +490,8 @@ hash-integrity evidence from semantic verification with `hash_bound`; and
 renames historical chain evidence, adds the current-commitment pointer and
 status projection constraints, and deliberately demotes legacy current claims
 until the mainnet indexer re-observes a sufficiently confirmed live Cell.
+`0008` adds expiring Pudge sandbox state and purge tombstones; `0009` adds the
+browser/CLI authorisation-session lifecycle.
 
 `GET /health` is process liveness and is the Compose container healthcheck.
 `GET /ready` is the traffic and operator gate: it checks store/object access,

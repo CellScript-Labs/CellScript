@@ -25,6 +25,7 @@ struct Args {
     artifact_kind: String,
     profile: String,
     compatibility_profile_hash: Option<String>,
+    expected_dependencies_base64: Option<String>,
     artifact_hash: Option<String>,
     abi_hash: Option<String>,
     build_recipe_hash: Option<String>,
@@ -60,6 +61,13 @@ struct ArtifactBundle {
 struct ArtifactBundleObject {
     role: String,
     content_base64: String,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct ExpectedDependency {
+    namespace: String,
+    version: String,
 }
 
 #[derive(Serialize)]
@@ -116,6 +124,10 @@ fn verifier_error_code(error: &anyhow::Error) -> &'static str {
         "identity_hash_mismatch"
     } else if contains("CellScript package compilation failed") {
         "cellscript_compilation_failed"
+    } else if contains("dependency metadata") {
+        "dependency_metadata_mismatch"
+    } else if contains("Registry verification does not permit") {
+        "unsupported_dependency_source"
     } else if contains("artifact bundle") {
         "artifact_bundle_invalid"
     } else if contains("artifact profile contract") {
@@ -172,6 +184,10 @@ fn verify_cellscript_source(args: Args, snapshot: &[u8]) -> Result<VerificationO
     {
         bail!("materialized package identity does not match the verification job");
     }
+    verify_manifest_dependencies(
+        &manifest,
+        args.expected_dependencies_base64.as_deref().context("cellscript_source requires --expected-dependencies-base64")?,
+    )?;
     let manifest_hash = cellscript::package::registry::compute_package_manifest_hash(&manifest)
         .context("failed to compute canonical package manifest hash")?;
     require_matching_hash("manifest_hash", &manifest_hash, &args.manifest_hash)?;
@@ -200,6 +216,45 @@ fn verify_cellscript_source(args: Args, snapshot: &[u8]) -> Result<VerificationO
         compatibility_profile_hash: args.compatibility_profile_hash,
         artifact_format: result.artifact_format.display_name().to_string(),
     })
+}
+
+fn verify_manifest_dependencies(manifest: &cellscript::package::PackageManifest, encoded: &str) -> Result<()> {
+    if encoded.len() > 96 * 1024 {
+        bail!("signed registry dependency metadata is too large");
+    }
+    let expected_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(encoded)
+        .context("signed registry dependency metadata is not valid base64url")?;
+    let expected: BTreeMap<String, ExpectedDependency> =
+        serde_json::from_slice(&expected_bytes).context("signed registry dependency metadata is not valid JSON")?;
+    let package_namespace = manifest.package.namespace.clone().unwrap_or_default();
+    let mut actual = BTreeMap::new();
+    for (name, dependency) in &manifest.dependencies {
+        let (namespace, version) = match dependency {
+            cellscript::package::Dependency::Simple(version) => (package_namespace.clone(), version.clone()),
+            cellscript::package::Dependency::Detailed(detail) => {
+                if detail.path.is_some()
+                    || detail.git.is_some()
+                    || detail.branch.is_some()
+                    || detail.tag.is_some()
+                    || detail.rev.is_some()
+                {
+                    bail!("Registry verification does not permit path or Git dependencies");
+                }
+                (detail.namespace.clone().unwrap_or_else(|| package_namespace.clone()), detail.version.clone())
+            }
+        };
+        actual.insert(name.clone(), ExpectedDependency { namespace, version });
+    }
+    for dependency in manifest.dev_dependencies.values() {
+        if matches!(dependency, cellscript::package::Dependency::Detailed(detail) if detail.path.is_some() || detail.git.is_some()) {
+            bail!("Registry verification does not permit path or Git dev-dependencies");
+        }
+    }
+    if actual != expected {
+        bail!("registry dependency metadata does not match the materialized Cell.toml");
+    }
+    Ok(())
 }
 
 fn verify_artifact_bundle(args: Args, snapshot: &[u8]) -> Result<VerificationOutput> {
@@ -379,6 +434,7 @@ fn parse_args() -> Result<Args> {
         artifact_kind: take("--artifact-kind")?,
         profile: take("--profile")?,
         compatibility_profile_hash: values.remove("--compatibility-profile-hash"),
+        expected_dependencies_base64: values.remove("--expected-dependencies-base64"),
         artifact_hash: values.remove("--artifact-hash"),
         abi_hash: values.remove("--abi-hash"),
         build_recipe_hash: values.remove("--build-recipe-hash"),
@@ -448,6 +504,47 @@ mod tests {
     }
 
     #[test]
+    fn binds_signed_dependencies_and_rejects_local_sources() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(
+            root.path().join("Cell.toml"),
+            r#"[package]
+name = "demo"
+namespace = "cellscript"
+version = "1.2.3"
+edition = "2026"
+
+[dependencies]
+base = { namespace = "shared", version = "2.0.0" }
+"#,
+        )
+        .unwrap();
+        let manifest = cellscript::package::PackageManager::new(root.path()).read_manifest().unwrap();
+        let expected =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(br#"{"base":{"namespace":"shared","version":"2.0.0"}}"#);
+        verify_manifest_dependencies(&manifest, &expected).unwrap();
+
+        let mismatched = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"{}");
+        assert!(verify_manifest_dependencies(&manifest, &mismatched).unwrap_err().to_string().contains("does not match"));
+
+        fs::write(
+            root.path().join("Cell.toml"),
+            r#"[package]
+name = "demo"
+namespace = "cellscript"
+version = "1.2.3"
+edition = "2026"
+
+[dependencies]
+base = { path = "../base", version = "2.0.0" }
+"#,
+        )
+        .unwrap();
+        let local_manifest = cellscript::package::PackageManager::new(root.path()).read_manifest().unwrap();
+        assert!(verify_manifest_dependencies(&local_manifest, &expected).unwrap_err().to_string().contains("does not permit path"));
+    }
+
+    #[test]
     fn verifies_generated_snapshot_with_the_real_compiler() {
         let source_root = tempfile::tempdir().unwrap();
         fs::create_dir_all(source_root.path().join("src")).unwrap();
@@ -511,6 +608,7 @@ action identity(value: u64) -> u64 {
             artifact_kind: "source_library".to_string(),
             profile: "cellscript_source".to_string(),
             compatibility_profile_hash: Some(compatibility_profile_hash.clone()),
+            expected_dependencies_base64: Some(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"{}")),
             artifact_hash: None,
             abi_hash: None,
             build_recipe_hash: None,
@@ -718,6 +816,7 @@ action identity(value: u64) -> u64 {
             artifact_kind: kind.to_string(),
             profile: profile.to_string(),
             compatibility_profile_hash: None,
+            expected_dependencies_base64: None,
             artifact_hash,
             abi_hash,
             build_recipe_hash,
