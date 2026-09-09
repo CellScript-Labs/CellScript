@@ -7022,7 +7022,7 @@ impl IrGenerator {
                 "ckb::input_out_point_index" if call.args.len() == 1 => self.lower_simple_runtime_call(
                     "__ckb_input_out_point_index",
                     "ckb_input_out_point_index",
-                    IrType::U64,
+                    IrType::U32,
                     &call.args,
                     current,
                     blocks,
@@ -9477,7 +9477,7 @@ fn typed_view_property_runtime_helper(ty: &IrType, field: &str) -> Option<(&'sta
         ("HeaderDepView", "timestamp") => {
             Some(("__ckb_header_dep_timestamp_millis", "typed_header_timestamp_millis", IrType::Named("TimestampMillis".to_string())))
         }
-        (CKB_INPUT_OUT_POINT_REF_TYPE, "index") => Some(("__ckb_input_out_point_index", "typed_out_point_index", IrType::U64)),
+        (CKB_INPUT_OUT_POINT_REF_TYPE, "index") => Some(("__ckb_input_out_point_index", "typed_out_point_index", IrType::U32)),
         (CKB_INPUT_OUT_POINT_REF_TYPE, "tx_hash") => Some(("__ckb_input_out_point_tx_hash", "typed_out_point_tx_hash", IrType::Hash)),
         _ => None,
     }

@@ -2,6 +2,24 @@
 
 ## 0.30 - Capability closure development branch
 
+- Add machine-gated maximum-shape resource profiles for all ten frozen
+  cryptographic and authorization capabilities. Exact CKB-VM measurements now
+  cover 459-byte Script hashing, 65,536-byte witness hashing, depth-16 SHA256d
+  Merkle openings, the maximum zero-Lock signing-message shape, exact Script
+  handles, and trusted EXEC; the signed multisig lifecycle gates both editions
+  and all optimization levels with pinned structural measurements and a cycle
+  ceiling. The BIP340 profile rebuilds and executes the reproducible NovaSeal
+  child verifier through the compiler-generated parent Lock in full transaction
+  context, recording 3,679,593 cycles, a 13,472-byte parent ELF, a 15,792-byte
+  child stack high-water mark, a 418-byte WitnessArgs value, an 879-byte
+  transaction, and a 100,912-byte verifier dependency. The release gate
+  reproduces and checks those values exactly.
+
+- Preserve the CKB OutPoint index as `u32` through builtin typing, stdlib IR,
+  direct/property lowering, metadata, and independently verified lowering.
+  This fixes current NovaSeal state Type compilation and aligns its action and
+  Lock harness witnesses with the canonical `WitnessArgs.input_type` envelope.
+
 - Freeze a machine-validated cryptographic and authorization matrix for the
   eight-family business corpus. Ten admitted capabilities and twelve value
   domains now distinguish native hashing and Script identity, bounded signing

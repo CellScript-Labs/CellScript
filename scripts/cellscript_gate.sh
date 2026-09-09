@@ -163,6 +163,27 @@ check_novaseal_verifier_pinning() {
         --root "$ROOT_DIR" check-novaseal-verifier-pinning
 }
 
+check_novaseal_cryptographic_resource_profile() {
+    local novaseal_root="$ROOT_DIR/proposals/novaseal"
+    local package_root="$novaseal_root/v0-mvp-skeleton"
+    local release_elf="$package_root/verifier/novaseal_btc_verifier_riscv/target/riscv64imac-unknown-none-elf/release/novaseal_btc_verifier_riscv"
+    local staged_elf="$package_root/target/novaseal-btc-verifier-riscv-shell-release.elf"
+    local report="$package_root/target/novaseal-parent-lock-ckb-vm-report.json"
+    local lowering="$package_root/target/novaseal-parent-lock-abi-preflight.elf.lowering.json"
+
+    run mkdir -p "$package_root/target"
+    run cp "$release_elf" "$staged_elf"
+    run cargo build --locked -p cellscript --bin cellc
+    run cargo run --quiet --locked --manifest-path "$novaseal_root/tools/Cargo.toml" -- \
+        --root "$novaseal_root" parent-lock-abi-preflight \
+        --cellc "$ROOT_DIR/target/debug/cellc" --pretty
+    run_in_dir "$package_root" cargo run --quiet --locked --manifest-path harness/ckb_vm/Cargo.toml \
+        --bin novaseal_parent_lock_harness -- --pretty
+    run cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
+        --root "$ROOT_DIR" check-cryptographic-resource-report \
+        --report "$report" --lowering "$lowering"
+}
+
 check_release_docs() {
     local required=(
         'docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md::Stdlib lifecycle and Cell metadata patterns'
@@ -703,6 +724,7 @@ run_release_auxiliary_checks() {
     check_ckb_tx_measure_tool "$ckb_repo"
     check_novaseal_rust_tooling
     check_novaseal_verifier_pinning
+    check_novaseal_cryptographic_resource_profile
     check_wasm_release_bundle
     if [[ ! -d editors/vscode-cellscript/node_modules ]]; then
         run npm --prefix editors/vscode-cellscript ci

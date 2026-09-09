@@ -1,0 +1,295 @@
+{
+  "schema": "cellscript-cryptographic-resource-budgets-v1",
+  "measurement_backend": "ckb-testtool-full-transaction-context plus pinned NovaSeal child-verifier CKB-VM and ckb-system-scripts multisig-v2",
+  "profiles": [
+    {
+      "id": "canonical-script-hash-max-args",
+      "status": "passed",
+      "capabilities": [
+        "canonical-script-hash"
+      ],
+      "maximum_shape": [
+        "459-byte fixed Script args",
+        "Data2 hash type",
+        "canonical Molecule Script serialization"
+      ],
+      "evidence": [
+        "tests/cryptographic_resource_budgets.rs",
+        "tests/script_hash.rs",
+        "tests/support/cryptographic_resource_budgets.rs",
+        "tests/support/ckb_script_runner.rs"
+      ],
+      "measured": {
+        "cycles": 42093,
+        "elf_bytes": 10304,
+        "max_stack_frame_bytes": 5376,
+        "witness_bytes": 60,
+        "transaction_bytes": 400,
+        "dependency_bytes": 0
+      },
+      "budgets": {
+        "cycles": 10000000,
+        "elf_bytes": 16384,
+        "max_stack_frame_bytes": 8192,
+        "witness_bytes": 1024,
+        "transaction_bytes": 4096,
+        "dependency_bytes": 0
+      },
+      "measurement_policy": "exact"
+    },
+    {
+      "id": "bounded-witness-blake2b-max-bytes",
+      "status": "passed",
+      "capabilities": [
+        "ckb-blake2b-256"
+      ],
+      "maximum_shape": [
+        "65536-byte WitnessArgs.lock field",
+        "streaming CKB Blake2b-256",
+        "first and last exact byte reads"
+      ],
+      "evidence": [
+        "tests/cryptographic_resource_budgets.rs",
+        "tests/typed_runtime_views.rs",
+        "tests/support/cryptographic_resource_budgets.rs",
+        "tests/support/ckb_script_runner.rs"
+      ],
+      "measured": {
+        "cycles": 1403825,
+        "elf_bytes": 10864,
+        "max_stack_frame_bytes": 1344,
+        "witness_bytes": 65556,
+        "transaction_bytes": 65896,
+        "dependency_bytes": 0
+      },
+      "budgets": {
+        "cycles": 10000000,
+        "elf_bytes": 16384,
+        "max_stack_frame_bytes": 8192,
+        "witness_bytes": 66000,
+        "transaction_bytes": 70000,
+        "dependency_bytes": 0
+      },
+      "measurement_policy": "exact"
+    },
+    {
+      "id": "sha256d-merkle-max-depth",
+      "status": "passed",
+      "capabilities": [
+        "sha256-and-sha256d",
+        "sha256d-merkle-opening"
+      ],
+      "maximum_shape": [
+        "16-level SHA256d Merkle opening",
+        "fixed 32-byte SHA-256 and SHA256d inputs",
+        "fixed 64-byte pair"
+      ],
+      "evidence": [
+        "tests/cryptographic_resource_budgets.rs",
+        "tests/crypto_primitives.rs",
+        "tests/support/cryptographic_resource_budgets.rs",
+        "tests/support/ckb_script_runner.rs"
+      ],
+      "measured": {
+        "cycles": 358964,
+        "elf_bytes": 24944,
+        "max_stack_frame_bytes": 5424,
+        "witness_bytes": 732,
+        "transaction_bytes": 1072,
+        "dependency_bytes": 0
+      },
+      "budgets": {
+        "cycles": 10000000,
+        "elf_bytes": 28000,
+        "max_stack_frame_bytes": 8192,
+        "witness_bytes": 2048,
+        "transaction_bytes": 4096,
+        "dependency_bytes": 0
+      },
+      "measurement_policy": "exact"
+    },
+    {
+      "id": "zero-lock-sighash-max-shape",
+      "status": "passed",
+      "capabilities": [
+        "raw-transaction-hash",
+        "zero-lock-sighash-all"
+      ],
+      "maximum_shape": [
+        "64 current-group inputs",
+        "256 transaction inputs",
+        "64 extra witnesses",
+        "one included 65536-byte witness"
+      ],
+      "evidence": [
+        "tests/cryptographic_resource_budgets.rs",
+        "tests/sighash_zero_lock.rs",
+        "Cargo.lock",
+        "tests/support/cryptographic_resource_budgets.rs",
+        "tests/support/ckb_script_runner.rs"
+      ],
+      "measured": {
+        "cycles": 1752419,
+        "elf_bytes": 12424,
+        "max_stack_frame_bytes": 7440,
+        "witness_bytes": 65588,
+        "transaction_bytes": 79700,
+        "dependency_bytes": 0
+      },
+      "budgets": {
+        "cycles": 10000000,
+        "elf_bytes": 20000,
+        "max_stack_frame_bytes": 8192,
+        "witness_bytes": 70000,
+        "transaction_bytes": 100000,
+        "dependency_bytes": 0
+      },
+      "measurement_policy": "exact"
+    },
+    {
+      "id": "exact-script-handle-fixed-receipt",
+      "status": "passed",
+      "capabilities": [
+        "exact-script-handle"
+      ],
+      "maximum_shape": [
+        "202-byte ExactScriptHandle",
+        "full handle commitment",
+        "exact CellDep data-hash comparison"
+      ],
+      "evidence": [
+        "tests/cryptographic_resource_budgets.rs",
+        "tests/exact_script_handles.rs",
+        "tests/support/cryptographic_resource_budgets.rs",
+        "tests/support/ckb_script_runner.rs"
+      ],
+      "measured": {
+        "cycles": 19029,
+        "elf_bytes": 9848,
+        "max_stack_frame_bytes": 5376,
+        "witness_bytes": 230,
+        "transaction_bytes": 607,
+        "dependency_bytes": 40
+      },
+      "budgets": {
+        "cycles": 10000000,
+        "elf_bytes": 20000,
+        "max_stack_frame_bytes": 8192,
+        "witness_bytes": 1024,
+        "transaction_bytes": 4096,
+        "dependency_bytes": 128
+      },
+      "measurement_policy": "exact"
+    },
+    {
+      "id": "trusted-external-fixed-exec",
+      "status": "passed",
+      "capabilities": [
+        "trusted-external-delegation"
+      ],
+      "maximum_shape": [
+        "fixed five-u8 EXEC adapter",
+        "exact CellDep data hash",
+        "terminal zero-success contract"
+      ],
+      "evidence": [
+        "tests/cryptographic_resource_budgets.rs",
+        "tests/trusted_external.rs",
+        "Cargo.lock",
+        "tests/support/cryptographic_resource_budgets.rs",
+        "tests/support/ckb_script_runner.rs"
+      ],
+      "measured": {
+        "cycles": 79848,
+        "elf_bytes": 1456,
+        "max_stack_frame_bytes": 1200,
+        "witness_bytes": 0,
+        "transaction_bytes": 377,
+        "dependency_bytes": 7184
+      },
+      "budgets": {
+        "cycles": 10000000,
+        "elf_bytes": 20000,
+        "max_stack_frame_bytes": 8192,
+        "witness_bytes": 1024,
+        "transaction_bytes": 4096,
+        "dependency_bytes": 8000
+      },
+      "measurement_policy": "exact"
+    },
+    {
+      "id": "standard-multisig-lifecycle",
+      "status": "passed",
+      "capabilities": [
+        "standard-multisig-lock"
+      ],
+      "maximum_shape": [
+        "eight Edition/optimization combinations",
+        "six live prior-output lifecycle transactions",
+        "2-of-2 multisig-v2 signing groups"
+      ],
+      "evidence": [
+        "tests/policy_lifecycle.rs",
+        "Cargo.lock",
+        "tests/support/cryptographic_resource_budgets.rs"
+      ],
+      "measured": {
+        "cycles": 6315692,
+        "elf_bytes": 9848,
+        "max_stack_frame_bytes": 5376,
+        "witness_bytes": 590,
+        "transaction_bytes": 1293,
+        "dependency_bytes": 1100920
+      },
+      "budgets": {
+        "cycles": 7000000,
+        "elf_bytes": 20000,
+        "max_stack_frame_bytes": 8192,
+        "witness_bytes": 2048,
+        "transaction_bytes": 2048,
+        "dependency_bytes": 1200000
+      },
+      "measurement_policy": "bounded-signature-dependent-cycles"
+    },
+    {
+      "id": "bip340-verifier-fixed-envelope",
+      "status": "passed",
+      "capabilities": [
+        "exact-bip340-verifier"
+      ],
+      "maximum_shape": [
+        "144-byte versioned IPC envelope",
+        "32-byte message",
+        "32-byte x-only public key",
+        "64-byte BIP340 signature",
+        "parent CellScript Lock plus spawned verifier child in one consensus-packed CKB transaction"
+      ],
+      "evidence": [
+        "proposals/novaseal/v0-mvp-skeleton/src/nova_btc_authority_lock.cell",
+        "proposals/novaseal/tools/src/parent_lock_preflight.rs",
+        "proposals/novaseal/v0-mvp-skeleton/harness/ckb_vm/src/main.rs",
+        "proposals/novaseal/v0-mvp-skeleton/harness/ckb_vm/src/bin/novaseal_parent_lock_harness.rs",
+        "proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier_riscv/build_reproducible_release.sh",
+        "crates/cellscript-tools/src/business_corpus.rs",
+        "scripts/cellscript_gate.sh"
+      ],
+      "measured": {
+        "cycles": 3679593,
+        "elf_bytes": 13472,
+        "max_stack_frame_bytes": 15792,
+        "witness_bytes": 418,
+        "transaction_bytes": 879,
+        "dependency_bytes": 100912
+      },
+      "budgets": {
+        "cycles": 100000000,
+        "elf_bytes": 300000,
+        "max_stack_frame_bytes": 1048576,
+        "witness_bytes": 1024,
+        "transaction_bytes": 4096,
+        "dependency_bytes": 300000
+      },
+      "measurement_policy": "exact"
+    }
+  ]
+}

@@ -393,7 +393,7 @@ impl StdLib {
             StdFunction {
                 name: "ckb_input_out_point_index".to_string(),
                 params: vec![("source_view".to_string(), IrType::U64)],
-                return_type: Some(IrType::U64),
+                return_type: Some(IrType::U32),
             },
             StdFunction {
                 name: "ckb_input_out_point_tx_hash_low".to_string(),

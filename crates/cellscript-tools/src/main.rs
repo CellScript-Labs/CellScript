@@ -163,6 +163,15 @@ enum Command {
         #[arg(long)]
         release: bool,
     },
+    /// Validate a reproduced NovaSeal BIP340 parent/child resource report.
+    CheckCryptographicResourceReport {
+        /// Parent-lock CKB-VM report produced by the NovaSeal harness.
+        #[arg(long)]
+        report: PathBuf,
+        /// Verified lowering record for the parent CellScript lock ELF.
+        #[arg(long)]
+        lowering: PathBuf,
+    },
     /// Validate or regenerate the compiler-owned executable-surface matrix.
     CheckExecutableSurface {
         #[arg(long)]
@@ -433,6 +442,12 @@ fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => failure(error),
         },
+        Command::CheckCryptographicResourceReport { report, lowering } => {
+            match business_corpus::validate_novaseal_resource_report(&root, &report, &lowering) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => failure(error),
+            }
+        }
         Command::CheckExecutableSurface { write } => match executable_surface::run(&root, write) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => failure(error),

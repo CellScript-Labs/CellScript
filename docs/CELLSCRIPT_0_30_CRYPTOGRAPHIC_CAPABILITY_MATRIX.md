@@ -6,8 +6,8 @@
 machine-readable source is
 [`tests/fixtures/cryptographic_capability_matrix.json`](../tests/fixtures/cryptographic_capability_matrix.json).
 `check-business-corpus` validates its complete row and value-domain set, binds
-all cited evidence into the corpus digest, and rejects release mode while its
-release requirements or maximum-bound measurements remain incomplete.
+all cited evidence and the resource-budget manifest into the corpus digest,
+and rejects release mode while its release requirements remain incomplete.
 
 The matrix covers the cryptographic and authorization operations actually used
 by the eight-family corpus. It does not promise every algorithm available to a
@@ -84,12 +84,36 @@ external-adapter, and standalone-checker evidence is present for the admitted
 rows. The eight-family business corpus and its four-artifact composition anchor
 exercise those operations through the product path.
 
-The JSON matrix intentionally marks maximum-bound per-capability measurements
-as `release-candidate-required`. Existing tests record representative cycles
-and portfolio-level budgets, but issue #25 requires a final exact-candidate
-resource record before these rows can be accepted for release. The matrix also
-keeps the applicable release gate, selected-network deployment, and independent
-review explicit and incomplete.
+The machine-readable
+[`cryptographic_resource_budgets.json`](../tests/fixtures/cryptographic_resource_budgets.json)
+binds every capability to exactly one maximum-shape profile. Ordinary CI
+re-executes the first six profiles in complete CKB transaction context; the
+signed multisig lifecycle separately takes the maximum across both admitted
+editions and all four optimization levels. Multisig cycles vary with the
+deterministically generated transaction and signatures, so that profile pins
+all structural measurements and gates each run against a 7,000,000-cycle
+ceiling. The other recorded profiles require exact measurement equality.
+
+| Profile | Cycles | ELF bytes | Stack bytes | Witness bytes | Transaction bytes | Dependency bytes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Maximum 459-byte Script hash | 42,093 | 10,304 | 5,376 | 60 | 400 | 0 |
+| Maximum 65,536-byte bounded witness Blake2b | 1,403,825 | 10,864 | 1,344 | 65,556 | 65,896 | 0 |
+| Maximum depth-16 SHA256d Merkle opening | 358,964 | 24,944 | 5,424 | 732 | 1,072 | 0 |
+| Maximum zero-Lock SighashAll shape | 1,752,419 | 12,424 | 7,440 | 65,588 | 79,700 | 0 |
+| Fixed exact Script handle | 19,029 | 9,848 | 5,376 | 230 | 607 | 40 |
+| Fixed trusted-external EXEC | 79,848 | 1,456 | 1,200 | 0 | 377 | 7,184 |
+| Standard multisig lifecycle sample maximum | 6,315,692 | 9,848 | 5,376 | 590 | 1,293 | 1,100,920 |
+| Fixed BIP340 verifier envelope | 3,679,593 | 13,472 | 15,792 | 418 | 879 | 100,912 |
+
+All ten capability rows now have executable resource gates. The BIP340 profile
+rebuilds the reproducible NovaSeal child-verifier ELF, recompiles the parent
+CellScript Lock, executes two exact 18-word IPC transfers, and verifies the
+complete four-case transaction matrix. Its 15,792-byte stack value is the
+child VM's observed dynamic high-water mark; the independently verified parent
+lowering has a 5,392-byte maximum frame. The release gate reproduces the report
+and requires exact equality with the recorded cycle, ELF, stack, witness,
+transaction, and dependency measurements. Selected-network deployment and
+independent review remain explicit and incomplete.
 
 ## Deferred surfaces
 

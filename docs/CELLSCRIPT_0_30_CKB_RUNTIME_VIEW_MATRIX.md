@@ -65,7 +65,7 @@ indexed item fails through the field-specific terminal error.
 | `witness::bounded_lock(view, max)` | inherited witness source | Same bounded operations over `WitnessArgs.lock` | `WitnessBytesView<lock,max>` | Missing differs from `Some(empty)`; absent uses error 67, values above `max` use 68, and malformed field encoding uses 42/43. This read-only view does not grant signer authority. |
 | `witness::bounded_entry(view, max)` | inherited witness source | Same bounded operations over the one `WitnessArgs.input_type` value | `WitnessBytesView<entry,max>` | The logical bytes are the existing `CSARGv1` entry envelope when that ABI is used. This is the shared owner for bounded plan, authorization, and entry consumers, not a second payload. |
 | `witness::bounded_output_type(view, max)` | inherited witness source | Same bounded operations over `WitnessArgs.output_type` | `WitnessBytesView<output_type,max>` | The owner is distinct from `lock` and `entry`; all offsets are relative to the selected field payload. |
-| `ckb::input_out_point(input)` or `input.out_point` | inherited Input/GroupInput | `tx_hash`, `index` | `OutPoint` | 32-byte transaction hash plus 4-byte CKB index widened to `u64`; incompatible source or malformed width terminates. |
+| `ckb::input_out_point(input)` or `input.out_point` | inherited Input/GroupInput | `tx_hash`, `index` | `OutPoint` | 32-byte transaction hash plus the exact 4-byte CKB `u32` index; incompatible source or malformed width terminates. |
 | `ckb::lock_script(cell)` or `cell.lock` | inherited Cell source | `hash`, `code_hash`, `hash_type`, `args_empty`, `args_hash` | `ScriptView` | Complete `hash` is `ScriptHash`; `code_hash` and `args_hash` are raw `Hash`; scalar fields are bounded and Molecule-checked. |
 | `ckb::type_script(cell)` or `cell.type_script` | inherited Cell source | Same as Lock `ScriptView` | `ScriptView` | An absent Type Script is not fabricated. Use `ckb::cell_has_type(cell)` before a conditional read. |
 
@@ -193,8 +193,9 @@ The following work remains before issue #24 can close:
 - any additional signing domain selected by the business corpus, including a
   multisig prefix-preserving layout, as a separately named contract;
 - persistent-policy and generated-builder parity for every admitted row;
-- maximum-bound cycle, stack, ELF, witness, and transaction-size measurements;
-  and
+- maximum-bound cycle, stack, ELF, witness, and transaction-size measurements
+  for the non-cryptographic admitted rows; all ten cryptographic portfolio rows
+  now map to executable resource profiles; and
 - `ci`, `backend`, release, and independent-review evidence on the exact
   candidate source.
 

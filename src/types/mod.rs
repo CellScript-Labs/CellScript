@@ -6251,7 +6251,7 @@ impl<'a> TypeChecker<'a> {
                 }
                 if base_name == CKB_OUT_POINT_TYPE {
                     return match field {
-                        "index" => Ok(Type::U64),
+                        "index" => Ok(Type::U32),
                         "tx_hash" => Ok(Type::Hash),
                         _ => Err(CompileError::new(format!("unknown OutPoint field '{}'; expected tx_hash or index", field), span)),
                     };
@@ -7121,7 +7121,11 @@ impl<'a> TypeChecker<'a> {
                                     call.span,
                                 ));
                             }
-                            Type::U64
+                            if suffix == "input_out_point_index" {
+                                Type::U32
+                            } else {
+                                Type::U64
+                            }
                         }
                         ("ckb", "input_out_point_tx_hash") => {
                             self.validate_builtin_arity(name, 1, arg_types, call.span)?;

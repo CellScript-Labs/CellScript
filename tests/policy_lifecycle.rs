@@ -40,6 +40,11 @@ use ckb_testtool::{
 use secp256k1::{Message, PublicKey, SecretKey};
 use std::collections::{HashMap, HashSet};
 
+#[path = "support/cryptographic_resource_budgets.rs"]
+mod cryptographic_resource_budgets;
+
+use cryptographic_resource_budgets::{assert_metrics, ResourceMetrics};
+
 const SOURCE: &str = r#"
 module issuer_authorized_token
 resource Token has store, consume { amount: u64 }
@@ -240,6 +245,7 @@ struct Lifecycle<'a> {
     committed: usize,
     max_cycles: u64,
     max_tx_bytes: usize,
+    max_witness_bytes: usize,
     max_occupied_bytes: u64,
 }
 
@@ -288,6 +294,7 @@ impl<'a> Lifecycle<'a> {
             committed: 0,
             max_cycles: 0,
             max_tx_bytes: 0,
+            max_witness_bytes: 0,
             max_occupied_bytes: 0,
         }
     }
@@ -404,6 +411,8 @@ impl<'a> Lifecycle<'a> {
         self.committed += 1;
         self.max_cycles = self.max_cycles.max(cycles);
         self.max_tx_bytes = self.max_tx_bytes.max(transaction.data().as_slice().len());
+        self.max_witness_bytes =
+            self.max_witness_bytes.max(transaction.witnesses().into_iter().map(|witness| witness.raw_data().len()).sum());
         Ok(out_points)
     }
 
@@ -470,9 +479,32 @@ fn replace_witness(
 
 #[test]
 fn signed_persistent_policy_executes_six_transactions_with_live_prior_outputs() {
+    let multisig_dependency_bytes = ckb_system_scripts_v0_6_0::BUNDLED_CELL
+        .get("specs/cells/secp256k1_blake160_multisig_all")
+        .expect("pinned bundled multisig-v2")
+        .len()
+        + ckb_system_scripts_v0_6_0::BUNDLED_CELL.get("specs/cells/secp256k1_data").expect("pinned secp data").len();
+    let mut measured = ResourceMetrics {
+        cycles: 0,
+        elf_bytes: 0,
+        max_stack_frame_bytes: 0,
+        witness_bytes: 0,
+        transaction_bytes: 0,
+        dependency_bytes: multisig_dependency_bytes,
+    };
     for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
         for opt_level in 0..=3 {
             let compiled = compile_policy(edition, opt_level);
+            measured.elf_bytes = measured.elf_bytes.max(strip_vm_abi_trailer(&compiled.artifact_bytes).len());
+            measured.max_stack_frame_bytes = measured.max_stack_frame_bytes.max(
+                compiled
+                    .verified_lowering_record
+                    .iter()
+                    .flat_map(|record| &record.entries)
+                    .map(|entry| entry.frame_size_bytes)
+                    .max()
+                    .expect("policy lowering record contains an entry"),
+            );
             let mut lifecycle = Lifecycle::new(&compiled);
             let original_policy = lifecycle.policy.clone();
             let mut minted = Vec::new();
@@ -525,12 +557,17 @@ fn signed_persistent_policy_executes_six_transactions_with_live_prior_outputs() 
             assert_eq!(lifecycle.committed, 6);
             assert_eq!(lifecycle.policy, original_policy);
             assert!(lifecycle.live.values().all(|(output, _)| output.type_().to_opt().is_none()), "no live Token remains after burn");
+            measured.cycles = measured.cycles.max(lifecycle.max_cycles);
+            measured.witness_bytes = measured.witness_bytes.max(lifecycle.max_witness_bytes);
+            measured.transaction_bytes = measured.transaction_bytes.max(lifecycle.max_tx_bytes);
             eprintln!(
                 "lifecycle {edition:?}/opt{opt_level}: {} committed txs, max cycles={}, max serialized tx bytes={}, max output occupied bytes={}",
                 lifecycle.committed, lifecycle.max_cycles, lifecycle.max_tx_bytes, lifecycle.max_occupied_bytes
             );
         }
     }
+    eprintln!("standard-multisig-lifecycle={}", serde_json::to_string(&measured).expect("serialize multisig measurements"));
+    assert_metrics("standard-multisig-lifecycle", &measured);
 }
 
 #[test]

@@ -49,6 +49,7 @@
   "evidence_files": [
     "Cargo.lock",
     "crates/cellscript-ckb-adapter/src/protocol_bundle.rs",
+    "crates/cellscript-tools/src/business_corpus.rs",
     "crates/cellscript-tools/src/ckb_acceptance_live.rs",
     "docs/CELLSCRIPT_0_30_CRYPTOGRAPHIC_CAPABILITY_MATRIX.md",
     "docs/CELLSCRIPT_SIGNATURE_VERIFIER_ABI.md",
@@ -59,6 +60,12 @@
     "examples/timelock.cell",
     "examples/token.cell",
     "examples/vesting.cell",
+    "proposals/novaseal/tools/src/parent_lock_preflight.rs",
+    "proposals/novaseal/v0-mvp-skeleton/harness/ckb_vm/src/bin/novaseal_parent_lock_harness.rs",
+    "proposals/novaseal/v0-mvp-skeleton/harness/ckb_vm/src/main.rs",
+    "proposals/novaseal/v0-mvp-skeleton/src/nova_btc_authority_lock.cell",
+    "proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier_riscv/build_reproducible_release.sh",
+    "scripts/cellscript_gate.sh",
     "src/cli/commands.rs",
     "src/protocol_bundle.rs",
     "src/script_handle.rs",
@@ -75,6 +82,7 @@
     "tests/cli.rs",
     "tests/cost_corpus.rs",
     "tests/crypto_primitives.rs",
+    "tests/cryptographic_resource_budgets.rs",
     "tests/entry_witness_abi.rs",
     "tests/exact_script_handles.rs",
     "tests/examples.rs",
@@ -95,6 +103,7 @@
     "tests/fixtures/cost_corpus/src/pool_merge.rs",
     "tests/fixtures/cost_corpus/src/schema_roll.rs",
     "tests/fixtures/cryptographic_capability_matrix.json",
+    "tests/fixtures/cryptographic_resource_budgets.json",
     "tests/fixtures/rust_ckb_token_transfer/Cargo.lock",
     "tests/fixtures/rust_ckb_token_transfer/src/main.rs",
     "tests/ickb_diff.rs",
@@ -104,6 +113,8 @@
     "tests/schema_acknowledgement.rs",
     "tests/script_hash.rs",
     "tests/sighash_zero_lock.rs",
+    "tests/support/ckb_script_runner.rs",
+    "tests/support/cryptographic_resource_budgets.rs",
     "tests/trusted_external.rs",
     "tests/typed_runtime_views.rs",
     "tests/verifier_failure.rs"
@@ -922,7 +933,7 @@
       ]
     }
   ],
-  "inventory_sha256": "0x6cb3224e02eb19df8787bd5a89279d7900e3353e679295fe7eb55926a602e357",
+  "inventory_sha256": "0x2915961471f6fbe29b5c4afeaeec37f5a4e4ad6131f73153218d2858e652627a",
   "release_requirements": {
     "backend": "passed",
     "ci": "passed",

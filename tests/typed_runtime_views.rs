@@ -110,6 +110,21 @@ action inspect(witness source_index: u64, witness expected_data_hash: Hash) -> u
 }
 "#;
 
+const OUT_POINT_INDEX_SOURCE: &str = r#"
+module runtime_views::out_point_index
+
+struct OutPoint {
+    tx_hash: Hash,
+    index: u32
+}
+
+action inspect(witness expected: OutPoint) -> u64 {
+    let actual_index = ckb::input_out_point_index(source::group_input(0))
+    require expected.index == actual_index
+    return 0
+}
+"#;
+
 fn compile(source: &str) -> cellscript::CompileResult {
     compile_with_executable_surface_policy(
         source,
@@ -122,6 +137,22 @@ fn compile(source: &str) -> cellscript::CompileResult {
         ExecutableSurfacePolicy::DenyFailClosed,
     )
     .unwrap_or_else(|error| panic!("typed runtime-view source must compile: {error}\n{source}"))
+}
+
+#[test]
+fn input_out_point_index_retains_its_u32_type_through_verified_lowering() {
+    let result = compile(OUT_POINT_INDEX_SOURCE);
+    let call = result
+        .verified_lowering_record
+        .as_ref()
+        .expect("verified lowering")
+        .typed_semantics
+        .entries
+        .iter()
+        .flat_map(|entry| &entry.blocks)
+        .flat_map(|block| &block.operations)
+        .find_map(|operation| operation.call.as_ref().filter(|call| call.target == "__ckb_input_out_point_index"));
+    assert_eq!(call.expect("input OutPoint index runtime call").return_type, "u32");
 }
 
 fn witness(result: &cellscript::CompileResult, expected_data_hash: [u8; 32]) -> Bytes {

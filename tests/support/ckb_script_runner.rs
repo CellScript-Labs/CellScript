@@ -250,6 +250,16 @@ pub struct CkbScriptExecutionResult {
     pub exit_code: i64,
     /// Cycles consumed (0 on error).
     pub cycles: u64,
+    /// Consensus-serialized transaction bytes for the executed fixture.
+    #[allow(dead_code)]
+    pub transaction_bytes: usize,
+    /// Sum of the serialized witness payload lengths in the transaction.
+    #[allow(dead_code)]
+    pub witness_bytes: usize,
+    /// Sum of additional fixture CellDep data bytes, excluding the script
+    /// under test and the harness's always-success Lock.
+    #[allow(dead_code)]
+    pub dependency_bytes: usize,
     /// Captured debug print messages from the script.
     pub captured_debug: Vec<String>,
 }
@@ -491,6 +501,9 @@ where
     let tx = tx_builder.build();
     let tx = context.complete_tx(tx);
     let tx = transform(tx, type_script);
+    let transaction_bytes = tx.data().serialized_size_in_block();
+    let witness_bytes = tx.witnesses().into_iter().map(|witness| witness.raw_data().len()).sum();
+    let dependency_bytes = fixture.cell_deps.iter().map(|cell| cell.data.len()).sum();
 
     // Execute via ckb-script ScriptVerify with full CKB syscall context.
     let verify_result = context.verify_tx(&tx, MAX_CYCLES);
@@ -498,6 +511,9 @@ where
         Ok(cycles) => CkbScriptExecutionResult {
             exit_code: 0,
             cycles,
+            transaction_bytes,
+            witness_bytes,
+            dependency_bytes,
             captured_debug: context.captured_messages().into_iter().map(|m| m.message).collect(),
         },
         Err(verify_failure) => {
@@ -507,7 +523,14 @@ where
             let exit_code = parse_ckb_script_error_code(&error_detail).unwrap_or(-1);
             let mut all_debug = debug_messages;
             all_debug.push(format!("CKB_ERROR: {}", error_detail));
-            CkbScriptExecutionResult { exit_code, cycles: 0, captured_debug: all_debug }
+            CkbScriptExecutionResult {
+                exit_code,
+                cycles: 0,
+                transaction_bytes,
+                witness_bytes,
+                dependency_bytes,
+                captured_debug: all_debug,
+            }
         }
     }
 }
