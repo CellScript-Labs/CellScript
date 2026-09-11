@@ -66,10 +66,13 @@ indexed item fails through the field-specific terminal error.
 | `witness::bounded_entry(view, max)` | inherited witness source | Same bounded operations over the one `WitnessArgs.input_type` value | `WitnessBytesView<entry,max>` | The logical bytes are the existing `CSARGv1` entry envelope when that ABI is used. This is the shared owner for bounded plan, authorization, and entry consumers, not a second payload. |
 | `witness::bounded_output_type(view, max)` | inherited witness source | Same bounded operations over `WitnessArgs.output_type` | `WitnessBytesView<output_type,max>` | The owner is distinct from `lock` and `entry`; all offsets are relative to the selected field payload. |
 | `ckb::input_out_point(input)` or `input.out_point` | inherited Input/GroupInput | `tx_hash`, `index` | `OutPoint` | 32-byte transaction hash plus the exact 4-byte CKB `u32` index; incompatible source or malformed width terminates. |
-| `ckb::lock_script(cell)` or `cell.lock` | inherited Cell source | `hash`, `code_hash`, `hash_type`, `args_empty`, `args_hash` | `ScriptView` | Complete `hash` is `ScriptHash`; `code_hash` and `args_hash` are raw `Hash`; scalar fields are bounded and Molecule-checked. |
+| `ckb::lock_script(cell)` or `cell.lock` | inherited Cell source | `hash`, `code_hash`, `hash_type`, `args_empty`, `args_hash` | `ScriptView` | Complete `hash` is `ScriptHash`; `code_hash` is raw `Hash`; `args_hash` is the exact 32-byte args projection represented as `Hash`, not a digest over arbitrary args. Scalar fields are bounded and Molecule-checked. |
 | `ckb::type_script(cell)` or `cell.type_script` | inherited Cell source | Same as Lock `ScriptView` | `ScriptView` | An absent Type Script is not fabricated. Use `ckb::cell_has_type(cell)` before a conditional read. |
 
-`ScriptHash`, `Hash`, and `Address` are separate source domains. A complete
+`ScriptHash`, `Hash`, and `Address` are separate source domains. `args_hash`
+requires Script args of exactly 32 bytes and returns error 38 for any other
+width; `args_empty` handles the arbitrary-width empty/nonempty distinction.
+A complete
 Lock/Type Script hash from a typed view is `ScriptHash`. A code hash, data hash,
 transaction hash, or args hash is `Hash`. `ckb::script_hash(hash)` is an
 explicit assertion that already trusted raw bytes represent a complete Script
@@ -189,7 +192,12 @@ after recomputing outer hashes and requires independent rejection.
 The non-cryptographic fixed transaction/header/temporal path now freezes exact
 cycles, ELF bytes, maximum stack frame, witness bytes, transaction bytes, and
 dependency bytes in `tests/fixtures/runtime_view_resource_budgets.json` and
-reproduces them in `tests/typed_runtime_views.rs`. Cryptographic and bounded
+reproduces them in `tests/typed_runtime_views.rs`. A second exact profile binds
+global Output and current-group GroupOutput fields, an absent input Type Script,
+complete Lock/Type Script projections, exact 32-byte args, the maximum 459-byte
+Script-args boundary, one-past-last indexes, artifact and sidecar hashes, and raw
+and serialized transaction hashes. Its measured maximum stack frame is 11,344
+bytes under an explicit 16,384-byte profile budget. Cryptographic and bounded
 witness maxima remain owned by the separate cryptographic resource manifest.
 
 The following work remains before issue #24 can close:
@@ -199,8 +207,8 @@ The following work remains before issue #24 can close:
   multisig prefix-preserving layout, as a separately named contract;
 - persistent-policy and generated-builder parity for every admitted row;
 - maximum-bound cycle, stack, ELF, witness, and transaction-size measurements
-  for the remaining non-cryptographic Output/GroupOutput, exact Script-field,
-  and adapter rows; the fixed transaction/header/temporal path and all ten
+  for the remaining non-cryptographic adapter rows; the fixed
+  transaction/header/temporal and Output/GroupOutput/Script paths and all ten
   cryptographic portfolio rows now map to executable resource profiles; and
 - `ci`, `backend`, release, and independent-review evidence on the exact
   candidate source.

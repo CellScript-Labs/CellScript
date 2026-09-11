@@ -418,7 +418,7 @@
       "design_records": ["docs/CELLSCRIPT_0_30_CKB_RUNTIME_VIEW_MATRIX.md"],
       "evidence": ["tests/typed_runtime_views.rs", "tests/fixtures/runtime_view_resource_budgets.json", "tests/exact_script_handles.rs", "tests/sighash_zero_lock.rs"],
       "non_goals": ["Raw syscall numbers, inline assembly, or unbounded transaction-wide reads"],
-      "remaining_work": ["Close remaining persistent-policy, builder, checker, and non-cryptographic Output/GroupOutput/Script/adapter resource rows", "Complete independent review of bounds, ownership, and syscall failures"]
+      "remaining_work": ["Close remaining persistent-policy, generated-builder, checker, and non-cryptographic adapter parity and resource rows", "Complete independent review of bounds, ownership, and syscall failures"]
     },
     {
       "issue": 25,

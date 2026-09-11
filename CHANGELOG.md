@@ -2,6 +2,14 @@
 
 ## 0.30 - Capability closure development branch
 
+- Extend issue #24's exact non-cryptographic runtime-view resource evidence to
+  global Output, current-group GroupOutput, and complete Lock/Type Script
+  projections. The CKB-VM fixture covers absent Type Scripts, exact 32-byte
+  args, maximum 459-byte Script args, and one-past-last indexes while pinning
+  artifact, sidecar, raw-transaction, and serialized-transaction identities.
+  The standalone checker now accepts only the closed Cell-view to internal
+  Script-reference lowering used by these public projections.
+
 - Add the bounded fixed-width committed-substate profile for issue #13.
   `Commitment<T>` is a nominal 32-byte CKB Blake2b-256 value over the existing
   `CellScriptPackedHashV0` domain; `Opening<T>` is an explicit, linear,

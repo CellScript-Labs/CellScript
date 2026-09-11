@@ -13,7 +13,9 @@ use ckb_testtool::{
 #[allow(dead_code)]
 mod ckb_script_runner;
 
-use ckb_script_runner::{build_simple_fixture, execute_cellscript_script, FixtureCell, FixtureHeaderContext};
+use ckb_script_runner::{
+    build_simple_fixture, deterministic_always_success_script, execute_cellscript_script, FixtureCell, FixtureHeaderContext,
+};
 
 const SOURCE: &str = r#"
 module runtime_views::header
@@ -110,6 +112,53 @@ action inspect(witness source_index: u64, witness expected_data_hash: Hash) -> u
 }
 "#;
 
+const OUTPUT_SCRIPT_SOURCE: &str = r#"
+module runtime_views::output_script
+
+resource Token has store { amount: u64 }
+
+action inspect() -> u64 {
+    let input = ckb::input<Token>(0)
+    let output = ckb::output<Token>(0)
+    let group_output = ckb::group_output<Token>(0)
+    let output_lock = output.lock
+    let group_lock = group_output.lock
+    let output_type = output.type_script
+    let group_type = group_output.type_script
+    if ckb::cell_has_type(input) || !ckb::cell_has_type(output) || !ckb::cell_has_type(group_output) {
+        return 80
+    }
+    if output.output_index != 0 || group_output.output_index != 0 {
+        return 81
+    }
+    if output.capacity != 200000000000 || group_output.capacity != 200000000000 {
+        return 82
+    }
+    if output.occupied_capacity > output.capacity || group_output.occupied_capacity > group_output.capacity {
+        return 83
+    }
+    if output.unoccupied_capacity + output.occupied_capacity != output.capacity || group_output.unoccupied_capacity + group_output.occupied_capacity != group_output.capacity {
+        return 84
+    }
+    if output.data_size != 257 || group_output.data_size != 513 {
+        return 85
+    }
+    if output.data_hash == group_output.data_hash || output.lock_hash != group_output.lock_hash {
+        return 86
+    }
+    if output_lock.hash != group_lock.hash || output_lock.code_hash != group_lock.code_hash || output_lock.hash_type != group_lock.hash_type || !output_lock.args_empty || !group_lock.args_empty {
+        return 87
+    }
+    if output.type_hash != output_type.hash || group_output.type_hash != group_type.hash || output_type.hash == group_type.hash {
+        return 88
+    }
+    if output_type.code_hash == group_type.code_hash || output_type.hash_type != group_type.hash_type || output_type.args_empty || group_type.args_empty || output_type.args_hash == Hash::zero() {
+        return 89
+    }
+    return 0
+}
+"#;
+
 const OUT_POINT_INDEX_SOURCE: &str = r#"
 module runtime_views::out_point_index
 
@@ -177,6 +226,20 @@ fn fixture(dep_data: Bytes, witness: Bytes) -> ckb_script_runner::CkbVmFixture {
     fixture.header_dao_fields = vec![[0; 32]];
     fixture.header_contexts =
         vec![FixtureHeaderContext { number: 100, timestamp: 1_700_000_000_123, epoch_number: 42, epoch_index: 3, epoch_length: 10 }];
+    fixture
+}
+
+fn output_script_fixture() -> ckb_script_runner::CkbVmFixture {
+    let mut fixture = build_simple_fixture(Bytes::from(vec![0x22; cellscript::CKB_SCRIPT_HASH_MAX_ARGS_BYTES]), 1, 2);
+    fixture.inputs[0].capacity = 500_000_000_000;
+    fixture.inputs[0].data = Bytes::from(vec![0x44; 17]);
+    fixture.outputs[0] = FixtureCell {
+        capacity: 200_000_000_000,
+        type_script: Some(deterministic_always_success_script(Bytes::from(vec![0x33; 32]))),
+        data: Bytes::from(vec![0x55; 257]),
+    };
+    fixture.outputs[1].capacity = 200_000_000_000;
+    fixture.outputs[1].data = Bytes::from(vec![0x66; 513]);
     fixture
 }
 
@@ -337,6 +400,72 @@ fn dynamic_source_indexes_execute_and_emit_checked_provenance() {
     let error = cellscript::validate_compile_metadata(&tampered, result.artifact_format)
         .expect_err("a narrowed source-view index contract must not validate");
     assert!(error.message.contains("32-bit source-view index"), "unexpected validation error: {error}");
+}
+
+#[test]
+fn output_group_output_and_maximum_script_views_execute_and_fail_closed() {
+    let result = compile(OUTPUT_SCRIPT_SOURCE);
+    let valid = output_script_fixture();
+    let execution = execute_cellscript_script(strip_vm_abi_trailer(&result.artifact_bytes), &valid);
+    assert_eq!(execution.exit_code, 0, "Output/GroupOutput and maximum Script fields must execute: {:?}", execution.captured_debug);
+    for (handle_type, source) in [("OutputView<Token>", "Output"), ("OutputView<Token>", "GroupOutput")] {
+        assert!(result.metadata.runtime.transaction_view_handles.iter().any(|handle| {
+            handle.handle_type == handle_type
+                && handle.source == source
+                && handle.provenance.source.resolved_source == source
+                && handle.provenance.index.kind == "static"
+        }));
+    }
+    assert!(result.metadata.runtime.transaction_view_handles.iter().filter(|handle| handle.handle_type == "ScriptView").count() >= 4);
+
+    for source in [
+        OUTPUT_SCRIPT_SOURCE.replace("ckb::output<Token>(0)", "ckb::output<Token>(2)"),
+        OUTPUT_SCRIPT_SOURCE.replace("ckb::group_output<Token>(0)", "ckb::group_output<Token>(1)"),
+    ] {
+        let missing = compile(&source);
+        let execution = execute_cellscript_script(strip_vm_abi_trailer(&missing.artifact_bytes), &valid);
+        assert_eq!(execution.exit_code, 44, "a one-past-last Output view must fail with ckb-source-view-invalid");
+    }
+
+    let invalid = compile_failure(&OUTPUT_SCRIPT_SOURCE.replace("ckb::output<Token>(0)", "ckb::input<Token>(0)"));
+    assert!(invalid.message.contains("output_index"), "unexpected invalid-view diagnostic: {invalid}");
+}
+
+#[test]
+fn output_group_output_and_maximum_script_view_resource_profile_is_exact_and_bounded() {
+    let result = compile(OUTPUT_SCRIPT_SOURCE);
+    let execution = execute_cellscript_script(strip_vm_abi_trailer(&result.artifact_bytes), &output_script_fixture());
+    assert_eq!(execution.exit_code, 0, "resource profile failed: {:?}", execution.captured_debug);
+    let max_stack_frame_bytes =
+        result.verified_lowering_record.as_ref().unwrap().entries.iter().map(|entry| entry.frame_size_bytes).max().unwrap();
+    let actual = serde_json::json!({
+        "cycles": execution.cycles,
+        "elf_bytes": strip_vm_abi_trailer(&result.artifact_bytes).len(),
+        "max_stack_frame_bytes": max_stack_frame_bytes,
+        "witness_bytes": execution.witness_bytes,
+        "transaction_bytes": execution.transaction_bytes,
+        "dependency_bytes": execution.dependency_bytes,
+    });
+    let identities = serde_json::json!({
+        "artifact_hash": format!("0x{}", result.metadata.artifact_hash.as_deref().unwrap()),
+        "lowering_record_hash": format!("0x{}", result.metadata.verified_artifact.lowering_record_hash.as_deref().unwrap()),
+        "source_map_hash": format!("0x{}", result.metadata.verified_artifact.source_map_hash.as_deref().unwrap()),
+        "verified_bundle_id": format!("0x{}", result.metadata.verified_artifact.verified_bundle_id.as_deref().unwrap()),
+        "raw_transaction_hash": execution.raw_transaction_hash,
+        "serialized_transaction_hash": execution.serialized_transaction_hash,
+    });
+    let manifest: serde_json::Value = serde_json::from_str(include_str!("fixtures/runtime_view_resource_budgets.json")).unwrap();
+    let profile = manifest["profiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|profile| profile["id"] == "output-group-output-maximum-script-view")
+        .expect("output/Script resource profile");
+    assert_eq!(actual, profile["measured"], "recorded runtime-view resource measurement is stale: {actual}");
+    assert_eq!(identities, profile["identities"], "recorded runtime-view identities are stale: {identities}");
+    for field in ["cycles", "elf_bytes", "max_stack_frame_bytes", "witness_bytes", "transaction_bytes", "dependency_bytes"] {
+        assert!(actual[field].as_u64().unwrap() <= profile["budgets"][field].as_u64().unwrap(), "{field} exceeded budget");
+    }
 }
 
 fn byte_string_literal(bytes: &[u8; 32]) -> String {

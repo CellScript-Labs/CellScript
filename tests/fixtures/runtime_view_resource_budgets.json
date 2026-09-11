@@ -28,6 +28,42 @@
         "transaction_bytes": 4096,
         "dependency_bytes": 4096
       }
+    },
+    {
+      "id": "output-group-output-maximum-script-view",
+      "status": "passed",
+      "coverage": [
+        "global Output and current-group GroupOutput fixed fields",
+        "absent input Type Script probe",
+        "complete Lock and Type Script projections",
+        "exact 32-byte Script args projection",
+        "maximum 459-byte Type Script args",
+        "one-past-last global and group output indexes"
+      ],
+      "identities": {
+        "artifact_hash": "0x5bafbf5983a5d5ff059c0d60a343f3b8334c8ec642b32ff3c579903e3d3ab972",
+        "lowering_record_hash": "0xa14d6344648dc417b12b6ce5127f4a549769bb57befc39c262ab419cab228402",
+        "source_map_hash": "0x0ea3fe1e81f9436bd20d203d4d713d9d7b8930882a28ab3549f7ac8b873e64fd",
+        "verified_bundle_id": "0x187e7a038387a521204cda7e434b4a5ebe2132e756934f78a718ca528f146a62",
+        "raw_transaction_hash": "0x16b7c83328f0c8863193e8228231861da925a88f79844f51ccf98f8a2e94dedc",
+        "serialized_transaction_hash": "0x77d1e1217a6e1d0d21b08a8a6acd8090a78bc3299a24c805b4a3a177b7fb1c8a"
+      },
+      "measured": {
+        "cycles": 46043,
+        "elf_bytes": 10552,
+        "max_stack_frame_bytes": 11344,
+        "witness_bytes": 0,
+        "transaction_bytes": 1743,
+        "dependency_bytes": 0
+      },
+      "budgets": {
+        "cycles": 10000000,
+        "elf_bytes": 32768,
+        "max_stack_frame_bytes": 16384,
+        "witness_bytes": 2048,
+        "transaction_bytes": 4096,
+        "dependency_bytes": 4096
+      }
     }
   ]
 }
