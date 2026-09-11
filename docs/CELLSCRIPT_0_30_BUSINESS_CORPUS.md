@@ -76,7 +76,11 @@ The stateful companion test verifies `partial_fill`, registers its output under
 the exact transaction OutPoint, then consumes that output with `settle`; it also
 executes `cancel` and rejects an invalid full fill. The anchor therefore
 establishes both same-transaction Script interaction and prior-output
-continuity. Every persistent-policy action also reads the current GroupInput's
+continuity. Domain-separated fixed input OutPoints make the `partial_fill`,
+successor `settle`, and independent `cancel` transaction hashes reproducible;
+the fixture pins all six raw/serialized identities and maps the two terminal
+inventory scenarios to the exact policy artifact. Every persistent-policy
+action also reads the current GroupInput's
 exact data size and capacity, so that typed runtime-view slice executes through
 policy-witness dispatch in both the composition anchor and stateful chain. The
 anchor now writes the four exact artifact bundles and generated
@@ -88,7 +92,9 @@ identity, together with the raw transaction, serialized transaction, and
 canonical ProtocolBundle hashes. Any artifact, sidecar, fixture, or construction
 drift therefore fails the test. Aggregate CKB-VM cycles are bound back to all
 four direct CellScript Script-group records without inventing per-group cycle
-attribution.
+attribution. A second bundle using the same exact transaction and four
+artifacts adds a conflicting exclusive input role, must report `PB200`, and
+must be rejected by the adapter before materialization.
 
 ## Evidence state
 
@@ -109,11 +115,10 @@ substitutions, and the maximum-width authenticated-opening row are exact-
 artifact scenarios: each freezes its ELF identity or identities plus raw and
 serialized transaction identities; their owning fixtures also bind lowering
 records, source maps, verified bundles, and resource measurements. Within the
-multi-Script family, only the separately stateful `partial_fill_then_settle`
-and `cancel_live_order` transactions plus the `role_conflict` fixture still
-lack exact records. The remaining scenarios in the other families, including
-successor and committed-state adversarial rows, still need their own exact
-records.
+multi-Script family, all four positive and all five adversarial inventory rows
+now have exact-artifact fixtures. The remaining scenarios in the other
+families, including successor and committed-state adversarial rows, still need
+their own exact records.
 `check-business-corpus --release` rejects that state. Stable versioning, tags,
 package publication, editor/browser
 publication, and network deployment remain outside this candidate record.

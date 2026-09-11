@@ -52,6 +52,8 @@ struct AnchorFixture {
     script_groups: usize,
     positive_case: String,
     adversarial_cases: Vec<AdversarialCase>,
+    protocol_bundle_role_conflict: ProtocolBundleRoleConflictEvidence,
+    stateful_policy: StatefulPolicyEvidence,
     measured: AnchorMeasurements,
     budgets: AnchorBudgets,
 }
@@ -73,6 +75,21 @@ struct AdversarialCase {
     inventory_scenario: Option<String>,
     raw_transaction_hash: String,
     serialized_transaction_hash: String,
+}
+
+#[derive(Debug, PartialEq, Eq, Deserialize)]
+struct StatefulPolicyEvidence {
+    partial_fill_raw_transaction_hash: String,
+    partial_fill_serialized_transaction_hash: String,
+    settle_raw_transaction_hash: String,
+    settle_serialized_transaction_hash: String,
+    cancel_raw_transaction_hash: String,
+    cancel_serialized_transaction_hash: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProtocolBundleRoleConflictEvidence {
+    code: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -113,6 +130,7 @@ struct AnchorProtocolBundleEvidence {
     raw_transaction_hash: String,
     serialized_transaction_hash: String,
     protocol_bundle_hash: String,
+    role_conflict_code: String,
 }
 
 struct AnchorArtifactSpec<'a> {
@@ -181,9 +199,13 @@ fn input(context: &mut Context, tag: u8, lock: packed::Script, type_script: pack
         .lock(lock)
         .type_(Some(type_script).pack())
         .build();
-    let out_point = packed::OutPoint::new_builder().tx_hash([tag; 32].pack()).build();
+    let out_point = fixture_out_point(tag);
     context.create_cell_with_out_point(out_point.clone(), output, Bytes::copy_from_slice(&amount.to_le_bytes()));
     packed::CellInput::new_builder().previous_output(out_point).build()
+}
+
+fn fixture_out_point(tag: u8) -> packed::OutPoint {
+    packed::OutPoint::new_builder().tx_hash([tag; 32].pack()).build()
 }
 
 fn output(lock: packed::Script, type_script: packed::Script) -> packed::CellOutput {
@@ -560,6 +582,28 @@ fn check_anchor_protocol_bundle(
         "witnesses": witness_claims,
         "cell_deps": dep_claims,
     });
+    let mut role_conflict_input = input.clone();
+    role_conflict_input["roles"].as_array_mut().expect("anchor roles").push(json!({
+        "artifact": "order", "name": "conflicting-order-input", "location": "input", "index": 0,
+        "ownership": "exclusive", "expected_type": script_json(specs[0].script), "cell_commitment": input_commitment(0),
+    }));
+    let role_conflict_input: cellscript::protocol_bundle::ProtocolBundleInput =
+        serde_json::from_value(role_conflict_input).expect("role-conflict ProtocolBundle input");
+    let role_conflict_report =
+        cellscript::protocol_bundle::check_protocol_bundle(&role_conflict_input, root).expect("check role-conflict ProtocolBundle");
+    assert_eq!(role_conflict_report.status, "failed");
+    let role_conflict_code = role_conflict_report
+        .conflicts
+        .iter()
+        .find(|conflict| conflict.code == "PB200")
+        .expect("exclusive role conflict PB200")
+        .code
+        .clone();
+    let role_conflict_bytes = serde_json::to_vec(&role_conflict_report).expect("serialize role-conflict ProtocolBundle report");
+    assert!(
+        cellscript_ckb_adapter::materialize_protocol_bundle_report(&role_conflict_bytes).is_err(),
+        "a role-conflicting ProtocolBundle must fail before materialization"
+    );
     let input: cellscript::protocol_bundle::ProtocolBundleInput =
         serde_json::from_value(input).expect("canonical anchor ProtocolBundle input");
     let report = cellscript::protocol_bundle::check_protocol_bundle(&input, root).expect("check canonical anchor ProtocolBundle");
@@ -593,6 +637,7 @@ fn check_anchor_protocol_bundle(
         raw_transaction_hash: materialization.raw_transaction_hash,
         serialized_transaction_hash: materialization.serialized_transaction_hash,
         protocol_bundle_hash: materialization.bundle_hash,
+        role_conflict_code,
     }
 }
 
@@ -811,6 +856,7 @@ fn canonical_anchor_executes_four_cellscript_artifacts_in_one_transaction() {
         protocol_bundle.protocol_bundle_hash, fixture.measured.protocol_bundle_hash,
         "recorded anchor ProtocolBundle hash is stale"
     );
+    assert_eq!(protocol_bundle.role_conflict_code, fixture.protocol_bundle_role_conflict.code);
     let scenario_evidence: Value = serde_json::from_str(SCENARIO_EVIDENCE).expect("business scenario evidence JSON");
     let artifact_hashes = fixture.artifact_identities.iter().map(|identity| identity.artifact_hash.clone()).collect::<Vec<_>>();
     for scenario in ["four_artifact_same_transaction", "protocol_bundle_materialization"] {
@@ -823,6 +869,14 @@ fn canonical_anchor_executes_four_cellscript_artifacts_in_one_transaction() {
             &artifact_hashes,
         );
     }
+    assert_anchor_scenario_record(
+        &scenario_evidence,
+        "role_conflict",
+        "adversarial",
+        &protocol_bundle.raw_transaction_hash,
+        &protocol_bundle.serialized_transaction_hash,
+        &artifact_hashes,
+    );
     assert!(cycles > 0 && cycles <= fixture.budgets.max_cycles, "anchor cycles outside the recorded budget: {cycles}");
     assert!(result.elf_bytes <= fixture.budgets.max_combined_elf_bytes, "combined anchor ELF bytes regressed: {}", result.elf_bytes);
     assert!(
@@ -841,7 +895,14 @@ fn canonical_anchor_executes_four_cellscript_artifacts_in_one_transaction() {
 
 #[test]
 fn persistent_order_policy_uses_prior_outputs_for_partial_fill_settle_and_cancel() {
+    let fixture = fixture();
     let policy = compile_order_policy();
+    let policy_identity = anchor_artifact_identity("policy", &policy);
+    assert_eq!(
+        fixture.artifact_identities.iter().find(|identity| identity.id == "policy"),
+        Some(&policy_identity),
+        "stateful policy must use the canonical anchor artifact"
+    );
     let policy_elf = strip_vm_abi_trailer(&policy.artifact_bytes);
     let mut context = Context::new_with_deterministic_rng();
     let always_success_out_point = context.deploy_cell(ALWAYS_SUCCESS.clone());
@@ -852,7 +913,8 @@ fn persistent_order_policy_uses_prior_outputs_for_partial_fill_settle_and_cancel
     let initial_data = Bytes::copy_from_slice(&30u64.to_le_bytes());
     let successor_data = Bytes::copy_from_slice(&18u64.to_le_bytes());
 
-    let initial = context.create_cell(state_cell.clone(), initial_data.clone());
+    let initial = fixture_out_point(0x51);
+    context.create_cell_with_out_point(initial.clone(), state_cell.clone(), initial_data.clone());
     let partial_fill = context.complete_tx(
         TransactionBuilder::default()
             .input(packed::CellInput::new_builder().previous_output(initial).build())
@@ -887,7 +949,8 @@ fn persistent_order_policy_uses_prior_outputs_for_partial_fill_settle_and_cancel
     assert_eq!(settle.inputs().get(0).unwrap().previous_output(), successor);
     context.verify_tx(&settle, MAX_CYCLES).expect("settle must consume the verified partial-fill output");
 
-    let cancel_input = context.create_cell(state_cell.clone(), initial_data.clone());
+    let cancel_input = fixture_out_point(0x52);
+    context.create_cell_with_out_point(cancel_input.clone(), state_cell.clone(), initial_data.clone());
     let cancel = context.complete_tx(
         TransactionBuilder::default()
             .input(packed::CellInput::new_builder().previous_output(cancel_input).build())
@@ -898,7 +961,8 @@ fn persistent_order_policy_uses_prior_outputs_for_partial_fill_settle_and_cancel
     );
     context.verify_tx(&cancel, MAX_CYCLES).expect("cancel terminal action must pass");
 
-    let invalid_input = context.create_cell(state_cell.clone(), initial_data);
+    let invalid_input = fixture_out_point(0x53);
+    context.create_cell_with_out_point(invalid_input.clone(), state_cell.clone(), initial_data);
     let invalid_fill = context.complete_tx(
         TransactionBuilder::default()
             .input(packed::CellInput::new_builder().previous_output(invalid_input).build())
@@ -916,6 +980,34 @@ fn persistent_order_policy_uses_prior_outputs_for_partial_fill_settle_and_cancel
             .build(),
     );
     context.verify_tx(&invalid_fill, MAX_CYCLES).expect_err("a non-partial fill must reject");
+
+    let actual = StatefulPolicyEvidence {
+        partial_fill_raw_transaction_hash: bytes_hex(partial_fill.hash().as_slice()),
+        partial_fill_serialized_transaction_hash: hash_hex(partial_fill.data().as_slice()),
+        settle_raw_transaction_hash: bytes_hex(settle.hash().as_slice()),
+        settle_serialized_transaction_hash: hash_hex(settle.data().as_slice()),
+        cancel_raw_transaction_hash: bytes_hex(cancel.hash().as_slice()),
+        cancel_serialized_transaction_hash: hash_hex(cancel.data().as_slice()),
+    };
+    assert_eq!(actual, fixture.stateful_policy, "recorded stateful policy transaction identities are stale");
+    let scenario_evidence: Value = serde_json::from_str(SCENARIO_EVIDENCE).expect("business scenario evidence JSON");
+    let artifact_hashes = vec![policy_identity.artifact_hash];
+    assert_anchor_scenario_record(
+        &scenario_evidence,
+        "partial_fill_then_settle",
+        "positive",
+        &fixture.stateful_policy.settle_raw_transaction_hash,
+        &fixture.stateful_policy.settle_serialized_transaction_hash,
+        &artifact_hashes,
+    );
+    assert_anchor_scenario_record(
+        &scenario_evidence,
+        "cancel_live_order",
+        "positive",
+        &fixture.stateful_policy.cancel_raw_transaction_hash,
+        &fixture.stateful_policy.cancel_serialized_transaction_hash,
+        &artifact_hashes,
+    );
 }
 
 #[test]

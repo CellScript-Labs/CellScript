@@ -6,9 +6,12 @@
   composition-anchor mutations and verify every case in one exhaustive test.
   Bind the four inventory-mapped substitutions—authorization, Type state,
   output, and CellDep—and exact ProtocolBundle materialization to their four
-  artifact identities in the scenario-evidence manifest. The remaining
-  multi-Script exact rows are the two separately stateful transactions and the
-  ProtocolBundle role-conflict fixture.
+  artifact identities in the scenario-evidence manifest. Complete exact-
+  artifact coverage for the multi-Script family by replacing nondeterministic
+  state input allocation with fixed fixture OutPoints, pinning the
+  `partial_fill`, successor `settle`, and independent `cancel` transactions,
+  and exercising a `PB200` exclusive-role conflict that the adapter rejects
+  before materialization.
 
 - Exercise typed `GroupInput` `data_size` and `capacity` reads inside every
   action of the persistent `partial_fill`/`settle`/`cancel` policy. The same
