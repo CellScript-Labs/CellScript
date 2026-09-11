@@ -1,6 +1,116 @@
 use super::*;
 
 impl CodeGenerator {
+    fn emit_commitment_open_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<bool> {
+        if func != "__ckb_commitment_open" {
+            return Ok(false);
+        }
+        self.emit("# cellscript committed-state: validate explicit fixed-width opening");
+        let Some(dest) = dest else {
+            self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
+            return Ok(true);
+        };
+        let [expected, opening] = args else {
+            self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
+            return Ok(true);
+        };
+        let IrOperand::Var(opening_var) = opening else {
+            self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
+            return Ok(true);
+        };
+        let IrType::Named(opening_name) = &opening_var.ty else {
+            self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
+            return Ok(true);
+        };
+        let Some(inner_name) = crate::commitment_contract::opening_inner_type(opening_name) else {
+            self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
+            return Ok(true);
+        };
+        let Some(width) = self.fixed_named_type_width(&opening_var.ty) else {
+            self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
+            return Ok(true);
+        };
+        let Some(expected_source) = self.expected_fixed_byte_source(expected, 32) else {
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        };
+        let Some(opening_source) = self.expected_fixed_byte_source(opening, width) else {
+            self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
+            return Ok(true);
+        };
+
+        let mut header = crate::commitment_contract::PACKED_HASH_DOMAIN_PREFIX.to_vec();
+        header.extend_from_slice(inner_name.as_bytes());
+        header.push(0);
+        header.extend_from_slice(&(width as u32).to_le_bytes());
+        let total_width = header.len() + width;
+        if total_width + 32 > RUNTIME_SCRATCH_BUFFER_SIZE {
+            self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
+            return Ok(true);
+        }
+        let buffer_offset = self.runtime_scratch_buffer_offset();
+        let digest_offset = buffer_offset + total_width;
+        for (index, byte) in header.iter().enumerate() {
+            self.emit(format!("li t0, {}", byte));
+            self.emit_stack_store_byte("t0", buffer_offset + index);
+        }
+        self.emit_prepare_fixed_byte_source(&opening_source, width, "typed opening witness");
+        if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &opening_source) {
+            self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
+            return Ok(true);
+        }
+        self.emit_sp_addi("a1", buffer_offset + header.len());
+        self.emit(format!("li a2, {}", width));
+        self.emit("call __cellscript_memcpy_fixed");
+        self.emit_sp_addi("a0", buffer_offset);
+        self.emit(format!("li a1, {}", total_width));
+        self.emit_sp_addi("a2", digest_offset);
+        self.emit("call __ckb_hash_blake2b_var");
+        self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
+
+        self.emit_prepare_fixed_byte_source(&expected_source, 32, "typed commitment");
+        self.emit_sp_addi("a0", digest_offset);
+        if !self.emit_fixed_byte_source_pointer_or_const_to("a1", &expected_source) {
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        }
+        self.emit("li a2, 32");
+        self.emit("call __cellscript_memcmp_fixed");
+        let verified = self.fresh_label("commitment_opening_verified");
+        self.emit(format!("beqz a0, {}", verified));
+        self.emit_fail(CellScriptRuntimeError::CommitmentOpeningMismatch);
+        self.emit_label(&verified);
+
+        // The value is materialized only after the digest comparison succeeds.
+        self.emit_prepare_fixed_byte_source(&opening_source, width, "validated typed opening");
+        if let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() {
+            if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &opening_source) {
+                self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
+                return Ok(true);
+            }
+            self.emit_sp_addi("a1", dest_offset);
+            self.emit(format!("li a2, {}", width));
+            self.emit("call __cellscript_memcpy_fixed");
+            self.emit_sp_addi("t0", dest_offset);
+            self.emit_stack_store("t0", dest.id * 8);
+        } else {
+            if width > 8 || !self.emit_fixed_byte_source_pointer_or_const_to("t4", &opening_source) {
+                self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
+                return Ok(true);
+            }
+            self.emit("li t0, 0");
+            for byte_index in 0..width {
+                self.emit(format!("lbu t1, {}(t4)", byte_index));
+                if byte_index != 0 {
+                    self.emit(format!("slli t1, t1, {}", byte_index * 8));
+                }
+                self.emit("or t0, t0, t1");
+            }
+            self.emit_stack_store("t0", dest.id * 8);
+        }
+        Ok(true)
+    }
+
     fn emit_ckb_fixed_hash_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<bool> {
         if !is_ckb_fixed_hash_helper(func) {
             return Ok(false);
@@ -238,6 +348,9 @@ impl CodeGenerator {
                 func
             ));
             self.emit_fail(CellScriptRuntimeError::CollectionRuntimeUnsupported);
+            return Ok(());
+        }
+        if self.emit_commitment_open_call(dest, func, args)? {
             return Ok(());
         }
         if self.emit_ckb_fixed_hash_call(dest, func, args)? {

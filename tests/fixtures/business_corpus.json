@@ -45,6 +45,10 @@
     "transaction_fixture": "tests/fixtures/capability_anchor_cases.json"
   },
   "claim": "Application-layer capability comparable to hand-written Rust CKB Scripts for this exact bounded eight-family portfolio; unrestricted Rust parity is excluded.",
+  "capability_ledger": "tests/fixtures/capability_ledger.json",
+  "capability_ledger_sha256": "0x150f3a622611b94905cfd9d2a05819afc65ee4127a0f49b390a328c96451de41",
+  "scenario_evidence_manifest": "tests/fixtures/business_scenario_evidence.json",
+  "scenario_evidence_sha256": "0x834f5bd5fb81f6137eedacd88b87c40b9884009b526b26f2a5e8b906c7e68284",
   "cryptographic_capability_matrix": "tests/fixtures/cryptographic_capability_matrix.json",
   "evidence_files": [
     "Cargo.lock",
@@ -241,7 +245,7 @@
           "paths": [
             "tests/cli.rs"
           ],
-          "status": "passed"
+          "status": "pending"
         },
         "ckb_vm": {
           "paths": [
@@ -652,14 +656,14 @@
           "paths": [
             "tests/cli.rs"
           ],
-          "status": "passed"
+          "status": "pending"
         },
         "ckb_vm": {
           "paths": [
             "tests/crypto_primitives.rs",
             "tests/cost_corpus.rs"
           ],
-          "status": "passed"
+          "status": "pending"
         },
         "deployment_identity": {
           "paths": [],
@@ -673,13 +677,13 @@
           "paths": [
             "tests/cost_corpus.rs"
           ],
-          "status": "passed"
+          "status": "pending"
         },
         "metadata_checker": {
           "paths": [
             "tests/artifact_checker.rs"
           ],
-          "status": "passed"
+          "status": "pending"
         },
         "node_admission": {
           "paths": [],
@@ -689,19 +693,19 @@
           "paths": [
             "tests/examples.rs"
           ],
-          "status": "passed"
+          "status": "pending"
         },
         "simulator": {
           "paths": [
             "tests/examples.rs"
           ],
-          "status": "passed"
+          "status": "pending"
         },
         "stateful": {
           "paths": [
             "tests/schema_acknowledgement.rs"
           ],
-          "status": "passed"
+          "status": "pending"
         }
       },
       "id": "committed_state",

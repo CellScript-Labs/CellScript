@@ -6,6 +6,13 @@
 announcement, a grammar freeze, or evidence that the listed capabilities are
 already complete.**
 
+The separate [0.30 capability ledger](CELLSCRIPT_0_30_CAPABILITY_LEDGER.md)
+is authoritative for product-capability admission, evidence ceilings, release
+scope, and issue-closure recommendations. The executable-surface registry
+remains authoritative only for syntax and IR shapes already admitted by the
+compiler; neither record may be used to broaden the universe claimed by the
+other.
+
 The `0.30` implementation branch starts from `0.26b` commit `08c0ef38`. The
 candidate release path is a direct stable-version jump from 0.25 to 0.30. The
 experimental `0.26b` branch may be absorbed into 0.30 without publishing a 0.26
@@ -164,8 +171,8 @@ form a complete 0.30 business-capability plan.
 | Typed roles across Script boundaries | [#10](https://github.com/CellScript-Labs/CellScript/issues/10) | Closed artifact-known Cell/witness roles are implemented in ProtocolBundle with exact schema/interface/ELF/deployment identity. Open/runtime-selected roles remain dependent on #11. |
 | Runtime Script and verifier handles | [#11](https://github.com/CellScript-Labs/CellScript/issues/11) | Exact artifact receipts and fixed-width values are implemented for independently checked ProtocolBundle artifacts. Canonical checked Script construction/hashing is implemented for fixed args up to 459 bytes. Generic handles, dynamic/larger construction, and open/runtime-selected roles remain open. |
 | Timelocks, epochs, timestamps, and `Since` | [#12](https://github.com/CellScript-Labs/CellScript/issues/12) | Covered for typed temporal domains. It does not own the rest of the transaction-view and syscall surface. |
-| Digest-committed substate and authenticated openings | [#13](https://github.com/CellScript-Labs/CellScript/issues/13) | Covered for commitments and opening correspondence. It must share the entry witness envelope with output plans and verifier proofs. |
-| Honest capability and product-completeness claims | [#14](https://github.com/CellScript-Labs/CellScript/issues/14) | Covered as a governance rule. It is not an implementation owner for the missing capabilities. |
+| Digest-committed substate and authenticated openings | [#13](https://github.com/CellScript-Labs/CellScript/issues/13) | The bounded fixed-width candidate is implemented: nominal `Commitment<T>`, explicit one-shot witness `Opening<T>`, exact `CellScriptPackedHashV0`/CKB Blake2b-256 identity, compare-before-materialize lowering, entry-witness builder metadata, successor output-field reuse, checked-runtime ProofPlan and typed-checker records, formatter/LSP parity, golden vectors, maximum-shape resource gates, and real CKB-VM tamper rejection. Dynamic values, independent inline-machine mutation coverage, independent review, and release acceptance remain outside that evidence. See [the committed-substate contract](CELLSCRIPT_COMMITTED_SUBSTATE.md). |
+| Honest capability and product-completeness claims | [#14](https://github.com/CellScript-Labs/CellScript/issues/14) | Implemented by the versioned, gate-checked [product capability ledger](CELLSCRIPT_0_30_CAPABILITY_LEDGER.md). It records status, priority, owner, reviewer state, dependencies, evidence ceiling, release scope, disposition, remaining work, and non-goals for #7 through #27 without redefining the executable-surface registry. |
 | Reproducible workspace, resolver, compiler-requirement, build-plan, and upgrade behavior | [#15](https://github.com/CellScript-Labs/CellScript/issues/15), [#16](https://github.com/CellScript-Labs/CellScript/issues/16), [#17](https://github.com/CellScript-Labs/CellScript/issues/17), [#18](https://github.com/CellScript-Labs/CellScript/issues/18), [#19](https://github.com/CellScript-Labs/CellScript/issues/19), [#20](https://github.com/CellScript-Labs/CellScript/issues/20) | Implemented on the 0.30 branch: canonical workspace graphs, single-package-coordinate resolution, chain-identity-safe environments, enforced compiler requirements and Registry selection, stable resolve/build inspection schemas, and hashed transactional upgrade plans with reverse-dependent compilation and explicit apply. This closes the toolchain composition prerequisite without making a release or deployment claim. |
 | Typed zero-knowledge verifier contracts | [#22](https://github.com/CellScript-Labs/CellScript/issues/22) | Covered as research and typed external-verifier composition. A circuit DSL is outside the 0.30 core. |
 | Stable public value-generics surface | [#23](https://github.com/CellScript-Labs/CellScript/issues/23) | Proposal A is implemented and accepted on `0.30`: public cross-package value templates and pure functions, `fixed_value` normalization, field-derived aggregate abilities, canonical interface hashing and compatibility, Registry/checker validation, and product-surface parity. The required `dev`, `ci`, and `backend` gates passed on 2026-09-08 at `69488316`. |

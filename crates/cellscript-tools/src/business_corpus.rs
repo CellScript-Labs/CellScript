@@ -95,6 +95,10 @@ struct Corpus {
     claim: String,
     families: Vec<Family>,
     anchor: Anchor,
+    capability_ledger: String,
+    capability_ledger_sha256: String,
+    scenario_evidence_manifest: String,
+    scenario_evidence_sha256: String,
     cryptographic_capability_matrix: String,
     release_requirements: BTreeMap<String, String>,
     #[serde(default)]
@@ -737,6 +741,8 @@ fn validate_nonempty(values: &[String], label: &str) -> Result<()> {
 fn validate(
     root: &Path,
     corpus: &Corpus,
+    ledger: &crate::capability_ledger::CapabilityLedger,
+    scenario_evidence: &crate::scenario_evidence::ScenarioEvidence,
     matrix: &CryptographicCapabilityMatrix,
     budgets: &CryptographicResourceBudgets,
     release: bool,
@@ -749,6 +755,22 @@ fn validate(
     }
     if corpus.claim.trim().is_empty() {
         bail!("business corpus claim must be explicit");
+    }
+    if corpus.capability_ledger != crate::capability_ledger::MANIFEST {
+        bail!("business corpus capability ledger must be {}", crate::capability_ledger::MANIFEST);
+    }
+    crate::capability_ledger::validate(root, ledger, release)?;
+    let ledger_digest = format!("0x{}", hex::encode(Sha256::digest(fs::read(root.join(&corpus.capability_ledger))?)));
+    if corpus.capability_ledger_sha256 != ledger_digest {
+        bail!("business corpus capability ledger digest is stale; expected {ledger_digest}; run check-business-corpus --write");
+    }
+    if corpus.scenario_evidence_manifest != crate::scenario_evidence::MANIFEST {
+        bail!("business corpus scenario evidence must be {}", crate::scenario_evidence::MANIFEST);
+    }
+    crate::scenario_evidence::validate(root, scenario_evidence, release)?;
+    let scenario_digest = format!("0x{}", hex::encode(Sha256::digest(fs::read(root.join(&corpus.scenario_evidence_manifest))?)));
+    if corpus.scenario_evidence_sha256 != scenario_digest {
+        bail!("business corpus scenario evidence digest is stale; expected {scenario_digest}; run check-business-corpus --write");
     }
     validate_crypto_matrix(matrix, budgets, release)?;
     let family_ids = corpus.families.iter().map(|family| family.id.as_str()).collect::<BTreeSet<_>>();
@@ -852,10 +874,16 @@ pub fn run(root: &Path, write: bool, release: bool) -> Result<()> {
     let bytes = fs::read(&path).with_context(|| format!("failed to read {MANIFEST}"))?;
     let mut value: Value = serde_json::from_slice(&bytes).with_context(|| format!("failed to parse {MANIFEST}"))?;
     let mut corpus: Corpus = serde_json::from_value(value.clone()).with_context(|| format!("invalid {MANIFEST}"))?;
+    let ledger = crate::capability_ledger::load(root)?;
+    let scenario_evidence = crate::scenario_evidence::load(root)?;
     let matrix = load_crypto_matrix(root, &corpus)?;
     let budgets = load_crypto_resource_budgets(root, &matrix)?;
     if write {
         let evidence = collect_evidence(&corpus, &matrix, &budgets);
+        let ledger_digest = Sha256::digest(fs::read(root.join(&corpus.capability_ledger))?);
+        value["capability_ledger_sha256"] = Value::String(format!("0x{}", hex::encode(ledger_digest)));
+        let scenario_digest = Sha256::digest(fs::read(root.join(&corpus.scenario_evidence_manifest))?);
+        value["scenario_evidence_sha256"] = Value::String(format!("0x{}", hex::encode(scenario_digest)));
         value["evidence_files"] = serde_json::to_value(evidence.iter().collect::<Vec<_>>())?;
         value["inventory_sha256"] = Value::String(inventory_digest(root, &evidence)?);
         let mut output = serde_json::to_vec_pretty(&value)?;
@@ -863,7 +891,7 @@ pub fn run(root: &Path, write: bool, release: bool) -> Result<()> {
         fs::write(&path, output).with_context(|| format!("failed to update {MANIFEST}"))?;
         corpus = serde_json::from_value(value)?;
     }
-    validate(root, &corpus, &matrix, &budgets, release)
+    validate(root, &corpus, &ledger, &scenario_evidence, &matrix, &budgets, release)
 }
 
 #[cfg(test)]

@@ -2,6 +2,39 @@
 
 ## 0.30 - Capability closure development branch
 
+- Add the bounded fixed-width committed-substate profile for issue #13.
+  `Commitment<T>` is a nominal 32-byte CKB Blake2b-256 value over the existing
+  `CellScriptPackedHashV0` domain; `Opening<T>` is an explicit, linear,
+  witness-only value that can be consumed exactly once by
+  `commitment::open`. The compiler rejects aliases, ordinary-parameter
+  injection, type mismatch, storage, return, nesting, Cell-backed/dynamic
+  payloads, and scratch-overflow shapes. Generated code hashes and compares
+  before materializing `T`, returning stable error 73 on mismatch. Metadata,
+  generated builders, checked-runtime ProofPlan records, typed-checker
+  mutations, formatter/LSP paths, output-field correspondence, golden vectors,
+  and real CKB-VM pass/tamper tests share the same fixed-width contract. An
+  exact maximum-shape profile fills the 512-byte scratch contract and gates
+  cycles, ELF, stack, witness, transaction, dependency, artifact, sidecar, and
+  transaction identities. Inline machine-block mutations, independent review,
+  and release acceptance remain pending.
+
+- Add the versioned 0.30 product-capability ledger for issues #7 through #27
+  and validate its claims, evidence links, dispositions, dependencies, and
+  release gates independently from executable-surface closure. Preserve
+  generated assembly coordinates in internal assembler diagnostics and expose
+  them under a distinct JSON `generated_assembly` object instead of presenting
+  them as CellScript source spans.
+
+- Add per-scenario business evidence grades and exact manifest hashing. The
+  record distinguishes owner/test inventory, partial transaction hashes, and
+  exact artifact fixtures, and downgrades unsupported family-layer claims. It
+  also records that the two parent-pinned external corpus commits are no longer
+  fetchable from their configured remotes; current remote heads are not used as
+  substitutes for frozen evidence. The committed-state family now has its
+  first exact-artifact authenticated-opening row, and the shared CKB harness
+  uses domain-separated deterministic fixture OutPoints so transaction hashes
+  remain reproducible across processes.
+
 - Add machine-gated maximum-shape resource profiles for all ten frozen
   cryptographic and authorization capabilities. Exact CKB-VM measurements now
   cover 459-byte Script hashing, 65,536-byte witness hashing, depth-16 SHA256d

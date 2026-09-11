@@ -186,6 +186,11 @@ inside CKB-VM. Lowering record v8 binds that typed call and its exact Molecule
 serialization, 459/512-byte bounds, Blake2b target, and error 72 to the final
 machine code. `tests/artifact_checker.rs` mutates each of those boundaries
 after recomputing outer hashes and requires independent rejection.
+The non-cryptographic fixed transaction/header/temporal path now freezes exact
+cycles, ELF bytes, maximum stack frame, witness bytes, transaction bytes, and
+dependency bytes in `tests/fixtures/runtime_view_resource_budgets.json` and
+reproduces them in `tests/typed_runtime_views.rs`. Cryptographic and bounded
+witness maxima remain owned by the separate cryptographic resource manifest.
 
 The following work remains before issue #24 can close:
 
@@ -194,8 +199,9 @@ The following work remains before issue #24 can close:
   multisig prefix-preserving layout, as a separately named contract;
 - persistent-policy and generated-builder parity for every admitted row;
 - maximum-bound cycle, stack, ELF, witness, and transaction-size measurements
-  for the non-cryptographic admitted rows; all ten cryptographic portfolio rows
-  now map to executable resource profiles; and
+  for the remaining non-cryptographic Output/GroupOutput, exact Script-field,
+  and adapter rows; the fixed transaction/header/temporal path and all ten
+  cryptographic portfolio rows now map to executable resource profiles; and
 - `ci`, `backend`, release, and independent-review evidence on the exact
   candidate source.
 

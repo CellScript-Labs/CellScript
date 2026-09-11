@@ -19047,6 +19047,35 @@ mod tests {
         }
     }
 
+    #[test]
+    fn generated_builder_preserves_typed_commitment_and_opening_abi() {
+        let source = r#"
+module generated_builder_committed_state
+struct State { counter: u64 }
+action reveal(witness expected: Commitment<State>, witness opening: Opening<State>) -> u64 {
+    verification
+        let state = commitment::open(expected, opening)
+        return state.counter
+}
+"#;
+        let metadata = crate::compile_metadata(source, crate::NEXT_EDITION, None).expect("committed-state builder fixture");
+        let action = &metadata.actions[0];
+        let manifest = typescript_builder_manifest("@test/committed", &metadata, &[action], "test-metadata", None, None).unwrap();
+        let params = manifest["actions"][0]["params"].as_array().unwrap();
+        assert_eq!(params[0]["ty"], "Commitment<State>");
+        assert_eq!(params[0]["fixed_byte_len"], 32);
+        assert_eq!(params[0]["schema_pointer_abi"], false);
+        assert_eq!(params[1]["ty"], "Opening<State>");
+        assert!(params[1]["fixed_byte_len"].is_null());
+        assert_eq!(params[1]["schema_pointer_abi"], true);
+        assert_eq!(manifest["actions"][0]["entry_witness_required"], true);
+
+        let generated = typescript_builder_index("@test/committed", &metadata, &[action], "test-metadata", None, None).unwrap();
+        assert!(generated.contains("schema_pointer_abi"));
+        assert!(generated.contains("Opening<State>"));
+        assert!(generated.contains("entryWitnessRequired"));
+    }
+
     #[cfg(feature = "vm-runner")]
     #[test]
     fn run_outcome_uses_the_resolved_entry_contract() {

@@ -33,10 +33,60 @@ enum AsmOp {
     Align(usize),
 }
 
+#[derive(Debug, Clone)]
+struct LocatedAsmOp {
+    op: AsmOp,
+    provenance: GeneratedAssemblyProvenance,
+}
+
+#[derive(Debug, Clone)]
+struct GeneratedAssemblyProvenance {
+    line: usize,
+    text: String,
+    section: SectionKind,
+    op_index: usize,
+}
+
+impl GeneratedAssemblyProvenance {
+    fn attach(&self, mut error: CompileError) -> CompileError {
+        if !error.message.starts_with("generated assembly line ") {
+            error.message = format!("generated assembly line {}: {}", self.line, error.message);
+        }
+        let provenance = serde_json::json!({
+            "kind": "generated_assembly",
+            "line": self.line,
+            "text": self.text,
+            "section": self.section.name(),
+            "op_index": self.op_index,
+        });
+        let mut details = error.details.take().unwrap_or_else(|| serde_json::json!({}));
+        if let Some(object) = details.as_object_mut() {
+            object.insert("generated_assembly".to_string(), provenance);
+        } else {
+            details = serde_json::json!({
+                "generated_assembly": provenance,
+                "previous_details": details,
+            });
+        }
+        error.details = Some(details);
+        error
+    }
+}
+
+impl SectionKind {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Text => ".text",
+            Self::Rodata => ".rodata",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct SymbolDef {
     section: SectionKind,
     offset: usize,
+    line: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -185,9 +235,9 @@ enum Instruction {
 
 fn reject_unresolved_calls(lines: &[String]) -> Result<()> {
     let mut labels = BTreeSet::new();
-    let mut calls = BTreeSet::new();
+    let mut calls = BTreeMap::new();
 
-    for line in lines {
+    for (line_index, line) in lines.iter().enumerate() {
         let Some(clean) = strip_comment(line) else {
             continue;
         };
@@ -198,20 +248,26 @@ fn reject_unresolved_calls(lines: &[String]) -> Result<()> {
         if let Some(target) = clean.strip_prefix("call ") {
             let target = target.trim();
             if !target.is_empty() {
-                calls.insert(target.to_string());
+                calls.entry(target.to_string()).or_insert_with(|| GeneratedAssemblyProvenance {
+                    line: line_index + 1,
+                    text: clean.to_string(),
+                    section: SectionKind::Text,
+                    op_index: line_index,
+                });
             }
         }
     }
 
-    let missing = calls.difference(&labels).cloned().collect::<Vec<_>>();
+    let missing = calls.keys().filter(|target| !labels.contains(*target)).cloned().collect::<Vec<_>>();
     if missing.is_empty() {
         return Ok(());
     }
 
-    Err(CompileError::without_span(format!(
+    let error = CompileError::without_span(format!(
         "unresolved call target(s) in generated assembly: {}; production ELF emission requires all call targets to be lowered",
         missing.join(", ")
-    )))
+    ));
+    Err(calls.get(&missing[0]).expect("missing call was collected").attach(error))
 }
 
 fn entry_requires_explicit_parameter_abi(lines: &[String], entry_label: &str) -> bool {
@@ -336,8 +392,8 @@ fn assemble_elf_internal(lines: &[String]) -> Result<Vec<u8>> {
 
 #[derive(Debug, Default)]
 struct ParsedAssembly {
-    text_ops: Vec<AsmOp>,
-    rodata_ops: Vec<AsmOp>,
+    text_ops: Vec<LocatedAsmOp>,
+    rodata_ops: Vec<LocatedAsmOp>,
     text_size: usize,
     rodata_size: usize,
     symbols: HashMap<String, SymbolDef>,
@@ -359,12 +415,13 @@ impl ParsedAssembly {
         let mut rodata_size = 0usize;
         let mut text_ops = Vec::new();
         let mut rodata_ops = Vec::new();
-        let mut symbols = HashMap::new();
+        let mut symbols: HashMap<String, SymbolDef> = HashMap::new();
         let mut globals = BTreeSet::new();
         let mut entry_label = None;
         let mut fallback_entry = None;
 
-        for line in lines {
+        for (line_index, line) in lines.iter().enumerate() {
+            let line_number = line_index + 1;
             let Some(clean) = strip_comment(line) else {
                 continue;
             };
@@ -372,7 +429,16 @@ impl ParsedAssembly {
                 continue;
             }
 
-            if let Some(section) = parse_section_directive(clean)? {
+            let directive_provenance = GeneratedAssemblyProvenance {
+                line: line_number,
+                text: clean.to_string(),
+                section: current_section,
+                op_index: match current_section {
+                    SectionKind::Text => text_ops.len(),
+                    SectionKind::Rodata => rodata_ops.len(),
+                },
+            };
+            if let Some(section) = parse_section_directive(clean).map_err(|error| directive_provenance.attach(error))? {
                 current_section = section;
                 continue;
             }
@@ -389,13 +455,19 @@ impl ParsedAssembly {
                 SectionKind::Rodata => (&mut rodata_ops, &mut rodata_size),
             };
             let op_index = ops.len();
+            let provenance =
+                GeneratedAssemblyProvenance { line: line_number, text: clean.to_string(), section: current_section, op_index };
 
             if let Some(label) = clean.strip_suffix(':') {
                 let label = label.trim().to_string();
-                let symbol = SymbolDef { section: current_section, offset: *offset };
-                if symbols.insert(label.clone(), symbol).is_some() {
-                    return Err(CompileError::new(format!("duplicate assembly label '{}'", label), crate::error::Span::default()));
+                let symbol = SymbolDef { section: current_section, offset: *offset, line: line_number };
+                if let Some(previous) = symbols.get(&label) {
+                    return Err(provenance.attach(CompileError::new(
+                        format!("duplicate assembly label '{}' (first defined at generated assembly line {})", label, previous.line),
+                        crate::error::Span::default(),
+                    )));
                 }
+                symbols.insert(label.clone(), symbol);
                 if current_section == SectionKind::Text && globals.contains(&label) {
                     if fallback_entry.is_none() {
                         fallback_entry = Some(label.clone());
@@ -404,13 +476,13 @@ impl ParsedAssembly {
                         entry_label = Some(label.clone());
                     }
                 }
-                ops.push(AsmOp::Label(label));
+                ops.push(LocatedAsmOp { op: AsmOp::Label(label), provenance });
                 continue;
             }
 
-            let op = parse_asm_op(clean)?;
+            let op = parse_asm_op(clean).map_err(|error| provenance.attach(error))?;
             *offset += op_size(&op, *offset, current_section, op_index, branch_size_mode);
-            ops.push(op);
+            ops.push(LocatedAsmOp { op, provenance });
         }
 
         Ok(Self {
@@ -429,16 +501,16 @@ impl ParsedAssembly {
         let mut relaxed = BTreeSet::new();
         let mut offset = 0usize;
         for (index, op) in self.text_ops.iter().enumerate() {
-            if let AsmOp::Instruction(inst) = op
+            if let AsmOp::Instruction(inst) = &op.op
                 && conditional_branch_parts(inst).is_some()
             {
                 let pc = layout.text_user_base + offset as u64;
-                let target = branch_target(inst, self, layout)?;
-                if !signed_bits_fit(relative_offset(pc, target)?, 13) {
+                let target = branch_target(inst, self, layout).map_err(|error| op.provenance.attach(error))?;
+                if !signed_bits_fit(relative_offset(pc, target).map_err(|error| op.provenance.attach(error))?, 13) {
                     relaxed.insert(index);
                 }
             }
-            offset += op_size(op, offset, SectionKind::Text, index, BranchSizeMode::Conservative);
+            offset += op_size(&op.op, offset, SectionKind::Text, index, BranchSizeMode::Conservative);
         }
         Ok(relaxed)
     }
@@ -472,16 +544,23 @@ impl ParsedAssembly {
         };
 
         for (op_index, op) in ops.iter().enumerate() {
-            match op {
+            match &op.op {
                 AsmOp::Label(_) => {}
                 AsmOp::Word(word) => out.extend_from_slice(&word.to_le_bytes()),
                 AsmOp::Byte(byte) => out.push(*byte),
                 AsmOp::Ascii(bytes) => out.extend_from_slice(bytes),
                 AsmOp::Align(bytes) => pad_to_alignment(out, *bytes),
                 AsmOp::Instruction(inst) => {
-                    let section_offset = out.len().checked_sub(base_bias).ok_or_else(|| {
-                        CompileError::new("assembly output offset is smaller than section base bias", crate::error::Span::default())
-                    })?;
+                    let section_offset = out
+                        .len()
+                        .checked_sub(base_bias)
+                        .ok_or_else(|| {
+                            CompileError::new(
+                                "assembly output offset is smaller than section base bias",
+                                crate::error::Span::default(),
+                            )
+                        })
+                        .map_err(|error| op.provenance.attach(error))?;
                     let pc = section_base + section_offset as u64;
                     encode_instruction(
                         out,
@@ -490,7 +569,8 @@ impl ParsedAssembly {
                         self,
                         layout,
                         section == SectionKind::Text && self.relaxed_text_branches.contains(&op_index),
-                    )?;
+                    )
+                    .map_err(|error| op.provenance.attach(error))?;
                 }
             }
         }
@@ -673,7 +753,7 @@ fn text_op_layouts(parsed: &ParsedAssembly) -> Vec<TextOpLayout> {
     let mut offset = 0usize;
     let mut layouts = Vec::with_capacity(parsed.text_ops.len());
     for (op_index, op) in parsed.text_ops.iter().enumerate() {
-        let size = op_size(op, offset, SectionKind::Text, op_index, BranchSizeMode::Exact(&parsed.relaxed_text_branches));
+        let size = op_size(&op.op, offset, SectionKind::Text, op_index, BranchSizeMode::Exact(&parsed.relaxed_text_branches));
         layouts.push(TextOpLayout { op_index, offset, size });
         offset += size;
     }
@@ -687,7 +767,7 @@ fn machine_blocks(parsed: &ParsedAssembly) -> Vec<MachineBlock> {
     let mut block_label = None;
 
     for (op_index, op) in parsed.text_ops.iter().enumerate() {
-        if let AsmOp::Label(label) = op {
+        if let AsmOp::Label(label) = &op.op {
             if block_has_executable_ops(&parsed.text_ops[block_start..op_index]) {
                 blocks.push(build_machine_block(parsed, &layouts, block_start, op_index, block_label.take()));
                 block_start = op_index;
@@ -729,16 +809,18 @@ fn machine_cfg(parsed: &ParsedAssembly) -> Result<MachineCfg> {
                 }
             }
             MachineTerminator::Jump { target } => {
+                let op_index = block.op_end.saturating_sub(1);
                 edges.push(MachineCfgEdge {
                     from: index,
-                    to: machine_cfg_target_block(target, &label_to_block)?,
+                    to: machine_cfg_target_block(parsed, target, &label_to_block, index, op_index)?,
                     kind: MachineCfgEdgeKind::Jump,
                 });
             }
             MachineTerminator::ConditionalBranch { target } => {
+                let op_index = block.op_end.saturating_sub(1);
                 edges.push(MachineCfgEdge {
                     from: index,
-                    to: machine_cfg_target_block(target, &label_to_block)?,
+                    to: machine_cfg_target_block(parsed, target, &label_to_block, index, op_index)?,
                     kind: MachineCfgEdgeKind::ConditionalTaken,
                 });
                 if index + 1 < blocks.len() {
@@ -753,7 +835,7 @@ fn machine_cfg(parsed: &ParsedAssembly) -> Result<MachineCfg> {
 }
 
 fn validate_machine_block_coverage(parsed: &ParsedAssembly, cfg: &MachineCfg) -> Result<MachineBlockCoverage> {
-    let executable_text_op_count = parsed.text_ops.iter().filter(|op| !matches!(op, AsmOp::Label(_))).count();
+    let executable_text_op_count = parsed.text_ops.iter().filter(|op| !matches!(&op.op, AsmOp::Label(_))).count();
     let mut covered = BTreeSet::new();
 
     for block in &cfg.blocks {
@@ -767,7 +849,7 @@ fn validate_machine_block_coverage(parsed: &ParsedAssembly, cfg: &MachineCfg) ->
             return Err(CompileError::new("machine block contains no executable instructions", crate::error::Span::default()));
         }
         for op_index in block.op_start..block.op_end {
-            if matches!(parsed.text_ops[op_index], AsmOp::Label(_)) {
+            if matches!(&parsed.text_ops[op_index].op, AsmOp::Label(_)) {
                 continue;
             }
             if !covered.insert(op_index) {
@@ -846,16 +928,29 @@ fn machine_label_to_block(parsed: &ParsedAssembly, blocks: &[MachineBlock]) -> H
     label_to_block
 }
 
-fn machine_cfg_target_block(target: &str, label_to_block: &HashMap<String, usize>) -> Result<usize> {
+fn machine_cfg_target_block(
+    parsed: &ParsedAssembly,
+    target: &str,
+    label_to_block: &HashMap<String, usize>,
+    block_index: usize,
+    op_index: usize,
+) -> Result<usize> {
     label_to_block.get(target).copied().ok_or_else(|| {
-        CompileError::new(format!("assembly branch target '{}' does not start a machine block", target), crate::error::Span::default())
+        let error = CompileError::new(
+            format!(
+                "assembly branch target '{}' from machine block {} text op {} does not start a machine block",
+                target, block_index, op_index
+            ),
+            crate::error::Span::default(),
+        );
+        parsed.text_ops.get(op_index).map_or(error.clone(), |op| op.provenance.attach(error))
     })
 }
 
 fn machine_block_call_targets(parsed: &ParsedAssembly, block: &MachineBlock) -> Vec<String> {
     parsed.text_ops[block.op_start..block.op_end]
         .iter()
-        .filter_map(|op| match op {
+        .filter_map(|op| match &op.op {
             AsmOp::Instruction(Instruction::Call { label }) => Some(label.clone()),
             _ => None,
         })
@@ -884,8 +979,8 @@ fn unreachable_machine_block_count(parsed: &ParsedAssembly, cfg: &MachineCfg) ->
     cfg.blocks.len().saturating_sub(reachable.len())
 }
 
-fn block_has_executable_ops(ops: &[AsmOp]) -> bool {
-    ops.iter().any(|op| !matches!(op, AsmOp::Label(_)))
+fn block_has_executable_ops(ops: &[LocatedAsmOp]) -> bool {
+    ops.iter().any(|op| !matches!(&op.op, AsmOp::Label(_)))
 }
 
 fn build_machine_block(
@@ -903,8 +998,8 @@ fn build_machine_block(
     MachineBlock { label, op_start, op_end, byte_start, byte_size: byte_end.saturating_sub(byte_start), terminator }
 }
 
-fn instruction_terminator(op: &AsmOp) -> Option<MachineTerminator> {
-    match op {
+fn instruction_terminator(op: &LocatedAsmOp) -> Option<MachineTerminator> {
+    match &op.op {
         AsmOp::Instruction(Instruction::Jump { label }) => Some(MachineTerminator::Jump { target: label.clone() }),
         AsmOp::Instruction(Instruction::Ret) => Some(MachineTerminator::Return),
         AsmOp::Instruction(inst) => {
@@ -926,15 +1021,16 @@ impl ParsedAssembly {
         let text_size = text_op_layouts.iter().map(|op| op.size).sum();
         let mut max_cond_branch_abs_distance = 0u64;
         for op_layout in text_op_layouts {
-            let AsmOp::Instruction(inst) = &self.text_ops[op_layout.op_index] else {
+            let op = &self.text_ops[op_layout.op_index];
+            let AsmOp::Instruction(inst) = &op.op else {
                 continue;
             };
             if conditional_branch_parts(inst).is_none() {
                 continue;
             };
             let pc = layout.text_user_base + op_layout.offset as u64;
-            let target = branch_target(inst, self, layout)?;
-            let distance = relative_offset(pc, target)?.unsigned_abs();
+            let target = branch_target(inst, self, layout).map_err(|error| op.provenance.attach(error))?;
+            let distance = relative_offset(pc, target).map_err(|error| op.provenance.attach(error))?.unsigned_abs();
             max_cond_branch_abs_distance = max_cond_branch_abs_distance.max(distance);
         }
         let machine_block_count = machine_cfg.blocks.len();
@@ -2094,6 +2190,26 @@ fn pad_to_alignment(out: &mut Vec<u8>, align: usize) {
 mod tests {
     use super::*;
 
+    fn assert_generated_assembly_error(error: &CompileError, expected_line: usize, expected_message: &str) {
+        assert!(error.message.contains(expected_message), "unexpected diagnostic: {}", error.message);
+        assert!(
+            error.message.contains(&format!("generated assembly line {}", expected_line)),
+            "diagnostic must name the generated line: {}",
+            error.message
+        );
+        assert_eq!(error.span.line, 0, "generated assembly provenance must not masquerade as a CellScript source span");
+        let provenance = error
+            .details
+            .as_ref()
+            .and_then(|details| details.get("generated_assembly"))
+            .expect("generated assembly diagnostics must expose structured provenance");
+        assert_eq!(provenance["kind"], "generated_assembly");
+        assert_eq!(provenance["line"], expected_line);
+        assert!(provenance["text"].as_str().is_some_and(|text| !text.is_empty()));
+        assert!(provenance["section"].as_str().is_some());
+        assert!(provenance["op_index"].as_u64().is_some());
+    }
+
     const SUPPORTED_INTERNAL_ASSEMBLER_MNEMONICS: &[(&str, &str)] = &[
         ("add", "add t0, a0, a1"),
         ("addi", "addi t0, t0, -1"),
@@ -2801,6 +2917,57 @@ mod tests {
 
         assert_eq!(err.code.as_deref(), Some("E2200"));
         assert!(err.message.contains("unresolved call target"), "unexpected error: {}", err.message);
+        assert_generated_assembly_error(&err, 4, "unresolved call target");
+    }
+
+    #[test]
+    fn assembler_parse_and_symbol_errors_report_generated_line_provenance() {
+        let cases = [
+            (vec![".section .text", ".global entry", "entry:", "entry:", "ret"], 4, "duplicate assembly label 'entry'"),
+            (vec![".section .text", ".global entry", "entry:", "addi nope, a0, 1", "ret"], 4, "unknown register 'nope'"),
+            (vec![".section .text", ".global entry", "entry:", "addi a0, a0, nope", "ret"], 4, "invalid immediate 'nope'"),
+            (vec![".section .text", ".section .data"], 2, "unsupported assembly section '.data'"),
+            (vec![".section .text", ".global entry", "entry:", ".align 17", "ret"], 4, "unsupported .align value '17'"),
+            (vec![".section .text", ".global entry", "entry:", "ld a0, not-memory", "ret"], 4, "invalid memory operand"),
+            (vec![".section .text", ".global entry", "entry:", "beqz a0, missing", "ret"], 4, "unknown assembly label 'missing'"),
+        ];
+
+        for (source, expected_line, expected_message) in cases {
+            let lines = source.into_iter().map(str::to_string).collect::<Vec<_>>();
+            let error = MachineLayoutPlan::build(&lines).expect_err("invalid assembly must fail");
+            assert_generated_assembly_error(&error, expected_line, expected_message);
+        }
+    }
+
+    #[test]
+    fn assembler_encoding_errors_report_generated_line_provenance() {
+        let lines = vec![
+            ".section .text".to_string(),
+            ".global entry".to_string(),
+            "entry:".to_string(),
+            "addi a0, a0, 2048".to_string(),
+            "ret".to_string(),
+        ];
+
+        let error = assemble_elf_internal(&lines).expect_err("out-of-range encoding immediate must fail");
+        assert_generated_assembly_error(&error, 4, "immediate '2048' does not fit 12-bit signed field");
+    }
+
+    #[test]
+    fn assembler_out_of_range_jump_reports_generated_line_provenance() {
+        let padding = "x".repeat((1 << 20) + 8);
+        let lines = vec![
+            ".section .text".to_string(),
+            ".global entry".to_string(),
+            "entry:".to_string(),
+            "j far".to_string(),
+            format!(".ascii \"{}\"", padding),
+            "far:".to_string(),
+            "ret".to_string(),
+        ];
+
+        let error = assemble_elf_internal(&lines).expect_err("out-of-range jump must fail");
+        assert_generated_assembly_error(&error, 4, "does not fit 21-bit signed field");
     }
 
     #[test]

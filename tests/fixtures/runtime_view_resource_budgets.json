@@ -1,0 +1,33 @@
+{
+  "schema": "cellscript-runtime-view-resource-budgets-v1",
+  "measurement_backend": "ckb-testtool-full-transaction-context",
+  "profiles": [
+    {
+      "id": "fixed-transaction-header-temporal-view",
+      "status": "passed",
+      "coverage": [
+        "typed Input and CellDep fixed fields",
+        "exact 208-byte full HeaderDep decoding",
+        "HeaderDep field syscalls",
+        "typed Since decoding and arithmetic",
+        "raw transaction hash"
+      ],
+      "measured": {
+        "cycles": 20673,
+        "elf_bytes": 14040,
+        "max_stack_frame_bytes": 5376,
+        "witness_bytes": 60,
+        "transaction_bytes": 469,
+        "dependency_bytes": 28
+      },
+      "budgets": {
+        "cycles": 10000000,
+        "elf_bytes": 32768,
+        "max_stack_frame_bytes": 8192,
+        "witness_bytes": 2048,
+        "transaction_bytes": 4096,
+        "dependency_bytes": 4096
+      }
+    }
+  ]
+}

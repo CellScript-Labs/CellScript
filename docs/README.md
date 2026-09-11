@@ -67,6 +67,15 @@ drafts. Released versions should use non-draft filenames.
   record for metadata schema 62, typed-semantics v3, exact Type Script group
   input scans, versioned bounded output plans, and the four checked dynamic
   batching examples.
+- `CELLSCRIPT_0_30_CAPABILITY_LEDGER.md` defines the versioned distinction
+  between admitted executable-surface closure and wider product-capability
+  completeness; its machine record covers issues #7 through #27 without making
+  a release promise.
+- `CELLSCRIPT_0_30_BUSINESS_CORPUS.md` defines the bounded eight-family
+  application corpus and its evidence ceilings.
+- `CELLSCRIPT_COMMITTED_SUBSTATE.md` defines the candidate fixed-width
+  `Commitment<T>`/`Opening<T>` hash, witness ABI, one-shot safety rules,
+  builder encoding, stable mismatch error, and current review boundary.
 
 Release candidates and planning notes should not live here unless they are the
 final release record.
@@ -89,6 +98,9 @@ High-value active references include:
 - [CELLSCRIPT_0_30_CRYPTOGRAPHIC_CAPABILITY_MATRIX.md](CELLSCRIPT_0_30_CRYPTOGRAPHIC_CAPABILITY_MATRIX.md)
   for the native, standard-Lock, exact-identity, and trusted-external
   cryptographic capabilities used by the frozen eight-family business corpus
+- [CELLSCRIPT_COMMITTED_SUBSTATE.md](CELLSCRIPT_COMMITTED_SUBSTATE.md)
+  for the fixed-width typed commitment/opening profile, canonical hash
+  preimage, witness encoding, and post-validation materialization rule
 - [CELLSCRIPT_COMPILER_REQUIREMENTS.md](CELLSCRIPT_COMPILER_REQUIREMENTS.md)
   for the enforced package SemVer range, dependency preflight diagnostics,
   Registry selection, and `Cell.lock` v5 evidence

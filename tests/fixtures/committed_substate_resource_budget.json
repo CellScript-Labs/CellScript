@@ -1,0 +1,35 @@
+{
+  "schema": "cellscript-committed-substate-resource-budget-v1",
+  "profile": "fixed-width-packed-hash-maximum",
+  "measurement_backend": "ckb-testtool-full-transaction-context",
+  "maximum_shape": {
+    "type_name": "S",
+    "packed_value_bytes": 451,
+    "packed_preimage_bytes": 480,
+    "scratch_bytes_including_digest": 512
+  },
+  "identities": {
+    "artifact_hash": "0xb28f0eb686cfd2d95501614a359d5bfa232fbf2b6166856f111e9186fd29336c",
+    "lowering_record_hash": "0xb4270c7d98107e6d7747ca1e5fd6051107676ea30dad5d0a7c4251b10fed7ef0",
+    "source_map_hash": "0x56372361efd40bb3caf7f385b92bec57b277cc162840ea4702af5a64177952cb",
+    "verified_bundle_id": "0xb409a05a9c25d121ef663cdd3f4fa19ced5994305add22741d32065cb0cdf811",
+    "raw_transaction_hash": "0x1544628215dc96e0a36b6285379a709bf5f67da92da1ee4f8aa6a09c58a37535",
+    "serialized_transaction_hash": "0x755c9ae4ac731ce6c08df91ba6952a34027591cad6a9deddc22d1b67e45a484b"
+  },
+  "measured": {
+    "cycles": 78387,
+    "elf_bytes": 10448,
+    "max_stack_frame_bytes": 5376,
+    "witness_bytes": 515,
+    "transaction_bytes": 855,
+    "dependency_bytes": 0
+  },
+  "budgets": {
+    "cycles": 10000000,
+    "elf_bytes": 32768,
+    "max_stack_frame_bytes": 8192,
+    "witness_bytes": 2048,
+    "transaction_bytes": 4096,
+    "dependency_bytes": 0
+  }
+}

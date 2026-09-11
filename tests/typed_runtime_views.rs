@@ -260,6 +260,32 @@ fn typed_cell_input_and_header_views_execute_and_fail_closed() {
 }
 
 #[test]
+fn fixed_transaction_header_temporal_view_resource_profile_is_exact_and_bounded() {
+    let result = compile(SOURCE);
+    let dep_data = Bytes::from_static(b"cellscript-0.30-runtime-view");
+    let expected_hash = blake2b_256(&dep_data);
+    let valid = fixture(dep_data, witness(&result, expected_hash));
+    let execution = execute_cellscript_script(strip_vm_abi_trailer(&result.artifact_bytes), &valid);
+    assert_eq!(execution.exit_code, 0, "resource profile failed: {:?}", execution.captured_debug);
+    let max_stack_frame_bytes =
+        result.verified_lowering_record.as_ref().unwrap().entries.iter().map(|entry| entry.frame_size_bytes).max().unwrap();
+    let actual = serde_json::json!({
+        "cycles": execution.cycles,
+        "elf_bytes": strip_vm_abi_trailer(&result.artifact_bytes).len(),
+        "max_stack_frame_bytes": max_stack_frame_bytes,
+        "witness_bytes": execution.witness_bytes,
+        "transaction_bytes": execution.transaction_bytes,
+        "dependency_bytes": execution.dependency_bytes,
+    });
+    let manifest: serde_json::Value = serde_json::from_str(include_str!("fixtures/runtime_view_resource_budgets.json")).unwrap();
+    let profile = &manifest["profiles"][0];
+    assert_eq!(actual, profile["measured"], "recorded runtime-view resource measurement is stale: {actual}");
+    for field in ["cycles", "elf_bytes", "max_stack_frame_bytes", "witness_bytes", "transaction_bytes", "dependency_bytes"] {
+        assert!(actual[field].as_u64().unwrap() <= profile["budgets"][field].as_u64().unwrap(), "{field} exceeded budget");
+    }
+}
+
+#[test]
 fn dynamic_source_indexes_execute_and_emit_checked_provenance() {
     let result = compile(DYNAMIC_INDEX_SOURCE);
     let dep_data = Bytes::from_static(b"cellscript-0.30-dynamic-index");

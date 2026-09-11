@@ -3031,6 +3031,48 @@ fn validate_typed_operation(
             if operation.operands.iter().any(|operand| operand.ty == "DeploymentLineHandle") && !is_deployment_line_handle_call {
                 return typed_error("DeploymentLineHandle operand is passed to an unrecognized runtime helper".to_string());
             }
+            let committed_inner = call.return_type.strip_prefix("Commitment<").and_then(|value| value.strip_suffix('>'));
+            if call.target == "__ckb_hash_blake2b_packed" && committed_inner.is_some() {
+                let inner = committed_inner.expect("guarded commitment return type");
+                if call.contract != "versioned-runtime-helper"
+                    || call.effect != "runtime-contract"
+                    || call.params != [inner]
+                    || operation.operands.len() != 1
+                    || operation.destinations.len() != 1
+                    || operand_type(0) != Some(inner)
+                    || destination_type(0) != Some(call.return_type.as_str())
+                    || inner.starts_with("Commitment<")
+                    || inner.starts_with("Opening<")
+                {
+                    return typed_error(
+                        "typed commitment construction does not preserve its nominal input, output, and bounded packed-hash contract"
+                            .to_string(),
+                    );
+                }
+            }
+            if call.target == "__ckb_commitment_open" {
+                let commitment_inner =
+                    call.params.first().and_then(|value| value.strip_prefix("Commitment<")).and_then(|value| value.strip_suffix('>'));
+                let opening_inner =
+                    call.params.get(1).and_then(|value| value.strip_prefix("Opening<")).and_then(|value| value.strip_suffix('>'));
+                if call.contract != "versioned-runtime-helper"
+                    || call.effect != "runtime-contract"
+                    || call.params.len() != 2
+                    || operation.operands.len() != 2
+                    || operation.destinations.len() != 1
+                    || commitment_inner.is_none()
+                    || commitment_inner != opening_inner
+                    || commitment_inner != Some(call.return_type.as_str())
+                    || operand_type(0) != call.params.first().map(String::as_str)
+                    || operand_type(1) != call.params.get(1).map(String::as_str)
+                    || destination_type(0) != Some(call.return_type.as_str())
+                {
+                    return typed_error(
+                        "typed commitment opening does not preserve its matched Commitment<T>, Opening<T>, and authenticated result contract"
+                            .to_string(),
+                    );
+                }
+            }
             // This known helper has no executable digest contract in this
             // schema. It must not be relabelled as an ordinary value-producing
             // helper after rebinding the enclosing artifact hashes.

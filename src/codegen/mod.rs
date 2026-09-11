@@ -211,6 +211,9 @@ fn referenced_v014_runtime_helpers(ir: &IrModule) -> BTreeSet<String> {
     if helpers.contains("__xudt_require_owner_mode_type_args_current_script") {
         helpers.insert("__xudt_require_owner_mode_type_args".to_string());
     }
+    if helpers.contains("__ckb_commitment_open") {
+        helpers.insert("__ckb_hash_blake2b_var".to_string());
+    }
     if helpers.contains("__novaseal_bip340_require_signature") || helpers.contains("__novaseal_bip340_require_signature_from_cell_dep")
     {
         helpers.insert("__ckb_pipe".to_string());
@@ -445,6 +448,7 @@ fn is_v014_runtime_helper(func: &str) -> bool {
             | "__ckb_hash_blake2b"
             | "__ckb_hash_blake2b_var"
             | "__ckb_hash_blake2b_packed"
+            | "__ckb_commitment_open"
             | "__ckb_hash_data_packed"
             | "__ckb_script_hash"
             | "__ckb_hash_sha256"
@@ -631,6 +635,7 @@ fn fixed_byte_width(ty: &IrType, fixed_size: Option<usize>) -> Option<usize> {
             Some(size)
         }
         (IrType::Named(name), Some(32)) if is_ckb_fixed_hash_domain_name(name) => Some(32),
+        (IrType::Named(name), Some(32)) if crate::commitment_contract::commitment_inner_type(name).is_some() => Some(32),
         (IrType::Ref(inner) | IrType::MutRef(inner), _) => fixed_byte_width(inner, type_static_length(inner)),
         _ => None,
     }
@@ -656,6 +661,12 @@ fn molecule_inline_type_fixed_width(
     type_fixed_sizes: &HashMap<String, usize>,
     enum_fixed_sizes: &HashMap<String, usize>,
 ) -> Option<usize> {
+    if crate::commitment_contract::commitment_inner_type(ty.trim()).is_some() {
+        return Some(32);
+    }
+    if let Some(inner) = crate::commitment_contract::opening_inner_type(ty.trim()) {
+        return molecule_inline_type_fixed_width(inner, type_fixed_sizes, enum_fixed_sizes);
+    }
     match ty.trim() {
         "bool" | "u8" => Some(1),
         "u16" => Some(2),
@@ -695,6 +706,7 @@ fn type_static_length(ty: &IrType) -> Option<usize> {
         IrType::Ref(inner) | IrType::MutRef(inner) => type_static_length(inner),
         IrType::Named(name) if is_ckb_temporal_scalar_name(name) => Some(8),
         IrType::Named(name) if is_ckb_fixed_hash_domain_name(name) => Some(32),
+        IrType::Named(name) if crate::commitment_contract::commitment_inner_type(name).is_some() => Some(32),
         IrType::Named(name) if name == crate::script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE => {
             Some(crate::script_handle_contract::EXACT_SCRIPT_HANDLE_BYTES)
         }
@@ -724,6 +736,7 @@ fn operand_fixed_byte_width(operand: &IrOperand) -> Option<usize> {
             Some(crate::script_handle_contract::DEPLOYMENT_LINE_HANDLE_BYTES)
         }
         IrType::Named(name) if is_ckb_fixed_hash_domain_name(name) => Some(32),
+        IrType::Named(name) if crate::commitment_contract::commitment_inner_type(name).is_some() => Some(32),
         _ => None,
     }
 }
@@ -1273,7 +1286,15 @@ impl CodeGenerator {
             IrType::Named(name) if name == crate::script_handle_contract::DEPLOYMENT_LINE_HANDLE_TYPE => {
                 Some(crate::script_handle_contract::DEPLOYMENT_LINE_HANDLE_BYTES)
             }
-            IrType::Named(name) => self.type_fixed_sizes.get(name).copied().or_else(|| self.enum_fixed_sizes.get(name).copied()),
+            IrType::Named(name) => {
+                if crate::commitment_contract::commitment_inner_type(name).is_some() {
+                    return Some(32);
+                }
+                if let Some(inner) = crate::commitment_contract::opening_inner_type(name) {
+                    return molecule_inline_type_fixed_width(inner, &self.type_fixed_sizes, &self.enum_fixed_sizes);
+                }
+                self.type_fixed_sizes.get(name).copied().or_else(|| self.enum_fixed_sizes.get(name).copied())
+            }
             IrType::Ref(inner) | IrType::MutRef(inner) => self.fixed_named_type_width(inner),
             _ => None,
         }

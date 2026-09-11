@@ -621,6 +621,13 @@ impl CodeGenerator {
                 {
                     return Some(ExpectedFixedByteSource::ParamBytes { var_id: var.id, size_offset, width: expected_width });
                 }
+                if self.param_vars.contains(&var.id)
+                    && var_width == expected_width
+                    && crate::commitment_contract::opening_inner_type(named_type_name(&var.ty)?).is_some()
+                    && let Some(size_offset) = self.schema_pointer_size_offsets.get(&var.id).copied()
+                {
+                    return Some(ExpectedFixedByteSource::ParamBytes { var_id: var.id, size_offset, width: expected_width });
+                }
                 if let Some(param_id) = self.param_type_hash_sources.get(&var.id).copied()
                     && var_width == expected_width
                     && let Some(size_offset) = self.param_type_hash_size_offsets.get(&param_id).copied()

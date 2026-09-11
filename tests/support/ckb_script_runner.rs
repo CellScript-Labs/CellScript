@@ -7,6 +7,7 @@
 //!
 //! This harness is protocol-neutral. It does not contain iCKB-specific logic.
 
+use ckb_testtool::ckb_hash::blake2b_256;
 use ckb_testtool::ckb_types::{
     bytes::Bytes,
     core::{DepType, EpochNumberWithFraction, HeaderBuilder, TransactionBuilder, TransactionView},
@@ -260,6 +261,12 @@ pub struct CkbScriptExecutionResult {
     /// under test and the harness's always-success Lock.
     #[allow(dead_code)]
     pub dependency_bytes: usize,
+    /// CKB raw transaction hash (witnesses excluded by the CKB data model).
+    #[allow(dead_code)]
+    pub raw_transaction_hash: String,
+    /// CKB Blake2b-256 of the exact consensus-serialized transaction bytes.
+    #[allow(dead_code)]
+    pub serialized_transaction_hash: String,
     /// Captured debug print messages from the script.
     pub captured_debug: Vec<String>,
 }
@@ -415,7 +422,9 @@ where
                 .lock(always_success_lock.clone())
                 .type_(packed::ScriptOpt::from(input_type_script))
                 .build();
-            context.create_cell(output, cell.data.clone())
+            let out_point = deterministic_fixture_out_point(b"cellscript-test-input-v1", index);
+            context.create_cell_with_out_point(out_point.clone(), output, cell.data.clone());
+            out_point
         })
         .collect();
 
@@ -425,13 +434,16 @@ where
     let dep_out_points: Vec<packed::OutPoint> = fixture
         .cell_deps
         .iter()
-        .map(|cell| {
+        .enumerate()
+        .map(|(index, cell)| {
             let output = packed::CellOutput::new_builder()
                 .capacity::<packed::Uint64>(cell.capacity.pack())
                 .lock(always_success_lock.clone())
                 .type_(packed::ScriptOpt::from(cell.type_script.clone()))
                 .build();
-            context.create_cell(output, cell.data.clone())
+            let out_point = deterministic_fixture_out_point(b"cellscript-test-cell-dep-v1", index);
+            context.create_cell_with_out_point(out_point.clone(), output, cell.data.clone());
+            out_point
         })
         .collect();
 
@@ -504,6 +516,8 @@ where
     let transaction_bytes = tx.data().serialized_size_in_block();
     let witness_bytes = tx.witnesses().into_iter().map(|witness| witness.raw_data().len()).sum();
     let dependency_bytes = fixture.cell_deps.iter().map(|cell| cell.data.len()).sum();
+    let raw_transaction_hash = format!("0x{}", hex::encode(tx.hash().as_slice()));
+    let serialized_transaction_hash = format!("0x{}", hex::encode(blake2b_256(tx.data().as_slice())));
 
     // Execute via ckb-script ScriptVerify with full CKB syscall context.
     let verify_result = context.verify_tx(&tx, MAX_CYCLES);
@@ -514,6 +528,8 @@ where
             transaction_bytes,
             witness_bytes,
             dependency_bytes,
+            raw_transaction_hash,
+            serialized_transaction_hash,
             captured_debug: context.captured_messages().into_iter().map(|m| m.message).collect(),
         },
         Err(verify_failure) => {
@@ -529,10 +545,21 @@ where
                 transaction_bytes,
                 witness_bytes,
                 dependency_bytes,
+                raw_transaction_hash,
+                serialized_transaction_hash,
                 captured_debug: all_debug,
             }
         }
     }
+}
+
+fn deterministic_fixture_out_point(domain: &[u8], index: usize) -> packed::OutPoint {
+    let mut preimage = domain.to_vec();
+    preimage.extend_from_slice(&(index as u64).to_le_bytes());
+    packed::OutPoint::new_builder()
+        .tx_hash(blake2b_256(&preimage).pack())
+        .index(u32::try_from(index).expect("fixture index fits u32"))
+        .build()
 }
 
 fn parse_ckb_script_error_code(error: &str) -> Option<i64> {

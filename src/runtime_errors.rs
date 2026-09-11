@@ -71,6 +71,7 @@ pub enum CellScriptRuntimeError {
     ExactScriptHandleInvalid = 70,
     DeploymentLineHandleInvalid = 71,
     ScriptConstructionInvalid = 72,
+    CommitmentOpeningMismatch = 73,
 }
 
 impl CellScriptRuntimeError {
@@ -145,6 +146,7 @@ impl CellScriptRuntimeError {
             Self::ExactScriptHandleInvalid => "exact-script-handle-invalid",
             Self::DeploymentLineHandleInvalid => "deployment-line-handle-invalid",
             Self::ScriptConstructionInvalid => "script-construction-invalid",
+            Self::CommitmentOpeningMismatch => "commitment-opening-mismatch",
         }
     }
 
@@ -240,6 +242,9 @@ impl CellScriptRuntimeError {
             }
             Self::ScriptConstructionInvalid => {
                 "A constructed CKB Script had an invalid hash_type, oversized args, or unavailable fixed-byte input."
+            }
+            Self::CommitmentOpeningMismatch => {
+                "An explicit fixed-width opening did not hash to the expected typed commitment."
             }
         }
     }
@@ -359,6 +364,9 @@ impl CellScriptRuntimeError {
             Self::ScriptConstructionInvalid => {
                 "Use data, type, data1, or data2 and keep fixed Script args within the documented bounded maximum."
             }
+            Self::CommitmentOpeningMismatch => {
+                "Check the Opening<T> witness bytes, Commitment<T> value, canonical type spelling, and packed-hash domain."
+            }
         }
     }
 
@@ -429,6 +437,7 @@ impl CellScriptRuntimeError {
             70 => Some(Self::ExactScriptHandleInvalid),
             71 => Some(Self::DeploymentLineHandleInvalid),
             72 => Some(Self::ScriptConstructionInvalid),
+            73 => Some(Self::CommitmentOpeningMismatch),
             _ => None,
         }
     }
@@ -508,6 +517,7 @@ pub const ALL_RUNTIME_ERRORS: &[CellScriptRuntimeError] = &[
     CellScriptRuntimeError::ExactScriptHandleInvalid,
     CellScriptRuntimeError::DeploymentLineHandleInvalid,
     CellScriptRuntimeError::ScriptConstructionInvalid,
+    CellScriptRuntimeError::CommitmentOpeningMismatch,
 ];
 
 pub const RESERVED_RUNTIME_ERROR_CODES: &[u64] = &[6, 19, 27, 28, 29, 30, 31];

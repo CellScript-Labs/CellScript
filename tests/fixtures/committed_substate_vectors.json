@@ -1,0 +1,24 @@
+{
+  "schema": "cellscript-committed-substate-v1",
+  "hash_algorithm": "ckb-blake2b-256",
+  "personalization_ascii": "ckb-default-hash",
+  "domain_prefix_hex": "43656c6c5363726970745061636b656448617368563000",
+  "vectors": [
+    {
+      "id": "u64-seven",
+      "type_name": "u64",
+      "packed_width": 8,
+      "packed_value_hex": "0700000000000000",
+      "preimage_hex": "43656c6c5363726970745061636b65644861736856300075363400080000000700000000000000",
+      "commitment_hex": "c87dd11e00d6fd616b1f6b1b9053db32c2145a359030c161307e21139ea07341"
+    },
+    {
+      "id": "state-counter-owner",
+      "type_name": "State",
+      "packed_width": 40,
+      "packed_value_hex": "07000000000000004242424242424242424242424242424242424242424242424242424242424242",
+      "preimage_hex": "43656c6c5363726970745061636b6564486173685630005374617465002800000007000000000000004242424242424242424242424242424242424242424242424242424242424242",
+      "commitment_hex": "de1c6436414f609a4c106e6288b8b44d439f4fc162988b441dc2cb3ee959fb68"
+    }
+  ]
+}

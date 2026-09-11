@@ -118,10 +118,11 @@ for the independent check's exact scope.
 | 70 | `exact-script-handle-invalid` | An exact Script handle had the wrong canonical encoding, full-value commitment, class, role, or selected transaction Script/artifact identity. | Use the checked `CSHDLv1-fixed-202` value, bind its complete CKB Blake2b-256 hash as a source literal, and keep its Script or CellDep artifact identity unchanged. |
 | 71 | `deployment-line-handle-invalid` | A deployment-line handle was not the active canonical value, its full-value commitment differed, or its admission CellDep, code CellDep, or selected Script identity was substituted. | Use the checked `CSLINv1-fixed-386` value, bind its complete CKB Blake2b-256 hash as a source literal, and preserve the exact active admission and code CellDeps selected by the ProtocolBundle. |
 | 72 | `script-construction-invalid` | A constructed CKB Script used a null source/output, more than 459 args bytes, or a hash type outside data/type/data1/data2. | Construct the Script with `script::new`, fixed bounded `script::args`, and one of the four named CKB hash-type helpers. |
+| 73 | `commitment-opening-mismatch` | An explicit fixed-width opening did not hash to the expected typed commitment. | Check the `Opening<T>` witness bytes, `Commitment<T>` value, canonical type spelling, and packed-hash domain. |
 
 ## Stability
 
 - Existing numeric codes must not be reused for a different condition.
 - New generated fail-closed paths must add a registry entry before they can
   emit a new non-zero code.
-- Codes `6`, `19`, `27` through `31`, and values above `68` are currently reserved.
+- Codes `6`, `19`, and `27` through `31` are currently reserved.

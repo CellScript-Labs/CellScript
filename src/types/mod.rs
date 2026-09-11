@@ -1524,6 +1524,12 @@ impl<'a> TypeChecker<'a> {
             }
             Type::Ref(_) | Type::MutRef(_) => None,
             Type::Named(name) => {
+                if crate::commitment_contract::commitment_inner_type(name).is_some() {
+                    return Some(32);
+                }
+                if let Some(inner) = crate::commitment_contract::opening_inner_type(name) {
+                    return self.payload_type_runtime_width(&self.parse_named_type_repr(inner), visiting);
+                }
                 if name.contains('<') {
                     return None;
                 }
@@ -2456,6 +2462,15 @@ impl<'a> TypeChecker<'a> {
 
     fn validate_callable_return_type(&self, callable_kind: &str, callable_name: &str, return_type: &Type, span: Span) -> Result<()> {
         self.validate_type(return_type)?;
+        if self.type_contains_opening(return_type) {
+            return Err(CompileError::new(
+                format!(
+                    "{} '{}' cannot return an Opening<T>; openings are witness-only one-shot values",
+                    callable_kind, callable_name
+                ),
+                span,
+            ));
+        }
         if self.type_contains_reference(return_type) {
             return Err(CompileError::new(
                 format!(
@@ -2518,6 +2533,12 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn validate_stored_type_has_no_references(&self, ty: &Type, owner: &str, span: Span) -> Result<()> {
+        if self.type_contains_opening(ty) {
+            return Err(CompileError::new(
+                format!("{} cannot store Opening<T>; openings are witness-only one-shot values", owner),
+                span,
+            ));
+        }
         if self.type_contains_reference(ty) {
             return Err(CompileError::new(
                 format!("{} cannot use reference type {}; schema storage must use owned serializable values", owner, type_repr(ty)),
@@ -2533,6 +2554,64 @@ impl<'a> TypeChecker<'a> {
             Type::Array(inner, _) => self.type_contains_reference(inner),
             Type::Tuple(items) => items.iter().any(|item| self.type_contains_reference(item)),
             Type::Named(name) => self.named_type_contains_reference(name),
+            _ => false,
+        }
+    }
+
+    fn type_contains_opening(&self, ty: &Type) -> bool {
+        self.type_contains_opening_with_seen(ty, &mut HashSet::new())
+    }
+
+    fn type_contains_opening_with_seen(&self, ty: &Type, visiting: &mut HashSet<String>) -> bool {
+        match ty {
+            Type::Array(inner, _) | Type::Ref(inner) | Type::MutRef(inner) => self.type_contains_opening_with_seen(inner, visiting),
+            Type::Tuple(items) => items.iter().any(|item| self.type_contains_opening_with_seen(item, visiting)),
+            Type::Named(name) => {
+                if crate::commitment_contract::opening_inner_type(name).is_some() {
+                    return true;
+                }
+                let base = name.split('<').next().unwrap_or(name.as_str());
+                if !visiting.insert(base.to_string()) {
+                    return false;
+                }
+                let contains = self
+                    .resolve_named_type_fields(base)
+                    .is_some_and(|fields| fields.values().any(|field| self.type_contains_opening_with_seen(field, visiting)))
+                    || self.resolve_enum_variant_fields(base).is_some_and(|variants| {
+                        variants.values().flatten().any(|field| self.type_contains_opening_with_seen(field, visiting))
+                    });
+                visiting.remove(base);
+                contains
+            }
+            _ => false,
+        }
+    }
+
+    fn type_contains_commitment(&self, ty: &Type) -> bool {
+        self.type_contains_commitment_with_seen(ty, &mut HashSet::new())
+    }
+
+    fn type_contains_commitment_with_seen(&self, ty: &Type, visiting: &mut HashSet<String>) -> bool {
+        match ty {
+            Type::Array(inner, _) | Type::Ref(inner) | Type::MutRef(inner) => self.type_contains_commitment_with_seen(inner, visiting),
+            Type::Tuple(items) => items.iter().any(|item| self.type_contains_commitment_with_seen(item, visiting)),
+            Type::Named(name) => {
+                if crate::commitment_contract::commitment_inner_type(name).is_some() {
+                    return true;
+                }
+                let base = name.split('<').next().unwrap_or(name.as_str());
+                if !visiting.insert(base.to_string()) {
+                    return false;
+                }
+                let contains = self
+                    .resolve_named_type_fields(base)
+                    .is_some_and(|fields| fields.values().any(|field| self.type_contains_commitment_with_seen(field, visiting)))
+                    || self.resolve_enum_variant_fields(base).is_some_and(|variants| {
+                        variants.values().flatten().any(|field| self.type_contains_commitment_with_seen(field, visiting))
+                    });
+                visiting.remove(base);
+                contains
+            }
             _ => false,
         }
     }
@@ -2663,13 +2742,30 @@ impl<'a> TypeChecker<'a> {
             self.validate_callable_param_reference_shape(param, callable_kind, callable_name)?;
             self.validate_callable_param_state_authority(param, callable_kind, callable_name)?;
             self.validate_callable_param_mutability(param)?;
-            let is_linear = self.is_linear_type(&param.ty) && !non_linear_params.contains(param.name.as_str());
+            let is_opening = matches!(&param.ty, Type::Named(name) if crate::commitment_contract::opening_inner_type(name).is_some());
+            let is_linear = is_opening || (self.is_linear_type(&param.ty) && !non_linear_params.contains(param.name.as_str()));
             env.bind_new(param.name.clone(), param.ty.clone(), is_linear, param.is_mut, param.span)?;
         }
         Ok(())
     }
 
     fn validate_callable_param_source(&self, param: &Param, callable_kind: &str, callable_name: &str) -> Result<()> {
+        if self.type_contains_opening(&param.ty)
+            && !matches!(&param.ty, Type::Named(name) if crate::commitment_contract::opening_inner_type(name).is_some())
+        {
+            return Err(CompileError::new(
+                format!("parameter '{}' cannot nest Opening<T>; openings must be direct witness bindings", param.name),
+                param.span,
+            ));
+        }
+        if matches!(&param.ty, Type::Named(name) if crate::commitment_contract::opening_inner_type(name).is_some())
+            && (param.source != ParamSource::Witness || !matches!(callable_kind, "action" | "lock"))
+        {
+            return Err(CompileError::new(
+                format!("opening parameter '{}' must be an explicit witness binding on an action or lock", param.name),
+                param.span,
+            ));
+        }
         if param.source == ParamSource::Default {
             if parse_bounded_collection_type(&param.ty).is_some() {
                 return Err(CompileError::new(
@@ -3827,6 +3923,15 @@ impl<'a> TypeChecker<'a> {
             Expr::ByteString(bytes) => Ok(Type::Array(Box::new(Type::U8), bytes.len())),
             Expr::Identifier(name) => {
                 if let Some(ty) = env.lookup(name).cloned() {
+                    if matches!(&ty, Type::Named(opening) if crate::commitment_contract::opening_inner_type(opening).is_some()) {
+                        return Err(CompileError::new(
+                            format!(
+                                "opening witness '{}' is opaque and may only be consumed directly as commitment::open's second argument",
+                                name
+                            ),
+                            expr_span(expr),
+                        ));
+                    }
                     Ok(ty)
                 } else if let Some(constant) = self.resolve_constant(name) {
                     Ok(constant.ty)
@@ -3940,6 +4045,9 @@ impl<'a> TypeChecker<'a> {
                 }
             }
             Expr::Call(call) => {
+                if let Some(result) = self.infer_commitment_open_call(env, call)? {
+                    return Ok(result);
+                }
                 if let Some(result) = self.infer_enum_constructor_call(env, call)? {
                     return Ok(result);
                 }
@@ -6158,7 +6266,14 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn parse_named_type_repr(&self, repr: &str) -> Type {
-        match repr.trim() {
+        let repr = repr.trim();
+        if let Some(array) = repr.strip_prefix('[').and_then(|value| value.strip_suffix(']'))
+            && let Some((inner, len)) = array.rsplit_once(';')
+            && let Ok(len) = len.trim().parse::<usize>()
+        {
+            return Type::Array(Box::new(self.parse_named_type_repr(inner)), len);
+        }
+        match repr {
             "u8" => Type::U8,
             "u16" => Type::U16,
             "u32" => Type::U32,
@@ -6606,6 +6721,52 @@ impl<'a> TypeChecker<'a> {
         Ok(Some(Type::Unit))
     }
 
+    fn infer_commitment_open_call(&mut self, env: &mut TypeEnv, call: &CallExpr) -> Result<Option<Type>> {
+        let Expr::Identifier(function) = call.func.as_ref() else {
+            return Ok(None);
+        };
+        if function != crate::commitment_contract::OPEN_FUNCTION {
+            return Ok(None);
+        }
+        if !call.type_args.is_empty() {
+            return Err(CompileError::new("commitment::open infers T and does not accept type arguments", call.span));
+        }
+        if call.args.len() != 2 {
+            return Err(CompileError::new(format!("commitment::open expects 2 arguments, found {}", call.args.len()), call.span));
+        }
+
+        let expected_ty = self.infer_expr(env, &call.args[0])?;
+        let Type::Named(expected_name) = &expected_ty else {
+            return Err(CompileError::new("commitment::open first argument must be Commitment<T>", call.span));
+        };
+        let Some(expected_inner) = crate::commitment_contract::commitment_inner_type(expected_name) else {
+            return Err(CompileError::new("commitment::open first argument must be Commitment<T>", call.span));
+        };
+        let Expr::Identifier(opening_binding) = &call.args[1] else {
+            return Err(CompileError::new("commitment::open second argument must be a direct Opening<T> witness binding", call.span));
+        };
+        let opening_ty = env
+            .lookup(opening_binding)
+            .cloned()
+            .ok_or_else(|| CompileError::new(format!("undefined opening witness '{}'", opening_binding), call.span))?;
+        let Type::Named(opening_name) = &opening_ty else {
+            return Err(CompileError::new("commitment::open second argument must be Opening<T>", call.span));
+        };
+        let Some(opening_inner) = crate::commitment_contract::opening_inner_type(opening_name) else {
+            return Err(CompileError::new("commitment::open second argument must be Opening<T>", call.span));
+        };
+        if expected_inner != opening_inner {
+            return Err(CompileError::new(
+                format!("commitment::open type mismatch: expected Commitment<{}> with Opening<{}>", expected_inner, expected_inner),
+                call.span,
+            ));
+        }
+        let inner_ty = self.parse_named_type_repr(expected_inner);
+        self.validate_committed_value_type(&inner_ty, call.span)?;
+        env.consume(opening_binding)?;
+        Ok(Some(inner_ty))
+    }
+
     fn infer_call_type(&mut self, env: &mut TypeEnv, call: &CallExpr, arg_types: &[Type]) -> Result<Type> {
         match call.func.as_ref() {
             Expr::Identifier(name) => {
@@ -6614,6 +6775,14 @@ impl<'a> TypeChecker<'a> {
                 }
                 if let Some(view_type) = Self::witness_bytes_view_type(name, call, arg_types)? {
                     return Ok(view_type);
+                }
+                if name == crate::commitment_contract::COMMIT_FUNCTION {
+                    if !call.type_args.is_empty() {
+                        return Err(CompileError::new("commitment::commit infers T and does not accept type arguments", call.span));
+                    }
+                    self.validate_builtin_arity(name, 1, arg_types, call.span)?;
+                    self.validate_committed_value_type(&arg_types[0], call.span)?;
+                    return Ok(Type::Named(crate::commitment_contract::commitment_type(&type_repr(&arg_types[0]))));
                 }
                 if !call.type_args.is_empty() {
                     return Err(CompileError::new(format!("function '{}' does not accept type arguments", name), call.span));
@@ -8296,6 +8465,19 @@ impl<'a> TypeChecker<'a> {
             _ => {}
         }
 
+        if let Some(inner) = crate::commitment_contract::commitment_inner_type(name) {
+            return self.validate_committed_value_type(&self.parse_named_type_repr(inner), Span::default());
+        }
+        if let Some(inner) = crate::commitment_contract::opening_inner_type(name) {
+            return self.validate_committed_value_type(&self.parse_named_type_repr(inner), Span::default());
+        }
+        if matches!(base_name, crate::commitment_contract::COMMITMENT_TYPE | crate::commitment_contract::OPENING_TYPE) {
+            return Err(CompileError::new(
+                format!("type '{}' requires exactly one fixed-width value type argument", base_name),
+                Span::default(),
+            ));
+        }
+
         if let Some(collection) = parse_bounded_collection_type(&Type::Named(name.to_string())) {
             if collection.max_elements == 0 || collection.max_elements > 1024 {
                 return Err(CompileError::new(format!("type '{}' requires a maximum cardinality in 1..=1024", name), Span::default()));
@@ -8469,6 +8651,45 @@ impl<'a> TypeChecker<'a> {
         } else {
             Err(CompileError::new(format!("unknown type '{}'", name), Span::default()))
         }
+    }
+
+    fn validate_committed_value_type(&self, ty: &Type, span: Span) -> Result<()> {
+        if matches!(ty, Type::Unit | Type::Ref(_) | Type::MutRef(_))
+            || self.type_contains_reference(ty)
+            || self.type_contains_opening(ty)
+            || self.type_contains_commitment(ty)
+            || self.type_contains_cell_backed_value(ty)
+        {
+            return Err(CompileError::new(
+                format!("committed-state profile requires an owned, non-Cell, non-wrapper fixed-width value; found {}", type_repr(ty)),
+                span,
+            ));
+        }
+        self.validate_type(ty)?;
+        let width = self.payload_type_runtime_width(ty, &mut HashSet::new()).ok_or_else(|| {
+            CompileError::new(
+                format!("committed-state type {} does not have a concrete fixed-width packed layout", type_repr(ty)),
+                span,
+            )
+        })?;
+        let preimage_len = crate::commitment_contract::PACKED_HASH_DOMAIN_PREFIX
+            .len()
+            .checked_add(type_repr(ty).len())
+            .and_then(|len| len.checked_add(1 + 4))
+            .and_then(|len| len.checked_add(width))
+            .ok_or_else(|| CompileError::new("committed-state packed width overflow", span))?;
+        if width == 0 || preimage_len + 32 > crate::commitment_contract::PACKED_HASH_SCRATCH_BYTES {
+            return Err(CompileError::new(
+                format!(
+                    "committed-state type {} requires {} packed bytes; the fixed-width profile permits preimage plus digest within {} bytes",
+                    type_repr(ty),
+                    width,
+                    crate::commitment_contract::PACKED_HASH_SCRATCH_BYTES
+                ),
+                span,
+            ));
+        }
+        Ok(())
     }
 
     fn bounded_list_element_is_fixed_width(&self, ty: &Type, visiting: &mut HashSet<String>) -> bool {
@@ -8706,6 +8927,9 @@ impl<'a> TypeChecker<'a> {
             Type::Array(inner, _) => self.is_linear_type_with_seen(inner, visiting),
             Type::Tuple(items) => items.iter().any(|item| self.is_linear_type_with_seen(item, visiting)),
             Type::Named(name) => {
+                if crate::commitment_contract::opening_inner_type(name).is_some() {
+                    return true;
+                }
                 if parse_bounded_collection_type(ty).is_some_and(|collection| collection.kind == BoundedCollectionKind::CellSet) {
                     return true;
                 }
@@ -10939,5 +11163,127 @@ action batch(input inputs: BoundedCellSet<Token, 4>) -> u64 {
         );
         let err = check(&impure_rhs).unwrap_err();
         assert!(err.message.contains("only transitively Pure helpers are allowed"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn typed_opening_is_explicit_one_shot_and_type_matched() {
+        let accepted = source_module(
+            r#"
+module committed
+
+struct State {
+    counter: u64,
+    owner: Address,
+}
+
+lock reveal(witness expected: Commitment<State>, witness opening: Opening<State>) -> bool {
+    verification
+        let state = commitment::open(expected, opening)
+        return state.counter > 0
+}
+"#,
+        );
+        check(&accepted).unwrap();
+
+        let implicit = source_module(
+            r#"
+module committed
+struct State { counter: u64 }
+lock reveal(witness expected: Commitment<State>, opening: Opening<State>) -> bool {
+    verification
+        let state = commitment::open(expected, opening)
+        return state.counter > 0
+}
+"#,
+        );
+        let err = check(&implicit).unwrap_err();
+        assert!(err.message.contains("must be an explicit witness binding"), "unexpected error: {}", err.message);
+
+        let escaped = source_module(
+            r#"
+module committed
+struct State { counter: u64 }
+lock reveal(witness expected: Commitment<State>, witness opening: Opening<State>) -> bool {
+    verification
+        let alias = opening
+        let state = commitment::open(expected, alias)
+        return state.counter > 0
+}
+"#,
+        );
+        let err = check(&escaped).unwrap_err();
+        assert!(err.message.contains("is opaque"), "unexpected error: {}", err.message);
+
+        let mismatched = source_module(
+            r#"
+module committed
+struct State { counter: u64 }
+struct Other { counter: u64 }
+lock reveal(witness expected: Commitment<State>, witness opening: Opening<Other>) -> bool {
+    verification
+        let state = commitment::open(expected, opening)
+        return state.counter > 0
+}
+"#,
+        );
+        let err = check(&mismatched).unwrap_err();
+        assert!(err.message.contains("type mismatch"), "unexpected error: {}", err.message);
+
+        let unused = source_module(
+            r#"
+module committed
+struct State { counter: u64 }
+lock reveal(witness expected: Commitment<State>, witness opening: Opening<State>) -> bool {
+    verification
+        return true
+}
+"#,
+        );
+        let err = check(&unused).unwrap_err();
+        assert!(err.message.contains("linear"), "unexpected error: {}", err.message);
+
+        let reused = source_module(
+            r#"
+module committed
+struct State { counter: u64 }
+lock reveal(witness expected: Commitment<State>, witness opening: Opening<State>) -> bool {
+    verification
+        let first = commitment::open(expected, opening)
+        let second = commitment::open(expected, opening)
+        return first.counter == second.counter
+}
+"#,
+        );
+        let err = check(&reused).unwrap_err();
+        assert!(err.message.contains("already Consumed"), "unexpected error: {}", err.message);
+
+        let nested_commitment = source_module(
+            r#"
+module committed
+struct Inner { counter: u64 }
+struct Outer { inner: Commitment<Inner> }
+lock reject(witness outer: Outer) -> bool {
+    verification
+        let nested = commitment::commit(outer)
+        return nested == nested
+}
+"#,
+        );
+        let err = check(&nested_commitment).unwrap_err();
+        assert!(err.message.contains("non-wrapper"), "unexpected error: {}", err.message);
+
+        let stored_opening = source_module(
+            r#"
+module committed
+struct State { counter: u64 }
+resource Vault has store { opening: Opening<State> }
+lock reject() -> bool {
+    verification
+        return true
+}
+"#,
+        );
+        let err = check(&stored_opening).unwrap_err();
+        assert!(err.message.contains("cannot store Opening<T>"), "unexpected error: {}", err.message);
     }
 }

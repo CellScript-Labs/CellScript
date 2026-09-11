@@ -1982,6 +1982,9 @@ impl IrGenerator {
                 Some((total.checked_add(width)?, any_linear || linear))
             }),
             IrType::Named(name) => {
+                if crate::commitment_contract::commitment_inner_type(name).is_some() {
+                    return Some((32, false));
+                }
                 let base_name = name.split('<').next().unwrap_or(name.as_str());
                 if base_name != name {
                     return None;
@@ -2030,6 +2033,12 @@ impl IrGenerator {
                 .try_fold(0usize, |acc, item| self.fixed_encoded_size_with_seen(item, seen).and_then(|size| acc.checked_add(size))),
             IrType::Unit => Some(0),
             IrType::Named(name) => {
+                if crate::commitment_contract::commitment_inner_type(name).is_some() {
+                    return Some(32);
+                }
+                if let Some(inner) = crate::commitment_contract::opening_inner_type(name) {
+                    return self.fixed_encoded_size_with_seen(&parse_inline_ir_type_repr(inner), seen);
+                }
                 let base_name = name.split('<').next().unwrap_or(name.as_str());
                 if let Some(size) = self.module.enum_fixed_sizes.get(base_name).copied() {
                     return Some(size);
@@ -7980,6 +7989,37 @@ impl IrGenerator {
                     blocks,
                     vars,
                 ),
+                name if name == crate::commitment_contract::COMMIT_FUNCTION && call.args.len() == 1 => {
+                    let lowered = self.lower_expr(&call.args[0], current, blocks, vars);
+                    let active = lowered.current?;
+                    let inner = ir_type_display(&self.operand_type(&lowered.operand));
+                    let dest = self.new_var("commitment", IrType::Named(crate::commitment_contract::commitment_type(&inner)));
+                    self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+                        dest: Some(dest.clone()),
+                        func: "__ckb_hash_blake2b_packed".to_string(),
+                        args: vec![lowered.operand],
+                    });
+                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
+                }
+                name if name == crate::commitment_contract::OPEN_FUNCTION && call.args.len() == 2 => {
+                    let expected = self.lower_expr(&call.args[0], current, blocks, vars);
+                    let active = expected.current?;
+                    let opening = self.lower_expr(&call.args[1], active, blocks, vars);
+                    let active = opening.current?;
+                    let inner = match self.operand_type(&opening.operand) {
+                        IrType::Named(name) => crate::commitment_contract::opening_inner_type(&name)
+                            .map(parse_inline_ir_type_repr)
+                            .unwrap_or(IrType::Unit),
+                        _ => IrType::Unit,
+                    };
+                    let dest = self.new_var("opened_value", inner);
+                    self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+                        dest: Some(dest.clone()),
+                        func: "__ckb_commitment_open".to_string(),
+                        args: vec![expected.operand, opening.operand],
+                    });
+                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
+                }
                 "Vec::new" if call.args.is_empty() => {
                     let dest = self.new_var("vec_new_tmp", IrType::Named("Vec".to_string()));
                     self.block_mut(blocks, current).instructions.push(IrInstruction::CollectionNew {
@@ -9408,7 +9448,14 @@ fn collection_item_ir_type(ty: &IrType) -> Option<IrType> {
 }
 
 fn parse_inline_ir_type_repr(repr: &str) -> IrType {
-    match repr.trim() {
+    let repr = repr.trim();
+    if let Some(array) = repr.strip_prefix('[').and_then(|value| value.strip_suffix(']'))
+        && let Some((inner, len)) = array.rsplit_once(';')
+        && let Ok(len) = len.trim().parse::<usize>()
+    {
+        return IrType::Array(Box::new(parse_inline_ir_type_repr(inner)), len);
+    }
+    match repr {
         "u8" => IrType::U8,
         "u16" => IrType::U16,
         "u32" => IrType::U32,
@@ -11137,6 +11184,12 @@ fn fixed_encoded_size_for_resolver_ir_type(
         }),
         IrType::Unit => Some(0),
         IrType::Named(name) => {
+            if crate::commitment_contract::commitment_inner_type(name).is_some() {
+                return Some(32);
+            }
+            if let Some(inner) = crate::commitment_contract::opening_inner_type(name) {
+                return fixed_encoded_size_for_resolver_ir_type(&parse_inline_ir_type_repr(inner), type_fields, seen);
+            }
             let base_name = name.split('<').next().unwrap_or(name.as_str());
             if !seen.insert(base_name.to_string()) {
                 return None;

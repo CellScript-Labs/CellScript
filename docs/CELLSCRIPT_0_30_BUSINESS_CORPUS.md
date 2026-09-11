@@ -16,6 +16,12 @@ one SHA-256 digest over the complete frozen inventory. The `dev`, `ci`, and
 `backend` gates run that validator. Stale, missing, untracked, duplicated, or
 path-escaping evidence fails the gate.
 
+The same gate validates the separate
+[0.30 product capability ledger](CELLSCRIPT_0_30_CAPABILITY_LEDGER.md). The
+ledger prevents an admitted compiler-surface result, an owner-only scenario
+inventory, or a local CKB-VM result from being presented as complete product,
+chain, or release evidence.
+
 ## Frozen portfolio
 
 | Family | Required business boundary | Principal executable evidence |
@@ -25,14 +31,19 @@ path-escaping evidence fails the gate.
 | Order and AMM | Partial fill/cancel/settle, variable payments, price/reserve rules, ordered outputs, authenticated dependency | iCKB differential fixtures, AMM examples, cost corpus, and the composition anchor |
 | Temporal | Absolute/relative locks, vesting, epochs, timestamps, blocks, headers, and `Since` | typed runtime-view and iCKB CKB-VM fixtures |
 | Authorization | Standard signing, multisig, issuer and Script identity, post-signing mutation rejection | bundled multisig-v2, SDK signing, policy lifecycle, and sighash fixtures |
-| Committed state | Authenticated opening, successor commitment, shared witness ownership, stale/root/index failures | bounded hash/Merkle CKB-VM cases, schema acknowledgements, and matched schema-roll reference |
+| Committed state | Authenticated opening, successor commitment, shared witness ownership, stale/root/index failures | typed `Commitment<T>`/`Opening<T>` CKB-VM and resource fixtures, bounded hash/Merkle cases, schema acknowledgements, and matched schema-roll reference |
 | Multi-Script composition | At least four artifacts, interacting Type and Lock groups, persistent action dispatch, ProtocolBundle conflicts and exact identities | `business_corpus.rs`, ProtocolBundle CLI and adapter tests |
 | External verifier | Exact-identity EXEC or SPAWN/WAIT with explicit trusted boundary and substitution failures | `trusted_external.rs` and exact-handle CKB-VM cases |
 
 The companion transaction inventory
 [`tests/fixtures/business_transaction_inventory.json`](../tests/fixtures/business_transaction_inventory.json)
-names the required positive and adversarial scenarios and the Rust fixture that
-constructs each canonical Molecule transaction.
+names the required positive and adversarial scenarios and their current test
+owners. It does not by itself prove that each name has a canonical Molecule
+transaction. The separately hashed
+[`business_scenario_evidence.json`](../tests/fixtures/business_scenario_evidence.json)
+records the actual evidence grade and gaps for every family. The release gate
+requires an exact artifact fixture for every named positive and adversarial row;
+owner-only test lists and family-level CKB-VM coverage do not satisfy it.
 
 ## Same-transaction anchor
 
@@ -80,6 +91,16 @@ never treated as evidence for a higher layer.
 
 The inventory remains `candidate` because selected-network node admission,
 deployment identities, and independent review are still pending.
+The scenario-evidence manifest additionally records that the configured
+NovaSeal and iCKB reference submodule commits are currently unreachable from
+their remotes, so matched-reference reproducibility is blocked rather than
+silently rebased to a different commit. The four-artifact anchor pins raw and
+serialized transaction hashes but remains below `exact-artifact-fixture` until
+every participating ELF and sidecar identity is frozen in its scenario record.
+The maximum-width authenticated-opening row is the first exact-artifact
+scenario: it freezes the ELF, lowering record, source map, verified bundle,
+raw transaction, serialized transaction, and resource measurements. The
+successor and committed-state adversarial rows remain incomplete.
 `check-business-corpus --release` rejects that state. Stable versioning, tags,
 package publication, editor/browser
 publication, and network deployment remain outside this candidate record.

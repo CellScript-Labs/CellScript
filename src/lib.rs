@@ -7,6 +7,7 @@ pub mod artifact;
 pub mod assumptions;
 pub mod ast;
 pub mod ckb_abi;
+mod commitment_contract;
 // CLI, LSP, REPL, incremental, and debug tooling are gated out of the
 // wasm build: they depend on tokio/tower-lsp/clap/colored/env_logger,
 // which pull native I/O (mio/std::net) that wasm32 cannot link. The
@@ -232,7 +233,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
-const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v52-0.30-dev10-public-value-generics";
+const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v53-0.30-dev11-typed-openings";
 pub const METADATA_SCHEMA_VERSION: u32 = 72;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 2;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -252,6 +253,7 @@ pub const CKB_SCRIPT_HASH_MAX_ARGS_BYTES: usize = 459;
 pub const MAX_SOURCE_BYTES: usize = 1024 * 1024;
 const STACK_COLLECTION_BACKING_BYTES: usize = 256;
 pub const ENTRY_WITNESS_ABI: &str = "cellscript-entry-witness-v1";
+
 pub(crate) const ENTRY_WITNESS_ABI_MAGIC: &[u8; 8] = b"CSARGv1\0";
 /// Versioned CKB placement contract for parameterized entry payloads.
 pub const ENTRY_WITNESS_PLACEMENT_ABI: &str = "cellscript-witnessargs-input-type-v2";
@@ -17414,6 +17416,37 @@ fn metadata_prelude_availability(
                         availability.fixed_value_vars.insert(dest.id);
                     }
                 }
+                ir::IrInstruction::Call { dest: Some(dest), func, args }
+                    if func == "__ckb_hash_blake2b_packed"
+                        && matches!(&dest.ty, ir::IrType::Named(name) if commitment_contract::commitment_inner_type(name).is_some()) =>
+                {
+                    if args.first().is_some_and(|arg| metadata_fixed_hash_input_available(arg, &availability, type_layouts)) {
+                        availability.fixed_value_vars.insert(dest.id);
+                        availability.aggregate_pointer_vars.insert(dest.id, MetadataAggregatePointerSource { ty: dest.ty.clone() });
+                    }
+                }
+                ir::IrInstruction::Call { dest: Some(dest), func, args } if func == "__ckb_commitment_open" => {
+                    let width = metadata_ir_type_fixed_width(&dest.ty, type_layouts);
+                    if args.len() == 2
+                        && metadata_fixed_value_available_with_layout_width(&args[0], &availability, 32, type_layouts)
+                        && width.is_some_and(|width| {
+                            metadata_fixed_value_available_with_layout_width(&args[1], &availability, width, type_layouts)
+                        })
+                    {
+                        availability.fixed_value_vars.insert(dest.id);
+                        if width.is_some_and(|width| width > 8) || matches!(dest.ty, ir::IrType::Named(_)) {
+                            availability
+                                .aggregate_pointer_vars
+                                .insert(dest.id, MetadataAggregatePointerSource { ty: dest.ty.clone() });
+                        } else {
+                            availability.scalar_vars.insert(dest.id);
+                            if dest.ty == ir::IrType::U64 {
+                                availability.u64_value_vars.insert(dest.id);
+                                availability.u64_operand_vars.insert(dest.id);
+                            }
+                        }
+                    }
+                }
                 ir::IrInstruction::Call { dest: Some(dest), func, args } if dest.ty == ir::IrType::Hash => {
                     let fixed_hash_result = match func.as_str() {
                         "__ckb_hash_chain" | "__ckb_hash_blake2b" | "__ckb_hash_sha256" | "__ckb_hash_sha256d" => {
@@ -18413,6 +18446,7 @@ fn metadata_fixed_byte_width(ty: &ir::IrType, fixed_size: Option<usize>) -> Opti
             Some(size)
         }
         (ir::IrType::Named(name), Some(32)) if ir::is_ckb_fixed_hash_domain_name(name) => Some(32),
+        (ir::IrType::Named(name), Some(32)) if commitment_contract::commitment_inner_type(name).is_some() => Some(32),
         (ir::IrType::Ref(inner) | ir::IrType::MutRef(inner), _) => metadata_fixed_byte_width(inner, type_static_length(inner)),
         _ => None,
     }
@@ -18453,6 +18487,12 @@ fn metadata_molecule_vector_element_fixed_width(ty: &ir::IrType, type_layouts: &
 }
 
 fn metadata_inline_type_fixed_width(ty: &str, type_layouts: &MetadataTypeLayouts) -> Option<usize> {
+    if commitment_contract::commitment_inner_type(ty.trim()).is_some() {
+        return Some(32);
+    }
+    if let Some(inner) = commitment_contract::opening_inner_type(ty.trim()) {
+        return metadata_inline_type_fixed_width(inner, type_layouts);
+    }
     match ty.trim() {
         "bool" | "u8" => Some(1),
         "u16" => Some(2),
@@ -21652,6 +21692,7 @@ fn operand_fixed_byte_width(operand: &ir::IrOperand) -> Option<usize> {
                 Some(script_handle_contract::DEPLOYMENT_LINE_HANDLE_BYTES)
             }
             ir::IrType::Named(name) if ir::is_ckb_fixed_hash_domain_name(name) => Some(32),
+            ir::IrType::Named(name) if commitment_contract::commitment_inner_type(name).is_some() => Some(32),
             _ => None,
         },
         _ => None,
@@ -21675,6 +21716,7 @@ fn type_static_length(ty: &ir::IrType) -> Option<usize> {
         ir::IrType::Ref(inner) | ir::IrType::MutRef(inner) => type_static_length(inner),
         ir::IrType::Named(name) if ir::is_ckb_temporal_scalar_name(name) => Some(8),
         ir::IrType::Named(name) if ir::is_ckb_fixed_hash_domain_name(name) => Some(32),
+        ir::IrType::Named(name) if commitment_contract::commitment_inner_type(name).is_some() => Some(32),
         ir::IrType::Named(name) if name == script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE => {
             Some(script_handle_contract::EXACT_SCRIPT_HANDLE_BYTES)
         }
@@ -21736,6 +21778,7 @@ fn param_metadata(
     let schema_pointer_abi = named_type.is_some_and(|name| {
         !ir::is_ckb_temporal_scalar_name(name)
             && !ir::is_ckb_fixed_hash_domain_name(name)
+            && commitment_contract::commitment_inner_type(name).is_none()
             && name != script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE
             && name != script_handle_contract::DEPLOYMENT_LINE_HANDLE_TYPE
     }) && enum_fixed_len.is_none();

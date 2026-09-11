@@ -83,6 +83,21 @@ action inspect() -> u64 {
 }
 "#;
 
+const COMMITTED_STATE_SOURCE: &str = r#"
+module artifact_checker_committed_state
+
+struct State { counter: u64 }
+
+action inspect(witness expected: Commitment<State>, witness opening: Opening<State>) -> u64 {
+    verification
+        let state = commitment::open(expected, opening)
+        let successor = State { counter: state.counter + 1 }
+        let next = commitment::commit(successor)
+        require next != expected
+        return 0
+}
+"#;
+
 const EXACT_HANDLE_SOURCE: &str = r#"
 module artifact_checker_exact_handle
 
@@ -1203,6 +1218,56 @@ fn assert_code(fixture: &Fixture, expected: CheckerRejectionCode) {
         Ok(()) => panic!("mutation unexpectedly passed; expected {}", expected.as_str()),
         Err(actual) => assert_eq!(actual, expected),
     }
+}
+
+#[test]
+fn committed_state_typed_call_contracts_cannot_be_relabelled_after_rebinding() {
+    let valid = Fixture::from_source(COMMITTED_STATE_SOURCE);
+    let calls = valid
+        .record
+        .typed_semantics
+        .entries
+        .iter()
+        .flat_map(|entry| &entry.blocks)
+        .flat_map(|block| &block.operations)
+        .filter_map(|operation| operation.call.as_ref())
+        .map(|call| call.target.as_str())
+        .collect::<Vec<_>>();
+    assert!(calls.contains(&"__ckb_commitment_open"));
+    assert!(calls.contains(&"__ckb_hash_blake2b_packed"));
+
+    let mut changed_opening = valid.clone();
+    let opening = changed_opening
+        .record
+        .typed_semantics
+        .entries
+        .iter_mut()
+        .flat_map(|entry| &mut entry.blocks)
+        .flat_map(|block| &mut block.operations)
+        .find_map(|operation| operation.call.as_mut().filter(|call| call.target == "__ckb_commitment_open"))
+        .expect("typed commitment opening call");
+    opening.params[1] = "Opening<u64>".to_string();
+    changed_opening.rebind_typed_semantics();
+    assert_code(&changed_opening, CheckerRejectionCode::V2419TypedSemanticsInvalid);
+
+    let mut changed_commit = valid;
+    let commit = changed_commit
+        .record
+        .typed_semantics
+        .entries
+        .iter_mut()
+        .flat_map(|entry| &mut entry.blocks)
+        .flat_map(|block| &mut block.operations)
+        .find_map(|operation| {
+            operation
+                .call
+                .as_mut()
+                .filter(|call| call.target == "__ckb_hash_blake2b_packed" && call.return_type.starts_with("Commitment<"))
+        })
+        .expect("typed commitment construction call");
+    commit.params[0] = "u64".to_string();
+    changed_commit.rebind_typed_semantics();
+    assert_code(&changed_commit, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 }
 
 #[test]

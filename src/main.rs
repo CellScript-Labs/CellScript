@@ -542,6 +542,7 @@ fn diagnostic_json_value(
         cellscript::runtime_errors::runtime_error_info_for_diagnostic(diagnostic).map(|info| format!("E{:04}", info.code));
     let compiler_info = diagnostic.code.as_deref().and_then(cellscript::error::compiler_error_info_by_code);
     let file = diagnostic.file.as_ref().map(|file| file.as_str()).or_else(|| fallback_file.map(Utf8Path::as_str));
+    let generated_assembly = diagnostic.details.as_ref().and_then(|details| details.get("generated_assembly"));
     serde_json::json!({
         "message": &diagnostic.message,
         "severity": diagnostic.severity.label(),
@@ -558,6 +559,7 @@ fn diagnostic_json_value(
             "end": diagnostic.span.end,
         },
         "range": diagnostic_range_json(diagnostic, fallback_source),
+        "generated_assembly": generated_assembly,
         "causes": error_causes(diagnostic),
     })
 }

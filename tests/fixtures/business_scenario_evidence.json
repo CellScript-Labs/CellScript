@@ -1,0 +1,104 @@
+{
+  "schema": "cellscript-business-scenario-evidence-v1",
+  "status": "candidate",
+  "transaction_inventory": "tests/fixtures/business_transaction_inventory.json",
+  "claim": "Evidence grades for every family in the frozen transaction inventory; owner tests and family-level CKB-VM coverage are not relabeled as exact per-scenario artifact fixtures.",
+  "reference_reproducibility": {
+    "status": "blocked",
+    "blockers": [
+      "Pinned NovaSeal submodule commit ee7dbff27af8b8ebe960b815794fcd76281d8164 is not reachable from its configured remote",
+      "Pinned iCKB equivalence submodule commit c27bac620293400409b73ec62c6514324c6c2855 is not reachable from its configured remote"
+    ]
+  },
+  "families": {
+    "authorization": {
+      "coverage_status": "owner-test-inventory-only",
+      "records": [],
+      "gaps": [
+        "Family tests exercise multisig, policy authorization, and SighashAll, but the inventory does not bind every named scenario to one canonical transaction, artifact set, and hash record"
+      ]
+    },
+    "committed_state": {
+      "coverage_status": "partial-transaction-hashes",
+      "records": [
+        {
+          "scenario": "authenticated_opening",
+          "outcome": "positive",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/committed_substate_resource_budget.json",
+          "evidence": [
+            "tests/commitment_opening.rs",
+            "tests/artifact_checker.rs",
+            "tests/fixtures/committed_substate_vectors.json"
+          ],
+          "raw_transaction_hash": "0x1544628215dc96e0a36b6285379a709bf5f67da92da1ee4f8aa6a09c58a37535",
+          "serialized_transaction_hash": "0x755c9ae4ac731ce6c08df91ba6952a34027591cad6a9deddc22d1b67e45a484b",
+          "artifact_hashes": [
+            "0xb28f0eb686cfd2d95501614a359d5bfa232fbf2b6166856f111e9186fd29336c"
+          ]
+        }
+      ],
+      "gaps": [
+        "The successor-commitment fixture binds one evaluated value in ProofPlan and output metadata but does not yet freeze an executed successor transaction and artifact identity",
+        "Stale, malformed, wrong-root, wrong-index, and wrong-successor rows still need individual exact artifact and transaction records"
+      ]
+    },
+    "external_verifier": {
+      "coverage_status": "owner-test-inventory-only",
+      "records": [],
+      "gaps": [
+        "Exact-handle and trusted-external tests are not yet indexed as one hash-bound canonical transaction fixture for every positive and adversarial inventory row"
+      ]
+    },
+    "fungible_asset": {
+      "coverage_status": "owner-test-inventory-only",
+      "records": [],
+      "gaps": [
+        "Bounded input/output and token lifecycle tests exist, but the inventory has no per-scenario fixture, ELF, sidecar, transaction, and measurement hash records"
+      ]
+    },
+    "multi_script_composition": {
+      "coverage_status": "partial-transaction-hashes",
+      "records": [
+        {
+          "scenario": "four_artifact_same_transaction",
+          "outcome": "positive",
+          "status": "transaction-hashes-pinned",
+          "fixture": "tests/fixtures/capability_anchor_cases.json",
+          "evidence": ["tests/business_corpus.rs"],
+          "raw_transaction_hash": "0x0991ec77b29b6d04b02afde1f8315cf549a6c466da151c5dd70838f6e60c6acd",
+          "serialized_transaction_hash": "0x4828bc62108ca171ba82670dbe8bd9479d6bb6ba2c1ab6f82291f4c302b7b01c",
+          "artifact_hashes": []
+        }
+      ],
+      "gaps": [
+        "The anchor pins raw and serialized transaction hashes but its frozen fixture does not record each participating ELF and sidecar hash",
+        "The remaining positive and adversarial inventory rows lack individual exact-artifact fixture records"
+      ]
+    },
+    "nft_dob": {
+      "coverage_status": "owner-test-inventory-only",
+      "records": [],
+      "gaps": [
+        "The matched cost row proves only NFT ownership Lock behavior, not mint, metadata update, capacity adjustment, or burn",
+        "The live action harness reports zero builder-backed actions and does not provide per-scenario canonical transaction hashes"
+      ]
+    },
+    "order_amm": {
+      "coverage_status": "owner-test-inventory-only",
+      "records": [],
+      "gaps": [
+        "The anchor and iCKB tests provide family evidence, but the configured pinned Rust-equivalence submodule commit is unreachable",
+        "Each named price, replay, reordering, cancellation, and partial-settlement row still needs its own exact artifact and transaction record"
+      ]
+    },
+    "temporal": {
+      "coverage_status": "owner-test-inventory-only",
+      "records": [],
+      "gaps": [
+        "Typed runtime-view and temporal tests do not yet bind every inventory row to an exact candidate artifact, builder transaction, and measurement record",
+        "The configured pinned iCKB reference commit is unreachable"
+      ]
+    }
+  }
+}

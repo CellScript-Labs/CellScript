@@ -178,8 +178,156 @@ pub fn build_for_body(
         .extend(body.borrow_regions.iter().enumerate().map(|(index, region)| plan_for_borrow_region(scope_kind, name, index, region)));
     plans.extend(exact_script_handle_plans(scope_kind, name, body));
     plans.extend(deployment_line_handle_plans(scope_kind, name, body));
+    plans.extend(committed_state_plans(scope_kind, name, body));
 
     plans
+}
+
+fn committed_state_plans(scope_kind: &str, scope_name: &str, body: &ir::IrBody) -> Vec<ProofPlanMetadata> {
+    let mut plans = Vec::new();
+    for (block_index, block) in body.blocks.iter().enumerate() {
+        for (operation_index, instruction) in block.instructions.iter().enumerate() {
+            let IrInstruction::Call { dest: Some(dest), func, args } = instruction else {
+                continue;
+            };
+            let (category, feature, reads, coverage, relation_checks, detail) = match func.as_str() {
+                "__ckb_commitment_open" => {
+                    let commitment_type = args
+                        .first()
+                        .and_then(|operand| match operand {
+                            ir::IrOperand::Var(var) => match &var.ty {
+                                ir::IrType::Named(name) => Some(name.as_str()),
+                                _ => None,
+                            },
+                            _ => None,
+                        })
+                        .unwrap_or("invalid-commitment");
+                    let opening_type = args
+                        .get(1)
+                        .and_then(|operand| match operand {
+                            ir::IrOperand::Var(var) => match &var.ty {
+                                ir::IrType::Named(name) => Some(name.as_str()),
+                                _ => None,
+                            },
+                            _ => None,
+                        })
+                        .unwrap_or("invalid-opening");
+                    (
+                        "committed-state-opening",
+                        format!("{commitment_type}+{opening_type}"),
+                        vec!["witness".to_string(), "witness:Opening<T>".to_string(), "expected:Commitment<T>".to_string()],
+                        vec![
+                            "codec:cellscript-entry-witness-v1-length-delimited-opening".to_string(),
+                            "hash:ckb-blake2b-256".to_string(),
+                            "domain:CellScriptPackedHashV0\\0+type+width".to_string(),
+                            "materialization:after-32-byte-digest-comparison".to_string(),
+                            "mismatch-error:73".to_string(),
+                        ],
+                        Vec::new(),
+                        format!("authenticate one {opening_type} against {commitment_type} before producing a typed value"),
+                    )
+                }
+                "__ckb_hash_blake2b_packed" if matches!(&dest.ty, ir::IrType::Named(name) if name.starts_with("Commitment<")) => {
+                    let commitment_type = match &dest.ty {
+                        ir::IrType::Named(name) => name.as_str(),
+                        _ => "invalid-commitment",
+                    };
+                    let output_fields = committed_value_output_fields(body, dest.id);
+                    let relation_checks = output_fields
+                        .iter()
+                        .map(|field| format!("successor-field:{field}=single-evaluated-commitment"))
+                        .collect::<Vec<_>>();
+                    (
+                        "committed-state-commit",
+                        commitment_type.to_string(),
+                        vec!["typed-fixed-width-successor".to_string()],
+                        vec![
+                            "codec:fixed-width-packed-value".to_string(),
+                            "hash:ckb-blake2b-256".to_string(),
+                            "domain:CellScriptPackedHashV0\\0+type+width".to_string(),
+                            "evaluation:single-ir-value".to_string(),
+                        ],
+                        relation_checks,
+                        if output_fields.is_empty() {
+                            format!("construct one nominal {commitment_type} from the exact typed input value")
+                        } else {
+                            format!(
+                                "construct one nominal {commitment_type} and bind that exact evaluated value to successor field(s) {}",
+                                output_fields.join(", ")
+                            )
+                        },
+                    )
+                }
+                _ => continue,
+            };
+            plans.push(ProofPlanMetadata {
+                name: format!("{}#{}-{}-{}", scope_name, category, block_index, operation_index),
+                origin: format!("{}:{}#{}:{}:{}", scope_kind, scope_name, category, block_index, operation_index),
+                category: category.to_string(),
+                feature: feature.clone(),
+                evidence_tier: EvidenceTier::CheckedRuntime,
+                source_span: None,
+                trigger: trigger_for_scope_kind(scope_kind).to_string(),
+                scope: "explicit-fixed-width-committed-substate".to_string(),
+                reads,
+                coverage,
+                input_output_relation_checks: relation_checks,
+                group_cardinality: "one-explicit-opening-or-successor-value".to_string(),
+                identity_lifecycle_policy:
+                    "commitment authentication does not hide, infer, consume, or create the parent Cell lifecycle"
+                        .to_string(),
+                preserved_fields: Vec::new(),
+                witness_fields: if category == "committed-state-opening" {
+                    vec!["Opening<T>".to_string()]
+                } else {
+                    Vec::new()
+                },
+                lock_args_fields: Vec::new(),
+                on_chain_checked: true,
+                on_chain_checked_obligations: vec![
+                    format!("{category}:{}=checked-runtime", feature),
+                    "typed operands, canonical domain, bounded preimage, complete digest comparison, and post-check materialization are required"
+                        .to_string(),
+                ],
+                builder_assumptions: if category == "committed-state-opening" {
+                    vec![
+                        "builder must encode the exact fixed-width opening in the declared entry-witness parameter before signing"
+                            .to_string(),
+                    ]
+                } else {
+                    Vec::new()
+                },
+                codegen_coverage_status: "covered".to_string(),
+                status: "checked-runtime".to_string(),
+                detail,
+                diagnostics: vec![ProofPlanDiagnosticMetadata {
+                    severity: "info".to_string(),
+                    message: "fixed-width committed state is an explicit typed value contract, not hidden persistent state"
+                        .to_string(),
+                }],
+            });
+        }
+    }
+    plans
+}
+
+fn committed_value_output_fields(body: &ir::IrBody, committed_value_id: usize) -> Vec<String> {
+    let mut fields = BTreeSet::new();
+    for instruction in body.blocks.iter().flat_map(|block| &block.instructions) {
+        let pattern = match instruction {
+            IrInstruction::Create { pattern, .. }
+            | IrInstruction::CreateUnique { pattern, .. }
+            | IrInstruction::ReplaceUnique { pattern, .. }
+            | IrInstruction::BoundedOutputVerify { pattern, .. } => pattern,
+            _ => continue,
+        };
+        for (field, operand) in &pattern.fields {
+            if matches!(operand, ir::IrOperand::Var(var) if var.id == committed_value_id) {
+                fields.insert(format!("{}.{}", pattern.binding, field));
+            }
+        }
+    }
+    fields.into_iter().collect()
 }
 
 fn exact_script_handle_plans(scope_kind: &str, scope_name: &str, body: &ir::IrBody) -> Vec<ProofPlanMetadata> {
