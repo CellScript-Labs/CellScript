@@ -5,8 +5,8 @@
 **Status: implementation-complete additive issue #12 contract for typed
 HeaderDep fields, all six RFC0017 `Since` mode/metric domains, checked decoding,
 checked whole-epoch duration arithmetic, migration, interfaces, builders, and
-product parity. Full candidate gates and independent review remain before issue
-#12 or the 0.30 release gate can close.**
+product parity. The maintainer has waived independent review for the 0.30
+release line; exact candidate replay remains a release-level requirement.**
 
 The normative chain behavior comes from
 [CKB RFC 0017](https://github.com/nervosnetwork/rfcs/blob/master/rfcs/0017-tx-valid-since/0017-tx-valid-since.md).

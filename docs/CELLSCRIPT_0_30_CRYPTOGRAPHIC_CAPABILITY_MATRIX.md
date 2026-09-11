@@ -112,8 +112,9 @@ complete four-case transaction matrix. Its 15,792-byte stack value is the
 child VM's observed dynamic high-water mark; the independently verified parent
 lowering has a 5,392-byte maximum frame. The release gate reproduces the report
 and requires exact equality with the recorded cycle, ELF, stack, witness,
-transaction, and dependency measurements. Selected-network deployment and
-independent review remain explicit and incomplete.
+transaction, and dependency measurements. Independent review is explicitly
+waived for the 0.30 release line; selected-network deployment and the unified
+release gate remain explicit and incomplete.
 
 ## Deferred surfaces
 

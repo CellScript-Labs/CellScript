@@ -464,7 +464,7 @@
       "design_records": ["docs/CELLSCRIPT_0_30_BUSINESS_CORPUS.md"],
       "evidence": ["tests/fixtures/business_corpus.json", "tests/fixtures/business_transaction_inventory.json", "tests/fixtures/business_scenario_evidence.json", "tests/fixtures/authorization_scenarios.json", "tests/fixtures/capability_anchor_cases.json", "tests/fixtures/committed_substate_scenarios.json", "tests/fixtures/external_exec_callee.hex", "tests/fixtures/external_verifier_scenarios.json", "tests/fixtures/fungible_scenarios.cell", "tests/fixtures/fungible_scenarios.json", "tests/fixtures/nft_capacity_scenario.cell", "tests/fixtures/nft_scenarios.cell", "tests/fixtures/nft_scenarios.json", "tests/fixtures/order_amm_scenarios.json", "tests/fixtures/order_amm_swap.cell", "tests/fixtures/temporal_scenarios.json", "tests/business_corpus.rs", "tests/commitment_opening.rs", "tests/external_verifier_scenarios.rs", "tests/fungible_scenarios.rs", "tests/order_amm_scenarios.rs", "tests/temporal_scenarios.rs"],
       "non_goals": ["A percentage claim over arbitrary Rust contracts or relabeling lower evidence tiers as higher ones"],
-      "remaining_work": ["Record node admission and selected-network deployment evidence"]
+      "remaining_work": ["Record selected-network deployment evidence"]
     },
     {
       "issue": 27,
@@ -487,7 +487,7 @@
       "design_records": ["docs/CELLSCRIPT_0_30_CAPABILITY_CLOSURE_RFC.md", "docs/CELLSCRIPT_0_30_BUSINESS_CORPUS.md"],
       "evidence": ["scripts/cellscript_gate.sh", "tests/fixtures/business_corpus.json"],
       "non_goals": ["Version bumps, publication, or deployment before every required identity and gate agrees"],
-      "remaining_work": ["Run exact clean candidate replay", "Record node admission and selected-network deployment", "Publish only after release acceptance"]
+      "remaining_work": ["Run exact clean candidate replay", "Record selected-network deployment", "Publish only after release acceptance"]
     }
   ],
   "release_requirements": {

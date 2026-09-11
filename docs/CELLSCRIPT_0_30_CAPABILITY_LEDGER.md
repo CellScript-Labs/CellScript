@@ -63,12 +63,13 @@ The machine ledger is the detailed source of truth. At this candidate point:
   builder, typed-checker, exact schema-field pointer binding, standalone
   machine-checker mutation, and complete positive/adversarial committed-state
   CKB-VM inventory slice.
-- #25 and #26 retain only release-gate, node-admission, and selected-network
-  evidence work; their admitted implementation slices are executable.
+- #25 retains release-gate and selected-network evidence work. #26 retains
+  selected-network deployment evidence after local production admission passed
+  on pinned CKB `f7fa4436`; their admitted implementation slices are executable.
 - #22 is research and deferred from the 0.30 core; a circuit DSL remains a
   non-goal.
-- #27 remains open until exact candidate replay, product publication, node
-  admission, and selected-network evidence are complete. The maintainer has
+- #27 remains open until exact candidate replay, product publication, and
+  selected-network evidence are complete. The maintainer has
   explicitly waived independent review for this release line. The previously
   unreachable gitlinks were re-accepted on 2026-09-11 at retrievable release
   evidence commits: VS Code `4df04807`, website `4d1acbed`, NovaSeal

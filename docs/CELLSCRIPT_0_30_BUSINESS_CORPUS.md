@@ -173,20 +173,21 @@ layers separately. `passed`, `not-applicable`, `pending`, and
 `release-candidate-required` retain their literal meanings. A lower layer is
 never treated as evidence for a higher layer.
 
-The inventory remains `candidate` because selected-network node admission,
-deployment identities, and independent review are still pending.
-The scenario-evidence manifest additionally records that the configured
-NovaSeal and iCKB reference submodule commits are currently unreachable from
-their remotes, so matched-reference reproducibility is blocked rather than
-silently rebased to a different commit. The four-artifact anchor, its byte-
+The inventory remains `candidate` because selected-network deployment identity
+and the unified release gate are still pending. Independent review is
+explicitly waived for the 0.30 release line. Local production admission passed
+against clean commit `6405ffe0` on the pinned CKB `f7fa4436` (`v0.207.0`). The
+scenario-evidence manifest records the re-accepted, retrievable NovaSeal
+`2db4af38` and iCKB `53c5078a` reference commits, so matched-reference
+reproducibility is no longer blocked. The four-artifact anchor, its byte-
 identical ProtocolBundle materialization, four inventory-mapped rejected
 substitutions, and the maximum-width authenticated-opening row are exact-
 artifact scenarios: each freezes its ELF identity or identities plus raw and
 serialized transaction identities; their owning fixtures also bind lowering
 records, source maps, verified bundles, and resource measurements. All eight
 families now have an exact artifact fixture for every frozen positive and
-adversarial row. The unreachable matched references, selected-network
-node/deployment evidence, and independent review remain separate blockers.
+adversarial row. Selected-network deployment evidence remains a separate
+blocker.
 `check-business-corpus --release` rejects that state. Stable versioning, tags,
 package publication, editor/browser
 publication, and network deployment remain outside this candidate record.
