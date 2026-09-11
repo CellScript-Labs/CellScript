@@ -165,7 +165,7 @@
       "design_records": ["docs/CELLSCRIPT_COMMITTED_SUBSTATE.md", "docs/CELLSCRIPT_0_30_CAPABILITY_CLOSURE_RFC.md"],
       "evidence": ["tests/commitment_opening.rs", "tests/artifact_checker.rs", "tests/fixtures/committed_substate_vectors.json", "tests/fixtures/committed_substate_resource_budget.json", "src/commitment_contract.rs"],
       "non_goals": ["Hidden compiler-owned state, arbitrary opaque bytes, or unbounded recursive values"],
-      "remaining_work": ["Add standalone machine-code mutations for removed or reordered opening and recommit blocks", "Record independent review of the fixed-width type, ABI, hash-domain, and post-comparison materialization contract"]
+      "remaining_work": ["Record independent review of the fixed-width type, ABI, hash-domain, and post-comparison materialization contract"]
     },
     {
       "issue": 14,

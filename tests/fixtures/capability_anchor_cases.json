@@ -41,7 +41,7 @@
     "occupied_capacity_shannons": 32800000000,
     "raw_transaction_hash": "0x0991ec77b29b6d04b02afde1f8315cf549a6c466da151c5dd70838f6e60c6acd",
     "serialized_transaction_hash": "0x4828bc62108ca171ba82670dbe8bd9479d6bb6ba2c1ab6f82291f4c302b7b01c",
-    "protocol_bundle_hash": "41fe6830a8c417e610505c6067f35389ceec720edf713c13cfb9554842d8aa3b"
+    "protocol_bundle_hash": "e8882c9bb9db2365aa7177fd2f26e6d2412d982ce42569395e6a71f265f828e1"
   },
   "budgets": {
     "max_cycles": 45000,

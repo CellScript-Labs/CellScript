@@ -15,8 +15,9 @@
   and real CKB-VM pass/tamper tests share the same fixed-width contract. An
   exact maximum-shape profile fills the 512-byte scratch contract and gates
   cycles, ELF, stack, witness, transaction, dependency, artifact, sidecar, and
-  transaction identities. Inline machine-block mutations, independent review,
-  and release acceptance remain pending.
+  transaction identities. The standalone checker binds and mutation-tests the
+  inline header/copy/hash/compare/materialize/recommit machine sequence.
+  Independent review and release acceptance remain pending.
 
 - Add the versioned 0.30 product-capability ledger for issues #7 through #27
   and validate its claims, evidence links, dispositions, dependencies, and

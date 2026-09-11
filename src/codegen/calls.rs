@@ -54,6 +54,8 @@ impl CodeGenerator {
             self.emit(format!("li t0, {}", byte));
             self.emit_stack_store_byte("t0", buffer_offset + index);
         }
+        let header_ready = self.fresh_label("commitment_opening_header_ready");
+        self.emit_label(&header_ready);
         self.emit_prepare_fixed_byte_source(&opening_source, width, "typed opening witness");
         if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &opening_source) {
             self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
@@ -260,6 +262,10 @@ impl CodeGenerator {
             for (index, byte) in header.iter().enumerate() {
                 self.emit(format!("li t0, {}", byte));
                 self.emit_stack_store_byte("t0", buffer_offset + index);
+            }
+            if matches!(&dest.ty, IrType::Named(name) if crate::commitment_contract::commitment_inner_type(name).is_some()) {
+                let header_ready = self.fresh_label("commitment_commit_header_ready");
+                self.emit_label(&header_ready);
             }
             self.emit_prepare_fixed_byte_source(&source, width, "hash_blake2b_packed input");
             if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &source) {

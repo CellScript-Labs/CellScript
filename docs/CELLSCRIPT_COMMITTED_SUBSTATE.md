@@ -82,15 +82,18 @@ ProofPlan records, host hash vectors, and real CKB-VM acceptance/rejection tests
 in `tests/commitment_opening.rs`, with vectors in
 `tests/fixtures/committed_substate_vectors.json`. The standalone artifact
 checker rejects rebound typed-call records whose `Commitment<T>`, `Opening<T>`,
-or result types no longer agree. The exact maximum fixed-width shape uses a
-one-byte type name and 451 packed value bytes, filling the 512-byte
+or result types no longer agree. It also binds the inline machine blocks to the
+typed operation order, exact domain/type/width header, bounded scratch layout,
+opening size guard, copy/hash/compare arguments and status paths,
+compare-before-materialize boundary, mismatch error 73, and successor digest
+destination. Independent mutations cover removed or reordered markers and each
+security-relevant instruction class. The exact maximum fixed-width shape uses
+a one-byte type name and 451 packed value bytes, filling the 512-byte
 preimage-plus-digest budget; its cycles, ELF, maximum stack frame, witness,
 transaction, and dependency bytes are frozen in
 `tests/fixtures/committed_substate_resource_budget.json`.
 
 Dynamic openings, selectable hash algorithms/domains, recursive or variable
 layouts, zero-knowledge proof objects, and general-purpose witness codecs are
-outside this Phase 1 profile. A standalone machine-code mutation contract for
-removing or reordering the inline open/recommit blocks, independent
-cryptographic/compiler review, and release acceptance remain gates before the
-issue can close.
+outside this Phase 1 profile. Independent cryptographic/compiler review and
+release acceptance remain gates before the issue can close.

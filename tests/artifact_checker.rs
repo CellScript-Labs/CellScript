@@ -1271,6 +1271,120 @@ fn committed_state_typed_call_contracts_cannot_be_relabelled_after_rebinding() {
 }
 
 #[test]
+fn committed_state_machine_blocks_reject_rebound_removal_reordering_and_instruction_mutations() {
+    let valid = Fixture::from_source(COMMITTED_STATE_SOURCE);
+    let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+    let marker = |prefix: &str| {
+        valid
+            .record
+            .blocks
+            .iter()
+            .find(|block| {
+                block.owner_entry == "action:inspect" && block.machine_label.as_deref().is_some_and(|label| label.starts_with(prefix))
+            })
+            .expect("committed-state marker")
+    };
+    let opening = marker(".Lcommitment_opening_header_ready_");
+    let authenticated = marker(".Lcommitment_opening_verified_");
+    let recommit = marker(".Lcommitment_commit_header_ready_");
+    assert!(opening.range.start < authenticated.range.start && authenticated.range.start < recommit.range.start);
+
+    let runtime_target = |name: &str| {
+        let entry = valid.record.entries.iter().find(|entry| entry.id == format!("runtime:{name}")).expect("runtime entry");
+        valid.record.blocks.iter().find(|block| block.id == entry.entry_block).expect("runtime entry block").range.start
+    };
+    let calls = |name: &str, start: u64, end: u64| {
+        let target = runtime_target(name);
+        elf.control_flow
+            .iter()
+            .filter(|flow| start <= flow.address && flow.address < end && flow.target == target)
+            .map(|flow| flow.address)
+            .collect::<Vec<_>>()
+    };
+    let opening_hash = calls("__ckb_hash_blake2b_var", opening.range.start, authenticated.range.start)[0];
+    let opening_compare = calls("__cellscript_memcmp_fixed", opening.range.start, authenticated.range.start)[0];
+    let recommit_hash = calls("__ckb_hash_blake2b_var", recommit.range.start, recommit.range.end + 512)[0];
+    let word_at = |address| elf.instructions.iter().find(|instruction| instruction.address == address).expect("machine word").word;
+    let last_immediate_definition = |address: u64, register: u32| {
+        elf.instructions
+            .iter()
+            .filter(|instruction| instruction.address < address)
+            .rev()
+            .find(|instruction| {
+                instruction.word & 0x7f == 0x13
+                    && (instruction.word >> 12) & 0x7 == 0
+                    && (instruction.word >> 7) & 0x1f == register
+                    && (instruction.word >> 15) & 0x1f == 0
+            })
+            .expect("immediate argument definition")
+            .address
+    };
+
+    let mut changed = valid.clone();
+    changed.record.blocks.iter_mut().find(|block| block.id == opening.id).unwrap().machine_label = None;
+    changed.rebind_sidecars();
+    assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+
+    let mut changed = valid.clone();
+    let opening_index = changed.record.blocks.iter().position(|block| block.id == opening.id).unwrap();
+    let recommit_index = changed.record.blocks.iter().position(|block| block.id == recommit.id).unwrap();
+    let opening_label = changed.record.blocks[opening_index].machine_label.take();
+    let recommit_label = changed.record.blocks[recommit_index].machine_label.take();
+    changed.record.blocks[opening_index].machine_label = recommit_label;
+    changed.record.blocks[recommit_index].machine_label = opening_label;
+    changed.rebind_sidecars();
+    assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+
+    for marker in [opening, recommit] {
+        let mut changed = valid.clone();
+        let address = marker.range.start - 8;
+        changed.replace_machine_word(address, word_at(address) ^ (1 << 20));
+        assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+    }
+
+    for (call, register) in [(opening_hash, 11), (opening_compare, 12), (recommit_hash, 11)] {
+        let mut changed = valid.clone();
+        let address = last_immediate_definition(call, register);
+        let immediate = (word_at(address) as i32) >> 20;
+        changed.replace_machine_word(address, replace_i_immediate(word_at(address), immediate + 1));
+        assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+    }
+
+    let mut changed = valid.clone();
+    changed.replace_machine_word(opening_compare + 4, word_at(opening_compare + 4) ^ (1 << 12));
+    assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+
+    let opening_destination = valid
+        .record
+        .typed_semantics
+        .entries
+        .iter()
+        .flat_map(|entry| &entry.blocks)
+        .flat_map(|block| &block.operations)
+        .find(|operation| operation.call.as_ref().is_some_and(|call| call.target == "__ckb_commitment_open"))
+        .and_then(|operation| operation.destinations.first())
+        .copied()
+        .unwrap();
+    let destination_offset = i32::try_from(opening_destination * 8).unwrap();
+    let destination_store = elf
+        .instructions
+        .iter()
+        .find(|instruction| {
+            authenticated.range.start <= instruction.address
+                && instruction.address < recommit.range.start
+                && instruction.word & 0x7f == 0x23
+                && (instruction.word >> 12) & 0x7 == 3
+                && (instruction.word >> 20) & 0x1f == 5
+                && (instruction.word >> 15) & 0x1f == 2
+                && decode_s_immediate(instruction.word) == destination_offset
+        })
+        .expect("authenticated opening destination store");
+    let mut changed = valid;
+    changed.replace_machine_word(destination_store.address, replace_s_immediate(destination_store.word, destination_offset + 8));
+    assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+}
+
+#[test]
 fn verified_artifact_sidecars_are_deterministic_and_canonical() {
     let first = Fixture::new();
     let second = Fixture::new();
