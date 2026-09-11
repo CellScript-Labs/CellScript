@@ -86,12 +86,21 @@ or result types no longer agree. It also binds the inline machine blocks to the
 typed operation order, exact domain/type/width header, bounded scratch layout,
 opening size guard, copy/hash/compare arguments and status paths,
 compare-before-materialize boundary, mismatch error 73, and successor digest
-destination. Independent mutations cover removed or reordered markers and each
-security-relevant instruction class. The exact maximum fixed-width shape uses
+destination. A Commitment read through a typed schema field is bound to the
+exact root stack slot and accumulated fixed-layout field offset; an offset
+mutation is rejected before the opening can authenticate. Independent mutations
+cover removed or reordered markers and each security-relevant instruction
+class. The exact maximum fixed-width shape uses
 a one-byte type name and 451 packed value bytes, filling the 512-byte
 preimage-plus-digest budget; its cycles, ELF, maximum stack frame, witness,
 transaction, and dependency bytes are frozen in
 `tests/fixtures/committed_substate_resource_budget.json`.
+The separate `committed_substate_scenarios.json` fixture freezes the artifact,
+lowering-record, source-map, verified-bundle, raw-transaction, and serialized-
+transaction identities for the successor positive case and the stale,
+malformed, wrong-root, wrong-index, and wrong-successor adversarial cases. With
+the maximum-shape authenticated-opening fixture, this covers every named
+committed-state business-inventory row.
 
 Dynamic openings, selectable hash algorithms/domains, recursive or variable
 layouts, zero-knowledge proof objects, and general-purpose witness codecs are

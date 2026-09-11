@@ -1,0 +1,54 @@
+{
+  "schema": "cellscript-committed-substate-scenarios-v1",
+  "source_file": "tests/fixtures/committed_substate_scenarios.cell",
+  "artifact_identities": {
+    "artifact_hash": "0x185d5a716653c01b489858e6e53bfd7936d4a52794058c09c2ffc5bba38c1d64",
+    "lowering_record_hash": "0xb8194a8bfc04924c829313dc7a41a764b4573188bdd34e48810b22dc61e255c7",
+    "source_map_hash": "0x978b9abfeb6803f7f9d60853f5f05e5345525b5a74fc76b9e7613ad1286cdbf4",
+    "verified_bundle_id": "0x1c77c49dfe9fda9c93b4d8efc30eff730493e254116cab001d8823df647e5fd9"
+  },
+  "cases": [
+    {
+      "scenario": "successor_commitment",
+      "outcome": "positive",
+      "expected_exit_code": 0,
+      "raw_transaction_hash": "0x14de69ecd935754c40ec0ec2da191e2f1f32ede911c5fe50d9db51417acdda4a",
+      "serialized_transaction_hash": "0x4d69ffd71750113aa84885e97c26722616dace5d37436e977001aae6bbc2f37c"
+    },
+    {
+      "scenario": "stale",
+      "outcome": "adversarial",
+      "expected_exit_code": 73,
+      "raw_transaction_hash": "0x2a87957308889e14168e046da873c8be4c990a91c4ee922523ae02ae2f5a253e",
+      "serialized_transaction_hash": "0x4f5dec48e7814bf04e012a02514db1a2ee9efa5273826826562d2b0384d7624a"
+    },
+    {
+      "scenario": "malformed",
+      "outcome": "adversarial",
+      "expected_exit_code": 4,
+      "raw_transaction_hash": "0x5938a996d54991b89e3bf09979bc3b79bb1b63ae2d2d0ddbc2763635d10eaca8",
+      "serialized_transaction_hash": "0xdcda758609a32b4eafb7eee7beeb774d91fcbdb6ff9680913029b539b5434b05"
+    },
+    {
+      "scenario": "wrong_root",
+      "outcome": "adversarial",
+      "expected_exit_code": 73,
+      "raw_transaction_hash": "0x5b0372c738f6654fe30ea423fa2db5a7eed96b6c29be622c10ea94a19507b889",
+      "serialized_transaction_hash": "0xa7b9f9421dbaacbf9322ab22d3ac9d6040348f4607968e32d82f2469b80bcacf"
+    },
+    {
+      "scenario": "wrong_index",
+      "outcome": "adversarial",
+      "expected_exit_code": 5,
+      "raw_transaction_hash": "0x22a9f411511e0bcc32c5610ed71d0d2614c16fbdc81835b8d6a5a4891b785582",
+      "serialized_transaction_hash": "0x1d519a18b39452052dd8e25861303938ef1d40e415cff2b34a73660ba5a7fff9"
+    },
+    {
+      "scenario": "wrong_successor",
+      "outcome": "adversarial",
+      "expected_exit_code": 3,
+      "raw_transaction_hash": "0x23e0d83e594ecdece439031cc3b3b737eb6ec8eb2723da9d9e9f2782b1b1d5d9",
+      "serialized_transaction_hash": "0xc5c8288b0929a84f72bd27d6cef95b32281e18ede1bb04b7e3394ba1922d8413"
+    }
+  ]
+}

@@ -98,6 +98,23 @@ action inspect(witness expected: Commitment<State>, witness opening: Opening<Sta
 }
 "#;
 
+const COMMITTED_STATE_FIELD_SOURCE: &str = r#"
+module artifact_checker_committed_state_field
+
+struct State { counter: u64 }
+
+struct Envelope {
+    nonce: u64,
+    state_commitment: Commitment<State>,
+}
+
+action inspect(witness envelope: Envelope, witness opening: Opening<State>) -> u64 {
+    verification
+        let state = commitment::open(envelope.state_commitment, opening)
+        return state.counter
+}
+"#;
+
 const EXACT_HANDLE_SOURCE: &str = r#"
 module artifact_checker_exact_handle
 
@@ -1381,6 +1398,55 @@ fn committed_state_machine_blocks_reject_rebound_removal_reordering_and_instruct
         .expect("authenticated opening destination store");
     let mut changed = valid;
     changed.replace_machine_word(destination_store.address, replace_s_immediate(destination_store.word, destination_offset + 8));
+    assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+}
+
+#[test]
+fn committed_state_machine_binds_schema_field_pointer_and_offset() {
+    let valid = Fixture::from_source(COMMITTED_STATE_FIELD_SOURCE);
+    let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+    let opening = valid
+        .record
+        .blocks
+        .iter()
+        .find(|block| {
+            block.owner_entry == "action:inspect"
+                && block.machine_label.as_deref().is_some_and(|label| label.starts_with(".Lcommitment_opening_header_ready_"))
+        })
+        .expect("committed-state field marker");
+    let authenticated = valid
+        .record
+        .blocks
+        .iter()
+        .find(|block| {
+            block.owner_entry == "action:inspect"
+                && block.machine_label.as_deref().is_some_and(|label| label.starts_with(".Lcommitment_opening_verified_"))
+        })
+        .expect("committed-state field authenticated marker");
+    let runtime = valid.record.entries.iter().find(|entry| entry.id == "runtime:__cellscript_memcmp_fixed").unwrap();
+    let target = valid.record.blocks.iter().find(|block| block.id == runtime.entry_block).unwrap().range.start;
+    let compare = elf
+        .control_flow
+        .iter()
+        .find(|flow| opening.range.start <= flow.address && flow.address < authenticated.range.start && flow.target == target)
+        .expect("committed-state field comparison")
+        .address;
+    let field_offset = elf
+        .instructions
+        .iter()
+        .filter(|instruction| opening.range.start <= instruction.address && instruction.address < compare)
+        .rev()
+        .find(|instruction| {
+            instruction.word & 0x7f == 0x13
+                && (instruction.word >> 12) & 0x7 == 0
+                && (instruction.word >> 7) & 0x1f == 11
+                && (instruction.word >> 15) & 0x1f == 11
+                && (instruction.word as i32 >> 20) == 8
+        })
+        .expect("typed field pointer offset");
+
+    let mut changed = valid;
+    changed.replace_machine_word(field_offset.address, replace_i_immediate(field_offset.word, 16));
     assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
 }
 

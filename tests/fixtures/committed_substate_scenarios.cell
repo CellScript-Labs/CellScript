@@ -1,0 +1,25 @@
+module committed_scenarios
+
+struct State {
+    counter: u64,
+    index: u64,
+}
+
+resource Vault has store, create, consume {
+    state_commitment: Commitment<State>,
+}
+
+action rotate(
+    input before: Vault,
+    witness opening: Opening<State>,
+    witness next_state: State,
+    witness owner: Address,
+) -> after: Vault {
+    verification
+        let current = commitment::open(before.state_commitment, opening)
+        require next_state.counter == current.counter + 1
+        require next_state.index == current.index
+        let successor = commitment::commit(next_state)
+        consume before
+        create after = Vault { state_commitment: successor } with_lock(owner)
+}

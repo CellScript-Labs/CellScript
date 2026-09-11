@@ -7,7 +7,12 @@ use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
 #[allow(dead_code)]
 mod ckb_script_runner;
 
-use ckb_script_runner::{build_simple_fixture, compile_cellscript_source_to_elf, execute_cellscript_script};
+use ckb_script_runner::{
+    build_simple_fixture, compile_cellscript_source_to_elf, deterministic_always_success_lock_hash, execute_cellscript_script,
+};
+
+const COMMITTED_SUBSTATE_SCENARIOS: &str = include_str!("fixtures/committed_substate_scenarios.cell");
+const BUSINESS_SCENARIO_EVIDENCE: &str = include_str!("fixtures/business_scenario_evidence.json");
 
 const FIXED_WIDTH_OPENING: &str = r#"
 module committed
@@ -196,6 +201,114 @@ action rotate(
     let assembly = String::from_utf8(result.artifact_bytes).unwrap();
     assert_eq!(assembly.matches("# cellscript committed-state: validate explicit fixed-width opening").count(), 1);
     assert_eq!(assembly.matches("call __ckb_hash_blake2b_var").count(), 2);
+}
+
+fn committed_state_bytes(counter: u64, index: u64) -> Vec<u8> {
+    let mut bytes = counter.to_le_bytes().to_vec();
+    bytes.extend_from_slice(&index.to_le_bytes());
+    bytes
+}
+
+fn committed_state_hash(bytes: &[u8]) -> [u8; 32] {
+    let mut preimage = b"CellScriptPackedHashV0\0State\0".to_vec();
+    preimage.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+    preimage.extend_from_slice(bytes);
+    blake2b_256(&preimage)
+}
+
+#[test]
+fn committed_substate_successor_and_adversarial_scenarios_are_exact() {
+    let result = compile(
+        COMMITTED_SUBSTATE_SCENARIOS,
+        CompileOptions {
+            edition: NEXT_EDITION,
+            target: Some("riscv64-elf".to_string()),
+            target_profile: Some("ckb".to_string()),
+            ..Default::default()
+        },
+    )
+    .expect("committed-substate scenario artifact");
+    result.validate().expect("independently checked committed-substate scenario artifact");
+    let action = result.metadata.actions.iter().find(|action| action.name == "rotate").expect("rotate action");
+    let elf = strip_vm_abi_trailer(&result.artifact_bytes);
+    let current = committed_state_bytes(7, 1);
+    let stale = committed_state_bytes(6, 1);
+    let next = committed_state_bytes(8, 1);
+    let wrong_index = committed_state_bytes(8, 2);
+    let current_commitment = committed_state_hash(&current);
+    let next_commitment = committed_state_hash(&next);
+    let wrong_index_commitment = committed_state_hash(&wrong_index);
+    let mut wrong_root = current_commitment;
+    wrong_root[0] ^= 1;
+    let mut wrong_successor = next_commitment;
+    wrong_successor[0] ^= 1;
+    let malformed = current[..current.len() - 1].to_vec();
+    let cases = [
+        ("successor_commitment", "positive", 0, current_commitment, current.as_slice(), next.as_slice(), next_commitment),
+        ("stale", "adversarial", 73, current_commitment, stale.as_slice(), next.as_slice(), next_commitment),
+        ("malformed", "adversarial", 4, current_commitment, malformed.as_slice(), next.as_slice(), next_commitment),
+        ("wrong_root", "adversarial", 73, wrong_root, current.as_slice(), next.as_slice(), next_commitment),
+        ("wrong_index", "adversarial", 5, current_commitment, current.as_slice(), wrong_index.as_slice(), wrong_index_commitment),
+        ("wrong_successor", "adversarial", 3, current_commitment, current.as_slice(), next.as_slice(), wrong_successor),
+    ];
+    let mut actual_cases = Vec::new();
+    for (scenario, outcome, expected_exit_code, input_commitment, opening, next_state, output_commitment) in cases {
+        let payload = action
+            .entry_witness_args(&[
+                EntryWitnessArg::Bytes(opening.to_vec()),
+                EntryWitnessArg::Bytes(next_state.to_vec()),
+                EntryWitnessArg::Address(deterministic_always_success_lock_hash()),
+            ])
+            .expect("committed-substate scenario witness");
+        let witness = packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(payload)).pack()).build();
+        let mut fixture = build_simple_fixture(Bytes::copy_from_slice(scenario.as_bytes()), 1, 1);
+        fixture.current_type_script_input_indices = vec![0];
+        fixture.inputs[0].data = Bytes::copy_from_slice(&input_commitment);
+        fixture.outputs[0].data = Bytes::copy_from_slice(&output_commitment);
+        fixture.witnesses = vec![witness.as_bytes()];
+        let execution = execute_cellscript_script(elf, &fixture);
+        assert_eq!(execution.exit_code, expected_exit_code, "unexpected {scenario} result: {:?}", execution.captured_debug);
+        actual_cases.push(serde_json::json!({
+            "scenario": scenario,
+            "outcome": outcome,
+            "expected_exit_code": expected_exit_code,
+            "raw_transaction_hash": execution.raw_transaction_hash,
+            "serialized_transaction_hash": execution.serialized_transaction_hash,
+        }));
+    }
+    let actual = serde_json::json!({
+        "schema": "cellscript-committed-substate-scenarios-v1",
+        "source_file": "tests/fixtures/committed_substate_scenarios.cell",
+        "artifact_identities": {
+            "artifact_hash": format!("0x{}", result.metadata.artifact_hash.as_deref().expect("artifact hash")),
+            "lowering_record_hash": format!("0x{}", result.metadata.verified_artifact.lowering_record_hash.as_deref().expect("lowering hash")),
+            "source_map_hash": format!("0x{}", result.metadata.verified_artifact.source_map_hash.as_deref().expect("source-map hash")),
+            "verified_bundle_id": format!("0x{}", result.metadata.verified_artifact.verified_bundle_id.as_deref().expect("bundle id")),
+        },
+        "cases": actual_cases,
+    });
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/committed_substate_scenarios.json")).expect("committed-substate scenario fixture");
+    assert_eq!(actual, fixture, "recorded committed-substate scenario identities are stale: {actual}");
+
+    let manifest: serde_json::Value = serde_json::from_str(BUSINESS_SCENARIO_EVIDENCE).expect("business scenario evidence JSON");
+    let family = &manifest["families"]["committed_state"];
+    assert_eq!(family["coverage_status"], "exact-artifact-fixtures");
+    assert_eq!(family["gaps"], serde_json::json!([]));
+    let records = family["records"].as_array().expect("committed-state scenario records");
+    assert_eq!(records.len(), 7, "committed-state inventory requires two positive and five adversarial records");
+    for case in actual["cases"].as_array().expect("executed committed-state cases") {
+        let scenario = case["scenario"].as_str().unwrap();
+        let record = records
+            .iter()
+            .find(|record| record["scenario"] == scenario && record["outcome"] == case["outcome"])
+            .unwrap_or_else(|| panic!("missing exact business-scenario record for {scenario}"));
+        assert_eq!(record["status"], "exact-artifact-fixture");
+        assert_eq!(record["fixture"], "tests/fixtures/committed_substate_scenarios.json");
+        assert_eq!(record["raw_transaction_hash"], case["raw_transaction_hash"]);
+        assert_eq!(record["serialized_transaction_hash"], case["serialized_transaction_hash"]);
+        assert_eq!(record["artifact_hashes"], serde_json::json!([actual["artifact_identities"]["artifact_hash"]]));
+    }
 }
 
 #[test]

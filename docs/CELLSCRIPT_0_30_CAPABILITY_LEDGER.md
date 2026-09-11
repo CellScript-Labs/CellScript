@@ -59,8 +59,9 @@ The machine ledger is the detailed source of truth. At this candidate point:
 - #7, #8, #12, #24, #25, and #26 keep their release-facing review or evidence
   work open even where their admitted implementation slice is executable.
 - #13 remains open after its bounded fixed-width typed opening, successor,
-  builder, typed-checker, standalone machine-checker mutation, and CKB-VM slice
-  landed; independent review is still required.
+  builder, typed-checker, exact schema-field pointer binding, standalone
+  machine-checker mutation, and complete positive/adversarial committed-state
+  CKB-VM inventory slice landed; independent review is still required.
 - #22 is research and deferred from the 0.30 core; a circuit DSL remains a
   non-goal.
 - #27 remains open until exact candidate replay, product publication, node

@@ -4746,8 +4746,14 @@ struct CommitmentMachineContract {
     width: u64,
     destination: u32,
     source: Option<u32>,
-    expected: Option<u32>,
+    expected: Option<CommitmentMachinePointerSource>,
     opening: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CommitmentMachinePointerSource {
+    stack_slot: i64,
+    displacement: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4755,6 +4761,7 @@ enum CommitmentMachineValue {
     Unknown,
     Constant(u64),
     StackAddress(i64),
+    StackLoadedAddress { stack_slot: i64, displacement: i64 },
 }
 
 fn validate_committed_state_machine_contract(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result<(), CheckerError> {
@@ -4861,13 +4868,87 @@ fn committed_state_machine_contracts(record: &VerifiedLoweringRecord) -> Result<
                     width,
                     destination,
                     source: (kind == CommitmentMachineKind::Commit).then(|| local(0)).flatten(),
-                    expected: (kind == CommitmentMachineKind::Open).then(|| local(0)).flatten(),
+                    expected: if kind == CommitmentMachineKind::Open {
+                        Some(commitment_machine_pointer_source(
+                            entry,
+                            local(0).ok_or_else(|| commitment_machine_error("typed opening has no commitment local"))?,
+                            &record.typed_semantics.types,
+                        )?)
+                    } else {
+                        None
+                    },
                     opening: (kind == CommitmentMachineKind::Open).then(|| local(1)).flatten(),
                 });
             }
         }
     }
     Ok(contracts)
+}
+
+fn commitment_machine_pointer_source(
+    entry: &crate::schema::TypedSemanticEntry,
+    local: u32,
+    types: &[TypedSemanticType],
+) -> Result<CommitmentMachinePointerSource, CheckerError> {
+    let mut current = local;
+    let mut displacement = 0i64;
+    let mut visited = BTreeSet::new();
+    loop {
+        if !visited.insert(current) {
+            return Err(commitment_machine_error("commitment pointer provenance contains a field-access cycle"));
+        }
+        let producer =
+            entry.blocks.iter().flat_map(|block| &block.operations).find(|operation| operation.destinations.contains(&current));
+        let Some(operation) = producer else { break };
+        if operation.opcode != "field-access" {
+            break;
+        }
+        let crate::schema::TypedSemanticOperationDetail::Field { name } = &operation.detail else {
+            return Err(commitment_machine_error("commitment field pointer has inconsistent typed semantics"));
+        };
+        let owner =
+            operation.operands.first().ok_or_else(|| commitment_machine_error("commitment field pointer has no owner operand"))?;
+        let owner_local =
+            owner.local.ok_or_else(|| commitment_machine_error("commitment field pointer owner is not a typed local"))?;
+        let offset = commitment_machine_field_offset(&owner.ty, name, types)
+            .ok_or_else(|| commitment_machine_error("commitment field pointer has no fixed typed layout"))?;
+        displacement = displacement
+            .checked_add(offset)
+            .ok_or_else(|| commitment_machine_error("commitment field pointer displacement overflowed"))?;
+        current = owner_local;
+    }
+    Ok(CommitmentMachinePointerSource { stack_slot: i64::from(local_stack_offset(current)?), displacement })
+}
+
+fn commitment_machine_field_offset(ty: &str, field: &str, types: &[TypedSemanticType]) -> Option<i64> {
+    let ty = canonical_abi_type(strip_reference(ty));
+    if let Some(layout) = types.iter().find(|layout| canonical_abi_type(&layout.name) == ty) {
+        return layout.fields.iter().find(|candidate| candidate.name == field).map(|candidate| i64::from(candidate.offset));
+    }
+    if matches!(ty.as_str(), "address" | "hash") && field == "0" {
+        return Some(0);
+    }
+    if let Some(body) = ty.strip_prefix('[').and_then(|value| value.strip_suffix(']')) {
+        let (element, length) = split_top_level_once(body, ';')?;
+        let index = field.parse::<u64>().ok()?;
+        if index >= length.parse::<u64>().ok()? {
+            return None;
+        }
+        let width = committed_state_type_width(element, types)?;
+        return index.checked_mul(width).and_then(|offset| i64::try_from(offset).ok());
+    }
+    if let Some(body) = ty.strip_prefix('(').and_then(|value| value.strip_suffix(')')) {
+        let fields = split_top_level(body, ',');
+        let index = field.parse::<usize>().ok()?;
+        if index >= fields.len() {
+            return None;
+        }
+        return fields[..index]
+            .iter()
+            .try_fold(0u64, |total, field_ty| total.checked_add(committed_state_type_width(field_ty, types)?))
+            .and_then(|offset| i64::try_from(offset).ok());
+    }
+    None
 }
 
 fn validate_commitment_header(
@@ -4956,7 +5037,7 @@ fn validate_one_commitment_open_machine_contract(
         return Err(commitment_machine_error("typed opening copy/hash/compare sequence is reordered"));
     }
     let opening = contract.opening.ok_or_else(|| commitment_machine_error("typed opening has no direct witness local"))?;
-    let expected = contract.expected.ok_or_else(|| commitment_machine_error("typed opening has no commitment local"))?;
+    let expected = contract.expected.ok_or_else(|| commitment_machine_error("typed opening has no commitment pointer source"))?;
     if !has_exact_commitment_size_guard(record, elf, start, *copy, contract.width)? {
         return Err(commitment_machine_error("opening witness has no exact fixed-width guard"));
     }
@@ -4980,7 +5061,8 @@ fn validate_one_commitment_open_machine_contract(
     let compare_args = commitment_registers_before(elf, start, *compare);
     if compare_args[10] != CommitmentMachineValue::StackAddress(i64::try_from(digest).unwrap_or(i64::MAX))
         || compare_args[12] != CommitmentMachineValue::Constant(32)
-        || !has_stack_load(elf, hash + 4, *compare, 11, local_stack_offset(expected)?)
+        || compare_args[11]
+            != (CommitmentMachineValue::StackLoadedAddress { stack_slot: expected.stack_slot, displacement: expected.displacement })
         || !is_beq(commitment_word(elf, compare + 4)?, 10, 0)
         || !flow_targets(elf, compare + 4, authenticated.range.start)
         || !jump_targets_runtime_error(record, elf, compare + 8, 73)
@@ -5262,6 +5344,13 @@ fn update_commitment_registers(values: &mut [CommitmentMachineValue; 32], word: 
             .ok()
             .and_then(|value| offset.checked_add(value))
             .map_or(CommitmentMachineValue::Unknown, CommitmentMachineValue::StackAddress),
+        (CommitmentMachineValue::StackLoadedAddress { stack_slot, displacement }, CommitmentMachineValue::Constant(value))
+        | (CommitmentMachineValue::Constant(value), CommitmentMachineValue::StackLoadedAddress { stack_slot, displacement }) => {
+            i64::try_from(value).ok().and_then(|value| displacement.checked_add(value)).map_or(
+                CommitmentMachineValue::Unknown,
+                |displacement| CommitmentMachineValue::StackLoadedAddress { stack_slot, displacement },
+            )
+        }
         _ => CommitmentMachineValue::Unknown,
     };
     let value = match opcode {
@@ -5270,6 +5359,11 @@ fn update_commitment_registers(values: &mut [CommitmentMachineValue; 32], word: 
             CommitmentMachineValue::Constant(value) => CommitmentMachineValue::Constant(value.wrapping_add_signed(immediate)),
             CommitmentMachineValue::StackAddress(offset) => {
                 offset.checked_add(immediate).map_or(CommitmentMachineValue::Unknown, CommitmentMachineValue::StackAddress)
+            }
+            CommitmentMachineValue::StackLoadedAddress { stack_slot, displacement } => {
+                displacement.checked_add(immediate).map_or(CommitmentMachineValue::Unknown, |displacement| {
+                    CommitmentMachineValue::StackLoadedAddress { stack_slot, displacement }
+                })
             }
             CommitmentMachineValue::Unknown => CommitmentMachineValue::Unknown,
         },
@@ -5283,6 +5377,14 @@ fn update_commitment_registers(values: &mut [CommitmentMachineValue; 32], word: 
         0x33 if function == 0 && (word >> 25) & 0x7f == 0x20 => match (values[source1], values[source2]) {
             (CommitmentMachineValue::Constant(left), CommitmentMachineValue::Constant(right)) => {
                 CommitmentMachineValue::Constant(left.wrapping_sub(right))
+            }
+            _ => CommitmentMachineValue::Unknown,
+        },
+        0x03 if function == 3 => match values[source1] {
+            CommitmentMachineValue::StackAddress(offset) => {
+                offset.checked_add(immediate).map_or(CommitmentMachineValue::Unknown, |stack_slot| {
+                    CommitmentMachineValue::StackLoadedAddress { stack_slot, displacement: 0 }
+                })
             }
             _ => CommitmentMachineValue::Unknown,
         },

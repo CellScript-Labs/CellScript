@@ -62,6 +62,12 @@
   inline header/copy/hash/compare/materialize/recommit machine sequence.
   Independent review and release acceptance remain pending.
 
+- Complete issue #26's committed-state scenario family with exact CKB-VM
+  successor, stale, malformed, wrong-root, wrong-index, and wrong-successor
+  transaction fixtures. The standalone checker now binds a Commitment field's
+  machine pointer to its typed root stack slot and exact schema offset and
+  rejects offset mutation before authentication.
+
 - Add the versioned 0.30 product-capability ledger for issues #7 through #27
   and validate its claims, evidence links, dispositions, dependencies, and
   release gates independently from executable-surface closure. Preserve

@@ -45,6 +45,14 @@ records the actual evidence grade and gaps for every family. The release gate
 requires an exact artifact fixture for every named positive and adversarial row;
 owner-only test lists and family-level CKB-VM coverage do not satisfy it.
 
+The committed-state family now meets that per-row evidence boundary. Its two
+positive rows and five adversarial rows execute one independently checked
+artifact in CKB-VM, and the fixture pins the artifact/lowering/source-map/bundle
+identities plus distinct raw and serialized transaction hashes. The stale and
+wrong-root cases fail at authenticated opening error 73; malformed witness,
+wrong-index successor, and wrong successor output fail at their exact bounded
+ABI or output-correspondence errors.
+
 ## Same-transaction anchor
 
 The current executable anchor is an authenticated two-order settlement. One
