@@ -219,6 +219,15 @@ projections. It also closes the independent checker's previously missing
 artifact and sidecar identities plus raw and serialized transaction hashes;
 its maximum is 92,896 cycles, 16,208 ELF bytes, a 22,880-byte checked stack
 frame, 124 witness bytes, a 597-byte transaction, and 73 dependency bytes.
+A fifth exact profile proves the same closed runtime-view surface behind a real
+`PolicyWitnessV1` Type-group dispatcher. Its witness is produced through the
+generated action-record encoder and canonical policy-bundle adapter, while the
+entry exercises complete GroupInput/GroupOutput, CellDep and HeaderDep fields,
+OutPoint, Since, bounded entry bytes, and raw transaction hash before a checked
+one-input/one-output resource transition. It pins all artifact/sidecar and
+transaction identities at 96,109 cycles, 21,368 ELF bytes, a 20,000-byte
+checked stack frame, 145 witness bytes, a 594-byte transaction, and 73
+dependency bytes.
 
 Two optional extensions are not required by the frozen 0.30 corpus. No scenario
 consumes a full Header hash; typed epoch/block/timestamp fields already cover
@@ -228,16 +237,11 @@ CellScript does not recreate the Lock's prefix-preserving signing-message
 transform. Adding either operation later requires a separately admitted typed,
 bounded contract rather than widening v1 implicitly.
 
-The following work remains before issue #24 can close:
-
-- persistent-policy and generated-builder parity for admitted rows beyond the
-  exact `GroupInput.data_size`/`capacity` anchor slice;
-- maximum-bound measurements and independent machine binding for any newly
-  admitted non-cryptographic adapter row; the complete typed read-only handle
-  table, persistent-policy anchor, and all ten cryptographic portfolio rows now
-  map to executable resource profiles; and
-- `ci`, `backend`, release, and independent-review evidence on the exact
-  candidate source.
+The repository-local implementation and executable evidence for the frozen
+runtime-view v1 table are complete. Any newly admitted adapter row must add its
+own maximum-bound measurements and independent machine binding rather than
+inheriting this status. Issue #24 remains open for `ci`, `backend`, release, and
+independent-review evidence on the exact candidate source.
 
 ## Deferred and excluded surfaces
 

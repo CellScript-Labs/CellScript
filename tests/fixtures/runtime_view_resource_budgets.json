@@ -138,6 +138,43 @@
         "transaction_bytes": 4096,
         "dependency_bytes": 4096
       }
+    },
+    {
+      "id": "persistent-policy-complete-runtime-view",
+      "status": "passed",
+      "coverage": [
+        "PolicyWitnessV1 persistent Type-group dispatch",
+        "generated action record and exact policy witness bundle",
+        "complete GroupInput and GroupOutput fields",
+        "complete CellDep fields",
+        "complete HeaderDep fields",
+        "GroupInput OutPoint and Since projections",
+        "bounded policy entry witness and raw transaction hash"
+      ],
+      "identities": {
+        "artifact_hash": "0x805b82fd8d8048d76b935f4ee03a6fd45af745129028b2afc5b5bf3fdef48241",
+        "lowering_record_hash": "0xe7450d22e7b541a1243825a57801a882ad7a0c8d6d278cbec772a83a0d6e9945",
+        "source_map_hash": "0xd9f26e6cadfdfa8515002c6dba35ebf09cb7d387a1236619c6497e536844a214",
+        "verified_bundle_id": "0x0928c21efca0c35db12f02b8f8e97e92f1b1307deaaef45b3458acfd81decbf4",
+        "raw_transaction_hash": "0xda8512c80f9e26e8b9968e413aee5c8766e1c7e88f784af463fa0a07a4257341",
+        "serialized_transaction_hash": "0x5ff67c80561e9152c135e947200ed5b7c664bf228acdf4471690e2cf3654fd98"
+      },
+      "measured": {
+        "cycles": 96109,
+        "elf_bytes": 21368,
+        "max_stack_frame_bytes": 20000,
+        "witness_bytes": 145,
+        "transaction_bytes": 594,
+        "dependency_bytes": 73
+      },
+      "budgets": {
+        "cycles": 10000000,
+        "elf_bytes": 49152,
+        "max_stack_frame_bytes": 49152,
+        "witness_bytes": 512,
+        "transaction_bytes": 4096,
+        "dependency_bytes": 4096
+      }
     }
   ]
 }

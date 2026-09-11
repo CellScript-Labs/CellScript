@@ -1,9 +1,13 @@
 //! Executable evidence for the bounded typed CKB transaction-view surface.
 
 use cellscript::{
+    artifact::{
+        compile_artifact, encode_policy_action_record, ArtifactAction, ArtifactContext, ArtifactDeclaration, ArtifactDispatch,
+    },
     compile_with_executable_surface_policy, strip_vm_abi_trailer, CellScriptEdition, CompileOptions, EntryWitnessArg,
     ExecutableSurfacePolicy,
 };
+use cellscript_ckb_adapter::policy_witness::{encode_policy_witness_bundle, PolicyScriptRole, PolicyWitnessRecord};
 use ckb_testtool::{
     ckb_hash::blake2b_256,
     ckb_types::{bytes::Bytes, packed, prelude::*},
@@ -14,7 +18,8 @@ use ckb_testtool::{
 mod ckb_script_runner;
 
 use ckb_script_runner::{
-    build_simple_fixture, deterministic_always_success_script, execute_cellscript_script, FixtureCell, FixtureHeaderContext,
+    build_simple_fixture, deterministic_always_success_lock_hash, deterministic_always_success_script, execute_cellscript_script,
+    execute_cellscript_script_with_transaction_transform, FixtureCell, FixtureHeaderContext,
 };
 
 const SOURCE: &str = r#"
@@ -220,6 +225,82 @@ action inspect() -> u64 {
 }
 "#;
 
+const PERSISTENT_RUNTIME_VIEW_SOURCE: &str = r#"
+module runtime_views::persistent_complete
+
+resource Token has store { amount: u64 }
+
+action inspect(
+    input before: Token,
+    witness expected_dep_size: u64,
+    witness owner: Address,
+) -> after: Token {
+    let input = ckb::group_input<Token>(0)
+    let output = ckb::group_output<Token>(0)
+    let dep = ckb::cell_dep(0)
+    let header = ckb::header_dep(0)
+    let witness_args = witness::args(0)
+    let entry = witness::bounded_entry(witness_args, 256)
+    let input_lock = input.lock
+    let output_lock = output.lock
+    let input_type = input.type_script
+    let output_type = output.type_script
+    let dep_lock = dep.lock
+    let dep_type = dep.type_script
+    let out_point = input.out_point
+    let transaction_hash = ckb::transaction_hash()
+    require input.capacity == output.capacity
+    require input.data_size == output.data_size
+    require input.data_hash == output.data_hash
+    require input.occupied_capacity <= input.capacity
+    require output.occupied_capacity <= output.capacity
+    require input.unoccupied_capacity + input.occupied_capacity == input.capacity
+    require output.unoccupied_capacity + output.occupied_capacity == output.capacity
+    require input.lock_hash == output.lock_hash
+    require input.type_hash == output.type_hash
+    require output.output_index == 0
+    require input_lock.hash == output_lock.hash
+    require input_lock.code_hash == output_lock.code_hash
+    require input_lock.hash_type == output_lock.hash_type
+    require input_lock.args_empty
+    require output_lock.args_empty
+    require input_type.hash == output_type.hash
+    require input_type.code_hash == output_type.code_hash
+    require input_type.hash_type == output_type.hash_type
+    require !input_type.args_empty
+    require !output_type.args_empty
+    require input_type.args_hash == output_type.args_hash
+    require out_point.tx_hash != Hash::zero()
+    require out_point.index == 0
+    require ckb::since_to_raw(input.since) == 0
+    require dep.capacity > 0
+    require dep.data_size == expected_dep_size
+    require dep.occupied_capacity <= dep.capacity
+    require dep.unoccupied_capacity + dep.occupied_capacity == dep.capacity
+    require dep.data_hash != input.data_hash
+    require dep.lock_hash == dep_lock.hash
+    require dep.type_hash == dep_type.hash
+    require dep_lock.code_hash == input_lock.code_hash
+    require dep_lock.hash_type == input_lock.hash_type
+    require dep_lock.args_empty
+    require dep_type.code_hash != input_type.code_hash
+    require dep_type.hash_type == input_type.hash_type
+    require !dep_type.args_empty
+    require dep_type.args_hash != input_type.args_hash
+    require ckb::epoch_number_to_u64(header.epoch_number) == 42
+    require ckb::block_number_to_u64(header.epoch_start_block_number) == 97
+    require ckb::epoch_length_to_u64(header.epoch_length) == 10
+    require ckb::block_number_to_u64(header.block_number) == 100
+    require ckb::timestamp_millis_to_u64(header.timestamp) == 1700000000123
+    require witness_args.size > 0
+    require entry.size > 0
+    require witness::byte(entry, 0) > 0
+    require transaction_hash != Hash::zero()
+    consume before
+    create after = Token { amount: before.amount } with_lock(owner)
+}
+"#;
+
 const OUT_POINT_INDEX_SOURCE: &str = r#"
 module runtime_views::out_point_index
 
@@ -247,6 +328,27 @@ fn compile(source: &str) -> cellscript::CompileResult {
         ExecutableSurfacePolicy::DenyFailClosed,
     )
     .unwrap_or_else(|error| panic!("typed runtime-view source must compile: {error}\n{source}"))
+}
+
+fn compile_persistent_runtime_view_policy() -> cellscript::CompileResult {
+    compile_artifact(
+        PERSISTENT_RUNTIME_VIEW_SOURCE,
+        CompileOptions {
+            edition: CellScriptEdition::Edition2027,
+            target: Some("riscv64-elf".to_string()),
+            target_profile: Some("ckb".to_string()),
+            ..Default::default()
+        },
+        ArtifactDeclaration {
+            name: "PersistentRuntimeView".to_string(),
+            context: ArtifactContext::TypeGroup { resource: "Token".to_string() },
+            dispatch: ArtifactDispatch::PolicyWitnessV1,
+            actions: vec![ArtifactAction { tag: 10, action: "inspect".to_string() }],
+            common_checks: Vec::new(),
+        },
+        ExecutableSurfacePolicy::DenyFailClosed,
+    )
+    .unwrap_or_else(|error| panic!("persistent runtime-view policy must compile: {error}"))
 }
 
 #[test]
@@ -322,6 +424,17 @@ fn input_group_dep_witness_fixture() -> ckb_script_runner::CkbVmFixture {
         .output_type(Some(Bytes::from(vec![0xc3; 32])).pack())
         .build()
         .as_bytes()];
+    fixture
+}
+
+fn persistent_runtime_view_fixture() -> ckb_script_runner::CkbVmFixture {
+    let mut fixture = input_group_dep_witness_fixture();
+    fixture.inputs[0].data = Bytes::copy_from_slice(&7u64.to_le_bytes());
+    fixture.outputs[0].data = Bytes::copy_from_slice(&7u64.to_le_bytes());
+    fixture.header_dao_fields = vec![[0; 32]];
+    fixture.header_contexts =
+        vec![FixtureHeaderContext { number: 100, timestamp: 1_700_000_000_123, epoch_number: 42, epoch_index: 3, epoch_length: 10 }];
+    fixture.witnesses = vec![packed::WitnessArgs::new_builder().build().as_bytes()];
     fixture
 }
 
@@ -582,6 +695,67 @@ fn input_group_input_cell_dep_and_witness_view_resource_profile_is_exact_and_bou
         .expect("Input/GroupInput/CellDep/WitnessArgs resource profile");
     assert_eq!(actual, profile["measured"], "recorded runtime-view resource measurement is stale: {actual}");
     assert_eq!(identities, profile["identities"], "recorded runtime-view identities are stale: {identities}");
+    for field in ["cycles", "elf_bytes", "max_stack_frame_bytes", "witness_bytes", "transaction_bytes", "dependency_bytes"] {
+        assert!(actual[field].as_u64().unwrap() <= profile["budgets"][field].as_u64().unwrap(), "{field} exceeded budget");
+    }
+}
+
+#[test]
+fn persistent_policy_and_generated_builder_cover_complete_runtime_view_profile() {
+    let result = compile_persistent_runtime_view_policy();
+    let metadata = result.metadata.clone();
+    let execution = execute_cellscript_script_with_transaction_transform(
+        strip_vm_abi_trailer(&result.artifact_bytes),
+        &persistent_runtime_view_fixture(),
+        move |transaction, type_script| {
+            let selected = encode_policy_action_record(
+                &metadata,
+                &type_script.calc_script_hash().unpack(),
+                "inspect",
+                &[EntryWitnessArg::U64(73), EntryWitnessArg::Address(deterministic_always_success_lock_hash())],
+            )
+            .expect("generated persistent-policy action record");
+            let bundle = encode_policy_witness_bundle(&[PolicyWitnessRecord {
+                role: PolicyScriptRole::Type,
+                script_hash: selected.script_hash,
+                tag: selected.tag,
+                args: selected.args,
+            }])
+            .expect("persistent runtime-view policy witness bundle");
+            let witness = packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(bundle)).pack()).build();
+            let mut witnesses = transaction.witnesses().into_iter().collect::<Vec<_>>();
+            witnesses[0] = witness.as_bytes().pack();
+            transaction.as_advanced_builder().set_witnesses(witnesses).build()
+        },
+    );
+    assert_eq!(execution.exit_code, 0, "persistent runtime-view profile failed: {:?}", execution.captured_debug);
+    let max_stack_frame_bytes =
+        result.verified_lowering_record.as_ref().unwrap().entries.iter().map(|entry| entry.frame_size_bytes).max().unwrap();
+    let actual = serde_json::json!({
+        "cycles": execution.cycles,
+        "elf_bytes": strip_vm_abi_trailer(&result.artifact_bytes).len(),
+        "max_stack_frame_bytes": max_stack_frame_bytes,
+        "witness_bytes": execution.witness_bytes,
+        "transaction_bytes": execution.transaction_bytes,
+        "dependency_bytes": execution.dependency_bytes,
+    });
+    let identities = serde_json::json!({
+        "artifact_hash": format!("0x{}", result.metadata.artifact_hash.as_deref().unwrap()),
+        "lowering_record_hash": format!("0x{}", result.metadata.verified_artifact.lowering_record_hash.as_deref().unwrap()),
+        "source_map_hash": format!("0x{}", result.metadata.verified_artifact.source_map_hash.as_deref().unwrap()),
+        "verified_bundle_id": format!("0x{}", result.metadata.verified_artifact.verified_bundle_id.as_deref().unwrap()),
+        "raw_transaction_hash": execution.raw_transaction_hash,
+        "serialized_transaction_hash": execution.serialized_transaction_hash,
+    });
+    let manifest: serde_json::Value = serde_json::from_str(include_str!("fixtures/runtime_view_resource_budgets.json")).unwrap();
+    let profile = manifest["profiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|profile| profile["id"] == "persistent-policy-complete-runtime-view")
+        .expect("persistent-policy complete runtime-view resource profile");
+    assert_eq!(actual, profile["measured"], "recorded persistent runtime-view measurement is stale: {actual}");
+    assert_eq!(identities, profile["identities"], "recorded persistent runtime-view identities are stale: {identities}");
     for field in ["cycles", "elf_bytes", "max_stack_frame_bytes", "witness_bytes", "transaction_bytes", "dependency_bytes"] {
         assert!(actual[field].as_u64().unwrap() <= profile["budgets"][field].as_u64().unwrap(), "{field} exceeded budget");
     }

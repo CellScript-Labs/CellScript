@@ -52,6 +52,11 @@
   reference boundary without admitting Output, CellDep, raw Source, or integer
   retyping.
 
+- Close issue #24's repository-local persistent-policy and generated-builder
+  parity with a fifth exact profile. A canonical `PolicyWitnessV1` bundle drives
+  a complete runtime-view Type-group action and pins the independently checked
+  artifact, sidecars, transaction identities, and bounded resource measurements.
+
 - Add the bounded fixed-width committed-substate profile for issue #13.
   `Commitment<T>` is a nominal 32-byte CKB Blake2b-256 value over the existing
   `CellScriptPackedHashV0` domain; `Opening<T>` is an explicit, linear,
