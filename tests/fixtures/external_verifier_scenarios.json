@@ -1,0 +1,147 @@
+{
+  "schema": "cellscript-external-verifier-scenarios-v1",
+  "source_files": [
+    "tests/external_verifier_scenarios.rs",
+    "tests/fixtures/external_exec_callee.hex"
+  ],
+  "dependency_identities": {
+    "exec_callee_ckb_data_hash": "0x4d8c3983631f1a5afa5ede4e422ec73f3704409c0180d39ce21ebf2053e7bedf",
+    "always_success_ckb_data_hash": "0xe683b04139344768348499c23eb1326d5a52d6db006c0d2fece00a831f3660d7"
+  },
+  "artifact_identities": {
+    "exec": {
+      "artifact_hash": "0x24dcbbaf73a57ad1864062a0d25f952764e633870d97b2d079c4b1e057abf3ae",
+      "lowering_record_hash": "0x756fe4c9f73330875a4f903761aadf35a47dc4c8ca296e47dfc891829ef8967e",
+      "source_map_hash": "0xacc3e6f706033bf379e6ebfd88ae9cf91ad344c0d2ba5d6523aa560027e3f476",
+      "verified_bundle_id": "0xcfa77d35771b8dbb3ccf2be915279e48d59a57874089a8cf62b804581d5fae12"
+    },
+    "wrong_argument": {
+      "artifact_hash": "0x6f5255524284589645016936d1f4e48d3d91a4421d1a5e63da22f2bd918c4059",
+      "lowering_record_hash": "0x9c0db0e1cbb3d4cf18e7df5ba7e48514b2f716ef3f8e55af3145753990f48dc7",
+      "source_map_hash": "0x5240810b4841a0c0eb39e37d78b7131ae216ec8f98bece5c02a7703ba88d3bfa",
+      "verified_bundle_id": "0x4be1cc68010a3bc84b8bb85aca544acae71e26997b64fab493e599e497337fb7"
+    },
+    "wrong_hash": {
+      "artifact_hash": "0x680ebeaf1b1f67fca328d1c79ba85bec2894ead204005ab56b57ec8b4e3e43d3",
+      "lowering_record_hash": "0xb91c60f1a4acb45b4839ae48ed10a10140e6b2717e74fd9456fe7fdf65377ec0",
+      "source_map_hash": "0xb8bc9f1356513c55db963ad802b193bde1ab0250d6690b28604dd37a3493ccb9",
+      "verified_bundle_id": "0x3e65c2a7585d09afd40334fb3da21cf4d308141b4fe4b54b5e2c19a24314ee76"
+    },
+    "wrong_adapter": {
+      "artifact_hash": "0x300d938be9c2670b1710e7273ce3cb4bf8b725d4fa3643d38ab940f2d826c0a4",
+      "lowering_record_hash": "0xc6aa25bb3cbd756deb448eec1c41bbe86a99e969a79f788fdcb06799ed284498",
+      "source_map_hash": "0xa55e24ad4bb944e61d91b8bd7e47acab789b0e13b0e5728ba838a28663e4d429",
+      "verified_bundle_id": "0xe5227aa75bc516a1cd235ddbe4ec7692ad371b19910aa970997a141ce2f5050b"
+    },
+    "spawn": {
+      "artifact_hash": "0x6fdf614ee263418f521b373973e4c6a970ebb221cbc36073195086bfd37a7478",
+      "lowering_record_hash": "0x79c37aa38f8ccb7c0b9e9d7bab0358039601c492bf89729fae36d7b40a9cae5e",
+      "source_map_hash": "0xf0b631ca5737cdde7aa54faeba655c0113b74dded128d010f1ca73d7747d3a9a",
+      "verified_bundle_id": "0x4e7a8947e95931399f670f070085c2b23e79298dc2ae599629318abc12864936"
+    },
+    "spawn_failure": {
+      "artifact_hash": "0xfda32cfc35e78c6ebbef5f273f6e76abeca6c00a3e44384a4df393a7b8dd2972",
+      "lowering_record_hash": "0xb408d4f61322bf52bfc050d8379761232c9e6b22e931d67281c96bdc0a4e5e6f",
+      "source_map_hash": "0x87654ad9b7ffba8ed85f2ad4ec26887cd20dd87b53ef218eba0e29e8b4bda4f6",
+      "verified_bundle_id": "0x7c454e089b377892d96aa55d0924f015df26c502fa827030d8a11791c049eb4b"
+    },
+    "exact_handle": {
+      "artifact_hash": "0x60f925aba3e6216ad1e60b24ce875a5ae25cbbce193a62c87c3c9f79e0e7ffcb",
+      "lowering_record_hash": "0x876e3320292133ecd92ecd1324794a7d9fbec8c99c7106c6aa11764b188e9b1a",
+      "source_map_hash": "0x38b2d332cddc23c323694ef2e7f51add0487e737ab1db995673d88b645cecaf5",
+      "verified_bundle_id": "0x3052dd097160d13e206415e6ed2f4493c78bf21de18d3c668934ce5bf604ca40"
+    }
+  },
+  "cases": [
+    {
+      "scenario": "child_failure",
+      "outcome": "adversarial",
+      "artifact": "spawn_failure",
+      "rejection_stage": "ckb-vm",
+      "expected_exit_code": 1,
+      "raw_transaction_hash": "0x3922d402230c491d0618862603805be241b3ed5d4e45f48b9117850dcb38bcd2",
+      "serialized_transaction_hash": "0x11a7790eb5f09548eaa82aa6582f198c44ad5a0e53dcd45c86699fdd58b5a3ad"
+    },
+    {
+      "scenario": "exact_identity_exec",
+      "outcome": "positive",
+      "artifact": "exec",
+      "rejection_stage": "ckb-vm",
+      "expected_exit_code": 0,
+      "raw_transaction_hash": "0xe91d98117cf5b101644cd093e253d59d3a694595c3305100e599656a7ac27cf8",
+      "serialized_transaction_hash": "0x80535eb11f6ccf01d40ae93b7c4d15012d2e5f406eac4bb34f816dfbd8e07dd5"
+    },
+    {
+      "scenario": "exact_identity_spawn_wait",
+      "outcome": "positive",
+      "artifact": "spawn",
+      "rejection_stage": "ckb-vm",
+      "expected_exit_code": 0,
+      "raw_transaction_hash": "0xb3edda6ce51d66449eaf1aa235cb524c370535ac3a6543d0f1cc3aac1250e73c",
+      "serialized_transaction_hash": "0x51ad771db77e9ac85d44c08c8f23a8484957b14bf2e512bee41ee675d45f2b9c"
+    },
+    {
+      "scenario": "post_build_substitution",
+      "outcome": "adversarial",
+      "artifact": "exact_handle",
+      "rejection_stage": "ckb-vm",
+      "expected_exit_code": 70,
+      "raw_transaction_hash": "0xd4d8bb95079e88bd92eae372121b124e8bdeaef6792d18abbb2607f738ca0b82",
+      "serialized_transaction_hash": "0xd7b4c0d914d12d572cb8f97b260e98bb32f05fae6ba1aeaaff0aed0a58e5f96f"
+    },
+    {
+      "scenario": "wrong_adapter",
+      "outcome": "adversarial",
+      "artifact": "wrong_adapter",
+      "rejection_stage": "ckb-vm",
+      "expected_exit_code": 1,
+      "raw_transaction_hash": "0x11ce9978912b5925f6dc4df9967fe0533d4caca58b3d069212a04e919de68898",
+      "serialized_transaction_hash": "0xd5eab90512a2027fa1a47116b8fccb0b05f0f762318b0bf2b1c2e8a8104fe765"
+    },
+    {
+      "scenario": "wrong_argument",
+      "outcome": "adversarial",
+      "artifact": "wrong_argument",
+      "rejection_stage": "ckb-vm",
+      "expected_exit_code": 4,
+      "raw_transaction_hash": "0xccf0b5e323d56f24316a4f47ecb5fb584f5c732365074299b79b3dc2556a79cc",
+      "serialized_transaction_hash": "0x22fdcc6f1687b49bdac29e7318e0400873c4148d55de927432cef1d335cd3623"
+    },
+    {
+      "scenario": "wrong_dependency",
+      "outcome": "adversarial",
+      "artifact": "exec",
+      "rejection_stage": "ckb-vm",
+      "expected_exit_code": 41,
+      "raw_transaction_hash": "0x79fc30b756b0cb7ea7c03e41e011e2ec9cbce32aad85e989bcb00bc5e524fc26",
+      "serialized_transaction_hash": "0x099a30275b0cae10072c20f205a7aefc9c06e2a93c9a36af321e5e924c1156d7"
+    },
+    {
+      "scenario": "wrong_hash",
+      "outcome": "adversarial",
+      "artifact": "wrong_hash",
+      "rejection_stage": "ckb-vm",
+      "expected_exit_code": 41,
+      "raw_transaction_hash": "0x1c08ec3886b2b7e81e04acd314f31414481941b9220bcd4fb00185e1ecd71257",
+      "serialized_transaction_hash": "0x90ad11f7d99246acebd6fa9698f86b199a4dd6ffa421fe20b3804f4f96ec9f96"
+    },
+    {
+      "scenario": "wrong_scope",
+      "outcome": "adversarial",
+      "artifact": "exact_handle",
+      "rejection_stage": "ckb-vm",
+      "expected_exit_code": 70,
+      "raw_transaction_hash": "0xd4d8bb95079e88bd92eae372121b124e8bdeaef6792d18abbb2607f738ca0b82",
+      "serialized_transaction_hash": "0x4d58800fabece55ff5e5980a60f833996b047e8913b44610d401b94e19d357fa"
+    },
+    {
+      "scenario": "wrong_statement",
+      "outcome": "adversarial",
+      "artifact": "exact_handle",
+      "rejection_stage": "ckb-vm",
+      "expected_exit_code": 70,
+      "raw_transaction_hash": "0xd4d8bb95079e88bd92eae372121b124e8bdeaef6792d18abbb2607f738ca0b82",
+      "serialized_transaction_hash": "0xd104607a015035c9fd38a841d41963950bb41941a817c4626f57cc81f433c814"
+    }
+  ]
+}

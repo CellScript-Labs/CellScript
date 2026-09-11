@@ -212,11 +212,110 @@
       "gaps": []
     },
     "external_verifier": {
-      "coverage_status": "owner-test-inventory-only",
-      "records": [],
-      "gaps": [
-        "Exact-handle and trusted-external tests are not yet indexed as one hash-bound canonical transaction fixture for every positive and adversarial inventory row"
-      ]
+      "coverage_status": "exact-artifact-fixtures",
+      "records": [
+        {
+          "scenario": "exact_identity_exec",
+          "outcome": "positive",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/external_verifier_scenarios.json",
+          "evidence": ["tests/external_verifier_scenarios.rs", "tests/fixtures/external_exec_callee.hex"],
+          "raw_transaction_hash": "0xe91d98117cf5b101644cd093e253d59d3a694595c3305100e599656a7ac27cf8",
+          "serialized_transaction_hash": "0x80535eb11f6ccf01d40ae93b7c4d15012d2e5f406eac4bb34f816dfbd8e07dd5",
+          "artifact_hashes": ["0x24dcbbaf73a57ad1864062a0d25f952764e633870d97b2d079c4b1e057abf3ae"]
+        },
+        {
+          "scenario": "exact_identity_spawn_wait",
+          "outcome": "positive",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/external_verifier_scenarios.json",
+          "evidence": ["tests/external_verifier_scenarios.rs", "tests/fixtures/external_exec_callee.hex"],
+          "raw_transaction_hash": "0xb3edda6ce51d66449eaf1aa235cb524c370535ac3a6543d0f1cc3aac1250e73c",
+          "serialized_transaction_hash": "0x51ad771db77e9ac85d44c08c8f23a8484957b14bf2e512bee41ee675d45f2b9c",
+          "artifact_hashes": ["0x6fdf614ee263418f521b373973e4c6a970ebb221cbc36073195086bfd37a7478"]
+        },
+        {
+          "scenario": "wrong_dependency",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/external_verifier_scenarios.json",
+          "evidence": ["tests/external_verifier_scenarios.rs", "tests/fixtures/external_exec_callee.hex"],
+          "raw_transaction_hash": "0x79fc30b756b0cb7ea7c03e41e011e2ec9cbce32aad85e989bcb00bc5e524fc26",
+          "serialized_transaction_hash": "0x099a30275b0cae10072c20f205a7aefc9c06e2a93c9a36af321e5e924c1156d7",
+          "artifact_hashes": ["0x24dcbbaf73a57ad1864062a0d25f952764e633870d97b2d079c4b1e057abf3ae"]
+        },
+        {
+          "scenario": "wrong_hash",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/external_verifier_scenarios.json",
+          "evidence": ["tests/external_verifier_scenarios.rs", "tests/fixtures/external_exec_callee.hex"],
+          "raw_transaction_hash": "0x1c08ec3886b2b7e81e04acd314f31414481941b9220bcd4fb00185e1ecd71257",
+          "serialized_transaction_hash": "0x90ad11f7d99246acebd6fa9698f86b199a4dd6ffa421fe20b3804f4f96ec9f96",
+          "artifact_hashes": ["0x680ebeaf1b1f67fca328d1c79ba85bec2894ead204005ab56b57ec8b4e3e43d3"]
+        },
+        {
+          "scenario": "wrong_adapter",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/external_verifier_scenarios.json",
+          "evidence": ["tests/external_verifier_scenarios.rs", "tests/fixtures/external_exec_callee.hex"],
+          "raw_transaction_hash": "0x11ce9978912b5925f6dc4df9967fe0533d4caca58b3d069212a04e919de68898",
+          "serialized_transaction_hash": "0xd5eab90512a2027fa1a47116b8fccb0b05f0f762318b0bf2b1c2e8a8104fe765",
+          "artifact_hashes": ["0x300d938be9c2670b1710e7273ce3cb4bf8b725d4fa3643d38ab940f2d826c0a4"]
+        },
+        {
+          "scenario": "wrong_argument",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/external_verifier_scenarios.json",
+          "evidence": ["tests/external_verifier_scenarios.rs", "tests/fixtures/external_exec_callee.hex"],
+          "raw_transaction_hash": "0xccf0b5e323d56f24316a4f47ecb5fb584f5c732365074299b79b3dc2556a79cc",
+          "serialized_transaction_hash": "0x22fdcc6f1687b49bdac29e7318e0400873c4148d55de927432cef1d335cd3623",
+          "artifact_hashes": ["0x6f5255524284589645016936d1f4e48d3d91a4421d1a5e63da22f2bd918c4059"]
+        },
+        {
+          "scenario": "wrong_scope",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/external_verifier_scenarios.json",
+          "evidence": ["tests/external_verifier_scenarios.rs", "tests/fixtures/external_exec_callee.hex"],
+          "raw_transaction_hash": "0xd4d8bb95079e88bd92eae372121b124e8bdeaef6792d18abbb2607f738ca0b82",
+          "serialized_transaction_hash": "0x4d58800fabece55ff5e5980a60f833996b047e8913b44610d401b94e19d357fa",
+          "artifact_hashes": ["0x60f925aba3e6216ad1e60b24ce875a5ae25cbbce193a62c87c3c9f79e0e7ffcb"]
+        },
+        {
+          "scenario": "wrong_statement",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/external_verifier_scenarios.json",
+          "evidence": ["tests/external_verifier_scenarios.rs", "tests/fixtures/external_exec_callee.hex"],
+          "raw_transaction_hash": "0xd4d8bb95079e88bd92eae372121b124e8bdeaef6792d18abbb2607f738ca0b82",
+          "serialized_transaction_hash": "0xd104607a015035c9fd38a841d41963950bb41941a817c4626f57cc81f433c814",
+          "artifact_hashes": ["0x60f925aba3e6216ad1e60b24ce875a5ae25cbbce193a62c87c3c9f79e0e7ffcb"]
+        },
+        {
+          "scenario": "child_failure",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/external_verifier_scenarios.json",
+          "evidence": ["tests/external_verifier_scenarios.rs", "tests/fixtures/external_exec_callee.hex"],
+          "raw_transaction_hash": "0x3922d402230c491d0618862603805be241b3ed5d4e45f48b9117850dcb38bcd2",
+          "serialized_transaction_hash": "0x11a7790eb5f09548eaa82aa6582f198c44ad5a0e53dcd45c86699fdd58b5a3ad",
+          "artifact_hashes": ["0xfda32cfc35e78c6ebbef5f273f6e76abeca6c00a3e44384a4df393a7b8dd2972"]
+        },
+        {
+          "scenario": "post_build_substitution",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/external_verifier_scenarios.json",
+          "evidence": ["tests/external_verifier_scenarios.rs", "tests/fixtures/external_exec_callee.hex"],
+          "raw_transaction_hash": "0xd4d8bb95079e88bd92eae372121b124e8bdeaef6792d18abbb2607f738ca0b82",
+          "serialized_transaction_hash": "0xd7b4c0d914d12d572cb8f97b260e98bb32f05fae6ba1aeaaff0aed0a58e5f96f",
+          "artifact_hashes": ["0x60f925aba3e6216ad1e60b24ce875a5ae25cbbce193a62c87c3c9f79e0e7ffcb"]
+        }
+      ],
+      "gaps": []
     },
     "fungible_asset": {
       "coverage_status": "exact-artifact-fixtures",

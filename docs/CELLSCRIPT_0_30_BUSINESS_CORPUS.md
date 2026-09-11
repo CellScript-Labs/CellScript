@@ -33,7 +33,7 @@ chain, or release evidence.
 | Authorization | Standard signing, multisig, issuer and Script identity, post-signing mutation rejection | bundled multisig-v2, SDK signing, policy lifecycle, and sighash fixtures |
 | Committed state | Authenticated opening, successor commitment, shared witness ownership, stale/root/index failures | typed `Commitment<T>`/`Opening<T>` CKB-VM and resource fixtures, bounded hash/Merkle cases, schema acknowledgements, and matched schema-roll reference |
 | Multi-Script composition | At least four artifacts, interacting Type and Lock groups, persistent action dispatch, ProtocolBundle conflicts and exact identities | `business_corpus.rs`, ProtocolBundle CLI and adapter tests |
-| External verifier | Exact-identity EXEC or SPAWN/WAIT with explicit trusted boundary and substitution failures | `trusted_external.rs` and exact-handle CKB-VM cases |
+| External verifier | Exact-identity EXEC or SPAWN/WAIT with explicit trusted boundary and substitution failures | Exact seven-artifact scenario fixture, `trusted_external.rs`, and exact-handle CKB-VM cases |
 
 The companion transaction inventory
 [`tests/fixtures/business_transaction_inventory.json`](../tests/fixtures/business_transaction_inventory.json)
@@ -89,6 +89,18 @@ it requires the data, complete Lock, and complete Type identities to remain
 unchanged while capacity increases, rather than claiming unsupported capacity
 mutation inside the persistent policy. Both artifacts and all raw/serialized
 transaction identities are pinned in `tests/fixtures/nft_scenarios.json`.
+
+The external-verifier family now binds all ten rows to exact transaction and
+artifact identities. Its fixed child accepts only the three one-byte arguments
+`a`, `b`, and `c`; this makes the u8 adapter's success and wrong-argument path
+observable, while selecting the four-segment hex adapter fails at the child.
+Separate checked parents cover exact EXEC, checked SPAWN/WAIT, a deliberately
+wrong pinned hash, and child failure. Exact verifier handles bind the complete
+receipt, entry scope, typed-semantics statement, runtime ABI, and child artifact;
+scope/statement witness substitution and a post-build CellDep replacement fail
+with error 70. The fixture pins all seven parent bundles and both child data
+identities without claiming that CellScript proves the external code's internal
+semantics.
 
 The order/AMM family now reuses exact anchor evidence where the frozen rows
 are genuinely identical: partial fill, cancel, two-order settlement,
@@ -169,9 +181,9 @@ serialized transaction identities; their owning fixtures also bind lowering
 records, source maps, verified bundles, and resource measurements. Within the
 multi-Script family, all four positive and all five adversarial inventory rows
 now have exact-artifact fixtures. The remaining non-exact scenarios are the
-four explicitly listed order/AMM rows and the external-verifier family; the
-unreachable matched references, selected-network node/deployment evidence, and
-independent review remain separate blockers.
+four explicitly listed order/AMM rows; the unreachable matched references,
+selected-network node/deployment evidence, and independent review remain
+separate blockers.
 `check-business-corpus --release` rejects that state. Stable versioning, tags,
 package publication, editor/browser
 publication, and network deployment remain outside this candidate record.

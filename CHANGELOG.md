@@ -2,6 +2,12 @@
 
 ## 0.30 - Capability closure development branch
 
+- Complete issue #26's external-verifier family with exact EXEC, SPAWN/WAIT,
+  and verifier-handle CKB-VM fixtures. Seven independently checked parent
+  artifacts and one pinned argument-checking child cover two accepted rows and
+  dependency-position, hash, adapter, argument, scope/receipt, semantic-
+  statement, child-exit, and post-build substitution failures.
+
 - Complete issue #26's NFT/DOB scenario family with a deterministic signed
   policy lifecycle for unique mint, derived metadata-state update, ownership
   transfer, and burn, plus an independently checked typed-view capacity

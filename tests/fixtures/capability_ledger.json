@@ -462,9 +462,9 @@
       "release_eligibility": "candidate",
       "issue_disposition": "keep-open",
       "design_records": ["docs/CELLSCRIPT_0_30_BUSINESS_CORPUS.md"],
-      "evidence": ["tests/fixtures/business_corpus.json", "tests/fixtures/business_transaction_inventory.json", "tests/fixtures/business_scenario_evidence.json", "tests/fixtures/authorization_scenarios.json", "tests/fixtures/capability_anchor_cases.json", "tests/fixtures/committed_substate_scenarios.json", "tests/fixtures/fungible_scenarios.cell", "tests/fixtures/fungible_scenarios.json", "tests/fixtures/nft_capacity_scenario.cell", "tests/fixtures/nft_scenarios.cell", "tests/fixtures/nft_scenarios.json", "tests/fixtures/temporal_scenarios.json", "tests/business_corpus.rs", "tests/commitment_opening.rs", "tests/fungible_scenarios.rs", "tests/temporal_scenarios.rs"],
+      "evidence": ["tests/fixtures/business_corpus.json", "tests/fixtures/business_transaction_inventory.json", "tests/fixtures/business_scenario_evidence.json", "tests/fixtures/authorization_scenarios.json", "tests/fixtures/capability_anchor_cases.json", "tests/fixtures/committed_substate_scenarios.json", "tests/fixtures/external_exec_callee.hex", "tests/fixtures/external_verifier_scenarios.json", "tests/fixtures/fungible_scenarios.cell", "tests/fixtures/fungible_scenarios.json", "tests/fixtures/nft_capacity_scenario.cell", "tests/fixtures/nft_scenarios.cell", "tests/fixtures/nft_scenarios.json", "tests/fixtures/temporal_scenarios.json", "tests/business_corpus.rs", "tests/commitment_opening.rs", "tests/external_verifier_scenarios.rs", "tests/fungible_scenarios.rs", "tests/temporal_scenarios.rs"],
       "non_goals": ["A percentage claim over arbitrary Rust contracts or relabeling lower evidence tiers as higher ones"],
-      "remaining_work": ["Complete exact canonical fixtures for external-verifier and the four uncovered order/AMM rows", "Record node admission, deployment, and independent review"]
+      "remaining_work": ["Complete exact canonical fixtures for the four uncovered order/AMM rows", "Record node admission, deployment, and independent review"]
     },
     {
       "issue": 27,

@@ -46,9 +46,9 @@
   },
   "claim": "Application-layer capability comparable to hand-written Rust CKB Scripts for this exact bounded eight-family portfolio; unrestricted Rust parity is excluded.",
   "capability_ledger": "tests/fixtures/capability_ledger.json",
-  "capability_ledger_sha256": "0x3510e44e3348b1878859aa6b71b82bdb751e7990db159183f4e31cd31e72d88d",
+  "capability_ledger_sha256": "0x48827e26744614863022778df106ac2bf693767d25ff52c41da131efb911d4a0",
   "scenario_evidence_manifest": "tests/fixtures/business_scenario_evidence.json",
-  "scenario_evidence_sha256": "0xf64607c5cd3560df8f0a5f0f35c26614a75e0831b713712c4c332539c8b78b07",
+  "scenario_evidence_sha256": "0x183193e7fa2695871ac4053c451ccdf0907230e5018a0dd2cc14291840a23fd6",
   "cryptographic_capability_matrix": "tests/fixtures/cryptographic_capability_matrix.json",
   "evidence_files": [
     "Cargo.lock",
