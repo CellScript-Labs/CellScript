@@ -75,9 +75,11 @@ establishes both same-transaction Script interaction and prior-output
 continuity. The anchor now writes the four exact artifact bundles and generated
 builders, admits their roles, witnesses, dependencies, and bounded output Plan
 through ProtocolBundle, and requires adapter materialization to reproduce the
-executed Molecule transaction byte for byte. The pinned raw transaction,
-serialized transaction, and canonical bundle hashes make accidental fixture or
-construction drift fail the test. Aggregate CKB-VM cycles are bound back to all
+executed Molecule transaction byte for byte. The canonical fixture pins each
+participating ELF hash plus its lowering-record, source-map, and verified-bundle
+identity, together with the raw transaction, serialized transaction, and
+canonical ProtocolBundle hashes. Any artifact, sidecar, fixture, or construction
+drift therefore fails the test. Aggregate CKB-VM cycles are bound back to all
 four direct CellScript Script-group records without inventing per-group cycle
 attribution.
 
@@ -94,13 +96,12 @@ deployment identities, and independent review are still pending.
 The scenario-evidence manifest additionally records that the configured
 NovaSeal and iCKB reference submodule commits are currently unreachable from
 their remotes, so matched-reference reproducibility is blocked rather than
-silently rebased to a different commit. The four-artifact anchor pins raw and
-serialized transaction hashes but remains below `exact-artifact-fixture` until
-every participating ELF and sidecar identity is frozen in its scenario record.
-The maximum-width authenticated-opening row is the first exact-artifact
-scenario: it freezes the ELF, lowering record, source map, verified bundle,
-raw transaction, serialized transaction, and resource measurements. The
-successor and committed-state adversarial rows remain incomplete.
+silently rebased to a different commit. The four-artifact anchor and the
+maximum-width authenticated-opening row are exact-artifact scenarios: each
+freezes its ELF identity or identities, lowering record, source map, verified
+bundle, raw transaction, serialized transaction, and resource measurements.
+The remaining portfolio scenarios, including successor and committed-state
+adversarial rows, still need their own exact records.
 `check-business-corpus --release` rejects that state. Stable versioning, tags,
 package publication, editor/browser
 publication, and network deployment remain outside this candidate record.

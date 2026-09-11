@@ -8,6 +8,36 @@
   ],
   "policy_data_hex": "0x63656c6c7363726970742d302e33302d616e63686f722d706f6c696379",
   "artifacts": 4,
+  "artifact_identities": [
+    {
+      "id": "order",
+      "artifact_hash": "0xf7b1f6db3eae3456cc0d4e97ec154eb19b70fae28a3645a7382deb72294fb018",
+      "lowering_record_hash": "0x1e1813060b285056b9321fa132f4c56b7bfe33f0c1fe7f37692abc8d1f6289b7",
+      "source_map_hash": "0xf84749064db3abee1438d9b7589bd050e157e354e3f5ce2694ee9656c7b2c97b",
+      "verified_bundle_id": "0x729c3cdb3c6544d38d03277826b6715f1400b0530ba0a14bd64e001b2fa1bea6"
+    },
+    {
+      "id": "policy",
+      "artifact_hash": "0x837b8c768eaf59e61253de3399da193f211483f3fcda75fd1bec9f05a0e20345",
+      "lowering_record_hash": "0xf4ec37dcac94cf4cc1958c7262754a4f60b7c5ed89e1cd7355f0eb5fe7cd44e9",
+      "source_map_hash": "0x9ea891cb573a2393f7d63b9a3505cab35e1e6d99d5cf7fbcd111318911f292de",
+      "verified_bundle_id": "0xcb7a5e76c2267d0d09130118d4f22f6511428056b1895f1352644074bdf7a5e6"
+    },
+    {
+      "id": "token",
+      "artifact_hash": "0xaa484561bcc9aa5eef79f1808a168866ed3155a40043d60e7e6256cff3190c1c",
+      "lowering_record_hash": "0x703b15dc239e34926cce3014541686fdd54702c2c0791cfadeecb7834400f807",
+      "source_map_hash": "0x4b063dd9accd45763d36edcc00180d4860418e686dd8a32044262e8348f64228",
+      "verified_bundle_id": "0x21cba1a911a996f12cc344d4fb57b6238c425731d1e89d761ee47b45e2e66d5c"
+    },
+    {
+      "id": "authorization",
+      "artifact_hash": "0xc8255dcc385aa8b61aef60ea9e919e2f18d82c43cefe6e873096d493bd4c1fe7",
+      "lowering_record_hash": "0x4f6a325ed95c3cdd2a87405dbaf3404bc1c2c37019885a03efde13c97b6c31f9",
+      "source_map_hash": "0xc5cd4463b18c4a856002c9d4c392a1e88397c36302b345a6f59c85fac64dbf69",
+      "verified_bundle_id": "0x3b9551850f23e6dae03c6925d6fc694b433ff2896fb4378c36f0ad69d229690e"
+    }
+  ],
   "script_groups": 5,
   "positive_case": "settle_two_orders",
   "adversarial_cases": [

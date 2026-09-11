@@ -48,7 +48,7 @@
   "capability_ledger": "tests/fixtures/capability_ledger.json",
   "capability_ledger_sha256": "0xe196b277207f67b561bcb63506281613363fa96d6c2767f7921a33d2de7acb8e",
   "scenario_evidence_manifest": "tests/fixtures/business_scenario_evidence.json",
-  "scenario_evidence_sha256": "0x834f5bd5fb81f6137eedacd88b87c40b9884009b526b26f2a5e8b906c7e68284",
+  "scenario_evidence_sha256": "0xb5669ce668c5836a3b8e0be1538ee2ca140b0a4b448ace8146eeb4a8ebed2e3f",
   "cryptographic_capability_matrix": "tests/fixtures/cryptographic_capability_matrix.json",
   "evidence_files": [
     "Cargo.lock",

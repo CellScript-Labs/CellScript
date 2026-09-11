@@ -44,6 +44,12 @@
   uses domain-separated deterministic fixture OutPoints so transaction hashes
   remain reproducible across processes.
 
+- Promote the four-artifact/five-group business anchor's positive settlement
+  row to an exact-artifact fixture. Its canonical record now pins every ELF,
+  lowering record, source map, and verified-bundle identity in addition to the
+  executed raw transaction, serialized transaction, ProtocolBundle, and
+  resource measurements.
+
 - Add machine-gated maximum-shape resource profiles for all ten frozen
   cryptographic and authorization capabilities. Exact CKB-VM measurements now
   cover 459-byte Script hashing, 65,536-byte witness hashing, depth-16 SHA256d

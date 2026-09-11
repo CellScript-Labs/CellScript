@@ -47,11 +47,21 @@ struct AnchorFixture {
     source_files: Vec<String>,
     policy_data_hex: String,
     artifacts: usize,
+    artifact_identities: Vec<AnchorArtifactIdentity>,
     script_groups: usize,
     positive_case: String,
     adversarial_cases: Vec<AdversarialCase>,
     measured: AnchorMeasurements,
     budgets: AnchorBudgets,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct AnchorArtifactIdentity {
+    id: String,
+    artifact_hash: String,
+    lowering_record_hash: String,
+    source_map_hash: String,
+    verified_bundle_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,6 +100,7 @@ struct AnchorResult {
     max_stack_frame_bytes: u32,
     witness_bytes: usize,
     occupied_capacity_shannons: u64,
+    artifact_identities: Vec<AnchorArtifactIdentity>,
     protocol_bundle: Option<AnchorProtocolBundleEvidence>,
 }
 
@@ -138,6 +149,25 @@ fn compile_order_policy() -> cellscript::CompileResult {
         ExecutableSurfacePolicy::DenyFailClosed,
     )
     .unwrap_or_else(|error| panic!("anchor order policy must compile: {error}"))
+}
+
+fn anchor_artifact_identity(id: &str, result: &cellscript::CompileResult) -> AnchorArtifactIdentity {
+    AnchorArtifactIdentity {
+        id: id.to_string(),
+        artifact_hash: format!("0x{}", result.metadata.artifact_hash.as_deref().expect("anchor artifact hash")),
+        lowering_record_hash: format!(
+            "0x{}",
+            result.metadata.verified_artifact.lowering_record_hash.as_deref().expect("anchor lowering-record hash")
+        ),
+        source_map_hash: format!(
+            "0x{}",
+            result.metadata.verified_artifact.source_map_hash.as_deref().expect("anchor source-map hash")
+        ),
+        verified_bundle_id: format!(
+            "0x{}",
+            result.metadata.verified_artifact.verified_bundle_id.as_deref().expect("anchor verified-bundle identity")
+        ),
+    }
 }
 
 fn input(context: &mut Context, tag: u8, lock: packed::Script, type_script: packed::Script, amount: u64) -> packed::CellInput {
@@ -558,6 +588,13 @@ fn run_anchor(mutation: Mutation) -> AnchorResult {
     for artifact in [&order, &policy, &token, &authorization] {
         artifact.validate().expect("each anchor artifact must pass independent validation");
     }
+    let artifact_identities = [
+        anchor_artifact_identity("order", &order),
+        anchor_artifact_identity("policy", &policy),
+        anchor_artifact_identity("token", &token),
+        anchor_artifact_identity("authorization", &authorization),
+    ]
+    .into();
 
     let order_elf = &order.artifact_bytes;
     let policy_elf = &policy.artifact_bytes;
@@ -695,6 +732,7 @@ fn run_anchor(mutation: Mutation) -> AnchorResult {
         max_stack_frame_bytes,
         witness_bytes,
         occupied_capacity_shannons,
+        artifact_identities,
         protocol_bundle,
     }
 }
@@ -717,6 +755,7 @@ fn canonical_anchor_executes_four_cellscript_artifacts_in_one_transaction() {
     assert_eq!(fixture.script_groups, 5);
     assert_eq!(fixture.positive_case, "settle_two_orders");
     let result = run_anchor(Mutation::None);
+    assert_eq!(result.artifact_identities, fixture.artifact_identities, "recorded anchor artifact identities are stale");
     let cycles = result.verification.expect("the canonical same-transaction anchor must pass");
     let transaction_bytes = result.transaction.data().serialized_size_in_block();
     assert_eq!(cycles, fixture.measured.cycles, "recorded anchor cycle measurement is stale");
