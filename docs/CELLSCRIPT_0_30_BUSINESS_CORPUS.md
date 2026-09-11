@@ -62,7 +62,7 @@ actual Script groups:
 The CKB-VM test rejects a wrong authorization credential, fungible inflation,
 partial-settlement mismatch, persistent-state substitution, and dependency
 substitution. Its pinned resource
-record is 40,412 cycles, 15,560 combined ELF bytes, a 5,376-byte largest checked
+record is 41,822 cycles, 16,424 combined ELF bytes, a 5,376-byte largest checked
 stack frame, 321 witness bytes, a 1,423-byte transaction, and 32.8 CKB occupied
 capacity. Budgets in
 [`tests/fixtures/capability_anchor_cases.json`](../tests/fixtures/capability_anchor_cases.json)
@@ -72,7 +72,10 @@ The stateful companion test verifies `partial_fill`, registers its output under
 the exact transaction OutPoint, then consumes that output with `settle`; it also
 executes `cancel` and rejects an invalid full fill. The anchor therefore
 establishes both same-transaction Script interaction and prior-output
-continuity. The anchor now writes the four exact artifact bundles and generated
+continuity. Every persistent-policy action also reads the current GroupInput's
+exact data size and capacity, so that typed runtime-view slice executes through
+policy-witness dispatch in both the composition anchor and stateful chain. The
+anchor now writes the four exact artifact bundles and generated
 builders, admits their roles, witnesses, dependencies, and bounded output Plan
 through ProtocolBundle, and requires adapter materialization to reproduce the
 executed Molecule transaction byte for byte. The canonical fixture pins each

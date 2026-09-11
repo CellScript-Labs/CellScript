@@ -199,13 +199,21 @@ Script-args boundary, one-past-last indexes, artifact and sidecar hashes, and ra
 and serialized transaction hashes. Its measured maximum stack frame is 11,344
 bytes under an explicit 16,384-byte profile budget. Cryptographic and bounded
 witness maxima remain owned by the separate cryptographic resource manifest.
+The four-artifact business anchor separately executes `GroupInput` `data_size`
+and `capacity` reads in all three actions of its persistent order policy. That
+exact policy artifact passes policy-witness dispatch, generated-builder and
+ProtocolBundle materialization of the byte-identical transaction, same-
+transaction CKB-VM composition, and stateful `partial_fill` then `settle` plus
+`cancel` execution. The anchor pins the policy artifact and sidecar identities,
+41,822 cycles, 16,424 combined ELF bytes, and the transaction and bundle hashes.
 
 The following work remains before issue #24 can close:
 
 - full-header hash decoding if the frozen business corpus requires it;
 - any additional signing domain selected by the business corpus, including a
   multisig prefix-preserving layout, as a separately named contract;
-- persistent-policy and generated-builder parity for every admitted row;
+- persistent-policy and generated-builder parity for admitted rows beyond the
+  exact `GroupInput.data_size`/`capacity` anchor slice;
 - maximum-bound cycle, stack, ELF, witness, and transaction-size measurements
   for the remaining non-cryptographic adapter rows; the fixed
   transaction/header/temporal and Output/GroupOutput/Script paths and all ten

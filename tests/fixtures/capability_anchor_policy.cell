@@ -6,6 +6,9 @@ shared OrderState has store, consume {
 
 action partial_fill(input before: OrderState, witness filled: u64, witness owner: Address) {
     verification
+        let current = ckb::group_input<OrderState>(0)
+        require current.data_size == 8
+        require current.capacity > 0
         require filled > 0
         require before.remaining > filled
         let remaining = before.remaining - filled
@@ -15,12 +18,18 @@ action partial_fill(input before: OrderState, witness filled: u64, witness owner
 
 action settle(input before: OrderState) {
     verification
+        let current = ckb::group_input<OrderState>(0)
+        require current.data_size == 8
+        require current.capacity > 0
         require before.remaining > 0
         consume before
 }
 
 action cancel(input before: OrderState) {
     verification
+        let current = ckb::group_input<OrderState>(0)
+        require current.data_size == 8
+        require current.capacity > 0
         require before.remaining > 0
         consume before
 }

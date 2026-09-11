@@ -2,6 +2,14 @@
 
 ## 0.30 - Capability closure development branch
 
+- Exercise typed `GroupInput` `data_size` and `capacity` reads inside every
+  action of the persistent `partial_fill`/`settle`/`cancel` policy. The same
+  policy artifact now passes direct action dispatch, exact generated-builder
+  and ProtocolBundle materialization, the four-artifact composition anchor,
+  and prior-output stateful CKB-VM execution. Refresh its four sidecar
+  identities, transaction and ProtocolBundle hashes, and measured 41,822-cycle,
+  16,424-byte combined-ELF profile under an explicit 17,000-byte ceiling.
+
 - Extend issue #24's exact non-cryptographic runtime-view resource evidence to
   global Output, current-group GroupOutput, and complete Lock/Type Script
   projections. The CKB-VM fixture covers absent Type Scripts, exact 32-byte

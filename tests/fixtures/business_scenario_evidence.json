@@ -66,11 +66,11 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/capability_anchor_cases.json",
           "evidence": ["tests/business_corpus.rs"],
-          "raw_transaction_hash": "0x0991ec77b29b6d04b02afde1f8315cf549a6c466da151c5dd70838f6e60c6acd",
-          "serialized_transaction_hash": "0x4828bc62108ca171ba82670dbe8bd9479d6bb6ba2c1ab6f82291f4c302b7b01c",
+          "raw_transaction_hash": "0xeeffbecf0ccbdda0d5709b96ccee78e11988a74be00515f96d34e84b8de73ba6",
+          "serialized_transaction_hash": "0x8b6904472b55eec2483f262331bd71b8da3920737f1924031f67e392d0c3e0bd",
           "artifact_hashes": [
             "0xf7b1f6db3eae3456cc0d4e97ec154eb19b70fae28a3645a7382deb72294fb018",
-            "0x837b8c768eaf59e61253de3399da193f211483f3fcda75fd1bec9f05a0e20345",
+            "0x5f827a767f28bcc91190945a3eeff396e24b6346e341ebe7643cbb91bac7bb28",
             "0xaa484561bcc9aa5eef79f1808a168866ed3155a40043d60e7e6256cff3190c1c",
             "0xc8255dcc385aa8b61aef60ea9e919e2f18d82c43cefe6e873096d493bd4c1fe7"
           ]

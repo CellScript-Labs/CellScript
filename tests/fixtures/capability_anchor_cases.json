@@ -18,10 +18,10 @@
     },
     {
       "id": "policy",
-      "artifact_hash": "0x837b8c768eaf59e61253de3399da193f211483f3fcda75fd1bec9f05a0e20345",
-      "lowering_record_hash": "0xf4ec37dcac94cf4cc1958c7262754a4f60b7c5ed89e1cd7355f0eb5fe7cd44e9",
-      "source_map_hash": "0x9ea891cb573a2393f7d63b9a3505cab35e1e6d99d5cf7fbcd111318911f292de",
-      "verified_bundle_id": "0xcb7a5e76c2267d0d09130118d4f22f6511428056b1895f1352644074bdf7a5e6"
+      "artifact_hash": "0x5f827a767f28bcc91190945a3eeff396e24b6346e341ebe7643cbb91bac7bb28",
+      "lowering_record_hash": "0xbbd907d8ef8062fce1f3e583986ff15910e7a4a15eaa5c7f9fe62cca3cb33216",
+      "source_map_hash": "0x142c5825a9c6db00c5c9f1e475d640e003f122589bc0703472b03fa3712bff55",
+      "verified_bundle_id": "0x558e5ec1ba697d0f919a57ee61dcef485ea843cbfac8c908f490b6edafc5339f"
     },
     {
       "id": "token",
@@ -63,19 +63,19 @@
     }
   ],
   "measured": {
-    "cycles": 40412,
-    "combined_elf_bytes": 15560,
+    "cycles": 41822,
+    "combined_elf_bytes": 16424,
     "max_stack_frame_bytes": 5376,
     "witness_bytes": 321,
     "transaction_bytes": 1423,
     "occupied_capacity_shannons": 32800000000,
-    "raw_transaction_hash": "0x0991ec77b29b6d04b02afde1f8315cf549a6c466da151c5dd70838f6e60c6acd",
-    "serialized_transaction_hash": "0x4828bc62108ca171ba82670dbe8bd9479d6bb6ba2c1ab6f82291f4c302b7b01c",
-    "protocol_bundle_hash": "e8882c9bb9db2365aa7177fd2f26e6d2412d982ce42569395e6a71f265f828e1"
+    "raw_transaction_hash": "0xeeffbecf0ccbdda0d5709b96ccee78e11988a74be00515f96d34e84b8de73ba6",
+    "serialized_transaction_hash": "0x8b6904472b55eec2483f262331bd71b8da3920737f1924031f67e392d0c3e0bd",
+    "protocol_bundle_hash": "d9eb8c317a4c82f09a91bc607d5c9edf023b19637fe736761c1fd730c46c7bc9"
   },
   "budgets": {
     "max_cycles": 45000,
-    "max_combined_elf_bytes": 16000,
+    "max_combined_elf_bytes": 17000,
     "max_stack_frame_bytes": 6000,
     "max_witness_bytes": 336,
     "max_transaction_bytes": 1500,
