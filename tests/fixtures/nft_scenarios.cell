@@ -1,0 +1,37 @@
+module acceptance::nft_scenarios
+
+resource Nft has store, create, consume, burn { state: u64 }
+
+action mint(witness issuer_input: u64, witness identity: u64, witness recipient: Address) {
+    verification
+    require identity > 0
+    let issuer = ckb::cell_type_args32(source::group_output(0))
+    ckb::require_cell_lock_hash(source::input(issuer_input), issuer)
+    create Nft { state: identity } with_lock(recipient)
+}
+
+action update(input before: Nft, witness recipient: Address) {
+    verification
+    require before.state < 18446744073709551615
+    let input = ckb::group_input<Nft>(0)
+    let output = ckb::group_output<Nft>(0)
+    require input.capacity == output.capacity
+    let next_state = before.state + 1
+    consume before
+    create Nft { state: next_state } with_lock(recipient)
+}
+
+action transfer(input before: Nft, witness recipient: Address) {
+    verification
+    let input = ckb::group_input<Nft>(0)
+    let output = ckb::group_output<Nft>(0)
+    require input.capacity == output.capacity
+    let state = before.state
+    consume before
+    create Nft { state: state } with_lock(recipient)
+}
+
+action burn(input before: Nft) {
+    verification
+    destroy before
+}

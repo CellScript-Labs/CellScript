@@ -27,7 +27,7 @@ chain, or release evidence.
 | Family | Required business boundary | Principal executable evidence |
 |---|---|---|
 | Fungible asset | Authorized lifecycle, bounded split/merge, conservation, identity and overflow failures | `bounded_group_input.rs`, `bounded_output_plan.rs`, `entry_witness_abi.rs`, and matched Rust references |
-| NFT or DOB | Unique mint, metadata/owner/capacity transitions, burn, stale and unauthorized failures | `nft.cell`, example checks, production acceptance, and the matched NFT Lock cost row |
+| NFT or DOB | Unique mint, metadata/owner/capacity transitions, burn, stale and unauthorized failures | Signed persistent-policy lifecycle plus an independently checked capacity typed-view artifact, exact fixtures, `nft.cell`, and the matched NFT Lock cost row |
 | Order and AMM | Partial fill/cancel/settle, variable payments, price/reserve rules, ordered outputs, authenticated dependency | iCKB differential fixtures, AMM examples, cost corpus, and the composition anchor |
 | Temporal | Absolute/relative locks, vesting, epochs, timestamps, blocks, headers, and `Since` | typed runtime-view and iCKB CKB-VM fixtures |
 | Authorization | Standard signing, multisig, issuer and Script identity, post-signing mutation rejection | bundled multisig-v2, SDK signing, policy lifecycle, and sighash fixtures |
@@ -78,6 +78,17 @@ exercise post-signing transaction mutation, a copied owner witness, a witness
 from another signing domain, a wrong key, one-of-two partial signing, and
 live-set replay. Exact Lock exit codes and transaction identities are pinned
 in `tests/fixtures/authorization_scenarios.json`.
+
+The NFT/DOB family now binds all ten inventory rows to exact CKB-VM
+transactions. One signed persistent policy carries a uniquely identified
+single-Cell object through mint, a verifier-derived state increment, ownership
+transfer, and burn; adversarial transactions reject a duplicate output, stale
+state, wrong Lock, missing Type Script, and absent owner multisig. Capacity
+adjustment is deliberately a second independently checked typed-view artifact:
+it requires the data, complete Lock, and complete Type identities to remain
+unchanged while capacity increases, rather than claiming unsupported capacity
+mutation inside the persistent policy. Both artifacts and all raw/serialized
+transaction identities are pinned in `tests/fixtures/nft_scenarios.json`.
 
 The order/AMM family now reuses exact anchor evidence where the frozen rows
 are genuinely identical: partial fill, cancel, two-order settlement,
@@ -157,9 +168,10 @@ artifact scenarios: each freezes its ELF identity or identities plus raw and
 serialized transaction identities; their owning fixtures also bind lowering
 records, source maps, verified bundles, and resource measurements. Within the
 multi-Script family, all four positive and all five adversarial inventory rows
-now have exact-artifact fixtures. The remaining scenarios in the other
-families, including successor and committed-state adversarial rows, still need
-their own exact records.
+now have exact-artifact fixtures. The remaining non-exact scenarios are the
+four explicitly listed order/AMM rows and the external-verifier family; the
+unreachable matched references, selected-network node/deployment evidence, and
+independent review remain separate blockers.
 `check-business-corpus --release` rejects that state. Stable versioning, tags,
 package publication, editor/browser
 publication, and network deployment remain outside this candidate record.

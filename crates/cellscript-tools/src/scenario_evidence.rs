@@ -263,7 +263,8 @@ mod tests {
         assert!(validate(&root, &unknown, false).unwrap_err().to_string().contains("not in its positive inventory"));
 
         let mut false_exact = evidence();
-        false_exact.families.get_mut("nft_dob").expect("NFT family").coverage_status = "exact-artifact-fixtures".to_string();
+        false_exact.families.get_mut("external_verifier").expect("external-verifier family").coverage_status =
+            "exact-artifact-fixtures".to_string();
         assert!(validate(&root, &false_exact, false).unwrap_err().to_string().contains("without an exact artifact fixture"));
     }
 }

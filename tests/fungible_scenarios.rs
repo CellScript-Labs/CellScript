@@ -6,7 +6,8 @@ use cellscript::{
     artifact::{
         compile_artifact, encode_policy_action_record, ArtifactAction, ArtifactContext, ArtifactDeclaration, ArtifactDispatch,
     },
-    strip_vm_abi_trailer, CellScriptEdition, CompileOptions, CompileResult, EntryWitnessArg, ExecutableSurfacePolicy,
+    compile_with_executable_surface_policy, strip_vm_abi_trailer, CellScriptEdition, CompileOptions, CompileResult, EntryWitnessArg,
+    ExecutableSurfacePolicy,
 };
 use cellscript_ckb_adapter::policy_witness::{
     encode_policy_witness_bundle, place_policy_witness_bundle_before_signing, PolicyScriptRole, PolicyWitnessRecord,
@@ -33,7 +34,15 @@ use ckb_testtool::{
 use secp256k1::{Message, PublicKey, SecretKey};
 use std::collections::HashMap;
 
+#[path = "support/ckb_script_runner.rs"]
+#[allow(dead_code)]
+mod ckb_script_runner;
+
+use ckb_script_runner::{build_simple_fixture, execute_cellscript_script};
+
 const SOURCE: &str = include_str!("fixtures/fungible_scenarios.cell");
+const NFT_SOURCE: &str = include_str!("fixtures/nft_scenarios.cell");
+const NFT_CAPACITY_SOURCE: &str = include_str!("fixtures/nft_capacity_scenario.cell");
 const TOKEN_CAPACITY: u64 = 100_000_000_000;
 const FEE: u64 = 100_000_000;
 const MAX_CYCLES: u64 = 100_000_000;
@@ -62,6 +71,48 @@ fn compile_policy() -> CompileResult {
     )
     .unwrap_or_else(|error| panic!("fungible scenario policy: {error}"));
     compiled.validate().expect("independent fungible scenario artifact validation");
+    compiled
+}
+
+fn compile_nft_policy() -> CompileResult {
+    let compiled = compile_artifact(
+        NFT_SOURCE,
+        CompileOptions {
+            edition: CellScriptEdition::Edition2027,
+            opt_level: 2,
+            target: Some("riscv64-elf".to_string()),
+            ..Default::default()
+        },
+        ArtifactDeclaration {
+            name: "NftScenarioPolicy".to_string(),
+            context: ArtifactContext::TypeGroup { resource: "Nft".to_string() },
+            dispatch: ArtifactDispatch::PolicyWitnessV1,
+            actions: [(0, "mint"), (17, "update"), (33, "transfer"), (u32::MAX, "burn")]
+                .into_iter()
+                .map(|(tag, action)| ArtifactAction { tag, action: action.to_string() })
+                .collect(),
+            common_checks: Vec::new(),
+        },
+        ExecutableSurfacePolicy::DenyFailClosed,
+    )
+    .unwrap_or_else(|error| panic!("NFT scenario policy: {error}"));
+    compiled.validate().expect("independent NFT scenario artifact validation");
+    compiled
+}
+
+fn compile_nft_capacity() -> CompileResult {
+    let compiled = compile_with_executable_surface_policy(
+        NFT_CAPACITY_SOURCE,
+        CompileOptions {
+            edition: CellScriptEdition::Edition2027,
+            target: Some("riscv64-elf".to_string()),
+            target_profile: Some("ckb".to_string()),
+            ..Default::default()
+        },
+        ExecutableSurfacePolicy::DenyFailClosed,
+    )
+    .expect("NFT capacity artifact compiles");
+    compiled.validate().expect("independent NFT capacity artifact validation");
     compiled
 }
 
@@ -138,6 +189,37 @@ impl Action {
             Self::Mint { issuer_input, amount } => vec![EntryWitnessArg::U64(issuer_input), EntryWitnessArg::U64(amount), recipient],
             Self::Split { left_amount } => vec![EntryWitnessArg::U64(left_amount), recipient],
             Self::Transfer | Self::Merge => vec![recipient],
+            Self::Burn => Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum NftAction {
+    Mint { issuer_input: u64, identity: u64 },
+    Update,
+    Transfer,
+    Burn,
+}
+
+impl NftAction {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Mint { .. } => "mint",
+            Self::Update => "update",
+            Self::Transfer => "transfer",
+            Self::Burn => "burn",
+        }
+    }
+
+    fn args(self, recipient: Actor) -> Vec<EntryWitnessArg> {
+        let recipient = EntryWitnessArg::Address(recipient.lock().calc_script_hash().unpack());
+        match self {
+            Self::Mint { issuer_input, identity } => {
+                vec![EntryWitnessArg::U64(issuer_input), EntryWitnessArg::U64(identity), recipient]
+            }
+            Self::Update => vec![recipient],
+            Self::Transfer => vec![recipient],
             Self::Burn => Vec::new(),
         }
     }
@@ -289,6 +371,88 @@ impl<'a> Lifecycle<'a> {
                 role: PolicyScriptRole::Lock,
                 script_hash: Actor::FeePayer.lock().calc_script_hash().unpack(),
                 tag: 900,
+                args: Vec::new(),
+            },
+        ])
+        .unwrap();
+        witnesses[1] = place_policy_witness_bundle_before_signing(&witnesses[1], &bundle).unwrap();
+        let transaction = TransactionBuilder::default()
+            .inputs(inputs.into_iter().map(|out_point| packed::CellInput::new_builder().previous_output(out_point).build()))
+            .outputs(outputs)
+            .outputs_data(data.pack())
+            .witnesses(witnesses.into_iter().map(|witness| witness.as_bytes().pack()))
+            .cell_dep(packed::CellDep::new_builder().out_point(self.secp_data.clone()).dep_type(DepType::Code).build())
+            .build();
+        let unsigned = self.context.complete_tx(transaction);
+        let mut pending = Pending { signed: unsigned.clone(), unsigned, groups };
+        pending.signed = pending.sign(&pending.unsigned, true);
+        pending
+    }
+
+    fn prepare_nft(
+        &mut self,
+        action: NftAction,
+        consumed: &[packed::OutPoint],
+        states: &[u64],
+        output_owner: Actor,
+        declared_owner: Actor,
+        output_capacity: u64,
+        native_output: bool,
+    ) -> Pending {
+        let inputs = std::iter::once(self.funding.clone()).chain(consumed.iter().cloned()).collect::<Vec<_>>();
+        let total: u64 = inputs.iter().map(|input| u64::from(self.live[input].0.capacity())).sum();
+        let mut outputs = vec![plain_cell(Actor::FeePayer, 0)];
+        let mut data = vec![Bytes::new()];
+        for state in states {
+            let mut builder = plain_cell(output_owner, output_capacity).as_builder();
+            if native_output {
+                builder = builder.type_(Some(self.policy.clone()).pack());
+            }
+            outputs.push(builder.build());
+            data.push(Bytes::copy_from_slice(&state.to_le_bytes()));
+        }
+        if matches!(action, NftAction::Mint { .. }) {
+            let authority = &self.live[&consumed[0]].0;
+            let capacity = u64::from(authority.capacity()) - output_capacity;
+            outputs.push(authority.clone().as_builder().capacity::<packed::Uint64>(capacity.pack()).build());
+            data.push(Bytes::new());
+        }
+        let allocated: u64 = outputs.iter().skip(1).map(|output| u64::from(output.capacity())).sum();
+        outputs[0] = plain_cell(Actor::FeePayer, total.checked_sub(allocated + FEE).expect("funded NFT transaction"));
+
+        let mut groups: Vec<SigningGroup> = Vec::new();
+        for (index, out_point) in inputs.iter().enumerate() {
+            let lock = self.live[out_point].0.lock();
+            if let Some(existing) = groups.iter_mut().find(|signing| signing.group.script == lock) {
+                existing.group.input_indices.push(index);
+            } else {
+                let mut group = ScriptGroup::from_lock_script(&lock);
+                group.input_indices.push(index);
+                groups.push(SigningGroup { actor: Actor::from_lock(&lock), group });
+            }
+        }
+        let mut witnesses = vec![packed::WitnessArgs::default(); inputs.len()];
+        for signing in &groups {
+            witnesses[signing.group.input_indices[0]] = signing.actor.config().placeholder_witness();
+        }
+        let selected = encode_policy_action_record(
+            &self.compiled.metadata,
+            &self.policy.calc_script_hash().unpack(),
+            action.name(),
+            &action.args(declared_owner),
+        )
+        .unwrap();
+        let bundle = encode_policy_witness_bundle(&[
+            PolicyWitnessRecord {
+                role: PolicyScriptRole::Type,
+                script_hash: selected.script_hash,
+                tag: selected.tag,
+                args: selected.args,
+            },
+            PolicyWitnessRecord {
+                role: PolicyScriptRole::Lock,
+                script_hash: Actor::FeePayer.lock().calc_script_hash().unpack(),
+                tag: 901,
                 args: Vec::new(),
             },
         ])
@@ -586,5 +750,135 @@ fn authorization_business_inventory_scenarios_are_exact() {
         assert_eq!(record["raw_transaction_hash"], case["raw_transaction_hash"]);
         assert_eq!(record["serialized_transaction_hash"], case["serialized_transaction_hash"]);
         assert_eq!(record["artifact_hashes"], serde_json::json!([actual["artifact_identities"]["artifact_hash"]]));
+    }
+}
+
+#[test]
+fn nft_business_inventory_scenarios_are_exact() {
+    let compiled = compile_nft_policy();
+    let capacity_compiled = compile_nft_capacity();
+    let mut lifecycle = Lifecycle::new(&compiled);
+    let mut cases = Vec::new();
+
+    let mint = lifecycle.prepare_nft(
+        NftAction::Mint { issuer_input: 1, identity: 7 },
+        &[lifecycle.issuer.clone()],
+        &[7],
+        Actor::Alice,
+        Actor::Alice,
+        TOKEN_CAPACITY,
+        true,
+    );
+    cases.push(case_record("mint_unique", "positive", "ckb-vm", Some(0), &mint.signed));
+    let duplicate = lifecycle.prepare_nft(
+        NftAction::Mint { issuer_input: 1, identity: 7 },
+        &[lifecycle.issuer.clone()],
+        &[7, 7],
+        Actor::Alice,
+        Actor::Alice,
+        TOKEN_CAPACITY,
+        true,
+    );
+    let exit = rejection_exit_code(&lifecycle.reject(&duplicate.signed));
+    cases.push(case_record("duplicate_identity", "adversarial", "ckb-vm", Some(exit), &duplicate.signed));
+    let outputs = lifecycle.commit(&mint.signed).expect("NFT mint");
+    lifecycle.issuer = outputs[2].clone();
+
+    let nft = outputs[1].clone();
+    let update =
+        lifecycle.prepare_nft(NftAction::Update, std::slice::from_ref(&nft), &[8], Actor::Alice, Actor::Alice, TOKEN_CAPACITY, true);
+    cases.push(case_record("metadata_update", "positive", "ckb-vm", Some(0), &update.signed));
+    let stale =
+        lifecycle.prepare_nft(NftAction::Update, std::slice::from_ref(&nft), &[7], Actor::Alice, Actor::Alice, TOKEN_CAPACITY, true);
+    let exit = rejection_exit_code(&lifecycle.reject(&stale.signed));
+    cases.push(case_record("stale_state", "adversarial", "ckb-vm", Some(exit), &stale.signed));
+    let wrong_lock =
+        lifecycle.prepare_nft(NftAction::Update, std::slice::from_ref(&nft), &[8], Actor::Bob, Actor::Alice, TOKEN_CAPACITY, true);
+    let exit = rejection_exit_code(&lifecycle.reject(&wrong_lock.signed));
+    cases.push(case_record("wrong_lock", "adversarial", "ckb-vm", Some(exit), &wrong_lock.signed));
+    let unauthorized = update.sign(&update.unsigned, false);
+    let exit = rejection_exit_code(&lifecycle.reject(&unauthorized));
+    cases.push(case_record("unauthorized_update", "adversarial", "ckb-vm", Some(exit), &unauthorized));
+    let outputs = lifecycle.commit(&update.signed).expect("NFT metadata update");
+
+    let nft = outputs[1].clone();
+    let transfer =
+        lifecycle.prepare_nft(NftAction::Transfer, std::slice::from_ref(&nft), &[8], Actor::Bob, Actor::Bob, TOKEN_CAPACITY, true);
+    cases.push(case_record("ownership_transfer", "positive", "ckb-vm", Some(0), &transfer.signed));
+    let outputs = lifecycle.commit(&transfer.signed).expect("NFT ownership transfer");
+
+    let nft = outputs[1].clone();
+    let wrong_type =
+        lifecycle.prepare_nft(NftAction::Transfer, std::slice::from_ref(&nft), &[8], Actor::Bob, Actor::Bob, TOKEN_CAPACITY, false);
+    let exit = rejection_exit_code(&lifecycle.reject(&wrong_type.signed));
+    cases.push(case_record("wrong_type", "adversarial", "ckb-vm", Some(exit), &wrong_type.signed));
+    let mut capacity_fixture = build_simple_fixture(Bytes::from_static(b"nft-capacity"), 1, 1);
+    capacity_fixture.current_type_script_input_indices = vec![0];
+    let nft_data = 8_u64.to_le_bytes();
+    capacity_fixture.inputs[0].data = Bytes::copy_from_slice(&nft_data);
+    capacity_fixture.outputs[0].data = Bytes::copy_from_slice(&nft_data);
+    capacity_fixture.inputs[0].capacity = TOKEN_CAPACITY;
+    capacity_fixture.outputs[0].capacity = TOKEN_CAPACITY + 1_000_000_000;
+    let capacity_execution = execute_cellscript_script(strip_vm_abi_trailer(&capacity_compiled.artifact_bytes), &capacity_fixture);
+    assert_eq!(capacity_execution.exit_code, 0, "NFT capacity adjustment: {:?}", capacity_execution.captured_debug);
+    cases.push(serde_json::json!({
+        "scenario": "capacity_adjustment",
+        "outcome": "positive",
+        "rejection_stage": "ckb-vm",
+        "expected_exit_code": 0,
+        "raw_transaction_hash": capacity_execution.raw_transaction_hash,
+        "serialized_transaction_hash": capacity_execution.serialized_transaction_hash,
+    }));
+
+    let burn = lifecycle.prepare_nft(NftAction::Burn, std::slice::from_ref(&nft), &[], Actor::Bob, Actor::Bob, TOKEN_CAPACITY, true);
+    cases.push(case_record("burn", "positive", "ckb-vm", Some(0), &burn.signed));
+    lifecycle.commit(&burn.signed).expect("NFT burn");
+
+    cases.sort_by(|left, right| left["scenario"].as_str().cmp(&right["scenario"].as_str()));
+    let actual = serde_json::json!({
+        "schema": "cellscript-nft-scenarios-v1",
+        "source_files": ["tests/fixtures/nft_scenarios.cell", "tests/fixtures/nft_capacity_scenario.cell"],
+        "artifact_identities": {
+            "policy": {
+                "artifact_hash": format!("0x{}", compiled.metadata.artifact_hash.as_deref().expect("artifact hash")),
+                "lowering_record_hash": format!("0x{}", compiled.metadata.verified_artifact.lowering_record_hash.as_deref().expect("lowering hash")),
+                "source_map_hash": format!("0x{}", compiled.metadata.verified_artifact.source_map_hash.as_deref().expect("source-map hash")),
+                "verified_bundle_id": format!("0x{}", compiled.metadata.verified_artifact.verified_bundle_id.as_deref().expect("bundle id")),
+            },
+            "capacity": {
+                "artifact_hash": format!("0x{}", capacity_compiled.metadata.artifact_hash.as_deref().expect("capacity artifact hash")),
+                "lowering_record_hash": format!("0x{}", capacity_compiled.metadata.verified_artifact.lowering_record_hash.as_deref().expect("capacity lowering hash")),
+                "source_map_hash": format!("0x{}", capacity_compiled.metadata.verified_artifact.source_map_hash.as_deref().expect("capacity source-map hash")),
+                "verified_bundle_id": format!("0x{}", capacity_compiled.metadata.verified_artifact.verified_bundle_id.as_deref().expect("capacity bundle id")),
+            },
+        },
+        "cases": cases,
+    });
+    let fixture: serde_json::Value = serde_json::from_str(include_str!("fixtures/nft_scenarios.json")).expect("NFT scenario fixture");
+    assert_eq!(actual, fixture, "recorded NFT scenario identities are stale: {actual}");
+
+    let manifest: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/business_scenario_evidence.json")).expect("business scenario evidence JSON");
+    let family = &manifest["families"]["nft_dob"];
+    assert_eq!(family["coverage_status"], "exact-artifact-fixtures");
+    assert_eq!(family["gaps"], serde_json::json!([]));
+    let records = family["records"].as_array().expect("NFT scenario records");
+    assert_eq!(records.len(), 10, "NFT inventory requires five positive and five adversarial records");
+    for case in actual["cases"].as_array().expect("executed NFT cases") {
+        let scenario = case["scenario"].as_str().unwrap();
+        let record = records
+            .iter()
+            .find(|record| record["scenario"] == scenario && record["outcome"] == case["outcome"])
+            .unwrap_or_else(|| panic!("missing exact business-scenario record for {scenario}"));
+        let artifact = if scenario == "capacity_adjustment" {
+            &actual["artifact_identities"]["capacity"]["artifact_hash"]
+        } else {
+            &actual["artifact_identities"]["policy"]["artifact_hash"]
+        };
+        assert_eq!(record["status"], "exact-artifact-fixture");
+        assert_eq!(record["fixture"], "tests/fixtures/nft_scenarios.json");
+        assert_eq!(record["raw_transaction_hash"], case["raw_transaction_hash"]);
+        assert_eq!(record["serialized_transaction_hash"], case["serialized_transaction_hash"]);
+        assert_eq!(record["artifact_hashes"], serde_json::json!([artifact]));
     }
 }

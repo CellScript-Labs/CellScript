@@ -2,6 +2,13 @@
 
 ## 0.30 - Capability closure development branch
 
+- Complete issue #26's NFT/DOB scenario family with a deterministic signed
+  policy lifecycle for unique mint, derived metadata-state update, ownership
+  transfer, and burn, plus an independently checked typed-view capacity
+  adjustment artifact. Pin five accepted and five rejected CKB transactions,
+  including duplicate output, stale state, wrong Lock/Type, and missing owner
+  authorization, to exact artifact and sidecar identities.
+
 - Add an exact persistent-policy runtime-view resource profile. The stateful
   `partial_fill`/`settle`/`cancel` path now gates its canonical policy artifact
   and sidecars, six transaction identities, 17,341 maximum cycles, 7,040-byte

@@ -470,12 +470,110 @@
       "gaps": []
     },
     "nft_dob": {
-      "coverage_status": "owner-test-inventory-only",
-      "records": [],
-      "gaps": [
-        "The matched cost row proves only NFT ownership Lock behavior, not mint, metadata update, capacity adjustment, or burn",
-        "The live action harness reports zero builder-backed actions and does not provide per-scenario canonical transaction hashes"
-      ]
+      "coverage_status": "exact-artifact-fixtures",
+      "records": [
+        {
+          "scenario": "mint_unique",
+          "outcome": "positive",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/nft_scenarios.json",
+          "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/nft_scenarios.cell"],
+          "raw_transaction_hash": "0x6ccd1e6d063ea610532bc4e3dd46af5986121f0959219f3570829aa8671afc8c",
+          "serialized_transaction_hash": "0x5b5983fa277c237bbf1f6a20a5e683cef4b95e2e7bdacb3cde2e72db4fae11f7",
+          "artifact_hashes": ["0x702f0811e0d0d0b3d5ba776598c8ac58b21a38c3dfb26a6f8307f34a15e1747a"]
+        },
+        {
+          "scenario": "metadata_update",
+          "outcome": "positive",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/nft_scenarios.json",
+          "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/nft_scenarios.cell"],
+          "raw_transaction_hash": "0xebf8109b4668da3cd44c2d9121619564387b6cb6389431b55d547a937bbcfe65",
+          "serialized_transaction_hash": "0x3dfdb1a138109a2b93c76ccda2a0ddbb8898c766b264dfea0a9671fdcd6cf619",
+          "artifact_hashes": ["0x702f0811e0d0d0b3d5ba776598c8ac58b21a38c3dfb26a6f8307f34a15e1747a"]
+        },
+        {
+          "scenario": "ownership_transfer",
+          "outcome": "positive",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/nft_scenarios.json",
+          "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/nft_scenarios.cell"],
+          "raw_transaction_hash": "0x170499bf097dbb22846ea9af740a327cf4fc9ecb3663fa5e8807ad5d3f086dff",
+          "serialized_transaction_hash": "0xdfa150b00e500ff4848c353d2e35ddac90f18862809786eb2efc060526dc88c0",
+          "artifact_hashes": ["0x702f0811e0d0d0b3d5ba776598c8ac58b21a38c3dfb26a6f8307f34a15e1747a"]
+        },
+        {
+          "scenario": "capacity_adjustment",
+          "outcome": "positive",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/nft_scenarios.json",
+          "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/nft_capacity_scenario.cell"],
+          "raw_transaction_hash": "0x8650da7eac43c2f116fee31bea3ef5142302426b05ad0adcea9dd0d4041f0711",
+          "serialized_transaction_hash": "0x95f98aa33917401c2bfd375da0b766c60a54f5b654fe02326c973a255bc4835f",
+          "artifact_hashes": ["0x56028936f39ad5006cf69ed2f05d556539eb55395a17ed7679391a0c588b0008"]
+        },
+        {
+          "scenario": "burn",
+          "outcome": "positive",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/nft_scenarios.json",
+          "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/nft_scenarios.cell"],
+          "raw_transaction_hash": "0x3e2d34e58bf8b4a4b76eea0091bed5c8c4ff0e3621356763402700d50304cb17",
+          "serialized_transaction_hash": "0xb425ff92b36e4c630cfb70114920e6c9a645d07e0e247a057178230df767a4f5",
+          "artifact_hashes": ["0x702f0811e0d0d0b3d5ba776598c8ac58b21a38c3dfb26a6f8307f34a15e1747a"]
+        },
+        {
+          "scenario": "duplicate_identity",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/nft_scenarios.json",
+          "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/nft_scenarios.cell"],
+          "raw_transaction_hash": "0x2676834041ef4da7f63719f7fb8c52e045da2fb3390f59b7b0aa7947778c0351",
+          "serialized_transaction_hash": "0x918787ff57255ee6a61be9dfe7206719fdb8b42a588c8c7e0d9bebc47cc8c54d",
+          "artifact_hashes": ["0x702f0811e0d0d0b3d5ba776598c8ac58b21a38c3dfb26a6f8307f34a15e1747a"]
+        },
+        {
+          "scenario": "stale_state",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/nft_scenarios.json",
+          "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/nft_scenarios.cell"],
+          "raw_transaction_hash": "0x7cd6d858f16602b51ef4d7ad78b34793dbfceeacb586a81bf861d7c86f4498c8",
+          "serialized_transaction_hash": "0x442ea4b917f248b80fcd87dafd7c91236fcea71661ed4b3030459c39fc15437d",
+          "artifact_hashes": ["0x702f0811e0d0d0b3d5ba776598c8ac58b21a38c3dfb26a6f8307f34a15e1747a"]
+        },
+        {
+          "scenario": "wrong_lock",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/nft_scenarios.json",
+          "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/nft_scenarios.cell"],
+          "raw_transaction_hash": "0x01629a3e7bb4519a83238df2fa6e3d367931be4a24481b1d041ee88ed3c695af",
+          "serialized_transaction_hash": "0x8385c56ecd7093f7135c6e22b1f8fa198896a472d003edaaa0d0fc57ab8a4ecf",
+          "artifact_hashes": ["0x702f0811e0d0d0b3d5ba776598c8ac58b21a38c3dfb26a6f8307f34a15e1747a"]
+        },
+        {
+          "scenario": "wrong_type",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/nft_scenarios.json",
+          "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/nft_scenarios.cell"],
+          "raw_transaction_hash": "0x2cdcd8455498003ddc2e12ecee60f86f094e10f488ba634c667eb466ea6724ef",
+          "serialized_transaction_hash": "0xdc3364488e50910117eae52a7751c6311b815bb20c11a1e9591d8e81604bb398",
+          "artifact_hashes": ["0x702f0811e0d0d0b3d5ba776598c8ac58b21a38c3dfb26a6f8307f34a15e1747a"]
+        },
+        {
+          "scenario": "unauthorized_update",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/nft_scenarios.json",
+          "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/nft_scenarios.cell"],
+          "raw_transaction_hash": "0xebf8109b4668da3cd44c2d9121619564387b6cb6389431b55d547a937bbcfe65",
+          "serialized_transaction_hash": "0x1622d4a617b77bcb5b3a28ebdb0653380efb19c09822f5ffde31c87927095007",
+          "artifact_hashes": ["0x702f0811e0d0d0b3d5ba776598c8ac58b21a38c3dfb26a6f8307f34a15e1747a"]
+        }
+      ],
+      "gaps": []
     },
     "order_amm": {
       "coverage_status": "partial-transaction-hashes",
