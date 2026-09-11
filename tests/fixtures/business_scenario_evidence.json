@@ -278,12 +278,100 @@
       ]
     },
     "temporal": {
-      "coverage_status": "owner-test-inventory-only",
-      "records": [],
-      "gaps": [
-        "Typed runtime-view and temporal tests do not yet bind every inventory row to an exact candidate artifact, builder transaction, and measurement record",
-        "The configured pinned iCKB reference commit is unreachable"
-      ]
+      "coverage_status": "exact-artifact-fixtures",
+      "records": [
+        {
+          "scenario": "absolute_timelock",
+          "outcome": "positive",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/temporal_scenarios.json",
+          "evidence": ["tests/temporal_scenarios.rs", "tests/typed_runtime_views.rs", "tests/artifact_checker.rs"],
+          "raw_transaction_hash": "0xda0b51e162aebc8b172b41d23648bc74569153466da75a162d0a955c1f78ed35",
+          "serialized_transaction_hash": "0xeb6dd63c85586c2684d36ed80e22d636ce825f0a900a56923111272fd325bcd1",
+          "artifact_hashes": ["0x1eb1139b56d05b36aae89bdca1091a6d06539f1b1ee7c187681032cec13c369c"]
+        },
+        {
+          "scenario": "relative_timelock",
+          "outcome": "positive",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/temporal_scenarios.json",
+          "evidence": ["tests/temporal_scenarios.rs", "tests/typed_runtime_views.rs", "tests/artifact_checker.rs"],
+          "raw_transaction_hash": "0x1d2c6b465ccef0e864a59796a098b284e2a1d2b44fc5129ff49e5c7aa2ca9b0d",
+          "serialized_transaction_hash": "0x4ccc9d8d07f0ca771d5db6781421c621640a21178f48979282314f7ce139cc1f",
+          "artifact_hashes": ["0x1eb1139b56d05b36aae89bdca1091a6d06539f1b1ee7c187681032cec13c369c"]
+        },
+        {
+          "scenario": "vesting",
+          "outcome": "positive",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/temporal_scenarios.json",
+          "evidence": ["tests/temporal_scenarios.rs", "tests/typed_runtime_views.rs", "tests/artifact_checker.rs"],
+          "raw_transaction_hash": "0x624f5b7f77674a8dbe1381bf7d6a57b3c02a17c5101f2a74d210137993bbc8f8",
+          "serialized_transaction_hash": "0xf9ca6db516c931f47935dfe02d28816a060bb58bdfd259b5598655370341b444",
+          "artifact_hashes": ["0x1eb1139b56d05b36aae89bdca1091a6d06539f1b1ee7c187681032cec13c369c"]
+        },
+        {
+          "scenario": "epoch_timestamp_block_since",
+          "outcome": "positive",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/temporal_scenarios.json",
+          "evidence": ["tests/temporal_scenarios.rs", "tests/typed_runtime_views.rs", "tests/artifact_checker.rs"],
+          "raw_transaction_hash": "0x28b114d9dd45bccb6a9112efcda04631c72e46042fdae0bdd4f2ad0c2de7ce61",
+          "serialized_transaction_hash": "0x375f705ad3b95ba0b7e8cdaadcfdfacf0a987e8bc8576eca1cfed5b5d674c42d",
+          "artifact_hashes": ["0x1eb1139b56d05b36aae89bdca1091a6d06539f1b1ee7c187681032cec13c369c"]
+        },
+        {
+          "scenario": "cross_domain",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/temporal_scenarios.json",
+          "evidence": ["tests/temporal_scenarios.rs", "tests/typed_runtime_views.rs", "tests/artifact_checker.rs"],
+          "raw_transaction_hash": "0x36104c4cdcad6ae43a821dc6718778bb9d5dc7424b8bda43a02c98a84501d38c",
+          "serialized_transaction_hash": "0x7ce4acb796db14c589c106f1594b36cc787122919e27f1059ad6e36e0b3bc803",
+          "artifact_hashes": ["0x1eb1139b56d05b36aae89bdca1091a6d06539f1b1ee7c187681032cec13c369c"]
+        },
+        {
+          "scenario": "missing_header",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/temporal_scenarios.json",
+          "evidence": ["tests/temporal_scenarios.rs", "tests/typed_runtime_views.rs", "tests/artifact_checker.rs"],
+          "raw_transaction_hash": "0x2c3c2b3d6524a5e801980c658b7585d010bacdc15bfc83eb583640f66d04b001",
+          "serialized_transaction_hash": "0x1b9e5d2308bc07e64c14c6db3c9664ca370a9a4eeeed2354d107988dac26c7f6",
+          "artifact_hashes": ["0x1eb1139b56d05b36aae89bdca1091a6d06539f1b1ee7c187681032cec13c369c"]
+        },
+        {
+          "scenario": "early_release",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/temporal_scenarios.json",
+          "evidence": ["tests/temporal_scenarios.rs", "tests/typed_runtime_views.rs", "tests/artifact_checker.rs"],
+          "raw_transaction_hash": "0xa629cb96631a55d594e2ab20e22b88ae979b4852fa0644eb2b4f5e3def47815e",
+          "serialized_transaction_hash": "0xd2b35137d6fe2abb5d0eb38f90a7971963c3cf7d4c68d2ab74fcd7b27a071e96",
+          "artifact_hashes": ["0x1eb1139b56d05b36aae89bdca1091a6d06539f1b1ee7c187681032cec13c369c"]
+        },
+        {
+          "scenario": "overflow",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/temporal_scenarios.json",
+          "evidence": ["tests/temporal_scenarios.rs", "tests/typed_runtime_views.rs", "tests/artifact_checker.rs"],
+          "raw_transaction_hash": "0xf7b0574d862facd6236b7ce3602f7eb4965248176453fa2c04986d5ea23e70db",
+          "serialized_transaction_hash": "0xa8e68ec3978726d9bf4d8432312ac4909adee5a5488ac081f919245e2f01e166",
+          "artifact_hashes": ["0x1eb1139b56d05b36aae89bdca1091a6d06539f1b1ee7c187681032cec13c369c"]
+        },
+        {
+          "scenario": "one_past_boundary",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/temporal_scenarios.json",
+          "evidence": ["tests/temporal_scenarios.rs", "tests/typed_runtime_views.rs", "tests/artifact_checker.rs"],
+          "raw_transaction_hash": "0xed1e5645e1bc6b3878707320d5f7bef73a6fabe7b39b1557103036c8e5fee607",
+          "serialized_transaction_hash": "0xdfbf8cd3871de4cea08449d00a977ad0881a4c0acb9a0d60c75ed7117486d03a",
+          "artifact_hashes": ["0x1eb1139b56d05b36aae89bdca1091a6d06539f1b1ee7c187681032cec13c369c"]
+        }
+      ],
+      "gaps": []
     }
   }
 }

@@ -53,6 +53,14 @@ wrong-root cases fail at authenticated opening error 73; malformed witness,
 wrong-index successor, and wrong successor output fail at their exact bounded
 ABI or output-correspondence errors.
 
+The temporal family also has exact per-row evidence. A single independently
+checked typed-Since/HeaderDep artifact executes four positive contexts and five
+adversarial contexts with distinct Script args, input `since` values, HeaderDep
+sets, and builder payloads. Cross-domain narrowing uses error 37, missing and
+one-past HeaderDeps use error 45, early release uses the verification failure,
+and epoch-duration overflow uses error 20; all raw and serialized transaction
+hashes are fixture-bound.
+
 ## Same-transaction anchor
 
 The current executable anchor is an authenticated two-order settlement. One

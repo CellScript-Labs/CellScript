@@ -168,6 +168,14 @@ absolute/relative mixing, block/epoch/timestamp mixing, and implicit comparison
 with raw integers. The standalone checker rejects typed-semantics mutations
 that change either mode or metric on a comparison operand.
 
+`tests/temporal_scenarios.rs` separately closes the frozen business inventory:
+four positive absolute/relative timelock, vesting, and combined
+epoch/timestamp/block/Since transactions plus cross-domain, missing-header,
+early-release, overflow, and one-past-boundary rejections. One independently
+checked artifact is reused with distinct Script args and transaction contexts;
+`tests/fixtures/temporal_scenarios.json` pins its artifact/lowering/source-map/
+bundle identities and each transaction's raw and full serialized hashes.
+
 Formatter round-trip, LSP `W3012` migration, VS Code grammar, generated-builder,
 package-interface v2/v3 interoperation, Registry validation, metadata-only WASM,
 and Playground checks cover the same public contract. The canonical browser

@@ -80,6 +80,12 @@
   machine pointer to its typed root stack slot and exact schema offset and
   rejects offset mutation before authentication.
 
+- Complete issue #26's temporal scenario family with four positive and five
+  adversarial typed-Since/HeaderDep transactions. Pin one checked artifact and
+  all sidecar, raw-transaction, and serialized-transaction identities while
+  preserving stable errors for cross-domain, missing/one-past HeaderDep,
+  early-release, and epoch-overflow failures.
+
 - Add the versioned 0.30 product-capability ledger for issues #7 through #27
   and validate its claims, evidence links, dispositions, dependencies, and
   release gates independently from executable-surface closure. Preserve

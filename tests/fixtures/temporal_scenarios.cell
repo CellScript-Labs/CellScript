@@ -1,0 +1,39 @@
+module temporal_scenarios
+
+resource Token has store { amount: u64 }
+
+action validate(
+    witness scenario: u64,
+    witness minimum: u64,
+    witness duration: u64,
+    witness header_index: u64,
+) -> u64 {
+    let input = ckb::input<Token>(0)
+    let decoded = ckb::since_decode(input.since)
+    let header = ckb::header_dep(header_index)
+    let checked_duration = ckb::epoch_duration(duration)
+    if scenario == 1 {
+        let actual = ckb::since_as_absolute_block(decoded)
+        require actual >= ckb::since_absolute_block(minimum)
+        return 0
+    }
+    if scenario == 2 {
+        let actual = ckb::since_as_relative_block(decoded)
+        require actual >= ckb::since_relative_block(minimum)
+        return 0
+    }
+    if scenario == 3 {
+        let unlock = ckb::epoch_add(header.epoch_number, checked_duration)
+        require ckb::epoch_number_to_u64(unlock) >= minimum
+        return 0
+    }
+    if scenario == 4 {
+        require ckb::epoch_number_to_u64(header.epoch_number) == 42
+        require ckb::block_number_to_u64(header.epoch_start_block_number) == 97
+        require ckb::epoch_length_to_u64(header.epoch_length) == 10
+        require ckb::block_number_to_u64(header.block_number) == 100
+        require ckb::timestamp_millis_to_u64(header.timestamp) == 1700000000123
+        return 0
+    }
+    return 9
+}
