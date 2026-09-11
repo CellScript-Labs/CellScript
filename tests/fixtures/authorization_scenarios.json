@@ -1,0 +1,92 @@
+{
+  "schema": "cellscript-authorization-scenarios-v1",
+  "source_file": "tests/fixtures/fungible_scenarios.cell",
+  "artifact_identities": {
+    "artifact_hash": "0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707",
+    "lowering_record_hash": "0x65729403ec72d52f9420d2b3f39d993adedad242fcb7a6f2bc730a44b497de05",
+    "source_map_hash": "0xe83bbd4a27ba23b6d1f9039e8c8fdc65d52bb56fd80d783f7f63b9170df45c8c",
+    "verified_bundle_id": "0xd558142236e4eb968dc687b8e47b2f11a0002544078b1aecf90d761ecadec1f3"
+  },
+  "cases": [
+    {
+      "scenario": "copied_owner",
+      "outcome": "adversarial",
+      "rejection_stage": "ckb-vm",
+      "expected_exit_code": -51,
+      "raw_transaction_hash": "0x0c05beb8641ae069ed01a5ab82e0c76c1f96e66af7b980d0196e2a6a6c7498a9",
+      "serialized_transaction_hash": "0x80ec2407ab41eda4485d272d41db97f061d828a1aa7b63cebcae3a0dd1efe9f9"
+    },
+    {
+      "scenario": "exact_script_identity",
+      "outcome": "positive",
+      "rejection_stage": "ckb-vm",
+      "expected_exit_code": 0,
+      "raw_transaction_hash": "0x23861a5cc03087a3ecc371d7d7af0d4b355e2054be38ea2fdfdb398006935a31",
+      "serialized_transaction_hash": "0x88dda6af6f386d80660809baf96d1582764c4619491e9801ce2741e0026703e8"
+    },
+    {
+      "scenario": "issuer_authority",
+      "outcome": "positive",
+      "rejection_stage": "ckb-vm",
+      "expected_exit_code": 0,
+      "raw_transaction_hash": "0x23861a5cc03087a3ecc371d7d7af0d4b355e2054be38ea2fdfdb398006935a31",
+      "serialized_transaction_hash": "0x88dda6af6f386d80660809baf96d1582764c4619491e9801ce2741e0026703e8"
+    },
+    {
+      "scenario": "multisig_threshold",
+      "outcome": "positive",
+      "rejection_stage": "ckb-vm",
+      "expected_exit_code": 0,
+      "raw_transaction_hash": "0x23861a5cc03087a3ecc371d7d7af0d4b355e2054be38ea2fdfdb398006935a31",
+      "serialized_transaction_hash": "0x88dda6af6f386d80660809baf96d1582764c4619491e9801ce2741e0026703e8"
+    },
+    {
+      "scenario": "partial_signature",
+      "outcome": "adversarial",
+      "rejection_stage": "ckb-vm",
+      "expected_exit_code": -11,
+      "raw_transaction_hash": "0x23861a5cc03087a3ecc371d7d7af0d4b355e2054be38ea2fdfdb398006935a31",
+      "serialized_transaction_hash": "0x0f9fd31f2b1e2033c5ff5e056783e8371f8b5722232e18735697921610a48bec"
+    },
+    {
+      "scenario": "post_signing_mutation",
+      "outcome": "adversarial",
+      "rejection_stage": "ckb-vm",
+      "expected_exit_code": -52,
+      "raw_transaction_hash": "0x4bd7628b88c1762e75903537d5d3cc19b522d4906b373ef73b1e9a7a031bca5e",
+      "serialized_transaction_hash": "0xb2ba1f59cec4eb9a73d4ecba43a58c11b808c96cd7170628852175c4defaa293"
+    },
+    {
+      "scenario": "replay",
+      "outcome": "adversarial",
+      "rejection_stage": "local-live-set",
+      "expected_exit_code": null,
+      "raw_transaction_hash": "0x23861a5cc03087a3ecc371d7d7af0d4b355e2054be38ea2fdfdb398006935a31",
+      "serialized_transaction_hash": "0x88dda6af6f386d80660809baf96d1582764c4619491e9801ce2741e0026703e8"
+    },
+    {
+      "scenario": "standard_lock",
+      "outcome": "positive",
+      "rejection_stage": "ckb-vm",
+      "expected_exit_code": 0,
+      "raw_transaction_hash": "0x23861a5cc03087a3ecc371d7d7af0d4b355e2054be38ea2fdfdb398006935a31",
+      "serialized_transaction_hash": "0x88dda6af6f386d80660809baf96d1582764c4619491e9801ce2741e0026703e8"
+    },
+    {
+      "scenario": "wrong_domain",
+      "outcome": "adversarial",
+      "rejection_stage": "ckb-vm",
+      "expected_exit_code": -52,
+      "raw_transaction_hash": "0xdde687aa5ee265020423dad40fb5489572a54e8918895aaf81e7a0975ebe0c60",
+      "serialized_transaction_hash": "0xfea51710855c7960e68a187011f4e3a0c883af29a78eb03564b9f9783c395133"
+    },
+    {
+      "scenario": "wrong_key",
+      "outcome": "adversarial",
+      "rejection_stage": "ckb-vm",
+      "expected_exit_code": -52,
+      "raw_transaction_hash": "0x23861a5cc03087a3ecc371d7d7af0d4b355e2054be38ea2fdfdb398006935a31",
+      "serialized_transaction_hash": "0xdef0cc98b616343ce7e986e1b28ca4ee920e0a00d7e74af4dee891f6577731d2"
+    }
+  ]
+}

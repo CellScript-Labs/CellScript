@@ -12,11 +12,110 @@
   },
   "families": {
     "authorization": {
-      "coverage_status": "owner-test-inventory-only",
-      "records": [],
-      "gaps": [
-        "Family tests exercise multisig, policy authorization, and SighashAll, but the inventory does not bind every named scenario to one canonical transaction, artifact set, and hash record"
-      ]
+      "coverage_status": "exact-artifact-fixtures",
+      "records": [
+        {
+          "scenario": "standard_lock",
+          "outcome": "positive",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/authorization_scenarios.json",
+          "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
+          "raw_transaction_hash": "0x23861a5cc03087a3ecc371d7d7af0d4b355e2054be38ea2fdfdb398006935a31",
+          "serialized_transaction_hash": "0x88dda6af6f386d80660809baf96d1582764c4619491e9801ce2741e0026703e8",
+          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+        },
+        {
+          "scenario": "multisig_threshold",
+          "outcome": "positive",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/authorization_scenarios.json",
+          "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
+          "raw_transaction_hash": "0x23861a5cc03087a3ecc371d7d7af0d4b355e2054be38ea2fdfdb398006935a31",
+          "serialized_transaction_hash": "0x88dda6af6f386d80660809baf96d1582764c4619491e9801ce2741e0026703e8",
+          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+        },
+        {
+          "scenario": "issuer_authority",
+          "outcome": "positive",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/authorization_scenarios.json",
+          "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
+          "raw_transaction_hash": "0x23861a5cc03087a3ecc371d7d7af0d4b355e2054be38ea2fdfdb398006935a31",
+          "serialized_transaction_hash": "0x88dda6af6f386d80660809baf96d1582764c4619491e9801ce2741e0026703e8",
+          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+        },
+        {
+          "scenario": "exact_script_identity",
+          "outcome": "positive",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/authorization_scenarios.json",
+          "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
+          "raw_transaction_hash": "0x23861a5cc03087a3ecc371d7d7af0d4b355e2054be38ea2fdfdb398006935a31",
+          "serialized_transaction_hash": "0x88dda6af6f386d80660809baf96d1582764c4619491e9801ce2741e0026703e8",
+          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+        },
+        {
+          "scenario": "post_signing_mutation",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/authorization_scenarios.json",
+          "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
+          "raw_transaction_hash": "0x4bd7628b88c1762e75903537d5d3cc19b522d4906b373ef73b1e9a7a031bca5e",
+          "serialized_transaction_hash": "0xb2ba1f59cec4eb9a73d4ecba43a58c11b808c96cd7170628852175c4defaa293",
+          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+        },
+        {
+          "scenario": "copied_owner",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/authorization_scenarios.json",
+          "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
+          "raw_transaction_hash": "0x0c05beb8641ae069ed01a5ab82e0c76c1f96e66af7b980d0196e2a6a6c7498a9",
+          "serialized_transaction_hash": "0x80ec2407ab41eda4485d272d41db97f061d828a1aa7b63cebcae3a0dd1efe9f9",
+          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+        },
+        {
+          "scenario": "wrong_domain",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/authorization_scenarios.json",
+          "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
+          "raw_transaction_hash": "0xdde687aa5ee265020423dad40fb5489572a54e8918895aaf81e7a0975ebe0c60",
+          "serialized_transaction_hash": "0xfea51710855c7960e68a187011f4e3a0c883af29a78eb03564b9f9783c395133",
+          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+        },
+        {
+          "scenario": "wrong_key",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/authorization_scenarios.json",
+          "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
+          "raw_transaction_hash": "0x23861a5cc03087a3ecc371d7d7af0d4b355e2054be38ea2fdfdb398006935a31",
+          "serialized_transaction_hash": "0xdef0cc98b616343ce7e986e1b28ca4ee920e0a00d7e74af4dee891f6577731d2",
+          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+        },
+        {
+          "scenario": "partial_signature",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/authorization_scenarios.json",
+          "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
+          "raw_transaction_hash": "0x23861a5cc03087a3ecc371d7d7af0d4b355e2054be38ea2fdfdb398006935a31",
+          "serialized_transaction_hash": "0x0f9fd31f2b1e2033c5ff5e056783e8371f8b5722232e18735697921610a48bec",
+          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+        },
+        {
+          "scenario": "replay",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/authorization_scenarios.json",
+          "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
+          "raw_transaction_hash": "0x23861a5cc03087a3ecc371d7d7af0d4b355e2054be38ea2fdfdb398006935a31",
+          "serialized_transaction_hash": "0x88dda6af6f386d80660809baf96d1582764c4619491e9801ce2741e0026703e8",
+          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+        }
+      ],
+      "gaps": []
     },
     "committed_state": {
       "coverage_status": "exact-artifact-fixtures",

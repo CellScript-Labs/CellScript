@@ -70,6 +70,15 @@ authority at their actual enforcement layers. The independently checked
 five-action artifact and every raw and serialized transaction hash are pinned
 in `tests/fixtures/fungible_scenarios.json`.
 
+The same deterministic lifecycle closes the authorization family without
+claiming that Type Scripts replace Lock authentication. Four accepted rows
+bind the bundled standard multisig-v2 Lock, its 2-of-2 threshold, issuer
+authority, and the complete Data2 policy Script identity. Six rejected rows
+exercise post-signing transaction mutation, a copied owner witness, a witness
+from another signing domain, a wrong key, one-of-two partial signing, and
+live-set replay. Exact Lock exit codes and transaction identities are pinned
+in `tests/fixtures/authorization_scenarios.json`.
+
 ## Same-transaction anchor
 
 The current executable anchor is an authenticated two-order settlement. One

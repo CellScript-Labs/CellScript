@@ -92,6 +92,11 @@
   deterministic and pin replay, cardinality, amount, overflow, issuer, and
   multisig-authority rejections to their exact transaction identities.
 
+- Complete issue #26's authorization scenario family with exact standard
+  multisig-v2, threshold, issuer, and policy-Script identity evidence. Pin
+  post-signing mutation, copied-owner, wrong-domain, wrong-key, partial-signature,
+  and live-set replay failures to their exact signed transaction identities.
+
 - Add the versioned 0.30 product-capability ledger for issues #7 through #27
   and validate its claims, evidence links, dispositions, dependencies, and
   release gates independently from executable-surface closure. Preserve

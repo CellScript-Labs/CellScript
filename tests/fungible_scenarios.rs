@@ -15,7 +15,8 @@ use ckb_sdk::{
     constants::MultisigScript,
     traits::SecpCkbRawKeySigner,
     types::ScriptGroup,
-    unlock::{MultisigConfig, ScriptSigner, SecpMultisigScriptSigner},
+    unlock::{generate_message, MultisigConfig, ScriptSigner, SecpMultisigScriptSigner},
+    util::serialize_signature,
     SECP256K1,
 };
 use ckb_testtool::{
@@ -29,13 +30,14 @@ use ckb_testtool::{
     },
     context::Context,
 };
-use secp256k1::{PublicKey, SecretKey};
+use secp256k1::{Message, PublicKey, SecretKey};
 use std::collections::HashMap;
 
 const SOURCE: &str = include_str!("fixtures/fungible_scenarios.cell");
 const TOKEN_CAPACITY: u64 = 100_000_000_000;
 const FEE: u64 = 100_000_000;
 const MAX_CYCLES: u64 = 100_000_000;
+const SIGNATURE_OFFSET: usize = 4 + 2 * 20;
 
 fn compile_policy() -> CompileResult {
     let compiled = compile_artifact(
@@ -154,18 +156,36 @@ struct Pending {
 
 impl Pending {
     fn sign(&self, transaction: &TransactionView, include_target: bool) -> TransactionView {
+        let target_keys = include_target.then(|| self.target().actor.keys());
+        self.sign_with_target_keys(transaction, target_keys)
+    }
+
+    fn sign_with_target_keys(&self, transaction: &TransactionView, target_keys: Option<Vec<SecretKey>>) -> TransactionView {
         let mut signed = transaction.clone();
         for signing in &self.groups {
-            if !include_target && signing.group.input_indices[0] == 1 {
-                continue;
-            }
-            let signer = SecpMultisigScriptSigner::new(
-                Box::new(SecpCkbRawKeySigner::new_with_secret_keys(signing.actor.keys())),
-                signing.actor.config(),
-            );
+            let keys = if signing.group.input_indices[0] == 1 {
+                match &target_keys {
+                    Some(keys) => keys.clone(),
+                    None => continue,
+                }
+            } else {
+                signing.actor.keys()
+            };
+            let signer =
+                SecpMultisigScriptSigner::new(Box::new(SecpCkbRawKeySigner::new_with_secret_keys(keys)), signing.actor.config());
             signed = signer.sign_tx(&signed, &signing.group).expect("sign completed scenario transaction");
         }
         signed
+    }
+
+    fn target(&self) -> &SigningGroup {
+        self.groups.iter().find(|signing| signing.group.input_indices[0] == 1).expect("scenario target Lock group")
+    }
+
+    fn message(&self, transaction: &TransactionView) -> Bytes {
+        let target = self.target();
+        let zero_lock = target.actor.config().placeholder_witness().lock().to_opt().unwrap().raw_data();
+        generate_message(transaction, &target.group, zero_lock).expect("canonical owning Lock group message")
     }
 }
 
@@ -358,6 +378,17 @@ fn rejection_exit_code(detail: &str) -> i64 {
     panic!("rejection did not expose an exact script exit code: {detail}");
 }
 
+fn replace_witness(
+    transaction: &TransactionView,
+    index: usize,
+    change: impl FnOnce(packed::WitnessArgs) -> packed::WitnessArgs,
+) -> TransactionView {
+    let current = packed::WitnessArgs::from_slice(transaction.witnesses().get(index).unwrap().raw_data().as_ref()).unwrap();
+    let mut witnesses = transaction.witnesses().into_iter().collect::<Vec<_>>();
+    witnesses[index] = change(current).as_bytes().pack();
+    transaction.as_advanced_builder().set_witnesses(witnesses).build()
+}
+
 #[test]
 fn fungible_business_inventory_scenarios_are_exact() {
     let compiled = compile_policy();
@@ -455,6 +486,103 @@ fn fungible_business_inventory_scenarios_are_exact() {
             .unwrap_or_else(|| panic!("missing exact business-scenario record for {scenario}"));
         assert_eq!(record["status"], "exact-artifact-fixture");
         assert_eq!(record["fixture"], "tests/fixtures/fungible_scenarios.json");
+        assert_eq!(record["raw_transaction_hash"], case["raw_transaction_hash"]);
+        assert_eq!(record["serialized_transaction_hash"], case["serialized_transaction_hash"]);
+        assert_eq!(record["artifact_hashes"], serde_json::json!([actual["artifact_identities"]["artifact_hash"]]));
+    }
+}
+
+#[test]
+fn authorization_business_inventory_scenarios_are_exact() {
+    let compiled = compile_policy();
+    let mut lifecycle = Lifecycle::new(&compiled);
+    let mut cases = Vec::new();
+    let valid = lifecycle.prepare(Action::Mint { issuer_input: 1, amount: 10 }, &[lifecycle.issuer.clone()], &[10], Actor::Alice);
+    lifecycle.context.verify_tx(&valid.signed, MAX_CYCLES).expect("fully signed standard multisig transaction");
+    assert_eq!(valid.target().actor.config().threshold(), 2);
+    assert_eq!(valid.target().actor.config().sighash_addresses().len(), 2);
+    assert_eq!(lifecycle.policy.hash_type(), ScriptHashType::Data2.into());
+    assert_eq!(lifecycle.policy.args().raw_data(), Actor::Issuer.lock().calc_script_hash().as_bytes());
+    for scenario in ["standard_lock", "multisig_threshold", "issuer_authority", "exact_script_identity"] {
+        cases.push(case_record(scenario, "positive", "ckb-vm", Some(0), &valid.signed));
+    }
+
+    let mut outputs = valid.signed.outputs().into_iter().collect::<Vec<_>>();
+    let changed_capacity = u64::from(outputs[0].capacity()) - 1;
+    outputs[0] = outputs[0].clone().as_builder().capacity::<packed::Uint64>(changed_capacity.pack()).build();
+    let post_signing_mutation = valid.signed.as_advanced_builder().set_outputs(outputs).build();
+    let exit = rejection_exit_code(&lifecycle.reject(&post_signing_mutation));
+    cases.push(case_record("post_signing_mutation", "adversarial", "ckb-vm", Some(exit), &post_signing_mutation));
+
+    let partial_signature = valid.sign_with_target_keys(&valid.unsigned, Some(vec![Actor::Issuer.keys()[0]]));
+    let exit = rejection_exit_code(&lifecycle.reject(&partial_signature));
+    cases.push(case_record("partial_signature", "adversarial", "ckb-vm", Some(exit), &partial_signature));
+
+    let message = Message::from_digest(valid.message(&valid.signed).as_ref().try_into().unwrap());
+    let wrong_signature = serialize_signature(&SECP256K1.sign_ecdsa_recoverable(&message, &key(0x7f)));
+    let wrong_key = replace_witness(&valid.signed, 1, |witness| {
+        let mut lock = witness.lock().to_opt().unwrap().raw_data().to_vec();
+        lock[SIGNATURE_OFFSET..SIGNATURE_OFFSET + 65].copy_from_slice(&wrong_signature);
+        witness.as_builder().lock(Some(Bytes::from(lock)).pack()).build()
+    });
+    let exit = rejection_exit_code(&lifecycle.reject(&wrong_key));
+    cases.push(case_record("wrong_key", "adversarial", "ckb-vm", Some(exit), &wrong_key));
+
+    let alternate = lifecycle.prepare(Action::Mint { issuer_input: 1, amount: 11 }, &[lifecycle.issuer.clone()], &[11], Actor::Alice);
+    let valid_owner_witness = valid.signed.witnesses().get(1).unwrap().raw_data();
+    let wrong_domain = replace_witness(&alternate.signed, 1, |_| packed::WitnessArgs::from_slice(&valid_owner_witness).unwrap());
+    let exit = rejection_exit_code(&lifecycle.reject(&wrong_domain));
+    cases.push(case_record("wrong_domain", "adversarial", "ckb-vm", Some(exit), &wrong_domain));
+
+    let replay = valid.signed.clone();
+    let outputs = lifecycle.commit(&valid.signed).expect("authorization seed mint");
+    lifecycle.issuer = outputs[2].clone();
+    assert!(lifecycle.check_live(&replay).unwrap_err().contains("non-live"));
+    cases.push(case_record("replay", "adversarial", "local-live-set", None, &replay));
+
+    let alice_transfer = lifecycle.prepare(Action::Transfer, &outputs[1..2], &[10], Actor::Alice);
+    let alice_witness = alice_transfer.signed.witnesses().get(1).unwrap().raw_data();
+    let mut copied_lifecycle = Lifecycle::new(&compiled);
+    let bob_mint =
+        copied_lifecycle.prepare(Action::Mint { issuer_input: 1, amount: 10 }, &[copied_lifecycle.issuer.clone()], &[10], Actor::Bob);
+    let outputs = copied_lifecycle.commit(&bob_mint.signed).expect("copied-owner seed mint");
+    copied_lifecycle.issuer = outputs[2].clone();
+    let bob_transfer = copied_lifecycle.prepare(Action::Transfer, &outputs[1..2], &[10], Actor::Alice);
+    let copied_owner = replace_witness(&bob_transfer.signed, 1, |_| packed::WitnessArgs::from_slice(&alice_witness).unwrap());
+    let exit = rejection_exit_code(&copied_lifecycle.reject(&copied_owner));
+    cases.push(case_record("copied_owner", "adversarial", "ckb-vm", Some(exit), &copied_owner));
+
+    cases.sort_by(|left, right| left["scenario"].as_str().cmp(&right["scenario"].as_str()));
+    let actual = serde_json::json!({
+        "schema": "cellscript-authorization-scenarios-v1",
+        "source_file": "tests/fixtures/fungible_scenarios.cell",
+        "artifact_identities": {
+            "artifact_hash": format!("0x{}", compiled.metadata.artifact_hash.as_deref().expect("artifact hash")),
+            "lowering_record_hash": format!("0x{}", compiled.metadata.verified_artifact.lowering_record_hash.as_deref().expect("lowering hash")),
+            "source_map_hash": format!("0x{}", compiled.metadata.verified_artifact.source_map_hash.as_deref().expect("source-map hash")),
+            "verified_bundle_id": format!("0x{}", compiled.metadata.verified_artifact.verified_bundle_id.as_deref().expect("bundle id")),
+        },
+        "cases": cases,
+    });
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/authorization_scenarios.json")).expect("authorization scenario fixture");
+    assert_eq!(actual, fixture, "recorded authorization scenario identities are stale: {actual}");
+
+    let manifest: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/business_scenario_evidence.json")).expect("business scenario evidence JSON");
+    let family = &manifest["families"]["authorization"];
+    assert_eq!(family["coverage_status"], "exact-artifact-fixtures");
+    assert_eq!(family["gaps"], serde_json::json!([]));
+    let records = family["records"].as_array().expect("authorization scenario records");
+    assert_eq!(records.len(), 10, "authorization inventory requires four positive and six adversarial records");
+    for case in actual["cases"].as_array().expect("executed authorization cases") {
+        let scenario = case["scenario"].as_str().unwrap();
+        let record = records
+            .iter()
+            .find(|record| record["scenario"] == scenario && record["outcome"] == case["outcome"])
+            .unwrap_or_else(|| panic!("missing exact business-scenario record for {scenario}"));
+        assert_eq!(record["status"], "exact-artifact-fixture");
+        assert_eq!(record["fixture"], "tests/fixtures/authorization_scenarios.json");
         assert_eq!(record["raw_transaction_hash"], case["raw_transaction_hash"]);
         assert_eq!(record["serialized_transaction_hash"], case["serialized_transaction_hash"]);
         assert_eq!(record["artifact_hashes"], serde_json::json!([actual["artifact_identities"]["artifact_hash"]]));
