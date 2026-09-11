@@ -97,6 +97,11 @@
   post-signing mutation, copied-owner, wrong-domain, wrong-key, partial-signature,
   and live-set replay failures to their exact signed transaction identities.
 
+- Index five order/AMM inventory rows to their already identical exact anchor
+  transactions: partial fill, cancel, settlement, partial-settlement rejection,
+  and authenticated dependency substitution. Keep the other four rows and the
+  unreachable pinned iCKB reference explicitly incomplete.
+
 - Add the versioned 0.30 product-capability ledger for issues #7 through #27
   and validate its claims, evidence links, dispositions, dependencies, and
   release gates independently from executable-surface closure. Preserve

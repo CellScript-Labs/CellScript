@@ -79,6 +79,13 @@ from another signing domain, a wrong key, one-of-two partial signing, and
 live-set replay. Exact Lock exit codes and transaction identities are pinned
 in `tests/fixtures/authorization_scenarios.json`.
 
+The order/AMM family now reuses exact anchor evidence where the frozen rows
+are genuinely identical: partial fill, cancel, two-order settlement,
+partial-settlement rejection, and authenticated dependency substitution.
+Those five rows are hash-bound; pool merge, replay, output reordering, and
+wrong-price remain explicitly incomplete, as does reproduction of the
+unreachable pinned iCKB reference.
+
 ## Same-transaction anchor
 
 The current executable anchor is an authenticated two-order settlement. One

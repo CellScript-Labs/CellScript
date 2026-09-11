@@ -478,11 +478,67 @@
       ]
     },
     "order_amm": {
-      "coverage_status": "owner-test-inventory-only",
-      "records": [],
+      "coverage_status": "partial-transaction-hashes",
+      "records": [
+        {
+          "scenario": "partial_fill",
+          "outcome": "positive",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/capability_anchor_cases.json",
+          "evidence": ["tests/business_corpus.rs"],
+          "raw_transaction_hash": "0xcd6b5a6b875958ad5d172a352daf0a5dd331dee23d524481b5df99a78db8345f",
+          "serialized_transaction_hash": "0xadf77c6b46542e61ea4d02098b90a525e087eea39e957340589affe0b78fa3d6",
+          "artifact_hashes": ["0x5f827a767f28bcc91190945a3eeff396e24b6346e341ebe7643cbb91bac7bb28"]
+        },
+        {
+          "scenario": "cancel",
+          "outcome": "positive",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/capability_anchor_cases.json",
+          "evidence": ["tests/business_corpus.rs"],
+          "raw_transaction_hash": "0xe963f8d00bfd0ca964e3c6698f51624c34e7da64ec412ef8015a1c81e37d513d",
+          "serialized_transaction_hash": "0x6057dae1afae897b8f80ac6243409c3592bb5bc8932d65ad34bf0f84f98941d1",
+          "artifact_hashes": ["0x5f827a767f28bcc91190945a3eeff396e24b6346e341ebe7643cbb91bac7bb28"]
+        },
+        {
+          "scenario": "settle",
+          "outcome": "positive",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/capability_anchor_cases.json",
+          "evidence": ["tests/business_corpus.rs"],
+          "raw_transaction_hash": "0xeeffbecf0ccbdda0d5709b96ccee78e11988a74be00515f96d34e84b8de73ba6",
+          "serialized_transaction_hash": "0x8b6904472b55eec2483f262331bd71b8da3920737f1924031f67e392d0c3e0bd",
+          "artifact_hashes": [
+            "0xf7b1f6db3eae3456cc0d4e97ec154eb19b70fae28a3645a7382deb72294fb018",
+            "0x5f827a767f28bcc91190945a3eeff396e24b6346e341ebe7643cbb91bac7bb28",
+            "0xaa484561bcc9aa5eef79f1808a168866ed3155a40043d60e7e6256cff3190c1c",
+            "0xc8255dcc385aa8b61aef60ea9e919e2f18d82c43cefe6e873096d493bd4c1fe7"
+          ]
+        },
+        {
+          "scenario": "partial_settlement",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/capability_anchor_cases.json",
+          "evidence": ["tests/business_corpus.rs"],
+          "raw_transaction_hash": "0xb4818b0c429830cf06f09624d699a35ca031f5537dea9ff9d7c6a1203a22fc3d",
+          "serialized_transaction_hash": "0x0a0688f595160f863a4aeaa051044184d31ca0f7ef93694a52c1cd85a700f174",
+          "artifact_hashes": ["0xf7b1f6db3eae3456cc0d4e97ec154eb19b70fae28a3645a7382deb72294fb018"]
+        },
+        {
+          "scenario": "dependency_substitution",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/capability_anchor_cases.json",
+          "evidence": ["tests/business_corpus.rs"],
+          "raw_transaction_hash": "0x898696abf01e0342e03a613c4e8a673bded0951d30c19f7941d09445a13797d4",
+          "serialized_transaction_hash": "0xec5200f4f5a6d592de114ed3c366aabd90971e7b4d559334816205c336b3e803",
+          "artifact_hashes": ["0xf7b1f6db3eae3456cc0d4e97ec154eb19b70fae28a3645a7382deb72294fb018"]
+        }
+      ],
       "gaps": [
         "The anchor and iCKB tests provide family evidence, but the configured pinned Rust-equivalence submodule commit is unreachable",
-        "Each named price, replay, reordering, cancellation, and partial-settlement row still needs its own exact artifact and transaction record"
+        "Pool merge, replay, output reordering, and wrong-price rows still need their own exact artifact and transaction records"
       ]
     },
     "temporal": {
