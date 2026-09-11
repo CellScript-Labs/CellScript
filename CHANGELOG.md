@@ -117,6 +117,12 @@
   reject wrong price and output reordering in a focused CKB-VM AMM artifact.
   Keep the unreachable pinned iCKB reference as a reproducibility blocker.
 
+- Record the exact clean-replay boundary after rechecking every 0.30 gitlink:
+  the pinned VS Code, website, NovaSeal, and iCKB commits are no longer
+  available from their configured GitHub repositories, while the pinned DOB
+  commit remains retrievable. Do not replace the missing identities with
+  current remote heads; they require explicit restoration or re-acceptance.
+
 - Add the versioned 0.30 product-capability ledger for issues #7 through #27
   and validate its claims, evidence links, dispositions, dependencies, and
   release gates independently from executable-surface closure. Preserve

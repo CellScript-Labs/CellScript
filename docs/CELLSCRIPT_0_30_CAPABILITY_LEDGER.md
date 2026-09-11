@@ -66,6 +66,13 @@ The machine ledger is the detailed source of truth. At this candidate point:
   non-goal.
 - #27 remains open until exact candidate replay, product publication, node
   admission, selected-network evidence, and independent review are complete.
+  The replay cannot currently reproduce four superproject gitlinks: VS Code
+  `7742a0c5c10ff92419869a2a03b1676e182923b4`, website
+  `422b9f4740e37b00a16ea50df42ff0c88f3098e8`, NovaSeal
+  `ee7dbff27af8b8ebe960b815794fcd76281d8164`, and iCKB equivalence
+  `c27bac620293400409b73ec62c6514324c6c2855` are absent from their configured
+  GitHub repositories as of 2026-09-11. The DOB pin remains retrievable. A
+  current remote head is not a substitute for an accepted candidate identity.
 
 This list is a dependency and closure map, not a delivery date or release
 promise. The `0.30` branch remains a development line while any required ledger
