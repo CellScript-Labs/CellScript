@@ -86,6 +86,12 @@
   preserving stable errors for cross-domain, missing/one-past HeaderDep,
   early-release, and epoch-overflow failures.
 
+- Complete issue #26's fungible scenario family with an independently checked
+  five-action policy and exact signed transactions for mint, transfer, bounded
+  split, bounded merge, and burn. Make lifecycle genesis OutPoints
+  deterministic and pin replay, cardinality, amount, overflow, issuer, and
+  multisig-authority rejections to their exact transaction identities.
+
 - Add the versioned 0.30 product-capability ledger for issues #7 through #27
   and validate its claims, evidence links, dispositions, dependencies, and
   release gates independently from executable-surface closure. Preserve

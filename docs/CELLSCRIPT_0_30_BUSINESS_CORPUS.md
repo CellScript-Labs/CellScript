@@ -61,6 +61,15 @@ one-past HeaderDeps use error 45, early release uses the verification failure,
 and epoch-duration overflow uses error 20; all raw and serialized transaction
 hashes are fixture-bound.
 
+The fungible family now has exact per-row evidence over a persistent, signed
+policy lifecycle. Deterministic genesis OutPoints feed five accepted mint,
+transfer, bounded split, bounded merge, and burn transactions. Six rejected
+records bind replay at the local live-set boundary plus missing output, wrong
+amount, checked-add overflow, wrong issuer identity, and incomplete multisig
+authority at their actual enforcement layers. The independently checked
+five-action artifact and every raw and serialized transaction hash are pinned
+in `tests/fixtures/fungible_scenarios.json`.
+
 ## Same-transaction anchor
 
 The current executable anchor is an authenticated two-order settlement. One
