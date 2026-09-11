@@ -206,18 +206,29 @@ ProtocolBundle materialization of the byte-identical transaction, same-
 transaction CKB-VM composition, and stateful `partial_fill` then `settle` plus
 `cancel` execution. The anchor pins the policy artifact and sidecar identities,
 41,822 cycles, 16,424 combined ELF bytes, and the transaction and bundle hashes.
+The same stateful test now supplies the third exact non-cryptographic resource
+profile in `runtime_view_resource_budgets.json`: fixed fixture OutPoints bind all
+three transaction identities, and the maximum action records 17,341 cycles, a
+7,040-byte ELF, 5,376-byte stack frame, 145 witness bytes, 493 transaction
+bytes, and 14,224 dependency bytes under explicit ceilings.
+
+Two optional extensions are not required by the frozen 0.30 corpus. No scenario
+consumes a full Header hash; typed epoch/block/timestamp fields already cover
+the admitted temporal portfolio. Multisig authorization uses the pinned
+standard multisig-v2 Lock and its `WitnessArgs.lock` ownership boundary, so
+CellScript does not recreate the Lock's prefix-preserving signing-message
+transform. Adding either operation later requires a separately admitted typed,
+bounded contract rather than widening v1 implicitly.
 
 The following work remains before issue #24 can close:
 
-- full-header hash decoding if the frozen business corpus requires it;
-- any additional signing domain selected by the business corpus, including a
-  multisig prefix-preserving layout, as a separately named contract;
 - persistent-policy and generated-builder parity for admitted rows beyond the
   exact `GroupInput.data_size`/`capacity` anchor slice;
 - maximum-bound cycle, stack, ELF, witness, and transaction-size measurements
   for the remaining non-cryptographic adapter rows; the fixed
-  transaction/header/temporal and Output/GroupOutput/Script paths and all ten
-  cryptographic portfolio rows now map to executable resource profiles; and
+  transaction/header/temporal, Output/GroupOutput/Script, and persistent-policy
+  paths and all ten cryptographic portfolio rows now map to executable resource
+  profiles; and
 - `ci`, `backend`, release, and independent-review evidence on the exact
   candidate source.
 

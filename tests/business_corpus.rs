@@ -28,6 +28,7 @@ const POLICY_SOURCE: &str = include_str!("fixtures/capability_anchor_policy.cell
 const TOKEN_SOURCE: &str = include_str!("fixtures/capability_anchor_token.cell");
 const AUTHORIZATION_SOURCE: &str = include_str!("fixtures/capability_anchor_authorization.cell");
 const SCENARIO_EVIDENCE: &str = include_str!("fixtures/business_scenario_evidence.json");
+const RUNTIME_VIEW_RESOURCE_BUDGETS: &str = include_str!("fixtures/runtime_view_resource_budgets.json");
 const POLICY_DATA: &[u8] = b"cellscript-0.30-anchor-policy";
 const MAX_CYCLES: u64 = 10_000_000;
 
@@ -931,7 +932,7 @@ fn persistent_order_policy_uses_prior_outputs_for_partial_fill_settle_and_cancel
             )
             .build(),
     );
-    context.verify_tx(&partial_fill, MAX_CYCLES).expect("partial fill policy step must pass");
+    let partial_fill_cycles = context.verify_tx(&partial_fill, MAX_CYCLES).expect("partial fill policy step must pass");
     let successor = packed::OutPoint::new(partial_fill.hash(), 0);
     context.create_cell_with_out_point(successor.clone(), state_cell.clone(), successor_data.clone());
     assert_eq!(context.get_cell(&successor), Some((state_cell.clone(), successor_data)));
@@ -947,7 +948,7 @@ fn persistent_order_policy_uses_prior_outputs_for_partial_fill_settle_and_cancel
             .build(),
     );
     assert_eq!(settle.inputs().get(0).unwrap().previous_output(), successor);
-    context.verify_tx(&settle, MAX_CYCLES).expect("settle must consume the verified partial-fill output");
+    let settle_cycles = context.verify_tx(&settle, MAX_CYCLES).expect("settle must consume the verified partial-fill output");
 
     let cancel_input = fixture_out_point(0x52);
     context.create_cell_with_out_point(cancel_input.clone(), state_cell.clone(), initial_data.clone());
@@ -959,7 +960,7 @@ fn persistent_order_policy_uses_prior_outputs_for_partial_fill_settle_and_cancel
             .witness(policy_witness(&policy, &type_script, "cancel", &[]).pack())
             .build(),
     );
-    context.verify_tx(&cancel, MAX_CYCLES).expect("cancel terminal action must pass");
+    let cancel_cycles = context.verify_tx(&cancel, MAX_CYCLES).expect("cancel terminal action must pass");
 
     let invalid_input = fixture_out_point(0x53);
     context.create_cell_with_out_point(invalid_input.clone(), state_cell.clone(), initial_data);
@@ -991,7 +992,7 @@ fn persistent_order_policy_uses_prior_outputs_for_partial_fill_settle_and_cancel
     };
     assert_eq!(actual, fixture.stateful_policy, "recorded stateful policy transaction identities are stale");
     let scenario_evidence: Value = serde_json::from_str(SCENARIO_EVIDENCE).expect("business scenario evidence JSON");
-    let artifact_hashes = vec![policy_identity.artifact_hash];
+    let artifact_hashes = vec![policy_identity.artifact_hash.clone()];
     assert_anchor_scenario_record(
         &scenario_evidence,
         "partial_fill_then_settle",
@@ -1008,6 +1009,61 @@ fn persistent_order_policy_uses_prior_outputs_for_partial_fill_settle_and_cancel
         &fixture.stateful_policy.cancel_serialized_transaction_hash,
         &artifact_hashes,
     );
+
+    let max_stack_frame_bytes = policy
+        .verified_lowering_record
+        .as_ref()
+        .expect("policy lowering record")
+        .entries
+        .iter()
+        .map(|entry| entry.frame_size_bytes)
+        .max()
+        .expect("policy entry stack frames");
+    let witness_bytes = [&partial_fill, &settle, &cancel]
+        .into_iter()
+        .map(|transaction| transaction.witnesses().into_iter().map(|witness| witness.raw_data().len()).sum::<usize>())
+        .max()
+        .expect("stateful policy transactions");
+    let transaction_bytes = [&partial_fill, &settle, &cancel]
+        .into_iter()
+        .map(|transaction| transaction.data().serialized_size_in_block())
+        .max()
+        .expect("stateful policy transactions");
+    let resource_actual = json!({
+        "cycles": partial_fill_cycles.max(settle_cycles).max(cancel_cycles),
+        "elf_bytes": policy_elf.len(),
+        "max_stack_frame_bytes": max_stack_frame_bytes,
+        "witness_bytes": witness_bytes,
+        "transaction_bytes": transaction_bytes,
+        "dependency_bytes": ALWAYS_SUCCESS.len() + policy_elf.len(),
+    });
+    let resource_identities = json!({
+        "artifact_hash": policy_identity.artifact_hash,
+        "lowering_record_hash": policy_identity.lowering_record_hash,
+        "source_map_hash": policy_identity.source_map_hash,
+        "verified_bundle_id": policy_identity.verified_bundle_id,
+        "partial_fill_raw_transaction_hash": fixture.stateful_policy.partial_fill_raw_transaction_hash,
+        "partial_fill_serialized_transaction_hash": fixture.stateful_policy.partial_fill_serialized_transaction_hash,
+        "settle_raw_transaction_hash": fixture.stateful_policy.settle_raw_transaction_hash,
+        "settle_serialized_transaction_hash": fixture.stateful_policy.settle_serialized_transaction_hash,
+        "cancel_raw_transaction_hash": fixture.stateful_policy.cancel_raw_transaction_hash,
+        "cancel_serialized_transaction_hash": fixture.stateful_policy.cancel_serialized_transaction_hash,
+    });
+    let resource_manifest: Value = serde_json::from_str(RUNTIME_VIEW_RESOURCE_BUDGETS).expect("runtime-view resource manifest");
+    let profile = resource_manifest["profiles"]
+        .as_array()
+        .expect("runtime-view profiles")
+        .iter()
+        .find(|profile| profile["id"] == "persistent-policy-group-input-view")
+        .expect("persistent-policy resource profile");
+    assert_eq!(resource_actual, profile["measured"], "recorded persistent-policy resource measurement is stale");
+    assert_eq!(resource_identities, profile["identities"], "recorded persistent-policy identities are stale");
+    for field in ["cycles", "elf_bytes", "max_stack_frame_bytes", "witness_bytes", "transaction_bytes", "dependency_bytes"] {
+        assert!(
+            resource_actual[field].as_u64().unwrap() <= profile["budgets"][field].as_u64().unwrap(),
+            "persistent-policy {field} exceeded budget"
+        );
+    }
 }
 
 #[test]

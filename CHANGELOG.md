@@ -2,6 +2,16 @@
 
 ## 0.30 - Capability closure development branch
 
+- Add an exact persistent-policy runtime-view resource profile. The stateful
+  `partial_fill`/`settle`/`cancel` path now gates its canonical policy artifact
+  and sidecars, six transaction identities, 17,341 maximum cycles, 7,040-byte
+  ELF, 5,376-byte stack frame, 145 witness bytes, 493 transaction bytes, and
+  14,224 dependency bytes. Fixed domain-separated input OutPoints make the
+  measurement stable under parallel test execution. The frozen corpus also
+  explicitly excludes full-header hashing and an in-language multisig-prefix
+  signing transform: it uses typed header fields and the exact standard
+  multisig Lock boundary instead.
+
 - Split the deliberately deferred portions of the implemented #10/#11
   contracts into post-v1 issues #29 and #28 respectively. The 0.30 boundary
   remains exact closed cross-Script roles plus exact fixed-width Script,

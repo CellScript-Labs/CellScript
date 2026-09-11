@@ -50,9 +50,8 @@ repository tests pass.
 
 The machine ledger is the detailed source of truth. At this candidate point:
 
-- #9, #14 through #20, #21, and #23 are recommended for closure after their
-  changes merge and their issue evidence is read back.
-- #10 and #11 are ready for bounded-scope closure. Generic compatible-open
+- #9 through #11, #14 through #21, and #23 were closed after their implemented
+  bounded scopes and issue evidence were read back on 2026-09-11. Generic compatible-open
   handles are split to [#28](https://github.com/CellScript-Labs/CellScript/issues/28),
   and runtime-selected open roles are split to
   [#29](https://github.com/CellScript-Labs/CellScript/issues/29); neither expands

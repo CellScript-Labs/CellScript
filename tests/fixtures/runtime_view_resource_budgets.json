@@ -64,6 +64,44 @@
         "transaction_bytes": 4096,
         "dependency_bytes": 4096
       }
+    },
+    {
+      "id": "persistent-policy-group-input-view",
+      "status": "passed",
+      "coverage": [
+        "persistent partial_fill, settle, and cancel policy dispatch",
+        "current-group GroupInput data size and capacity",
+        "prior-output state continuity",
+        "generated entry witness builders"
+      ],
+      "identities": {
+        "artifact_hash": "0x5f827a767f28bcc91190945a3eeff396e24b6346e341ebe7643cbb91bac7bb28",
+        "lowering_record_hash": "0xbbd907d8ef8062fce1f3e583986ff15910e7a4a15eaa5c7f9fe62cca3cb33216",
+        "source_map_hash": "0x142c5825a9c6db00c5c9f1e475d640e003f122589bc0703472b03fa3712bff55",
+        "verified_bundle_id": "0x558e5ec1ba697d0f919a57ee61dcef485ea843cbfac8c908f490b6edafc5339f",
+        "partial_fill_raw_transaction_hash": "0xcd6b5a6b875958ad5d172a352daf0a5dd331dee23d524481b5df99a78db8345f",
+        "partial_fill_serialized_transaction_hash": "0xadf77c6b46542e61ea4d02098b90a525e087eea39e957340589affe0b78fa3d6",
+        "settle_raw_transaction_hash": "0x6dfedc2385a4a10e9091db01b759cb87454403b6cd2c5c307037be9320e5e5ad",
+        "settle_serialized_transaction_hash": "0x251d6fc03933adf46189c3e88f485a9ff4d539eb154bd61937b4729bcca8c6d5",
+        "cancel_raw_transaction_hash": "0xe963f8d00bfd0ca964e3c6698f51624c34e7da64ec412ef8015a1c81e37d513d",
+        "cancel_serialized_transaction_hash": "0x6057dae1afae897b8f80ac6243409c3592bb5bc8932d65ad34bf0f84f98941d1"
+      },
+      "measured": {
+        "cycles": 17341,
+        "elf_bytes": 7040,
+        "max_stack_frame_bytes": 5376,
+        "witness_bytes": 145,
+        "transaction_bytes": 493,
+        "dependency_bytes": 14224
+      },
+      "budgets": {
+        "cycles": 20000,
+        "elf_bytes": 8192,
+        "max_stack_frame_bytes": 6000,
+        "witness_bytes": 192,
+        "transaction_bytes": 600,
+        "dependency_bytes": 15000
+      }
     }
   ]
 }
