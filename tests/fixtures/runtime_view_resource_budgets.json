@@ -102,6 +102,42 @@
         "transaction_bytes": 600,
         "dependency_bytes": 15000
       }
+    },
+    {
+      "id": "input-group-input-cell-dep-witness-view",
+      "status": "passed",
+      "coverage": [
+        "global Input and current-group GroupInput fixed fields",
+        "Input and GroupInput OutPoint and Since projections",
+        "complete Input and GroupInput Lock and Type Script projections",
+        "CellDep capacity, occupied capacity, unoccupied capacity, data size, and hashes",
+        "complete CellDep Lock and Type Script projections",
+        "WitnessArgs size and exact 32-byte lock, input_type, and output_type projections"
+      ],
+      "identities": {
+        "artifact_hash": "0x9640379ca225826eca89d9022e872da1dd6dd66e3b66c62b7554caf178034d3b",
+        "lowering_record_hash": "0xedf228682cd4118a6bbf0b0257ff7326c9824cb2aef5dfd5afd9a09cbf2c6d9a",
+        "source_map_hash": "0x79e541a684e8e9c22d88802f671d132c8b8861de407fcdf655aebe20a4f89273",
+        "verified_bundle_id": "0x78d3763f977f41ebfb61f9f47aa9e35d37ec7c8a71092fd90c0b707674ec29ae",
+        "raw_transaction_hash": "0x15428909482aa4bbcc26080dafd7d130c9148c0c2ff4af07d9b6d8ac588d424b",
+        "serialized_transaction_hash": "0xc75dfcc999976b4739be4dab2d6c665d657a6aabb8cafed99ed9929737633a4e"
+      },
+      "measured": {
+        "cycles": 92896,
+        "elf_bytes": 16208,
+        "max_stack_frame_bytes": 22880,
+        "witness_bytes": 124,
+        "transaction_bytes": 597,
+        "dependency_bytes": 73
+      },
+      "budgets": {
+        "cycles": 10000000,
+        "elf_bytes": 32768,
+        "max_stack_frame_bytes": 24576,
+        "witness_bytes": 512,
+        "transaction_bytes": 4096,
+        "dependency_bytes": 4096
+      }
     }
   ]
 }

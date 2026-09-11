@@ -159,6 +159,67 @@ action inspect() -> u64 {
 }
 "#;
 
+const INPUT_GROUP_DEP_WITNESS_SOURCE: &str = r#"
+module runtime_views::input_group_dep_witness
+
+resource Token has store { amount: u64 }
+
+action inspect() -> u64 {
+    let input = ckb::input<Token>(0)
+    let group_input = ckb::group_input<Token>(0)
+    let dep = ckb::cell_dep(0)
+    let witness_args = witness::args(0)
+    let input_lock = input.lock
+    let group_lock = group_input.lock
+    let input_type = input.type_script
+    let group_type = group_input.type_script
+    let dep_lock = dep.lock
+    let dep_type = dep.type_script
+    let input_out_point = input.out_point
+    let group_out_point = group_input.out_point
+    if input.capacity != group_input.capacity || input.data_size != group_input.data_size {
+        return 80
+    }
+    if input.occupied_capacity != group_input.occupied_capacity || input.unoccupied_capacity != group_input.unoccupied_capacity {
+        return 81
+    }
+    if input.unoccupied_capacity + input.occupied_capacity != input.capacity {
+        return 82
+    }
+    if input.data_hash != group_input.data_hash || input.lock_hash != group_input.lock_hash || input.type_hash != group_input.type_hash {
+        return 83
+    }
+    if input_lock.hash != group_lock.hash || input_lock.code_hash != group_lock.code_hash || input_lock.hash_type != group_lock.hash_type || !input_lock.args_empty || !group_lock.args_empty {
+        return 84
+    }
+    if input_type.hash != group_type.hash || input_type.code_hash != group_type.code_hash || input_type.hash_type != group_type.hash_type || input_type.args_empty || group_type.args_empty || input_type.args_hash != group_type.args_hash {
+        return 85
+    }
+    if input_out_point.tx_hash != group_out_point.tx_hash || input_out_point.index != group_out_point.index || ckb::since_to_raw(input.since) != ckb::since_to_raw(group_input.since) {
+        return 86
+    }
+    if dep.capacity == 0 || dep.data_size != 73 || dep.occupied_capacity > dep.capacity || dep.unoccupied_capacity + dep.occupied_capacity != dep.capacity {
+        return 87
+    }
+    if dep.data_hash == input.data_hash || dep.lock_hash != dep_lock.hash || dep.type_hash != dep_type.hash {
+        return 88
+    }
+    if dep_lock.code_hash != input_lock.code_hash || dep_lock.hash_type != input_lock.hash_type || !dep_lock.args_empty {
+        return 89
+    }
+    if dep_type.code_hash == input_type.code_hash || dep_type.hash_type != input_type.hash_type || dep_type.args_empty || dep_type.args_hash == input_type.args_hash {
+        return 90
+    }
+    if witness_args.size == 0 || witness_args.lock == Hash::zero() || witness_args.input_type == Hash::zero() || witness_args.output_type == Hash::zero() {
+        return 91
+    }
+    if witness_args.lock == witness_args.input_type || witness_args.input_type == witness_args.output_type {
+        return 92
+    }
+    return 0
+}
+"#;
+
 const OUT_POINT_INDEX_SOURCE: &str = r#"
 module runtime_views::out_point_index
 
@@ -240,6 +301,27 @@ fn output_script_fixture() -> ckb_script_runner::CkbVmFixture {
     };
     fixture.outputs[1].capacity = 200_000_000_000;
     fixture.outputs[1].data = Bytes::from(vec![0x66; 513]);
+    fixture
+}
+
+fn input_group_dep_witness_fixture() -> ckb_script_runner::CkbVmFixture {
+    let mut fixture = build_simple_fixture(Bytes::from(vec![0x21; 32]), 1, 1);
+    fixture.current_type_script_input_indices = vec![0];
+    fixture.inputs[0].capacity = 300_000_000_000;
+    fixture.inputs[0].data = Bytes::from(vec![0x31; 64]);
+    fixture.outputs[0].capacity = 300_000_000_000;
+    fixture.outputs[0].data = Bytes::from(vec![0x41; 64]);
+    fixture.cell_deps.push(FixtureCell {
+        capacity: 200_000_000_000,
+        type_script: Some(deterministic_always_success_script(Bytes::from(vec![0x51; 32]))),
+        data: Bytes::from(vec![0x61; 73]),
+    });
+    fixture.witnesses = vec![packed::WitnessArgs::new_builder()
+        .lock(Some(Bytes::from(vec![0xa1; 32])).pack())
+        .input_type(Some(Bytes::from(vec![0xb2; 32])).pack())
+        .output_type(Some(Bytes::from(vec![0xc3; 32])).pack())
+        .build()
+        .as_bytes()];
     fixture
 }
 
@@ -461,6 +543,43 @@ fn output_group_output_and_maximum_script_view_resource_profile_is_exact_and_bou
         .iter()
         .find(|profile| profile["id"] == "output-group-output-maximum-script-view")
         .expect("output/Script resource profile");
+    assert_eq!(actual, profile["measured"], "recorded runtime-view resource measurement is stale: {actual}");
+    assert_eq!(identities, profile["identities"], "recorded runtime-view identities are stale: {identities}");
+    for field in ["cycles", "elf_bytes", "max_stack_frame_bytes", "witness_bytes", "transaction_bytes", "dependency_bytes"] {
+        assert!(actual[field].as_u64().unwrap() <= profile["budgets"][field].as_u64().unwrap(), "{field} exceeded budget");
+    }
+}
+
+#[test]
+fn input_group_input_cell_dep_and_witness_view_resource_profile_is_exact_and_bounded() {
+    let result = compile(INPUT_GROUP_DEP_WITNESS_SOURCE);
+    let execution = execute_cellscript_script(strip_vm_abi_trailer(&result.artifact_bytes), &input_group_dep_witness_fixture());
+    assert_eq!(execution.exit_code, 0, "resource profile failed: {:?}", execution.captured_debug);
+    let max_stack_frame_bytes =
+        result.verified_lowering_record.as_ref().unwrap().entries.iter().map(|entry| entry.frame_size_bytes).max().unwrap();
+    let actual = serde_json::json!({
+        "cycles": execution.cycles,
+        "elf_bytes": strip_vm_abi_trailer(&result.artifact_bytes).len(),
+        "max_stack_frame_bytes": max_stack_frame_bytes,
+        "witness_bytes": execution.witness_bytes,
+        "transaction_bytes": execution.transaction_bytes,
+        "dependency_bytes": execution.dependency_bytes,
+    });
+    let identities = serde_json::json!({
+        "artifact_hash": format!("0x{}", result.metadata.artifact_hash.as_deref().unwrap()),
+        "lowering_record_hash": format!("0x{}", result.metadata.verified_artifact.lowering_record_hash.as_deref().unwrap()),
+        "source_map_hash": format!("0x{}", result.metadata.verified_artifact.source_map_hash.as_deref().unwrap()),
+        "verified_bundle_id": format!("0x{}", result.metadata.verified_artifact.verified_bundle_id.as_deref().unwrap()),
+        "raw_transaction_hash": execution.raw_transaction_hash,
+        "serialized_transaction_hash": execution.serialized_transaction_hash,
+    });
+    let manifest: serde_json::Value = serde_json::from_str(include_str!("fixtures/runtime_view_resource_budgets.json")).unwrap();
+    let profile = manifest["profiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|profile| profile["id"] == "input-group-input-cell-dep-witness-view")
+        .expect("Input/GroupInput/CellDep/WitnessArgs resource profile");
     assert_eq!(actual, profile["measured"], "recorded runtime-view resource measurement is stale: {actual}");
     assert_eq!(identities, profile["identities"], "recorded runtime-view identities are stale: {identities}");
     for field in ["cycles", "elf_bytes", "max_stack_frame_bytes", "witness_bytes", "transaction_bytes", "dependency_bytes"] {

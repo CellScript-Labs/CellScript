@@ -45,6 +45,13 @@
   The standalone checker now accepts only the closed Cell-view to internal
   Script-reference lowering used by these public projections.
 
+- Add a fourth exact issue #24 resource profile for complete Input, GroupInput,
+  CellDep, OutPoint, Since, Lock/Type Script, and fixed WitnessArgs projections.
+  Pin its artifact/sidecar and raw/serialized transaction identities and teach
+  the standalone checker the closed `InputView<T>` to internal OutPoint
+  reference boundary without admitting Output, CellDep, raw Source, or integer
+  retyping.
+
 - Add the bounded fixed-width committed-substate profile for issue #13.
   `Commitment<T>` is a nominal 32-byte CKB Blake2b-256 value over the existing
   `CellScriptPackedHashV0` domain; `Opening<T>` is an explicit, linear,

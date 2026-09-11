@@ -3214,6 +3214,9 @@ fn validate_typed_operation(
                 || operand_type(0)
                     .zip(destination_type(0))
                     .is_some_and(|(source, destination)| script_view_retyping_move(source, destination))
+                || operand_type(0)
+                    .zip(destination_type(0))
+                    .is_some_and(|(source, destination)| input_out_point_retyping_move(source, destination))
                 || (operand_type(0) == Some("Vec")
                     && destination_type(0).is_some_and(|destination| collection_element_type(destination).is_some()))
                 || checked_unsigned_narrowing_move(entry, block, operation, locals)
@@ -3568,6 +3571,11 @@ fn script_view_retyping_move(actual: &str, expected: &str) -> bool {
     });
     let cell_view = actual == "CellDepView" || actual == "SourceView" || typed_cell_view;
     cell_view && matches!(expected, "__ckb_lock_script_ref" | "__ckb_type_script_ref")
+}
+
+fn input_out_point_retyping_move(actual: &str, expected: &str) -> bool {
+    actual.strip_prefix("InputView<").and_then(|value| value.strip_suffix('>')).is_some_and(|inner| !inner.trim().is_empty())
+        && expected == "__ckb_input_out_point_ref"
 }
 
 fn checked_unsigned_narrowing_move(
@@ -8141,6 +8149,17 @@ mod tests {
         }
         for destination in ["ScriptView", "__ckb_script_ref", "Hash"] {
             assert!(!script_view_retyping_move("OutputView<Token>", destination));
+        }
+    }
+
+    #[test]
+    fn out_point_projection_moves_accept_only_typed_input_views_and_the_internal_reference() {
+        assert!(input_out_point_retyping_move("InputView<Token>", "__ckb_input_out_point_ref"));
+        for source in ["InputView<>", "OutputView<Token>", "CellDepView", "SourceView", "HeaderDepView", "u64"] {
+            assert!(!input_out_point_retyping_move(source, "__ckb_input_out_point_ref"));
+        }
+        for destination in ["OutPoint", "__ckb_lock_script_ref", "Hash"] {
+            assert!(!input_out_point_retyping_move("InputView<Token>", destination));
         }
     }
 

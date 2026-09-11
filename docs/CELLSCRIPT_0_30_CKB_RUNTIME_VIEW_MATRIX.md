@@ -206,11 +206,19 @@ ProtocolBundle materialization of the byte-identical transaction, same-
 transaction CKB-VM composition, and stateful `partial_fill` then `settle` plus
 `cancel` execution. The anchor pins the policy artifact and sidecar identities,
 41,822 cycles, 16,424 combined ELF bytes, and the transaction and bundle hashes.
-The same stateful test now supplies the third exact non-cryptographic resource
+The same stateful test supplies the third exact non-cryptographic resource
 profile in `runtime_view_resource_budgets.json`: fixed fixture OutPoints bind all
 three transaction identities, and the maximum action records 17,341 cycles, a
 7,040-byte ELF, 5,376-byte stack frame, 145 witness bytes, 493 transaction
 bytes, and 14,224 dependency bytes under explicit ceilings.
+A fourth exact profile covers every field of global `Input`, current-group
+`GroupInput`, and `CellDep` views together with complete Lock/Type Script,
+OutPoint, Since, and exact 32-byte `WitnessArgs.lock`/`input_type`/`output_type`
+projections. It also closes the independent checker's previously missing
+`InputView<T>` to internal OutPoint-reference type binding. The profile pins
+artifact and sidecar identities plus raw and serialized transaction hashes;
+its maximum is 92,896 cycles, 16,208 ELF bytes, a 22,880-byte checked stack
+frame, 124 witness bytes, a 597-byte transaction, and 73 dependency bytes.
 
 Two optional extensions are not required by the frozen 0.30 corpus. No scenario
 consumes a full Header hash; typed epoch/block/timestamp fields already cover
@@ -224,11 +232,10 @@ The following work remains before issue #24 can close:
 
 - persistent-policy and generated-builder parity for admitted rows beyond the
   exact `GroupInput.data_size`/`capacity` anchor slice;
-- maximum-bound cycle, stack, ELF, witness, and transaction-size measurements
-  for the remaining non-cryptographic adapter rows; the fixed
-  transaction/header/temporal, Output/GroupOutput/Script, and persistent-policy
-  paths and all ten cryptographic portfolio rows now map to executable resource
-  profiles; and
+- maximum-bound measurements and independent machine binding for any newly
+  admitted non-cryptographic adapter row; the complete typed read-only handle
+  table, persistent-policy anchor, and all ten cryptographic portfolio rows now
+  map to executable resource profiles; and
 - `ci`, `backend`, release, and independent-review evidence on the exact
   candidate source.
 
