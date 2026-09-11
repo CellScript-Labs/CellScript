@@ -43,23 +43,37 @@
   "adversarial_cases": [
     {
       "name": "wrong_authorization_credential",
-      "mutation": "authorization_credential"
+      "mutation": "authorization_credential",
+      "inventory_scenario": "authorization_substitution",
+      "raw_transaction_hash": "0xeeffbecf0ccbdda0d5709b96ccee78e11988a74be00515f96d34e84b8de73ba6",
+      "serialized_transaction_hash": "0x016bbf3f66327bf8d2c0a294eb40b55b12f2ef55a0139a7db1d9493ab3a181a9"
     },
     {
       "name": "fungible_amount_inflation",
-      "mutation": "token_amount"
+      "mutation": "token_amount",
+      "inventory_scenario": "type_state_substitution",
+      "raw_transaction_hash": "0x582d82554b45f3935929ef8cccb7be0c7bd6667c438b36eab56204df8ce82aa6",
+      "serialized_transaction_hash": "0xd3bd02305c76c60d882d8ac42cf73156f5bb616e1d584e47b4c9ccc41bf405a2"
     },
     {
       "name": "partial_settlement_amount_mismatch",
-      "mutation": "order_amount"
+      "mutation": "order_amount",
+      "inventory_scenario": "output_substitution",
+      "raw_transaction_hash": "0xb4818b0c429830cf06f09624d699a35ca031f5537dea9ff9d7c6a1203a22fc3d",
+      "serialized_transaction_hash": "0x0a0688f595160f863a4aeaa051044184d31ca0f7ef93694a52c1cd85a700f174"
     },
     {
       "name": "persistent_policy_state_substitution",
-      "mutation": "policy_state"
+      "mutation": "policy_state",
+      "raw_transaction_hash": "0x332092f94bc5c7c4b6cd91cf762349b1259addf9366bb9d55b76b024b1c56b07",
+      "serialized_transaction_hash": "0x142aef059b7ddbcebac8322849f551ca6207886c5c4572ad7c4fd419c51a5986"
     },
     {
       "name": "authenticated_dependency_substitution",
-      "mutation": "dependency"
+      "mutation": "dependency",
+      "inventory_scenario": "cell_dep_substitution",
+      "raw_transaction_hash": "0x898696abf01e0342e03a613c4e8a673bded0951d30c19f7941d09445a13797d4",
+      "serialized_transaction_hash": "0xec5200f4f5a6d592de114ed3c366aabd90971e7b4d559334816205c336b3e803"
     }
   ],
   "measured": {

@@ -61,7 +61,11 @@ actual Script groups:
 
 The CKB-VM test rejects a wrong authorization credential, fungible inflation,
 partial-settlement mismatch, persistent-state substitution, and dependency
-substitution. Its pinned resource
+substitution. The fixture pins a distinct raw and serialized transaction hash
+for each rejected mutation, and the executable test binds the four inventory-
+mapped authorization, Type-state, output, and CellDep substitutions back to the
+same exact four artifact identities in the scenario-evidence manifest. Its
+pinned resource
 record is 41,822 cycles, 16,424 combined ELF bytes, a 5,376-byte largest checked
 stack frame, 321 witness bytes, a 1,423-byte transaction, and 32.8 CKB occupied
 capacity. Budgets in
@@ -99,12 +103,17 @@ deployment identities, and independent review are still pending.
 The scenario-evidence manifest additionally records that the configured
 NovaSeal and iCKB reference submodule commits are currently unreachable from
 their remotes, so matched-reference reproducibility is blocked rather than
-silently rebased to a different commit. The four-artifact anchor and the
-maximum-width authenticated-opening row are exact-artifact scenarios: each
-freezes its ELF identity or identities, lowering record, source map, verified
-bundle, raw transaction, serialized transaction, and resource measurements.
-The remaining portfolio scenarios, including successor and committed-state
-adversarial rows, still need their own exact records.
+silently rebased to a different commit. The four-artifact anchor, its byte-
+identical ProtocolBundle materialization, four inventory-mapped rejected
+substitutions, and the maximum-width authenticated-opening row are exact-
+artifact scenarios: each freezes its ELF identity or identities plus raw and
+serialized transaction identities; their owning fixtures also bind lowering
+records, source maps, verified bundles, and resource measurements. Within the
+multi-Script family, only the separately stateful `partial_fill_then_settle`
+and `cancel_live_order` transactions plus the `role_conflict` fixture still
+lack exact records. The remaining scenarios in the other families, including
+successor and committed-state adversarial rows, still need their own exact
+records.
 `check-business-corpus --release` rejects that state. Stable versioning, tags,
 package publication, editor/browser
 publication, and network deployment remain outside this candidate record.

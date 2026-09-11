@@ -74,10 +74,86 @@
             "0xaa484561bcc9aa5eef79f1808a168866ed3155a40043d60e7e6256cff3190c1c",
             "0xc8255dcc385aa8b61aef60ea9e919e2f18d82c43cefe6e873096d493bd4c1fe7"
           ]
+        },
+        {
+          "scenario": "protocol_bundle_materialization",
+          "outcome": "positive",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/capability_anchor_cases.json",
+          "evidence": ["tests/business_corpus.rs"],
+          "raw_transaction_hash": "0xeeffbecf0ccbdda0d5709b96ccee78e11988a74be00515f96d34e84b8de73ba6",
+          "serialized_transaction_hash": "0x8b6904472b55eec2483f262331bd71b8da3920737f1924031f67e392d0c3e0bd",
+          "artifact_hashes": [
+            "0xf7b1f6db3eae3456cc0d4e97ec154eb19b70fae28a3645a7382deb72294fb018",
+            "0x5f827a767f28bcc91190945a3eeff396e24b6346e341ebe7643cbb91bac7bb28",
+            "0xaa484561bcc9aa5eef79f1808a168866ed3155a40043d60e7e6256cff3190c1c",
+            "0xc8255dcc385aa8b61aef60ea9e919e2f18d82c43cefe6e873096d493bd4c1fe7"
+          ]
+        },
+        {
+          "scenario": "authorization_substitution",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/capability_anchor_cases.json",
+          "evidence": ["tests/business_corpus.rs"],
+          "raw_transaction_hash": "0xeeffbecf0ccbdda0d5709b96ccee78e11988a74be00515f96d34e84b8de73ba6",
+          "serialized_transaction_hash": "0x016bbf3f66327bf8d2c0a294eb40b55b12f2ef55a0139a7db1d9493ab3a181a9",
+          "artifact_hashes": [
+            "0xf7b1f6db3eae3456cc0d4e97ec154eb19b70fae28a3645a7382deb72294fb018",
+            "0x5f827a767f28bcc91190945a3eeff396e24b6346e341ebe7643cbb91bac7bb28",
+            "0xaa484561bcc9aa5eef79f1808a168866ed3155a40043d60e7e6256cff3190c1c",
+            "0xc8255dcc385aa8b61aef60ea9e919e2f18d82c43cefe6e873096d493bd4c1fe7"
+          ]
+        },
+        {
+          "scenario": "type_state_substitution",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/capability_anchor_cases.json",
+          "evidence": ["tests/business_corpus.rs"],
+          "raw_transaction_hash": "0x582d82554b45f3935929ef8cccb7be0c7bd6667c438b36eab56204df8ce82aa6",
+          "serialized_transaction_hash": "0xd3bd02305c76c60d882d8ac42cf73156f5bb616e1d584e47b4c9ccc41bf405a2",
+          "artifact_hashes": [
+            "0xf7b1f6db3eae3456cc0d4e97ec154eb19b70fae28a3645a7382deb72294fb018",
+            "0x5f827a767f28bcc91190945a3eeff396e24b6346e341ebe7643cbb91bac7bb28",
+            "0xaa484561bcc9aa5eef79f1808a168866ed3155a40043d60e7e6256cff3190c1c",
+            "0xc8255dcc385aa8b61aef60ea9e919e2f18d82c43cefe6e873096d493bd4c1fe7"
+          ]
+        },
+        {
+          "scenario": "output_substitution",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/capability_anchor_cases.json",
+          "evidence": ["tests/business_corpus.rs"],
+          "raw_transaction_hash": "0xb4818b0c429830cf06f09624d699a35ca031f5537dea9ff9d7c6a1203a22fc3d",
+          "serialized_transaction_hash": "0x0a0688f595160f863a4aeaa051044184d31ca0f7ef93694a52c1cd85a700f174",
+          "artifact_hashes": [
+            "0xf7b1f6db3eae3456cc0d4e97ec154eb19b70fae28a3645a7382deb72294fb018",
+            "0x5f827a767f28bcc91190945a3eeff396e24b6346e341ebe7643cbb91bac7bb28",
+            "0xaa484561bcc9aa5eef79f1808a168866ed3155a40043d60e7e6256cff3190c1c",
+            "0xc8255dcc385aa8b61aef60ea9e919e2f18d82c43cefe6e873096d493bd4c1fe7"
+          ]
+        },
+        {
+          "scenario": "cell_dep_substitution",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/capability_anchor_cases.json",
+          "evidence": ["tests/business_corpus.rs"],
+          "raw_transaction_hash": "0x898696abf01e0342e03a613c4e8a673bded0951d30c19f7941d09445a13797d4",
+          "serialized_transaction_hash": "0xec5200f4f5a6d592de114ed3c366aabd90971e7b4d559334816205c336b3e803",
+          "artifact_hashes": [
+            "0xf7b1f6db3eae3456cc0d4e97ec154eb19b70fae28a3645a7382deb72294fb018",
+            "0x5f827a767f28bcc91190945a3eeff396e24b6346e341ebe7643cbb91bac7bb28",
+            "0xaa484561bcc9aa5eef79f1808a168866ed3155a40043d60e7e6256cff3190c1c",
+            "0xc8255dcc385aa8b61aef60ea9e919e2f18d82c43cefe6e873096d493bd4c1fe7"
+          ]
         }
       ],
       "gaps": [
-        "The remaining positive and adversarial inventory rows lack individual exact-artifact fixture records"
+        "The partial_fill_then_settle and cancel_live_order positives still need individually pinned stateful transaction hashes",
+        "The role_conflict adversarial row still needs an exact conflicting-bundle fixture and transaction record"
       ]
     },
     "nft_dob": {

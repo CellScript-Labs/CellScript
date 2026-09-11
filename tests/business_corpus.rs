@@ -27,6 +27,7 @@ const ORDER_SOURCE: &str = include_str!("fixtures/capability_anchor_order.cell")
 const POLICY_SOURCE: &str = include_str!("fixtures/capability_anchor_policy.cell");
 const TOKEN_SOURCE: &str = include_str!("fixtures/capability_anchor_token.cell");
 const AUTHORIZATION_SOURCE: &str = include_str!("fixtures/capability_anchor_authorization.cell");
+const SCENARIO_EVIDENCE: &str = include_str!("fixtures/business_scenario_evidence.json");
 const POLICY_DATA: &[u8] = b"cellscript-0.30-anchor-policy";
 const MAX_CYCLES: u64 = 10_000_000;
 
@@ -68,6 +69,10 @@ struct AnchorArtifactIdentity {
 struct AdversarialCase {
     name: String,
     mutation: Mutation,
+    #[serde(default)]
+    inventory_scenario: Option<String>,
+    raw_transaction_hash: String,
+    serialized_transaction_hash: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -234,6 +239,29 @@ fn hash_hex(bytes: &[u8]) -> String {
 
 fn bytes_hex(bytes: &[u8]) -> String {
     format!("0x{}", hex::encode(bytes))
+}
+
+fn assert_anchor_scenario_record(
+    manifest: &Value,
+    scenario: &str,
+    outcome: &str,
+    raw_transaction_hash: &str,
+    serialized_transaction_hash: &str,
+    artifact_hashes: &[String],
+) {
+    let records = manifest["families"]["multi_script_composition"]["records"].as_array().expect("multi-Script scenario records");
+    let record = records
+        .iter()
+        .find(|record| record["scenario"] == scenario && record["outcome"] == outcome)
+        .unwrap_or_else(|| panic!("missing {outcome} scenario-evidence record for {scenario}"));
+    assert_eq!(record["status"], "exact-artifact-fixture");
+    assert_eq!(record["fixture"], "tests/fixtures/capability_anchor_cases.json");
+    assert_eq!(record["raw_transaction_hash"], raw_transaction_hash);
+    assert_eq!(record["serialized_transaction_hash"], serialized_transaction_hash);
+    assert_eq!(
+        record["artifact_hashes"].as_array().expect("scenario artifact hashes"),
+        &artifact_hashes.iter().map(|hash| Value::String(hash.clone())).collect::<Vec<_>>()
+    );
 }
 
 fn out_point_json(out_point: &packed::OutPoint) -> Value {
@@ -783,6 +811,18 @@ fn canonical_anchor_executes_four_cellscript_artifacts_in_one_transaction() {
         protocol_bundle.protocol_bundle_hash, fixture.measured.protocol_bundle_hash,
         "recorded anchor ProtocolBundle hash is stale"
     );
+    let scenario_evidence: Value = serde_json::from_str(SCENARIO_EVIDENCE).expect("business scenario evidence JSON");
+    let artifact_hashes = fixture.artifact_identities.iter().map(|identity| identity.artifact_hash.clone()).collect::<Vec<_>>();
+    for scenario in ["four_artifact_same_transaction", "protocol_bundle_materialization"] {
+        assert_anchor_scenario_record(
+            &scenario_evidence,
+            scenario,
+            "positive",
+            &protocol_bundle.raw_transaction_hash,
+            &protocol_bundle.serialized_transaction_hash,
+            &artifact_hashes,
+        );
+    }
     assert!(cycles > 0 && cycles <= fixture.budgets.max_cycles, "anchor cycles outside the recorded budget: {cycles}");
     assert!(result.elf_bytes <= fixture.budgets.max_combined_elf_bytes, "combined anchor ELF bytes regressed: {}", result.elf_bytes);
     assert!(
@@ -882,7 +922,27 @@ fn persistent_order_policy_uses_prior_outputs_for_partial_fill_settle_and_cancel
 fn canonical_anchor_rejects_each_role_and_dependency_substitution() {
     let fixture = fixture();
     assert_eq!(fixture.adversarial_cases.len(), 5);
-    for case in fixture.adversarial_cases {
-        assert!(run_anchor(case.mutation).verification.is_err(), "{} ({:?}) must fail the full transaction", case.name, case.mutation);
+    let scenario_evidence: Value = serde_json::from_str(SCENARIO_EVIDENCE).expect("business scenario evidence JSON");
+    let artifact_hashes = fixture.artifact_identities.iter().map(|identity| identity.artifact_hash.clone()).collect::<Vec<_>>();
+    let mut stale_hashes = Vec::new();
+    for case in &fixture.adversarial_cases {
+        let result = run_anchor(case.mutation);
+        assert!(result.verification.is_err(), "{} ({:?}) must fail the full transaction", case.name, case.mutation);
+        let raw_transaction_hash = bytes_hex(result.transaction.hash().as_slice());
+        let serialized_transaction_hash = hash_hex(result.transaction.data().as_slice());
+        if case.raw_transaction_hash != raw_transaction_hash || case.serialized_transaction_hash != serialized_transaction_hash {
+            stale_hashes.push(format!("{}: raw {}, serialized {}", case.name, raw_transaction_hash, serialized_transaction_hash));
+        }
+        if let Some(scenario) = &case.inventory_scenario {
+            assert_anchor_scenario_record(
+                &scenario_evidence,
+                scenario,
+                "adversarial",
+                &raw_transaction_hash,
+                &serialized_transaction_hash,
+                &artifact_hashes,
+            );
+        }
     }
+    assert!(stale_hashes.is_empty(), "recorded adversarial transaction identities are stale:\n{}", stale_hashes.join("\n"));
 }

@@ -2,6 +2,14 @@
 
 ## 0.30 - Capability closure development branch
 
+- Pin the raw and serialized CKB transaction identities for all five rejected
+  composition-anchor mutations and verify every case in one exhaustive test.
+  Bind the four inventory-mapped substitutions—authorization, Type state,
+  output, and CellDep—and exact ProtocolBundle materialization to their four
+  artifact identities in the scenario-evidence manifest. The remaining
+  multi-Script exact rows are the two separately stateful transactions and the
+  ProtocolBundle role-conflict fixture.
+
 - Exercise typed `GroupInput` `data_size` and `capacity` reads inside every
   action of the persistent `partial_fill`/`settle`/`cancel` policy. The same
   policy artifact now passes direct action dispatch, exact generated-builder
