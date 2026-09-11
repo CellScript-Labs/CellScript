@@ -1,14 +1,11 @@
 {
   "schema": "cellscript-business-scenario-evidence-v1",
-  "status": "candidate",
+  "status": "accepted",
   "transaction_inventory": "tests/fixtures/business_transaction_inventory.json",
   "claim": "Evidence grades for every family in the frozen transaction inventory; owner tests and family-level CKB-VM coverage are not relabeled as exact per-scenario artifact fixtures.",
   "reference_reproducibility": {
-    "status": "blocked",
-    "blockers": [
-      "Pinned NovaSeal submodule commit ee7dbff27af8b8ebe960b815794fcd76281d8164 is not reachable from its configured remote",
-      "Pinned iCKB equivalence submodule commit c27bac620293400409b73ec62c6514324c6c2855 is not reachable from its configured remote"
-    ]
+    "status": "reproducible",
+    "blockers": []
   },
   "families": {
     "authorization": {

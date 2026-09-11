@@ -2,6 +2,18 @@
 
 ## 0.30 - Capability closure development branch
 
+- Re-accept retrievable release-evidence pins for the VS Code extension,
+  website, NovaSeal, and iCKB comparison corpus after the recorded commits
+  disappeared from their configured remotes. Refresh the editor and website
+  dependency graphs, eliminating all editor and all moderate-or-higher website
+  npm advisories without taking npm's unsafe CKB connector downgrade. Make Git
+  fixture tests independent of the developer's global commit-signing setting,
+  and retain 2026-compatible source wrappers for repository-wide scenario
+  discovery while refreshing their exact sidecar and iCKB differential
+  identities. Rebuild the canonical playground compiler twice to the identical
+  SHA-256 `82e76c029af7647fa206684e023fc95abdfd8e15ea6ce12e8993edb75da91b3b`
+  within the 600 KB gzip budget.
+
 - Complete issue #26's external-verifier family with exact EXEC, SPAWN/WAIT,
   and verifier-handle CKB-VM fixtures. Seven independently checked parent
   artifacts and one pinned argument-checking child cover two accepted rows and

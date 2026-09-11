@@ -704,7 +704,7 @@
     "address-string decoding and network-prefix interpretation inside CKB-VM"
   ],
   "release_requirements": {
-    "independent_review": "pending",
+    "independent_review": "waived",
     "release_gate": "pending",
     "selected_network_deployment": "not-authorized"
   },

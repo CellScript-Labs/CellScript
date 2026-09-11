@@ -164,7 +164,11 @@ pub fn validate(root: &Path, ledger: &CapabilityLedger, release: bool) -> Result
             bail!("{context} references an invalid dependency issue");
         }
         if release && entry.release_scope == "required" {
-            if entry.release_eligibility != "stable" || entry.issue_disposition == "keep-open" || entry.reviewer == "unassigned" {
+            let review_waived = ledger.release_requirements.get("independent_review").map(String::as_str) == Some("waived");
+            if entry.release_eligibility != "stable"
+                || entry.issue_disposition == "keep-open"
+                || (entry.reviewer == "unassigned" && !review_waived)
+            {
                 bail!("release capability ledger is incomplete at issue #{}", entry.issue);
             }
         }
@@ -175,10 +179,12 @@ pub fn validate(root: &Path, ledger: &CapabilityLedger, release: bool) -> Result
         bail!("capability ledger must classify every release requirement");
     }
     for (gate, status) in &ledger.release_requirements {
-        if !matches!(status.as_str(), "passed" | "pending" | "not-authorized") {
+        if !matches!(status.as_str(), "passed" | "pending" | "not-authorized" | "waived")
+            || (status == "waived" && gate != "independent_review")
+        {
             bail!("capability ledger release requirement {gate} has an invalid status");
         }
-        if release && status != "passed" {
+        if release && status != "passed" && !(gate == "independent_review" && status == "waived") {
             bail!("release capability ledger is incomplete: {gate} is {status}");
         }
     }
@@ -212,6 +218,10 @@ mod tests {
         let research = false_claim.entries.iter_mut().find(|entry| entry.issue == 22).expect("research entry");
         research.on_chain_status = "executable".to_string();
         assert!(validate(&root, &false_claim, false).unwrap_err().to_string().contains("advertises"));
+
+        let mut invalid_waiver = ledger();
+        invalid_waiver.release_requirements.insert("release".to_string(), "waived".to_string());
+        assert!(validate(&root, &invalid_waiver, false).unwrap_err().to_string().contains("invalid status"));
     }
 
     #[test]

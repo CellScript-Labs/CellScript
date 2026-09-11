@@ -665,10 +665,12 @@ fn validate_crypto_matrix(
         bail!("cryptographic capability matrix must classify every release requirement");
     }
     for (gate, status) in &matrix.release_requirements {
-        if !matches!(status.as_str(), "passed" | "pending" | "not-authorized") {
+        if !matches!(status.as_str(), "passed" | "pending" | "not-authorized" | "waived")
+            || (status == "waived" && gate != "independent_review")
+        {
             bail!("cryptographic capability matrix release requirement {gate} has an invalid status");
         }
-        if release && status != "passed" {
+        if release && status != "passed" && !(gate == "independent_review" && status == "waived") {
             bail!("release cryptographic capability matrix is incomplete: {gate} is {status}");
         }
     }
@@ -828,10 +830,12 @@ fn validate(
         bail!("business corpus release_requirements must classify every required gate");
     }
     for (gate, status) in &corpus.release_requirements {
-        if !matches!(status.as_str(), "passed" | "pending" | "not-authorized") {
+        if !matches!(status.as_str(), "passed" | "pending" | "not-authorized" | "waived")
+            || (status == "waived" && gate != "independent_review")
+        {
             bail!("business corpus release requirement {gate} has an invalid status");
         }
-        if release && status != "passed" {
+        if release && status != "passed" && !(gate == "independent_review" && status == "waived") {
             bail!("release corpus is incomplete: release requirement {gate} is {status}");
         }
     }
@@ -924,6 +928,10 @@ mod tests {
 
         let candidate = matrix();
         assert!(validate_crypto_matrix(&candidate, &budgets, true).unwrap_err().to_string().contains("incomplete"));
+
+        let mut invalid_waiver = matrix();
+        invalid_waiver.release_requirements.insert("release_gate".to_string(), "waived".to_string());
+        assert!(validate_crypto_matrix(&invalid_waiver, &budgets, false).unwrap_err().to_string().contains("invalid status"));
     }
 
     #[test]

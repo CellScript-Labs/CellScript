@@ -3,9 +3,9 @@
   "source_file": "tests/fixtures/temporal_scenarios.cell",
   "artifact_identities": {
     "artifact_hash": "0x1eb1139b56d05b36aae89bdca1091a6d06539f1b1ee7c187681032cec13c369c",
-    "lowering_record_hash": "0x1b019047f39a040741b60c3e935925d83f156902b62d6eab88cbcda11bbccb22",
-    "source_map_hash": "0x471df409ae55d3829d8ea97a449f31f7ecdbc2f7479e1e2c6798652571056c2d",
-    "verified_bundle_id": "0x57721605c3adedb7dd956163036168de04a4c931f00dce60f12307d4a27970f4"
+    "lowering_record_hash": "0x3f64578b1c0c0f5b3c8f4837573446ddc35632bd341da05a5dff5e6846da905c",
+    "source_map_hash": "0x6e94612d0cd3654b64060c42ca401b9931c35fcf47e8a08110a11ebbac102e2e",
+    "verified_bundle_id": "0x11b6eb52d0169f44c9fdf409f39b389396ebbf4f40788d204289c856a946be80"
   },
   "cases": [
     {

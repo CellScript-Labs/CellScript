@@ -5,10 +5,11 @@ resource Token has store, consume, create {
 }
 
 action merge(input left: Token, input right: Token, witness recipient: Address) -> merged: Token {
-    require left.amount > 0
-    require right.amount > 0
-    require left.amount <= 18446744073709551615 - right.amount
-    consume left
-    consume right
-    create merged = Token { amount: left.amount + right.amount } with_lock(recipient)
+    verification
+        require left.amount > 0
+        require right.amount > 0
+        require left.amount <= 18446744073709551615 - right.amount
+        consume left
+        consume right
+        create merged = Token { amount: left.amount + right.amount } with_lock(recipient)
 }

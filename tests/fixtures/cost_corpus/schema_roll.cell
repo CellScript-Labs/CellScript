@@ -6,10 +6,10 @@ resource Note has store, replace, relock {
 }
 
 action roll(input note: Note) -> next: Note {
-    replace note -> next {
-        data = same except { amount = note.amount + 1 }
-        lock = same
-        capacity = same
-        identity = same
-    }
+    verification
+        consume note
+        create next = Note { amount: note.amount + 1, owner: note.owner }
+        std::cell::same_lock(next, note)
+        std::cell::same_type(next, note)
+        std::cell::preserve_capacity(next, note)
 }

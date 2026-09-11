@@ -13,9 +13,9 @@
     },
     "capacity": {
       "artifact_hash": "0x56028936f39ad5006cf69ed2f05d556539eb55395a17ed7679391a0c588b0008",
-      "lowering_record_hash": "0x6a2c6040640357f02bb66bff3142252af4d099d7dd6dbb15fe25d45b680092f0",
-      "source_map_hash": "0x8919d9e04d45f1e1fe34612c5b88d71152bd8e095251c43fb780e4e1eef04136",
-      "verified_bundle_id": "0xd23a424505c765752493f3e1623fec3170eac042811b5703c8a824398d0aefcd"
+      "lowering_record_hash": "0x485337bc4005a185ccbf2e525ce84d788c5ac28dc2adc9cba63f572d9a586dee",
+      "source_map_hash": "0xc23427980b75384cfcdaad2228efd818fbe8526e6d80238bdd81e62f7de481d1",
+      "verified_bundle_id": "0x6cb1cd7a74e0135e3c7abef76060610f20699ac9b9ab5ff1abf3603eb13e575d"
     }
   },
   "cases": [

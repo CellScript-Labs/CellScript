@@ -4935,6 +4935,7 @@ version = "^1.2.0"
             vec!["init", "-q"],
             vec!["config", "user.email", "tests@cellscript.dev"],
             vec!["config", "user.name", "CellScript Tests"],
+            vec!["config", "commit.gpgSign", "false"],
             vec!["add", "."],
             vec!["commit", "-q", "-m", "initial"],
         ] {
@@ -5002,6 +5003,7 @@ resolver = "local"
             vec!["init", "-q", "--initial-branch=main"],
             vec!["config", "user.email", "tests@cellscript.dev"],
             vec!["config", "user.name", "CellScript Tests"],
+            vec!["config", "commit.gpgSign", "false"],
             vec!["add", "."],
             vec!["commit", "-q", "-m", "first"],
         ] {
@@ -5078,6 +5080,7 @@ branch = "main"
             vec!["init", "-q"],
             vec!["config", "user.email", "tests@cellscript.dev"],
             vec!["config", "user.name", "CellScript Tests"],
+            vec!["config", "commit.gpgSign", "false"],
             vec!["add", "."],
             vec!["commit", "-q", "-m", "future compiler package"],
         ] {

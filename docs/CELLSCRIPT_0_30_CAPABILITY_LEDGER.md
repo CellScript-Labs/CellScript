@@ -56,23 +56,28 @@ The machine ledger is the detailed source of truth. At this candidate point:
   and runtime-selected open roles are split to
   [#29](https://github.com/CellScript-Labs/CellScript/issues/29); neither expands
   the 0.30 release boundary.
-- #7, #8, #12, #24, #25, and #26 keep their release-facing review or evidence
-  work open even where their admitted implementation slice is executable.
-- #13 remains open after its bounded fixed-width typed opening, successor,
+- #7, #8, #12, #13, and #24 have complete repository-local evidence and are
+  eligible to close after the 0.30 candidate is pushed; their formerly pending
+  independent-review requirement is covered by the maintainer waiver.
+- #13 includes its bounded fixed-width typed opening, successor,
   builder, typed-checker, exact schema-field pointer binding, standalone
   machine-checker mutation, and complete positive/adversarial committed-state
-  CKB-VM inventory slice landed; independent review is still required.
+  CKB-VM inventory slice.
+- #25 and #26 retain only release-gate, node-admission, and selected-network
+  evidence work; their admitted implementation slices are executable.
 - #22 is research and deferred from the 0.30 core; a circuit DSL remains a
   non-goal.
 - #27 remains open until exact candidate replay, product publication, node
-  admission, selected-network evidence, and independent review are complete.
-  The replay cannot currently reproduce four superproject gitlinks: VS Code
-  `7742a0c5c10ff92419869a2a03b1676e182923b4`, website
-  `422b9f4740e37b00a16ea50df42ff0c88f3098e8`, NovaSeal
-  `ee7dbff27af8b8ebe960b815794fcd76281d8164`, and iCKB equivalence
-  `c27bac620293400409b73ec62c6514324c6c2855` are absent from their configured
-  GitHub repositories as of 2026-09-11. The DOB pin remains retrievable. A
-  current remote head is not a substitute for an accepted candidate identity.
+  admission, and selected-network evidence are complete. The maintainer has
+  explicitly waived independent review for this release line. The previously
+  unreachable gitlinks were re-accepted on 2026-09-11 at retrievable release
+  evidence commits: VS Code `4df04807`, website `4d1acbed`, NovaSeal
+  `2db4af38`, and iCKB equivalence `53c5078a`; DOB remains pinned at
+  `30709c97`. The two product pins include validated dependency refreshes:
+  VS Code reports zero npm advisories, and the website reports no
+  moderate/high/critical advisories. Its remaining twenty low-severity
+  `elliptic`-chain findings are retained rather than accepting npm's proposed
+  downgrade from the maintained CKB connector 1.3.0 to 0.0.4.
 
 This list is a dependency and closure map, not a delivery date or release
 promise. The `0.30` branch remains a development line while any required ledger

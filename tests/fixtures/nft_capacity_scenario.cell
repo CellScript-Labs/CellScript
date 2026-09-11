@@ -3,11 +3,12 @@ module acceptance::nft_capacity_scenario
 resource Nft has store { state: u64 }
 
 action adjust_capacity() -> u64 {
-    let input = ckb::group_input<Nft>(0)
-    let output = ckb::group_output<Nft>(0)
-    require output.capacity > input.capacity
-    require output.data_hash == input.data_hash
-    require output.lock_hash == input.lock_hash
-    require output.type_hash == input.type_hash
-    return 0
+    verification
+        let input = ckb::group_input<Nft>(0)
+        let output = ckb::group_output<Nft>(0)
+        require output.capacity > input.capacity
+        require output.data_hash == input.data_hash
+        require output.lock_hash == input.lock_hash
+        require output.type_hash == input.type_hash
+        return 0
 }

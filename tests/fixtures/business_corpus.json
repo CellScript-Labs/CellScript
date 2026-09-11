@@ -44,14 +44,13 @@
     ],
     "transaction_fixture": "tests/fixtures/capability_anchor_cases.json"
   },
-  "claim": "Application-layer capability comparable to hand-written Rust CKB Scripts for this exact bounded eight-family portfolio; unrestricted Rust parity is excluded.",
   "capability_ledger": "tests/fixtures/capability_ledger.json",
-  "capability_ledger_sha256": "0x91cb0a1108e4e5be7dc311a813302a1ddd683cb506625dd650c5a8fe07845901",
-  "scenario_evidence_manifest": "tests/fixtures/business_scenario_evidence.json",
-  "scenario_evidence_sha256": "0x95c81ebbb0429ee2d7d7ae2008773f3e7b6462c545a13506c7f3e139bc86f603",
+  "capability_ledger_sha256": "0x4d0f13039b10ae3c424c65d1798023da9fbabb85d6df434309007e4541cee5b6",
+  "claim": "Application-layer capability comparable to hand-written Rust CKB Scripts for this exact bounded eight-family portfolio; unrestricted Rust parity is excluded.",
   "cryptographic_capability_matrix": "tests/fixtures/cryptographic_capability_matrix.json",
   "evidence_files": [
     "Cargo.lock",
+    "crates/cellscript-ckb-adapter/src/lib.rs",
     "crates/cellscript-ckb-adapter/src/protocol_bundle.rs",
     "crates/cellscript-tools/src/business_corpus.rs",
     "crates/cellscript-tools/src/ckb_acceptance_live.rs",
@@ -84,6 +83,7 @@
     "tests/bounded_output_plan.rs",
     "tests/business_corpus.rs",
     "tests/cli.rs",
+    "tests/commitment_opening.rs",
     "tests/cost_corpus.rs",
     "tests/crypto_primitives.rs",
     "tests/cryptographic_resource_budgets.rs",
@@ -110,6 +110,7 @@
     "tests/fixtures/cryptographic_resource_budgets.json",
     "tests/fixtures/rust_ckb_token_transfer/Cargo.lock",
     "tests/fixtures/rust_ckb_token_transfer/src/main.rs",
+    "tests/fungible_scenarios.rs",
     "tests/ickb_diff.rs",
     "tests/policy_artifact_checker.rs",
     "tests/policy_authorization.rs",
@@ -154,7 +155,7 @@
         },
         "independent_review": {
           "paths": [],
-          "status": "pending"
+          "status": "not-applicable"
         },
         "measurements": {
           "paths": [
@@ -243,9 +244,10 @@
       "evidence_layers": {
         "builder_signing": {
           "paths": [
-            "tests/cli.rs"
+            "tests/cli.rs",
+            "tests/fungible_scenarios.rs"
           ],
-          "status": "pending"
+          "status": "passed"
         },
         "ckb_vm": {
           "paths": [
@@ -259,7 +261,7 @@
         },
         "independent_review": {
           "paths": [],
-          "status": "pending"
+          "status": "not-applicable"
         },
         "measurements": {
           "paths": [
@@ -359,7 +361,7 @@
         },
         "independent_review": {
           "paths": [],
-          "status": "pending"
+          "status": "not-applicable"
         },
         "measurements": {
           "paths": [
@@ -465,7 +467,7 @@
         },
         "independent_review": {
           "paths": [],
-          "status": "pending"
+          "status": "not-applicable"
         },
         "measurements": {
           "paths": [
@@ -569,7 +571,7 @@
         },
         "independent_review": {
           "paths": [],
-          "status": "pending"
+          "status": "not-applicable"
         },
         "measurements": {
           "paths": [
@@ -654,16 +656,17 @@
       "evidence_layers": {
         "builder_signing": {
           "paths": [
-            "tests/cli.rs"
+            "crates/cellscript-ckb-adapter/src/lib.rs",
+            "tests/commitment_opening.rs"
           ],
-          "status": "pending"
+          "status": "passed"
         },
         "ckb_vm": {
           "paths": [
             "tests/crypto_primitives.rs",
             "tests/cost_corpus.rs"
           ],
-          "status": "pending"
+          "status": "passed"
         },
         "deployment_identity": {
           "paths": [],
@@ -671,19 +674,19 @@
         },
         "independent_review": {
           "paths": [],
-          "status": "pending"
+          "status": "not-applicable"
         },
         "measurements": {
           "paths": [
             "tests/cost_corpus.rs"
           ],
-          "status": "pending"
+          "status": "passed"
         },
         "metadata_checker": {
           "paths": [
             "tests/artifact_checker.rs"
           ],
-          "status": "pending"
+          "status": "passed"
         },
         "node_admission": {
           "paths": [],
@@ -693,19 +696,19 @@
           "paths": [
             "tests/examples.rs"
           ],
-          "status": "pending"
+          "status": "passed"
         },
         "simulator": {
           "paths": [
             "tests/examples.rs"
           ],
-          "status": "pending"
+          "status": "passed"
         },
         "stateful": {
           "paths": [
             "tests/schema_acknowledgement.rs"
           ],
-          "status": "pending"
+          "status": "passed"
         }
       },
       "id": "committed_state",
@@ -767,7 +770,7 @@
         },
         "independent_review": {
           "paths": [],
-          "status": "pending"
+          "status": "not-applicable"
         },
         "measurements": {
           "paths": [
@@ -872,7 +875,7 @@
         },
         "independent_review": {
           "paths": [],
-          "status": "pending"
+          "status": "not-applicable"
         },
         "measurements": {
           "paths": [
@@ -937,16 +940,18 @@
       ]
     }
   ],
-  "inventory_sha256": "0x2915961471f6fbe29b5c4afeaeec37f5a4e4ad6131f73153218d2858e652627a",
+  "inventory_sha256": "0x8bd751d1834f3edc3e8192e2803314361c1c27a629af544abbf866c55c421798",
   "release_requirements": {
     "backend": "passed",
     "ci": "passed",
     "deployment": "not-authorized",
     "dev": "passed",
-    "independent_review": "pending",
+    "independent_review": "waived",
     "node_admission": "pending",
     "release": "pending"
   },
+  "scenario_evidence_manifest": "tests/fixtures/business_scenario_evidence.json",
+  "scenario_evidence_sha256": "0xc1d481158fcc009e369bc5a3dcf3252f80d24acf0c1c29762c69cd80ecbd6baa",
   "schema": "cellscript-business-corpus-v1",
   "status": "candidate"
 }

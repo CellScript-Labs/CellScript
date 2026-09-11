@@ -239,11 +239,11 @@ mod tests {
     }
 
     #[test]
-    fn candidate_scenario_evidence_is_honest_and_release_rejects_its_gaps() {
+    fn accepted_scenario_evidence_is_complete_and_reproducible() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let evidence = evidence();
-        validate(&root, &evidence, false).expect("honest candidate evidence");
-        assert!(validate(&root, &evidence, true).unwrap_err().to_string().contains("not reproducible"));
+        validate(&root, &evidence, false).expect("accepted scenario evidence");
+        validate(&root, &evidence, true).expect("release scenario evidence");
     }
 
     #[test]
