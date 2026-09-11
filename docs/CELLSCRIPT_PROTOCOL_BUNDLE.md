@@ -186,8 +186,10 @@ entry, Script role, interface hash, ELF hash, complete deployment identity,
 and exact fixed-width handle into the canonical bundle. This makes the relation
 auditable and hash-bound; it does not mean that CKB-VM links the ELFs or calls
 one Script from another.
-Runtime-selected/open roles remain outside this schema until the separately
-versioned Script-handle contract is admitted.
+Runtime-selected/open roles remain outside this schema and are tracked as
+post-v1 work in [#29](https://github.com/CellScript-Labs/CellScript/issues/29),
+dependent on [#28](https://github.com/CellScript-Labs/CellScript/issues/28)'s
+separately versioned compatible-open Script-handle contract.
 
 ## Conflict codes
 

@@ -1,7 +1,8 @@
 # CellScript Exact Script Handles
 
 Status: implemented exact-artifact source/runtime boundary on the `0.30`
-development branch. Generic compatible or open handles remain deferred.
+development branch. Generic compatible or open handles remain deferred to
+[#28](https://github.com/CellScript-Labs/CellScript/issues/28).
 
 ## Purpose
 
@@ -116,7 +117,10 @@ acceptance remain separate release checks.
 This phase expresses exact artifact identity. `ScriptHandle<I>`,
 `VerifierHandle<I>`, compatible interface selection, Registry-selected runtime
 linkage, and open ProtocolBundle roles need their own versioned construction
-and verification contracts. The exact active-version deployment-line path is
+and verification contracts. Compatible-open handles are tracked in
+[#28](https://github.com/CellScript-Labs/CellScript/issues/28), and open roles
+in [#29](https://github.com/CellScript-Labs/CellScript/issues/29). The exact
+active-version deployment-line path is
 specified in [Deployment-line handles](CELLSCRIPT_DEPLOYMENT_LINE_HANDLES.md).
 Compatible/open behavior must not be inferred from either fixed handle or from
 matching only one embedded field.

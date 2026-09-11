@@ -2,6 +2,12 @@
 
 ## 0.30 - Capability closure development branch
 
+- Split the deliberately deferred portions of the implemented #10/#11
+  contracts into post-v1 issues #29 and #28 respectively. The 0.30 boundary
+  remains exact closed cross-Script roles plus exact fixed-width Script,
+  verifier, and deployment-line handles; runtime-selected open roles and
+  generic compatible-open handles cannot silently expand that release scope.
+
 - Pin the raw and serialized CKB transaction identities for all five rejected
   composition-anchor mutations and verify every case in one exhaustive test.
   Bind the four inventory-mapped substitutions—authorization, Type state,

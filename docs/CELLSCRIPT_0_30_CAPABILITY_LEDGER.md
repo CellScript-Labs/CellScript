@@ -52,8 +52,11 @@ The machine ledger is the detailed source of truth. At this candidate point:
 
 - #9, #14 through #20, #21, and #23 are recommended for closure after their
   changes merge and their issue evidence is read back.
-- #10 and #11 are recommended for bounded-scope closure with new follow-up work
-  for open/runtime-selected roles and generic compatible handles.
+- #10 and #11 are ready for bounded-scope closure. Generic compatible-open
+  handles are split to [#28](https://github.com/CellScript-Labs/CellScript/issues/28),
+  and runtime-selected open roles are split to
+  [#29](https://github.com/CellScript-Labs/CellScript/issues/29); neither expands
+  the 0.30 release boundary.
 - #7, #8, #12, #24, #25, and #26 keep their release-facing review or evidence
   work open even where their admitted implementation slice is executable.
 - #13 remains open after its bounded fixed-width typed opening, successor,

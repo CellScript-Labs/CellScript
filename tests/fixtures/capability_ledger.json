@@ -92,11 +92,11 @@
       "dependencies": [9, 11],
       "release_scope": "required",
       "release_eligibility": "candidate",
-      "issue_disposition": "split-and-close",
+      "issue_disposition": "close-after-merge",
       "design_records": ["docs/CELLSCRIPT_PROTOCOL_BUNDLE.md"],
       "evidence": ["src/protocol_bundle.rs", "tests/business_corpus.rs"],
-      "non_goals": ["Runtime-selected open participants in the closed-role v1 contract"],
-      "remaining_work": ["Track open/runtime-selected role stabilization as a separate post-v1 issue"]
+      "non_goals": ["Runtime-selected open participants in the closed-role v1 contract; tracked post-v1 in GitHub issue #29"],
+      "remaining_work": []
     },
     {
       "issue": 11,
@@ -115,11 +115,11 @@
       "dependencies": [9, 10, 17],
       "release_scope": "required",
       "release_eligibility": "candidate",
-      "issue_disposition": "split-and-close",
+      "issue_disposition": "close-after-merge",
       "design_records": ["docs/CELLSCRIPT_EXACT_SCRIPT_HANDLES.md"],
       "evidence": ["src/script_handle.rs", "tests/exact_script_handles.rs"],
-      "non_goals": ["Generic compatible-open handles and behavioral inference"],
-      "remaining_work": ["Track generic compatible-open handles separately from the exact fixed-width v1 closure"]
+      "non_goals": ["Generic compatible-open handles and behavioral inference; tracked post-v1 in GitHub issue #28"],
+      "remaining_work": []
     },
     {
       "issue": 12,
