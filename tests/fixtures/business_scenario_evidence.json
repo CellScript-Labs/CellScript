@@ -675,7 +675,7 @@
       "gaps": []
     },
     "order_amm": {
-      "coverage_status": "partial-transaction-hashes",
+      "coverage_status": "exact-artifact-fixtures",
       "records": [
         {
           "scenario": "partial_fill",
@@ -731,12 +731,49 @@
           "raw_transaction_hash": "0x898696abf01e0342e03a613c4e8a673bded0951d30c19f7941d09445a13797d4",
           "serialized_transaction_hash": "0xec5200f4f5a6d592de114ed3c366aabd90971e7b4d559334816205c336b3e803",
           "artifact_hashes": ["0xf7b1f6db3eae3456cc0d4e97ec154eb19b70fae28a3645a7382deb72294fb018"]
+        },
+        {
+          "scenario": "pool_merge",
+          "outcome": "positive",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/order_amm_scenarios.json",
+          "evidence": ["tests/order_amm_scenarios.rs", "tests/cost_corpus.rs"],
+          "raw_transaction_hash": "0x82bef7aa8ed8f6da802bca4115216082edd55c1e925be3dffb223221ea8dc087",
+          "serialized_transaction_hash": "0x9e4bb79d17face29ee97fe6500f7c615e0533c43e84ae44612194ba1029187c4",
+          "artifact_hashes": ["0x6a50875fbd0f2e4beab28b6dfedc18730f7949d7f8e0bff41bca42313e1bfad8"]
+        },
+        {
+          "scenario": "replay",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/order_amm_scenarios.json",
+          "evidence": ["tests/order_amm_scenarios.rs"],
+          "raw_transaction_hash": "0x82bef7aa8ed8f6da802bca4115216082edd55c1e925be3dffb223221ea8dc087",
+          "serialized_transaction_hash": "0x9e4bb79d17face29ee97fe6500f7c615e0533c43e84ae44612194ba1029187c4",
+          "artifact_hashes": ["0x6a50875fbd0f2e4beab28b6dfedc18730f7949d7f8e0bff41bca42313e1bfad8"]
+        },
+        {
+          "scenario": "output_reordering",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/order_amm_scenarios.json",
+          "evidence": ["tests/order_amm_scenarios.rs"],
+          "raw_transaction_hash": "0x8d34405595cf07f6870077e1b279faca5e60371ad99b26ea6ef78f013393b1a0",
+          "serialized_transaction_hash": "0x515c12b2400bcc409d21aac44e004d8f29d159902ef121e7e43e504f0ade7e34",
+          "artifact_hashes": ["0xaa22d53049e6a6a2c6903736bf4bda2acf117e0f93eb7f9ebeb25b67b4f3424c"]
+        },
+        {
+          "scenario": "wrong_price",
+          "outcome": "adversarial",
+          "status": "exact-artifact-fixture",
+          "fixture": "tests/fixtures/order_amm_scenarios.json",
+          "evidence": ["tests/order_amm_scenarios.rs"],
+          "raw_transaction_hash": "0xa9a66578c4908d8c81027d3598e51a526eeae9f267356570641c95fdc085ebbe",
+          "serialized_transaction_hash": "0xc09371d93064e0881fc1089f1d67cce46b061d5c9e4c298e3f598622a311a426",
+          "artifact_hashes": ["0xaa22d53049e6a6a2c6903736bf4bda2acf117e0f93eb7f9ebeb25b67b4f3424c"]
         }
       ],
-      "gaps": [
-        "The anchor and iCKB tests provide family evidence, but the configured pinned Rust-equivalence submodule commit is unreachable",
-        "Pool merge, replay, output reordering, and wrong-price rows still need their own exact artifact and transaction records"
-      ]
+      "gaps": []
     },
     "temporal": {
       "coverage_status": "exact-artifact-fixtures",

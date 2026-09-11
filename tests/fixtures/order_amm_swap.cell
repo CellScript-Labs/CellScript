@@ -1,0 +1,42 @@
+module acceptance::order_amm_swap
+
+const U64_MAX: u64 = 18446744073709551615
+
+// A narrow transaction-position artifact for the frozen AMM evidence rows.
+// Pool data is (reserve_a, reserve_b); token data is a single u64 amount.
+// The current Type Script owns the pool input/output. The token input/output
+// remain foreign cells, but their exact transaction positions and amounts are
+// checked by this artifact.
+action swap() -> u64 {
+    verification
+        let pool_before = source::input(0)
+        let token_in = source::input(1)
+        let pool_after = source::output(0)
+        let token_out = source::output(1)
+
+        require ckb::cell_data_size(pool_before) == 16
+        require ckb::cell_data_size(token_in) == 8
+        require ckb::cell_data_size(pool_after) == 16
+        require ckb::cell_data_size(token_out) == 8
+
+        let reserve_a_before = ckb::cell_data_u64_le(pool_before, 0)
+        let reserve_b_before = ckb::cell_data_u64_le(pool_before, 8)
+        let amount_in = ckb::cell_data_u64_le(token_in, 0)
+        let reserve_a_after = ckb::cell_data_u64_le(pool_after, 0)
+        let reserve_b_after = ckb::cell_data_u64_le(pool_after, 8)
+        let amount_out = ckb::cell_data_u64_le(token_out, 0)
+
+        require reserve_a_before > 0
+        require reserve_b_before > 0
+        require amount_in > 0
+        require amount_in <= U64_MAX - reserve_a_before
+        require reserve_b_before <= U64_MAX / amount_in
+
+        let priced_output = reserve_b_before * amount_in / (reserve_a_before + amount_in)
+        require priced_output > 0
+        require priced_output < reserve_b_before
+        require amount_out == priced_output
+        require reserve_a_after == reserve_a_before + amount_in
+        require reserve_b_after == reserve_b_before - priced_output
+        return 0
+}

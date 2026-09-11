@@ -1,0 +1,59 @@
+{
+  "schema": "cellscript-order-amm-scenarios-v1",
+  "source_files": [
+    "tests/fixtures/cost_corpus/pool_merge.cell",
+    "tests/fixtures/order_amm_swap.cell"
+  ],
+  "artifact_identities": {
+    "amm_swap": {
+      "artifact_hash": "0xaa22d53049e6a6a2c6903736bf4bda2acf117e0f93eb7f9ebeb25b67b4f3424c",
+      "lowering_record_hash": "0x06c86c3e208d1d3fb3487f3cb8f9a292121a01ecebed5c783e32eb96b0f07357",
+      "source_map_hash": "0xbb1ef316e96a18618a2169ab6dc13cae870dfc4b871489121bbf448435805f07",
+      "verified_bundle_id": "0xbe12b26a1ef138a42e9053dbe53fb5410bdbd880749e667186928e71bf1a5105"
+    },
+    "pool_merge": {
+      "artifact_hash": "0x6a50875fbd0f2e4beab28b6dfedc18730f7949d7f8e0bff41bca42313e1bfad8",
+      "lowering_record_hash": "0x5bbe04a27a4861ec5f8e8f7fdfd8753530bc055c7c1a1333e748cbe2d3ef13bb",
+      "source_map_hash": "0xb3f8f8d0d7aa92c899b75381438a71853460bd40226eb259148639534db83d5b",
+      "verified_bundle_id": "0xdc5309afdc6a05d814dfb1a9071a7c9f4f2e4c4a16fafafd9b4b1868c6678a88"
+    }
+  },
+  "cases": [
+    {
+      "scenario": "output_reordering",
+      "outcome": "adversarial",
+      "artifact": "amm_swap",
+      "rejection_stage": "ckb-vm",
+      "expected_exit_code": 5,
+      "raw_transaction_hash": "0x8d34405595cf07f6870077e1b279faca5e60371ad99b26ea6ef78f013393b1a0",
+      "serialized_transaction_hash": "0x515c12b2400bcc409d21aac44e004d8f29d159902ef121e7e43e504f0ade7e34"
+    },
+    {
+      "scenario": "pool_merge",
+      "outcome": "positive",
+      "artifact": "pool_merge",
+      "rejection_stage": "ckb-vm",
+      "expected_exit_code": 0,
+      "raw_transaction_hash": "0x82bef7aa8ed8f6da802bca4115216082edd55c1e925be3dffb223221ea8dc087",
+      "serialized_transaction_hash": "0x9e4bb79d17face29ee97fe6500f7c615e0533c43e84ae44612194ba1029187c4"
+    },
+    {
+      "scenario": "replay",
+      "outcome": "adversarial",
+      "artifact": "pool_merge",
+      "rejection_stage": "local-live-set",
+      "expected_exit_code": null,
+      "raw_transaction_hash": "0x82bef7aa8ed8f6da802bca4115216082edd55c1e925be3dffb223221ea8dc087",
+      "serialized_transaction_hash": "0x9e4bb79d17face29ee97fe6500f7c615e0533c43e84ae44612194ba1029187c4"
+    },
+    {
+      "scenario": "wrong_price",
+      "outcome": "adversarial",
+      "artifact": "amm_swap",
+      "rejection_stage": "ckb-vm",
+      "expected_exit_code": 5,
+      "raw_transaction_hash": "0xa9a66578c4908d8c81027d3598e51a526eeae9f267356570641c95fdc085ebbe",
+      "serialized_transaction_hash": "0xc09371d93064e0881fc1089f1d67cce46b061d5c9e4c298e3f598622a311a426"
+    }
+  ]
+}

@@ -102,12 +102,17 @@ with error 70. The fixture pins all seven parent bundles and both child data
 identities without claiming that CellScript proves the external code's internal
 semantics.
 
-The order/AMM family now reuses exact anchor evidence where the frozen rows
-are genuinely identical: partial fill, cancel, two-order settlement,
-partial-settlement rejection, and authenticated dependency substitution.
-Those five rows are hash-bound; pool merge, replay, output reordering, and
-wrong-price remain explicitly incomplete, as does reproduction of the
-unreachable pinned iCKB reference.
+The order/AMM family now binds all nine frozen rows to exact transaction and
+artifact identities. Partial fill, cancel, two-order settlement,
+partial-settlement rejection, and authenticated dependency substitution reuse
+the same anchor transactions they name. Pool merge reuses the matched
+CellScript/Rust cost-corpus artifact; its exact accepted transaction is then
+rejected on replay by the local live-set boundary with unchanged transaction
+hashes. A separate narrow AMM artifact binds the pool and token output roles,
+checks the constant-product quote and exact reserve transition, and rejects
+both output reordering and an internally consistent but incorrectly priced
+swap. Reproduction of the unreachable pinned iCKB reference remains a global
+reference-reproducibility blocker, not a missing inventory row.
 
 ## Same-transaction anchor
 
@@ -178,12 +183,10 @@ identical ProtocolBundle materialization, four inventory-mapped rejected
 substitutions, and the maximum-width authenticated-opening row are exact-
 artifact scenarios: each freezes its ELF identity or identities plus raw and
 serialized transaction identities; their owning fixtures also bind lowering
-records, source maps, verified bundles, and resource measurements. Within the
-multi-Script family, all four positive and all five adversarial inventory rows
-now have exact-artifact fixtures. The remaining non-exact scenarios are the
-four explicitly listed order/AMM rows; the unreachable matched references,
-selected-network node/deployment evidence, and independent review remain
-separate blockers.
+records, source maps, verified bundles, and resource measurements. All eight
+families now have an exact artifact fixture for every frozen positive and
+adversarial row. The unreachable matched references, selected-network
+node/deployment evidence, and independent review remain separate blockers.
 `check-business-corpus --release` rejects that state. Stable versioning, tags,
 package publication, editor/browser
 publication, and network deployment remain outside this candidate record.

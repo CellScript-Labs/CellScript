@@ -110,10 +110,12 @@
   post-signing mutation, copied-owner, wrong-domain, wrong-key, partial-signature,
   and live-set replay failures to their exact signed transaction identities.
 
-- Index five order/AMM inventory rows to their already identical exact anchor
-  transactions: partial fill, cancel, settlement, partial-settlement rejection,
-  and authenticated dependency substitution. Keep the other four rows and the
-  unreachable pinned iCKB reference explicitly incomplete.
+- Complete issue #26's order/AMM scenario family. Reuse the exact anchor for
+  partial fill, cancel, settlement, partial-settlement rejection, and
+  authenticated dependency substitution; bind pool merge to the matched
+  CellScript/Rust artifact; reject replay at the local live-set boundary; and
+  reject wrong price and output reordering in a focused CKB-VM AMM artifact.
+  Keep the unreachable pinned iCKB reference as a reproducibility blocker.
 
 - Add the versioned 0.30 product-capability ledger for issues #7 through #27
   and validate its claims, evidence links, dispositions, dependencies, and

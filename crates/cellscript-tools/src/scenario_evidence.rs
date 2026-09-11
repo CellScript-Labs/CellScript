@@ -263,7 +263,7 @@ mod tests {
         assert!(validate(&root, &unknown, false).unwrap_err().to_string().contains("not in its positive inventory"));
 
         let mut false_exact = evidence();
-        false_exact.families.get_mut("order_amm").expect("order/AMM family").coverage_status = "exact-artifact-fixtures".to_string();
+        false_exact.families.get_mut("order_amm").expect("order/AMM family").records.retain(|record| record.scenario != "wrong_price");
         assert!(validate(&root, &false_exact, false).unwrap_err().to_string().contains("without an exact artifact fixture"));
     }
 }
