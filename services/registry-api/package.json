@@ -25,12 +25,12 @@
     "pg": "^8.13.1"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250617.0",
+    "@cloudflare/workers-types": "^5.20260911.1",
     "@types/node": "^22.20.1",
     "@types/pg": "^8.11.10",
-    "esbuild": "^0.25.12",
+    "esbuild": "^0.28.2",
     "typescript": "^5.8.3",
-    "vitest": "^3.2.4",
-    "wrangler": "^4.20.5"
+    "vitest": "^4.1.11",
+    "wrangler": "^4.131.1"
   }
 }

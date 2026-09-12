@@ -2,6 +2,14 @@
 
 ## 0.30 - Capability closure development branch
 
+- Complete the repository-local 0.30 release replay after updating NovaSeal's
+  parent-lock ABI preflight to require the compiler's exact `GroupInput#0`
+  binding. Record the unified release, repository, cryptographic, and business
+  gates as passed while leaving selected-network deployment and publication
+  explicitly unauthorized and incomplete. Refresh the Registry API's Wrangler,
+  Vitest, esbuild, and Workers type toolchain, removing all moderate/high
+  advisories while retaining only the JoyID/CKB low-severity `elliptic` chain.
+
 - Re-accept retrievable release-evidence pins for the VS Code extension,
   website, NovaSeal, and iCKB comparison corpus after the recorded commits
   disappeared from their configured remotes. Refresh the editor and website

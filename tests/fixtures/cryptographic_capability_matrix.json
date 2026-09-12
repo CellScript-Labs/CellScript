@@ -705,7 +705,7 @@
   ],
   "release_requirements": {
     "independent_review": "waived",
-    "release_gate": "pending",
+    "release_gate": "passed",
     "selected_network_deployment": "not-authorized"
   },
   "resource_budget_manifest": "tests/fixtures/cryptographic_resource_budgets.json"

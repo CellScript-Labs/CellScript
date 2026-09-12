@@ -63,22 +63,24 @@ The machine ledger is the detailed source of truth. At this candidate point:
   builder, typed-checker, exact schema-field pointer binding, standalone
   machine-checker mutation, and complete positive/adversarial committed-state
   CKB-VM inventory slice.
-- #25 retains release-gate and selected-network evidence work. #26 retains
+- #25 and #26 retain only selected-network evidence work. #26's
   selected-network deployment evidence after local production admission passed
   on pinned CKB `f7fa4436`; their admitted implementation slices are executable.
 - #22 is research and deferred from the 0.30 core; a circuit DSL remains a
   non-goal.
-- #27 remains open until exact candidate replay, product publication, and
+- #27 remains open until product publication and
   selected-network evidence are complete. The maintainer has
   explicitly waived independent review for this release line. The previously
   unreachable gitlinks were re-accepted on 2026-09-11 at retrievable release
   evidence commits: VS Code `4df04807`, website `4d1acbed`, NovaSeal
-  `2db4af38`, and iCKB equivalence `53c5078a`; DOB remains pinned at
+  `1e0e7e8`, and iCKB equivalence `53c5078a`; DOB remains pinned at
   `30709c97`. The two product pins include validated dependency refreshes:
   VS Code reports zero npm advisories, and the website reports no
   moderate/high/critical advisories. Its remaining twenty low-severity
   `elliptic`-chain findings are retained rather than accepting npm's proposed
-  downgrade from the maintained CKB connector 1.3.0 to 0.0.4.
+  downgrade from the maintained CKB connector 1.3.0 to 0.0.4. The Registry API
+  likewise reports no moderate/high/critical advisories after its release-tool
+  refresh; its three remaining low findings are the same unsafe-fix class.
 
 This list is a dependency and closure map, not a delivery date or release
 promise. The `0.30` branch remains a development line while any required ledger

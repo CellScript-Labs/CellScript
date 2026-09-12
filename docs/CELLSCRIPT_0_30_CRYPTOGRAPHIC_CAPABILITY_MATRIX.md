@@ -113,8 +113,8 @@ child VM's observed dynamic high-water mark; the independently verified parent
 lowering has a 5,392-byte maximum frame. The release gate reproduces the report
 and requires exact equality with the recorded cycle, ELF, stack, witness,
 transaction, and dependency measurements. Independent review is explicitly
-waived for the 0.30 release line; selected-network deployment and the unified
-release gate remain explicit and incomplete.
+waived for the 0.30 release line and the unified release gate passes;
+selected-network deployment remains explicit and incomplete.
 
 ## Deferred surfaces
 

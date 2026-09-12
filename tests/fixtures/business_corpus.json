@@ -45,7 +45,7 @@
     "transaction_fixture": "tests/fixtures/capability_anchor_cases.json"
   },
   "capability_ledger": "tests/fixtures/capability_ledger.json",
-  "capability_ledger_sha256": "0x44a1b88ec1ee759e9005070643a8cc0f6420f39f9246390293571a8cd1da33b8",
+  "capability_ledger_sha256": "0x9ddf9704ecd9b67244cd4410cf6b2493a18237486c690c50b008503fc4ad6b7f",
   "claim": "Application-layer capability comparable to hand-written Rust CKB Scripts for this exact bounded eight-family portfolio; unrestricted Rust parity is excluded.",
   "cryptographic_capability_matrix": "tests/fixtures/cryptographic_capability_matrix.json",
   "evidence_files": [
@@ -940,7 +940,7 @@
       ]
     }
   ],
-  "inventory_sha256": "0x130ac54fe8b6f08402c7580856ae531fca14be045501bf6a4f6d4334b1b7a635",
+  "inventory_sha256": "0x493b471261812b2db666fec7d55d1689a3f057115e263d99e2e8d117094ef304",
   "release_requirements": {
     "backend": "passed",
     "ci": "passed",
@@ -948,7 +948,7 @@
     "dev": "passed",
     "independent_review": "waived",
     "node_admission": "passed",
-    "release": "pending"
+    "release": "passed"
   },
   "scenario_evidence_manifest": "tests/fixtures/business_scenario_evidence.json",
   "scenario_evidence_sha256": "0xc1d481158fcc009e369bc5a3dcf3252f80d24acf0c1c29762c69cd80ecbd6baa",

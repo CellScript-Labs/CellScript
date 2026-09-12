@@ -6,7 +6,7 @@
 HeaderDep fields, all six RFC0017 `Since` mode/metric domains, checked decoding,
 checked whole-epoch duration arithmetic, migration, interfaces, builders, and
 product parity. The maintainer has waived independent review for the 0.30
-release line; exact candidate replay remains a release-level requirement.**
+release line, and the exact candidate release replay passes.**
 
 The normative chain behavior comes from
 [CKB RFC 0017](https://github.com/nervosnetwork/rfcs/blob/master/rfcs/0017-tx-valid-since/0017-tx-valid-since.md).

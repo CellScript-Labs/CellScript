@@ -174,11 +174,11 @@ layers separately. `passed`, `not-applicable`, `pending`, and
 never treated as evidence for a higher layer.
 
 The inventory remains `candidate` because selected-network deployment identity
-and the unified release gate are still pending. Independent review is
+is still pending. The unified release gate passes. Independent review is
 explicitly waived for the 0.30 release line. Local production admission passed
 against clean commit `6405ffe0` on the pinned CKB `f7fa4436` (`v0.207.0`). The
 scenario-evidence manifest records the re-accepted, retrievable NovaSeal
-`2db4af38` and iCKB `53c5078a` reference commits, so matched-reference
+`1e0e7e8` and iCKB `53c5078a` reference commits, so matched-reference
 reproducibility is no longer blocked. The four-artifact anchor, its byte-
 identical ProtocolBundle materialization, four inventory-mapped rejected
 substitutions, and the maximum-width authenticated-opening row are exact-

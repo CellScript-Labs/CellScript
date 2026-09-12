@@ -492,8 +492,8 @@
   ],
   "release_requirements": {
     "independent_review": "waived",
-    "release": "pending",
-    "repository_gates": "pending",
+    "release": "passed",
+    "repository_gates": "passed",
     "selected_network_evidence": "not-authorized"
   }
 }
