@@ -178,7 +178,7 @@ is still pending. The unified release gate passes. Independent review is
 explicitly waived for the 0.30 release line. Local production admission passed
 against clean commit `6405ffe0` on the pinned CKB `f7fa4436` (`v0.207.0`). The
 scenario-evidence manifest records the re-accepted, retrievable NovaSeal
-`1e0e7e8` and iCKB `53c5078a` reference commits, so matched-reference
+`656c4f9` and iCKB `53c5078a` reference commits, so matched-reference
 reproducibility is no longer blocked. The four-artifact anchor, its byte-
 identical ProtocolBundle materialization, four inventory-mapped rejected
 substitutions, and the maximum-width authenticated-opening row are exact-

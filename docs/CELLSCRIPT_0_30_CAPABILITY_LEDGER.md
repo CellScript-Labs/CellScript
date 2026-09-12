@@ -73,7 +73,7 @@ The machine ledger is the detailed source of truth. At this candidate point:
   explicitly waived independent review for this release line. The previously
   unreachable gitlinks were re-accepted on 2026-09-11 at retrievable release
   evidence commits: VS Code `4df04807`, website `4d1acbed`, NovaSeal
-  `1e0e7e8`, and iCKB equivalence `53c5078a`; DOB remains pinned at
+  `656c4f9`, and iCKB equivalence `53c5078a`; DOB remains pinned at
   `30709c97`. The two product pins include validated dependency refreshes:
   VS Code reports zero npm advisories, and the website reports no
   moderate/high/critical advisories. Its remaining twenty low-severity

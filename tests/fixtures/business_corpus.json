@@ -940,7 +940,7 @@
       ]
     }
   ],
-  "inventory_sha256": "0x493b471261812b2db666fec7d55d1689a3f057115e263d99e2e8d117094ef304",
+  "inventory_sha256": "0xbdd69a87857260ed275d9d4fedc3d662dfb3a7c856123c0a7e84640a83373eb0",
   "release_requirements": {
     "backend": "passed",
     "ci": "passed",
