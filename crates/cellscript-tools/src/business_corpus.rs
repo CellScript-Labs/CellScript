@@ -762,6 +762,7 @@ fn validate(
         bail!("business corpus capability ledger must be {}", crate::capability_ledger::MANIFEST);
     }
     crate::capability_ledger::validate(root, ledger, release)?;
+    crate::pudge_deployment::validate(root)?;
     let ledger_digest = format!("0x{}", hex::encode(Sha256::digest(fs::read(root.join(&corpus.capability_ledger))?)));
     if corpus.capability_ledger_sha256 != ledger_digest {
         bail!("business corpus capability ledger digest is stale; expected {ledger_digest}; run check-business-corpus --write");
@@ -926,8 +927,9 @@ mod tests {
         unknown_domain.capabilities[0].output_domain = "unclassified-bytes".to_string();
         assert!(validate_crypto_matrix(&unknown_domain, &budgets, false).unwrap_err().to_string().contains("unknown value domain"));
 
-        let candidate = matrix();
-        assert!(validate_crypto_matrix(&candidate, &budgets, true).unwrap_err().to_string().contains("incomplete"));
+        let mut candidate = matrix();
+        candidate.status = "candidate".to_string();
+        assert!(validate_crypto_matrix(&candidate, &budgets, true).unwrap_err().to_string().contains("must be accepted"));
 
         let mut invalid_waiver = matrix();
         invalid_waiver.release_requirements.insert("release_gate".to_string(), "waived".to_string());

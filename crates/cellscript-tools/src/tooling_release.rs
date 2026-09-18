@@ -126,6 +126,22 @@ pub fn run(root: &Path) -> Result<()> {
     let surface = release_surface(&crate_version);
     let changelog_match = changelog_head().captures(&changelog);
 
+    // Candidate inventories must never pass the release workflow through the
+    // permissive development check. Require the strict preflight in both modes.
+    let gate = read_text(root, "scripts/cellscript_gate.sh")?;
+    for (start, end) in [("run_release_quick_gate() {", "run_release_gate() {"), ("run_release_gate() {", "case \"$MODE\" in")] {
+        let body = slice_between(&gate, start, end)?;
+        require(
+            body.contains("check_release_source_identity\n    check_release_business_corpus\n    run_ci_gate"),
+            format!("{start} must run strict business acceptance before CI"),
+        )?;
+    }
+    require(
+        slice_between(&gate, "check_release_business_corpus() {", "check_executable_surface_freshness() {")?
+            .contains("check-business-corpus --release"),
+        "release business acceptance must use --release",
+    )?;
+
     // --- Stage B: version-consistency checks ------------------------------
     require_with(lock_versions.as_slice() == [crate_version.as_str()], || {
         "Cargo.lock cellscript version must match Cargo.toml package.version".to_string()

@@ -1,0 +1,125 @@
+{
+  "schema": "cellscript-pudge-release-deployment-manifest-v1",
+  "status": "accepted-deployment-scope",
+  "release_line": "0.30",
+  "artifact_source_commit": "3cf60a105c80a33016b8280c990a479657c3bc13",
+  "network": {
+    "name": "pudge",
+    "chain_id": "ckb_testnet",
+    "genesis_hash": "0x10639e0895502b5688a6be8cf69460d76541bfa4821629d86d62ba0aae3f9606",
+    "rpc_url": "https://testnet.ckb.dev"
+  },
+  "required_confirmations": 4,
+  "fee_rate_shannons_per_kb": 1000,
+  "deployment_scope": "The seven strict bundled business contracts, bounded GroupInput and GroupOutput verifiers, Registry Type Script, and the exact NovaSeal parent/child BIP340 boundary selected for CellScript 0.30.",
+  "batches": [
+    {
+      "id": "business-product",
+      "purpose": "Strict bundled business contracts plus Registry deployment identity",
+      "artifacts": [
+        {
+          "id": "amm-pool.strict.elf",
+          "purpose": "Order and AMM strict bundled contract",
+          "source": { "kind": "acceptance-report", "path": "artifacts/amm_pool.cell.strict.elf" },
+          "bytes": 21656,
+          "sha256": "3734508be306bae934a08d966ef165d90b0e0d3c4f0050e68f223e9f90690b0e",
+          "ckb_data_hash": "0xf8228b148519e7c1ab4bca862340c1ad5627e0b09972e5384d0a8d0b6b30b6f0"
+        },
+        {
+          "id": "launch.strict.elf",
+          "purpose": "Launch composition strict bundled contract",
+          "source": { "kind": "acceptance-report", "path": "artifacts/launch.cell.strict.elf" },
+          "bytes": 15840,
+          "sha256": "57623f0bd5c48b6f257d26e9b7c2b39cf3a61abcd774ab882ad1bb2bd736b7e0",
+          "ckb_data_hash": "0x9ef4e2d16631dac1846514b31d61fceeb2f094d9caa3a5ae088d0f9f39dff53d"
+        },
+        {
+          "id": "multisig.strict.elf",
+          "purpose": "Authorization strict bundled contract",
+          "source": { "kind": "acceptance-report", "path": "artifacts/multisig.cell.strict.elf" },
+          "bytes": 71448,
+          "sha256": "d55e265f2b8a0341961d5b8074e6961c8862a5a4c0b7e95cad3ae3e364723c8b",
+          "ckb_data_hash": "0x1a0b6ee03822944d4e9bc26f0ba30cf02199c50d929e62f462f40c11f94b52b3"
+        },
+        {
+          "id": "nft.strict.elf",
+          "purpose": "NFT and DOB strict bundled contract",
+          "source": { "kind": "acceptance-report", "path": "artifacts/nft.cell.strict.elf" },
+          "bytes": 43504,
+          "sha256": "2bdc6051a9a279c58eddac398505634310abb76f5c6d1b933c388fdb9ae371d7",
+          "ckb_data_hash": "0xa381991d2c18c8fc17947e3904af5374f113c320998be0d9d015979a1392bc40"
+        },
+        {
+          "id": "timelock.strict.elf",
+          "purpose": "Temporal and timelock strict bundled contract",
+          "source": { "kind": "acceptance-report", "path": "artifacts/timelock.cell.strict.elf" },
+          "bytes": 48776,
+          "sha256": "ba01b0d5410525bb836436ca537722968df14f7a42a9c05c297962fc89a90709",
+          "ckb_data_hash": "0xf83db4e0684a27f0e592024feceda762970fc8e046ad1f07ad8ffa99155fbaa2"
+        },
+        {
+          "id": "token.strict.elf",
+          "purpose": "Fungible asset strict bundled contract",
+          "source": { "kind": "acceptance-report", "path": "artifacts/token.cell.strict.elf" },
+          "bytes": 6328,
+          "sha256": "1121b25fb001de8da3db9fa8c2d332e53948187c77d4a58c21be339ce40749e1",
+          "ckb_data_hash": "0x9d27169e9132c1ad1fd1dc7166061f443f25f8d8c89a31e88061b83b9d6166ea"
+        },
+        {
+          "id": "vesting.strict.elf",
+          "purpose": "Vesting and temporal strict bundled contract",
+          "source": { "kind": "acceptance-report", "path": "artifacts/vesting.cell.strict.elf" },
+          "bytes": 15952,
+          "sha256": "c93ed29affd307d20f3f5329854fab478658bc09775548565874d37a773b8d55",
+          "ckb_data_hash": "0x42fe39a4dedfd649fe99568c6afcf517bcb9cfd5abef71e1d2d65d712cd3e48b"
+        },
+        {
+          "id": "registry-type-script",
+          "purpose": "Canonical Registry commitment Type Script",
+          "source": { "kind": "repository", "path": "contracts/registry-type-script/target/riscv64imac-unknown-none-elf/release/cellscript-registry-type-script" },
+          "bytes": 3352,
+          "sha256": "0f48a8736360c121f6ae0f04ab4b0496834f6715d47e3284a0a07add609dede9",
+          "ckb_data_hash": "0x0dd596ade29e06e5bcc00f56abf36ecbe9afaa09f1b26a64436aa37854da622b"
+        }
+      ]
+    },
+    {
+      "id": "consensus-security",
+      "purpose": "Bounded consensus runtime and exact NovaSeal external-verifier boundary",
+      "artifacts": [
+        {
+          "id": "bounded-group-input-v1.elf",
+          "purpose": "Bounded authenticated GroupInput verifier",
+          "source": { "kind": "acceptance-report", "path": "artifacts/bounded_group_input_v1_verify.elf" },
+          "bytes": 1752,
+          "sha256": "b09715d8e5eef56ac35487522db64eeaf4f4e19fcf13def87218914d84794125",
+          "ckb_data_hash": "0x3f792f7176bdaadb2ecbfb2b03bd70e3e38c396087aab67b106081174112cae9"
+        },
+        {
+          "id": "bounded-output-plan-v1.elf",
+          "purpose": "Bounded GroupOutput correspondence verifier",
+          "source": { "kind": "acceptance-report", "path": "artifacts/bounded_output_plan_v1_verify.elf" },
+          "bytes": 3296,
+          "sha256": "59949f7f68bb7ca1b42452066659b79620a644b68104aed5e67fd9f434542d25",
+          "ckb_data_hash": "0x08dbdb407ddc44af139a42c47718abaf8f8de15b70ddbd6bf235a6373c7a9b75"
+        },
+        {
+          "id": "novaseal-parent-lock.elf",
+          "purpose": "CellScript parent Lock for the exact NovaSeal BIP340 child boundary",
+          "source": { "kind": "repository", "path": "proposals/novaseal/v0-mvp-skeleton/target/novaseal-parent-lock-abi-preflight.elf" },
+          "bytes": 13472,
+          "sha256": "54ffdd4816f3b3b7de0713acae86bd35d261e7273d607acffed717fc3a92db92",
+          "ckb_data_hash": "0x2b4237afd46bccdbc872979ec22c2c72ce53ac681744c549ba5be4c0513aa4b6"
+        },
+        {
+          "id": "novaseal-bip340-child.elf",
+          "purpose": "Exact identity-pinned NovaSeal BIP340 child verifier",
+          "source": { "kind": "repository", "path": "proposals/novaseal/v0-mvp-skeleton/target/novaseal-btc-verifier-riscv-shell-release.elf" },
+          "bytes": 100912,
+          "sha256": "be66f22507b734c8a432c4c85f0079cc7461caaa92ee3277d50ea8f62ce95ff7",
+          "ckb_data_hash": "0x988bab12eab02ebfccc2d2a84da46f4119c5343797ada24104683e61cd07d26e"
+        }
+      ]
+    }
+  ]
+}

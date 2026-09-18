@@ -34,6 +34,7 @@ mod novaseal_planned_live;
 mod novaseal_planned_rwa;
 mod production_evidence;
 mod profile_operator;
+mod pudge_deployment;
 mod repository_checks;
 mod scenario_evidence;
 mod service_builder;

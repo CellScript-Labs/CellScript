@@ -21,7 +21,7 @@ resolver = "3"
 
 [package]
 name = "cellscript"
-version = "0.26.0"
+version = "0.30.0"
 edition = "2024"
 rust-version = "1.97.1"
 autobins = false
@@ -84,7 +84,7 @@ blake2b_simd = "1.0"
 toml = "0.8"
 hex = "0.4"
 semver = "1.0"
-cellscript-artifact-checker = { version = "=0.26.0", path = "crates/cellscript-artifact-checker" }
+cellscript-artifact-checker = { version = "=0.30.0", path = "crates/cellscript-artifact-checker" }
 
 indexmap = "=2.2.6"
 

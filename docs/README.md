@@ -3,6 +3,10 @@
 This directory is organized by document role. Keep new docs in the smallest
 stable category that matches how readers should use them.
 
+The [0.30 release candidate notes](releases/CELLSCRIPT_0_30_RELEASE_NOTES.md)
+record the version, accepted compatibility axes, validation commands, and the
+separate no-TAC publication constraint.
+
 The active `0.30` implementation uses metadata schema 72; its runtime
 matrix is [`cellscript-ckb-runtime-view-v1`](CELLSCRIPT_0_30_CKB_RUNTIME_VIEW_MATRIX.md).
 The additive six-domain `Since`, typed HeaderDep, and checked `EpochDuration`
@@ -146,7 +150,7 @@ High-value active references include:
 - `CELLSCRIPT_2027_PREVIEW_GRAMMAR.md` for the exact bounded native grammar,
   lowering, diagnostics, issue constraints, and deferred surface introduced by
   preview4, recorded under `cellscript-source-semantics-2027-authoring1`, and
-  retained by the current `cellscript-source-semantics-2027-0.30-dev1` route
+  retained by the current `cellscript-source-semantics-2027-0.30-v1` route
 - `releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md` for the final 0.13 syntax
   governance summary
 - `CELLSCRIPT_GATE_POLICY.md`

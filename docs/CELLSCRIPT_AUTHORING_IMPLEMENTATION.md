@@ -7,11 +7,12 @@ production quality, with no loss of Edition 2026's supported functionality or
 feature completeness. This includes the complete language and toolchain, not
 only a Token example or acceptance of old source text.
 
-Work is in progress on `0.30`. No production-completion claim is made here. The
-first capability slice advances the experimental source contract from the
-recorded `cellscript-source-semantics-2027-authoring1` baseline to
-`cellscript-source-semantics-2027-0.30-dev1`; the workspace release version and
-existing single-entry payload/placement ABIs are unchanged. Explicit persistent
+The bounded 0.30 release scope is recorded in the capability ledger and
+[release notes](releases/CELLSCRIPT_0_30_RELEASE_NOTES.md). This wider authoring
+plan is not a claim that all proposed 1.0 features are complete. The source
+contract advances from the recorded `authoring1` and `0.30-dev1` development
+identities to `cellscript-source-semantics-2027-0.30-v1`; the compiler version is
+0.30.0 while existing single-entry payload/placement ABIs are unchanged. Explicit persistent
 Type policies have a separate, opt-in `cellscript-policy-witness-v1` envelope.
 The implementation may become the next stable release without publishing a
 stable 0.26 line. The 0.30 scope and its broader Rust-comparable business

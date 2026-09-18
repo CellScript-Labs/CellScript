@@ -227,8 +227,31 @@ mod tests {
     #[test]
     fn candidate_ledger_is_valid_for_development_and_rejected_for_release() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let ledger = ledger();
+        let mut ledger = ledger();
+        ledger.status = "candidate".to_string();
+        ledger.entries[0].release_eligibility = "candidate".to_string();
         validate(&root, &ledger, false).expect("candidate ledger");
         assert!(validate(&root, &ledger, true).unwrap_err().to_string().contains("incomplete"));
+    }
+
+    #[test]
+    fn release_ledger_requires_acceptance_complete_scope_and_review_or_explicit_waiver() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut accepted = ledger();
+        accepted.status = "accepted".to_string();
+        for entry in &mut accepted.entries {
+            if entry.release_scope == "required" {
+                entry.release_eligibility = "stable".to_string();
+                entry.issue_disposition = "close-after-merge".to_string();
+            }
+        }
+        validate(&root, &accepted, true).expect("accepted bounded scope with recorded review waiver");
+
+        accepted.entries[0].issue_disposition = "keep-open".to_string();
+        accepted.entries[0].remaining_work = vec!["Unfinished release requirement".to_string()];
+        assert!(validate(&root, &accepted, true).unwrap_err().to_string().contains("incomplete"));
+        accepted.entries[0].issue_disposition = "close-after-merge".to_string();
+        accepted.release_requirements.insert("independent_review".to_string(), "passed".to_string());
+        assert!(validate(&root, &accepted, true).unwrap_err().to_string().contains("incomplete"));
     }
 }

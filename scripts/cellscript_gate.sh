@@ -239,6 +239,11 @@ check_business_corpus() {
         --root "$ROOT_DIR" check-business-corpus
 }
 
+check_release_business_corpus() {
+    run cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
+        --root "$ROOT_DIR" check-business-corpus --release
+}
+
 check_executable_surface_freshness() {
     run cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
         --root "$ROOT_DIR" check-executable-surface
@@ -737,6 +742,7 @@ run_release_quick_gate() {
     local ckb_repo
     ckb_repo="$(release_ckb_repo_from_args "$@")"
     check_release_source_identity
+    check_release_business_corpus
     run_ci_gate
     run_release_auxiliary_checks "$ckb_repo"
     run ./scripts/ckb_cellscript_acceptance.sh --compile-only --production "$@"
@@ -748,6 +754,7 @@ run_release_gate() {
     local ckb_repo
     ckb_repo="$(release_ckb_repo_from_args "$@")"
     check_release_source_identity
+    check_release_business_corpus
     run_ci_gate
     run_release_auxiliary_checks "$ckb_repo"
     run ./scripts/ckb_cellscript_acceptance.sh --production --stateful-scenarios "$@"

@@ -1,6 +1,7 @@
 # CellScript 0.30 Capability Ledger
 
-**Status:** candidate governance contract; not a release announcement
+**Status:** accepted bounded capability contract for the 0.30.0 release
+candidate; public publication is withheld under the no-TAC constraint.
 
 This document separates two different completeness claims:
 
@@ -56,23 +57,29 @@ The machine ledger is the detailed source of truth. At this candidate point:
   and runtime-selected open roles are split to
   [#29](https://github.com/CellScript-Labs/CellScript/issues/29); neither expands
   the 0.30 release boundary.
-- #7, #8, #12, #13, and #24 have complete repository-local evidence and are
-  eligible to close after the 0.30 candidate is pushed; their formerly pending
-  independent-review requirement is covered by the maintainer waiver.
+- #7, #8, #12, #13, and #24 were closed after their complete repository-local
+  evidence and the maintainer's independent-review waiver were pushed and read
+  back on 2026-09-12.
 - #13 includes its bounded fixed-width typed opening, successor,
   builder, typed-checker, exact schema-field pointer binding, standalone
   machine-checker mutation, and complete positive/adversarial committed-state
   CKB-VM inventory slice.
-- #25 and #26 retain only selected-network evidence work. #26's
-  selected-network deployment evidence after local production admission passed
-  on pinned CKB `f7fa4436`; their admitted implementation slices are executable.
+- #25 and #26 now have selected-network evidence and are eligible to close
+  after this ledger update is pushed. Pudge transactions `0x49572cfd…a562` and
+  `0x24273eb1…54e9` keep the accepted twelve-artifact deployment scope live;
+  the machine report binds every output and the online verifier rechecks all
+  Cell bytes. Local production admission also passed on pinned CKB `f7fa4436`.
 - #22 is research and deferred from the 0.30 core; a circuit DSL remains a
   non-goal.
-- #27 remains open until product publication and
-  selected-network evidence are complete. The maintainer has
-  explicitly waived independent review for this release line. The previously
+- #27 separates accepted release engineering from public product publication.
+  Its `stable` eligibility and `split-and-close` recommendation mean the bounded
+  capability is eligible for release; they do not claim the packages are already
+  published or close the GitHub issue. Selected-network evidence is complete,
+  but no tag or release workflow may be created while the maintainer's no-TAC
+  constraint remains in force. The maintainer has explicitly waived
+  independent review for this release line. The previously
   unreachable gitlinks were re-accepted on 2026-09-11 at retrievable release
-  evidence commits: VS Code `4df04807`, website `4d1acbed`, NovaSeal
+  evidence commits: VS Code `4df04807`, website `320d54e`, NovaSeal
   `1e7c812`, and iCKB equivalence `53c5078a`; DOB remains pinned at
   `30709c97`. The two product pins include validated dependency refreshes:
   VS Code reports zero npm advisories, and the website reports no
@@ -83,8 +90,8 @@ The machine ledger is the detailed source of truth. At this candidate point:
   refresh; its three remaining low findings are the same unsafe-fix class.
 
 This list is a dependency and closure map, not a delivery date or release
-promise. The `0.30` branch remains a development line while any required ledger
-entry or release requirement is incomplete.
+promise. The `0.30` branch remains unpublished until the separate publication
+action is authorized and verified. Final candidate replay must pass on clean source.
 
 ## Strategy wording
 
@@ -112,5 +119,7 @@ cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
 
 Development validation accepts an honest `candidate` ledger. Release
 validation additionally requires an `accepted` ledger, all release requirements
-passed, and every required capability stable, assigned to a reviewer, and no
-longer marked `keep-open`.
+passed, and every required capability stable and no longer marked `keep-open`.
+An assigned reviewer is required unless independent review is explicitly waived.
+Both release modes run this stricter check before CI. Eligibility is a
+pre-publication contract; it never authorizes a tag or overrides no-TAC.

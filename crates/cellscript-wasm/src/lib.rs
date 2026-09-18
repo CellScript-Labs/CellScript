@@ -85,9 +85,9 @@ struct LanguageServiceResult {
 /// runtime features and their scoped reasons). On error it
 /// is `{"error": "<message>"}`.
 ///
-/// `edition` is mandatory and accepts stable `"2026"` or experimental
-/// `"2027"`. Edition 2027 remains a bounded preview rather than a stable
-/// browser-language contract.
+/// `edition` is mandatory and accepts the default `"2026"` contract or the
+/// opt-in bounded `"2027"` contract frozen for CellScript 0.30. This does not
+/// extend the browser's metadata-only evidence boundary.
 /// The `target` argument is optional; pass `None` for the default target.
 #[wasm_bindgen]
 pub fn compile_metadata_json(source: &str, edition: &str, target: Option<String>) -> String {

@@ -45,7 +45,7 @@
     "transaction_fixture": "tests/fixtures/capability_anchor_cases.json"
   },
   "capability_ledger": "tests/fixtures/capability_ledger.json",
-  "capability_ledger_sha256": "0x9ddf9704ecd9b67244cd4410cf6b2493a18237486c690c50b008503fc4ad6b7f",
+  "capability_ledger_sha256": "0x4f3e2b920824e33fa2b92837da771af98ba0eaf7dbb252e791b6f0107cf2b3a9",
   "claim": "Application-layer capability comparable to hand-written Rust CKB Scripts for this exact bounded eight-family portfolio; unrestricted Rust parity is excluded.",
   "cryptographic_capability_matrix": "tests/fixtures/cryptographic_capability_matrix.json",
   "evidence_files": [
@@ -100,6 +100,8 @@
     "tests/fixtures/capability_anchor_order.cell",
     "tests/fixtures/capability_anchor_policy.cell",
     "tests/fixtures/capability_anchor_token.cell",
+    "tests/fixtures/cellscript_0_30_pudge_deployment.json",
+    "tests/fixtures/cellscript_0_30_pudge_deployment_manifest.json",
     "tests/fixtures/cost_corpus/Cargo.lock",
     "tests/fixtures/cost_corpus/nft_lock.cell",
     "tests/fixtures/cost_corpus/schema_roll.cell",
@@ -150,8 +152,11 @@
           "status": "passed"
         },
         "deployment_identity": {
-          "paths": [],
-          "status": "release-candidate-required"
+          "paths": [
+            "tests/fixtures/cellscript_0_30_pudge_deployment.json",
+            "tests/fixtures/cellscript_0_30_pudge_deployment_manifest.json"
+          ],
+          "status": "passed"
         },
         "independent_review": {
           "paths": [],
@@ -170,8 +175,11 @@
           "status": "passed"
         },
         "node_admission": {
-          "paths": [],
-          "status": "release-candidate-required"
+          "paths": [
+            "crates/cellscript-tools/src/ckb_acceptance_live.rs",
+            "tests/fixtures/cellscript_0_30_pudge_deployment.json"
+          ],
+          "status": "passed"
         },
         "parser_type_ir": {
           "paths": [
@@ -256,8 +264,11 @@
           "status": "passed"
         },
         "deployment_identity": {
-          "paths": [],
-          "status": "release-candidate-required"
+          "paths": [
+            "tests/fixtures/cellscript_0_30_pudge_deployment.json",
+            "tests/fixtures/cellscript_0_30_pudge_deployment_manifest.json"
+          ],
+          "status": "passed"
         },
         "independent_review": {
           "paths": [],
@@ -276,8 +287,11 @@
           "status": "passed"
         },
         "node_admission": {
-          "paths": [],
-          "status": "release-candidate-required"
+          "paths": [
+            "crates/cellscript-tools/src/ckb_acceptance_live.rs",
+            "tests/fixtures/cellscript_0_30_pudge_deployment.json"
+          ],
+          "status": "passed"
         },
         "parser_type_ir": {
           "paths": [
@@ -356,8 +370,11 @@
           "status": "passed"
         },
         "deployment_identity": {
-          "paths": [],
-          "status": "release-candidate-required"
+          "paths": [
+            "tests/fixtures/cellscript_0_30_pudge_deployment.json",
+            "tests/fixtures/cellscript_0_30_pudge_deployment_manifest.json"
+          ],
+          "status": "passed"
         },
         "independent_review": {
           "paths": [],
@@ -377,8 +394,11 @@
           "status": "passed"
         },
         "node_admission": {
-          "paths": [],
-          "status": "release-candidate-required"
+          "paths": [
+            "crates/cellscript-tools/src/ckb_acceptance_live.rs",
+            "tests/fixtures/cellscript_0_30_pudge_deployment.json"
+          ],
+          "status": "passed"
         },
         "parser_type_ir": {
           "paths": [
@@ -462,8 +482,11 @@
           "status": "passed"
         },
         "deployment_identity": {
-          "paths": [],
-          "status": "release-candidate-required"
+          "paths": [
+            "tests/fixtures/cellscript_0_30_pudge_deployment.json",
+            "tests/fixtures/cellscript_0_30_pudge_deployment_manifest.json"
+          ],
+          "status": "passed"
         },
         "independent_review": {
           "paths": [],
@@ -482,8 +505,11 @@
           "status": "passed"
         },
         "node_admission": {
-          "paths": [],
-          "status": "release-candidate-required"
+          "paths": [
+            "crates/cellscript-tools/src/ckb_acceptance_live.rs",
+            "tests/fixtures/cellscript_0_30_pudge_deployment.json"
+          ],
+          "status": "passed"
         },
         "parser_type_ir": {
           "paths": [
@@ -566,8 +592,11 @@
           "status": "passed"
         },
         "deployment_identity": {
-          "paths": [],
-          "status": "release-candidate-required"
+          "paths": [
+            "tests/fixtures/cellscript_0_30_pudge_deployment.json",
+            "tests/fixtures/cellscript_0_30_pudge_deployment_manifest.json"
+          ],
+          "status": "passed"
         },
         "independent_review": {
           "paths": [],
@@ -586,8 +615,11 @@
           "status": "passed"
         },
         "node_admission": {
-          "paths": [],
-          "status": "release-candidate-required"
+          "paths": [
+            "crates/cellscript-tools/src/ckb_acceptance_live.rs",
+            "tests/fixtures/cellscript_0_30_pudge_deployment.json"
+          ],
+          "status": "passed"
         },
         "parser_type_ir": {
           "paths": [
@@ -669,8 +701,11 @@
           "status": "passed"
         },
         "deployment_identity": {
-          "paths": [],
-          "status": "release-candidate-required"
+          "paths": [
+            "tests/fixtures/cellscript_0_30_pudge_deployment.json",
+            "tests/fixtures/cellscript_0_30_pudge_deployment_manifest.json"
+          ],
+          "status": "passed"
         },
         "independent_review": {
           "paths": [],
@@ -689,8 +724,11 @@
           "status": "passed"
         },
         "node_admission": {
-          "paths": [],
-          "status": "release-candidate-required"
+          "paths": [
+            "crates/cellscript-tools/src/ckb_acceptance_live.rs",
+            "tests/fixtures/cellscript_0_30_pudge_deployment.json"
+          ],
+          "status": "passed"
         },
         "parser_type_ir": {
           "paths": [
@@ -765,8 +803,11 @@
           "status": "passed"
         },
         "deployment_identity": {
-          "paths": [],
-          "status": "release-candidate-required"
+          "paths": [
+            "tests/fixtures/cellscript_0_30_pudge_deployment.json",
+            "tests/fixtures/cellscript_0_30_pudge_deployment_manifest.json"
+          ],
+          "status": "passed"
         },
         "independent_review": {
           "paths": [],
@@ -786,8 +827,11 @@
           "status": "passed"
         },
         "node_admission": {
-          "paths": [],
-          "status": "release-candidate-required"
+          "paths": [
+            "crates/cellscript-tools/src/ckb_acceptance_live.rs",
+            "tests/fixtures/cellscript_0_30_pudge_deployment.json"
+          ],
+          "status": "passed"
         },
         "parser_type_ir": {
           "paths": [
@@ -870,8 +914,11 @@
           "status": "passed"
         },
         "deployment_identity": {
-          "paths": [],
-          "status": "release-candidate-required"
+          "paths": [
+            "tests/fixtures/cellscript_0_30_pudge_deployment.json",
+            "tests/fixtures/cellscript_0_30_pudge_deployment_manifest.json"
+          ],
+          "status": "passed"
         },
         "independent_review": {
           "paths": [],
@@ -891,8 +938,11 @@
           "status": "passed"
         },
         "node_admission": {
-          "paths": [],
-          "status": "release-candidate-required"
+          "paths": [
+            "crates/cellscript-tools/src/ckb_acceptance_live.rs",
+            "tests/fixtures/cellscript_0_30_pudge_deployment.json"
+          ],
+          "status": "passed"
         },
         "parser_type_ir": {
           "paths": [
@@ -940,11 +990,11 @@
       ]
     }
   ],
-  "inventory_sha256": "0xf2ffd708225a748b32fc29ca268484796645f1121b35cfce6b5f2c0f52e3ee2d",
+  "inventory_sha256": "0xa7a32a3fbf9d7885a235ee9de2c110ee983f558235d02b82f33146a351cd3d8a",
   "release_requirements": {
     "backend": "passed",
     "ci": "passed",
-    "deployment": "not-authorized",
+    "deployment": "passed",
     "dev": "passed",
     "independent_review": "waived",
     "node_admission": "passed",
@@ -953,5 +1003,5 @@
   "scenario_evidence_manifest": "tests/fixtures/business_scenario_evidence.json",
   "scenario_evidence_sha256": "0xc1d481158fcc009e369bc5a3dcf3252f80d24acf0c1c29762c69cd80ecbd6baa",
   "schema": "cellscript-business-corpus-v1",
-  "status": "candidate"
+  "status": "accepted"
 }

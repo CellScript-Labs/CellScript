@@ -314,7 +314,7 @@ dependencies = [
 
 [[package]]
 name = "cellscript"
-version = "0.26.0"
+version = "0.30.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -354,7 +354,7 @@ dependencies = [
 
 [[package]]
 name = "cellscript-artifact-checker"
-version = "0.26.0"
+version = "0.30.0"
 dependencies = [
  "blake2b_simd",
  "clap",
@@ -365,7 +365,7 @@ dependencies = [
 
 [[package]]
 name = "cellscript-ckb-adapter"
-version = "0.26.0"
+version = "0.30.0"
 dependencies = [
  "anyhow",
  "cellscript-artifact-checker",
@@ -389,7 +389,7 @@ dependencies = [
 
 [[package]]
 name = "cellscript-fiber-adapter"
-version = "0.26.0"
+version = "0.30.0"
 dependencies = [
  "anyhow",
  "camino",
@@ -409,7 +409,7 @@ dependencies = [
 
 [[package]]
 name = "cellscript-tools"
-version = "0.26.0"
+version = "0.30.0"
 dependencies = [
  "anyhow",
  "blake2b-ref",
@@ -433,7 +433,7 @@ dependencies = [
 
 [[package]]
 name = "cellscript-wasm"
-version = "0.26.0"
+version = "0.30.0"
 dependencies = [
  "cellscript",
  "serde",

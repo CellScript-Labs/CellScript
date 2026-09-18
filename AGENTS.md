@@ -16,7 +16,7 @@ validates the versioned lowering/source-map/ELF boundary without loading the
 compiler front end or code generator. The website submodule under `website/`
 ships an Astro + WASM playground that loads the prebuilt bundle.
 
-Version line: the workspace `Cargo.toml` pins `version = "0.25.0"`, Rust
+Version line: the workspace `Cargo.toml` pins `version = "0.30.0"`, Rust
 Edition 2024, and `rust-version = "1.97.1"`. `rust-toolchain.toml` and CI pin
 that exact toolchain; do not bump either version without coordinating with the
 release gate.

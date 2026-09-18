@@ -1,6 +1,7 @@
 # CellScript 0.30 Business Corpus
 
-**Status**: Candidate contract, frozen inventory; release evidence incomplete
+**Status**: Accepted bounded inventory for the 0.30.0 release candidate;
+public publication remains separate and withheld under no-TAC.
 
 This document defines the finite business portfolio behind the statement that
 CellScript 0.30 aims to provide application-layer coverage comparable to
@@ -111,8 +112,8 @@ rejected on replay by the local live-set boundary with unchanged transaction
 hashes. A separate narrow AMM artifact binds the pool and token output roles,
 checks the constant-product quote and exact reserve transition, and rejects
 both output reordering and an internally consistent but incorrectly priced
-swap. Reproduction of the unreachable pinned iCKB reference remains a global
-reference-reproducibility blocker, not a missing inventory row.
+swap. The re-accepted iCKB reference pin is retrievable; the old unreachable-pin
+blocker is retained only in historical records.
 
 ## Same-transaction anchor
 
@@ -173,10 +174,12 @@ layers separately. `passed`, `not-applicable`, `pending`, and
 `release-candidate-required` retain their literal meanings. A lower layer is
 never treated as evidence for a higher layer.
 
-The inventory remains `candidate` because selected-network deployment identity
-is still pending. The unified release gate passes. Independent review is
-explicitly waived for the 0.30 release line. Local production admission passed
-against clean commit `6405ffe0` on the pinned CKB `f7fa4436` (`v0.207.0`). The
+The inventory is `accepted` as the finite pre-publication capability contract;
+this does not claim that a public release exists. Its selected-network
+deployment and every recorded corpus evidence layer pass. The
+unified release gate passes, and independent review is explicitly waived for
+the 0.30 release line. Local production admission passed against clean commit
+`3cf60a10` on the pinned CKB `f7fa4436` (`v0.207.0`). The
 scenario-evidence manifest records the re-accepted, retrievable NovaSeal
 `1e7c812` and iCKB `53c5078a` reference commits, so matched-reference
 reproducibility is no longer blocked. The four-artifact anchor, its byte-
@@ -186,11 +189,12 @@ artifact scenarios: each freezes its ELF identity or identities plus raw and
 serialized transaction identities; their owning fixtures also bind lowering
 records, source maps, verified bundles, and resource measurements. All eight
 families now have an exact artifact fixture for every frozen positive and
-adversarial row. Selected-network deployment evidence remains a separate
-blocker.
-`check-business-corpus --release` rejects that state. Stable versioning, tags,
-package publication, editor/browser
-publication, and network deployment remain outside this candidate record.
+adversarial row. The Pudge manifest selects twelve release artifacts and the
+two-transaction report records their live `data2` code Cells, exact output
+indices, content hashes, capacities, deployment Locks, dry-run cycles, blocks,
+and confirmation policy. The CCC online verifier re-read all twelve Cells from
+Pudge after confirmation. Stable versioning, tags, package publication, and
+editor/browser publication remain outside this candidate record.
 
 ## Updating the corpus
 

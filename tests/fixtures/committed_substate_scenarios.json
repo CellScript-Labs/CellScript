@@ -3,9 +3,9 @@
   "source_file": "tests/fixtures/committed_substate_scenarios.cell",
   "artifact_identities": {
     "artifact_hash": "0x185d5a716653c01b489858e6e53bfd7936d4a52794058c09c2ffc5bba38c1d64",
-    "lowering_record_hash": "0xb8194a8bfc04924c829313dc7a41a764b4573188bdd34e48810b22dc61e255c7",
-    "source_map_hash": "0x978b9abfeb6803f7f9d60853f5f05e5345525b5a74fc76b9e7613ad1286cdbf4",
-    "verified_bundle_id": "0x1c77c49dfe9fda9c93b4d8efc30eff730493e254116cab001d8823df647e5fd9"
+    "lowering_record_hash": "0x28e2acd4dcbfd2cdce1c9779af906400660395266ec9df4ed80336359663c05f",
+    "source_map_hash": "0x19ce59fef913e3d048d6fa48e48c2d9eb3e9b5854edabe075cc8f0f1d3b56693",
+    "verified_bundle_id": "0x9c3fcb33700444b8e707f3b3fcf5741217a238fdbbe9afc9a1469381f59a0661"
   },
   "cases": [
     {

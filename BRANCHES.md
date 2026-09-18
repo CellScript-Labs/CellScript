@@ -2,6 +2,12 @@
 
 ## 0.30
 
+The workspace and editor are being prepared as 0.30.0 with the bounded
+`cellscript-source-semantics-2027-0.30-v1` identity. See the
+[release candidate notes](docs/releases/CELLSCRIPT_0_30_RELEASE_NOTES.md).
+This is local release preparation; the no-TAC publication constraint still
+applies and no tag or public release is implied.
+
 `0.30` is the active capability-closure implementation branch, forked from
 `0.26b` at `08c0ef38`. The current planning target permits the next stable
 release after 0.25 to be 0.30. The experimental `0.26b` work may be absorbed
@@ -35,8 +41,11 @@ binds the temporal constructors, decoders, domains, wire format, and migration
 identity. The v2 reader and cross-edition interface comparison preserve the
 old-edition boundary. Formatter, VS Code, generated-builder, package, WASM, and
 Playground parity are implemented, and the six-family temporal business corpus
-uses typed HeaderDep and Since operations. Full candidate gates and independent
-review remain before issue #12 and the release gate can close.
+uses typed HeaderDep and Since operations. The repository-local candidate gates
+now pass, the maintainer has waived the independent review requirement, and
+issue #12 is closed. The selected Pudge deployment is recorded separately;
+publication and the stable tag remain open under issue #27 because they must
+not trigger TAC.
 
 The issue #18 package-compiler prerequisite is implemented through enforced
 `[package].cellscript_version` SemVer ranges, aggregated root/transitive

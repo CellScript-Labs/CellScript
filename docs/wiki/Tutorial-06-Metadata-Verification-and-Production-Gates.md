@@ -593,6 +593,9 @@ component scripts:
 IR/codegen/RISC-V changes. `release` is the production CKB evidence gate.
 `release-quick` is a compile-only release preflight, not external live/devnet
 evidence. See `docs/CELLSCRIPT_GATE_POLICY.md` for the exact command contract.
+Both release modes first require a clean checkout and an accepted bounded
+business corpus through `check-business-corpus --release`. A development corpus
+check cannot authorize publication; publication constraints remain separate.
 
 In `dev` and `ci`, the wrapper also checks that
 `examples/language/core/canonical_style.cell` is already formatter-clean and that

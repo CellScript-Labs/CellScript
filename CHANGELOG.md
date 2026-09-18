@@ -1,6 +1,29 @@
 # Changelog
 
-## 0.30 - Capability closure development branch
+## 0.30.0 - Capability closure
+
+Release candidate prepared for publication; no stable tag or public release is
+created by this record. See [the 0.30 release notes](docs/releases/CELLSCRIPT_0_30_RELEASE_NOTES.md)
+for the accepted compatibility boundary and publication constraints.
+
+The entries below retain the evidence state at each implementation step. The
+release notes and capability ledger record the current acceptance state.
+
+- Record the selected-network deployment on Pudge testnet without creating a
+  release tag or invoking GitHub release automation. Two confirmed
+  transactions keep twelve immutable `data2` code Cells live: the seven strict
+  business contracts and Registry Type Script in
+  `0x49572cfd3258b49ff214c0dc5cd60388826e7f989acf904a9016c4cfbcb2a562`,
+  plus the bounded GroupInput/GroupOutput verifiers and exact NovaSeal
+  parent/BIP340-child boundary in
+  `0x24273eb1f62a6a34a629f8306aa0c5a1434e47365538115002d2aec7563e54e9`.
+  The checked-in manifest and report bind Pudge's genesis, the clean artifact
+  source commit, every ELF SHA-256/CKB data hash, output index, occupied
+  capacity, deployment authority, dry-run result, block identity, and minimum
+  confirmation policy. Offline Rust validation and the CCC-based online
+  verifier reject scope, transaction, Cell liveness, lock, and byte-identity
+  drift. Publication remains separate and must not bypass the maintainer's
+  no-TAC constraint.
 
 - Complete the repository-local 0.30 release replay after updating NovaSeal's
   parent-lock ABI preflight to require the compiler's exact `GroupInput#0`

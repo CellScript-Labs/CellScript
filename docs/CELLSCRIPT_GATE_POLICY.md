@@ -78,6 +78,18 @@ test owner. It runs in `dev`, `ci`, and `backend`; see
 The structural check accepts an honestly marked candidate. The stricter
 `check-business-corpus --release` mode requires an accepted corpus with no
 pending release layer.
+Both `release` and `release-quick` invoke this strict mode immediately after
+checking clean source identity, before running CI or rebuilding artifacts.
+Passing the development form does not satisfy release acceptance.
+
+The selected-network evidence is the immutable Pudge manifest and deployment
+report under `tests/fixtures/cellscript_0_30_pudge_deployment*.json`. The
+business-corpus validator checks their exact two-transaction, twelve-artifact
+scope offline. `website/scripts/pudge-release-evidence.mjs verify-release`
+additionally queries the selected Pudge RPC, checks the genesis and chain ID,
+requires the confirmation depth, and re-reads every live code Cell to compare
+its bytes, CKB data hash, Lock, and OutPoint. This is deployment evidence, not
+stable package publication or authorization to create a release tag.
 
 Both release modes fail before doing expensive work unless the CellScript tree
 is completely clean, including untracked files. GitHub release CI additionally
@@ -457,7 +469,7 @@ a hash boundary. Source paths and spans live only in source-map v2, while
 source bytes have a separate `SourceDigest`.
 
 The gate treats Edition 2027 as experimental, not a release claim. The current
-`cellscript-source-semantics-2027-0.30-dev1` frontend inherits the `authoring1`
+`cellscript-source-semantics-2027-0.30-v1` frontend inherits the `authoring1`
 2026 value/declaration/statement kernel while retaining an independently
 selected entry-body grammar. Ordinary modules retain legacy default provenance
 and lifecycle meanings and may contain multiple actions/locks; those source

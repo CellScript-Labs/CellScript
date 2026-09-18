@@ -2,7 +2,7 @@
 
 ## Status and claim
 
-**Status: candidate matrix for the frozen 0.30 business corpus.** The
+**Status: accepted matrix for the frozen 0.30 release-candidate corpus.** The
 machine-readable source is
 [`tests/fixtures/cryptographic_capability_matrix.json`](../tests/fixtures/cryptographic_capability_matrix.json).
 `check-business-corpus` validates its complete row and value-domain set, binds
@@ -113,8 +113,11 @@ child VM's observed dynamic high-water mark; the independently verified parent
 lowering has a 5,392-byte maximum frame. The release gate reproduces the report
 and requires exact equality with the recorded cycle, ELF, stack, witness,
 transaction, and dependency measurements. Independent review is explicitly
-waived for the 0.30 release line and the unified release gate passes;
-selected-network deployment remains explicit and incomplete.
+waived for the 0.30 release line and the unified release gate passes.
+Selected-network deployment now binds the exact NovaSeal parent/BIP340 child,
+bounded GroupInput/GroupOutput, Registry, and business-contract artifacts to
+live Pudge `data2` code Cells in the checked-in deployment report. Stable
+publication remains a separate product boundary.
 
 ## Deferred surfaces
 

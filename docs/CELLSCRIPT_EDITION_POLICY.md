@@ -1,6 +1,7 @@
 # CellScript Edition Policy
 
-**Status**: Edition 2026 normative; Edition 2027 experimental on `0.30`.
+**Status**: Edition 2026 normative and default; the bounded Edition 2027
+contract is frozen for the 0.30 release candidate.
 
 CellScript editions are long-lived source-language semantic epochs. An edition
 answers one question: how should this CellScript source be understood? The year
@@ -15,11 +16,12 @@ edition = "2026"
 ```
 
 `edition` is mandatory in every package manifest. A missing or unknown value is
-an error. The `0.30` implementation branch also recognizes `edition = "2027"`
-as `cellscript-source-semantics-2027-0.30-dev1`. This development identity
-extends the recorded `cellscript-source-semantics-2027-authoring1` baseline; it
-is deliberately not the current default, accepted final grammar, migration
-promise, or 1.0 release contract. Its separately routed authoring frontend
+an error. The 0.30 compiler also recognizes `edition = "2027"`
+as `cellscript-source-semantics-2027-0.30-v1`. This identity freezes the bounded
+0.30 contract following the `0.30-dev1` development route. It does not redefine
+the recorded `preview4`, `authoring1`, or `0.30-dev1` identities, change the
+default edition, promise automatic migration, or freeze the wider 1.0 grammar.
+Its separately routed authoring frontend
 shares Edition 2026's full declaration, value, and statement grammar and
 preserves their checked meaning.
 The `verification` marker is optional in ordinary action/lock bodies; the
@@ -33,10 +35,10 @@ guides the next frontend iteration. It preserves the Edition 2026 authoring
 vocabulary and requires genuine multi-action operation under one deployed
 policy. `authoring1` advanced source and cache identities for the restored
 authoring surface while keeping the native preview4 grammar and existing wire
-ABIs. The 0.30 development identity adds the first precise `ScriptHash`
-successor-lock contract. Schema acknowledgement, remaining successor relations,
-shared-policy dispatch, and further type/placement contracts remain
-implementation work. The
+ABIs. The accepted 0.30 identity includes precise `ScriptHash` successor-lock
+contracts, bounded schema acknowledgements, explicit persistent-policy dispatch,
+typed runtime views, and authenticated openings. The capability ledger and
+release notes define the finite accepted scope. The
 [implementation checklist](CELLSCRIPT_AUTHORING_IMPLEMENTATION.md) records the
 full goal and its evidence requirements.
 
@@ -59,8 +61,8 @@ An edition owns rules that can change the meaning of the same source text:
 - edition-specific deprecation diagnostics and migration lints.
 
 Edition 2026 identifies those rules as `cellscript-source-semantics-2026` and
-keeps its legacy frontend path frozen. Edition 2027 development uses the
-distinct `cellscript-source-semantics-2027-0.30-dev1` route, following the
+keeps its legacy frontend path frozen. Edition 2027 uses the
+distinct `cellscript-source-semantics-2027-0.30-v1` route, following the
 recorded `cellscript-source-semantics-2027-authoring1` baseline. Both editions
 currently lower through the shared checked AST/IR into typed-semantics v8 and
 may have identical
@@ -91,16 +93,16 @@ primitive-assurance mode, metadata schemas, or CKB wire ABIs. The compiler
 assembles those independently versioned values with the source edition into a
 resolved compatibility profile:
 
-| Axis | Current `0.30` development value |
+| Axis | Current `0.30` candidate value |
 |---|---|
-| Source edition | stable `2026`; experimental `2027` |
-| Source semantics | `cellscript-source-semantics-2026` or `cellscript-source-semantics-2027-0.30-dev1` |
+| Source edition | default `2026`; opt-in bounded `2027` |
+| Source semantics | `cellscript-source-semantics-2026` or `cellscript-source-semantics-2027-0.30-v1` |
 | Compiler release | workspace SemVer (`0.x.y`), recorded separately |
 | Target profile | selected independently, normally `ckb` |
 | Primitive assurance | selected independently, or `default` |
 | Payload ABI | Single entry: `cellscript-entry-witness-v1` (`CSARGv1\0`); explicit Type policy: `cellscript-policy-witness-v1` (`CSPOLv1\0`) |
 | Placement ABI | Single entry: `cellscript-witnessargs-input-type-v2`; explicit Type policy: `cellscript-policy-witnessargs-input-type-v1` |
-| Metadata schemas | metadata 68, source 2, artifact 1, constraints 4 |
+| Metadata schemas | metadata 72, source 2, artifact 1, constraints 4 |
 
 The compiler release is recorded next to the profile but is not part of the
 profile itself. A compiler patch may change diagnostics or optimization

@@ -1,6 +1,6 @@
 [package]
 name = "cellscript-artifact-checker"
-version = "0.26.0"
+version = "0.30.0"
 edition = "2024"
 rust-version = "1.97.1"
 description = "Bounded independent verifier for CellScript lowering records and CKB RISC-V artifacts"

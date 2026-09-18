@@ -15,7 +15,7 @@ is not the final authoring grammar or a required intermediate language.
 This document is the source contract for the bounded native syntax introduced
 by `cellscript-source-semantics-2027-preview4`, recorded under
 `cellscript-source-semantics-2027-authoring1`, and retained by
-`cellscript-source-semantics-2027-0.30-dev1`. It records what the native parser
+`cellscript-source-semantics-2027-0.30-v1`. It records what the native parser
 accepts now so parser, formatter, lowering, metadata, LSP, editor tooling,
 examples, and tests can agree while the broader 1.0 design remains under
 review.
@@ -40,7 +40,7 @@ entry = "src/main.cell"
 Edition 2026 remains the stable default semantic epoch. Edition 2026 rejects
 the native `type_script` and `lock_script` surfaces. An Edition 2027 package
 uses a separately routed frontend and records
-`cellscript-source-semantics-2027-0.30-dev1` in its resolved compatibility
+`cellscript-source-semantics-2027-0.30-v1` in its resolved compatibility
 profile. Ordinary `action`/`lock` modules now use the separately routed familiar
 authoring grammar described in the [edition policy](CELLSCRIPT_EDITION_POLICY.md);
 this native-container reference does not restrict that surface.

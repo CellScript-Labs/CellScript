@@ -505,8 +505,8 @@ The following spelling is an implementation reference, not the adopted authoring
 target. It was introduced by
 `cellscript-source-semantics-2027-preview4`, was recorded under
 `cellscript-source-semantics-2027-authoring1`, and remains accepted by the
-`cellscript-source-semantics-2027-0.30-dev1` development route. It remains
-experimental and does not freeze the complete grammar or select a new payload
+`cellscript-source-semantics-2027-0.30-v1` bounded route. Its acceptance does
+not freeze the complete 1.0 grammar or select a new payload
 ABI. The exact bounded contract and EBNF are specified in the
 [Edition 2027 preview grammar](CELLSCRIPT_2027_PREVIEW_GRAMMAR.md).
 

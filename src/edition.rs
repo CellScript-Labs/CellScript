@@ -14,8 +14,8 @@ pub const COMPATIBILITY_PROFILE_SCHEMA: &str = "cellscript-resolved-compatibilit
 pub enum CellScriptEdition {
     #[serde(rename = "2026")]
     Edition2026,
-    /// Experimental semantic-foundation frontend. This edition is accepted on
-    /// the `0.30` implementation branch but is not the default stable edition.
+    /// Opt-in bounded authoring frontend frozen for the 0.30 release.
+    /// Edition 2026 remains the default source contract.
     #[serde(rename = "2027")]
     Edition2027,
 }
@@ -45,7 +45,7 @@ impl CellScriptEdition {
     pub const fn source_semantics(self) -> &'static str {
         match self {
             Self::Edition2026 => "cellscript-source-semantics-2026",
-            Self::Edition2027 => "cellscript-source-semantics-2027-0.30-dev1",
+            Self::Edition2027 => "cellscript-source-semantics-2027-0.30-v1",
         }
     }
 }
@@ -186,7 +186,7 @@ mod tests {
     #[test]
     fn edition_owns_source_semantics_only() {
         assert_eq!(CURRENT_EDITION.source_semantics(), "cellscript-source-semantics-2026");
-        assert_eq!(NEXT_EDITION.source_semantics(), "cellscript-source-semantics-2027-0.30-dev1");
+        assert_eq!(NEXT_EDITION.source_semantics(), "cellscript-source-semantics-2027-0.30-v1");
     }
 
     #[test]

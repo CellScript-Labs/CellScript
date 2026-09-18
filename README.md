@@ -551,6 +551,7 @@ or CellFabric intent engine.
 - [0.22 release notes](docs/releases/CELLSCRIPT_0_22_RELEASE_NOTES.md)
 - [0.23 release notes](docs/releases/CELLSCRIPT_0_23_RELEASE_NOTES.md)
 - [0.24 release notes](docs/releases/CELLSCRIPT_0_24_RELEASE_NOTES.md)
+- [0.30 release candidate notes](docs/releases/CELLSCRIPT_0_30_RELEASE_NOTES.md)
 - [0.22 bounded Fiber interoperability guide](examples/fiber/README.md)
 - [Agentic Loops and cellscript-mcp tutorial](docs/wiki/Tutorial-13-Agentic-Loops-and-cellscript-mcp.md)
 - [LS-IDL for CKB Lock Scripts tutorial](docs/wiki/Tutorial-15-LS-IDL-for-CKB-Lock-Scripts.md)
@@ -754,7 +755,7 @@ policy defaults:
 [package]
 edition = "2026"
 name = "token"
-version = "0.26.0"
+version = "0.30.0"
 entry = "src/main.cell"
 source_roots = ["src"]
 
