@@ -97,6 +97,14 @@ jobs:
           printf '{"status":"not-generated","reason":"test suite did not reach backend shape report generation"}\n' > "$CELLSCRIPT_BACKEND_SHAPE_REPORT"
           ./scripts/cellscript_gate.sh ci
 
+      - name: Upload cost corpus report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cellscript-cost-corpus-report
+          if-no-files-found: error
+          path: target/cellscript-cost/*.json
+
       - name: Upload backend shape report
         if: always()
         uses: actions/upload-artifact@v4

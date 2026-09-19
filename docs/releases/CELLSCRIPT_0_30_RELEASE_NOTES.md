@@ -26,6 +26,10 @@ stable 0.26 release requirement.
 - Eight frozen business families bind positive and adversarial cases to exact
   artifacts and transactions, with maximum-shape resource budgets and independent
   artifact checks.
+- Cost checks fail when required tooling is missing and produce fresh execution
+  reports. Matched samples have independent byte/cycle ceilings; bounded growth
+  cases measure ELF, stack frames, witness bytes, and cycles. See the
+  [cost regression contract](../CELLSCRIPT_COST_REGRESSION.md).
 
 ## Compatibility boundary
 

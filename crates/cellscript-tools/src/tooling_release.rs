@@ -129,6 +129,18 @@ pub fn run(root: &Path) -> Result<()> {
     // Candidate inventories must never pass the release workflow through the
     // permissive development check. Require the strict preflight in both modes.
     let gate = read_text(root, "scripts/cellscript_gate.sh")?;
+    for (start, end) in [("run_ci_gate() {", "run_backend_gate() {"), ("run_backend_gate() {", "run_release_auxiliary_checks() {")] {
+        let body = slice_between(&gate, start, end)?;
+        let preflight = body.find("    prepare_cost_evidence\n");
+        let tests = body
+            .find("    run cargo test --locked -p cellscript\n")
+            .or_else(|| body.find("    run cargo test --locked -p cellscript -- --test-threads=1\n"));
+        let report = body.find("    check_cost_evidence\n");
+        require(
+            matches!((preflight, tests, report), (Some(a), Some(b), Some(c)) if a < b && b < c),
+            format!("{start} must preflight cost tooling and require fresh evidence after compiler tests"),
+        )?;
+    }
     for (start, end) in [("run_release_quick_gate() {", "run_release_gate() {"), ("run_release_gate() {", "case \"$MODE\" in")] {
         let body = slice_between(&gate, start, end)?;
         require(

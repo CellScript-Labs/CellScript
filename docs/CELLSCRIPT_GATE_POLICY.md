@@ -23,6 +23,13 @@ deciding whether a change is ready.
 `release-quick` is kept for `scripts/cellscript_ckb_release_gate.sh quick`.
 Use `release` for any production or external live/devnet claim.
 
+`ci` and `backend` preflight the selected Rust toolchain's RISC-V target and
+`llvm-strip`, then require a fresh cost-corpus execution report after compiler
+tests. Both release modes inherit this check through `ci`. Missing tooling
+fails instead of skipping cost tests. The report covers matched Rust parity,
+independent byte/cycle ceilings, and bounded action/parameter/group growth;
+see the [cost regression contract](CELLSCRIPT_COST_REGRESSION.md).
+
 CI packages the independently publishable `cellscript-artifact-checker` first,
 then verifies the `cellscript` package offline with an exact local crates.io
 patch. A real crates.io release must preserve that dependency order: publish

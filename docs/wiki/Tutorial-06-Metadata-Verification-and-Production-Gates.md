@@ -49,6 +49,13 @@ Edition is reserved for a change to the meaning of existing source.
 This chapter is about trust boundaries. It teaches you what compiler evidence
 can prove, and where you still need CKB transaction evidence.
 
+Cost evidence is also explicit: CI/backend and both release gates require the
+Rust toolchain's RISC-V target and `llvm-strip`, execute the matched and bounded
+growth corpus, and retain a fresh JSON report under `target/cellscript-cost/`.
+A missing tool or unexecuted corpus fails the gate. The
+[cost regression contract](../CELLSCRIPT_COST_REGRESSION.md) distinguishes ELF,
+individual stack-frame, witness and cycle budgets from universal cost claims.
+
 ## The Main Rule
 
 Compiler verification is necessary, but it is not the same thing as a deployed

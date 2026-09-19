@@ -7,7 +7,9 @@ use std::{
 use camino::Utf8PathBuf;
 use cellscript::{compile_file_with_entry_action, ArtifactFormat, CompileOptions};
 
-const RUST_CKB_TARGET: &str = "riscv64imac-unknown-none-elf";
+#[path = "support/cost_toolchain.rs"]
+mod cost_toolchain;
+use cost_toolchain::RUST_CKB_TARGET;
 const RUST_REFERENCE_PACKAGE: &str = "rust-ckb-token-transfer";
 const TOKEN_TRANSFER_MAX_CELLSCRIPT_LOAD_BYTES: usize = 7 * 1024;
 const TOKEN_TRANSFER_MAX_VERIFIED_ELF_OVERHEAD_BYTES: usize = 320;
@@ -20,15 +22,7 @@ const TOKEN_TRANSFER_MAX_CELLSCRIPT_BYTES: usize = TOKEN_TRANSFER_MAX_RUST_STRIP
 
 #[test]
 fn token_transfer_cellscript_artifact_is_compared_against_equivalent_rust_ckb_contract() {
-    if !rust_riscv_target_is_installed() {
-        eprintln!("skipping Rust CKB size comparison because {RUST_CKB_TARGET} is not installed");
-        return;
-    }
-    if !command_is_available("llvm-strip") {
-        eprintln!("skipping Rust CKB size comparison because llvm-strip is not available");
-        return;
-    }
-
+    let strip = cost_toolchain::require_strip();
     let repo = repo_root();
     let cellscript_source = Utf8PathBuf::from_path_buf(repo.join("examples/token/src/main.cell")).expect("repo path should be UTF-8");
     let cellscript = compile_file_with_entry_action(
@@ -49,7 +43,7 @@ fn token_transfer_cellscript_artifact_is_compared_against_equivalent_rust_ckb_co
     let rust_unstripped = build_rust_reference(&repo, temp.path());
     let rust_stripped = temp.path().join("rust-ckb-token-transfer.stripped");
     fs::copy(&rust_unstripped, &rust_stripped).expect("copy Rust reference artifact for stripping");
-    let strip_status = Command::new("llvm-strip").arg(&rust_stripped).status().expect("run llvm-strip");
+    let strip_status = Command::new(strip).arg(&rust_stripped).status().expect("run llvm-strip");
     assert!(strip_status.success(), "llvm-strip should succeed for {}", rust_stripped.display());
     let rust_stripped_bytes = fs::metadata(&rust_stripped).expect("stripped Rust artifact metadata").len() as usize;
     let rust_load_bytes = elf_load_file_bytes(&fs::read(&rust_stripped).expect("read stripped Rust artifact"));
@@ -104,17 +98,6 @@ fn token_transfer_cellscript_artifact_is_compared_against_equivalent_rust_ckb_co
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-}
-
-fn rust_riscv_target_is_installed() -> bool {
-    let Ok(output) = Command::new("rustup").args(["target", "list", "--installed"]).output() else {
-        return true;
-    };
-    output.status.success() && String::from_utf8_lossy(&output.stdout).lines().any(|line| line.trim() == RUST_CKB_TARGET)
-}
-
-fn command_is_available(command: &str) -> bool {
-    Command::new(command).arg("--version").output().is_ok()
 }
 
 fn build_rust_reference(repo: &Path, temp_root: &Path) -> PathBuf {

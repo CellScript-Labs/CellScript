@@ -3,7 +3,7 @@
 //! on-chain system scripts as context.
 //!
 //! This is cost evidence for named samples, not an equivalence proof or a
-//! production release gate. Each Rust binary mirrors exactly the checks of
+//! universal production cost guarantee. Each Rust binary mirrors exactly the checks of
 //! its CellScript counterpart under the audited build profile (no_std,
 //! ckb-std 1.1.0, opt-level z, thin LTO, one codegen unit, aborting panics,
 //! llvm-strip). Real system-script sizes are reported for context only:
@@ -26,7 +26,11 @@ mod ckb_script_runner;
 
 use ckb_script_runner::{build_simple_fixture, deterministic_always_success_lock_hash, execute_cellscript_script};
 
-const RUST_CKB_TARGET: &str = "riscv64imac-unknown-none-elf";
+#[path = "support/cost_growth.rs"]
+mod cost_growth;
+#[path = "support/cost_toolchain.rs"]
+mod cost_toolchain;
+use cost_toolchain::RUST_CKB_TARGET;
 const PARITY_BUDGET_PERCENT: u64 = 100;
 
 const NFT_LOCK: &str = include_str!("fixtures/cost_corpus/nft_lock.cell");
@@ -66,17 +70,6 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-fn rust_riscv_target_is_installed() -> bool {
-    let Ok(output) = Command::new("rustup").args(["target", "list", "--installed"]).output() else {
-        return true;
-    };
-    output.status.success() && String::from_utf8_lossy(&output.stdout).lines().any(|line| line.trim() == RUST_CKB_TARGET)
-}
-
-fn command_is_available(command: &str) -> bool {
-    Command::new(command).arg("--version").output().is_ok()
-}
-
 fn build_rust_reference(repo: &std::path::Path, temp_root: &std::path::Path, bin: &str) -> PathBuf {
     let manifest = repo.join("tests/fixtures/cost_corpus/Cargo.toml");
     let target_dir = temp_root.join("rust-target");
@@ -105,7 +98,7 @@ fn build_rust_reference(repo: &std::path::Path, temp_root: &std::path::Path, bin
     let binary = target_dir.join(RUST_CKB_TARGET).join("release").join(bin);
     let stripped = temp_root.join(format!("{bin}.stripped"));
     fs::copy(&binary, &stripped).expect("copy for stripping");
-    let status = Command::new("llvm-strip").arg(&stripped).status().expect("run llvm-strip");
+    let status = Command::new(cost_toolchain::require_strip()).arg(&stripped).status().expect("run llvm-strip");
     assert!(status.success(), "llvm-strip should succeed for {}", stripped.display());
     stripped
 }
@@ -146,18 +139,23 @@ fn note_data(owner: [u8; 32], amount: u64) -> Bytes {
 
 #[test]
 fn matched_cost_corpus_compiles_runs_and_stays_within_budget() {
-    if !rust_riscv_target_is_installed() || !command_is_available("llvm-strip") {
-        eprintln!("skipping cost corpus because {RUST_CKB_TARGET} or llvm-strip is unavailable");
-        return;
-    }
     let repo = repo_root();
+    let report_path = env::var_os("CELLSCRIPT_COST_CORPUS_REPORT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repo.join("target/cellscript-cost/cost-corpus-report.json"));
+    if let Some(parent) = report_path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+        fs::create_dir_all(parent).expect("create cost report directory");
+    }
+    fs::write(&report_path, "{\"status\":\"not-generated\"}\n").expect("invalidate previous cost report");
+    let strip = cost_toolchain::require_strip();
+    let mut matched = Vec::new();
     let temp = tempfile::tempdir().expect("tempdir");
 
     // --- Pool merge (two inputs, checked sum, output lock binding) ---
     let merge = compile_cellscript(POOL_MERGE);
     maybe_dump_cellscript_assembly("pool-merge", POOL_MERGE);
     let merge_rust = build_rust_reference(&repo, temp.path(), "pool-merge");
-    assert_byte_parity("pool-merge", &merge, &merge_rust);
+    let (merge_bytes, merge_rust_bytes) = assert_byte_parity("pool-merge", &merge, &merge_rust);
     let merge_rust_elf = fs::read(&merge_rust).expect("read rust ref");
     let recipient = deterministic_always_success_lock_hash();
     let merge_witness = witness_for(&merge, &[EntryWitnessArg::Address(recipient)]);
@@ -176,6 +174,9 @@ fn matched_cost_corpus_compiles_runs_and_stays_within_budget() {
         if expected_ok {
             eprintln!("[cost-corpus] pool-merge positive cycles: cellscript={} rust={}", cs.cycles, rust.cycles);
             assert!(cs.cycles <= rust.cycles, "pool-merge cycles exceed matched Rust: {} vs {}", cs.cycles, rust.cycles);
+            assert!(merge_bytes <= 2600 && cs.cycles <= 6200, "pool-merge absolute budget exceeded");
+            matched.push(serde_json::json!({"name": "pool-merge", "elf_bytes": merge_bytes, "positive_cycles": cs.cycles,
+                "rust_elf_bytes": merge_rust_bytes, "rust_positive_cycles": rust.cycles, "elf_budget": 2600, "cycle_budget": 6200}));
         }
     }
 
@@ -183,7 +184,7 @@ fn matched_cost_corpus_compiles_runs_and_stays_within_budget() {
     let roll = compile_cellscript(SCHEMA_ROLL);
     maybe_dump_cellscript_assembly("schema-roll", SCHEMA_ROLL);
     let roll_rust = build_rust_reference(&repo, temp.path(), "schema-roll");
-    assert_byte_parity("schema-roll", &roll, &roll_rust);
+    let (roll_bytes, roll_rust_bytes) = assert_byte_parity("schema-roll", &roll, &roll_rust);
     let roll_rust_elf = fs::read(&roll_rust).expect("read rust ref");
     let owner = deterministic_always_success_lock_hash();
     for (input_amount, output_amount, expected_ok) in [(7u64, 8, true), (7, 7, false), (7, 9, false)] {
@@ -198,6 +199,9 @@ fn matched_cost_corpus_compiles_runs_and_stays_within_budget() {
         if expected_ok {
             eprintln!("[cost-corpus] schema-roll positive cycles: cellscript={} rust={}", cs.cycles, rust.cycles);
             assert!(cs.cycles <= rust.cycles, "schema-roll cycles exceed matched Rust: {} vs {}", cs.cycles, rust.cycles);
+            assert!(roll_bytes <= 2400 && cs.cycles <= 9000, "schema-roll absolute budget exceeded");
+            matched.push(serde_json::json!({"name": "schema-roll", "elf_bytes": roll_bytes, "positive_cycles": cs.cycles,
+                "rust_elf_bytes": roll_rust_bytes, "rust_positive_cycles": rust.cycles, "elf_budget": 2400, "cycle_budget": 9000}));
         }
     }
 
@@ -205,7 +209,7 @@ fn matched_cost_corpus_compiles_runs_and_stays_within_budget() {
     let nft = compile_cellscript(NFT_LOCK);
     maybe_dump_cellscript_assembly("nft-lock", NFT_LOCK);
     let nft_rust = build_rust_reference(&repo, temp.path(), "nft-lock");
-    assert_byte_parity("nft-lock", &nft, &nft_rust);
+    let (nft_bytes, nft_rust_bytes) = assert_byte_parity("nft-lock", &nft, &nft_rust);
     let nft_rust_elf = fs::read(&nft_rust).expect("read rust ref");
     let run_lock_pair = |data_owner: [u8; 32], elf: &[u8], witness: &Bytes| {
         let mut context = Context::new_with_deterministic_rng();
@@ -268,8 +272,19 @@ fn matched_cost_corpus_compiles_runs_and_stays_within_budget() {
             let rust_cycles = rust.expect("positive Rust lock cycles");
             eprintln!("[cost-corpus] nft-lock positive cycles: cellscript={cs_cycles} rust={rust_cycles}");
             assert!(cs_cycles <= rust_cycles, "nft-lock cycles exceed matched Rust: {cs_cycles} vs {rust_cycles}");
+            assert!(nft_bytes <= 2350 && cs_cycles <= 5800, "nft-lock absolute budget exceeded");
+            matched.push(serde_json::json!({"name": "nft-lock", "elf_bytes": nft_bytes, "positive_cycles": cs_cycles,
+                "rust_elf_bytes": nft_rust_bytes, "rust_positive_cycles": rust_cycles, "elf_budget": 2350, "cycle_budget": 5800}));
         }
     }
+
+    let growth = cost_growth::measure();
+    assert_eq!(matched.len(), 3, "all matched samples executed");
+    let report = serde_json::json!({
+        "schema": "cellscript-cost-corpus-v1", "status": "passed", "llvm_strip": strip,
+        "edition": "2027", "opt_level": 3, "matched": matched, "growth": growth,
+    });
+    fs::write(&report_path, serde_json::to_vec_pretty(&report).expect("serialize cost report")).expect("write executed cost report");
 
     // --- Real on-chain system scripts, deployed sizes for context only ---
     let registry = home_registry_path();

@@ -597,9 +597,10 @@ give the byte decomposition, matched Rust scope, and multi-action comparison.
 The start trampoline keeps its fixed 20-byte ABI shape; the independent
 checker's exit-site decoder already understood both immediate forms, and its
 mutation corpus was updated for the new sink layout (corrupting the ECALL itself now trips the
-instruction allowlist). Remaining size work from the audit — redundant
-schema-size checks, large stack-offset materialization, and compressed
-16-bit encodings — is tracked separately.
+instruction allowlist). The subsequent economic tranche shares redundant
+schema-size checks where dominance permits. Further large stack-offset
+materialization improvements and compressed 16-bit encodings remain separate
+backend work; neither is claimed as part of this closure.
 
 ### Matched cost corpus
 
@@ -622,13 +623,25 @@ the measured positive cycles. Real system-script deployments for context: DAO 7,
 secp256k1 sighash 52,048 B, secp-data 1,048,576 B, xUDT (iCKB original)
 33,696 B — different feature scopes, not matched comparisons. The corpus is
 cost evidence for named samples, not a theorem about arbitrary future programs.
+The [cost regression contract](CELLSCRIPT_COST_REGRESSION.md) now requires
+fresh execution reports, independent absolute ceilings, and 18 bounded growth
+rows; missing measurement tools fail the gate instead of skipping tests.
 The full mechanisms, Spore/Fiber measurements, and mandatory VM2/Data2
 deployment contract are recorded in the
 [0.26 release notes](releases/CELLSCRIPT_0_26_RELEASE_NOTES.md#economic-backend-closure-and-vm2-deployment-contract).
 
-### WASM playground bundle budget
+### WASM playground bundle budget (historical failure and current closure)
 
-Rebuilding the canonical playground bundle in the pinned container
+The 0.30 candidate resolves the failure below: the canonical bundle is 571,696
+bytes gzip, within the unchanged 600 KB budget, with SHA-256
+`419e8260c3c6acc9f950adf422de90163533c14af96043ebb7429f935b1393d6`.
+The clean candidate release gate passed with this rebuilt bundle; publication
+remains withheld under the no-TAC constraint. See the
+[0.30 issue audit](releases/CELLSCRIPT_0_30_ISSUE_STATUS.md) for the candidate
+and product pins. The following numbers preserve the earlier 0.26b audit,
+not the current bundle or release status.
+
+At that earlier audit, rebuilding the canonical playground bundle in the pinned container
 (rust 1.97.1, wasm-bindgen 0.2.121, binaryen 131) after the 0.26b tranches
 produces a 1,730,601-byte module that gzips to 659,050 bytes (643 KB) —
 44,650 bytes over the 600 KB budget that `website/scripts/build-wasm.sh`
@@ -641,23 +654,24 @@ from the wasm build. Binaryen 131 metrics on the rebuilt module attribute it
 to aggregate compiler code (3,389 functions, ~690K wasm-opt units, ~190 KB
 of memory data) rather than a single outlier block, so the trim is a
 feature-gating and surface-reduction work item, not a one-line fix. The `ci` website check does not rebuild the bundle,
-which is why this stayed latent. Until the wasm path trims or gates the new
-surface, the release gate's `check_wasm_release_bundle` will fail; resolving
-it is part of the pending language-services/product row, not a budget
-change.
+which is why this stayed latent. At that point the release gate's
+`check_wasm_release_bundle` failed, and resolution belonged to the
+language-services/product row. The 0.30 closure above fixes that row without
+changing the budget.
 
-## Verification workflow
+## Historical tranche verification and current workflow
 
 The successor-relation tranche passed the complete `dev` gate on 2026-09-06.
-Current evidence includes all 892 compiler unit tests, the six-case
+That tranche's evidence included all 892 compiler unit tests, the six-case
 `authoring_replace` suite, authoring parity, entry selection, both policy
 suites, the artifact checker and clippy with warnings denied. The registered
 syntax seed is included in the passing quick matrix: 67 accepted and 56
 rejected cases out of 123 generated, with zero failures. The strict quick
 report is
 `target/cellscript-strict-backend-audit/strict-backend-audit-quick-20260906-162715.json`.
-This is current development evidence; it does not promote the documented
-WASM, full-backend, chain or release boundaries.
+This is historical development evidence; it does not establish the current
+WASM, full-backend, chain or release boundaries. Current candidate evidence is
+recorded in the [0.30 issue audit](releases/CELLSCRIPT_0_30_ISSUE_STATUS.md).
 
 The policy tranche passed the complete `dev` gate on 2026-09-05. Its strict
 quick audit report is

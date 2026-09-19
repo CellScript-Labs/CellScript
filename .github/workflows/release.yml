@@ -108,6 +108,7 @@ jobs:
             target/ckb-cellscript-acceptance/**
             target/cellscript-backend-shape/*.json
             target/cellscript-schema-manifest/*.json
+            target/cellscript-cost/*.json
 
   build:
     name: Build ${{ matrix.target }}

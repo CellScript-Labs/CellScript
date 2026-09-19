@@ -85,6 +85,7 @@
     "tests/cli.rs",
     "tests/commitment_opening.rs",
     "tests/cost_corpus.rs",
+    "tests/cost_toolchain.rs",
     "tests/crypto_primitives.rs",
     "tests/cryptographic_resource_budgets.rs",
     "tests/entry_witness_abi.rs",
@@ -103,6 +104,7 @@
     "tests/fixtures/cellscript_0_30_pudge_deployment.json",
     "tests/fixtures/cellscript_0_30_pudge_deployment_manifest.json",
     "tests/fixtures/cost_corpus/Cargo.lock",
+    "tests/fixtures/cost_corpus/growth_budgets.json",
     "tests/fixtures/cost_corpus/nft_lock.cell",
     "tests/fixtures/cost_corpus/schema_roll.cell",
     "tests/fixtures/cost_corpus/src/nft_lock.rs",
@@ -121,6 +123,8 @@
     "tests/script_hash.rs",
     "tests/sighash_zero_lock.rs",
     "tests/support/ckb_script_runner.rs",
+    "tests/support/cost_growth.rs",
+    "tests/support/cost_toolchain.rs",
     "tests/support/cryptographic_resource_budgets.rs",
     "tests/trusted_external.rs",
     "tests/typed_runtime_views.rs",
@@ -164,7 +168,11 @@
         },
         "measurements": {
           "paths": [
-            "tests/cost_corpus.rs"
+            "tests/cost_corpus.rs",
+            "tests/cost_toolchain.rs",
+            "tests/fixtures/cost_corpus/growth_budgets.json",
+            "tests/support/cost_growth.rs",
+            "tests/support/cost_toolchain.rs"
           ],
           "status": "passed"
         },
@@ -276,7 +284,11 @@
         },
         "measurements": {
           "paths": [
-            "tests/cost_corpus.rs"
+            "tests/cost_corpus.rs",
+            "tests/cost_toolchain.rs",
+            "tests/fixtures/cost_corpus/growth_budgets.json",
+            "tests/support/cost_growth.rs",
+            "tests/support/cost_toolchain.rs"
           ],
           "status": "passed"
         },
@@ -382,8 +394,12 @@
         },
         "measurements": {
           "paths": [
+            "tests/business_corpus.rs",
             "tests/cost_corpus.rs",
-            "tests/business_corpus.rs"
+            "tests/cost_toolchain.rs",
+            "tests/fixtures/cost_corpus/growth_budgets.json",
+            "tests/support/cost_growth.rs",
+            "tests/support/cost_toolchain.rs"
           ],
           "status": "passed"
         },
@@ -713,7 +729,11 @@
         },
         "measurements": {
           "paths": [
-            "tests/cost_corpus.rs"
+            "tests/cost_corpus.rs",
+            "tests/cost_toolchain.rs",
+            "tests/fixtures/cost_corpus/growth_budgets.json",
+            "tests/support/cost_growth.rs",
+            "tests/support/cost_toolchain.rs"
           ],
           "status": "passed"
         },
@@ -990,7 +1010,7 @@
       ]
     }
   ],
-  "inventory_sha256": "0xa7a32a3fbf9d7885a235ee9de2c110ee983f558235d02b82f33146a351cd3d8a",
+  "inventory_sha256": "0x760a0d3a29a39ffbfa7c2e7b7617057736a434798572570e022a47fa32a8391e",
   "release_requirements": {
     "backend": "passed",
     "ci": "passed",

@@ -9,6 +9,12 @@ for the accepted compatibility boundary and publication constraints.
 The entries below retain the evidence state at each implementation step. The
 release notes and capability ledger record the current acceptance state.
 
+- Make cost evidence mandatory in CI/backend and both release gates: missing
+  RISC-V target libraries or the selected Rust toolchain's `llvm-strip` fail
+  instead of silently skipping. Require a fresh execution report, independent
+  byte/cycle ceilings for the three matched Rust samples, and bounded growth
+  checks for action count, fixed-byte witness width, and input-group size.
+
 - Record the selected-network deployment on Pudge testnet without creating a
   release tag or invoking GitHub release automation. Two confirmed
   transactions keep twelve immutable `data2` code Cells live: the seven strict

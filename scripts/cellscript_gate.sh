@@ -10,10 +10,12 @@ fi
 export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
 export CELLSCRIPT_BACKEND_SHAPE_REPORT="${CELLSCRIPT_BACKEND_SHAPE_REPORT:-$ROOT_DIR/target/cellscript-backend-shape/backend-shape-report-$MODE.json}"
 export CELLSCRIPT_MOLECULE_SCHEMA_MANIFEST_REPORT="${CELLSCRIPT_MOLECULE_SCHEMA_MANIFEST_REPORT:-$ROOT_DIR/target/cellscript-schema-manifest/schema-manifest-report-$MODE.json}"
+export CELLSCRIPT_COST_CORPUS_REPORT="${CELLSCRIPT_COST_CORPUS_REPORT:-$ROOT_DIR/target/cellscript-cost/cost-corpus-report-$MODE.json}"
 
 cd "$ROOT_DIR"
 mkdir -p "$(dirname "$CELLSCRIPT_BACKEND_SHAPE_REPORT")"
 mkdir -p "$(dirname "$CELLSCRIPT_MOLECULE_SCHEMA_MANIFEST_REPORT")"
+mkdir -p "$(dirname "$CELLSCRIPT_COST_CORPUS_REPORT")"
 
 require_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
@@ -634,6 +636,22 @@ run_dev_gate() {
     run git diff --check
 }
 
+prepare_cost_evidence() {
+    printf '{"status":"not-generated","reason":"cost corpus has not completed"}\n' >"$CELLSCRIPT_COST_CORPUS_REPORT"
+    run cargo test --locked -p cellscript --test cost_toolchain
+}
+
+check_cost_evidence() {
+    # The corpus writes this top-level marker only after all matched and growth
+    # rows pass their VM outcomes and budgets. Resetting it before tests prevents
+    # a filtered/skipped suite from reusing evidence from an earlier run.
+    if ! rg -q -x '  "status": "passed"' "$CELLSCRIPT_COST_CORPUS_REPORT"; then
+        printf 'cost corpus did not produce passing execution evidence: %s\n' "$CELLSCRIPT_COST_CORPUS_REPORT" >&2
+        exit 1
+    fi
+    printf 'CellScript cost corpus report: %s\n' "$CELLSCRIPT_COST_CORPUS_REPORT"
+}
+
 run_ci_gate() {
     if (($# != 0)); then
         printf 'usage: %s ci\n' "$0" >&2
@@ -644,11 +662,14 @@ run_ci_gate() {
     require_cmd npm
     require_node_22
 
+    prepare_cost_evidence
+
     printf '{"status":"not-generated","reason":"test suite did not reach backend shape report generation"}\n' >"$CELLSCRIPT_BACKEND_SHAPE_REPORT"
     cargo_fmt_workspace --check
     check_canonical_cellscript_format
     check_example_u64_boundaries
     run cargo test --locked -p cellscript -- --test-threads=1
+    check_cost_evidence
     run cargo test --locked -p cellscript-artifact-checker -- --test-threads=1
     check_artifact_checker_dependency_boundary
     run cargo test --locked -p cellscript-fiber-adapter -- --test-threads=1
@@ -699,11 +720,13 @@ run_backend_gate() {
     check_source_policy
     check_business_corpus
 
+    prepare_cost_evidence
     cargo_fmt_workspace --check
     run cargo check --locked -p cellscript --all-targets
     run cargo check --locked -p cellscript-artifact-checker --all-targets
     run cargo check --locked -p cellscript-fiber-adapter --all-targets
     run cargo test --locked -p cellscript
+    check_cost_evidence
     run cargo test --locked -p cellscript-artifact-checker
     run cargo test --locked -p cellscript-fiber-adapter -- --test-threads=1
     run cargo clippy --locked -p cellscript --all-targets -- -D warnings

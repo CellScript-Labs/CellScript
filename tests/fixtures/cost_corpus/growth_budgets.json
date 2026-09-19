@@ -1,0 +1,110 @@
+{
+  "single-width-8": {
+    "elf_bytes": 2048,
+    "positive_cycles": 3600,
+    "max_stack_frame_bytes": 5376,
+    "witness_bytes": 36
+  },
+  "policy-actions-1-width-8": {
+    "elf_bytes": 4288,
+    "positive_cycles": 10200,
+    "max_stack_frame_bytes": 5376,
+    "witness_bytes": 113
+  },
+  "policy-actions-2-width-8": {
+    "elf_bytes": 5504,
+    "positive_cycles": 10500,
+    "max_stack_frame_bytes": 5376,
+    "witness_bytes": 113
+  },
+  "policy-actions-4-width-8": {
+    "elf_bytes": 7936,
+    "positive_cycles": 11100,
+    "max_stack_frame_bytes": 5376,
+    "witness_bytes": 113
+  },
+  "policy-actions-8-width-8": {
+    "elf_bytes": 12864,
+    "positive_cycles": 12400,
+    "max_stack_frame_bytes": 5376,
+    "witness_bytes": 113
+  },
+  "single-width-32": {
+    "elf_bytes": 1984,
+    "positive_cycles": 4800,
+    "max_stack_frame_bytes": 5376,
+    "witness_bytes": 60
+  },
+  "policy-actions-1-width-32": {
+    "elf_bytes": 4224,
+    "positive_cycles": 11800,
+    "max_stack_frame_bytes": 5376,
+    "witness_bytes": 137
+  },
+  "policy-actions-2-width-32": {
+    "elf_bytes": 5376,
+    "positive_cycles": 12100,
+    "max_stack_frame_bytes": 5376,
+    "witness_bytes": 137
+  },
+  "policy-actions-4-width-32": {
+    "elf_bytes": 7680,
+    "positive_cycles": 12600,
+    "max_stack_frame_bytes": 5376,
+    "witness_bytes": 137
+  },
+  "policy-actions-8-width-32": {
+    "elf_bytes": 12288,
+    "positive_cycles": 13800,
+    "max_stack_frame_bytes": 5376,
+    "witness_bytes": 137
+  },
+  "single-width-128": {
+    "elf_bytes": 1984,
+    "positive_cycles": 9200,
+    "max_stack_frame_bytes": 5376,
+    "witness_bytes": 156
+  },
+  "policy-actions-1-width-128": {
+    "elf_bytes": 4224,
+    "positive_cycles": 17800,
+    "max_stack_frame_bytes": 5376,
+    "witness_bytes": 233
+  },
+  "policy-actions-2-width-128": {
+    "elf_bytes": 5376,
+    "positive_cycles": 18100,
+    "max_stack_frame_bytes": 5376,
+    "witness_bytes": 233
+  },
+  "policy-actions-4-width-128": {
+    "elf_bytes": 7680,
+    "positive_cycles": 18600,
+    "max_stack_frame_bytes": 5376,
+    "witness_bytes": 233
+  },
+  "policy-actions-8-width-128": {
+    "elf_bytes": 12288,
+    "positive_cycles": 19800,
+    "max_stack_frame_bytes": 5376,
+    "witness_bytes": 233
+  },
+  "group-bound-1": {
+    "elf_bytes": 1856,
+    "positive_cycles": 4700,
+    "max_stack_frame_bytes": 5376,
+    "witness_bytes": 0
+  },
+  "group-bound-4": {
+    "elf_bytes": 1856,
+    "positive_cycles": 12000,
+    "max_stack_frame_bytes": 5376,
+    "witness_bytes": 0
+  },
+  "group-bound-16": {
+    "elf_bytes": 1856,
+    "positive_cycles": 41100,
+    "max_stack_frame_bytes": 5376,
+    "witness_bytes": 0
+  }
+}
