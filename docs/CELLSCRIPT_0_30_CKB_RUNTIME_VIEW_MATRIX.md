@@ -2,9 +2,11 @@
 
 ## Status and contract
 
-**Status: active implementation matrix for
-`cellscript-ckb-runtime-view-v1`. This is a development contract, not a claim
-that issue #24 or the 0.30 release gate is complete.**
+**Status: accepted bounded `cellscript-ckb-runtime-view-v1` contract for the
+0.30 release candidate.** Issue #24 is closed for this scope. Candidate
+`74cff5fd` passed `dev`, `ci` (within `release`), `backend`, and `release`;
+public publication remains separate under #27. Independent review was
+explicitly waived by the maintainer, not performed or reported as passed.
 
 Compile metadata schema 72 records the view contract name in
 `runtime.ckb_runtime_view_contract` and binds
@@ -240,8 +242,11 @@ bounded contract rather than widening v1 implicitly.
 The repository-local implementation and executable evidence for the frozen
 runtime-view v1 table are complete. Any newly admitted adapter row must add its
 own maximum-bound measurements and independent machine binding rather than
-inheriting this status. Issue #24 remains open for `ci`, `backend`, release, and
-independent-review evidence on the exact candidate source.
+inheriting this status. Issue #24 was closed on 2026-09-12 and the final
+candidate replay passed at `74cff5fd` on 2026-09-18. See the
+[issue status audit](releases/CELLSCRIPT_0_30_ISSUE_STATUS.md) for the exact
+candidate and the distinction between completed verification, the explicit
+review waiver, and outstanding publication.
 
 ## Deferred and excluded surfaces
 

@@ -2,11 +2,13 @@
 
 ## 0.30
 
-The workspace and editor are being prepared as 0.30.0 with the bounded
+The workspace and editor are prepared as 0.30.0 with the bounded
 `cellscript-source-semantics-2027-0.30-v1` identity. See the
 [release candidate notes](docs/releases/CELLSCRIPT_0_30_RELEASE_NOTES.md).
-This is local release preparation; the no-TAC publication constraint still
-applies and no tag or public release is implied.
+Candidate `74cff5fd` and its website/editor gitlinks were pushed on 2026-09-19
+after the required gates passed. The no-TAC publication constraint still
+applies; no tag or public release is implied. See the
+[issue status audit](docs/releases/CELLSCRIPT_0_30_ISSUE_STATUS.md).
 
 `0.30` is the active capability-closure implementation branch, forked from
 `0.26b` at `08c0ef38`. The current planning target permits the next stable
@@ -49,7 +51,9 @@ not trigger TAC.
 
 The issue #18 package-compiler prerequisite is implemented through enforced
 `[package].cellscript_version` SemVer ranges, aggregated root/transitive
-pre-source diagnostics, compiler-aware Registry selection, and `Cell.lock` v4.
+pre-source diagnostics and compiler-aware Registry selection. The current
+`Cell.lock` v5 retains those compiler-requirement bindings and adds the
+single-package-coordinate model described below.
 Compiler compatibility remains separate from Edition, target/profile,
 metadata/checker schema, and exact reproducible compiler identity.
 

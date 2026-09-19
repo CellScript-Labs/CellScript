@@ -93,6 +93,7 @@ by `v*` tags or manual dispatch, so it cannot be used under that constraint.
 ## Detailed contracts
 
 - [Capability ledger](../CELLSCRIPT_0_30_CAPABILITY_LEDGER.md)
+- [2026-09-19 issue status and candidate evidence](CELLSCRIPT_0_30_ISSUE_STATUS.md)
 - [Business corpus](../CELLSCRIPT_0_30_BUSINESS_CORPUS.md)
 - [Cryptographic capability matrix](../CELLSCRIPT_0_30_CRYPTOGRAPHIC_CAPABILITY_MATRIX.md)
 - [Edition policy](../CELLSCRIPT_EDITION_POLICY.md)

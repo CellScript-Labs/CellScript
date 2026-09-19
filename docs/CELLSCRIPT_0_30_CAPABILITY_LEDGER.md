@@ -64,11 +64,14 @@ The machine ledger is the detailed source of truth. At this candidate point:
   builder, typed-checker, exact schema-field pointer binding, standalone
   machine-checker mutation, and complete positive/adversarial committed-state
   CKB-VM inventory slice.
-- #25 and #26 now have selected-network evidence and are eligible to close
-  after this ledger update is pushed. Pudge transactions `0x49572cfd…a562` and
-  `0x24273eb1…54e9` keep the accepted twelve-artifact deployment scope live;
+- #25 and #26 were closed on 2026-09-19 after candidate `74cff5fd` and its
+  product gitlinks were pushed and read back. Pudge transactions
+  `0x49572cfd…a562` and `0x24273eb1…54e9` keep the accepted twelve-artifact
+  deployment scope live;
   the machine report binds every output and the online verifier rechecks all
-  Cell bytes. Local production admission also passed on pinned CKB `f7fa4436`.
+  Cell bytes. Final candidate reproduction matched all twelve deployed ELF
+  identities; the historical deployment source remains `3cf60a10`. Local
+  production admission also passed on pinned CKB `f7fa4436`.
 - #22 is research and deferred from the 0.30 core; a circuit DSL remains a
   non-goal.
 - #27 separates accepted release engineering from public product publication.
@@ -88,6 +91,15 @@ The machine ledger is the detailed source of truth. At this candidate point:
   downgrade from the maintained CKB connector 1.3.0 to 0.0.4. The Registry API
   likewise reports no moderate/high/critical advisories after its release-tool
   refresh; its three remaining low findings are the same unsafe-fix class.
+
+The current product gitlinks supersede the historical recovery pins above:
+VS Code `ee0f259a` and website `6a61e49` were pushed and read back with root
+`74cff5fd` on 2026-09-19. That candidate passed `dev`, full `ci` within
+`release`, `backend`, and `release` on 2026-09-18. Its canonical WASM is
+571,696 bytes gzip with SHA-256
+`419e8260c3c6acc9f950adf422de90163533c14af96043ebb7429f935b1393d6`.
+The [dated issue audit](releases/CELLSCRIPT_0_30_ISSUE_STATUS.md) records all
+24 issue dispositions and the remaining publication boundary.
 
 This list is a dependency and closure map, not a delivery date or release
 promise. The `0.30` branch remains unpublished until the separate publication
