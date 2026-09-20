@@ -27,16 +27,18 @@ private fn internal_identity(value: u64) -> u64 {
 `fixed_value` is the source shorthand for the canonical expanded constraint set
 `copy + drop + store + fixed + serializable + non_linear`. Machine-readable
 interfaces always contain the expanded list. When a generic struct or enum
-omits `has`, the compiler derives its abilities from the field contract; the
-formatter therefore removes an equivalent redundant `has` clause.
+omits `has`, the compiler derives its abilities from the field contract. The
+formatter preserves explicit `has` clauses and the chosen constraint spelling
+to avoid silently raising the source minimum compiler version.
 
 CellScript monomorphizes concrete value uses before IR lowering. The compiler
 records every instantiation and applies fixed nesting, count, and identity-size
 budgets. Ordinary generic containers cannot hide a Cell-backed value.
-Public generic layouts require every non-phantom type parameter to be fixed,
-serializable, and non-linear. Public templates may be imported from
-dependencies; specializations remain in the owning module and do not become
-public-interface entries in the consumer.
+Edition 2027 public generic layouts require every non-phantom type parameter
+to be fixed, serializable, and non-linear. Edition 2026 preserves the 0.25
+declaration rules while validating every concrete specialization. Public
+templates may be imported from dependencies. Their specializations remain in
+the owning module and do not become public-interface entries in the consumer.
 
 Value abilities are not Cell authority. `copy`, `drop`, `fixed`,
 `serializable`, and `non_linear` describe ordinary values; `create`, `consume`,

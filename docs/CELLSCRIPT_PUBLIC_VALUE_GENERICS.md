@@ -50,8 +50,9 @@ expanded abilities is a duplicate-constraint error. Combining `cell` and
 
 The expanded spelling remains accepted. Compact and expanded source forms
 produce the same AST constraints, public interface, interface hash, typed
-instantiation evidence, IR, and artifact. The formatter writes the compact
-profile.
+instantiation evidence, IR, and artifact. The formatter preserves whether the
+source used the compact profile or expanded constraints, and retains explicit
+`has` clauses so formatting does not raise the minimum compiler version.
 
 ## Visibility and layout boundary
 
@@ -62,10 +63,12 @@ profile.
 - Edition 2026 retains its historical public-by-default behavior, although new
   package APIs should spell visibility explicitly.
 
-Every non-phantom parameter of a public generic struct or enum must declare at
-least `fixed + serializable + non_linear`. `fixed_value` is the normal spelling
+In edition 2027, every non-phantom parameter of a public generic struct or enum
+must declare at least `fixed + serializable + non_linear`. Use `fixed_value`
 when the parameter also supports copy, drop, and store. Missing public layout
-requirements fail with `E2110` and point to `fixed_value`.
+requirements fail with `E2110` and point to `fixed_value`. Edition 2026 retains
+the 0.25 declaration contract, including unconstrained public templates;
+concrete specializations still undergo ability, layout, and hidden-Cell checks.
 
 A phantom parameter contributes to canonical type identity and occupies no
 serialized bytes. Using a phantom parameter in a field remains `E2110`.
@@ -135,16 +138,15 @@ monomorphization identities in typed semantics.
 
 ## Migration
 
-The existing expanded nightly spelling remains source-compatible. Run
-`cellc fmt` to convert an exact six-constraint list to `fixed_value` and remove
-an explicit generic `has` clause when it exactly matches structural derivation.
-The formatter round-trip test proves this rewrite is deterministic and does not
-change the canonical interface identity.
+The expanded 0.25 spelling remains source-compatible under edition 2026.
+`cellc fmt` preserves expanded constraints and explicit `has` clauses. Adopting
+`fixed_value` or removing an explicit ability clause is an intentional source
+migration requiring a compiler that supports those forms.
 
-Packages with public generic layouts that omit `fixed`, `serializable`, or
-`non_linear` must add the missing contract or make the template
-`public(package)`/`private`. This is an intentional stabilization error rather
-than an implicit change to the accepted type set.
+When opting into edition 2027, public generic layouts must add any missing
+`fixed`, `serializable`, or `non_linear` constraints, or change visibility to
+`public(package)`/`private`. Dependency templates use their owning package
+edition; the importer cannot silently select a stricter declaration contract.
 
 ## Evidence boundary
 

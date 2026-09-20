@@ -1331,9 +1331,10 @@ pub fn validate_compile_metadata(metadata: &CompileMetadata, artifact_format: Ar
         if metadata.public_interface.schema != interface::INTERFACE_SCHEMA
             || metadata.public_interface.version != interface::INTERFACE_SCHEMA_VERSION
             || metadata.public_interface.module != metadata.module
+            || metadata.public_interface.edition != metadata.edition.as_str()
         {
             return Err(CompileError::without_span(
-                "compile metadata public interface has an invalid schema, version, or module identity",
+                "compile metadata public interface has an invalid schema, version, edition, or module identity",
             ));
         }
         interface::validate(&metadata.public_interface)?;
@@ -7201,7 +7202,12 @@ fn monomorphize_loaded_project_diagnostics(
         for &index in &reachable {
             let source_module = &source_modules[index];
             let module_seeds = seeds[index].values().cloned().collect::<Vec<_>>();
-            match generics::monomorphize_with_project_context(source_module, &external_items[index], &module_seeds) {
+            match generics::monomorphize_with_project_context(
+                source_module,
+                &external_items[index],
+                &module_seeds,
+                modules[index].edition,
+            ) {
                 Ok(output) => {
                     discovered.extend(output.external_requests.iter().cloned());
                     outputs.insert(index, output);
@@ -7374,7 +7380,7 @@ pub fn compile_with_executable_surface_policy(
     options: CompileOptions,
     policy: ExecutableSurfacePolicy,
 ) -> Result<CompileResult> {
-    let ast = generics::monomorphize(&frontend::parse(source, options.edition)?)?;
+    let ast = generics::monomorphize_for_edition(&frontend::parse(source, options.edition)?, options.edition)?;
 
     let mut result = compile_ast_with_build(&ast, &options, None, None, None, None, policy)?;
     bind_compile_result_source_metadata(&mut result, vec![source_unit_from_bytes("<memory>", "memory", source.as_bytes())])?;
@@ -7385,7 +7391,7 @@ pub fn compile_with_executable_surface_policy(
 /// Compile the unique structurally eligible fungible Type Script invariant
 /// from in-memory source as the payload-free `fungible-type-group-v1` entry.
 pub fn compile_fungible_type_group_entry(source: &str, options: CompileOptions) -> Result<CompileResult> {
-    let ast = generics::monomorphize(&frontend::parse(source, options.edition)?)?;
+    let ast = generics::monomorphize_for_edition(&frontend::parse(source, options.edition)?, options.edition)?;
     let mut result = compile_ast_with_build(
         &ast,
         &options,
@@ -7407,7 +7413,7 @@ pub fn compile_fungible_type_group_entry_for(
     options: CompileOptions,
     type_name: impl Into<String>,
 ) -> Result<CompileResult> {
-    let ast = generics::monomorphize(&frontend::parse(source, options.edition)?)?;
+    let ast = generics::monomorphize_for_edition(&frontend::parse(source, options.edition)?, options.edition)?;
     let scope = CompileEntryScope::FungibleTypeGroupV1For(type_name.into());
     let mut result = compile_ast_with_build(&ast, &options, None, None, None, Some(&scope), ExecutableSurfacePolicy::AllowFailClosed)?;
     bind_compile_result_source_metadata(&mut result, vec![source_unit_from_bytes("<memory>", "memory", source.as_bytes())])?;
@@ -7417,7 +7423,7 @@ pub fn compile_fungible_type_group_entry_for(
 
 /// Only generate compile metadata, without asm/elf artifact.
 pub fn compile_metadata(source: &str, edition: CellScriptEdition, target: Option<String>) -> Result<CompileMetadata> {
-    let ast = generics::monomorphize(&frontend::parse(source, edition)?)?;
+    let ast = generics::monomorphize_for_edition(&frontend::parse(source, edition)?, edition)?;
     let artifact_format = ArtifactFormat::from_target(target.as_deref().unwrap_or(DEFAULT_TARGET))?;
     let target_profile = TargetProfile::Ckb;
     types::check(&ast)?;
@@ -7466,7 +7472,7 @@ pub fn compile_metadata_with_diagnostics(
         Ok(ast) => ast,
         Err(diagnostics) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics },
     };
-    let ast = match generics::monomorphize(&ast) {
+    let ast = match generics::monomorphize_for_edition(&ast, edition) {
         Ok(ast) => ast,
         Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error] },
     };
@@ -36424,6 +36430,30 @@ action verify() -> u64 {
         let interface = &result.metadata.public_interface;
         assert!(interface.types.iter().all(|item| !item.name.contains("__mono__")));
         assert!(interface.callables.iter().all(|item| !item.name.contains("__mono__")));
+
+        // An importing 2027 package must use the declaration owner's edition.
+        let dep_source = dep_root.join("src/pairs.cell");
+        let source = std::fs::read_to_string(&dep_source)
+            .unwrap()
+            .replace("Pair<T: fixed_value> {", "Pair<T: copy> has copy {")
+            .replace("swap<T: fixed_value>", "swap<T: copy>");
+        std::fs::write(&dep_source, source).unwrap();
+        let app_manifest = app_root.join("Cell.toml");
+        let manifest = std::fs::read_to_string(&app_manifest).unwrap().replace("2026", "2027");
+        std::fs::write(&app_manifest, manifest).unwrap();
+        lock_package_for_test(&app_root).unwrap();
+        compile_file(&entry, CompileOptions::default()).unwrap();
+
+        // A 2026 importer cannot relax a 2027 owner's public declaration contract.
+        let dep_manifest = dep_root.join("Cell.toml");
+        let manifest = std::fs::read_to_string(&dep_manifest).unwrap().replace("2026", "2027");
+        std::fs::write(&dep_manifest, manifest).unwrap();
+        let manifest = std::fs::read_to_string(&app_manifest).unwrap().replace("2027", "2026");
+        std::fs::write(&app_manifest, manifest).unwrap();
+        lock_package_for_test(&app_root).unwrap();
+        let error = compile_file(&entry, CompileOptions::default()).unwrap_err();
+        assert_eq!(error.code.as_deref(), Some("E2110"));
+        assert!(error.message.contains("fixed value layout boundary"), "{error}");
     }
 
     #[test]
@@ -38861,7 +38891,7 @@ action verify() -> u64 {
 module generics::unsafe_public
 public struct Box<T: copy + drop> { value: T }
 "#,
-            CompileOptions::default(),
+            CompileOptions { edition: crate::NEXT_EDITION, ..Default::default() },
         )
         .unwrap_err();
         assert_eq!(unsafe_public.code.as_deref(), Some("E2110"));

@@ -178,6 +178,8 @@ pub struct EnumDef {
 /// authority to create, consume, replace, or destroy a Cell.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeParam {
+    /// Source spelling only; machine interfaces always use expanded constraints.
+    pub uses_fixed_value_profile: bool,
     pub name: String,
     pub constraints: Vec<ValueAbility>,
     pub phantom: bool,

@@ -647,11 +647,13 @@ impl<'a> Parser<'a> {
             }
             let name = self.parse_name()?;
             let mut constraints = Vec::new();
+            let mut uses_fixed_value_profile = false;
             if self.check(&TokenKind::Colon) {
                 self.advance();
                 loop {
                     let source_name = self.current().text.as_str();
                     let expanded = if source_name == ValueAbility::FIXED_VALUE_PROFILE_NAME {
+                        uses_fixed_value_profile = true;
                         ValueAbility::FIXED_VALUE_PROFILE.to_vec()
                     } else if let Some(ability) = ValueAbility::from_source_name(source_name) {
                         vec![ability]
@@ -679,7 +681,7 @@ impl<'a> Parser<'a> {
                 }
                 constraints.sort_unstable();
             }
-            params.push(TypeParam { name, constraints, phantom, span: start });
+            params.push(TypeParam { name, constraints, uses_fixed_value_profile, phantom, span: start });
             if self.check(&TokenKind::Comma) {
                 self.advance();
             } else {

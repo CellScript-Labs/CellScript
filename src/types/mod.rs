@@ -4096,6 +4096,9 @@ impl<'a> TypeChecker<'a> {
             Expr::Create(create) => {
                 self.require_create_target_cell_backed(&create.ty, create.span)?;
                 self.check_field_initializer(env, &create.ty, &create.fields, create.span, "create")?;
+                if let Some(lock) = &create.lock {
+                    self.validate_stdlib_lock_arg("create", lock, env)?;
+                }
                 if let Some(target) = &create.target {
                     let Some(target_ty) = env.lookup(target).cloned() else {
                         return Err(CompileError::new(
@@ -4180,8 +4183,8 @@ impl<'a> TypeChecker<'a> {
                 }
                 if let Some(lock) = &cu.lock {
                     let lock_ty = self.infer_expr(env, lock)?;
-                    if !Self::is_address_like_type(&lock_ty) {
-                        return Err(CompileError::new("lock target must be address-like", cu.span));
+                    if !Self::is_lock_hash_type(&lock_ty) {
+                        return Err(CompileError::new("lock target must be ScriptHash, Address, or Hash", cu.span));
                     }
                 }
                 Ok(Type::Named(cu.ty.clone()))
@@ -4575,8 +4578,11 @@ impl<'a> TypeChecker<'a> {
                 let (input_ty, input_name) = self.require_named_linear_cell_operand(env, &call.args[0], &qualified, call.span)?;
                 let output_ty = self.require_named_cell_identifier(env, &call.args[1], &qualified, "output")?;
                 let lock_ty = self.infer_expr(env, &call.args[2])?;
-                if !matches!(lock_ty, Type::Address | Type::Hash) {
-                    return Err(CompileError::new("std::lifecycle::transfer lock target must be Address or Hash", call.span));
+                if !Self::is_lock_hash_type(&lock_ty) {
+                    return Err(CompileError::new(
+                        "std::lifecycle::transfer lock target must be ScriptHash, Address, or Hash",
+                        call.span,
+                    ));
                 }
                 if !self.types_equal(&input_ty, &output_ty) {
                     return Err(CompileError::new(
@@ -4735,12 +4741,18 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    // Native 2027 exact_hash clauses lower through these legacy lifecycle helpers.
+    // ScriptHash is the nominal full-script hash; Address/Hash retain the preview ABI.
+    fn is_lock_hash_type(ty: &Type) -> bool {
+        matches!(ty, Type::Address | Type::Hash) || matches!(ty, Type::Named(name) if name == CKB_SCRIPT_HASH_TYPE)
+    }
+
     fn validate_stdlib_lock_arg(&mut self, qualified: &str, lock: &Expr, env: &mut TypeEnv) -> Result<()> {
         let lock_ty = self.infer_expr(env, lock)?;
-        if matches!(lock_ty, Type::Address | Type::Hash) {
+        if Self::is_lock_hash_type(&lock_ty) {
             Ok(())
         } else {
-            Err(CompileError::new(format!("{} lock target must be Address or Hash", qualified), expr_span(lock)))
+            Err(CompileError::new(format!("{} lock target must be ScriptHash, Address, or Hash", qualified), expr_span(lock)))
         }
     }
 
@@ -8745,10 +8757,6 @@ impl<'a> TypeChecker<'a> {
             Type::Ref(inner) | Type::MutRef(inner) => Self::base_type_name(inner),
             _ => None,
         }
-    }
-
-    fn is_address_like_type(ty: &Type) -> bool {
-        matches!(ty, Type::Address | Type::Hash)
     }
 
     fn is_receipt_type(&self, ty: &Type) -> bool {

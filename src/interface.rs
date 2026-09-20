@@ -415,11 +415,15 @@ pub fn validate(interface: &PackageInterface) -> Result<()> {
         return Err(invalid_interface(format!("unsupported public interface schema '{}'/{}", interface.schema, interface.version)));
     }
 
+    if !matches!(interface.edition.as_str(), "2026" | "2027") {
+        return Err(invalid_interface("unsupported public interface edition"));
+    }
+    let strict_layout = interface.edition == "2027";
     validate_sorted_unique_identities(interface.types.iter().map(|item| item.identity.as_str()), "type")?;
     validate_sorted_unique_identities(interface.constants.iter().map(|item| item.identity.as_str()), "constant")?;
     validate_sorted_unique_identities(interface.callables.iter().map(|item| item.identity.as_str()), "callable")?;
     for item in &interface.types {
-        validate_interface_type_parameters(&item.type_parameters, &format!("{}.type_parameters", item.identity), true)?;
+        validate_interface_type_parameters(&item.type_parameters, &format!("{}.type_parameters", item.identity), strict_layout)?;
         validate_interface_abilities(&item.value_abilities, &format!("{}.value_abilities", item.identity))?;
     }
     for item in &interface.callables {
@@ -804,7 +808,7 @@ mod tests {
         } else {
             crate::frontend::parse(source, edition).unwrap()
         };
-        let monomorphized = crate::generics::monomorphize(&ast).unwrap();
+        let monomorphized = crate::generics::monomorphize_for_edition(&ast, edition).unwrap();
         let metadata = compile_metadata(source, edition, None).unwrap();
         build(&monomorphized, &metadata)
     }
@@ -863,8 +867,13 @@ public fn first<T: copy + drop + store + fixed + serializable + non_linear>(pair
         assert!(validate(&reordered).unwrap_err().message.contains("canonical order"));
 
         let mut unsafe_layout = interface;
+        unsafe_layout.edition = "2027".to_string();
         unsafe_layout.types[0].type_parameters[0].constraints.pop();
         assert!(validate(&unsafe_layout).unwrap_err().message.contains("public layout boundary"));
+        unsafe_layout.edition = "2026".to_string();
+        validate(&unsafe_layout).unwrap();
+        unsafe_layout.edition = "2099".to_string();
+        assert!(validate(&unsafe_layout).unwrap_err().message.contains("edition"));
     }
 
     #[test]

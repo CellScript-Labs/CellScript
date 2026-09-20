@@ -1542,6 +1542,11 @@ fn validate_public_interface_metadata(metadata: &Value, module: &str, expected_h
     {
         return Err(metadata_binding_error("compile metadata public interface has an invalid schema, version, or module identity"));
     }
+    let edition = interface.get("edition").and_then(Value::as_str);
+    if !matches!(edition, Some("2026" | "2027")) || edition != metadata.get("edition").and_then(Value::as_str) {
+        return Err(metadata_binding_error("public interface edition must match compile metadata"));
+    }
+    let strict_layout = edition == Some("2027");
     let canonical = canonical_json_value(&Value::Object(interface.clone()));
     let canonical_bytes = serde_json::to_vec(&canonical)
         .map_err(|error| metadata_binding_error(format!("failed to serialize canonical public interface: {error}")))?;
@@ -1555,7 +1560,7 @@ fn validate_public_interface_metadata(metadata: &Value, module: &str, expected_h
     let callables = validate_public_interface_items(interface.get("callables"), "callable")?;
     for item in types {
         let identity = item.get("identity").and_then(Value::as_str).unwrap_or("<unknown>");
-        validate_public_type_parameters(item.get("type_parameters"), &format!("{identity}.type_parameters"), true)?;
+        validate_public_type_parameters(item.get("type_parameters"), &format!("{identity}.type_parameters"), strict_layout)?;
         validate_public_value_abilities(item.get("value_abilities"), &format!("{identity}.value_abilities"))?;
     }
     for item in callables {
@@ -8049,6 +8054,7 @@ mod tests {
             "schema": "cellscript-package-interface-v3",
             "version": 3,
             "module": "api",
+            "edition": "2027",
             "types": [{
                 "identity": "api::Pair",
                 "type_parameters": [{
@@ -8062,7 +8068,7 @@ mod tests {
             "callables": []
         });
         let hash = public_interface_hash(&interface);
-        let metadata = serde_json::json!({ "public_interface": interface });
+        let metadata = serde_json::json!({ "edition": "2027", "public_interface": interface });
         validate_public_interface_metadata(&metadata, "api", &hash).unwrap();
 
         let mut compact_machine_form = metadata.clone();
@@ -8077,6 +8083,11 @@ mod tests {
         let unsafe_hash = public_interface_hash(&unsafe_layout["public_interface"]);
         let error = validate_public_interface_metadata(&unsafe_layout, "api", &unsafe_hash).unwrap_err();
         assert!(error.message.contains("public layout boundary"), "{}", error.message);
+        unsafe_layout["public_interface"]["edition"] = serde_json::json!("2026");
+        let legacy_hash = public_interface_hash(&unsafe_layout["public_interface"]);
+        assert!(validate_public_interface_metadata(&unsafe_layout, "api", &legacy_hash).unwrap_err().message.contains("edition"));
+        unsafe_layout["edition"] = serde_json::json!("2026");
+        validate_public_interface_metadata(&unsafe_layout, "api", &legacy_hash).unwrap();
     }
 
     #[test]

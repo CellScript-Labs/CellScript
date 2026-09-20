@@ -1,0 +1,35 @@
+// audit:edition=2027
+// audit:phase=accept
+
+module cellscript::audit::edition_2027_type_script
+
+resource Token has store, replace, relock {
+    owner: Address,
+    amount: u64,
+}
+
+type_script TokenTransfer on type_group<Token> {
+    entry transfer(
+        input token: Token from group_input[0],
+        witness recipient: ScriptHash from group_witness.input_type,
+        output next: Token from group_output[0],
+    ) {
+        verify {
+            enforce token.amount > 0
+        }
+
+        effects {
+            replace token -> next {
+                data {
+                    owner = same
+                    amount = same
+                }
+                identity = same
+                type_script = same
+                lock_script = exact_hash(recipient)
+                capacity = same
+                cardinality = one_to_one
+            }
+        }
+    }
+}

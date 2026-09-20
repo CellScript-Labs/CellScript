@@ -16,7 +16,7 @@ pub fn compile_artifact(
     declaration: ArtifactDeclaration,
     policy: ExecutableSurfacePolicy,
 ) -> Result<CompileResult> {
-    let ast = crate::generics::monomorphize(&crate::frontend::parse(source, options.edition)?)?;
+    let ast = crate::generics::monomorphize_for_edition(&crate::frontend::parse(source, options.edition)?, options.edition)?;
     let scope = CompileEntryScope::Artifact(declaration);
     let mut result = crate::compile_ast_with_build(&ast, &options, None, None, None, Some(&scope), policy)?;
     crate::bind_compile_result_source_metadata(
@@ -30,7 +30,7 @@ pub fn compile_artifact(
 /// Inspect exactly the same resolved policy without generating machine code.
 /// Reserved executable operations remain visible to diagnostic consumers.
 pub fn compile_artifact_metadata(source: &str, options: CompileOptions, declaration: ArtifactDeclaration) -> Result<CompileMetadata> {
-    let ast = crate::generics::monomorphize(&crate::frontend::parse(source, options.edition)?)?;
+    let ast = crate::generics::monomorphize_for_edition(&crate::frontend::parse(source, options.edition)?, options.edition)?;
     let scope = CompileEntryScope::Artifact(declaration);
     let mut metadata = metadata_from_ast(&ast, &options, None, None, None, Some(&scope))?;
     crate::bind_source_metadata(&mut metadata, vec![crate::source_unit_from_bytes("<memory>", "memory", source.as_bytes())]);

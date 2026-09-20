@@ -63,7 +63,7 @@ resource Token has store, replace, relock {
 type_script TokenTransfer on type_group<Token> {
     entry transfer(
         input token: Token from group_input[0],
-        witness recipient: Address from group_witness.input_type,
+        witness recipient: ScriptHash from group_witness.input_type,
         output next: Token from group_output[0],
     ) {
         verify {
@@ -282,7 +282,8 @@ rules:
   output-producing dispositions follow declared `group_output` order so the
   checked backend index and source role cannot diverge;
   every schema field and fixed envelope clause appears exactly once in
-  canonical order; every `exact_hash(...)` subject has type `Address`; and
+  canonical order; `exact_hash(...)` accepts the nominal `ScriptHash` domain;
+  the native preview also retains `Address` and `Hash` inputs for compatibility; and
   `effects` is final and non-empty;
 - a `pool` has non-empty, unique, explicitly named input and output sets; at
   least one unsigned numeric schema field uses `= conserve`, which generates
@@ -471,7 +472,7 @@ The following remain outside `preview4`:
 - foreign/open roles, Script handles, ProtocolBundle, or `.celltx`
   choreography;
 - non-positional selectors and bounded variable-cardinality native roles;
-- Script-valued lock construction beyond the current Address-based transfer
+- Script-valued lock construction beyond the current full-hash-based transfer
   primitive;
 - audit evidence kinds beyond the metadata-only `external_policy(subject)`
   declaration;

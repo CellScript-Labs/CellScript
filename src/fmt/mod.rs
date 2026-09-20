@@ -111,15 +111,7 @@ impl Formatter {
             Item::Struct(struct_def) => {
                 self.format_type_id_attr(struct_def.type_id.as_ref());
                 let name = format!("{}{}", struct_def.name, format_type_params(&struct_def.type_params));
-                let derived = crate::generics::derive_template_value_abilities(
-                    &struct_def.type_params,
-                    struct_def.fields.iter().map(|field| &field.ty),
-                );
-                let abilities = if !struct_def.type_params.is_empty() && struct_def.abilities == derived {
-                    &[][..]
-                } else {
-                    struct_def.abilities.as_slice()
-                };
+                let abilities = struct_def.abilities.as_slice();
                 self.format_type_def(
                     "struct",
                     &name,
@@ -145,11 +137,7 @@ impl Formatter {
             }
             Item::Enum(enum_def) => {
                 let mut header = format!("enum {}{}", enum_def.name, format_type_params(&enum_def.type_params));
-                let derived = crate::generics::derive_template_value_abilities(
-                    &enum_def.type_params,
-                    enum_def.variants.iter().flat_map(|variant| variant.fields.iter()),
-                );
-                if !enum_def.abilities.is_empty() && (enum_def.type_params.is_empty() || enum_def.abilities != derived) {
+                if !enum_def.abilities.is_empty() {
                     header.push_str(&format!(" has {}", format_value_abilities(&enum_def.abilities)));
                 }
                 self.push_line(&format!("{} {{", header));
@@ -1237,7 +1225,7 @@ fn format_type_params(params: &[TypeParam]) -> String {
             value.push_str(&param.name);
             if !param.constraints.is_empty() {
                 value.push_str(": ");
-                if ValueAbility::is_fixed_value_profile(&param.constraints) {
+                if param.uses_fixed_value_profile && ValueAbility::is_fixed_value_profile(&param.constraints) {
                     value.push_str(ValueAbility::FIXED_VALUE_PROFILE_NAME);
                 } else {
                     value.push_str(&param.constraints.iter().map(|ability| ability.as_str()).collect::<Vec<_>>().join(" + "));
@@ -1962,7 +1950,7 @@ action verify() -> u64 {
     }
 
     #[test]
-    fn formatter_canonicalizes_the_fixed_value_profile_and_derived_abilities() {
+    fn formatter_preserves_expanded_constraints_and_explicit_abilities() {
         let source = r#"
 module fmt::fixed_value
 
@@ -1978,9 +1966,9 @@ public fn identity<T: copy + drop + store + fixed + serializable + non_linear>(v
 "#;
         let module = parser::parse(&lexer::lex(source).unwrap()).unwrap();
         let formatted = format_default(&module).unwrap();
-        assert!(formatted.contains("public struct Pair<T: fixed_value> {"), "unexpected format:\n{formatted}");
-        assert!(!formatted.contains("Pair<T: fixed_value> has"), "derived abilities must not be repeated:\n{formatted}");
-        assert!(formatted.contains("public fn identity<T: fixed_value>"));
+        assert!(formatted.contains("public struct Pair<T: copy + drop + store + fixed + serializable + non_linear> has copy, drop, store, fixed, serializable, non_linear {"), "{formatted}");
+        assert!(formatted.contains("public fn identity<T: copy + drop + store + fixed + serializable + non_linear>"));
+        assert!(!formatted.contains(": fixed_value"));
         let reparsed = parser::parse(&lexer::lex(&formatted).unwrap()).unwrap();
         assert_eq!(formatted, format_default(&reparsed).unwrap());
     }

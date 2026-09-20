@@ -124,8 +124,14 @@ struct Monomorphizer {
 
 /// Replace every reachable generic template in one module with deterministic
 /// concrete specializations.
+#[cfg(test)]
 pub fn monomorphize(module: &Module) -> Result<Module> {
-    let mut monomorphizer = Monomorphizer::new(module)?;
+    monomorphize_for_edition(module, crate::CellScriptEdition::Edition2026)
+}
+
+/// Preserve legacy declaration contracts unless the source owner selects 2027.
+pub fn monomorphize_for_edition(module: &Module, edition: crate::CellScriptEdition) -> Result<Module> {
+    let mut monomorphizer = Monomorphizer::new(module, edition)?;
     monomorphizer.run(module)
 }
 
@@ -133,8 +139,9 @@ pub(crate) fn monomorphize_with_project_context(
     module: &Module,
     external_items: &[ExternalGenericItem],
     seeds: &[SeedInstantiation],
+    edition: crate::CellScriptEdition,
 ) -> Result<MonomorphizeOutput> {
-    let mut monomorphizer = Monomorphizer::new(module)?;
+    let mut monomorphizer = Monomorphizer::new(module, edition)?;
     monomorphizer.register_external_items(external_items)?;
     monomorphizer.seed(seeds)?;
     let module = monomorphizer.run(module)?;
@@ -222,7 +229,7 @@ fn guaranteed_template_type_abilities(ty: &Type, constraints: &HashMap<&str, Has
 }
 
 impl Monomorphizer {
-    fn new(module: &Module) -> Result<Self> {
+    fn new(module: &Module, edition: crate::CellScriptEdition) -> Result<Self> {
         let mut this = Self {
             structs: HashMap::new(),
             enums: HashMap::new(),
@@ -267,7 +274,7 @@ impl Monomorphizer {
                 Item::Struct(def) => {
                     let mut def = def.clone();
                     Self::validate_type_params("struct", &def.name, &def.type_params, def.span)?;
-                    if module.visibility_of(&def.name).is_exported() {
+                    if edition == crate::CellScriptEdition::Edition2027 && module.visibility_of(&def.name).is_exported() {
                         Self::validate_public_layout_params("struct", &def.name, &def.type_params)?;
                     }
                     if def.abilities.is_empty() {
@@ -285,7 +292,7 @@ impl Monomorphizer {
                 Item::Enum(def) => {
                     let mut def = def.clone();
                     Self::validate_type_params("enum", &def.name, &def.type_params, def.span)?;
-                    if module.visibility_of(&def.name).is_exported() {
+                    if edition == crate::CellScriptEdition::Edition2027 && module.visibility_of(&def.name).is_exported() {
                         Self::validate_public_layout_params("enum", &def.name, &def.type_params)?;
                     }
                     if def.abilities.is_empty() {
@@ -1829,6 +1836,7 @@ fn builtin_option_template() -> EnumDef {
     EnumDef {
         name: "Option".to_string(),
         type_params: vec![TypeParam {
+            uses_fixed_value_profile: false,
             name: "T".to_string(),
             constraints: vec![
                 ValueAbility::Copy,

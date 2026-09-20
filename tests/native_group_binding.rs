@@ -63,12 +63,13 @@ fn execute_replacement_case(
     let foreign = compile(ALWAYS_SUCCESS, options.clone()).unwrap();
     let foreign_code = context.deploy_cell(Bytes::copy_from_slice(cellscript::strip_vm_abi_trailer(&foreign.artifact_bytes)));
     let foreign_script = context.build_script(&foreign_code, Bytes::new()).unwrap();
-    let native = compile(NATIVE_REPLACEMENT, CompileOptions { edition: NEXT_EDITION, ..options }).unwrap();
+    let source = NATIVE_REPLACEMENT.replace("recipient: Address", "recipient: ScriptHash");
+    let native = compile(&source, CompileOptions { edition: NEXT_EDITION, ..options }).unwrap();
     native.validate().expect("native artifact bundle must validate independently");
     let native_code = context.deploy_cell(Bytes::copy_from_slice(cellscript::strip_vm_abi_trailer(&native.artifact_bytes)));
     let native_script = context.build_script(&native_code, Bytes::new()).unwrap();
     let payload = native.metadata.actions[0]
-        .entry_witness_args(&[cellscript::EntryWitnessArg::Address(foreign_script.calc_script_hash().unpack())])
+        .entry_witness_args(&[cellscript::EntryWitnessArg::Bytes(foreign_script.calc_script_hash().as_slice().to_vec())])
         .unwrap();
     let witness = packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(payload)).pack()).build().as_bytes();
 

@@ -3214,6 +3214,7 @@ mod tests {
     #[test]
     fn generic_hover_uses_the_canonical_fixed_value_profile() {
         let params = [TypeParam {
+            uses_fixed_value_profile: true,
             name: "T".to_string(),
             constraints: ValueAbility::FIXED_VALUE_PROFILE.to_vec(),
             phantom: false,
@@ -3808,6 +3809,18 @@ action update(amount: u64) -> u64 {
         let edits = server.format_document(&uri);
         assert_eq!(edits.len(), 1);
         assert!(edits[0].new_text.contains("action demo(x: u64) -> u64 {\n    verification"));
+    }
+
+    #[test]
+    fn formatting_legacy_generics_does_not_migrate_their_source_contract() {
+        let mut server = LspServer::new();
+        let uri = "file:///legacy-format.cell".to_string();
+        let source = "module legacy\nstruct Box<T: copy + drop + store + fixed + serializable + non_linear> has copy, drop, store, fixed, serializable, non_linear { value: T }\n";
+        server.open_document(uri.clone(), source.to_string());
+        let edits = server.format_document(&uri);
+        assert_eq!(edits.len(), 1);
+        assert!(!edits[0].new_text.contains("fixed_value"));
+        assert!(edits[0].new_text.contains("> has copy, drop, store, fixed, serializable, non_linear"));
     }
 
     #[test]

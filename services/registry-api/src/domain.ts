@@ -935,8 +935,12 @@ function validateTypeParameters(value: unknown, label: string, layoutType: boole
 }
 
 function validatePublicInterfaceGenerics(publicInterface: Record<string, unknown>): void {
+  const edition = publicInterface["edition"];
+  if (edition !== "2026" && edition !== "2027") {
+    throw new ApiError(400, "invalid_public_interface", "unsupported public interface edition");
+  }
   for (const item of interfaceItems(publicInterface["types"], "types").values()) {
-    validateTypeParameters(item["type_parameters"], `${requireString(item, "identity")}.type_parameters`, true);
+    validateTypeParameters(item["type_parameters"], `${requireString(item, "identity")}.type_parameters`, edition === "2027");
     canonicalValueAbilities(item["value_abilities"], `${requireString(item, "identity")}.value_abilities`);
   }
   for (const item of interfaceItems(publicInterface["callables"], "callables").values()) {
@@ -1073,6 +1077,9 @@ function validateRegistryEntry(
       validateHash(interfaceHash, "interface_hash", "invalid_interface_hash");
       const publicInterface = assertPlainObject(published["interface"], "invalid_public_interface");
       validatePublicInterfaceVersion(publicInterface);
+      if (publicInterface["version"] === 3 && publicInterface["edition"] !== published["edition"]) {
+        throw new ApiError(400, "invalid_public_interface", "public interface edition must match the published edition");
+      }
       const computedInterfaceHash = ckbBlake2bHex(canonicalJson(publicInterface));
       if (computedInterfaceHash.replace(/^0x/, "") !== interfaceHash.replace(/^0x/, "")) {
         throw new ApiError(400, "interface_hash_mismatch", "interface_hash must bind the canonical public interface");

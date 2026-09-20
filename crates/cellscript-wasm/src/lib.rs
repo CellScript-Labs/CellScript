@@ -387,6 +387,15 @@ mod tests {
     }
 
     #[test]
+    fn wasm_preserves_legacy_public_generics_in_2026_only() {
+        let source = "module legacy\npublic struct Box<T: copy> has copy { value: T }\naction verify() -> u64 { verification let b: Box<u64> = Box<u64> { value: 7 } return b.value }";
+        let legacy: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2026", None)).unwrap();
+        assert!(legacy.get("error").is_none(), "{legacy}");
+        let strict: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
+        assert!(strict.get("error").is_some(), "{strict}");
+    }
+
+    #[test]
     fn wasm_playground_accepts_the_canonical_public_value_generic_surface() {
         let source = r#"
 module browser_generics
@@ -514,6 +523,9 @@ type_script TokenTransfer on type_group<Token> {
         let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
         assert_eq!(result["edition"], "2027");
         assert_eq!(result["actions"][0]["name"], "transfer");
+        let typed_source = source.replace("recipient: Address", "recipient: ScriptHash");
+        let typed: serde_json::Value = serde_json::from_str(&compile_metadata_json(&typed_source, "2027", None)).unwrap();
+        assert_eq!(typed["actions"][0]["name"], "transfer", "{typed}");
 
         #[cfg(feature = "language-service")]
         {

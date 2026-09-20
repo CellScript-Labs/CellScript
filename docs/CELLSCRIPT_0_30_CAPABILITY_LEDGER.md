@@ -92,12 +92,16 @@ The machine ledger is the detailed source of truth. At this candidate point:
   likewise reports no moderate/high/critical advisories after its release-tool
   refresh; its three remaining low findings are the same unsafe-fix class.
 
-The current product gitlinks supersede the historical recovery pins above:
+The pre-syntax-audit candidate superseded the historical recovery pins above:
 VS Code `ee0f259a` and website `6a61e49` were pushed and read back with root
 `74cff5fd` on 2026-09-19. That candidate passed `dev`, full `ci` within
 `release`, `backend`, and `release` on 2026-09-18. Its canonical WASM is
 571,696 bytes gzip with SHA-256
 `419e8260c3c6acc9f950adf422de90163533c14af96043ebb7429f935b1393d6`.
+The subsequent [syntax compatibility fixes](CELLSCRIPT_0_25_0_30_SYNTAX_AUDIT.md)
+rebuild the current workspace WASM to 571,644 bytes gzip, SHA-256
+`8df77dde17da89b14dc31e1f08cb14e262a7e35516f415783b20f2bd68fcdb0d`.
+The historical release-gate result above belongs to its stated candidate.
 The [dated issue audit](releases/CELLSCRIPT_0_30_ISSUE_STATUS.md) records all
 24 issue dispositions and the remaining publication boundary.
 

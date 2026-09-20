@@ -9,6 +9,12 @@ for the accepted compatibility boundary and publication constraints.
 The entries below retain the evidence state at each implementation step. The
 release notes and capability ledger record the current acceptance state.
 
+- Restore the edition 2026 generic declaration contract from 0.25; apply the
+  stricter public layout declaration boundary only to edition 2027 owners.
+  Preserve constraint spelling and explicit abilities during formatting, and
+  accept nominal `ScriptHash` inputs in native `exact_hash` lifecycle clauses.
+  See [the syntax compatibility audit](docs/CELLSCRIPT_0_25_0_30_SYNTAX_AUDIT.md).
+
 - Make cost evidence mandatory in CI/backend and both release gates: missing
   RISC-V target libraries or the selected Rust toolchain's `llvm-strip` fail
   instead of silently skipping. Require a fresh execution report, independent

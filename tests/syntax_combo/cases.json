@@ -1832,7 +1832,7 @@
     {
       "expected": {
         "contains": [
-          "settle lock target must be Address or Hash"
+          "settle lock target must be ScriptHash, Address, or Hash"
         ],
         "phase": "reject_compile"
       },

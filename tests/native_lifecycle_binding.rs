@@ -99,9 +99,13 @@ fn execute_lifecycle(
         transaction = transaction.output(make_cell(true)).output_data(Bytes::copy_from_slice(&amount.to_le_bytes()).pack());
     }
     if has_witness {
-        let payload = native.metadata.actions[0]
-            .entry_witness_args(&[EntryWitnessArg::Address(foreign_script.calc_script_hash().unpack())])
-            .unwrap();
+        let hash: [u8; 32] = foreign_script.calc_script_hash().unpack();
+        let argument = if native.metadata.actions[0].params[0].ty == "ScriptHash" {
+            EntryWitnessArg::Bytes(hash.to_vec())
+        } else {
+            EntryWitnessArg::Address(hash)
+        };
+        let payload = native.metadata.actions[0].entry_witness_args(&[argument]).unwrap();
         let witness = packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(payload)).pack()).build().as_bytes();
         let index = if native_inputs.is_empty() { usize::from(foreign_output) } else { usize::from(foreign_input) };
         let mut witnesses = vec![Bytes::new(); index];
@@ -136,6 +140,13 @@ fn fresh_output_binds_nonzero_output_group_and_rejects_nonempty_input_side() {
         &execute_lifecycle(&native, &[], &[7, 7], true, true, true).expect_err("fresh role covers exactly one output"),
         21,
     );
+}
+
+#[test]
+fn nominal_script_hash_fresh_output_executes_with_the_existing_witness_abi() {
+    let native = compile_native(&FRESH.replace("recipient: Address", "recipient: ScriptHash"));
+    assert!(execute_lifecycle(&native, &[], &[7], true, true, true).unwrap() > 0);
+    assert!(execute_lifecycle(&native, &[], &[8], true, true, true).is_err());
 }
 
 #[test]

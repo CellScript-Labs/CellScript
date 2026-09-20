@@ -1104,6 +1104,7 @@ describe("registry api", () => {
         }],
         value_abilities: ["copy", "drop", "store", "fixed", "serializable", "non_linear"],
       }],
+      edition: "2026",
       runtime_contract: { temporal },
     };
     published.interface = interfaceV3;
@@ -1119,6 +1120,12 @@ describe("registry api", () => {
     drifted.registry_entry.versions[0].interface_hash = ckbBlake2bHex(canonicalJson(driftedInterface));
     expect(() => validatePublishPayload(drifted, DEFAULT_REGISTRY_ORIGIN, now)).toThrow(/temporal.since_abi/);
 
+    const crossEdition = structuredClone(payload);
+    const crossEditionInterface = crossEdition.registry_entry.versions[0].interface as Record<string, unknown>;
+    crossEditionInterface.edition = "2027";
+    crossEdition.registry_entry.versions[0].interface_hash = ckbBlake2bHex(canonicalJson(crossEditionInterface));
+    expect(() => validatePublishPayload(crossEdition, DEFAULT_REGISTRY_ORIGIN, now)).toThrow(/edition must match/);
+
     const reordered = structuredClone(payload);
     const reorderedInterface = reordered.registry_entry.versions[0].interface as Record<string, unknown>;
     const reorderedType = (reorderedInterface.types as Array<Record<string, unknown>>)[0]!;
@@ -1133,7 +1140,13 @@ describe("registry api", () => {
     const unsafeParameter = (unsafeType.type_parameters as Array<Record<string, unknown>>)[0]!;
     unsafeParameter.constraints = ["copy", "drop", "store", "fixed", "serializable"];
     unsafeLayout.registry_entry.versions[0].interface_hash = ckbBlake2bHex(canonicalJson(unsafeInterface));
+    expect(() => validatePublishPayload(unsafeLayout, DEFAULT_REGISTRY_ORIGIN, now)).not.toThrow();
+    unsafeInterface.edition = "2027";
+    unsafeLayout.registry_entry.versions[0].interface_hash = ckbBlake2bHex(canonicalJson(unsafeInterface));
     expect(() => validatePublishPayload(unsafeLayout, DEFAULT_REGISTRY_ORIGIN, now)).toThrow(/layout boundary/);
+    unsafeInterface.edition = "2099";
+    unsafeLayout.registry_entry.versions[0].interface_hash = ckbBlake2bHex(canonicalJson(unsafeInterface));
+    expect(() => validatePublishPayload(unsafeLayout, DEFAULT_REGISTRY_ORIGIN, now)).toThrow(/edition/);
   });
 
   it("reports readiness only when production bindings are configured", async () => {
