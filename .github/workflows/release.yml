@@ -239,21 +239,21 @@ jobs:
             ### One-line install (Global)
 
             ```bash
-            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh | sh
+            curl -fsSL https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.version }}/install.sh | sh
             ```
 
             ### One-line install (China mainland)
 
-            If `raw.githubusercontent.com` is unreachable, use a GitHub proxy:
+            If GitHub downloads are unreachable, use a GitHub proxy:
 
             ```bash
-            curl -fsSL https://ghgo.xyz/https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh | sh
+            curl -fsSL https://ghgo.xyz/https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.version }}/install.sh | sh
             ```
 
             Or force a specific mirror for binary downloads:
 
             ```bash
-            CELLSCRIPT_MIRROR=ghgo curl -fsSL https://ghgo.xyz/https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh | sh
+            curl -fsSL https://ghgo.xyz/https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.version }}/install.sh | CELLSCRIPT_MIRROR=ghgo sh
             ```
 
             Available mirrors: `ghgo` (ghgo.xyz), `ghproxy` (gh-proxy.com), `ghfast` (ghfast.top)
@@ -261,7 +261,7 @@ jobs:
             ### Install specific version
 
             ```bash
-            CELLSCRIPT_VERSION=${{ steps.version.outputs.version }} curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh | sh
+            curl -fsSL https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.version }}/install.sh | CELLSCRIPT_VERSION=${{ steps.version.outputs.version }} sh
             ```
 
             ### Alternative: cargo install

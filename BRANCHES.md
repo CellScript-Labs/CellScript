@@ -1,5 +1,23 @@
 # Branch Context
 
+## Branch decision — 2026-09-21
+
+`0.31` is the development branch, starting from the tested
+`0.30` commit `8d6e200caa58d81429912df925a9322f691cb41d`. Its
+[cost decisions](docs/CELLSCRIPT_0_31_COST_DECISIONS.md) define the next work:
+measurement, immediate planning, shared decoders, private adapter frames, and
+scalar slot reuse. These are accepted decisions, not implemented optimizations.
+Cargo versions and the pinned toolchain remain unchanged for this planning step.
+The requested branch layout makes `0.31` the GitHub default branch.
+
+`0.30` is retained as the release baseline. Its complete local release gate
+passed on 2026-09-21; its signed tag points at that exact commit. Publication
+still requires verified release/deployment steps. Release tags and submodule
+repositories are preserved. The requested cleanup retires the other root
+branches after a verified local Git bundle backup. The descriptions below
+preserve historical evidence scope; consult the remote branch list for the
+actual completion state of that administrative operation.
+
 ## 0.30
 
 The workspace and editor are prepared as 0.30.0 with the bounded
@@ -11,7 +29,7 @@ after the required gates passed. On 2026-09-21 the maintainer authorized the
 The final source must pass a fresh full release gate before publication. See the
 [issue status audit](docs/releases/CELLSCRIPT_0_30_ISSUE_STATUS.md).
 
-`0.30` is the active capability-closure implementation branch, forked from
+`0.30` is the capability-closure release branch, forked from
 `0.26b` at `08c0ef38`. The current planning target permits the next stable
 release after 0.25 to be 0.30. The experimental `0.26b` work may be absorbed
 into that release without a published 0.26 stable line. No stable tag, Cargo

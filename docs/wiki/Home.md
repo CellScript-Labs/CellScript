@@ -248,7 +248,7 @@ production-ready.
 
 ## Reference Examples
 
-- [CKB hashing workflow](https://github.com/CellScript-Labs/CellScript/blob/main/docs/examples/ckb_hashing.md)
-- [Collections matrix](https://github.com/CellScript-Labs/CellScript/blob/main/docs/examples/collections_matrix.md)
-- [Deployment manifest](https://github.com/CellScript-Labs/CellScript/blob/main/docs/examples/deployment_manifest.md)
-- [Output append](https://github.com/CellScript-Labs/CellScript/blob/main/docs/examples/output_append.md)
+- [CKB hashing workflow](https://github.com/CellScript-Labs/CellScript/blob/0.30/docs/examples/ckb_hashing.md)
+- [Collections matrix](https://github.com/CellScript-Labs/CellScript/blob/0.30/docs/examples/collections_matrix.md)
+- [Deployment manifest](https://github.com/CellScript-Labs/CellScript/blob/0.30/docs/examples/deployment_manifest.md)
+- [Output append](https://github.com/CellScript-Labs/CellScript/blob/0.30/docs/examples/output_append.md)

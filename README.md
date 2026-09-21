@@ -4,7 +4,7 @@
 </p>
 
 [![CellScript CI](https://github.com/CellScript-Labs/CellScript/actions/workflows/ci.yml/badge.svg)](https://github.com/CellScript-Labs/CellScript/actions/workflows/ci.yml)
-[![Release: v0.30.0](https://img.shields.io/badge/release-v0.30.0-2f6f4e.svg)](https://github.com/CellScript-Labs/CellScript/releases/tag/v0.30.0)
+[![Release: v0.25.0](https://img.shields.io/badge/release-v0.25.0-2f6f4e.svg)](https://github.com/CellScript-Labs/CellScript/releases/tag/v0.25.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE-MIT)
 [![Rust 1.97.1](https://img.shields.io/badge/rust-1.97.1-orange.svg)](Cargo.toml)
 [![Targets: CKB](https://img.shields.io/badge/targets-CKB-2f6f4e.svg)](#target-profiles)
@@ -19,11 +19,15 @@ CKB. It compiles `.cell` source into ckb-vm RISC-V assembly or ELF
 artifacts, together with typed metadata for auditing, policy checks, schema
 binding, and scheduler-aware execution.
 
-The current stable release is
-[CellScript v0.30.0](https://github.com/CellScript-Labs/CellScript/releases/tag/v0.30.0).
+Development now continues on `0.31`; the accepted
+[0.31 cost decisions](docs/CELLSCRIPT_0_31_COST_DECISIONS.md) define its scope.
+The `0.30` release baseline has passed the full local release gate and has a
+signed tag. Public release and website deployment are tracked separately.
+
+The current published stable release is
+[CellScript v0.25.0](https://github.com/CellScript-Labs/CellScript/releases/tag/v0.25.0).
 The [0.30 release notes](docs/releases/CELLSCRIPT_0_30_RELEASE_NOTES.md)
-describe its bounded Cell lifecycles, multi-Script composition, typed CKB views,
-lock-authoritative packages, cost measurements, and evidence limits.
+describe the prepared release and its evidence limits.
 
 In this README, metadata means machine-readable semantic facts emitted by the
 compiler: schema layout, Cell effects, access summaries, source hashes,
@@ -111,13 +115,13 @@ matrix described in [the Fiber example guide](examples/fiber/README.md) and
 Install the current stable release (one line, four platform binaries):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CellScript-Labs/CellScript/main/scripts/install.sh | sh
+curl -fsSL https://github.com/CellScript-Labs/CellScript/releases/latest/download/install.sh | sh
 ```
 
 Or pin a specific version:
 
 ```bash
-CELLSCRIPT_VERSION=0.30.0 curl -fsSL https://raw.githubusercontent.com/CellScript-Labs/CellScript/main/scripts/install.sh | sh
+curl -fsSL https://github.com/CellScript-Labs/CellScript/releases/latest/download/install.sh | CELLSCRIPT_VERSION=0.25.0 sh
 ```
 
 The release page publishes `SHA256SUMS` alongside all four platform archives.
@@ -125,7 +129,7 @@ The release page publishes `SHA256SUMS` alongside all four platform archives.
 Build the exact published source instead:
 
 ```bash
-git clone --branch v0.30.0 --depth 1 https://github.com/CellScript-Labs/CellScript.git
+git clone --branch v0.25.0 --depth 1 https://github.com/CellScript-Labs/CellScript.git
 cd CellScript
 cargo install --locked --path .
 ```

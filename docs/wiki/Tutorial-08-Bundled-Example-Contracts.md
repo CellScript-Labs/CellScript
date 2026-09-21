@@ -104,9 +104,9 @@ state-transition lifecycle checks. They are covered by compiler/tooling tests
 rather than CKB production action acceptance.
 
 For a visual business-flow map of every bundled example, see
-[`CELLSCRIPT_EXAMPLE_BUSINESS_FLOWS.md`](https://github.com/CellScript-Labs/CellScript/blob/main/docs/CELLSCRIPT_EXAMPLE_BUSINESS_FLOWS.md).
+[`CELLSCRIPT_EXAMPLE_BUSINESS_FLOWS.md`](https://github.com/CellScript-Labs/CellScript/blob/0.30/docs/CELLSCRIPT_EXAMPLE_BUSINESS_FLOWS.md).
 For a concrete token-to-AMM builder path with entry witness commands, see
-[`token_amm_bootstrap.md`](https://github.com/CellScript-Labs/CellScript/blob/main/docs/examples/token_amm_bootstrap.md).
+[`token_amm_bootstrap.md`](https://github.com/CellScript-Labs/CellScript/blob/0.30/docs/examples/token_amm_bootstrap.md).
 For small reusable patterns drawn from the same ideas, see
 [Cookbook Recipes](https://github.com/CellScript-Labs/CellScript/wiki/Cookbook-Recipes).
 
