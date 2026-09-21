@@ -1,9 +1,10 @@
 # CellScript 0.30.0 Release Notes
 
-**Status:** release candidate; publication is withheld under the maintainer's
-no-TAC constraint. A prepared version, accepted capability record, or local
-release gate does not mean a tag, GitHub Release, package, or extension has been
-published.
+**Publication decision (2026-09-21):** the maintainer authorized the 0.30.0
+release and the cellscript.dev update, superseding the earlier no-TAC hold.
+Publication requires a fresh full release gate on the final clean source.
+GitHub assets and the website are released together; crates.io and extension
+marketplace publication retain their own independently verified status.
 
 ## Highlights
 
@@ -89,10 +90,11 @@ Both release modes require a clean checkout and invoke
 ledgers, incomplete required capabilities, stale evidence, and pending release
 layers fail closed. `release-quick` remains compile-only preflight.
 
-Public publication remains a separate operation. Do not create or push a release
-tag or dispatch GitHub release automation while the no-TAC constraint remains
-in force. The current GitHub release workflow is triggered
-by `v*` tags or manual dispatch, so it cannot be used under that constraint.
+The GitHub release workflow is triggered by `v*` tags or manual dispatch. Its
+full release gate must pass before binary builds and public publication. Deploy
+the website only after its matching release assets are available, and retain
+the previous site directory for rollback. A local gate result alone does not
+establish publication on any channel.
 
 ## Detailed contracts
 

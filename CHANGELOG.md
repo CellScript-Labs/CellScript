@@ -2,9 +2,9 @@
 
 ## 0.30.0 - Capability closure
 
-Release candidate prepared for publication; no stable tag or public release is
-created by this record. See [the 0.30 release notes](docs/releases/CELLSCRIPT_0_30_RELEASE_NOTES.md)
-for the accepted compatibility boundary and publication constraints.
+Publication and the website update were authorized on 2026-09-21, subject to a
+fresh full release gate. See [the 0.30 release notes](docs/releases/CELLSCRIPT_0_30_RELEASE_NOTES.md)
+for the accepted compatibility boundary and publication channels.
 
 The entries below retain the evidence state at each implementation step. The
 release notes and capability ledger record the current acceptance state.

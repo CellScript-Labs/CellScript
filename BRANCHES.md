@@ -4,10 +4,11 @@
 
 The workspace and editor are prepared as 0.30.0 with the bounded
 `cellscript-source-semantics-2027-0.30-v1` identity. See the
-[release candidate notes](docs/releases/CELLSCRIPT_0_30_RELEASE_NOTES.md).
+[release notes](docs/releases/CELLSCRIPT_0_30_RELEASE_NOTES.md).
 Candidate `74cff5fd` and its website/editor gitlinks were pushed on 2026-09-19
-after the required gates passed. The no-TAC publication constraint still
-applies; no tag or public release is implied. See the
+after the required gates passed. On 2026-09-21 the maintainer authorized the
+0.30 release and website deployment, superseding the earlier no-TAC hold.
+The final source must pass a fresh full release gate before publication. See the
 [issue status audit](docs/releases/CELLSCRIPT_0_30_ISSUE_STATUS.md).
 
 `0.30` is the active capability-closure implementation branch, forked from
@@ -46,8 +47,8 @@ Playground parity are implemented, and the six-family temporal business corpus
 uses typed HeaderDep and Since operations. The repository-local candidate gates
 now pass, the maintainer has waived the independent review requirement, and
 issue #12 is closed. The selected Pudge deployment is recorded separately;
-publication and the stable tag remain open under issue #27 because they must
-not trigger TAC.
+publication and the stable tag remain tracked under issue #27 until the
+authorized release has been published and verified.
 
 The issue #18 package-compiler prerequisite is implemented through enforced
 `[package].cellscript_version` SemVer ranges, aggregated root/transitive

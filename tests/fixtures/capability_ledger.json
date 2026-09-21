@@ -509,7 +509,7 @@
         "Version bumps, publication, or deployment before every required identity and gate agrees"
       ],
       "remaining_work": [
-        "Public publication remains withheld under the maintainer's no-TAC constraint; #27 stays open until the publication action is authorized and verified."
+        "The maintainer authorized the 0.30 release and website update on 2026-09-21; #27 stays open until the final clean-source release gate and each selected publication channel are verified."
       ]
     }
   ],

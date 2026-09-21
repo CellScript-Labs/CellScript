@@ -1,7 +1,8 @@
 # CellScript 0.30 Capability Ledger
 
-**Status:** accepted bounded capability contract for the 0.30.0 release
-candidate; public publication is withheld under the no-TAC constraint.
+**Status:** accepted bounded capability contract for the 0.30.0 release.
+The maintainer authorized publication and the website update on 2026-09-21;
+the final source still requires a fresh full release gate.
 
 This document separates two different completeness claims:
 
@@ -78,8 +79,8 @@ The machine ledger is the detailed source of truth. At this candidate point:
   Its `stable` eligibility and `split-and-close` recommendation mean the bounded
   capability is eligible for release; they do not claim the packages are already
   published or close the GitHub issue. Selected-network evidence is complete,
-  but no tag or release workflow may be created while the maintainer's no-TAC
-  constraint remains in force. The maintainer has explicitly waived
+  and publication was authorized on 2026-09-21 after the earlier no-TAC hold.
+  Each publication channel must still be verified. The maintainer has explicitly waived
   independent review for this release line. The previously
   unreachable gitlinks were re-accepted on 2026-09-11 at retrievable release
   evidence commits: VS Code `4df04807`, website `320d54e`, NovaSeal
@@ -106,8 +107,8 @@ The [dated issue audit](releases/CELLSCRIPT_0_30_ISSUE_STATUS.md) records all
 24 issue dispositions and the remaining publication boundary.
 
 This list is a dependency and closure map, not a delivery date or release
-promise. The `0.30` branch remains unpublished until the separate publication
-action is authorized and verified. Final candidate replay must pass on clean source.
+promise. Publication is authorized but must be verified separately from the
+capability evidence. Final candidate replay must pass on clean source.
 
 ## Strategy wording
 
@@ -138,4 +139,4 @@ validation additionally requires an `accepted` ledger, all release requirements
 passed, and every required capability stable and no longer marked `keep-open`.
 An assigned reviewer is required unless independent review is explicitly waived.
 Both release modes run this stricter check before CI. Eligibility is a
-pre-publication contract; it never authorizes a tag or overrides no-TAC.
+pre-publication contract; it does not itself authorize a tag or deployment.
