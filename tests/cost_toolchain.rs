@@ -7,16 +7,23 @@ fn gate_rejects_stale_or_missing_cost_reports() {
     let functions = gate.split_once("prepare_cost_evidence() {").unwrap().1.split_once("run_ci_gate() {").unwrap().0;
     let root = tempfile::tempdir().unwrap();
     let report = root.path().join("report.json");
+    let multi_report = root.path().join("multi-report.json");
     let run = |body: &str| {
         std::process::Command::new("bash")
             .arg("-c")
-            .arg(format!("set -euo pipefail\nprepare_cost_evidence() {{{functions}\n{body}"))
+            // This checks the shell's freshness lifecycle. The native v2
+            // consumer has separate malformed-measurement tests.
+            .arg(format!("set -euo pipefail\nrun() {{ :; }}\nprepare_cost_evidence() {{{functions}\n{body}"))
             .env("CELLSCRIPT_COST_CORPUS_REPORT", &report)
+            .env("CELLSCRIPT_MULTI_SCRIPT_COST_REPORT", &multi_report)
+            .env("ROOT_DIR", root.path())
             .output()
             .expect("run cost report gate")
     };
     assert!(!run("check_cost_evidence").status.success(), "missing report must fail");
     std::fs::write(&report, "{\n  \"status\": \"passed\"\n}\n").unwrap();
+    assert!(!run("check_cost_evidence").status.success(), "both report families are required");
+    std::fs::write(&multi_report, "{\n  \"status\": \"passed\"\n}\n").unwrap();
     assert!(run("check_cost_evidence").status.success(), "fresh completed marker is accepted");
     // Pretend the test runner succeeds without running the corpus. Preflight
     // must invalidate the previous passing report before accepting new evidence.

@@ -26348,7 +26348,7 @@ action activate(ticket: Ticket) -> Ticket {
         assert!(asm.contains("sd a0, 0(sp)"), "missing parameter spill for x:\n{}", asm);
         assert!(asm.contains("sd a1, 8(sp)"), "missing parameter spill for y:\n{}", asm);
         assert!(asm.contains("add t0, t0, t1"), "missing add instruction:\n{}", asm);
-        assert!(asm.contains("ld a0, 16(sp)"), "missing return load for z:\n{}", asm);
+        assert!(asm.contains("sd t0, 0(sp)\n    ld a0, 0(sp)"), "missing return load for z:\n{}", asm);
     }
 
     #[test]
@@ -26376,7 +26376,7 @@ action activate(ticket: Ticket) -> Ticket {
         assert!(asm.contains(".global double"), "missing callee symbol:\n{}", asm);
         assert!(asm.contains(".global run"), "missing caller symbol:\n{}", asm);
         assert!(asm.contains("call double"), "missing direct call instruction:\n{}", asm);
-        assert!(asm.contains("sd a0, 8(sp)"), "missing call result spill:\n{}", asm);
+        assert!(asm.contains("call double\n    sd a0, 0(sp)\n    ld a0, 0(sp)"), "missing call result spill:\n{}", asm);
     }
 
     #[test]
@@ -26391,7 +26391,11 @@ action activate(ticket: Ticket) -> Ticket {
             asm
         );
         assert!(asm.contains(".Lchoose_block_3:"), "missing join block for if expression:\n{}", asm);
-        assert!(asm.contains("sd t0, 24(sp)") || asm.contains("sd t0, 32(sp)"), "missing branch value move into join slot:\n{}", asm);
+        for block in [1, 2] {
+            let body = asm.split(&format!(".Lchoose_block_{block}:\n")).nth(1).unwrap().split(".Lchoose_block_").next().unwrap();
+            assert!(body.contains("ld t0, 0(sp)\n    sd t0, 0(sp)"), "missing branch value move into reused join slot:\n{body}");
+        }
+        assert!(asm.contains(".Lchoose_block_3:\n    ld a0, 0(sp)"), "join must return the selected value:\n{asm}");
     }
 
     #[test]

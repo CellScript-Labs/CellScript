@@ -378,7 +378,9 @@ fn typed_outgoing_stack_args_are_bound_to_the_policy_adapter_frame() {
     };
     let valid = Fixture::new_source_with(STACK_ARGS_SOURCE, CellScriptEdition::Edition2027, 3, declaration);
     let adapter = valid.record.entries.iter().find(|entry| entry.name.starts_with(".Lpolicy_action_adapter_")).unwrap();
-    assert!(adapter.frame_size_bytes > 5_376);
+    // 104 payload bytes + 8-byte CSARG header + length/RA slots,
+    // aligned to 16, plus the 32-byte outgoing argument reservation.
+    assert_eq!(adapter.frame_size_bytes, 160);
 
     let mut changed = valid.clone();
     let adapter_id = adapter.id.clone();

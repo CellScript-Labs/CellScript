@@ -249,7 +249,9 @@ pub const VM_HARNESS_ICKB_DEPOSIT_ACTION: &str = "test_ickb_deposit_verification
 pub struct CkbScriptExecutionResult {
     /// 0 for pass, non-zero for script error.
     pub exit_code: i64,
-    /// Cycles consumed (0 on error).
+    /// Transaction-success cycles. The legacy zero on error is unavailable
+    /// evidence, never a measured rejection cost. Cost-report consumers use a
+    /// separate group observation from the transaction observer below.
     pub cycles: u64,
     /// Consensus-serialized transaction bytes for the executed fixture.
     #[allow(dead_code)]
@@ -384,6 +386,23 @@ pub fn execute_cellscript_script_with_transaction_transform<F>(
 where
     F: FnOnce(TransactionView, packed::Script) -> TransactionView,
 {
+    execute_cellscript_script_with_observer(elf_bytes, fixture, transform, |_, _, _| ()).0
+}
+
+/// Observe the exact completed transaction without changing the ordinary
+/// verifier used as the acceptance oracle. Measurements can replay one Script
+/// group against the same cells, headers, dependencies, and witness bytes.
+#[allow(dead_code)]
+pub fn execute_cellscript_script_with_observer<F, O, T>(
+    elf_bytes: &[u8],
+    fixture: &CkbVmFixture,
+    transform: F,
+    observe: O,
+) -> (CkbScriptExecutionResult, T)
+where
+    F: FnOnce(TransactionView, packed::Script) -> TransactionView,
+    O: FnOnce(&Context, &TransactionView, &packed::Script) -> T,
+{
     let mut context = Context::new_with_deterministic_rng();
     context.set_capture_debug(true);
 
@@ -512,7 +531,7 @@ where
 
     let tx = tx_builder.build();
     let tx = context.complete_tx(tx);
-    let tx = transform(tx, type_script);
+    let tx = transform(tx, type_script.clone());
     let transaction_bytes = tx.data().serialized_size_in_block();
     let witness_bytes = tx.witnesses().into_iter().map(|witness| witness.raw_data().len()).sum();
     let dependency_bytes = fixture.cell_deps.iter().map(|cell| cell.data.len()).sum();
@@ -521,7 +540,8 @@ where
 
     // Execute via ckb-script ScriptVerify with full CKB syscall context.
     let verify_result = context.verify_tx(&tx, MAX_CYCLES);
-    match verify_result {
+    let observation = observe(&context, &tx, &type_script);
+    let result = match verify_result {
         Ok(cycles) => CkbScriptExecutionResult {
             exit_code: 0,
             cycles,
@@ -550,7 +570,8 @@ where
                 captured_debug: all_debug,
             }
         }
-    }
+    };
+    (result, observation)
 }
 
 fn deterministic_fixture_out_point(domain: &[u8], index: usize) -> packed::OutPoint {

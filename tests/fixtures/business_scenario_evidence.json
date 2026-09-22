@@ -17,9 +17,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/authorization_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
-          "raw_transaction_hash": "0x23861a5cc03087a3ecc371d7d7af0d4b355e2054be38ea2fdfdb398006935a31",
-          "serialized_transaction_hash": "0x88dda6af6f386d80660809baf96d1582764c4619491e9801ce2741e0026703e8",
-          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+          "raw_transaction_hash": "0xcd7c9287c77039ddb0af4b993ba91aa2a630a478b0b4e70fe67c83cfa7a66045",
+          "serialized_transaction_hash": "0x87623bcb45d37c2535fc4b61b6124bc3e1f8377ec4fb0bf303ceb191751bcb65",
+          "artifact_hashes": ["0x9e6c59bc96cfdd426337dbffee4772b9ede56fa6622ff5fb1b4fa0f9fa83a678"]
         },
         {
           "scenario": "multisig_threshold",
@@ -27,9 +27,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/authorization_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
-          "raw_transaction_hash": "0x23861a5cc03087a3ecc371d7d7af0d4b355e2054be38ea2fdfdb398006935a31",
-          "serialized_transaction_hash": "0x88dda6af6f386d80660809baf96d1582764c4619491e9801ce2741e0026703e8",
-          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+          "raw_transaction_hash": "0xcd7c9287c77039ddb0af4b993ba91aa2a630a478b0b4e70fe67c83cfa7a66045",
+          "serialized_transaction_hash": "0x87623bcb45d37c2535fc4b61b6124bc3e1f8377ec4fb0bf303ceb191751bcb65",
+          "artifact_hashes": ["0x9e6c59bc96cfdd426337dbffee4772b9ede56fa6622ff5fb1b4fa0f9fa83a678"]
         },
         {
           "scenario": "issuer_authority",
@@ -37,9 +37,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/authorization_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
-          "raw_transaction_hash": "0x23861a5cc03087a3ecc371d7d7af0d4b355e2054be38ea2fdfdb398006935a31",
-          "serialized_transaction_hash": "0x88dda6af6f386d80660809baf96d1582764c4619491e9801ce2741e0026703e8",
-          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+          "raw_transaction_hash": "0xcd7c9287c77039ddb0af4b993ba91aa2a630a478b0b4e70fe67c83cfa7a66045",
+          "serialized_transaction_hash": "0x87623bcb45d37c2535fc4b61b6124bc3e1f8377ec4fb0bf303ceb191751bcb65",
+          "artifact_hashes": ["0x9e6c59bc96cfdd426337dbffee4772b9ede56fa6622ff5fb1b4fa0f9fa83a678"]
         },
         {
           "scenario": "exact_script_identity",
@@ -47,9 +47,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/authorization_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
-          "raw_transaction_hash": "0x23861a5cc03087a3ecc371d7d7af0d4b355e2054be38ea2fdfdb398006935a31",
-          "serialized_transaction_hash": "0x88dda6af6f386d80660809baf96d1582764c4619491e9801ce2741e0026703e8",
-          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+          "raw_transaction_hash": "0xcd7c9287c77039ddb0af4b993ba91aa2a630a478b0b4e70fe67c83cfa7a66045",
+          "serialized_transaction_hash": "0x87623bcb45d37c2535fc4b61b6124bc3e1f8377ec4fb0bf303ceb191751bcb65",
+          "artifact_hashes": ["0x9e6c59bc96cfdd426337dbffee4772b9ede56fa6622ff5fb1b4fa0f9fa83a678"]
         },
         {
           "scenario": "post_signing_mutation",
@@ -57,9 +57,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/authorization_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
-          "raw_transaction_hash": "0x4bd7628b88c1762e75903537d5d3cc19b522d4906b373ef73b1e9a7a031bca5e",
-          "serialized_transaction_hash": "0xb2ba1f59cec4eb9a73d4ecba43a58c11b808c96cd7170628852175c4defaa293",
-          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+          "raw_transaction_hash": "0x12abbf67ece8b0a2146cdee63ca733bff0cc3981b5f3727af796c603909ad5d5",
+          "serialized_transaction_hash": "0x0f6d08f91a627543cfeddcca59fc2f1c32efa7d9de0752ce9a9be4e2085d4820",
+          "artifact_hashes": ["0x9e6c59bc96cfdd426337dbffee4772b9ede56fa6622ff5fb1b4fa0f9fa83a678"]
         },
         {
           "scenario": "copied_owner",
@@ -67,9 +67,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/authorization_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
-          "raw_transaction_hash": "0x0c05beb8641ae069ed01a5ab82e0c76c1f96e66af7b980d0196e2a6a6c7498a9",
-          "serialized_transaction_hash": "0x80ec2407ab41eda4485d272d41db97f061d828a1aa7b63cebcae3a0dd1efe9f9",
-          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+          "raw_transaction_hash": "0xbd464ee102d1e511aaee81ab349ae7516a0b3c9f42a0b8fd0f5d2baa081d9e1e",
+          "serialized_transaction_hash": "0xe126238abe5679799d97fcfcf42d89e457fb0131b647abafc6597ff8b490ca09",
+          "artifact_hashes": ["0x9e6c59bc96cfdd426337dbffee4772b9ede56fa6622ff5fb1b4fa0f9fa83a678"]
         },
         {
           "scenario": "wrong_domain",
@@ -77,9 +77,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/authorization_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
-          "raw_transaction_hash": "0xdde687aa5ee265020423dad40fb5489572a54e8918895aaf81e7a0975ebe0c60",
-          "serialized_transaction_hash": "0xfea51710855c7960e68a187011f4e3a0c883af29a78eb03564b9f9783c395133",
-          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+          "raw_transaction_hash": "0x4e4c17c71122cb3443d1a67d61699e52bea4b52ceb96f2ab9b8413c7ce0e208e",
+          "serialized_transaction_hash": "0x085637f6aa3a52cb325d8d423d0619d22cf4303eb105e806320c249bf6f216ec",
+          "artifact_hashes": ["0x9e6c59bc96cfdd426337dbffee4772b9ede56fa6622ff5fb1b4fa0f9fa83a678"]
         },
         {
           "scenario": "wrong_key",
@@ -87,9 +87,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/authorization_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
-          "raw_transaction_hash": "0x23861a5cc03087a3ecc371d7d7af0d4b355e2054be38ea2fdfdb398006935a31",
-          "serialized_transaction_hash": "0xdef0cc98b616343ce7e986e1b28ca4ee920e0a00d7e74af4dee891f6577731d2",
-          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+          "raw_transaction_hash": "0xcd7c9287c77039ddb0af4b993ba91aa2a630a478b0b4e70fe67c83cfa7a66045",
+          "serialized_transaction_hash": "0x41a2bbed267929b4611484f6ff19acb3a9f4f618661ccdca8dedc7bddc925b2f",
+          "artifact_hashes": ["0x9e6c59bc96cfdd426337dbffee4772b9ede56fa6622ff5fb1b4fa0f9fa83a678"]
         },
         {
           "scenario": "partial_signature",
@@ -97,9 +97,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/authorization_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
-          "raw_transaction_hash": "0x23861a5cc03087a3ecc371d7d7af0d4b355e2054be38ea2fdfdb398006935a31",
-          "serialized_transaction_hash": "0x0f9fd31f2b1e2033c5ff5e056783e8371f8b5722232e18735697921610a48bec",
-          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+          "raw_transaction_hash": "0xcd7c9287c77039ddb0af4b993ba91aa2a630a478b0b4e70fe67c83cfa7a66045",
+          "serialized_transaction_hash": "0xe843e098e89eced9538d1a47327740b88f73e2b133e37ed3debb8f683b80cfa3",
+          "artifact_hashes": ["0x9e6c59bc96cfdd426337dbffee4772b9ede56fa6622ff5fb1b4fa0f9fa83a678"]
         },
         {
           "scenario": "replay",
@@ -107,9 +107,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/authorization_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
-          "raw_transaction_hash": "0x23861a5cc03087a3ecc371d7d7af0d4b355e2054be38ea2fdfdb398006935a31",
-          "serialized_transaction_hash": "0x88dda6af6f386d80660809baf96d1582764c4619491e9801ce2741e0026703e8",
-          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+          "raw_transaction_hash": "0xcd7c9287c77039ddb0af4b993ba91aa2a630a478b0b4e70fe67c83cfa7a66045",
+          "serialized_transaction_hash": "0x87623bcb45d37c2535fc4b61b6124bc3e1f8377ec4fb0bf303ceb191751bcb65",
+          "artifact_hashes": ["0x9e6c59bc96cfdd426337dbffee4772b9ede56fa6622ff5fb1b4fa0f9fa83a678"]
         }
       ],
       "gaps": []
@@ -127,10 +127,10 @@
             "tests/artifact_checker.rs",
             "tests/fixtures/committed_substate_vectors.json"
           ],
-          "raw_transaction_hash": "0x1544628215dc96e0a36b6285379a709bf5f67da92da1ee4f8aa6a09c58a37535",
-          "serialized_transaction_hash": "0x755c9ae4ac731ce6c08df91ba6952a34027591cad6a9deddc22d1b67e45a484b",
+          "raw_transaction_hash": "0xb301a23ad526c83b76b49ae44d783caf34134174817d8a6d33d489db94abadde",
+          "serialized_transaction_hash": "0xe6ee2ff6df25b47a974e702f2b2bf8443f2ba4a589c3d4842c37d0c1cbd40297",
           "artifact_hashes": [
-            "0xb28f0eb686cfd2d95501614a359d5bfa232fbf2b6166856f111e9186fd29336c"
+            "0x7cfcfeb4ced54cbe51fc79562397453a0dd64c48bc8fd2509e78f7ec0fde26c6"
           ]
         },
         {
@@ -139,10 +139,10 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/committed_substate_scenarios.json",
           "evidence": ["tests/commitment_opening.rs", "tests/artifact_checker.rs"],
-          "raw_transaction_hash": "0x14de69ecd935754c40ec0ec2da191e2f1f32ede911c5fe50d9db51417acdda4a",
-          "serialized_transaction_hash": "0x4d69ffd71750113aa84885e97c26722616dace5d37436e977001aae6bbc2f37c",
+          "raw_transaction_hash": "0x543b1e3ed9a799bb6f964f38cc16b9dafdf943e5a00cf758bf1d25eb83f5cf0e",
+          "serialized_transaction_hash": "0xffb6c03ce806f26e7cb424cd567e97aaf17d4b2d3ef76210f57259089044a459",
           "artifact_hashes": [
-            "0x185d5a716653c01b489858e6e53bfd7936d4a52794058c09c2ffc5bba38c1d64"
+            "0xafaad5f544b00b42f435e50c2bf51a6b34fdf6b26fa273c0d58d8ae9ffff9c84"
           ]
         },
         {
@@ -151,10 +151,10 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/committed_substate_scenarios.json",
           "evidence": ["tests/commitment_opening.rs", "tests/artifact_checker.rs"],
-          "raw_transaction_hash": "0x2a87957308889e14168e046da873c8be4c990a91c4ee922523ae02ae2f5a253e",
-          "serialized_transaction_hash": "0x4f5dec48e7814bf04e012a02514db1a2ee9efa5273826826562d2b0384d7624a",
+          "raw_transaction_hash": "0x20f8d06934229b36e945d86cb3d3709fe3d31096a5ca54559d66f419dbf409e9",
+          "serialized_transaction_hash": "0x2576642131d31fabd47a4a201c6c3dc494cb09e915c66281c53251d0caaedb16",
           "artifact_hashes": [
-            "0x185d5a716653c01b489858e6e53bfd7936d4a52794058c09c2ffc5bba38c1d64"
+            "0xafaad5f544b00b42f435e50c2bf51a6b34fdf6b26fa273c0d58d8ae9ffff9c84"
           ]
         },
         {
@@ -163,10 +163,10 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/committed_substate_scenarios.json",
           "evidence": ["tests/commitment_opening.rs", "tests/artifact_checker.rs"],
-          "raw_transaction_hash": "0x5938a996d54991b89e3bf09979bc3b79bb1b63ae2d2d0ddbc2763635d10eaca8",
-          "serialized_transaction_hash": "0xdcda758609a32b4eafb7eee7beeb774d91fcbdb6ff9680913029b539b5434b05",
+          "raw_transaction_hash": "0x867be65717285fd9f6d13a9fbc5b186ecf03cd3ee37c1cf6c97fd6f1aa4fcbde",
+          "serialized_transaction_hash": "0x2fc826dc1169aecc42a2d114cfd8cdd63be63dc929e097faa408cc2d08eb8cd1",
           "artifact_hashes": [
-            "0x185d5a716653c01b489858e6e53bfd7936d4a52794058c09c2ffc5bba38c1d64"
+            "0xafaad5f544b00b42f435e50c2bf51a6b34fdf6b26fa273c0d58d8ae9ffff9c84"
           ]
         },
         {
@@ -175,10 +175,10 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/committed_substate_scenarios.json",
           "evidence": ["tests/commitment_opening.rs", "tests/artifact_checker.rs"],
-          "raw_transaction_hash": "0x5b0372c738f6654fe30ea423fa2db5a7eed96b6c29be622c10ea94a19507b889",
-          "serialized_transaction_hash": "0xa7b9f9421dbaacbf9322ab22d3ac9d6040348f4607968e32d82f2469b80bcacf",
+          "raw_transaction_hash": "0x7b3e68b93f19c472605990a010905c49fc73de7988eb7997a5a8ad9976f5aaed",
+          "serialized_transaction_hash": "0xd19cc3f0607a6f4d6f34254646d4f2e58a2ca65deca95cd26441c865e17d906a",
           "artifact_hashes": [
-            "0x185d5a716653c01b489858e6e53bfd7936d4a52794058c09c2ffc5bba38c1d64"
+            "0xafaad5f544b00b42f435e50c2bf51a6b34fdf6b26fa273c0d58d8ae9ffff9c84"
           ]
         },
         {
@@ -187,10 +187,10 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/committed_substate_scenarios.json",
           "evidence": ["tests/commitment_opening.rs", "tests/artifact_checker.rs"],
-          "raw_transaction_hash": "0x22a9f411511e0bcc32c5610ed71d0d2614c16fbdc81835b8d6a5a4891b785582",
-          "serialized_transaction_hash": "0x1d519a18b39452052dd8e25861303938ef1d40e415cff2b34a73660ba5a7fff9",
+          "raw_transaction_hash": "0xb9b41654a79edae2d1e28e98c24fba5a67028f9f1d4523edb9b87555938ab439",
+          "serialized_transaction_hash": "0x999033e746c5c00a11b1be8199984d56d1eac15bf9c21aa2f24179459355ed7a",
           "artifact_hashes": [
-            "0x185d5a716653c01b489858e6e53bfd7936d4a52794058c09c2ffc5bba38c1d64"
+            "0xafaad5f544b00b42f435e50c2bf51a6b34fdf6b26fa273c0d58d8ae9ffff9c84"
           ]
         },
         {
@@ -199,10 +199,10 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/committed_substate_scenarios.json",
           "evidence": ["tests/commitment_opening.rs", "tests/artifact_checker.rs"],
-          "raw_transaction_hash": "0x23e0d83e594ecdece439031cc3b3b737eb6ec8eb2723da9d9e9f2782b1b1d5d9",
-          "serialized_transaction_hash": "0xc5c8288b0929a84f72bd27d6cef95b32281e18ede1bb04b7e3394ba1922d8413",
+          "raw_transaction_hash": "0xd077cb540a217ea45daa40dd19799e2faeee9ecac885f65236aea1653600bfcc",
+          "serialized_transaction_hash": "0x7879a0808cc8a4e60071a155921216fff226e5da73614e10304910ebeea988f6",
           "artifact_hashes": [
-            "0x185d5a716653c01b489858e6e53bfd7936d4a52794058c09c2ffc5bba38c1d64"
+            "0xafaad5f544b00b42f435e50c2bf51a6b34fdf6b26fa273c0d58d8ae9ffff9c84"
           ]
         }
       ],
@@ -217,9 +217,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/external_verifier_scenarios.json",
           "evidence": ["tests/external_verifier_scenarios.rs", "tests/fixtures/external_exec_callee.hex"],
-          "raw_transaction_hash": "0xe91d98117cf5b101644cd093e253d59d3a694595c3305100e599656a7ac27cf8",
-          "serialized_transaction_hash": "0x80535eb11f6ccf01d40ae93b7c4d15012d2e5f406eac4bb34f816dfbd8e07dd5",
-          "artifact_hashes": ["0x24dcbbaf73a57ad1864062a0d25f952764e633870d97b2d079c4b1e057abf3ae"]
+          "raw_transaction_hash": "0x1435509cf7457c7d15ee1ecc749aaab197d101dc97e82d1c689d4ff8ab62be4a",
+          "serialized_transaction_hash": "0xca7aff3cf85815957d3d85a0765b416850b7efde267f3cfec511055f35b2beb0",
+          "artifact_hashes": ["0x81df69d820e17380b514e50f86129bf460f45d8f3f2ad5f467ad453d6a55d95d"]
         },
         {
           "scenario": "exact_identity_spawn_wait",
@@ -227,9 +227,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/external_verifier_scenarios.json",
           "evidence": ["tests/external_verifier_scenarios.rs", "tests/fixtures/external_exec_callee.hex"],
-          "raw_transaction_hash": "0xb3edda6ce51d66449eaf1aa235cb524c370535ac3a6543d0f1cc3aac1250e73c",
-          "serialized_transaction_hash": "0x51ad771db77e9ac85d44c08c8f23a8484957b14bf2e512bee41ee675d45f2b9c",
-          "artifact_hashes": ["0x6fdf614ee263418f521b373973e4c6a970ebb221cbc36073195086bfd37a7478"]
+          "raw_transaction_hash": "0xf3a7e68b599fba994e822b2a81badbb25424dbd9c711a9dfcec1a59285c6c72f",
+          "serialized_transaction_hash": "0x1c9fc5a3c4e397549db73ad2cc7eed6f30e17a7d18ea52f301f8309f2a10a50b",
+          "artifact_hashes": ["0x54b68d4ff05cc317d80d1c80da07d8a5c2aa5aaf18c76fd7e3b161e7f098cd51"]
         },
         {
           "scenario": "wrong_dependency",
@@ -237,9 +237,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/external_verifier_scenarios.json",
           "evidence": ["tests/external_verifier_scenarios.rs", "tests/fixtures/external_exec_callee.hex"],
-          "raw_transaction_hash": "0x79fc30b756b0cb7ea7c03e41e011e2ec9cbce32aad85e989bcb00bc5e524fc26",
-          "serialized_transaction_hash": "0x099a30275b0cae10072c20f205a7aefc9c06e2a93c9a36af321e5e924c1156d7",
-          "artifact_hashes": ["0x24dcbbaf73a57ad1864062a0d25f952764e633870d97b2d079c4b1e057abf3ae"]
+          "raw_transaction_hash": "0x8800f50668afb28615c5bf9a8c1ad70da70060fd4d1da0232649bcbf29683313",
+          "serialized_transaction_hash": "0xe56ac02e716b37f5bdf8f19e0ee8abb27d7d538b2267f683d954b1cb612bd176",
+          "artifact_hashes": ["0x81df69d820e17380b514e50f86129bf460f45d8f3f2ad5f467ad453d6a55d95d"]
         },
         {
           "scenario": "wrong_hash",
@@ -247,9 +247,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/external_verifier_scenarios.json",
           "evidence": ["tests/external_verifier_scenarios.rs", "tests/fixtures/external_exec_callee.hex"],
-          "raw_transaction_hash": "0x1c08ec3886b2b7e81e04acd314f31414481941b9220bcd4fb00185e1ecd71257",
-          "serialized_transaction_hash": "0x90ad11f7d99246acebd6fa9698f86b199a4dd6ffa421fe20b3804f4f96ec9f96",
-          "artifact_hashes": ["0x680ebeaf1b1f67fca328d1c79ba85bec2894ead204005ab56b57ec8b4e3e43d3"]
+          "raw_transaction_hash": "0xbf0251985ff0c437c57e76f9eee848b380cb5b13c47208c34837ec6c3cb49546",
+          "serialized_transaction_hash": "0x45254ab03d7353878eeca505bfc0d968c4accb75f70fe7b98394abdc036d3bff",
+          "artifact_hashes": ["0xfad90463eb24ce0f7d600da06ac20c8c121d592d54c4caeec04dc0b6c3d3c297"]
         },
         {
           "scenario": "wrong_adapter",
@@ -257,9 +257,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/external_verifier_scenarios.json",
           "evidence": ["tests/external_verifier_scenarios.rs", "tests/fixtures/external_exec_callee.hex"],
-          "raw_transaction_hash": "0x11ce9978912b5925f6dc4df9967fe0533d4caca58b3d069212a04e919de68898",
-          "serialized_transaction_hash": "0xd5eab90512a2027fa1a47116b8fccb0b05f0f762318b0bf2b1c2e8a8104fe765",
-          "artifact_hashes": ["0x300d938be9c2670b1710e7273ce3cb4bf8b725d4fa3643d38ab940f2d826c0a4"]
+          "raw_transaction_hash": "0x062f753ff24597379cc6592b546641c5d12dc8b276fbb6d86fa87ac091d91551",
+          "serialized_transaction_hash": "0x22c8e8f630982b0d66cdbcc04c0078cbd6c90f8b81bc3267bb2a0897cbc96415",
+          "artifact_hashes": ["0xa6bfd675ea1f892a0b2d33af27514d85e1a71e7dc854a6ac8cbb6da6cd1488ff"]
         },
         {
           "scenario": "wrong_argument",
@@ -267,9 +267,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/external_verifier_scenarios.json",
           "evidence": ["tests/external_verifier_scenarios.rs", "tests/fixtures/external_exec_callee.hex"],
-          "raw_transaction_hash": "0xccf0b5e323d56f24316a4f47ecb5fb584f5c732365074299b79b3dc2556a79cc",
-          "serialized_transaction_hash": "0x22fdcc6f1687b49bdac29e7318e0400873c4148d55de927432cef1d335cd3623",
-          "artifact_hashes": ["0x6f5255524284589645016936d1f4e48d3d91a4421d1a5e63da22f2bd918c4059"]
+          "raw_transaction_hash": "0xea0de0049349432a8a99fee9da4a39187d9c20a7fc3de78ca9b3f6908079203c",
+          "serialized_transaction_hash": "0xe92fbf1ca612f2ac9e6bba871c6a99ccde983e6cff83f4ecff74303fd23ca08b",
+          "artifact_hashes": ["0xa6c0d8ee2ff3da85cb8fc167a984d119f699995deade879216000bae766543cb"]
         },
         {
           "scenario": "wrong_scope",
@@ -277,9 +277,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/external_verifier_scenarios.json",
           "evidence": ["tests/external_verifier_scenarios.rs", "tests/fixtures/external_exec_callee.hex"],
-          "raw_transaction_hash": "0xd4d8bb95079e88bd92eae372121b124e8bdeaef6792d18abbb2607f738ca0b82",
-          "serialized_transaction_hash": "0x4d58800fabece55ff5e5980a60f833996b047e8913b44610d401b94e19d357fa",
-          "artifact_hashes": ["0x60f925aba3e6216ad1e60b24ce875a5ae25cbbce193a62c87c3c9f79e0e7ffcb"]
+          "raw_transaction_hash": "0xd7a93420127a7ef7973491be674512ce4d98ca63bda964886531b0e134c913b1",
+          "serialized_transaction_hash": "0x36348486104b14ff96cfa643ee8a2a538587a3da2a1af0805bdd7862c310580b",
+          "artifact_hashes": ["0x07f77982cf9b8bacf5dcf8f853bd20d9b807424e06ced2221259b9a7649128c3"]
         },
         {
           "scenario": "wrong_statement",
@@ -287,9 +287,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/external_verifier_scenarios.json",
           "evidence": ["tests/external_verifier_scenarios.rs", "tests/fixtures/external_exec_callee.hex"],
-          "raw_transaction_hash": "0xd4d8bb95079e88bd92eae372121b124e8bdeaef6792d18abbb2607f738ca0b82",
-          "serialized_transaction_hash": "0xd104607a015035c9fd38a841d41963950bb41941a817c4626f57cc81f433c814",
-          "artifact_hashes": ["0x60f925aba3e6216ad1e60b24ce875a5ae25cbbce193a62c87c3c9f79e0e7ffcb"]
+          "raw_transaction_hash": "0xd7a93420127a7ef7973491be674512ce4d98ca63bda964886531b0e134c913b1",
+          "serialized_transaction_hash": "0x20e0bfe2161a67ab2e2759add02faab33ac20a55da8cfd27bf7fddb9e5c5eda6",
+          "artifact_hashes": ["0x07f77982cf9b8bacf5dcf8f853bd20d9b807424e06ced2221259b9a7649128c3"]
         },
         {
           "scenario": "child_failure",
@@ -297,9 +297,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/external_verifier_scenarios.json",
           "evidence": ["tests/external_verifier_scenarios.rs", "tests/fixtures/external_exec_callee.hex"],
-          "raw_transaction_hash": "0x3922d402230c491d0618862603805be241b3ed5d4e45f48b9117850dcb38bcd2",
-          "serialized_transaction_hash": "0x11a7790eb5f09548eaa82aa6582f198c44ad5a0e53dcd45c86699fdd58b5a3ad",
-          "artifact_hashes": ["0xfda32cfc35e78c6ebbef5f273f6e76abeca6c00a3e44384a4df393a7b8dd2972"]
+          "raw_transaction_hash": "0x4c4f1b39a9c2619a7c0a22e2f4068132499ad81a2c92291d6af33bf4b24f8952",
+          "serialized_transaction_hash": "0xa182abf5e5088dc2dd3618ad2dee411fec5fdc10154b8446d69f4e44e47b89dc",
+          "artifact_hashes": ["0xfed142e94fc4a14735318329adbf0f037d4986fe1c3b9f8a03aca9dbf85c8545"]
         },
         {
           "scenario": "post_build_substitution",
@@ -307,9 +307,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/external_verifier_scenarios.json",
           "evidence": ["tests/external_verifier_scenarios.rs", "tests/fixtures/external_exec_callee.hex"],
-          "raw_transaction_hash": "0xd4d8bb95079e88bd92eae372121b124e8bdeaef6792d18abbb2607f738ca0b82",
-          "serialized_transaction_hash": "0xd7b4c0d914d12d572cb8f97b260e98bb32f05fae6ba1aeaaff0aed0a58e5f96f",
-          "artifact_hashes": ["0x60f925aba3e6216ad1e60b24ce875a5ae25cbbce193a62c87c3c9f79e0e7ffcb"]
+          "raw_transaction_hash": "0xd7a93420127a7ef7973491be674512ce4d98ca63bda964886531b0e134c913b1",
+          "serialized_transaction_hash": "0x5994bddc115dd4e0464775f13a4807437f5238e0d38420a2b9045463a23ed577",
+          "artifact_hashes": ["0x07f77982cf9b8bacf5dcf8f853bd20d9b807424e06ced2221259b9a7649128c3"]
         }
       ],
       "gaps": []
@@ -323,9 +323,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/fungible_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
-          "raw_transaction_hash": "0x52bd2491efcce71e83bd2036cf71c4580403223a44b8b09d298533b077482a08",
-          "serialized_transaction_hash": "0x952e38ff9456a20f8000304e9245dd4dad0da9ff680bf6c137e4b7c95bf4effc",
-          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+          "raw_transaction_hash": "0xabcd58c0ef2096fc95d7d8a81d952c461efe30b9b36434d6d7fa223c79dfd7cc",
+          "serialized_transaction_hash": "0xea0dc8eb47f1b7e89d5a9f56a4e3092faac66202e257b936daa5299ff0e039db",
+          "artifact_hashes": ["0x9e6c59bc96cfdd426337dbffee4772b9ede56fa6622ff5fb1b4fa0f9fa83a678"]
         },
         {
           "scenario": "transfer",
@@ -333,9 +333,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/fungible_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
-          "raw_transaction_hash": "0x6902ae8eb9ba5f07559a800c35b2a9abb04b5644db5607d646b1b7cb315c938e",
-          "serialized_transaction_hash": "0x0ef5c92acb1eaa69b6fee3de4caac82c63ae5c991046e2cbb3bbbbc72c4ff7e7",
-          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+          "raw_transaction_hash": "0xc898d4b61aeb1b35cc062f42c573bb40153005adab2717188a50650dee1e41cb",
+          "serialized_transaction_hash": "0x71dba597efa51c2ec07841a1700ef02d2601ef27ca20c260ac7712d6dab97dfe",
+          "artifact_hashes": ["0x9e6c59bc96cfdd426337dbffee4772b9ede56fa6622ff5fb1b4fa0f9fa83a678"]
         },
         {
           "scenario": "bounded_split",
@@ -343,9 +343,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/fungible_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
-          "raw_transaction_hash": "0x1455914c79422d3ea8e009f38c2585a4ec921b21aedd8ea02c8c7d0872a2ca04",
-          "serialized_transaction_hash": "0x749efa30b2906bfe407bcccb992c31f5d1f52b87541e745deb200389ad71aaed",
-          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+          "raw_transaction_hash": "0x36bf88a99ca3f9c6d31f5a1754282573358151cff2f11df4c26e6ac4b2aeeb83",
+          "serialized_transaction_hash": "0x3d31d415c9db2b3239e3a38587014ef2e24daafa4c297984a5d059b634ba15f9",
+          "artifact_hashes": ["0x9e6c59bc96cfdd426337dbffee4772b9ede56fa6622ff5fb1b4fa0f9fa83a678"]
         },
         {
           "scenario": "bounded_merge",
@@ -353,9 +353,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/fungible_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
-          "raw_transaction_hash": "0xf9560d0fdbddd79be242aef8b4975573dfcc6df4bcb707644f3ad22d30c5e755",
-          "serialized_transaction_hash": "0xbe38162d712fdaf80eb26c11079c926159005900fc3b0b76449a367605c2d0ed",
-          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+          "raw_transaction_hash": "0xde660480b32546f933ad65d0f048aa73262cb90031e9ed51453e70e9165e8c6e",
+          "serialized_transaction_hash": "0x6bde74898104250f7d8090ceabcef867120439344193d3b70bcc04bcb635b1bb",
+          "artifact_hashes": ["0x9e6c59bc96cfdd426337dbffee4772b9ede56fa6622ff5fb1b4fa0f9fa83a678"]
         },
         {
           "scenario": "burn",
@@ -363,9 +363,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/fungible_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
-          "raw_transaction_hash": "0xb314d11e716e5c2bc72790ed79d2ddbb5c7c488fe8481b56d66991073b6021c6",
-          "serialized_transaction_hash": "0x38c991eb9ae5f9ec234b8d4d4dc780981ea0790e4d0c324b71cc176c8711aa99",
-          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+          "raw_transaction_hash": "0xb121f5a28bbb80fa8576c689a667c78c12b6c3280453a0daf9735da67c1418ae",
+          "serialized_transaction_hash": "0x0fa3c09fffcf2b1ee02800ed66ed5e88eca1217596d15cff3f164e5e5300dc09",
+          "artifact_hashes": ["0x9e6c59bc96cfdd426337dbffee4772b9ede56fa6622ff5fb1b4fa0f9fa83a678"]
         },
         {
           "scenario": "replay",
@@ -373,9 +373,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/fungible_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
-          "raw_transaction_hash": "0x52bd2491efcce71e83bd2036cf71c4580403223a44b8b09d298533b077482a08",
-          "serialized_transaction_hash": "0x952e38ff9456a20f8000304e9245dd4dad0da9ff680bf6c137e4b7c95bf4effc",
-          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+          "raw_transaction_hash": "0xabcd58c0ef2096fc95d7d8a81d952c461efe30b9b36434d6d7fa223c79dfd7cc",
+          "serialized_transaction_hash": "0xea0dc8eb47f1b7e89d5a9f56a4e3092faac66202e257b936daa5299ff0e039db",
+          "artifact_hashes": ["0x9e6c59bc96cfdd426337dbffee4772b9ede56fa6622ff5fb1b4fa0f9fa83a678"]
         },
         {
           "scenario": "missing_or_extra_cell",
@@ -383,9 +383,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/fungible_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
-          "raw_transaction_hash": "0xf864329b86886c1f1f4b67f865b6390e93a362aaefea41504f97142750b82c1e",
-          "serialized_transaction_hash": "0x9ac41b113377f31d79c5d923af2009089c8407d5cdc14dc41a0e674cdfcc753c",
-          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+          "raw_transaction_hash": "0x9ddc5642a2c0ac8f3672580e699b1f73b8d8df44844f1c5c1977db788f116d43",
+          "serialized_transaction_hash": "0xef33b378ecd032de31a678428fe2d3d27cae76c1b74053c440bf307012225489",
+          "artifact_hashes": ["0x9e6c59bc96cfdd426337dbffee4772b9ede56fa6622ff5fb1b4fa0f9fa83a678"]
         },
         {
           "scenario": "wrong_amount",
@@ -393,9 +393,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/fungible_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
-          "raw_transaction_hash": "0x56071d7ac75761db0a2985565d6f74c67c87d33a6320d180749b6c5f7a13f48d",
-          "serialized_transaction_hash": "0xd6b7aaef2727e7e8084c3677ef06c47baf7ab5b3c274ccaff93653de411b6f7d",
-          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+          "raw_transaction_hash": "0x2a8842850f49ed12f82e2d22cf2fa82c51895a4a1dd3c431f39488a930cc1cd4",
+          "serialized_transaction_hash": "0xbc8f3dc14c08b09f62522bead3869b8a9aa9cf6b5efd6a795b29863ec24a7bf0",
+          "artifact_hashes": ["0x9e6c59bc96cfdd426337dbffee4772b9ede56fa6622ff5fb1b4fa0f9fa83a678"]
         },
         {
           "scenario": "overflow",
@@ -403,9 +403,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/fungible_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
-          "raw_transaction_hash": "0x05dbb3b4fca0b62aa370a9e2812b0dec17757a7242c4b227d7056c8421964409",
-          "serialized_transaction_hash": "0x30bed0fbd66e5a9c099bcf02f13f05aefdda678f186202a5b070054ae7b4192e",
-          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+          "raw_transaction_hash": "0x0727123ae04cd3883fc3775eb9e8ee51952e87eb98f777571317b4449e690c26",
+          "serialized_transaction_hash": "0xfebf797c938767dfc56563c62ad5b64052cabb9ff5a2325f7ad87fe7091cbdc3",
+          "artifact_hashes": ["0x9e6c59bc96cfdd426337dbffee4772b9ede56fa6622ff5fb1b4fa0f9fa83a678"]
         },
         {
           "scenario": "wrong_identity",
@@ -413,9 +413,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/fungible_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
-          "raw_transaction_hash": "0x6fe84e298b85e31beb31fed7c1b14b5be5a3bb3f93e82a35195a34523fdf9e91",
-          "serialized_transaction_hash": "0xd7c04f05a8959752412f08bb2258836c12a4e5fdeda1a1f3e7b8a8961dc2b568",
-          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+          "raw_transaction_hash": "0x9f3cee866475af135d6eafc33ca82c846cb549645400ff21cb0ddc350a4d101b",
+          "serialized_transaction_hash": "0xf744cca27e4658b5ca360ff21ce7629f763c1a03f17cf588fd7179f46b5d0fb1",
+          "artifact_hashes": ["0x9e6c59bc96cfdd426337dbffee4772b9ede56fa6622ff5fb1b4fa0f9fa83a678"]
         },
         {
           "scenario": "wrong_authority",
@@ -423,9 +423,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/fungible_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/fungible_scenarios.cell"],
-          "raw_transaction_hash": "0x6902ae8eb9ba5f07559a800c35b2a9abb04b5644db5607d646b1b7cb315c938e",
-          "serialized_transaction_hash": "0x0a20fc92fea7296fbc9af45d3066df1cae9106297860bed1721d6ace439aed2e",
-          "artifact_hashes": ["0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707"]
+          "raw_transaction_hash": "0xc898d4b61aeb1b35cc062f42c573bb40153005adab2717188a50650dee1e41cb",
+          "serialized_transaction_hash": "0xb4c95fe00009ffc587351db82f501245b6e217021f2464165f23da66a9f97184",
+          "artifact_hashes": ["0x9e6c59bc96cfdd426337dbffee4772b9ede56fa6622ff5fb1b4fa0f9fa83a678"]
         }
       ],
       "gaps": []
@@ -439,13 +439,13 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/capability_anchor_cases.json",
           "evidence": ["tests/business_corpus.rs"],
-          "raw_transaction_hash": "0xeeffbecf0ccbdda0d5709b96ccee78e11988a74be00515f96d34e84b8de73ba6",
-          "serialized_transaction_hash": "0x8b6904472b55eec2483f262331bd71b8da3920737f1924031f67e392d0c3e0bd",
+          "raw_transaction_hash": "0x025f688c8e33abb001f85534b0d16bc6f2e08adf18159965cfb0d5403a6b0880",
+          "serialized_transaction_hash": "0x1f634e453a4365addf6e2dc1b2dcccda52c7ff553c6b0016928b95cadcb0872f",
           "artifact_hashes": [
-            "0xf7b1f6db3eae3456cc0d4e97ec154eb19b70fae28a3645a7382deb72294fb018",
-            "0x5f827a767f28bcc91190945a3eeff396e24b6346e341ebe7643cbb91bac7bb28",
-            "0xaa484561bcc9aa5eef79f1808a168866ed3155a40043d60e7e6256cff3190c1c",
-            "0xc8255dcc385aa8b61aef60ea9e919e2f18d82c43cefe6e873096d493bd4c1fe7"
+            "0xf26ffbbb557f3a21c3477c198453e8e8b1cb4e189ca135ccaeb9ad45157eb3c2",
+            "0x90679a6d2bbfe68becbcda7dde1b8ebf5c15e3ba1474a376edd9c516b81a161b",
+            "0x99c1cd4ba11a89f0e1c51542bbccf6112d35315b97525de2e129523ec826973e",
+            "0xc15fe339250ba4f7529b0e834a93053a7105c95edbbe03d20b8cb488da0e022b"
           ]
         },
         {
@@ -454,13 +454,13 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/capability_anchor_cases.json",
           "evidence": ["tests/business_corpus.rs"],
-          "raw_transaction_hash": "0xeeffbecf0ccbdda0d5709b96ccee78e11988a74be00515f96d34e84b8de73ba6",
-          "serialized_transaction_hash": "0x8b6904472b55eec2483f262331bd71b8da3920737f1924031f67e392d0c3e0bd",
+          "raw_transaction_hash": "0x025f688c8e33abb001f85534b0d16bc6f2e08adf18159965cfb0d5403a6b0880",
+          "serialized_transaction_hash": "0x1f634e453a4365addf6e2dc1b2dcccda52c7ff553c6b0016928b95cadcb0872f",
           "artifact_hashes": [
-            "0xf7b1f6db3eae3456cc0d4e97ec154eb19b70fae28a3645a7382deb72294fb018",
-            "0x5f827a767f28bcc91190945a3eeff396e24b6346e341ebe7643cbb91bac7bb28",
-            "0xaa484561bcc9aa5eef79f1808a168866ed3155a40043d60e7e6256cff3190c1c",
-            "0xc8255dcc385aa8b61aef60ea9e919e2f18d82c43cefe6e873096d493bd4c1fe7"
+            "0xf26ffbbb557f3a21c3477c198453e8e8b1cb4e189ca135ccaeb9ad45157eb3c2",
+            "0x90679a6d2bbfe68becbcda7dde1b8ebf5c15e3ba1474a376edd9c516b81a161b",
+            "0x99c1cd4ba11a89f0e1c51542bbccf6112d35315b97525de2e129523ec826973e",
+            "0xc15fe339250ba4f7529b0e834a93053a7105c95edbbe03d20b8cb488da0e022b"
           ]
         },
         {
@@ -469,10 +469,10 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/capability_anchor_cases.json",
           "evidence": ["tests/business_corpus.rs"],
-          "raw_transaction_hash": "0x6dfedc2385a4a10e9091db01b759cb87454403b6cd2c5c307037be9320e5e5ad",
-          "serialized_transaction_hash": "0x251d6fc03933adf46189c3e88f485a9ff4d539eb154bd61937b4729bcca8c6d5",
+          "raw_transaction_hash": "0x7d7c7346470131452c8014fcd9f3ee9bd652c5e931042c939ea82bcd18656b22",
+          "serialized_transaction_hash": "0xedf7148d721af52027cb67564bf23eee380173a19640c270c6775c4b59ec5270",
           "artifact_hashes": [
-            "0x5f827a767f28bcc91190945a3eeff396e24b6346e341ebe7643cbb91bac7bb28"
+            "0x90679a6d2bbfe68becbcda7dde1b8ebf5c15e3ba1474a376edd9c516b81a161b"
           ]
         },
         {
@@ -481,10 +481,10 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/capability_anchor_cases.json",
           "evidence": ["tests/business_corpus.rs"],
-          "raw_transaction_hash": "0xe963f8d00bfd0ca964e3c6698f51624c34e7da64ec412ef8015a1c81e37d513d",
-          "serialized_transaction_hash": "0x6057dae1afae897b8f80ac6243409c3592bb5bc8932d65ad34bf0f84f98941d1",
+          "raw_transaction_hash": "0xb39f4b15ada522fd0fba64ac4fce17d0bb8ad8f43dbb789b1e69a2380c44915f",
+          "serialized_transaction_hash": "0x6fb7c4d3f028f0f080784112e7fb06e9fc6301331c9e426d7718b4dcbd7317c0",
           "artifact_hashes": [
-            "0x5f827a767f28bcc91190945a3eeff396e24b6346e341ebe7643cbb91bac7bb28"
+            "0x90679a6d2bbfe68becbcda7dde1b8ebf5c15e3ba1474a376edd9c516b81a161b"
           ]
         },
         {
@@ -493,13 +493,13 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/capability_anchor_cases.json",
           "evidence": ["tests/business_corpus.rs"],
-          "raw_transaction_hash": "0xeeffbecf0ccbdda0d5709b96ccee78e11988a74be00515f96d34e84b8de73ba6",
-          "serialized_transaction_hash": "0x016bbf3f66327bf8d2c0a294eb40b55b12f2ef55a0139a7db1d9493ab3a181a9",
+          "raw_transaction_hash": "0x025f688c8e33abb001f85534b0d16bc6f2e08adf18159965cfb0d5403a6b0880",
+          "serialized_transaction_hash": "0x2f9223b192bcddfdfabcf3187e17aac7f4c3210d62158e681dbbc7b7e8105f50",
           "artifact_hashes": [
-            "0xf7b1f6db3eae3456cc0d4e97ec154eb19b70fae28a3645a7382deb72294fb018",
-            "0x5f827a767f28bcc91190945a3eeff396e24b6346e341ebe7643cbb91bac7bb28",
-            "0xaa484561bcc9aa5eef79f1808a168866ed3155a40043d60e7e6256cff3190c1c",
-            "0xc8255dcc385aa8b61aef60ea9e919e2f18d82c43cefe6e873096d493bd4c1fe7"
+            "0xf26ffbbb557f3a21c3477c198453e8e8b1cb4e189ca135ccaeb9ad45157eb3c2",
+            "0x90679a6d2bbfe68becbcda7dde1b8ebf5c15e3ba1474a376edd9c516b81a161b",
+            "0x99c1cd4ba11a89f0e1c51542bbccf6112d35315b97525de2e129523ec826973e",
+            "0xc15fe339250ba4f7529b0e834a93053a7105c95edbbe03d20b8cb488da0e022b"
           ]
         },
         {
@@ -508,13 +508,13 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/capability_anchor_cases.json",
           "evidence": ["tests/business_corpus.rs"],
-          "raw_transaction_hash": "0x582d82554b45f3935929ef8cccb7be0c7bd6667c438b36eab56204df8ce82aa6",
-          "serialized_transaction_hash": "0xd3bd02305c76c60d882d8ac42cf73156f5bb616e1d584e47b4c9ccc41bf405a2",
+          "raw_transaction_hash": "0x693906cdad4f32a071d6114c9e903710831de2a53c339d00f7b19718b64bd58f",
+          "serialized_transaction_hash": "0xa7b83f9dff8182fc26a9eaa6b896ab30057e576c88ebb45878c91d277ea456a9",
           "artifact_hashes": [
-            "0xf7b1f6db3eae3456cc0d4e97ec154eb19b70fae28a3645a7382deb72294fb018",
-            "0x5f827a767f28bcc91190945a3eeff396e24b6346e341ebe7643cbb91bac7bb28",
-            "0xaa484561bcc9aa5eef79f1808a168866ed3155a40043d60e7e6256cff3190c1c",
-            "0xc8255dcc385aa8b61aef60ea9e919e2f18d82c43cefe6e873096d493bd4c1fe7"
+            "0xf26ffbbb557f3a21c3477c198453e8e8b1cb4e189ca135ccaeb9ad45157eb3c2",
+            "0x90679a6d2bbfe68becbcda7dde1b8ebf5c15e3ba1474a376edd9c516b81a161b",
+            "0x99c1cd4ba11a89f0e1c51542bbccf6112d35315b97525de2e129523ec826973e",
+            "0xc15fe339250ba4f7529b0e834a93053a7105c95edbbe03d20b8cb488da0e022b"
           ]
         },
         {
@@ -523,13 +523,13 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/capability_anchor_cases.json",
           "evidence": ["tests/business_corpus.rs"],
-          "raw_transaction_hash": "0xb4818b0c429830cf06f09624d699a35ca031f5537dea9ff9d7c6a1203a22fc3d",
-          "serialized_transaction_hash": "0x0a0688f595160f863a4aeaa051044184d31ca0f7ef93694a52c1cd85a700f174",
+          "raw_transaction_hash": "0xbf9b20def0ebadf5055ff6f3aa21d97d611314594902198c86fe9e6aa3246caf",
+          "serialized_transaction_hash": "0x294e53396bc248476f6c4363bc5c8f686c9410fe501a38d03375fe8bcd2f402f",
           "artifact_hashes": [
-            "0xf7b1f6db3eae3456cc0d4e97ec154eb19b70fae28a3645a7382deb72294fb018",
-            "0x5f827a767f28bcc91190945a3eeff396e24b6346e341ebe7643cbb91bac7bb28",
-            "0xaa484561bcc9aa5eef79f1808a168866ed3155a40043d60e7e6256cff3190c1c",
-            "0xc8255dcc385aa8b61aef60ea9e919e2f18d82c43cefe6e873096d493bd4c1fe7"
+            "0xf26ffbbb557f3a21c3477c198453e8e8b1cb4e189ca135ccaeb9ad45157eb3c2",
+            "0x90679a6d2bbfe68becbcda7dde1b8ebf5c15e3ba1474a376edd9c516b81a161b",
+            "0x99c1cd4ba11a89f0e1c51542bbccf6112d35315b97525de2e129523ec826973e",
+            "0xc15fe339250ba4f7529b0e834a93053a7105c95edbbe03d20b8cb488da0e022b"
           ]
         },
         {
@@ -538,13 +538,13 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/capability_anchor_cases.json",
           "evidence": ["tests/business_corpus.rs"],
-          "raw_transaction_hash": "0x898696abf01e0342e03a613c4e8a673bded0951d30c19f7941d09445a13797d4",
-          "serialized_transaction_hash": "0xec5200f4f5a6d592de114ed3c366aabd90971e7b4d559334816205c336b3e803",
+          "raw_transaction_hash": "0x77bf07bff8af1bf3c9085906b85e2bd6c9c40c08c78cb99bf3c6de341f67d039",
+          "serialized_transaction_hash": "0x628e5585206ad3c3387062a56bc0ecd650d33aca7a24deb1c634fec8c37c93dd",
           "artifact_hashes": [
-            "0xf7b1f6db3eae3456cc0d4e97ec154eb19b70fae28a3645a7382deb72294fb018",
-            "0x5f827a767f28bcc91190945a3eeff396e24b6346e341ebe7643cbb91bac7bb28",
-            "0xaa484561bcc9aa5eef79f1808a168866ed3155a40043d60e7e6256cff3190c1c",
-            "0xc8255dcc385aa8b61aef60ea9e919e2f18d82c43cefe6e873096d493bd4c1fe7"
+            "0xf26ffbbb557f3a21c3477c198453e8e8b1cb4e189ca135ccaeb9ad45157eb3c2",
+            "0x90679a6d2bbfe68becbcda7dde1b8ebf5c15e3ba1474a376edd9c516b81a161b",
+            "0x99c1cd4ba11a89f0e1c51542bbccf6112d35315b97525de2e129523ec826973e",
+            "0xc15fe339250ba4f7529b0e834a93053a7105c95edbbe03d20b8cb488da0e022b"
           ]
         },
         {
@@ -553,13 +553,13 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/capability_anchor_cases.json",
           "evidence": ["tests/business_corpus.rs"],
-          "raw_transaction_hash": "0xeeffbecf0ccbdda0d5709b96ccee78e11988a74be00515f96d34e84b8de73ba6",
-          "serialized_transaction_hash": "0x8b6904472b55eec2483f262331bd71b8da3920737f1924031f67e392d0c3e0bd",
+          "raw_transaction_hash": "0x025f688c8e33abb001f85534b0d16bc6f2e08adf18159965cfb0d5403a6b0880",
+          "serialized_transaction_hash": "0x1f634e453a4365addf6e2dc1b2dcccda52c7ff553c6b0016928b95cadcb0872f",
           "artifact_hashes": [
-            "0xf7b1f6db3eae3456cc0d4e97ec154eb19b70fae28a3645a7382deb72294fb018",
-            "0x5f827a767f28bcc91190945a3eeff396e24b6346e341ebe7643cbb91bac7bb28",
-            "0xaa484561bcc9aa5eef79f1808a168866ed3155a40043d60e7e6256cff3190c1c",
-            "0xc8255dcc385aa8b61aef60ea9e919e2f18d82c43cefe6e873096d493bd4c1fe7"
+            "0xf26ffbbb557f3a21c3477c198453e8e8b1cb4e189ca135ccaeb9ad45157eb3c2",
+            "0x90679a6d2bbfe68becbcda7dde1b8ebf5c15e3ba1474a376edd9c516b81a161b",
+            "0x99c1cd4ba11a89f0e1c51542bbccf6112d35315b97525de2e129523ec826973e",
+            "0xc15fe339250ba4f7529b0e834a93053a7105c95edbbe03d20b8cb488da0e022b"
           ]
         }
       ],
@@ -574,9 +574,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/nft_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/nft_scenarios.cell"],
-          "raw_transaction_hash": "0x6ccd1e6d063ea610532bc4e3dd46af5986121f0959219f3570829aa8671afc8c",
-          "serialized_transaction_hash": "0x5b5983fa277c237bbf1f6a20a5e683cef4b95e2e7bdacb3cde2e72db4fae11f7",
-          "artifact_hashes": ["0x702f0811e0d0d0b3d5ba776598c8ac58b21a38c3dfb26a6f8307f34a15e1747a"]
+          "raw_transaction_hash": "0xaca937d056ce9da1adc455db5448bca2da1191b000dfa99320e844f121a930e0",
+          "serialized_transaction_hash": "0x32d57bd30de6fcfb247b49ffae4f9e5947cbe0b366a5f628b639f78186fc95c9",
+          "artifact_hashes": ["0xf56e3beeffd7d78ef1e6f9d9c07cd3b7564eb72663be6bcf89e086ec2ae3543a"]
         },
         {
           "scenario": "metadata_update",
@@ -584,9 +584,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/nft_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/nft_scenarios.cell"],
-          "raw_transaction_hash": "0xebf8109b4668da3cd44c2d9121619564387b6cb6389431b55d547a937bbcfe65",
-          "serialized_transaction_hash": "0x3dfdb1a138109a2b93c76ccda2a0ddbb8898c766b264dfea0a9671fdcd6cf619",
-          "artifact_hashes": ["0x702f0811e0d0d0b3d5ba776598c8ac58b21a38c3dfb26a6f8307f34a15e1747a"]
+          "raw_transaction_hash": "0x542763062e20d6ee8414ebd6b1dfca649415e71bc227d3e93565d88f5d594f0f",
+          "serialized_transaction_hash": "0xf68335214f9f2f06890739d5b25c94032c5a86cfef5e2ea76436af613fddbdcb",
+          "artifact_hashes": ["0xf56e3beeffd7d78ef1e6f9d9c07cd3b7564eb72663be6bcf89e086ec2ae3543a"]
         },
         {
           "scenario": "ownership_transfer",
@@ -594,9 +594,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/nft_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/nft_scenarios.cell"],
-          "raw_transaction_hash": "0x170499bf097dbb22846ea9af740a327cf4fc9ecb3663fa5e8807ad5d3f086dff",
-          "serialized_transaction_hash": "0xdfa150b00e500ff4848c353d2e35ddac90f18862809786eb2efc060526dc88c0",
-          "artifact_hashes": ["0x702f0811e0d0d0b3d5ba776598c8ac58b21a38c3dfb26a6f8307f34a15e1747a"]
+          "raw_transaction_hash": "0xd401aec18fe85646337d0845d52913a8546d36bf49500ddbf82dee21a1e0aa26",
+          "serialized_transaction_hash": "0x654e2d728b2541061a9a2204175a255ffd906027c55b2c1e2d31ef79c0f1de1c",
+          "artifact_hashes": ["0xf56e3beeffd7d78ef1e6f9d9c07cd3b7564eb72663be6bcf89e086ec2ae3543a"]
         },
         {
           "scenario": "capacity_adjustment",
@@ -604,9 +604,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/nft_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/nft_capacity_scenario.cell"],
-          "raw_transaction_hash": "0x8650da7eac43c2f116fee31bea3ef5142302426b05ad0adcea9dd0d4041f0711",
-          "serialized_transaction_hash": "0x95f98aa33917401c2bfd375da0b766c60a54f5b654fe02326c973a255bc4835f",
-          "artifact_hashes": ["0x56028936f39ad5006cf69ed2f05d556539eb55395a17ed7679391a0c588b0008"]
+          "raw_transaction_hash": "0x658e6345012a88ed882e7a9d3eaf5793f3af1e04e6a851d4e0a475bfc523278a",
+          "serialized_transaction_hash": "0xfede3ba1b11a87f2ae3d1553db7a1296075d424c1e1a53c08dc44f514989d374",
+          "artifact_hashes": ["0x939d465727acc081655e125edf23b55feea5c5637170c27ab539c5ce760ace1c"]
         },
         {
           "scenario": "burn",
@@ -614,9 +614,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/nft_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/nft_scenarios.cell"],
-          "raw_transaction_hash": "0x3e2d34e58bf8b4a4b76eea0091bed5c8c4ff0e3621356763402700d50304cb17",
-          "serialized_transaction_hash": "0xb425ff92b36e4c630cfb70114920e6c9a645d07e0e247a057178230df767a4f5",
-          "artifact_hashes": ["0x702f0811e0d0d0b3d5ba776598c8ac58b21a38c3dfb26a6f8307f34a15e1747a"]
+          "raw_transaction_hash": "0x6c0f9aaedfd7fc068bc7e0645a417dc58bdbec88af461cc6102b88de94603efd",
+          "serialized_transaction_hash": "0x6920ec69954c5406b1a1c4e7df47d35881d9aae7c82cb164c0189b92872f026e",
+          "artifact_hashes": ["0xf56e3beeffd7d78ef1e6f9d9c07cd3b7564eb72663be6bcf89e086ec2ae3543a"]
         },
         {
           "scenario": "duplicate_identity",
@@ -624,9 +624,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/nft_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/nft_scenarios.cell"],
-          "raw_transaction_hash": "0x2676834041ef4da7f63719f7fb8c52e045da2fb3390f59b7b0aa7947778c0351",
-          "serialized_transaction_hash": "0x918787ff57255ee6a61be9dfe7206719fdb8b42a588c8c7e0d9bebc47cc8c54d",
-          "artifact_hashes": ["0x702f0811e0d0d0b3d5ba776598c8ac58b21a38c3dfb26a6f8307f34a15e1747a"]
+          "raw_transaction_hash": "0xc0750788dd2bd81cd743cdfd9a0e69235815945701aa36e806032a56f1826cc6",
+          "serialized_transaction_hash": "0x4d6a2aec72eef1762c3f624129c68a22e92a86f45b327f340ad7cc96df8968da",
+          "artifact_hashes": ["0xf56e3beeffd7d78ef1e6f9d9c07cd3b7564eb72663be6bcf89e086ec2ae3543a"]
         },
         {
           "scenario": "stale_state",
@@ -634,9 +634,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/nft_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/nft_scenarios.cell"],
-          "raw_transaction_hash": "0x7cd6d858f16602b51ef4d7ad78b34793dbfceeacb586a81bf861d7c86f4498c8",
-          "serialized_transaction_hash": "0x442ea4b917f248b80fcd87dafd7c91236fcea71661ed4b3030459c39fc15437d",
-          "artifact_hashes": ["0x702f0811e0d0d0b3d5ba776598c8ac58b21a38c3dfb26a6f8307f34a15e1747a"]
+          "raw_transaction_hash": "0xab66f6d4ad4fd219d4ff605ff30c3054a481e2c3adc3ffaf04f48430a585c589",
+          "serialized_transaction_hash": "0xb3a9402e6c001a14300f891d80f408113d4955c6dfa8261d6c691a47261c56ca",
+          "artifact_hashes": ["0xf56e3beeffd7d78ef1e6f9d9c07cd3b7564eb72663be6bcf89e086ec2ae3543a"]
         },
         {
           "scenario": "wrong_lock",
@@ -644,9 +644,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/nft_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/nft_scenarios.cell"],
-          "raw_transaction_hash": "0x01629a3e7bb4519a83238df2fa6e3d367931be4a24481b1d041ee88ed3c695af",
-          "serialized_transaction_hash": "0x8385c56ecd7093f7135c6e22b1f8fa198896a472d003edaaa0d0fc57ab8a4ecf",
-          "artifact_hashes": ["0x702f0811e0d0d0b3d5ba776598c8ac58b21a38c3dfb26a6f8307f34a15e1747a"]
+          "raw_transaction_hash": "0x9dad70f5dabd8e17ee3aabb88ee820c2460660925aa8cfac4cf5fd7aacb82648",
+          "serialized_transaction_hash": "0x488797c105eb599a76c74383b737e70991a74d78cf019f7451f84721ba22b3c0",
+          "artifact_hashes": ["0xf56e3beeffd7d78ef1e6f9d9c07cd3b7564eb72663be6bcf89e086ec2ae3543a"]
         },
         {
           "scenario": "wrong_type",
@@ -654,9 +654,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/nft_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/nft_scenarios.cell"],
-          "raw_transaction_hash": "0x2cdcd8455498003ddc2e12ecee60f86f094e10f488ba634c667eb466ea6724ef",
-          "serialized_transaction_hash": "0xdc3364488e50910117eae52a7751c6311b815bb20c11a1e9591d8e81604bb398",
-          "artifact_hashes": ["0x702f0811e0d0d0b3d5ba776598c8ac58b21a38c3dfb26a6f8307f34a15e1747a"]
+          "raw_transaction_hash": "0x653a9169da3a7db24f254413dc80bf9333a9a505b742dae7659744aebe33d6db",
+          "serialized_transaction_hash": "0xb7e9eefc13f09a86d8c2b63691e292c565d2470c9fc69eeeb15057aa3f3d5dd6",
+          "artifact_hashes": ["0xf56e3beeffd7d78ef1e6f9d9c07cd3b7564eb72663be6bcf89e086ec2ae3543a"]
         },
         {
           "scenario": "unauthorized_update",
@@ -664,9 +664,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/nft_scenarios.json",
           "evidence": ["tests/fungible_scenarios.rs", "tests/fixtures/nft_scenarios.cell"],
-          "raw_transaction_hash": "0xebf8109b4668da3cd44c2d9121619564387b6cb6389431b55d547a937bbcfe65",
-          "serialized_transaction_hash": "0x1622d4a617b77bcb5b3a28ebdb0653380efb19c09822f5ffde31c87927095007",
-          "artifact_hashes": ["0x702f0811e0d0d0b3d5ba776598c8ac58b21a38c3dfb26a6f8307f34a15e1747a"]
+          "raw_transaction_hash": "0x542763062e20d6ee8414ebd6b1dfca649415e71bc227d3e93565d88f5d594f0f",
+          "serialized_transaction_hash": "0x07daddb783e505252c637d875dad385fd80cc46aae0f37f1f0b174a922301240",
+          "artifact_hashes": ["0xf56e3beeffd7d78ef1e6f9d9c07cd3b7564eb72663be6bcf89e086ec2ae3543a"]
         }
       ],
       "gaps": []
@@ -680,9 +680,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/capability_anchor_cases.json",
           "evidence": ["tests/business_corpus.rs"],
-          "raw_transaction_hash": "0xcd6b5a6b875958ad5d172a352daf0a5dd331dee23d524481b5df99a78db8345f",
-          "serialized_transaction_hash": "0xadf77c6b46542e61ea4d02098b90a525e087eea39e957340589affe0b78fa3d6",
-          "artifact_hashes": ["0x5f827a767f28bcc91190945a3eeff396e24b6346e341ebe7643cbb91bac7bb28"]
+          "raw_transaction_hash": "0x5f1305f6195b4d344e97acf065459b6d9ecb294846f44c513ef2f397a56885b0",
+          "serialized_transaction_hash": "0x209b8a2d21ec04cef2108aa57e165c6143ba0f4cdf0a659c4266cfb1a0ce0495",
+          "artifact_hashes": ["0x90679a6d2bbfe68becbcda7dde1b8ebf5c15e3ba1474a376edd9c516b81a161b"]
         },
         {
           "scenario": "cancel",
@@ -690,9 +690,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/capability_anchor_cases.json",
           "evidence": ["tests/business_corpus.rs"],
-          "raw_transaction_hash": "0xe963f8d00bfd0ca964e3c6698f51624c34e7da64ec412ef8015a1c81e37d513d",
-          "serialized_transaction_hash": "0x6057dae1afae897b8f80ac6243409c3592bb5bc8932d65ad34bf0f84f98941d1",
-          "artifact_hashes": ["0x5f827a767f28bcc91190945a3eeff396e24b6346e341ebe7643cbb91bac7bb28"]
+          "raw_transaction_hash": "0xb39f4b15ada522fd0fba64ac4fce17d0bb8ad8f43dbb789b1e69a2380c44915f",
+          "serialized_transaction_hash": "0x6fb7c4d3f028f0f080784112e7fb06e9fc6301331c9e426d7718b4dcbd7317c0",
+          "artifact_hashes": ["0x90679a6d2bbfe68becbcda7dde1b8ebf5c15e3ba1474a376edd9c516b81a161b"]
         },
         {
           "scenario": "settle",
@@ -700,13 +700,13 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/capability_anchor_cases.json",
           "evidence": ["tests/business_corpus.rs"],
-          "raw_transaction_hash": "0xeeffbecf0ccbdda0d5709b96ccee78e11988a74be00515f96d34e84b8de73ba6",
-          "serialized_transaction_hash": "0x8b6904472b55eec2483f262331bd71b8da3920737f1924031f67e392d0c3e0bd",
+          "raw_transaction_hash": "0x025f688c8e33abb001f85534b0d16bc6f2e08adf18159965cfb0d5403a6b0880",
+          "serialized_transaction_hash": "0x1f634e453a4365addf6e2dc1b2dcccda52c7ff553c6b0016928b95cadcb0872f",
           "artifact_hashes": [
-            "0xf7b1f6db3eae3456cc0d4e97ec154eb19b70fae28a3645a7382deb72294fb018",
-            "0x5f827a767f28bcc91190945a3eeff396e24b6346e341ebe7643cbb91bac7bb28",
-            "0xaa484561bcc9aa5eef79f1808a168866ed3155a40043d60e7e6256cff3190c1c",
-            "0xc8255dcc385aa8b61aef60ea9e919e2f18d82c43cefe6e873096d493bd4c1fe7"
+            "0xf26ffbbb557f3a21c3477c198453e8e8b1cb4e189ca135ccaeb9ad45157eb3c2",
+            "0x90679a6d2bbfe68becbcda7dde1b8ebf5c15e3ba1474a376edd9c516b81a161b",
+            "0x99c1cd4ba11a89f0e1c51542bbccf6112d35315b97525de2e129523ec826973e",
+            "0xc15fe339250ba4f7529b0e834a93053a7105c95edbbe03d20b8cb488da0e022b"
           ]
         },
         {
@@ -715,9 +715,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/capability_anchor_cases.json",
           "evidence": ["tests/business_corpus.rs"],
-          "raw_transaction_hash": "0xb4818b0c429830cf06f09624d699a35ca031f5537dea9ff9d7c6a1203a22fc3d",
-          "serialized_transaction_hash": "0x0a0688f595160f863a4aeaa051044184d31ca0f7ef93694a52c1cd85a700f174",
-          "artifact_hashes": ["0xf7b1f6db3eae3456cc0d4e97ec154eb19b70fae28a3645a7382deb72294fb018"]
+          "raw_transaction_hash": "0xbf9b20def0ebadf5055ff6f3aa21d97d611314594902198c86fe9e6aa3246caf",
+          "serialized_transaction_hash": "0x294e53396bc248476f6c4363bc5c8f686c9410fe501a38d03375fe8bcd2f402f",
+          "artifact_hashes": ["0xf26ffbbb557f3a21c3477c198453e8e8b1cb4e189ca135ccaeb9ad45157eb3c2"]
         },
         {
           "scenario": "dependency_substitution",
@@ -725,9 +725,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/capability_anchor_cases.json",
           "evidence": ["tests/business_corpus.rs"],
-          "raw_transaction_hash": "0x898696abf01e0342e03a613c4e8a673bded0951d30c19f7941d09445a13797d4",
-          "serialized_transaction_hash": "0xec5200f4f5a6d592de114ed3c366aabd90971e7b4d559334816205c336b3e803",
-          "artifact_hashes": ["0xf7b1f6db3eae3456cc0d4e97ec154eb19b70fae28a3645a7382deb72294fb018"]
+          "raw_transaction_hash": "0x77bf07bff8af1bf3c9085906b85e2bd6c9c40c08c78cb99bf3c6de341f67d039",
+          "serialized_transaction_hash": "0x628e5585206ad3c3387062a56bc0ecd650d33aca7a24deb1c634fec8c37c93dd",
+          "artifact_hashes": ["0xf26ffbbb557f3a21c3477c198453e8e8b1cb4e189ca135ccaeb9ad45157eb3c2"]
         },
         {
           "scenario": "pool_merge",
@@ -735,9 +735,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/order_amm_scenarios.json",
           "evidence": ["tests/order_amm_scenarios.rs", "tests/cost_corpus.rs"],
-          "raw_transaction_hash": "0x82bef7aa8ed8f6da802bca4115216082edd55c1e925be3dffb223221ea8dc087",
-          "serialized_transaction_hash": "0x9e4bb79d17face29ee97fe6500f7c615e0533c43e84ae44612194ba1029187c4",
-          "artifact_hashes": ["0x6a50875fbd0f2e4beab28b6dfedc18730f7949d7f8e0bff41bca42313e1bfad8"]
+          "raw_transaction_hash": "0x1c23a2bdaa1a3a5cea5559a6c5ead2076dcba8d7790ec1782d89ce706fae4d97",
+          "serialized_transaction_hash": "0x77a4c2b1dd8a4d8006ce505dacbdc05932b7496c69835e67a2e30067a9517c9b",
+          "artifact_hashes": ["0x11e9299df573f77bc3b38d0183f4854b417e933850927b31f259568686f3f57b"]
         },
         {
           "scenario": "replay",
@@ -745,9 +745,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/order_amm_scenarios.json",
           "evidence": ["tests/order_amm_scenarios.rs"],
-          "raw_transaction_hash": "0x82bef7aa8ed8f6da802bca4115216082edd55c1e925be3dffb223221ea8dc087",
-          "serialized_transaction_hash": "0x9e4bb79d17face29ee97fe6500f7c615e0533c43e84ae44612194ba1029187c4",
-          "artifact_hashes": ["0x6a50875fbd0f2e4beab28b6dfedc18730f7949d7f8e0bff41bca42313e1bfad8"]
+          "raw_transaction_hash": "0x1c23a2bdaa1a3a5cea5559a6c5ead2076dcba8d7790ec1782d89ce706fae4d97",
+          "serialized_transaction_hash": "0x77a4c2b1dd8a4d8006ce505dacbdc05932b7496c69835e67a2e30067a9517c9b",
+          "artifact_hashes": ["0x11e9299df573f77bc3b38d0183f4854b417e933850927b31f259568686f3f57b"]
         },
         {
           "scenario": "output_reordering",
@@ -755,9 +755,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/order_amm_scenarios.json",
           "evidence": ["tests/order_amm_scenarios.rs"],
-          "raw_transaction_hash": "0x8d34405595cf07f6870077e1b279faca5e60371ad99b26ea6ef78f013393b1a0",
-          "serialized_transaction_hash": "0x515c12b2400bcc409d21aac44e004d8f29d159902ef121e7e43e504f0ade7e34",
-          "artifact_hashes": ["0xaa22d53049e6a6a2c6903736bf4bda2acf117e0f93eb7f9ebeb25b67b4f3424c"]
+          "raw_transaction_hash": "0xe221f2f651d1834c10b7cc174ef35a6b5c100da6792596ae59c63e32d4dab6df",
+          "serialized_transaction_hash": "0x78f0781a022c23cc05d048fc351cab000a9b886dd42fa68f3f91f22d981fda3e",
+          "artifact_hashes": ["0x6d7f305977e841455f4afba8d3851941472c27ec8c24850062244bdf35b4857a"]
         },
         {
           "scenario": "wrong_price",
@@ -765,9 +765,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/order_amm_scenarios.json",
           "evidence": ["tests/order_amm_scenarios.rs"],
-          "raw_transaction_hash": "0xa9a66578c4908d8c81027d3598e51a526eeae9f267356570641c95fdc085ebbe",
-          "serialized_transaction_hash": "0xc09371d93064e0881fc1089f1d67cce46b061d5c9e4c298e3f598622a311a426",
-          "artifact_hashes": ["0xaa22d53049e6a6a2c6903736bf4bda2acf117e0f93eb7f9ebeb25b67b4f3424c"]
+          "raw_transaction_hash": "0xc68b80d2c07fffd8dbaff3738b5fbff260d0b1c9ac907fabdfb4c456b20e9441",
+          "serialized_transaction_hash": "0xfad33ad0f95cd780902bb257466bb79f6970cc085ad0724bb69f547663c7bfa2",
+          "artifact_hashes": ["0x6d7f305977e841455f4afba8d3851941472c27ec8c24850062244bdf35b4857a"]
         }
       ],
       "gaps": []
@@ -781,9 +781,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/temporal_scenarios.json",
           "evidence": ["tests/temporal_scenarios.rs", "tests/typed_runtime_views.rs", "tests/artifact_checker.rs"],
-          "raw_transaction_hash": "0xda0b51e162aebc8b172b41d23648bc74569153466da75a162d0a955c1f78ed35",
-          "serialized_transaction_hash": "0xeb6dd63c85586c2684d36ed80e22d636ce825f0a900a56923111272fd325bcd1",
-          "artifact_hashes": ["0x1eb1139b56d05b36aae89bdca1091a6d06539f1b1ee7c187681032cec13c369c"]
+          "raw_transaction_hash": "0x4ee5768bc6abbadddb6731da3b4dbefa9e830d68ef1bfc1ac422eb5469bf77c8",
+          "serialized_transaction_hash": "0x075ffaf387d4dbbd22340b6b653aad8d3de7738f5a690160ed603432bbf108d7",
+          "artifact_hashes": ["0xafa83110497225566e7de22a91643d0532a3d7f8575b8a278be5637bebfeafbe"]
         },
         {
           "scenario": "relative_timelock",
@@ -791,9 +791,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/temporal_scenarios.json",
           "evidence": ["tests/temporal_scenarios.rs", "tests/typed_runtime_views.rs", "tests/artifact_checker.rs"],
-          "raw_transaction_hash": "0x1d2c6b465ccef0e864a59796a098b284e2a1d2b44fc5129ff49e5c7aa2ca9b0d",
-          "serialized_transaction_hash": "0x4ccc9d8d07f0ca771d5db6781421c621640a21178f48979282314f7ce139cc1f",
-          "artifact_hashes": ["0x1eb1139b56d05b36aae89bdca1091a6d06539f1b1ee7c187681032cec13c369c"]
+          "raw_transaction_hash": "0xdce08ed497797a812c1a46032b457979cccf6164188788276d4be125452b1e1b",
+          "serialized_transaction_hash": "0x0bb986acbe1c517ff5ec5cafbc7fc14b9d952a195190a3fb8420dc4daa1ed310",
+          "artifact_hashes": ["0xafa83110497225566e7de22a91643d0532a3d7f8575b8a278be5637bebfeafbe"]
         },
         {
           "scenario": "vesting",
@@ -801,9 +801,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/temporal_scenarios.json",
           "evidence": ["tests/temporal_scenarios.rs", "tests/typed_runtime_views.rs", "tests/artifact_checker.rs"],
-          "raw_transaction_hash": "0x624f5b7f77674a8dbe1381bf7d6a57b3c02a17c5101f2a74d210137993bbc8f8",
-          "serialized_transaction_hash": "0xf9ca6db516c931f47935dfe02d28816a060bb58bdfd259b5598655370341b444",
-          "artifact_hashes": ["0x1eb1139b56d05b36aae89bdca1091a6d06539f1b1ee7c187681032cec13c369c"]
+          "raw_transaction_hash": "0x38b7c975b530a353cb92960b192db92104b44a7cacd09d7de84b83d19564d0eb",
+          "serialized_transaction_hash": "0x24db0924a306ca6cf30d96279c5ab46d1de090a4ebc7cdc08bfdfd9c00e60a05",
+          "artifact_hashes": ["0xafa83110497225566e7de22a91643d0532a3d7f8575b8a278be5637bebfeafbe"]
         },
         {
           "scenario": "epoch_timestamp_block_since",
@@ -811,9 +811,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/temporal_scenarios.json",
           "evidence": ["tests/temporal_scenarios.rs", "tests/typed_runtime_views.rs", "tests/artifact_checker.rs"],
-          "raw_transaction_hash": "0x28b114d9dd45bccb6a9112efcda04631c72e46042fdae0bdd4f2ad0c2de7ce61",
-          "serialized_transaction_hash": "0x375f705ad3b95ba0b7e8cdaadcfdfacf0a987e8bc8576eca1cfed5b5d674c42d",
-          "artifact_hashes": ["0x1eb1139b56d05b36aae89bdca1091a6d06539f1b1ee7c187681032cec13c369c"]
+          "raw_transaction_hash": "0x9c966eb8b17168563f869d86f4549c2c088fe79a53bbe947f8f5523a3eb8f663",
+          "serialized_transaction_hash": "0xf575e108937b273155f72d54f3b886eea1e7eda186d6582e7f2e2d66134c95de",
+          "artifact_hashes": ["0xafa83110497225566e7de22a91643d0532a3d7f8575b8a278be5637bebfeafbe"]
         },
         {
           "scenario": "cross_domain",
@@ -821,9 +821,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/temporal_scenarios.json",
           "evidence": ["tests/temporal_scenarios.rs", "tests/typed_runtime_views.rs", "tests/artifact_checker.rs"],
-          "raw_transaction_hash": "0x36104c4cdcad6ae43a821dc6718778bb9d5dc7424b8bda43a02c98a84501d38c",
-          "serialized_transaction_hash": "0x7ce4acb796db14c589c106f1594b36cc787122919e27f1059ad6e36e0b3bc803",
-          "artifact_hashes": ["0x1eb1139b56d05b36aae89bdca1091a6d06539f1b1ee7c187681032cec13c369c"]
+          "raw_transaction_hash": "0xe5966be94b6f08329332103b402d6767d866408279b62795d507af4c512784a8",
+          "serialized_transaction_hash": "0x4148ec7b451e4616c917b555c2966746841881996046dcd5ac4e2650a040492d",
+          "artifact_hashes": ["0xafa83110497225566e7de22a91643d0532a3d7f8575b8a278be5637bebfeafbe"]
         },
         {
           "scenario": "missing_header",
@@ -831,9 +831,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/temporal_scenarios.json",
           "evidence": ["tests/temporal_scenarios.rs", "tests/typed_runtime_views.rs", "tests/artifact_checker.rs"],
-          "raw_transaction_hash": "0x2c3c2b3d6524a5e801980c658b7585d010bacdc15bfc83eb583640f66d04b001",
-          "serialized_transaction_hash": "0x1b9e5d2308bc07e64c14c6db3c9664ca370a9a4eeeed2354d107988dac26c7f6",
-          "artifact_hashes": ["0x1eb1139b56d05b36aae89bdca1091a6d06539f1b1ee7c187681032cec13c369c"]
+          "raw_transaction_hash": "0x9d9986038d76f0308ef3effa3a6088d4d499045c6bde73ed2925099026499c78",
+          "serialized_transaction_hash": "0xfc02ec1754dab5164626a00256d34491b188627935b5e0a39cbe368fb3bfd058",
+          "artifact_hashes": ["0xafa83110497225566e7de22a91643d0532a3d7f8575b8a278be5637bebfeafbe"]
         },
         {
           "scenario": "early_release",
@@ -841,9 +841,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/temporal_scenarios.json",
           "evidence": ["tests/temporal_scenarios.rs", "tests/typed_runtime_views.rs", "tests/artifact_checker.rs"],
-          "raw_transaction_hash": "0xa629cb96631a55d594e2ab20e22b88ae979b4852fa0644eb2b4f5e3def47815e",
-          "serialized_transaction_hash": "0xd2b35137d6fe2abb5d0eb38f90a7971963c3cf7d4c68d2ab74fcd7b27a071e96",
-          "artifact_hashes": ["0x1eb1139b56d05b36aae89bdca1091a6d06539f1b1ee7c187681032cec13c369c"]
+          "raw_transaction_hash": "0x6fc18754dcc8a4a7bd5b502c65fc196cf20fe151f45c1e5001acc76624567f94",
+          "serialized_transaction_hash": "0x966460b2b77e1ede883ce46927995b79677b286f315b770bff1ab20f13f03df6",
+          "artifact_hashes": ["0xafa83110497225566e7de22a91643d0532a3d7f8575b8a278be5637bebfeafbe"]
         },
         {
           "scenario": "overflow",
@@ -851,9 +851,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/temporal_scenarios.json",
           "evidence": ["tests/temporal_scenarios.rs", "tests/typed_runtime_views.rs", "tests/artifact_checker.rs"],
-          "raw_transaction_hash": "0xf7b0574d862facd6236b7ce3602f7eb4965248176453fa2c04986d5ea23e70db",
-          "serialized_transaction_hash": "0xa8e68ec3978726d9bf4d8432312ac4909adee5a5488ac081f919245e2f01e166",
-          "artifact_hashes": ["0x1eb1139b56d05b36aae89bdca1091a6d06539f1b1ee7c187681032cec13c369c"]
+          "raw_transaction_hash": "0x8ad606f47c1c97b8e576fc3dc1ac3cbf6dd1b77b1935caffa04fbd35f7e8b6ff",
+          "serialized_transaction_hash": "0x3274edeb35a3d41c5a4e25e3c8b1baf6c560036c78f2157865a6dac3c888527c",
+          "artifact_hashes": ["0xafa83110497225566e7de22a91643d0532a3d7f8575b8a278be5637bebfeafbe"]
         },
         {
           "scenario": "one_past_boundary",
@@ -861,9 +861,9 @@
           "status": "exact-artifact-fixture",
           "fixture": "tests/fixtures/temporal_scenarios.json",
           "evidence": ["tests/temporal_scenarios.rs", "tests/typed_runtime_views.rs", "tests/artifact_checker.rs"],
-          "raw_transaction_hash": "0xed1e5645e1bc6b3878707320d5f7bef73a6fabe7b39b1557103036c8e5fee607",
-          "serialized_transaction_hash": "0xdfbf8cd3871de4cea08449d00a977ad0881a4c0acb9a0d60c75ed7117486d03a",
-          "artifact_hashes": ["0x1eb1139b56d05b36aae89bdca1091a6d06539f1b1ee7c187681032cec13c369c"]
+          "raw_transaction_hash": "0x106458a6e0119a63f5fb9f012e45dd63503bca39729f0e7446e1b59172adc9da",
+          "serialized_transaction_hash": "0x21dda18d53e5715739592ccd3706bfc1d222262df5adb3c5e996e505281b010e",
+          "artifact_hashes": ["0xafa83110497225566e7de22a91643d0532a3d7f8575b8a278be5637bebfeafbe"]
         }
       ],
       "gaps": []

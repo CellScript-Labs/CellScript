@@ -223,7 +223,7 @@ impl CodeGenerator {
                 self.emit_loaded_fixed_bytes_helper_call(
                     output_buffer_offset,
                     output_field_offset,
-                    SourcePointer::StackAddress { offset: var_id * 8 },
+                    SourcePointer::StackAddress { offset: self.scalar_slot_offset(var_id) },
                     width,
                     &mismatch_label,
                 );
@@ -254,7 +254,7 @@ impl CodeGenerator {
         self.emit_sp_addi("a0", output_buffer_offset + output_field_offset);
         match source {
             SourcePointer::LoadedStackPointer { var_id, offset } => {
-                self.emit_stack_load("a1", var_id * 8);
+                self.emit_stack_load("a1", self.scalar_slot_offset(var_id));
                 if offset != 0 {
                     self.emit_large_addi("a1", "a1", offset as i64);
                 }
@@ -420,13 +420,13 @@ impl CodeGenerator {
                 self.emit(format!("li {}, {}", dest_reg, bytes[byte_index]));
             }
             ExpectedFixedByteSource::StackSlot { var_id, .. } => {
-                self.emit_sp_addi(base_reg, var_id * 8);
+                self.emit_sp_addi(base_reg, self.scalar_slot_offset(var_id));
                 self.emit(format!("lbu {}, {}({})", dest_reg, byte_index, base_reg));
             }
             ExpectedFixedByteSource::PointerBytes { var_id, .. }
             | ExpectedFixedByteSource::ParamBytes { var_id, .. }
             | ExpectedFixedByteSource::LoadedBytes { var_id, .. } => {
-                self.emit_stack_load(base_reg, var_id * 8);
+                self.emit_stack_load(base_reg, self.scalar_slot_offset(var_id));
                 self.emit(format!("lbu {}, {}({})", dest_reg, byte_index, base_reg));
             }
         }
@@ -442,13 +442,13 @@ impl CodeGenerator {
                 self.emit_schema_field_source_pointer_to(dest_reg, source, width)
             }
             ExpectedFixedByteSource::StackSlot { var_id, .. } => {
-                self.emit_sp_addi(dest_reg, var_id * 8);
+                self.emit_sp_addi(dest_reg, self.scalar_slot_offset(var_id));
                 true
             }
             ExpectedFixedByteSource::PointerBytes { var_id, .. }
             | ExpectedFixedByteSource::ParamBytes { var_id, .. }
             | ExpectedFixedByteSource::LoadedBytes { var_id, .. } => {
-                self.emit_stack_load(dest_reg, var_id * 8);
+                self.emit_stack_load(dest_reg, self.scalar_slot_offset(var_id));
                 true
             }
             ExpectedFixedByteSource::Const(_) => false,
@@ -507,7 +507,7 @@ impl CodeGenerator {
         self.emit_label(&mismatch_label);
         self.emit(format!("li t3, {}", mismatch_value));
         self.emit_label(&done_label);
-        self.emit_stack_store("t3", dest.id * 8);
+        self.emit_stack_store("t3", self.scalar_slot_offset(dest.id));
         true
     }
 
@@ -556,7 +556,7 @@ impl CodeGenerator {
         } else {
             self.emit("snez t3, a0");
         }
-        self.emit_stack_store("t3", dest.id * 8);
+        self.emit_stack_store("t3", self.scalar_slot_offset(dest.id));
         true
     }
 
@@ -682,7 +682,7 @@ impl CodeGenerator {
 
         // Load left pointer to t4
         if let Some(v) = left_var {
-            self.emit_stack_load("t4", v.id * 8);
+            self.emit_stack_load("t4", self.scalar_slot_offset(v.id));
         } else {
             // Left is a constant – store it to scratch buffer and point t4 there
             let size_offset = self.runtime_scratch_size_offset();
@@ -693,7 +693,7 @@ impl CodeGenerator {
 
         // Load right pointer to t5
         if let Some(v) = right_var {
-            self.emit_stack_load("t5", v.id * 8);
+            self.emit_stack_load("t5", self.scalar_slot_offset(v.id));
         } else {
             let size_offset = self.runtime_scratch2_size_offset();
             let buffer_offset = self.runtime_scratch2_buffer_offset();
@@ -716,7 +716,7 @@ impl CodeGenerator {
         self.emit_label(&mismatch_label);
         self.emit(format!("li t3, {}", mismatch_value));
         self.emit_label(&done_label);
-        self.emit_stack_store("t3", dest.id * 8);
+        self.emit_stack_store("t3", self.scalar_slot_offset(dest.id));
         true
     }
 
@@ -841,7 +841,7 @@ impl CodeGenerator {
         self.emit_stack_store("t5", dest_offset);
         self.emit_stack_store("t6", dest_offset + 8);
         self.emit_sp_addi("t0", dest_offset);
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         self.emit(format!("j {}", done_label));
         self.emit_label(&overflow_label);
         self.emit_fail(CellScriptRuntimeError::AggregateAmountMismatch);
@@ -862,11 +862,11 @@ impl CodeGenerator {
                 } else if let Some(source) = self.prelude_u64_value_sources.get(&var.id).cloned() {
                     self.emit_prelude_u64_value_source_to_t1(&source);
                 } else if matches!(var.ty, IrType::Bool | IrType::U8 | IrType::U16 | IrType::U32 | IrType::I32 | IrType::U64) {
-                    self.emit_stack_load("t1", var.id * 8);
+                    self.emit_stack_load("t1", self.scalar_slot_offset(var.id));
                 } else if let Some(value) = self.prelude_scalar_immediates.get(&var.id).copied() {
                     self.emit(format!("li t1, {}", value));
                 } else {
-                    self.emit_stack_load("t1", var.id * 8);
+                    self.emit_stack_load("t1", self.scalar_slot_offset(var.id));
                 }
             }
             _ => self.emit("li t1, 0"),
@@ -880,8 +880,8 @@ impl CodeGenerator {
     pub(super) fn emit_prelude_u64_value_source_to_t1_at_depth(&mut self, source: &PreludeU64ValueSource, _depth: usize) {
         match source {
             PreludeU64ValueSource::Const(n) => self.emit(format!("li t1, {}", n)),
-            PreludeU64ValueSource::ParamVar(var_id) => self.emit_stack_load("t1", var_id * 8),
-            PreludeU64ValueSource::StackVar(var_id) => self.emit_stack_load("t1", var_id * 8),
+            PreludeU64ValueSource::ParamVar(var_id) => self.emit_stack_load("t1", self.scalar_slot_offset(var_id)),
+            PreludeU64ValueSource::StackVar(var_id) => self.emit_stack_load("t1", self.scalar_slot_offset(var_id)),
             PreludeU64ValueSource::Field(source) => self.emit_schema_field_source_to_t1(source),
             PreludeU64ValueSource::Binary { op, left, right } => {
                 self.emit(format!("# cellscript abi: expected expression u64 {:?}", op));
@@ -935,8 +935,8 @@ impl CodeGenerator {
     pub(super) fn emit_prelude_u64_operand_source_to_t1_at_depth(&mut self, source: &PreludeU64OperandSource, _depth: usize) {
         match source {
             PreludeU64OperandSource::Const(n) => self.emit(format!("li t1, {}", n)),
-            PreludeU64OperandSource::ParamVar(var_id) => self.emit_stack_load("t1", var_id * 8),
-            PreludeU64OperandSource::StackVar(var_id) => self.emit_stack_load("t1", var_id * 8),
+            PreludeU64OperandSource::ParamVar(var_id) => self.emit_stack_load("t1", self.scalar_slot_offset(var_id)),
+            PreludeU64OperandSource::StackVar(var_id) => self.emit_stack_load("t1", self.scalar_slot_offset(var_id)),
             PreludeU64OperandSource::Field(source) => self.emit_schema_field_source_to_t1(source),
             PreludeU64OperandSource::Expr(source) => self.emit_prelude_u64_value_source_to_t1_at_depth(source, _depth),
         }
@@ -964,7 +964,7 @@ impl CodeGenerator {
             self.emit_loaded_schema_bounds_check(size_offset, source.layout.offset + width, &context);
         }
         self.emit(format!("# cellscript abi: expected field {} offset={} size={}", context, source.layout.offset, width));
-        self.emit_stack_load("t4", source.obj_var_id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(source.obj_var_id));
         self.emit_schema_scalar_load(source.obj_var_id, "t4", "t1", "t2", source.layout.offset, width);
     }
 
@@ -977,7 +977,7 @@ impl CodeGenerator {
             self.emit_loaded_schema_exact_size_check(size_offset, expected_size, &source.type_name);
             self.emit_loaded_schema_bounds_check(size_offset, source.layout.offset + width, &context);
         } else {
-            self.emit_stack_load("t4", source.obj_var_id * 8);
+            self.emit_stack_load("t4", self.scalar_slot_offset(source.obj_var_id));
             self.emit_molecule_table_field_bounds_to_t5("t4", size_offset, source.layout.index, width, &context);
         }
     }
@@ -993,12 +993,12 @@ impl CodeGenerator {
             if let Some(expected_size) = self.type_fixed_sizes.get(&source.type_name).copied() {
                 self.emit_loaded_schema_exact_size_check(size_offset, expected_size, &source.type_name);
                 self.emit_loaded_schema_bounds_check(size_offset, source.layout.offset + width, &context);
-                self.emit_stack_load(dest_reg, source.obj_var_id * 8);
+                self.emit_stack_load(dest_reg, self.scalar_slot_offset(source.obj_var_id));
                 if source.layout.offset != 0 {
                     self.emit_large_addi(dest_reg, dest_reg, source.layout.offset as i64);
                 }
             } else {
-                self.emit_stack_load("t4", source.obj_var_id * 8);
+                self.emit_stack_load("t4", self.scalar_slot_offset(source.obj_var_id));
                 self.emit_molecule_table_field_bounds_to_t5("t4", size_offset, source.layout.index, width, &context);
                 self.emit(format!("add {}, t4, t5", dest_reg));
             }
@@ -1006,7 +1006,7 @@ impl CodeGenerator {
         } else if self.aggregate_pointer_sources.contains_key(&source.obj_var_id)
             || self.type_fixed_sizes.contains_key(&source.type_name)
         {
-            self.emit_stack_load(dest_reg, source.obj_var_id * 8);
+            self.emit_stack_load(dest_reg, self.scalar_slot_offset(source.obj_var_id));
             if source.layout.offset != 0 {
                 self.emit_large_addi(dest_reg, dest_reg, source.layout.offset as i64);
             }

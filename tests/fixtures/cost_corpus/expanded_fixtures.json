@@ -1,0 +1,415 @@
+{
+  "schema": "cellscript-cost-fixtures-v2",
+  "policies": [
+    {
+      "id": "policy-dense-1-width-8",
+      "actions": 1,
+      "width": 8,
+      "tags": "dense",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "policy-dense-2-width-8",
+      "actions": 2,
+      "width": 8,
+      "tags": "dense",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "policy-dense-4-width-8",
+      "actions": 4,
+      "width": 8,
+      "tags": "dense",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "policy-dense-8-width-8",
+      "actions": 8,
+      "width": 8,
+      "tags": "dense",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "policy-dense-16-width-8",
+      "actions": 16,
+      "width": 8,
+      "tags": "dense",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "policy-dense-32-width-8",
+      "actions": 32,
+      "width": 8,
+      "tags": "dense",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "policy-dense-64-width-8",
+      "actions": 64,
+      "width": 8,
+      "tags": "dense",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "policy-dense-1-width-32",
+      "actions": 1,
+      "width": 32,
+      "tags": "dense",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "policy-dense-2-width-32",
+      "actions": 2,
+      "width": 32,
+      "tags": "dense",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "policy-dense-4-width-32",
+      "actions": 4,
+      "width": 32,
+      "tags": "dense",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "policy-dense-8-width-32",
+      "actions": 8,
+      "width": 32,
+      "tags": "dense",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "policy-dense-16-width-32",
+      "actions": 16,
+      "width": 32,
+      "tags": "dense",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "policy-dense-32-width-32",
+      "actions": 32,
+      "width": 32,
+      "tags": "dense",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "policy-dense-64-width-32",
+      "actions": 64,
+      "width": 32,
+      "tags": "dense",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "policy-dense-1-width-128",
+      "actions": 1,
+      "width": 128,
+      "tags": "dense",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "policy-dense-2-width-128",
+      "actions": 2,
+      "width": 128,
+      "tags": "dense",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "policy-dense-4-width-128",
+      "actions": 4,
+      "width": 128,
+      "tags": "dense",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "policy-dense-8-width-128",
+      "actions": 8,
+      "width": 128,
+      "tags": "dense",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "policy-dense-16-width-128",
+      "actions": 16,
+      "width": 128,
+      "tags": "dense",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "policy-dense-32-width-128",
+      "actions": 32,
+      "width": 128,
+      "tags": "dense",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "policy-dense-64-width-128",
+      "actions": 64,
+      "width": 128,
+      "tags": "dense",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "policy-sparse-8-width-32",
+      "actions": 8,
+      "width": 32,
+      "tags": "sparse",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "policy-sparse-32-width-32",
+      "actions": 32,
+      "width": 32,
+      "tags": "sparse",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "policy-sparse-64-width-32",
+      "actions": 64,
+      "width": 32,
+      "tags": "sparse",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "policy-high-8-width-32",
+      "actions": 8,
+      "width": 32,
+      "tags": "high",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "policy-high-32-width-32",
+      "actions": 32,
+      "width": 32,
+      "tags": "high",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "policy-high-64-width-32",
+      "actions": 64,
+      "width": 32,
+      "tags": "high",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": false
+    },
+    {
+      "id": "records-1-first-matching-common",
+      "actions": 8,
+      "width": 32,
+      "tags": "dense",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": true
+    },
+    {
+      "id": "records-1-first-mixed-common",
+      "actions": 8,
+      "width": 32,
+      "tags": "dense",
+      "records": 1,
+      "selected_record": "first",
+      "mixed_layouts": true,
+      "common_checks": true
+    },
+    {
+      "id": "records-2-first-matching-common",
+      "actions": 8,
+      "width": 32,
+      "tags": "dense",
+      "records": 2,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": true
+    },
+    {
+      "id": "records-2-first-mixed-common",
+      "actions": 8,
+      "width": 32,
+      "tags": "dense",
+      "records": 2,
+      "selected_record": "first",
+      "mixed_layouts": true,
+      "common_checks": true
+    },
+    {
+      "id": "records-2-last-matching-common",
+      "actions": 8,
+      "width": 32,
+      "tags": "dense",
+      "records": 2,
+      "selected_record": "last",
+      "mixed_layouts": false,
+      "common_checks": true
+    },
+    {
+      "id": "records-2-last-mixed-common",
+      "actions": 8,
+      "width": 32,
+      "tags": "dense",
+      "records": 2,
+      "selected_record": "last",
+      "mixed_layouts": true,
+      "common_checks": true
+    },
+    {
+      "id": "records-4-first-matching-common",
+      "actions": 8,
+      "width": 32,
+      "tags": "dense",
+      "records": 4,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": true
+    },
+    {
+      "id": "records-4-first-mixed-common",
+      "actions": 8,
+      "width": 32,
+      "tags": "dense",
+      "records": 4,
+      "selected_record": "first",
+      "mixed_layouts": true,
+      "common_checks": true
+    },
+    {
+      "id": "records-4-last-matching-common",
+      "actions": 8,
+      "width": 32,
+      "tags": "dense",
+      "records": 4,
+      "selected_record": "last",
+      "mixed_layouts": false,
+      "common_checks": true
+    },
+    {
+      "id": "records-4-last-mixed-common",
+      "actions": 8,
+      "width": 32,
+      "tags": "dense",
+      "records": 4,
+      "selected_record": "last",
+      "mixed_layouts": true,
+      "common_checks": true
+    },
+    {
+      "id": "records-8-first-matching-common",
+      "actions": 8,
+      "width": 32,
+      "tags": "dense",
+      "records": 8,
+      "selected_record": "first",
+      "mixed_layouts": false,
+      "common_checks": true
+    },
+    {
+      "id": "records-8-first-mixed-common",
+      "actions": 8,
+      "width": 32,
+      "tags": "dense",
+      "records": 8,
+      "selected_record": "first",
+      "mixed_layouts": true,
+      "common_checks": true
+    },
+    {
+      "id": "records-8-last-matching-common",
+      "actions": 8,
+      "width": 32,
+      "tags": "dense",
+      "records": 8,
+      "selected_record": "last",
+      "mixed_layouts": false,
+      "common_checks": true
+    },
+    {
+      "id": "records-8-last-mixed-common",
+      "actions": 8,
+      "width": 32,
+      "tags": "dense",
+      "records": 8,
+      "selected_record": "last",
+      "mixed_layouts": true,
+      "common_checks": true
+    }
+  ]
+}

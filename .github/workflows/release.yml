@@ -24,6 +24,22 @@ jobs:
     name: Release gate
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: cellscript_registry_test
+          POSTGRES_USER: cellscript_test
+          POSTGRES_PASSWORD: cellscript_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cellscript_test -d cellscript_registry_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      REGISTRY_TEST_DATABASE_URL: postgresql://cellscript_test:cellscript_test_password@127.0.0.1:5432/cellscript_registry_test
     steps:
       - name: Check out tagged source
         uses: actions/checkout@v4

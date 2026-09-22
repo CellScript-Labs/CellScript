@@ -86,11 +86,31 @@ impl CodeGenerator {
         self.emit_large_addi("sp", "sp", POLICY_ENTRY_FRAME_SIZE as i64);
         self.emit("ret");
 
-        // The old wrapper and this adapter share the exact positional decoder.
-        // The adapter receives a0=normalized CSARG bytes, a1=length (possibly
-        // zero for a payload-free variant), and must not reload a witness.
-        for (_, action, adapter, _) in &actions {
-            self.emit_policy_action_adapter(&action.name, &action.params, adapter)?;
+        let mut groups: BTreeMap<String, Vec<(usize, usize)>> = BTreeMap::new();
+        for (index, (_, action, _, _)) in actions.iter().enumerate() {
+            if let Some((key, frame)) = self.policy_decoder_key(&action.name) {
+                groups.entry(key).or_default().push((index, frame));
+            }
+        }
+        let mut selected_decoders = BTreeMap::new();
+        let mut decoders = Vec::new();
+        for group in groups.values().filter(|group| group.len() > 1) {
+            let label = self.fresh_label("policy_shared_decoder");
+            for (index, frame) in group {
+                selected_decoders.insert(*index, (label.clone(), *frame));
+            }
+            decoders.push((group[0].0, label));
+        }
+        for (index, (_, action, adapter, _)) in actions.iter().enumerate() {
+            if let Some((decoder, frame)) = selected_decoders.get(&index) {
+                self.emit_policy_decoder_stub(&action.name, adapter, decoder, *frame);
+            } else {
+                self.emit_policy_action_adapter(&action.name, &action.params, adapter)?;
+            }
+        }
+        for (index, label) in decoders {
+            let action = actions[index].1;
+            self.emit_policy_shared_decoder(&action.name, &action.params, &label)?;
         }
         Ok(())
     }

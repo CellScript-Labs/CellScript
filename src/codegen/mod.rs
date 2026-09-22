@@ -22,6 +22,7 @@ mod frame;
 mod policy;
 mod runtime;
 mod runtime_gather;
+mod scalar_slots;
 mod schema;
 #[cfg(not(feature = "wasm"))]
 pub(crate) use abi::{entry_param_abi_sources, EntryParamAbiSource};
@@ -1155,6 +1156,8 @@ pub struct CodeGenerator {
     auto_aggregate_runtime_helpers_by_action: HashMap<String, BTreeSet<String>>,
     /// ABI summaries for locally emitted actions/functions/locks.
     callable_abis: HashMap<String, CallableAbi>,
+    local_callable_names: BTreeSet<String>,
+    scalar_slot_offsets: BTreeMap<usize, usize>,
     /// Function parameters whose slot contains a pointer to encoded schema bytes.
     schema_pointer_vars: BTreeSet<usize>,
     /// Function parameter slots available before the prelude summaries run.
@@ -1389,6 +1392,8 @@ impl CodeGenerator {
             current_state_transition_edges: Vec::new(),
             auto_aggregate_runtime_helpers_by_action: HashMap::new(),
             callable_abis: HashMap::new(),
+            local_callable_names: BTreeSet::new(),
+            scalar_slot_offsets: BTreeMap::new(),
             schema_pointer_vars: BTreeSet::new(),
             param_vars: BTreeSet::new(),
             schema_pointer_size_offsets: HashMap::new(),
@@ -1756,6 +1761,7 @@ impl CodeGenerator {
 
     fn register_callable_abis(&mut self, ir: &IrModule) {
         self.callable_abis.clear();
+        self.local_callable_names.clear();
         for item in &ir.items {
             let (name, params, body) = match item {
                 IrItem::Action(action) => (&action.name, &action.params, &action.body),
@@ -1764,6 +1770,7 @@ impl CodeGenerator {
                 IrItem::TypeDef(_) | IrItem::Invariant(_) => continue,
             };
             let param_indices = params.iter().enumerate().map(|(index, param)| (param.binding.id, index)).collect::<HashMap<_, _>>();
+            self.local_callable_names.insert(name.clone());
             let mut type_hash_param_indices = BTreeSet::new();
             let (runtime_bound_param_indices, bounded_plan_param_indices) =
                 abi::entry_abi_parameter_indices(params, body, &self.cell_type_names);
@@ -2863,7 +2870,7 @@ impl CodeGenerator {
             );
             self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
             self.emit_sp_addi("t0", buffer_offset);
-            self.emit_stack_store("t0", var_id * 8);
+            self.emit_stack_store("t0", self.scalar_slot_offset(var_id));
         }
 
         let mut dep_bindings = self
@@ -2896,7 +2903,7 @@ impl CodeGenerator {
             );
             self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
             self.emit_sp_addi("t0", buffer_offset);
-            self.emit_stack_store("t0", var_id * 8);
+            self.emit_stack_store("t0", self.scalar_slot_offset(var_id));
         }
     }
 
@@ -2923,7 +2930,7 @@ impl CodeGenerator {
                 self.emit_dominating_schema_exact_size_check(size_offset, expected_size, &type_name);
             }
             self.emit_sp_addi("t0", buffer_offset);
-            self.emit_stack_store("t0", var_id * 8);
+            self.emit_stack_store("t0", self.scalar_slot_offset(var_id));
             if pattern.operation == "destroy" {
                 self.emit_destroy_group_output_absence_scan(pattern, input_index);
             }
@@ -2963,7 +2970,7 @@ impl CodeGenerator {
                 self.emit_dominating_schema_exact_size_check(size_offset, expected_size, type_name);
             }
             self.emit_sp_addi("t0", buffer_offset);
-            self.emit_stack_store("t0", dest.id * 8);
+            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
             return Ok(());
         }
 
@@ -3003,7 +3010,7 @@ impl CodeGenerator {
                 );
                 self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
                 self.emit_sp_addi("t0", buffer_offset);
-                self.emit_stack_store("t0", var_id * 8);
+                self.emit_stack_store("t0", self.scalar_slot_offset(var_id));
                 self.operation_output_indices.insert(var_id, index);
                 if defer_all_output_fields {
                     self.emit("# cellscript abi: output field verification deferred to ordered create constraint");
@@ -3117,7 +3124,7 @@ impl CodeGenerator {
         );
         self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
         self.emit_sp_addi("t0", buffer_offset);
-        self.emit_stack_store("t0", var_id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(var_id));
     }
 
     fn generate_block(&mut self, block: &IrBlock, fallthrough: Option<BlockId>) -> Result<()> {
@@ -3419,7 +3426,7 @@ impl CodeGenerator {
                     self.emit_jump_to_block(*then_block, fallthrough);
                 }
                 IrOperand::Var(v) => {
-                    self.emit_stack_load("t0", v.id * 8);
+                    self.emit_stack_load("t0", self.scalar_slot_offset(v.id));
                     if Some(*then_block) == fallthrough {
                         self.emit(format!("beqz t0, {}", self.block_label(*else_block)));
                     } else if Some(*else_block) == fallthrough {
@@ -3465,7 +3472,7 @@ impl CodeGenerator {
         );
         self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
         self.emit_sp_addi("t0", buffer_offset);
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
 
         // Also store the size so that subsequent schema operations can use it
         self.schema_pointer_size_offsets.insert(dest.id, size_offset);
@@ -3486,7 +3493,7 @@ impl CodeGenerator {
             return Ok(());
         }
         self.emit_operand_to_register("t0", src);
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         Ok(())
     }
 
@@ -3510,7 +3517,7 @@ impl CodeGenerator {
         self.emit(format!("li a2, {}", width));
         self.emit("call __cellscript_memcpy_fixed");
         self.emit_sp_addi("t0", dest_offset);
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         true
     }
 
@@ -3522,7 +3529,7 @@ impl CodeGenerator {
         if self.emit_fixed_named_tuple(dest, fields) {
             return Ok(());
         }
-        self.emit_stack_store("zero", dest.id * 8);
+        self.emit_stack_store("zero", self.scalar_slot_offset(dest.id));
         Ok(())
     }
 
@@ -3560,7 +3567,7 @@ impl CodeGenerator {
             self.emit("call __cellscript_memcpy_fixed");
         }
         self.emit_sp_addi("t0", dest_offset);
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         true
     }
 
@@ -3647,7 +3654,7 @@ impl CodeGenerator {
             self.emit_sp_addi("t4", dest_offset);
         }
         self.emit_sp_addi("t0", dest_offset);
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         Ok(())
     }
 
@@ -3669,7 +3676,7 @@ impl CodeGenerator {
             return Ok(());
         }
         self.emit_memory_load_with_avoid("lbu", "t0", "t4", 0, &["t0", "t4"]);
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         Ok(())
     }
 
@@ -3710,7 +3717,7 @@ impl CodeGenerator {
             return Ok(());
         }
         if field.width == 0 {
-            self.emit_stack_store("zero", dest.id * 8);
+            self.emit_stack_store("zero", self.scalar_slot_offset(dest.id));
             return Ok(());
         }
         if field.linear || (field.width <= 8 && is_fixed_scalar_ir_type(&field.ty)) {
@@ -3718,7 +3725,7 @@ impl CodeGenerator {
             if field.ty == IrType::I32 {
                 self.emit_sign_extend_i32("t0");
             }
-            self.emit_stack_store("t0", dest.id * 8);
+            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
             return Ok(());
         }
 
@@ -3732,7 +3739,7 @@ impl CodeGenerator {
         self.emit(format!("li a2, {}", field.width));
         self.emit("call __cellscript_memcpy_fixed");
         self.emit_sp_addi("t0", dest_offset);
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         Ok(())
     }
 
@@ -3776,7 +3783,7 @@ impl CodeGenerator {
             self.emit("call __cellscript_memcpy_fixed");
         }
         self.emit_sp_addi("t0", dest_offset);
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         true
     }
 
@@ -3795,7 +3802,7 @@ impl CodeGenerator {
                     self.emit(format!("li {}, 0", register));
                 }
             }
-            IrOperand::Var(v) => self.emit_stack_load(register, v.id * 8),
+            IrOperand::Var(v) => self.emit_stack_load(register, self.scalar_slot_offset(v.id)),
         }
     }
 
@@ -3810,7 +3817,7 @@ impl CodeGenerator {
             // Consume a local variable: the actual LOAD_CELL input data loading
             // already happened in the action prelude (generate_consume).
             // Here we only zero out the local binding to enforce linear ownership.
-            self.emit_stack_store("zero", var.id * 8);
+            self.emit_stack_store("zero", self.scalar_slot_offset(var.id));
             return Ok(());
         }
         // Non-Var consume: this should not happen in valid IR, but fail with
@@ -3872,7 +3879,7 @@ impl CodeGenerator {
                 return Ok(());
             }
             self.emit(format!("li t0, {}", output_index));
-            self.emit_stack_store("t0", dest.id * 8);
+            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
             self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
             return Ok(());
         }
@@ -3891,7 +3898,7 @@ impl CodeGenerator {
             self.emit("#   with_lock <expr>");
         }
         self.emit(format!("li t0, {}", output_index));
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
         Ok(())
     }
@@ -4181,7 +4188,7 @@ impl CodeGenerator {
             self.emit("#   with_lock <expr>");
         }
         self.emit(format!("li t0, {}", output_index));
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
         Ok(())
     }
@@ -4218,7 +4225,7 @@ impl CodeGenerator {
         }
         self.emit(format!("# cellscript abi: replace_unique output handle Output#{}", output_index));
         self.emit(format!("li t0, {}", output_index));
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
         Ok(())
     }
@@ -4234,7 +4241,7 @@ impl CodeGenerator {
         if let Some(output_index) = self.operation_output_indices.get(&dest.id).copied() {
             self.emit(format!("# cellscript abi: transfer output handle Output#{} (unverified)", output_index));
             self.emit(format!("li t0, {}", output_index));
-            self.emit_stack_store("t0", dest.id * 8);
+            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
             self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
             return Ok(());
         }
@@ -4253,7 +4260,7 @@ impl CodeGenerator {
         if let Some(output_index) = self.operation_output_indices.get(&dest.id).copied() {
             self.emit(format!("# cellscript abi: claim output handle Output#{} (unverified)", output_index));
             self.emit(format!("li t0, {}", output_index));
-            self.emit_stack_store("t0", dest.id * 8);
+            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
             self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
             return Ok(());
         }
@@ -4272,7 +4279,7 @@ impl CodeGenerator {
         if let Some(output_index) = self.operation_output_indices.get(&dest.id).copied() {
             self.emit(format!("# cellscript abi: settle output handle Output#{} (unverified)", output_index));
             self.emit(format!("li t0, {}", output_index));
-            self.emit_stack_store("t0", dest.id * 8);
+            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
             self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
             return Ok(());
         }
@@ -4288,7 +4295,7 @@ impl CodeGenerator {
         let output_index = self.operation_output_indices.get(&dest.id).copied().unwrap_or(self.next_virtual_output);
         self.emit(format!("# cellscript abi: {} output relation verified by prelude Output#{}", operation, output_index));
         self.emit(format!("li t0, {}", output_index));
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
         true
     }

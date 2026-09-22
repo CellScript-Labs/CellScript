@@ -1,9 +1,9 @@
 # CellScript Verified Artifact Boundary
 
 **Status**: semantic-foundation and bounded machine contracts implemented on
-the `0.30` development branch
+the `0.31` development branch
 
-**Schemas**: `cellscript-verified-lowering-record-v8`,
+**Schemas**: `cellscript-verified-lowering-record-v9`,
 `cellscript-typed-semantics-v8`,
 `cellscript-semantic-foundation-v3`,
 `cellscript-value-provenance-dag-v1`,
@@ -34,7 +34,11 @@ classes, legacy migration nodes, and layered semantic identities. Typed
 semantics v8 additionally binds exact trusted-external verifier declarations
 to ordered CellDep data-hash checks and delegation calls while retaining an
 explicit no-proof-of-internals flag. Lowering
-record v8 embeds that record and binds it to the final machine layout. Every
+record v9 embeds that record and binds it to the final machine layout. It
+versions the private policy-adapter storage contract introduced in 0.31.
+The standalone checker rejects unsupported record versions; an old sidecar
+cannot certify rebuilt bytes. Typed semantics and the witness wire ABI keep
+their existing versions. Every
 typed block is accounted for;
 optimized/elided typed blocks have an explicit empty machine-block list, while
 materialized blocks carry exact typed-block hashes. Source-map v2 binds source

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — 0.31 cost work
+
+Implement deterministic RV64 immediate plans, shared policy decoders behind
+direct action stubs, bounded private adapter frames, and CFG-liveness scalar
+slot reuse. Keep witness formats and the outer 4,096-byte loading boundary.
+Lowering record v9 and the independent checker bind the changed machine shapes.
+
+Cost-report v2 adds measured nonzero group exits, explicit unavailable results,
+static call-chain bounds, expanded policy/scalar sweeps, and multi-Script
+accounting with frozen per-metric ceilings. See the
+[implementation and acceptance report](docs/CELLSCRIPT_0_31_COST_IMPLEMENTATION.md).
+These changes are development work; 0.31 has not been released.
+
 ## 0.30.0 - Capability closure
 
 Publication and the website update were authorized on 2026-09-21, subject to a
@@ -8,6 +21,13 @@ for the accepted compatibility boundary and publication channels.
 
 The entries below retain the evidence state at each implementation step. The
 release notes and capability ledger record the current acceptance state.
+
+- Correct runtime-error sidecars so generated label ordinals are not mistaken
+  for exit codes. Validate large policy dispatchers after conditional-branch
+  relaxation, with mutations that reject changed conditions, skip distances,
+  and call destinations. Generated contract instructions remain unchanged.
+  Run the Registry PostgreSQL suite in the release workflow and require the
+  latest migration and its interface lookup index.
 
 - Restore the edition 2026 generic declaration contract from 0.25; apply the
   stricter public layout declaration boundary only to edition 2027 owners.

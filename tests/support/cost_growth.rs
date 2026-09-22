@@ -22,8 +22,7 @@ struct Budget {
 }
 
 use super::{
-    ckb_script_runner::{build_simple_fixture, execute_cellscript_script, execute_cellscript_script_with_transaction_transform},
-    compile_cellscript, options, witness_for,
+    ckb_script_runner::build_simple_fixture, compile_cellscript, cost_provenance, cost_stack, measured_run, options, witness_for,
 };
 
 fn metrics(name: String, compiled: &CompileResult, cycles: u64, witness_bytes: usize) -> Value {
@@ -40,6 +39,9 @@ fn metrics(name: String, compiled: &CompileResult, cycles: u64, witness_bytes: u
         "max_stack_frame_bytes": frame,
         "positive_cycles": cycles,
         "witness_bytes": witness_bytes,
+        "source_content_hash": compiled.metadata.source_content_hash,
+        "elf_sha256": cost_provenance::sha256(strip_vm_abi_trailer(&compiled.artifact_bytes)),
+        "static_stack": cost_stack::measure(compiled),
     });
     eprintln!("[cost-growth] {row}");
     row
@@ -54,7 +56,7 @@ fn action(index: usize, width: usize) -> String {
     )
 }
 
-pub fn measure() -> Vec<Value> {
+pub fn measure(runs: &mut Vec<Value>) -> Vec<Value> {
     let mut rows = Vec::new();
     for width in [8, 32, 128] {
         let prefix = format!("module cost_growth\nresource Token has store, consume {{ amount: u64\nexpected: [u8; {width}] }}\n");
@@ -69,12 +71,28 @@ pub fn measure() -> Vec<Value> {
         fixture.inputs[0].data = Bytes::from(data.clone());
         let witness = witness_for(&single, &[EntryWitnessArg::Bytes(payload.clone())]);
         fixture.witnesses = vec![witness.clone()];
-        let single_run = execute_cellscript_script(strip_vm_abi_trailer(&single.artifact_bytes), &fixture);
+        let single_run = measured_run(
+            &format!("single-width-{width}/success"),
+            strip_vm_abi_trailer(&single.artifact_bytes),
+            &fixture,
+            |tx, _| tx,
+            runs,
+        );
         assert_eq!(single_run.exit_code, 0, "single width {width}");
         rows.push(metrics(format!("single-width-{width}"), &single, single_run.cycles, witness.len()));
         payload[width - 1] ^= 1;
         fixture.witnesses = vec![witness_for(&single, &[EntryWitnessArg::Bytes(payload)])];
-        assert_ne!(execute_cellscript_script(strip_vm_abi_trailer(&single.artifact_bytes), &fixture).exit_code, 0);
+        assert_ne!(
+            measured_run(
+                &format!("single-width-{width}/late-mismatch"),
+                strip_vm_abi_trailer(&single.artifact_bytes),
+                &fixture,
+                |tx, _| tx,
+                runs
+            )
+            .exit_code,
+            0
+        );
 
         for count in [1, 2, 4, 8] {
             let source = format!("{prefix}{}", (0..count).map(|index| action(index, width)).collect::<String>());
@@ -100,7 +118,8 @@ pub fn measure() -> Vec<Value> {
                 for valid in [true, false] {
                     let mut payload = vec![0; width];
                     payload[width - 1] = if valid { 7 } else { 6 };
-                    let run = execute_cellscript_script_with_transaction_transform(
+                    let run = measured_run(
+                        &format!("policy-actions-{count}-width-{width}/action-{index}/valid-{valid}"),
                         strip_vm_abi_trailer(&policy.artifact_bytes),
                         &fixture,
                         |tx, script| {
@@ -123,6 +142,7 @@ pub fn measure() -> Vec<Value> {
                             policy_witness_bytes = encoded.len();
                             tx.as_advanced_builder().set_witnesses(vec![encoded.pack()]).build()
                         },
+                        runs,
                     );
                     assert_eq!(run.exit_code == 0, valid, "policy {count}/{width} action {index}, valid={valid}");
                     if valid {
@@ -150,7 +170,13 @@ pub fn measure() -> Vec<Value> {
                 data.extend_from_slice(&amount.to_le_bytes());
                 cell.data = Bytes::from(data);
             }
-            let run = execute_cellscript_script(strip_vm_abi_trailer(&compiled.artifact_bytes), &fixture);
+            let run = measured_run(
+                &format!("group-bound-{bound}/count-{count}/valid-{valid_amount}"),
+                strip_vm_abi_trailer(&compiled.artifact_bytes),
+                &fixture,
+                |tx, _| tx,
+                runs,
+            );
             assert_eq!(run.exit_code == 0, expected_ok, "group bound {bound}, count {count}, valid amount={valid_amount}");
             if expected_ok {
                 rows.push(metrics(format!("group-bound-{bound}"), &compiled, run.cycles, 0));

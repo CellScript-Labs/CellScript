@@ -5453,7 +5453,6 @@ fn commitment_machine_error(message: impl Into<String>) -> CheckerError {
 
 const POLICY_WRAPPER_ENTRY_ID: &str = "wrapper:_cellscript_entry";
 const POLICY_ENTRY_FRAME_BYTES: u32 = 4_192;
-const POLICY_ADAPTER_FRAME_BYTES: u32 = 5_376;
 const POLICY_ARGS_POINTER_OFFSET: i32 = 4_144;
 const POLICY_ARGS_LENGTH_OFFSET: i32 = 4_152;
 const POLICY_TAG_OFFSET: i32 = 4_160;
@@ -6540,6 +6539,19 @@ fn bounded_group_input_machine_error(message: impl Into<String>) -> CheckerError
 }
 
 fn validate_policy_dispatch_machine_contract(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result<(), CheckerError> {
+    if !matches!(record.typed_semantics.foundation.entry_contract.dispatch, EntryDispatchContract::PolicyWitnessV1(_)) {
+        return Ok(());
+    }
+    if let Some((logical_record, logical_elf)) =
+        crate::policy_machine::normalize_relaxed_branches(record, elf).map_err(policy_machine_error)?
+    {
+        validate_policy_dispatch_logical_machine_contract(&logical_record, &logical_elf)
+    } else {
+        validate_policy_dispatch_logical_machine_contract(record, elf)
+    }
+}
+
+fn validate_policy_dispatch_logical_machine_contract(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result<(), CheckerError> {
     let EntryDispatchContract::PolicyWitnessV1(contract) = &record.typed_semantics.foundation.entry_contract.dispatch else {
         return Ok(());
     };
@@ -7152,6 +7164,7 @@ fn validate_policy_action_adapters(
     }
     let all_action_starts =
         contract.variants.iter().map(|variant| entry_start(record, &variant.entry_id)).collect::<Result<BTreeSet<_>, _>>()?;
+    let mut shared_bindings: BTreeMap<String, (Value, BTreeSet<u64>)> = BTreeMap::new();
     for (adapter, variant) in adapters.into_iter().zip(&contract.variants) {
         let entry = record
             .typed_semantics
@@ -7160,7 +7173,8 @@ fn validate_policy_action_adapters(
             .find(|entry| entry.id == variant.entry_id)
             .ok_or_else(|| policy_machine_error("policy variant has no typed action entry"))?;
         let expected_outgoing = policy_outgoing_argument_bytes(entry, &record.typed_semantics)?;
-        let expected_record_frame = POLICY_ADAPTER_FRAME_BYTES
+        let (private_frame, private_capacity) = crate::policy::private_adapter_layout(entry, &record.typed_semantics)?;
+        let expected_record_frame = private_frame
             .checked_add(expected_outgoing)
             .ok_or_else(|| policy_machine_error("policy adapter recorded frame overflows u32"))?;
         if adapter.frame_size_bytes != expected_record_frame || adapter.outgoing_argument_bytes != 0 {
@@ -7174,31 +7188,93 @@ fn validate_policy_action_adapters(
             return Err(policy_machine_error("policy positional adapter blocks disagree on frame size"));
         }
         let base = entry_start(record, &adapter.id)?;
-        let prologue = instructions_from(elf, base, 9)?;
-        if !matches_large_sp_adjust(prologue, 0, -(POLICY_ADAPTER_FRAME_BYTES as i32))
-            || !matches_large_stack_store(prologue, 3, 1, POLICY_ADAPTER_FRAME_BYTES as i32 - 8)
+        let saved_ra = private_frame as i32 - 8;
+        let save_address = base + sp_adjust_instruction_bytes(-(private_frame as i32));
+        if !matches_sp_adjust_at(elf, base, -(private_frame as i32))? || !matches_stack_slot_at(elf, save_address, 1, saved_ra, false)?
         {
             return Err(policy_machine_error("policy adapter prologue no longer owns a bounded private copy frame"));
         }
-        let fail = unique_policy_block(record, &adapter.id, ".Lentry_witness_fail_")?;
+        let decoder_call_start = save_address + stack_slot_instruction_bytes(saved_ra);
+        let shared_decoder = elf.control_flow.iter().find(|flow| flow.address == decoder_call_start + 4).and_then(|flow| {
+            record.entries.iter().find(|candidate| {
+                candidate.name.starts_with(".Lpolicy_shared_decoder_") && entry_start(record, &candidate.id).ok() == Some(flow.target)
+            })
+        });
+        let decoder_owner = if let Some(decoder) = shared_decoder {
+            if !is_auipc(instruction_at(elf, decoder_call_start)?.word, 1)
+                || !is_jalr_call(instruction_at(elf, decoder_call_start + 4)?.word)
+                || decoder.kind != EntryKind::Runtime
+                || decoder.frame_size_bytes != 0
+                || decoder.outgoing_argument_bytes != 0
+            {
+                return Err(policy_machine_error("shared decoder call or borrowed-frame contract changed"));
+            }
+            let decoder_blocks: Vec<_> = record.blocks.iter().filter(|block| block.owner_entry == decoder.id).collect();
+            if decoder_blocks.iter().any(|block| block.frame_size_bytes != 0 || block.outgoing_argument_bytes != 0)
+                || elf
+                    .stack_adjustments
+                    .iter()
+                    .any(|adjustment| decoder_blocks.iter().any(|block| block.range.contains(adjustment.address)))
+                || elf.instructions.iter().any(|instruction| {
+                    decoder_blocks.iter().any(|block| block.range.contains(instruction.address))
+                        && matches!(instruction.word & 0x7f, 0x6f | 0x67)
+                        && (instruction.word >> 7) & 31 != 0
+                })
+            {
+                return Err(policy_machine_error("shared decoder may neither move sp nor call another function"));
+            }
+            let projections = entry
+                .params
+                .iter()
+                .map(|param| crate::policy::builder_parameter_projection(param, entry, &record.typed_semantics))
+                .collect::<Result<Vec<_>, _>>()?;
+            let key =
+                serde_json::json!({"params":entry.params,"projection":projections,"frame":private_frame,"capacity":private_capacity});
+            let (expected, callers) = shared_bindings.entry(decoder.id.clone()).or_insert_with(|| (key.clone(), BTreeSet::new()));
+            if *expected != key {
+                return Err(policy_machine_error("different parameter contracts share one positional decoder"));
+            }
+            callers.insert(decoder_call_start + 4);
+            let decoder_done = unique_policy_block(record, &decoder.id, ".Lentry_witness_done_")?;
+            if instruction_at(elf, decoder_done.range.start)?.word != 0x0000_8067 {
+                return Err(policy_machine_error("shared decoder must return with its borrowed frame intact"));
+            }
+            &decoder.id
+        } else {
+            &adapter.id
+        };
+        let fail = unique_policy_block(record, decoder_owner, ".Lentry_witness_fail_")?;
         let done = unique_policy_block(record, &adapter.id, ".Lentry_witness_done_")?;
-        let has_payload = entry.params.iter().any(|param| matches!(param.source.as_str(), "default" | "witness"));
+        let has_payload =
+            private_capacity > 0 && entry.params.iter().any(|param| matches!(param.source.as_str(), "default" | "witness"));
         if has_payload {
-            let copy = unique_policy_block(record, &adapter.id, ".Lpolicy_args_copy_")?;
-            let prefix_address =
-                copy.range.start.checked_sub(24).ok_or_else(|| policy_machine_error("policy adapter copy prefix underflows"))?;
-            let prefix = instructions_from(elf, prefix_address, 6)?;
-            if !is_lui(prefix[0].word, 5, 0x0000_1000)
-                || !is_bltu(prefix[1].word, 5, 11)
-                || !flow_targets(elf, prefix[1].address, fail.range.start)
-                || !is_sd(prefix[2].word, 11, 2, 0)
-                || !is_addi(prefix[3].word, 5, 10, 0)
-                || !is_addi(prefix[4].word, 6, 2, 8)
-                || !is_addi(prefix[5].word, 7, 0, 0)
+            let copy = unique_policy_block(record, decoder_owner, ".Lpolicy_args_copy_")?;
+            let bound_instructions = if private_capacity <= 2047 || private_capacity == 4096 { 1 } else { 2 };
+            let prefix_address = copy
+                .range
+                .start
+                .checked_sub((5 + bound_instructions) * 4)
+                .ok_or_else(|| policy_machine_error("policy adapter copy prefix underflows"))?;
+            let prefix = instructions_from(elf, prefix_address, (5 + bound_instructions) as usize)?;
+            let bound_matches = if private_capacity <= 2047 {
+                is_addi(prefix[0].word, 5, 0, private_capacity as i32)
+            } else if private_capacity == 4096 {
+                is_lui(prefix[0].word, 5, 0x1000)
+            } else {
+                is_lui(prefix[0].word, 5, 0x1000) && is_addi(prefix[1].word, 5, 5, private_capacity as i32 - 4096)
+            };
+            let start = bound_instructions as usize;
+            if !bound_matches
+                || !is_bltu(prefix[start].word, 5, 11)
+                || !flow_targets(elf, prefix[start].address, fail.range.start)
+                || !is_sd(prefix[start + 1].word, 11, 2, 0)
+                || !is_addi(prefix[start + 2].word, 5, 10, 0)
+                || !is_addi(prefix[start + 3].word, 6, 2, 8)
+                || !is_addi(prefix[start + 4].word, 7, 0, 0)
             {
                 return Err(policy_machine_error("policy adapter no longer bounds and privately copies selected args"));
             }
-            let copied = unique_policy_block(record, &adapter.id, ".Lpolicy_args_copied_")?;
+            let copied = unique_policy_block(record, decoder_owner, ".Lpolicy_args_copied_")?;
             let loop_words = instructions_from(elf, copy.range.start, 7)?;
             if !is_bgeu(loop_words[0].word, 7, 11)
                 || !flow_targets(elf, loop_words[0].address, copied.range.start)
@@ -7212,11 +7288,14 @@ fn validate_policy_action_adapters(
             {
                 return Err(policy_machine_error("policy adapter selected-args copy loop changed"));
             }
-        } else if !is_bne(prologue[7].word, 11, 0)
-            || !flow_targets(elf, prologue[7].address, fail.range.start)
-            || !is_sd(prologue[8].word, 0, 2, 0)
-        {
-            return Err(policy_machine_error("payload-free policy adapter no longer requires empty args"));
+        } else {
+            let empty_guard = if shared_decoder.is_some() { entry_start(record, decoder_owner)? } else { decoder_call_start };
+            if !is_bne(instruction_at(elf, empty_guard)?.word, 11, 0)
+                || !flow_targets(elf, empty_guard, fail.range.start)
+                || !is_sd(instruction_at(elf, empty_guard + 4)?.word, 0, 2, 0)
+            {
+                return Err(policy_machine_error("payload-free policy adapter no longer requires empty args"));
+            }
         }
 
         let target = entry_start(record, &variant.entry_id)?;
@@ -7233,6 +7312,13 @@ fn validate_policy_action_adapters(
             )));
         }
         let call = action_calls[0];
+        if shared_decoder.is_some() {
+            let outgoing_adjustment =
+                if expected_outgoing == 0 { 0 } else { sp_adjust_instruction_bytes(-(expected_outgoing as i32)) };
+            if call.address != decoder_call_start + 8 + outgoing_adjustment + 4 {
+                return Err(policy_machine_error("shared decoder arguments must flow directly to the bound action call"));
+            }
+        }
         if call.address < 4
             || !is_auipc(instruction_at(elf, call.address - 4)?.word, 1)
             || !is_jalr_call(instruction_at(elf, call.address)?.word)
@@ -7262,12 +7348,20 @@ fn validate_policy_action_adapters(
         if !is_jal_zero(instruction_at(elf, completion)?.word) || !flow_targets(elf, completion, done.range.start) {
             return Err(policy_machine_error("policy adapter call no longer completes through its exact done block"));
         }
-        let done_words = instructions_from(elf, done.range.start, 8)?;
-        if !matches_large_stack_load(done_words, 0, 1, POLICY_ADAPTER_FRAME_BYTES as i32 - 8)
-            || !matches_large_sp_adjust(done_words, 4, POLICY_ADAPTER_FRAME_BYTES as i32)
-            || done_words[7].word != 0x0000_8067
+        let restore = done.range.start + stack_slot_instruction_bytes(saved_ra);
+        if !matches_stack_slot_at(elf, done.range.start, 1, saved_ra, true)?
+            || !matches_sp_adjust_at(elf, restore, private_frame as i32)?
+            || instruction_at(elf, restore + sp_adjust_instruction_bytes(private_frame as i32))?.word != 0x0000_8067
         {
             return Err(policy_machine_error("policy adapter completion no longer restores its private frame"));
+        }
+    }
+    for decoder in record.entries.iter().filter(|entry| entry.name.starts_with(".Lpolicy_shared_decoder_")) {
+        let (_, callers) = shared_bindings.get(&decoder.id).ok_or_else(|| policy_machine_error("unbound shared policy decoder"))?;
+        let target = entry_start(record, &decoder.id)?;
+        let incoming: BTreeSet<_> = elf.control_flow.iter().filter(|flow| flow.target == target).map(|flow| flow.address).collect();
+        if callers.len() < 2 || &incoming != callers {
+            return Err(policy_machine_error("shared decoder has an undeclared caller or no repeated layout"));
         }
     }
     Ok(())
@@ -7408,6 +7502,28 @@ fn sp_adjust_instruction_bytes(delta: i32) -> u64 {
         4
     } else {
         12
+    }
+}
+
+fn stack_slot_instruction_bytes(offset: i32) -> u64 {
+    if (-2048..=2047).contains(&offset) {
+        4
+    } else {
+        16
+    }
+}
+
+fn matches_stack_slot_at(elf: &ParsedElf, address: u64, register: u32, offset: i32, load: bool) -> Result<bool, CheckerError> {
+    if (-2048..=2047).contains(&offset) {
+        let word = instruction_at(elf, address)?.word;
+        Ok(if load { is_ld(word, register, 2, offset) } else { is_sd(word, register, 2, offset) })
+    } else {
+        let words = instructions_from(elf, address, 4)?;
+        Ok(if load {
+            matches_large_stack_load(words, 0, register, offset)
+        } else {
+            matches_large_stack_store(words, 0, register, offset)
+        })
     }
 }
 

@@ -1,6 +1,11 @@
 use super::*;
 
 impl CodeGenerator {
+    /// One address calculation for scalar VarIds, including pointer formation.
+    /// Unclassified functions retain identity mapping.
+    pub(super) fn scalar_slot_offset(&self, id: impl std::borrow::Borrow<usize>) -> usize {
+        self.scalar_slot_offsets.get(id.borrow()).copied().unwrap_or_else(|| *id.borrow() * 8)
+    }
     pub(super) fn emit_prologue(&mut self) {
         self.emit_large_addi("sp", "sp", -(self.frame_size as i64));
         self.emit_stack_store("ra", self.frame_size - 8);
@@ -237,7 +242,12 @@ impl CodeGenerator {
             self.record_terminator_var(&block.terminator, &mut max_var_id);
         }
 
-        let locals_size = max_var_id.map(|id| (id + 1) * 8).unwrap_or(0);
+        let scalar_slots = scalar_slots::allocate(body, params, &self.callable_abis, &self.local_callable_names);
+        let locals_size = scalar_slots.as_ref().map_or_else(
+            || max_var_id.map(|id| (id + 1) * 8).unwrap_or(0),
+            |slots| slots.values().max().map_or(0, |offset| offset + 8),
+        );
+        self.scalar_slot_offsets = scalar_slots.unwrap_or_default();
         self.fixed_byte_local_offsets.clear();
         self.named_var_offsets.clear();
         self.cell_buffer_offsets.clear();
@@ -871,7 +881,7 @@ impl CodeGenerator {
         for param in params {
             if is_ckb_temporal_scalar_ir_type(&param.ty) {
                 self.emit(format!("# cellscript abi: temporal scalar param {} value={}", param.name, abi_arg_label(abi_index)));
-                self.emit_spill_abi_arg(abi_index, param.binding.id * 8);
+                self.emit_spill_abi_arg(abi_index, self.scalar_slot_offset(param.binding.id));
                 abi_index += 1;
             } else if let Some(width) = self.fieldless_enum_width(&param.ty) {
                 self.emit(format!(
@@ -880,7 +890,7 @@ impl CodeGenerator {
                     abi_arg_label(abi_index),
                     width
                 ));
-                self.emit_spill_abi_arg(abi_index, param.binding.id * 8);
+                self.emit_spill_abi_arg(abi_index, self.scalar_slot_offset(param.binding.id));
                 abi_index += 2;
             } else if let Some(width) = self.generic_value_type_width(&param.ty) {
                 self.emit(format!(
@@ -890,7 +900,7 @@ impl CodeGenerator {
                     abi_arg_label(abi_index + 1),
                     width
                 ));
-                self.emit_spill_abi_arg(abi_index, param.binding.id * 8);
+                self.emit_spill_abi_arg(abi_index, self.scalar_slot_offset(param.binding.id));
                 if let Some(size_offset) = self.fixed_byte_param_size_offsets.get(&param.binding.id).copied() {
                     self.emit_spill_abi_arg(abi_index + 1, size_offset);
                 }
@@ -902,7 +912,7 @@ impl CodeGenerator {
                     abi_arg_label(abi_index),
                     abi_arg_label(abi_index + 1)
                 ));
-                self.emit_spill_abi_arg(abi_index, param.binding.id * 8);
+                self.emit_spill_abi_arg(abi_index, self.scalar_slot_offset(param.binding.id));
                 if let Some(size_offset) = self.schema_pointer_size_offsets.get(&param.binding.id).copied() {
                     self.emit_spill_abi_arg(abi_index + 1, size_offset);
                 }
@@ -929,7 +939,7 @@ impl CodeGenerator {
                     abi_arg_label(abi_index + 1),
                     width
                 ));
-                self.emit_spill_abi_arg(abi_index, param.binding.id * 8);
+                self.emit_spill_abi_arg(abi_index, self.scalar_slot_offset(param.binding.id));
                 if let Some(size_offset) = self.fixed_byte_param_size_offsets.get(&param.binding.id).copied() {
                     self.emit_spill_abi_arg(abi_index + 1, size_offset);
                 }
@@ -942,13 +952,13 @@ impl CodeGenerator {
                     abi_arg_label(abi_index + 1),
                     width
                 ));
-                self.emit_spill_abi_arg(abi_index, param.binding.id * 8);
+                self.emit_spill_abi_arg(abi_index, self.scalar_slot_offset(param.binding.id));
                 if let Some(size_offset) = self.fixed_byte_param_size_offsets.get(&param.binding.id).copied() {
                     self.emit_spill_abi_arg(abi_index + 1, size_offset);
                 }
                 abi_index += 2;
             } else {
-                self.emit_spill_abi_arg(abi_index, param.binding.id * 8);
+                self.emit_spill_abi_arg(abi_index, self.scalar_slot_offset(param.binding.id));
                 abi_index += 1;
             }
         }
@@ -1317,7 +1327,7 @@ impl CodeGenerator {
 
     pub(super) fn emit_store_u128_pointer_for_var(&mut self, var_id: usize, offset: usize) {
         self.emit_sp_addi("t0", offset);
-        self.emit_stack_store("t0", var_id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(var_id));
     }
 
     pub(super) fn emit_materialize_u128_operand_to_var(&mut self, dest: &IrVar, src: &IrOperand) -> bool {

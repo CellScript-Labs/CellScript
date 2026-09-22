@@ -1,5 +1,7 @@
 use super::*;
 
+mod immediate;
+
 const ELF_HEADER_SIZE: usize = 64;
 const ELF_PROGRAM_HEADER_SIZE: usize = 56;
 const ELF_SECTION_HEADER_SIZE: usize = 64;
@@ -1499,22 +1501,14 @@ fn encode_fixed_li_sequence(out: &mut Vec<u8>, rd: u8, imm: i128) -> Result<()> 
 }
 
 fn encode_li_sequence(out: &mut Vec<u8>, rd: u8, imm: i128) -> Result<()> {
-    match li_form(imm) {
-        LiForm::Addi => {
-            let signed = li_signed_i64(imm).expect("addi form implies an i64 immediate");
-            out.extend_from_slice(&encode_i_type(0x13, rd, 0b000, 0, signed)?.to_le_bytes());
-        }
-        LiForm::Lui => {
-            let signed = li_signed_i64(imm).expect("lui form implies an i64 immediate");
-            out.extend_from_slice(&encode_u_type(0x37, rd, signed >> 12).to_le_bytes());
-        }
-        LiForm::LuiAddi => {
-            let signed = li_signed_i64(imm).expect("lui+addi form implies an i64 immediate");
-            let (hi, lo) = split_hi_lo(signed)?;
-            out.extend_from_slice(&encode_u_type(0x37, rd, hi).to_le_bytes());
-            out.extend_from_slice(&encode_i_type(0x13, rd, 0b000, rd, lo)?.to_le_bytes());
-        }
-        LiForm::Large => encode_large_li_sequence(out, rd, li_bits(imm)?)?,
+    for step in immediate::plan(imm)? {
+        let word = match step {
+            immediate::Step::AddFromZero(value) => encode_i_type(0x13, rd, 0b000, 0, value)?,
+            immediate::Step::LoadUpper(value) => encode_u_type(0x37, rd, value),
+            immediate::Step::ShiftLeft(value) => encode_i_type(0x13, rd, 0b001, rd, i64::from(value))?,
+            immediate::Step::Add(value) => encode_i_type(0x13, rd, 0b000, rd, value)?,
+        };
+        out.extend_from_slice(&word.to_le_bytes());
     }
     Ok(())
 }
@@ -1619,11 +1613,8 @@ fn li_form(imm: i128) -> LiForm {
 }
 
 fn li_sequence_size(imm: i128) -> usize {
-    match li_form(imm) {
-        LiForm::Addi | LiForm::Lui => 4,
-        LiForm::LuiAddi => 8,
-        LiForm::Large => 60,
-    }
+    // Parsing validates the literal domain before any layout pass runs.
+    immediate::plan(imm).expect("parsed RV64 immediate").len() * 4
 }
 
 fn write_elf_header(
@@ -2190,6 +2181,64 @@ fn pad_to_alignment(out: &mut Vec<u8>, align: usize) {
 mod tests {
     use super::*;
 
+    #[test]
+    #[cfg(feature = "vm-runner")]
+    fn immediate_plans_execute_in_ckb_vm_with_relaxed_branches_and_zero_destination() {
+        use ckb_vm::{
+            cost_model::estimate_cycles, machine::VERSION2, Bytes, DefaultCoreMachine, DefaultMachineBuilder, DefaultMachineRunner,
+            SparseMemory, SupportMachine, TraceMachine, WXorXMemory, ISA_B, ISA_IMC, ISA_MOP,
+        };
+        let mut values = vec![
+            0u64,
+            2047,
+            2048,
+            (-2048i64) as u64,
+            (-2049i64) as u64,
+            0x7fff_f7ff,
+            0x7fff_f800,
+            0x7fff_ffff,
+            0x8000_0000,
+            1 << 56,
+            1 << 63,
+            u64::MAX,
+        ];
+        let mut state = 0x6d75_a6e7_c4a4_ec17u64;
+        for _ in 0..512 {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            values.push(state);
+        }
+        let mut lines = vec![".section .text".into(), ".global entry".into(), "entry:".into()];
+        for (index, value) in values.iter().enumerate() {
+            lines.extend([
+                format!("li t0, {value}"),
+                format!("la t1, expected_{index}"),
+                "ld t2, 0(t1)".into(),
+                "bne t0, t2, failed".into(),
+                format!("li zero, {value}"),
+                "bnez zero, failed".into(),
+            ]);
+        }
+        lines.extend(["li a0, 0".into(), "ret".into(), "failed:".into(), "li a0, 1".into(), "ret".into(), ".section .rodata".into()]);
+        for (index, value) in values.iter().enumerate() {
+            lines.extend([
+                ".align 3".into(),
+                format!("expected_{index}:"),
+                format!(".word {}", *value as u32),
+                format!(".word {}", value >> 32),
+            ]);
+        }
+        let elf = assemble_elf_internal(&lines).expect("immediate VM fixture with far branches");
+        type Machine = TraceMachine<DefaultCoreMachine<u64, WXorXMemory<SparseMemory<u64>>>>;
+        let core = <<Machine as DefaultMachineRunner>::Inner as SupportMachine>::new(ISA_IMC | ISA_B | ISA_MOP, VERSION2, 10_000_000);
+        let mut machine = Machine::new(DefaultMachineBuilder::new(core).instruction_cycle_func(Box::new(estimate_cycles)).build());
+        machine.load_program(&Bytes::from(elf), std::iter::empty::<std::result::Result<Bytes, ckb_vm::Error>>()).unwrap();
+        assert_eq!(machine.run().unwrap(), 0, "encoded RV64 immediates must equal independent .rodata values");
+        assert_eq!(START_TRAMPOLINE_SIZE, 20);
+        assert!(li_sequence_size(1 << 56) <= 8);
+    }
+
     fn assert_generated_assembly_error(error: &CompileError, expected_line: usize, expected_message: &str) {
         assert!(error.message.contains(expected_message), "unexpected diagnostic: {}", error.message);
         assert!(
@@ -2625,7 +2674,7 @@ mod tests {
 
     #[test]
     fn rv64_li_boundary_values_materialize_correct_bits() {
-        let cases = [(0x7fff_f7ffi128, 8usize), (0x7fff_f800i128, 60usize), (0x7fff_ffffi128, 60usize), (0x8000_0000i128, 60usize)];
+        let cases = [(0x7fff_f7ffi128, 8usize), (0x7fff_f800i128, 12usize), (0x7fff_ffffi128, 12usize), (0x8000_0000i128, 8usize)];
 
         for (value, expected_size) in cases {
             let mut bytes = Vec::new();

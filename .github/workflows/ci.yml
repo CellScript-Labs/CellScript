@@ -6,6 +6,8 @@ on:
     branches:
       - main
       - master
+      - "0.30"
+      - "0.31"
       - "nightly-*"
     tags:
       - "v*"
@@ -36,6 +38,8 @@ jobs:
           --health-retries 10
     env:
       CARGO_INCREMENTAL: "0"
+      WRANGLER_HIDE_BANNER: "true"
+      WRANGLER_SEND_METRICS: "false"
       CARGO_TARGET_DIR: /tmp/cellscript-ci-target
       CELLSCRIPT_BACKEND_SHAPE_REPORT: /tmp/cellscript-backend-shape/backend-shape-report.json
       CKB_SDK_RUST_REF: v5.1.0

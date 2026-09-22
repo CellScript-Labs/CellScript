@@ -6,8 +6,9 @@
 `0.30` commit `8d6e200caa58d81429912df925a9322f691cb41d`. Its
 [cost decisions](docs/CELLSCRIPT_0_31_COST_DECISIONS.md) define the next work:
 measurement, immediate planning, shared decoders, private adapter frames, and
-scalar slot reuse. These are accepted decisions, not implemented optimizations.
-Cargo versions and the pinned toolchain remain unchanged for this planning step.
+scalar slot reuse. The implementation and remaining acceptance work are tracked
+in [the cost implementation report](docs/CELLSCRIPT_0_31_COST_IMPLEMENTATION.md).
+Cargo versions and the pinned toolchain remain unchanged during development.
 The requested branch layout makes `0.31` the GitHub default branch.
 
 `0.30` is retained as the release baseline. Its complete local release gate

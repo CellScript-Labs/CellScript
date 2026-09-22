@@ -201,14 +201,14 @@ impl CodeGenerator {
         self.emit_label(&lock_is_distinct);
 
         self.emit_sp_addi("t0", buffer_offset);
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         self.emit("li t0, 1");
-        self.emit_stack_store("t0", found.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(found.id));
         self.emit(format!("j {}", done));
 
         self.emit_label(&out_of_bound);
-        self.emit_stack_store("zero", dest.id * 8);
-        self.emit_stack_store("zero", found.id * 8);
+        self.emit_stack_store("zero", self.scalar_slot_offset(dest.id));
+        self.emit_stack_store("zero", self.scalar_slot_offset(found.id));
         self.emit_label(&done);
     }
 
@@ -249,7 +249,7 @@ impl CodeGenerator {
             max_elements,
             element_width
         ));
-        self.emit_stack_load("t4", plan_var.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(plan_var.id));
         self.emit_stack_load("t5", plan_size_offset);
         self.emit(format!("li t0, {}", 12));
         self.emit("sltu t2, t5, t0");
@@ -288,22 +288,22 @@ impl CodeGenerator {
         self.emit_operand_to_register("t0", index);
         self.emit("sltu t2, t0, t3");
         self.emit(format!("bnez t2, {}", found_label));
-        self.emit_stack_store("zero", dest.id * 8);
+        self.emit_stack_store("zero", self.scalar_slot_offset(dest.id));
         self.emit_schema_size_store("zero", element_size_offset);
-        self.emit_stack_store("zero", found.id * 8);
+        self.emit_stack_store("zero", self.scalar_slot_offset(found.id));
         self.emit(format!("j {}", done));
 
         self.emit_label(&found_label);
         self.emit(format!("li t1, {}", element_width));
         self.emit("mul t2, t0, t1");
         self.emit("addi t2, t2, 12");
-        self.emit_stack_load("t4", plan_var.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(plan_var.id));
         self.emit("add t4, t4, t2");
-        self.emit_stack_store("t4", dest.id * 8);
+        self.emit_stack_store("t4", self.scalar_slot_offset(dest.id));
         self.emit(format!("li t1, {}", element_width));
         self.emit_schema_size_store("t1", element_size_offset);
         self.emit("li t1, 1");
-        self.emit_stack_store("t1", found.id * 8);
+        self.emit_stack_store("t1", self.scalar_slot_offset(found.id));
         self.emit_label(&done);
     }
 
@@ -1302,7 +1302,7 @@ impl CodeGenerator {
                 if output_field_offset != 0 {
                     self.emit_large_addi("a0", "a0", output_field_offset as i64);
                 }
-                self.emit_sp_addi("a1", var_id * 8);
+                self.emit_sp_addi("a1", self.scalar_slot_offset(var_id));
                 self.emit(format!("li a2, {}", width));
                 self.emit("call __cellscript_memcmp_fixed");
                 self.emit(format!("bnez a0, {}", mismatch_label));
@@ -1314,7 +1314,7 @@ impl CodeGenerator {
                 if output_field_offset != 0 {
                     self.emit_large_addi("a0", "a0", output_field_offset as i64);
                 }
-                self.emit_stack_load("a1", var_id * 8);
+                self.emit_stack_load("a1", self.scalar_slot_offset(var_id));
                 self.emit(format!("li a2, {}", width));
                 self.emit("call __cellscript_memcmp_fixed");
                 self.emit(format!("bnez a0, {}", mismatch_label));
@@ -2098,7 +2098,7 @@ impl CodeGenerator {
         self.emit(format!("# cellscript abi: verify output dynamic field {}.{} as Molecule bytes", type_name, field));
         let mismatch_label = self.fresh_label("create_dynamic_field_mismatch");
         self.emit_stack_load("a0", output_start_offset);
-        self.emit_stack_load("a1", var.id * 8);
+        self.emit_stack_load("a1", self.scalar_slot_offset(var.id));
         self.emit_stack_load("a2", output_len_offset);
         self.emit("call __cellscript_memcmp_fixed");
         self.emit(format!("bnez a0, {}", mismatch_label));

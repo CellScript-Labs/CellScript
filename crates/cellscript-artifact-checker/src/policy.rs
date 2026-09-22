@@ -19,6 +19,35 @@ pub const POLICY_SELECTOR_FIELD: &str = "input_type.records[type,current-script-
 const MAX_COMMON_CALL_DEPTH: usize = 256;
 const MAX_COMMON_CALLEE_BLOCKS: usize = 262_144;
 
+/// Independently derive the private decoder's fixed payload reservation.
+/// Unknown layouts and Script-argument users retain the old bounded frame.
+pub(crate) fn private_adapter_layout(entry: &TypedSemanticEntry, typed: &TypedSemanticRecord) -> Result<(u32, u32), CheckerError> {
+    let fallback = (5376, 4096);
+    let mut payload = 0u64;
+    for param in &entry.params {
+        if param.source == "lockargs" {
+            return Ok(fallback);
+        }
+        let projection = builder_parameter_projection(param, entry, typed)?;
+        if projection["cell_bound_abi"] == true || param.reference {
+            continue;
+        }
+        let width = projection["fixed_byte_len"].as_u64().or(policy_abi_type(&param.ty, 0)?.static_width());
+        let Some(width) = width else {
+            return Ok(fallback);
+        };
+        let Some(total) = payload.checked_add(width) else {
+            return Ok(fallback);
+        };
+        payload = total;
+    }
+    let capacity = if payload == 0 { 0 } else { payload.saturating_add(8) };
+    if capacity > 4096 {
+        return Ok(fallback);
+    }
+    Ok((((8 + capacity + 8).next_multiple_of(16)) as u32, capacity as u32))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PolicyWitnessContract {

@@ -1,0 +1,330 @@
+{
+  "policy-dense-1-width-8": {
+    "elf_bytes": 4048,
+    "positive_cycles": 10726,
+    "group_positive_cycles": 10112,
+    "group_rejection_cycles": 9017,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11424
+  },
+  "policy-dense-2-width-8": {
+    "elf_bytes": 5208,
+    "positive_cycles": 11020,
+    "group_positive_cycles": 10406,
+    "group_rejection_cycles": 9311,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11424
+  },
+  "policy-dense-4-width-8": {
+    "elf_bytes": 7536,
+    "positive_cycles": 11610,
+    "group_positive_cycles": 10996,
+    "group_rejection_cycles": 9901,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11424
+  },
+  "policy-dense-8-width-8": {
+    "elf_bytes": 12192,
+    "positive_cycles": 12790,
+    "group_positive_cycles": 12176,
+    "group_rejection_cycles": 11081,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11424
+  },
+  "policy-dense-16-width-8": {
+    "elf_bytes": 21504,
+    "positive_cycles": 15150,
+    "group_positive_cycles": 14536,
+    "group_rejection_cycles": 13441,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11424
+  },
+  "policy-dense-32-width-8": {
+    "elf_bytes": 40128,
+    "positive_cycles": 19870,
+    "group_positive_cycles": 19256,
+    "group_rejection_cycles": 18161,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11424
+  },
+  "policy-dense-64-width-8": {
+    "elf_bytes": 77536,
+    "positive_cycles": 29350,
+    "group_positive_cycles": 28736,
+    "group_rejection_cycles": 27641,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11424
+  },
+  "policy-dense-1-width-32": {
+    "elf_bytes": 3984,
+    "positive_cycles": 12206,
+    "group_positive_cycles": 11592,
+    "group_rejection_cycles": 10503,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11472
+  },
+  "policy-dense-2-width-32": {
+    "elf_bytes": 5080,
+    "positive_cycles": 12484,
+    "group_positive_cycles": 11870,
+    "group_rejection_cycles": 10781,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11472
+  },
+  "policy-dense-4-width-32": {
+    "elf_bytes": 7280,
+    "positive_cycles": 13042,
+    "group_positive_cycles": 12428,
+    "group_rejection_cycles": 11339,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11472
+  },
+  "policy-dense-8-width-32": {
+    "elf_bytes": 11680,
+    "positive_cycles": 14158,
+    "group_positive_cycles": 13544,
+    "group_rejection_cycles": 12455,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11472
+  },
+  "policy-dense-16-width-32": {
+    "elf_bytes": 20480,
+    "positive_cycles": 16390,
+    "group_positive_cycles": 15776,
+    "group_rejection_cycles": 14687,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11472
+  },
+  "policy-dense-32-width-32": {
+    "elf_bytes": 38080,
+    "positive_cycles": 20854,
+    "group_positive_cycles": 20240,
+    "group_rejection_cycles": 19151,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11472
+  },
+  "policy-dense-64-width-32": {
+    "elf_bytes": 73440,
+    "positive_cycles": 29822,
+    "group_positive_cycles": 29208,
+    "group_rejection_cycles": 28119,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11472
+  },
+  "policy-dense-1-width-128": {
+    "elf_bytes": 3984,
+    "positive_cycles": 17894,
+    "group_positive_cycles": 17280,
+    "group_rejection_cycles": 16215,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11568
+  },
+  "policy-dense-2-width-128": {
+    "elf_bytes": 5080,
+    "positive_cycles": 18172,
+    "group_positive_cycles": 17558,
+    "group_rejection_cycles": 16493,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11568
+  },
+  "policy-dense-4-width-128": {
+    "elf_bytes": 7280,
+    "positive_cycles": 18730,
+    "group_positive_cycles": 18116,
+    "group_rejection_cycles": 17051,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11568
+  },
+  "policy-dense-8-width-128": {
+    "elf_bytes": 11680,
+    "positive_cycles": 19846,
+    "group_positive_cycles": 19232,
+    "group_rejection_cycles": 18167,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11568
+  },
+  "policy-dense-16-width-128": {
+    "elf_bytes": 20480,
+    "positive_cycles": 22078,
+    "group_positive_cycles": 21464,
+    "group_rejection_cycles": 20399,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11568
+  },
+  "policy-dense-32-width-128": {
+    "elf_bytes": 38080,
+    "positive_cycles": 26542,
+    "group_positive_cycles": 25928,
+    "group_rejection_cycles": 24863,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11568
+  },
+  "policy-dense-64-width-128": {
+    "elf_bytes": 73440,
+    "positive_cycles": 35510,
+    "group_positive_cycles": 34896,
+    "group_rejection_cycles": 33831,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11568
+  },
+  "policy-sparse-8-width-32": {
+    "elf_bytes": 11712,
+    "positive_cycles": 14174,
+    "group_positive_cycles": 13560,
+    "group_rejection_cycles": 12471,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11472
+  },
+  "policy-sparse-32-width-32": {
+    "elf_bytes": 38208,
+    "positive_cycles": 20918,
+    "group_positive_cycles": 20304,
+    "group_rejection_cycles": 19215,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11472
+  },
+  "policy-sparse-64-width-32": {
+    "elf_bytes": 73736,
+    "positive_cycles": 29960,
+    "group_positive_cycles": 29346,
+    "group_rejection_cycles": 28257,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11472
+  },
+  "policy-high-8-width-32": {
+    "elf_bytes": 12128,
+    "positive_cycles": 14382,
+    "group_positive_cycles": 13768,
+    "group_rejection_cycles": 12679,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11472
+  },
+  "policy-high-32-width-32": {
+    "elf_bytes": 40032,
+    "positive_cycles": 21790,
+    "group_positive_cycles": 21176,
+    "group_rejection_cycles": 20087,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11472
+  },
+  "policy-high-64-width-32": {
+    "elf_bytes": 77104,
+    "positive_cycles": 31634,
+    "group_positive_cycles": 31020,
+    "group_rejection_cycles": 29931,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11472
+  },
+  "records-1-first-matching-common": {
+    "elf_bytes": 11824,
+    "positive_cycles": 14255,
+    "group_positive_cycles": 13641,
+    "group_rejection_cycles": 12552,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11472
+  },
+  "records-1-first-mixed-common": {
+    "elf_bytes": 12320,
+    "positive_cycles": 14678,
+    "group_positive_cycles": 14064,
+    "group_rejection_cycles": 12968,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11488
+  },
+  "records-2-first-matching-common": {
+    "elf_bytes": 11824,
+    "positive_cycles": 15554,
+    "group_positive_cycles": 14940,
+    "group_rejection_cycles": 13867,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11472
+  },
+  "records-2-first-mixed-common": {
+    "elf_bytes": 12320,
+    "positive_cycles": 15977,
+    "group_positive_cycles": 15363,
+    "group_rejection_cycles": 14283,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11488
+  },
+  "records-2-last-matching-common": {
+    "elf_bytes": 11824,
+    "positive_cycles": 15554,
+    "group_positive_cycles": 14940,
+    "group_rejection_cycles": 13867,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11472
+  },
+  "records-2-last-mixed-common": {
+    "elf_bytes": 12320,
+    "positive_cycles": 15977,
+    "group_positive_cycles": 15363,
+    "group_rejection_cycles": 14283,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11488
+  },
+  "records-4-first-matching-common": {
+    "elf_bytes": 11824,
+    "positive_cycles": 19268,
+    "group_positive_cycles": 18654,
+    "group_rejection_cycles": 17613,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11472
+  },
+  "records-4-first-mixed-common": {
+    "elf_bytes": 12320,
+    "positive_cycles": 19691,
+    "group_positive_cycles": 19077,
+    "group_rejection_cycles": 18029,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11488
+  },
+  "records-4-last-matching-common": {
+    "elf_bytes": 11824,
+    "positive_cycles": 19268,
+    "group_positive_cycles": 18654,
+    "group_rejection_cycles": 17613,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11472
+  },
+  "records-4-last-mixed-common": {
+    "elf_bytes": 12320,
+    "positive_cycles": 19691,
+    "group_positive_cycles": 19077,
+    "group_rejection_cycles": 18029,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11488
+  },
+  "records-8-first-matching-common": {
+    "elf_bytes": 11824,
+    "positive_cycles": 26696,
+    "group_positive_cycles": 26082,
+    "group_rejection_cycles": 25106,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11472
+  },
+  "records-8-first-mixed-common": {
+    "elf_bytes": 12320,
+    "positive_cycles": 27119,
+    "group_positive_cycles": 26505,
+    "group_rejection_cycles": 25522,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11488
+  },
+  "records-8-last-matching-common": {
+    "elf_bytes": 11824,
+    "positive_cycles": 26696,
+    "group_positive_cycles": 26082,
+    "group_rejection_cycles": 25106,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11472
+  },
+  "records-8-last-mixed-common": {
+    "elf_bytes": 12320,
+    "positive_cycles": 27119,
+    "group_positive_cycles": 26505,
+    "group_rejection_cycles": 25522,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 11488
+  }
+}

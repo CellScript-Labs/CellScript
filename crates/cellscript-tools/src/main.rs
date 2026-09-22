@@ -17,6 +17,7 @@ mod ckb_acceptance;
 mod ckb_acceptance_live;
 mod ckb_adapter_live;
 mod ckb_devnet;
+mod cost_evidence;
 mod crypto;
 mod evidence_retention;
 mod executable_surface;
@@ -157,6 +158,8 @@ enum Command {
     },
     /// Validate freshness markers in CellScript documentation headers.
     CheckDocStatus,
+    /// Validate versioned cost measurements and the frozen per-fixture ceilings.
+    CheckCostEvidence { report: PathBuf, multi_script_report: PathBuf },
     /// Validate the frozen 0.30 business-capability corpus inventory.
     CheckBusinessCorpus {
         /// Refresh the sorted evidence inventory and its content digest.
@@ -438,6 +441,11 @@ fn main() -> ExitCode {
             }
         }
         Command::CheckDocStatus => match repository_checks::check_doc_status(&root) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => failure(error),
+        },
+        Command::CheckCostEvidence { report, multi_script_report } => match cost_evidence::check(&root, &report, &multi_script_report)
+        {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => failure(error),
         },

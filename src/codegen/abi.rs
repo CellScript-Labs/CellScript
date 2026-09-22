@@ -120,7 +120,7 @@ impl CodeGenerator {
     }
 
     pub(super) fn emit_entry_witness_wrapper(&mut self, target: &str, params: &[IrParam]) -> Result<()> {
-        self.emit_entry_parameter_wrapper(target, params, None)
+        self.emit_entry_parameter_wrapper(target, params, None, false)
     }
 
     /// Policy dispatch has already validated the complete WitnessArgs and
@@ -128,12 +128,69 @@ impl CodeGenerator {
     /// pointer, a1=length and reuses the positional decoder without reloading a
     /// witness. A payload-free variant requires exactly zero argument bytes.
     pub(super) fn emit_policy_action_adapter(&mut self, target: &str, params: &[IrParam], label: &str) -> Result<()> {
-        self.emit_entry_parameter_wrapper(target, params, Some(label))
+        self.emit_entry_parameter_wrapper(target, params, Some(label), false)
     }
 
-    fn emit_entry_parameter_wrapper(&mut self, target: &str, params: &[IrParam], policy_record_label: Option<&str>) -> Result<()> {
+    /// Sharing is deliberately limited to complete, fixed private layouts.
+    /// The key retains ordered parameter types, sources, flags and binding IDs,
+    /// runtime/TypeHash/plan indices, and the resolved payload representation.
+    /// Named types resolve within one module; dynamic or Script-argument
+    /// layouts keep dedicated adapters.
+    pub(super) fn policy_decoder_key(&self, target: &str) -> Option<(String, usize)> {
+        let abi = self.callable_abis.get(target)?;
+        if abi.params.iter().any(|param| param.source == ParamSource::LockArgs) || !abi.bounded_plan_param_indices.is_empty() {
+            return None;
+        }
+        let payload = entry_witness_payload_layout(
+            &abi.params,
+            &abi.runtime_bound_param_indices,
+            &abi.bounded_plan_param_indices,
+            &self.enum_layouts,
+        );
+        if payload.iter().any(|arg| arg.unsupported || arg.schema_dynamic) {
+            return None;
+        }
+        let width: usize = payload.iter().map(|arg| arg.width).sum();
+        let capacity = if width == 0 { 0 } else { ENTRY_WITNESS_HEADER_SIZE.checked_add(width)? };
+        if capacity > ENTRY_WITNESS_BUFFER_SIZE {
+            return None;
+        }
+        let frame = align_up(ENTRY_WITNESS_BUFFER_OFFSET + capacity + 8, 16);
+        Some((format!("policy-private-fixed-v1:{abi:?}:{payload:?}"), frame))
+    }
+
+    pub(super) fn emit_policy_shared_decoder(&mut self, target: &str, params: &[IrParam], label: &str) -> Result<()> {
+        self.emit_entry_parameter_wrapper(target, params, Some(label), true)
+    }
+
+    pub(super) fn emit_policy_decoder_stub(&mut self, target: &str, label: &str, decoder: &str, frame: usize) {
+        let abi = self.callable_abis.get(target).expect("shared decoder requires a complete local ABI");
+        let outgoing = align_stack_arg_bytes(entry_abi_arg_count(&abi.params, Some(abi)).saturating_sub(8) * 8);
+        let done = self.fresh_label("entry_witness_done");
+        self.entry_frame_sizes.insert(label.to_string(), frame as u32);
+        self.emit_global(label);
+        self.emit_label(label);
+        self.emit_large_addi("sp", "sp", -(frame as i64));
+        self.emit_stack_store("ra", frame - 8);
+        // The stub owns the private copy and saved RA throughout both calls.
+        // The decoder borrows this frame without moving sp or calling helpers.
+        self.emit_entry_call_target(decoder, 0);
+        self.emit_entry_call_target(target, outgoing);
+        self.emit(format!("j {done}"));
+        self.emit_label(&done);
+        self.emit_stack_load("ra", frame - 8);
+        self.emit_large_addi("sp", "sp", frame as i64);
+        self.emit("ret");
+    }
+
+    fn emit_entry_parameter_wrapper(
+        &mut self,
+        target: &str,
+        params: &[IrParam],
+        policy_record_label: Option<&str>,
+        decoder_only: bool,
+    ) -> Result<()> {
         let wrapper_label = policy_record_label.unwrap_or(ENTRY_WITNESS_LABEL);
-        self.entry_frame_sizes.insert(wrapper_label.to_string(), ENTRY_WITNESS_FRAME_SIZE as u32);
         let callable_abi = self.callable_abis.get(target).cloned();
         let type_hash_param_indices = callable_abi.as_ref().map(|abi| abi.type_hash_param_indices.clone()).unwrap_or_default();
         let runtime_bound_param_indices = callable_abi.as_ref().map(|abi| abi.runtime_bound_param_indices.clone()).unwrap_or_default();
@@ -151,6 +208,28 @@ impl CodeGenerator {
                 && !bounded_plan_param_indices.contains(&index)
         });
         let min_witness_len = ENTRY_WITNESS_HEADER_SIZE + payload_len;
+        // Only the private selected-record adapter can use the proven fixed
+        // payload bound. The outer WitnessArgs loader still accepts 4096 bytes,
+        // including optional fields and records belonging to other Scripts.
+        let compact = policy_record_label.is_some()
+            && !has_lock_args
+            && !has_dynamic_payload
+            && !payload.iter().any(|arg| arg.unsupported)
+            && !has_unsupported_bounded_collection_param
+            && min_witness_len <= ENTRY_WITNESS_BUFFER_SIZE;
+        let private_capacity = if compact {
+            if has_witness_payload {
+                min_witness_len
+            } else {
+                0
+            }
+        } else {
+            ENTRY_WITNESS_BUFFER_SIZE
+        };
+        let frame_size =
+            if compact { align_up(ENTRY_WITNESS_BUFFER_OFFSET + private_capacity + 8, 16) } else { ENTRY_WITNESS_FRAME_SIZE };
+        let return_address_offset = frame_size - 8;
+        self.entry_frame_sizes.insert(wrapper_label.to_string(), if decoder_only { 0 } else { frame_size as u32 });
         let loaded_label = self.fresh_label("entry_witness_loaded");
         let try_group_output_label = self.fresh_label("entry_witness_try_group_output");
         let buffer_ok_label = self.fresh_label("entry_witness_buffer_ok");
@@ -170,8 +249,10 @@ impl CodeGenerator {
             ));
             self.emit("# cellscript entry abi: placement profile requires CSARGv1 inside WitnessArgs.input_type");
         }
-        self.emit_large_addi("sp", "sp", -(ENTRY_WITNESS_FRAME_SIZE as i64));
-        self.emit_stack_store("ra", ENTRY_WITNESS_RA_OFFSET);
+        if !decoder_only {
+            self.emit_large_addi("sp", "sp", -(frame_size as i64));
+            self.emit_stack_store("ra", return_address_offset);
+        }
         if has_unsupported_bounded_collection_param {
             self.emit(
                 "# cellscript entry abi: bounded collection source/codec contract is unavailable; reject before decoding witness bytes",
@@ -179,7 +260,7 @@ impl CodeGenerator {
             self.emit(format!("j {}", bounded_collection_fail_label));
         }
         if policy_record_label.is_some() {
-            self.emit_policy_preload_entry_args(has_witness_payload, &fail_label);
+            self.emit_policy_preload_entry_args(has_witness_payload, private_capacity, &fail_label);
         }
         if has_lock_args {
             self.emit_entry_load_script_args(&fail_label);
@@ -404,7 +485,9 @@ impl CodeGenerator {
             if has_lock_args {
                 self.emit_entry_lock_args_exact_size_check(&fail_label);
             }
-            self.emit_entry_call_target(target, outgoing_stack_arg_bytes);
+            if !decoder_only {
+                self.emit_entry_call_target(target, outgoing_stack_arg_bytes);
+            }
             self.emit(format!("j {}", done_label));
         } else {
             let mut abi_index = 0usize;
@@ -490,7 +573,9 @@ impl CodeGenerator {
             if has_lock_args {
                 self.emit_entry_lock_args_exact_size_check(&fail_label);
             }
-            self.emit_entry_call_target(target, outgoing_stack_arg_bytes);
+            if !decoder_only {
+                self.emit_entry_call_target(target, outgoing_stack_arg_bytes);
+            }
             self.emit(format!("j {}", done_label));
         }
 
@@ -501,8 +586,10 @@ impl CodeGenerator {
         self.emit_label(&fail_label);
         self.emit_process_failure(CellScriptRuntimeError::EntryWitnessAbiInvalid);
         self.emit_label(&done_label);
-        self.emit_stack_load("ra", ENTRY_WITNESS_RA_OFFSET);
-        self.emit_large_addi("sp", "sp", ENTRY_WITNESS_FRAME_SIZE as i64);
+        if !decoder_only {
+            self.emit_stack_load("ra", return_address_offset);
+            self.emit_large_addi("sp", "sp", frame_size as i64);
+        }
         self.emit("ret");
         Ok(())
     }
@@ -511,7 +598,7 @@ impl CodeGenerator {
     /// argument decoding can clobber a0/a1. The fixed child frame does not overlap
     /// the parent policy frame. Only a0/a1 and t0..t4 are read or overwritten;
     /// no outgoing ABI parameters are live yet.
-    fn emit_policy_preload_entry_args(&mut self, has_witness_payload: bool, fail: &str) {
+    fn emit_policy_preload_entry_args(&mut self, has_witness_payload: bool, capacity: usize, fail: &str) {
         if !has_witness_payload {
             self.emit("# cellscript policy adapter: payload-free variants require exactly empty args");
             self.emit(format!("bnez a1, {fail}"));
@@ -520,7 +607,7 @@ impl CodeGenerator {
         }
         let copy = self.fresh_label("policy_args_copy");
         let copied = self.fresh_label("policy_args_copied");
-        self.emit(format!("li t0, {ENTRY_WITNESS_BUFFER_SIZE}"));
+        self.emit(format!("li t0, {capacity}"));
         self.emit(format!("bltu t0, a1, {fail}"));
         self.emit_stack_store("a1", ENTRY_WITNESS_SIZE_OFFSET);
         self.emit("addi t0, a0, 0");

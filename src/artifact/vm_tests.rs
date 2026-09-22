@@ -200,6 +200,71 @@ fn assert_exit(error: String, code: u64) {
 }
 
 #[test]
+fn shared_policy_decoder_preserves_wide_and_outgoing_stack_arguments() {
+    let parameters = (0..9).map(|index| format!("witness p{index}: u64")).collect::<Vec<_>>().join(", ");
+    let checks = (0..9).map(|index| format!("require p{index} == {}\n", index + 1)).collect::<String>();
+    let mut source = "module shared_stack_policy\nresource Token has store, consume { amount: u64 }\n".to_string();
+    for name in ["first", "second"] {
+        source.push_str(&format!(
+            "action {name}(input before: Token, {parameters}, witness recipient: Address) {{\nverification\n\
+             require before.amount == 7\n{checks}consume before\n\
+             create Token {{ amount: 7 }} with_lock(recipient)\n}}\n"
+        ));
+    }
+    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        for opt_level in [0, 3] {
+            let declaration = ArtifactDeclaration {
+                name: "SharedStackPolicy".into(),
+                context: ArtifactContext::TypeGroup { resource: "Token".into() },
+                dispatch: ArtifactDispatch::PolicyWitnessV1,
+                actions: vec![
+                    ArtifactAction { tag: 100, action: "first".into() },
+                    ArtifactAction { tag: 101, action: "second".into() },
+                ],
+                common_checks: Vec::new(),
+            };
+            let compiled = compile_artifact(
+                &source,
+                CompileOptions { edition, opt_level, ..options() },
+                declaration,
+                ExecutableSurfacePolicy::DenyFailClosed,
+            )
+            .unwrap();
+            compiled.validate().unwrap();
+            assert_eq!(
+                compiled
+                    .verified_lowering_record
+                    .as_ref()
+                    .unwrap()
+                    .entries
+                    .iter()
+                    .filter(|entry| entry.name.starts_with(".Lpolicy_shared_decoder_"))
+                    .count(),
+                1
+            );
+            for (tag, name) in [(100, "first"), (101, "second")] {
+                for valid in [true, false] {
+                    let result = execute(&compiled, Case::new(tag, &[7], &[7]), |_, script, recipient| {
+                        let mut values = (1..=9).map(EntryWitnessArg::U64).collect::<Vec<_>>();
+                        if !valid {
+                            values[8] = EntryWitnessArg::U64(10);
+                        }
+                        values.push(EntryWitnessArg::Address(recipient.calc_script_hash().unpack()));
+                        let args = compiled.metadata.actions.iter().find(|action| action.name == name).unwrap();
+                        encode_policy_witness_bundle(&[record(script, tag, args.entry_witness_args(&values).unwrap())]).unwrap()
+                    });
+                    if valid {
+                        assert!(result.expect("shared decoder must preserve every scalar and the recipient pointer") > 0);
+                    } else {
+                        assert_exit(result.unwrap_err(), 5);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn same_policy_bytes_select_all_four_group_cardinalities_at_nonzero_indices() {
     let compiled = policy(false);
     for case in

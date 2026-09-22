@@ -1,0 +1,116 @@
+{
+  "None": {
+    "elf_bytes": 16424,
+    "max_stack_frame_bytes": 5376,
+    "transaction_bytes": 1423,
+    "witness_bytes": 321,
+    "groups": {
+      "\"lock\":[0]:[]": 1944,
+      "\"lock\":[1,2,3]:[]": 2107,
+      "\"type\":[1,2]:[1,3]": 18730,
+      "\"type\":[3]:[2]": 15234,
+      "\"type\":[0]:[0]": 3807
+    },
+    "static_stacks": {
+      "order": 7968,
+      "policy": 11504,
+      "token": 2576,
+      "authorization": 6576
+    }
+  },
+  "AuthorizationCredential": {
+    "elf_bytes": 16424,
+    "max_stack_frame_bytes": 5376,
+    "transaction_bytes": 1423,
+    "witness_bytes": 321,
+    "groups": {
+      "\"lock\":[0]:[]": 1921,
+      "\"lock\":[1,2,3]:[]": 2107,
+      "\"type\":[1,2]:[1,3]": 18730,
+      "\"type\":[3]:[2]": 15234,
+      "\"type\":[0]:[0]": 3807
+    },
+    "static_stacks": {
+      "order": 7968,
+      "policy": 11504,
+      "token": 2576,
+      "authorization": 6576
+    }
+  },
+  "TokenAmount": {
+    "elf_bytes": 16424,
+    "max_stack_frame_bytes": 5376,
+    "transaction_bytes": 1423,
+    "witness_bytes": 321,
+    "groups": {
+      "\"lock\":[0]:[]": 1944,
+      "\"lock\":[1,2,3]:[]": 2107,
+      "\"type\":[1,2]:[1,3]": 18730,
+      "\"type\":[3]:[2]": 15234,
+      "\"type\":[0]:[0]": 3785
+    },
+    "static_stacks": {
+      "order": 7968,
+      "policy": 11504,
+      "token": 2576,
+      "authorization": 6576
+    }
+  },
+  "OrderAmount": {
+    "elf_bytes": 16424,
+    "max_stack_frame_bytes": 5376,
+    "transaction_bytes": 1423,
+    "witness_bytes": 321,
+    "groups": {
+      "\"lock\":[0]:[]": 1944,
+      "\"lock\":[1,2,3]:[]": 2107,
+      "\"type\":[1,2]:[1,3]": 12365,
+      "\"type\":[3]:[2]": 15234,
+      "\"type\":[0]:[0]": 3807
+    },
+    "static_stacks": {
+      "order": 7968,
+      "policy": 11504,
+      "token": 2576,
+      "authorization": 6576
+    }
+  },
+  "PolicyState": {
+    "elf_bytes": 16424,
+    "max_stack_frame_bytes": 5376,
+    "transaction_bytes": 1423,
+    "witness_bytes": 321,
+    "groups": {
+      "\"lock\":[0]:[]": 1944,
+      "\"lock\":[1,2,3]:[]": 2107,
+      "\"type\":[1,2]:[1,3]": 18730,
+      "\"type\":[3]:[2]": 14121,
+      "\"type\":[0]:[0]": 3807
+    },
+    "static_stacks": {
+      "order": 7968,
+      "policy": 11504,
+      "token": 2576,
+      "authorization": 6576
+    }
+  },
+  "Dependency": {
+    "elf_bytes": 16424,
+    "max_stack_frame_bytes": 5376,
+    "transaction_bytes": 1423,
+    "witness_bytes": 321,
+    "groups": {
+      "\"lock\":[0]:[]": 1944,
+      "\"lock\":[1,2,3]:[]": 2107,
+      "\"type\":[1,2]:[1,3]": 5588,
+      "\"type\":[3]:[2]": 15234,
+      "\"type\":[0]:[0]": 3807
+    },
+    "static_stacks": {
+      "order": 7968,
+      "policy": 11504,
+      "token": 2576,
+      "authorization": 6576
+    }
+  }
+}

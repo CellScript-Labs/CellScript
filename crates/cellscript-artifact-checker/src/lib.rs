@@ -3,6 +3,7 @@ mod checker;
 mod elf;
 mod failure;
 mod policy;
+mod policy_machine;
 mod schema;
 
 pub use checker::{

@@ -47,13 +47,13 @@ impl CodeGenerator {
             self.emit_loaded_schema_exact_size_check(size_offset, total_width, "fixed aggregate param");
             self.emit_loaded_schema_bounds_check(size_offset, offset + element_width, "fixed aggregate index");
         }
-        self.emit_stack_load("t4", arr_var.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(arr_var.id));
         if let Some(width) = fixed_scalar_width(inner, Some(element_width)) {
             self.emit_unaligned_scalar_load("t4", "t0", "t2", offset, width);
         } else {
             self.emit(format!("addi t0, t4, {}", offset));
         }
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         true
     }
 
@@ -80,7 +80,7 @@ impl CodeGenerator {
             element_width, size_offset
         ));
         self.emit_loaded_schema_bounds_check(size_offset, 4, "dynamic Molecule vector index");
-        self.emit_stack_load("t4", arr_var.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(arr_var.id));
         self.emit_unaligned_scalar_load("t4", "t0", "t2", 0, 4);
 
         self.emit_stack_load("t3", size_offset);
@@ -94,7 +94,7 @@ impl CodeGenerator {
         self.emit_label(&size_ok);
 
         match idx {
-            IrOperand::Var(v) => self.emit_stack_load("t1", v.id * 8),
+            IrOperand::Var(v) => self.emit_stack_load("t1", self.scalar_slot_offset(v.id)),
             IrOperand::Const(IrConst::U8(n)) => self.emit(format!("li t1, {}", n)),
             IrOperand::Const(IrConst::U16(n)) => self.emit(format!("li t1, {}", n)),
             IrOperand::Const(IrConst::U32(n)) => self.emit(format!("li t1, {}", n)),
@@ -117,7 +117,7 @@ impl CodeGenerator {
         } else {
             self.emit("addi t0, t4, 0");
         }
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         true
     }
 
@@ -140,7 +140,7 @@ impl CodeGenerator {
 
         self.emit("# index access");
         self.emit(format!("# cellscript abi: stack collection index element_size={}", element_width));
-        self.emit_stack_load("t4", arr_var.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(arr_var.id));
         self.emit("ld t0, -8(t4)");
         self.emit_operand_to_register("t1", idx);
 
@@ -158,7 +158,7 @@ impl CodeGenerator {
         } else {
             self.emit("addi t0, t4, 0");
         }
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         true
     }
 
@@ -188,11 +188,11 @@ impl CodeGenerator {
         }
 
         // Load array base pointer
-        self.emit_stack_load("t4", arr_var.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(arr_var.id));
 
         // Load index value into t1
         match idx {
-            IrOperand::Var(v) => self.emit_stack_load("t1", v.id * 8),
+            IrOperand::Var(v) => self.emit_stack_load("t1", self.scalar_slot_offset(v.id)),
             IrOperand::Const(IrConst::U8(n)) => self.emit(format!("li t1, {}", n)),
             IrOperand::Const(IrConst::U16(n)) => self.emit(format!("li t1, {}", n)),
             IrOperand::Const(IrConst::U32(n)) => self.emit(format!("li t1, {}", n)),
@@ -221,7 +221,7 @@ impl CodeGenerator {
             // Pointer-sized element: compute base + offset
             self.emit("add t0, t4, t1");
         }
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         true
     }
 
@@ -240,7 +240,7 @@ impl CodeGenerator {
             self.emit_fail(CellScriptRuntimeError::CollectionRuntimeUnsupported);
             return Ok(());
         }
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         Ok(())
     }
 
@@ -252,7 +252,7 @@ impl CodeGenerator {
             return false;
         }
         self.emit("# cellscript abi: stack collection length");
-        self.emit_stack_load("t4", var.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(var.id));
         self.emit("ld t0, -8(t4)");
         true
     }
@@ -275,7 +275,7 @@ impl CodeGenerator {
             element_width, size_offset
         ));
         self.emit_loaded_schema_bounds_check(size_offset, 4, "dynamic Molecule vector length");
-        self.emit_stack_load("t4", var.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(var.id));
         self.emit_unaligned_scalar_load("t4", "t0", "t2", 0, 4);
 
         self.emit_stack_load("t1", size_offset);
@@ -332,7 +332,7 @@ impl CodeGenerator {
             self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
             self.emit_loaded_schema_exact_size_check(size_offset, 32, "output type hash");
             self.emit_sp_addi("t0", buffer_offset);
-            self.emit_stack_store("t0", dest.id * 8);
+            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
             return Ok(());
         }
         if self.emit_runtime_type_hash(dest, operand) {
@@ -349,7 +349,7 @@ impl CodeGenerator {
             self.emit_operand_comment("type_hash source", operand);
             self.emit_loaded_schema_exact_size_check(size_offset, 32, "param type hash");
             self.emit_stack_load("t0", pointer_offset);
-            self.emit_stack_store("t0", dest.id * 8);
+            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
             return Ok(());
         }
 
@@ -383,7 +383,7 @@ impl CodeGenerator {
         self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
         self.emit_loaded_schema_exact_size_check(size_offset, 32, "runtime type hash");
         self.emit_sp_addi("t0", buffer_offset);
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         true
     }
 
@@ -409,7 +409,7 @@ impl CodeGenerator {
         // Initialize length to 0
         self.emit_stack_store("zero", length_offset);
         self.emit_sp_addi("t0", buffer_offset);
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         self.empty_molecule_vector_vars.insert(dest.id);
         self.stack_collection_vars.insert(dest.id);
         self.next_collection_slot += 1;
@@ -447,7 +447,7 @@ impl CodeGenerator {
 
         self.emit(format!("# cellscript abi: stack collection capacity element_size={}", element_width));
         self.emit(format!("li t0, {}", RUNTIME_COLLECTION_BUFFER_SIZE / element_width));
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         true
     }
 
@@ -493,7 +493,7 @@ impl CodeGenerator {
         }
 
         self.emit(format!("# cellscript abi: stack collection push element_size={}", width));
-        self.emit_stack_load("t4", collection.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
         self.emit("ld t0, -8(t4)");
         self.emit(format!("li t1, {}", width));
         self.emit("mul t2, t0, t1");
@@ -523,7 +523,7 @@ impl CodeGenerator {
             self.emit(format!("# cellscript abi: stack collection copy fixed bytes size={}", width));
             for byte_index in 0..width {
                 self.emit_fixed_byte_source_byte_to("t1", "t6", &source, byte_index);
-                self.emit_stack_load("t4", collection.id * 8);
+                self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
                 self.emit("ld t0, -8(t4)");
                 self.emit(format!("li t2, {}", width));
                 self.emit("mul t2, t0, t2");
@@ -536,7 +536,7 @@ impl CodeGenerator {
                 }
             }
         }
-        self.emit_stack_load("t4", collection.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
         self.emit("ld t0, -8(t4)");
         self.emit("addi t0, t0, 1");
         self.emit("sd t0, -8(t4)");
@@ -587,7 +587,7 @@ impl CodeGenerator {
             "# cellscript abi: stack collection extend bytes={} elements={} element_size={}",
             width, element_count, element_width
         ));
-        self.emit_stack_load("t4", collection.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
         self.emit("ld t0, -8(t4)");
         self.emit(format!("li t1, {}", element_width));
         self.emit("mul t2, t0, t1");
@@ -604,7 +604,7 @@ impl CodeGenerator {
         self.emit(format!("# cellscript abi: stack collection extend copy fixed bytes size={}", width));
         for byte_index in 0..width {
             self.emit_fixed_byte_source_byte_to("t1", "t6", &source, byte_index);
-            self.emit_stack_load("t4", collection.id * 8);
+            self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
             self.emit("ld t0, -8(t4)");
             self.emit(format!("li t2, {}", element_width));
             self.emit("mul t2, t0, t2");
@@ -616,7 +616,7 @@ impl CodeGenerator {
                 self.emit("sb t1, 0(t0)");
             }
         }
-        self.emit_stack_load("t4", collection.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
         self.emit("ld t0, -8(t4)");
         self.emit(format!("addi t0, t0, {}", element_count));
         self.emit("sd t0, -8(t4)");
@@ -647,7 +647,7 @@ impl CodeGenerator {
             return false;
         }
         self.emit("# cellscript abi: stack collection clear");
-        self.emit_stack_load("t4", collection.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
         self.emit("sd zero, -8(t4)");
         true
     }
@@ -679,7 +679,7 @@ impl CodeGenerator {
         }
 
         self.emit(format!("# cellscript abi: stack collection reverse element_size={}", element_width));
-        self.emit_stack_load("t4", collection.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
         self.emit("ld t0, -8(t4)");
         let done_label = self.fresh_label("stack_collection_reverse_done");
         self.emit("li t1, 2");
@@ -699,7 +699,7 @@ impl CodeGenerator {
         self.emit("sltu t2, t0, t1");
         self.emit(format!("beqz t2, {}", done_label));
 
-        self.emit_stack_load("t4", collection.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
         self.emit(format!("li t3, {}", element_width));
         self.emit("mul t5, t0, t3");
         self.emit("add t5, t4, t5");
@@ -753,7 +753,7 @@ impl CodeGenerator {
         }
 
         self.emit("# cellscript abi: stack collection truncate");
-        self.emit_stack_load("t4", collection.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
         self.emit("ld t0, -8(t4)");
         self.emit_operand_to_register("t1", len);
         let done_label = self.fresh_label("stack_collection_truncate_done");
@@ -793,7 +793,7 @@ impl CodeGenerator {
         }
 
         self.emit(format!("# cellscript abi: stack collection swap element_size={}", element_width));
-        self.emit_stack_load("t4", collection.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
         self.emit("ld t0, -8(t4)");
         self.emit_operand_to_register("t1", left);
         self.emit_operand_to_register("t2", right);
@@ -865,14 +865,14 @@ impl CodeGenerator {
         self.emit(format!("# cellscript abi: stack collection contains element_size={}", element_width));
         let index_offset = self.runtime_expr_temp_offset(0);
         self.emit_stack_store("zero", index_offset);
-        self.emit_stack_store("zero", dest.id * 8);
+        self.emit_stack_store("zero", self.scalar_slot_offset(dest.id));
         let loop_label = self.fresh_label("stack_collection_contains_loop");
         let next_label = self.fresh_label("stack_collection_contains_next");
         let found_label = self.fresh_label("stack_collection_contains_found");
         let done_label = self.fresh_label("stack_collection_contains_done");
         self.emit_label(&loop_label);
         self.emit_stack_load("t1", index_offset);
-        self.emit_stack_load("t4", collection.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
         self.emit("ld t2, -8(t4)");
         self.emit(format!("beq t1, t2, {}", done_label));
 
@@ -891,7 +891,7 @@ impl CodeGenerator {
             self.emit_prepare_fixed_byte_source(&source, element_width, "stack collection contains");
             for byte_index in 0..element_width {
                 self.emit_stack_load("t1", index_offset);
-                self.emit_stack_load("t4", collection.id * 8);
+                self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
                 self.emit(format!("li t2, {}", element_width));
                 self.emit("mul t3, t1, t2");
                 self.emit("add t4, t4, t3");
@@ -915,7 +915,7 @@ impl CodeGenerator {
         self.emit(format!("j {}", loop_label));
         self.emit_label(&found_label);
         self.emit("li t0, 1");
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         self.emit_label(&done_label);
         true
     }
@@ -957,7 +957,7 @@ impl CodeGenerator {
         };
 
         self.emit(format!("# cellscript abi: stack collection remove element_size={}", element_width));
-        self.emit_stack_load("t4", collection.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
         self.emit("ld t0, -8(t4)");
         self.emit_operand_to_register("t1", index);
 
@@ -972,7 +972,7 @@ impl CodeGenerator {
         self.emit("add t5, t4, t3");
         if dest_scalar {
             self.emit_unaligned_scalar_load("t5", "t6", "t2", 0, element_width);
-            self.emit_stack_store("t6", dest.id * 8);
+            self.emit_stack_store("t6", self.scalar_slot_offset(dest.id));
         } else {
             let removed_offset = self.runtime_expr_temp_offset(0);
             self.emit(format!("# cellscript abi: stack collection remove snapshot fixed bytes size={}", element_width));
@@ -987,7 +987,7 @@ impl CodeGenerator {
                 self.emit("sb t6, 0(t2)");
             }
             self.emit_sp_addi("t6", removed_offset);
-            self.emit_stack_store("t6", dest.id * 8);
+            self.emit_stack_store("t6", self.scalar_slot_offset(dest.id));
         }
 
         self.emit_stack_store("t1", index_offset);
@@ -997,7 +997,7 @@ impl CodeGenerator {
         self.emit_label(&shift_loop);
         self.emit_stack_load("t1", index_offset);
         self.emit("addi t2, t1, 1");
-        self.emit_stack_load("t4", collection.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
         self.emit("ld t0, -8(t4)");
         self.emit("sltu t3, t2, t0");
         self.emit(format!("beqz t3, {}", shift_done));
@@ -1022,7 +1022,7 @@ impl CodeGenerator {
         self.emit_stack_store("t1", index_offset);
         self.emit(format!("j {}", shift_loop));
         self.emit_label(&shift_done);
-        self.emit_stack_load("t4", collection.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
         self.emit("ld t0, -8(t4)");
         self.emit("addi t0, t0, -1");
         self.emit("sd t0, -8(t4)");
@@ -1058,7 +1058,7 @@ impl CodeGenerator {
         }
 
         self.emit(format!("# cellscript abi: stack collection pop element_size={}", element_width));
-        self.emit_stack_load("t4", collection.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
         self.emit("ld t0, -8(t4)");
         let bounds_ok = self.fresh_label("stack_collection_pop_bounds_ok");
         self.emit(format!("bnez t0, {}", bounds_ok));
@@ -1071,10 +1071,10 @@ impl CodeGenerator {
         self.emit("add t5, t4, t3");
         if dest_scalar {
             self.emit_unaligned_scalar_load("t5", "t6", "t2", 0, element_width);
-            self.emit_stack_store("t6", dest.id * 8);
+            self.emit_stack_store("t6", self.scalar_slot_offset(dest.id));
         } else {
             self.emit("# cellscript abi: stack collection pop fixed bytes");
-            self.emit_stack_store("t5", dest.id * 8);
+            self.emit_stack_store("t5", self.scalar_slot_offset(dest.id));
         }
         self.emit("sd t1, -8(t4)");
         true
@@ -1124,7 +1124,7 @@ impl CodeGenerator {
         };
 
         self.emit(format!("# cellscript abi: stack collection insert element_size={}", element_width));
-        self.emit_stack_load("t4", collection.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
         self.emit("ld t0, -8(t4)");
         self.emit_operand_to_register("t1", index);
 
@@ -1166,7 +1166,7 @@ impl CodeGenerator {
         self.emit_stack_load("t1", index_offset);
         self.emit(format!("beq t0, t1, {}", shift_done));
         self.emit("addi t2, t0, -1");
-        self.emit_stack_load("t4", collection.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
         self.emit(format!("li t3, {}", element_width));
         self.emit("mul t5, t0, t3");
         self.emit("add t5, t4, t5");
@@ -1200,7 +1200,7 @@ impl CodeGenerator {
         self.emit(format!("j {}", shift_loop));
         self.emit_label(&shift_done);
 
-        self.emit_stack_load("t4", collection.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
         self.emit_stack_load("t0", index_offset);
         self.emit(format!("li t2, {}", element_width));
         self.emit("mul t3, t0, t2");
@@ -1228,7 +1228,7 @@ impl CodeGenerator {
                 }
             }
         }
-        self.emit_stack_load("t4", collection.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
         self.emit("ld t0, -8(t4)");
         self.emit("addi t0, t0, 1");
         self.emit("sd t0, -8(t4)");
@@ -1279,7 +1279,7 @@ impl CodeGenerator {
         if let Some(source) = fixed_byte_source.as_ref() {
             self.emit_prepare_fixed_byte_source(source, element_width, "stack collection set");
         }
-        self.emit_stack_load("t4", collection.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
         self.emit("ld t0, -8(t4)");
         self.emit_operand_to_register("t1", index);
 

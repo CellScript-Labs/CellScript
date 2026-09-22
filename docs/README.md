@@ -13,7 +13,7 @@ The additive six-domain `Since`, typed HeaderDep, and checked `EpochDuration`
 subset of issue #12 is recorded in the
 [typed CKB temporal-domain contract](CELLSCRIPT_0_30_TEMPORAL_DOMAINS.md).
 The runtime-view matrix also records the bounded source-level
-`script::new`/`script::hash` contract and its lowering-record-v8 machine
+`script::new`/`script::hash` contract and its lowering-record-v9 machine
 evidence.
 The experimental `0.26b` baseline used schema 67. The existing unreleased 0.26
 implementation record below retains the historical schema 62 baseline; its

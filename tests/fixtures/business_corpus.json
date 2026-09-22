@@ -1010,7 +1010,7 @@
       ]
     }
   ],
-  "inventory_sha256": "0x5a6999f65789d30fcfb2f8d136264bedc34a745da31ba6adad394205bff5c45f",
+  "inventory_sha256": "0xe63f30d5b75d46e214ee332e824cb812f7f58ac1bc2d394803bf1c89ee0277da",
   "release_requirements": {
     "backend": "passed",
     "ci": "passed",
@@ -1021,7 +1021,7 @@
     "release": "passed"
   },
   "scenario_evidence_manifest": "tests/fixtures/business_scenario_evidence.json",
-  "scenario_evidence_sha256": "0xc1d481158fcc009e369bc5a3dcf3252f80d24acf0c1c29762c69cd80ecbd6baa",
+  "scenario_evidence_sha256": "0xd459d957dcd3ad740d4b9f4065f6e4cf8d8787a532dea64b4f7269ea615c7521",
   "schema": "cellscript-business-corpus-v1",
   "status": "accepted"
 }

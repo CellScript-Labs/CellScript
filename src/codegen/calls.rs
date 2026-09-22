@@ -94,7 +94,7 @@ impl CodeGenerator {
             self.emit(format!("li a2, {}", width));
             self.emit("call __cellscript_memcpy_fixed");
             self.emit_sp_addi("t0", dest_offset);
-            self.emit_stack_store("t0", dest.id * 8);
+            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         } else {
             if width > 8 || !self.emit_fixed_byte_source_pointer_or_const_to("t4", &opening_source) {
                 self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
@@ -108,7 +108,7 @@ impl CodeGenerator {
                 }
                 self.emit("or t0, t0, t1");
             }
-            self.emit_stack_store("t0", dest.id * 8);
+            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         }
         Ok(true)
     }
@@ -187,7 +187,7 @@ impl CodeGenerator {
             self.emit_process_failure_status();
             self.emit_label(&ok);
             self.emit_sp_addi("t0", dest_offset);
-            self.emit_stack_store("t0", dest.id * 8);
+            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
             return Ok(true);
         }
         if matches!(func, "__ckb_hash_pair" | "__ckb_hash_sha256_pair" | "__ckb_hash_sha256d_pair") {
@@ -222,7 +222,7 @@ impl CodeGenerator {
             self.emit(format!("call {}", func));
             self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
             self.emit_sp_addi("t0", dest_offset);
-            self.emit_stack_store("t0", dest.id * 8);
+            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
             return Ok(true);
         }
         if func == "__ckb_hash_blake2b_packed" {
@@ -282,7 +282,7 @@ impl CodeGenerator {
             self.emit("call __ckb_hash_blake2b_var");
             self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
             self.emit_sp_addi("t0", dest_offset);
-            self.emit_stack_store("t0", dest.id * 8);
+            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
             return Ok(true);
         }
         if func == "__ckb_hash_data_packed" {
@@ -315,7 +315,7 @@ impl CodeGenerator {
             self.emit("call __ckb_hash_blake2b_var");
             self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
             self.emit_sp_addi("t0", dest_offset);
-            self.emit_stack_store("t0", dest.id * 8);
+            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
             return Ok(true);
         }
         let Some(arg) = args.first() else {
@@ -338,7 +338,7 @@ impl CodeGenerator {
         self.emit(format!("call {}", func));
         self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
         self.emit_sp_addi("t0", dest_offset);
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         Ok(true)
     }
 
@@ -656,7 +656,7 @@ impl CodeGenerator {
                         }
                     }
                     self.emit_sp_addi("t0", offset);
-                    self.emit_stack_store("t0", d.id * 8);
+                    self.emit_stack_store("t0", self.scalar_slot_offset(d.id));
                 } else {
                     self.emit("# cellscript abi: payload enum call destination has no storage; fail closed");
                     self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
@@ -672,15 +672,15 @@ impl CodeGenerator {
                     self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
                 }
             } else if let IrType::Tuple(items) = &d.ty {
-                self.emit_stack_store("a0", d.id * 8);
+                self.emit_stack_store("a0", self.scalar_slot_offset(d.id));
                 for index in 0..items.len().min(8) {
                     let field = index.to_string();
                     if let Some(field_var_id) = self.tuple_call_return_field_slots.get(&(d.id, field)).copied() {
-                        self.emit_stack_store(&format!("a{}", index), field_var_id * 8);
+                        self.emit_stack_store(&format!("a{}", index), self.scalar_slot_offset(field_var_id));
                     }
                 }
             } else {
-                self.emit_stack_store("a0", d.id * 8);
+                self.emit_stack_store("a0", self.scalar_slot_offset(d.id));
             }
         }
 
@@ -730,7 +730,7 @@ impl CodeGenerator {
         self.emit("addi a0, a1, 0");
         self.emit_process_failure_status();
         self.emit_label(&ok);
-        self.emit_stack_store("a0", dest.id * 8);
+        self.emit_stack_store("a0", self.scalar_slot_offset(dest.id));
         Ok(true)
     }
 
@@ -771,7 +771,7 @@ impl CodeGenerator {
         self.emit_process_failure_status();
         self.emit_label(&ok_label);
         self.emit_sp_addi("t0", buffer_offset);
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         Ok(true)
     }
 
@@ -809,7 +809,7 @@ impl CodeGenerator {
         self.emit_process_failure_status();
         self.emit_label(&ok_label);
         self.emit_sp_addi("t0", buffer_offset);
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         Ok(true)
     }
 
@@ -846,7 +846,7 @@ impl CodeGenerator {
         self.emit_process_failure_status();
         self.emit_label(&ok_label);
         self.emit_sp_addi("t0", buffer_offset);
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         Ok(true)
     }
 
@@ -893,7 +893,7 @@ impl CodeGenerator {
         self.emit_process_failure_status();
         self.emit_label(&ok_label);
         self.emit_sp_addi("t0", buffer_offset);
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         Ok(true)
     }
 
@@ -931,7 +931,7 @@ impl CodeGenerator {
         self.emit_process_failure_status();
         self.emit_label(&ok_label);
         self.emit_sp_addi("t0", buffer_offset);
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         Ok(true)
     }
 
@@ -970,7 +970,7 @@ impl CodeGenerator {
             self.emit_process_failure_status();
             self.emit_label(&ok);
             self.emit_sp_addi("t0", buffer);
-            self.emit_stack_store("t0", dest.id * 8);
+            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
             return Ok(true);
         }
         let raw_transaction = func == "__ckb_raw_transaction_hash_without_cell_deps";
@@ -1022,7 +1022,7 @@ impl CodeGenerator {
         self.emit_process_failure_status();
         self.emit_label(&ok);
         self.emit_sp_addi("t0", buffer);
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         Ok(true)
     }
 
@@ -1067,7 +1067,7 @@ impl CodeGenerator {
         self.emit_process_failure_status();
         self.emit_label(&ok_label);
         self.emit_sp_addi("t0", buffer_offset);
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         Ok(true)
     }
 

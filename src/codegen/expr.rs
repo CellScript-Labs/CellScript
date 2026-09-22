@@ -16,7 +16,7 @@ impl CodeGenerator {
                 if let Some(offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() {
                     self.emit_store_const_bytes_to_stack(&value.to_le_bytes(), offset);
                     self.emit_sp_addi("t0", offset);
-                    self.emit_stack_store("t0", dest.id * 8);
+                    self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
                     return Ok(());
                 }
                 let label = self.const_data_label_for_bytes(value.to_le_bytes().to_vec());
@@ -28,14 +28,14 @@ impl CodeGenerator {
                     self.emit("# cellscript abi: fail closed because fixed-byte constant bytes are not materializable");
                     self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
                     self.emit("li t0, 0");
-                    self.emit_stack_store("t0", dest.id * 8);
+                    self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
                     return Ok(());
                 };
                 let label = self.const_data_label_for_bytes(bytes);
                 self.emit(format!("la t0, {}", label));
             }
         }
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         Ok(())
     }
 
@@ -47,7 +47,7 @@ impl CodeGenerator {
             return Ok(());
         };
         self.emit_stack_load("t0", offset);
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         Ok(())
     }
 
@@ -202,7 +202,7 @@ impl CodeGenerator {
             _ => {}
         }
 
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         Ok(())
     }
 
@@ -253,7 +253,7 @@ impl CodeGenerator {
         self.emit_label(&equal);
         self.emit(format!("li t0, {}", u8::from(equal_result)));
         self.emit_label(&done);
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
     }
 
     fn emit_u128_binary(&mut self, dest: &IrVar, op: BinaryOp, left: &IrOperand, right: &IrOperand) -> bool {
@@ -494,7 +494,7 @@ impl CodeGenerator {
         let high_gt_value = matches!(op, BinaryOp::Ne | BinaryOp::Gt | BinaryOp::Ge);
         self.emit(format!("li t0, {}", u8::from(high_gt_value)));
         self.emit_label(&done);
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
     }
 
     fn emit_u128_mul(&mut self, dest: &IrVar, left: &IrOperand, right: &IrOperand) {
@@ -664,22 +664,22 @@ impl CodeGenerator {
         self.emit("sub t2, t0, t1");
         self.emit(format!("beqz t2, {}", len_equal_label));
         self.emit(format!("li t0, {}", mismatch_value));
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         self.emit(format!("j {}", done_label));
 
         self.emit_label(&len_equal_label);
-        self.emit_stack_load("a0", left_var.id * 8);
-        self.emit_stack_load("a1", right_var.id * 8);
+        self.emit_stack_load("a0", self.scalar_slot_offset(left_var.id));
+        self.emit_stack_load("a1", self.scalar_slot_offset(right_var.id));
         self.emit_stack_load("a2", left_len_offset);
         self.emit("call __cellscript_memcmp_fixed");
         self.emit(format!("beqz a0, {}", bytes_equal_label));
         self.emit(format!("li t0, {}", mismatch_value));
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         self.emit(format!("j {}", done_label));
 
         self.emit_label(&bytes_equal_label);
         self.emit(format!("li t0, {}", equal_value));
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         self.emit_label(&done_label);
         true
     }
@@ -687,7 +687,7 @@ impl CodeGenerator {
     pub(super) fn emit_unary(&mut self, dest: &IrVar, op: UnaryOp, operand: &IrOperand) -> Result<()> {
         match operand {
             IrOperand::Const(IrConst::U64(n)) => self.emit(format!("li t0, {}", n)),
-            IrOperand::Var(v) => self.emit_stack_load("t0", v.id * 8),
+            IrOperand::Var(v) => self.emit_stack_load("t0", self.scalar_slot_offset(v.id)),
             _ => self.emit("li t0, 0"),
         }
 
@@ -697,7 +697,7 @@ impl CodeGenerator {
             UnaryOp::Ref | UnaryOp::Deref => self.emit("# reference conversion (no-op in asm backend)"),
         }
 
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         Ok(())
     }
 
@@ -767,7 +767,7 @@ impl CodeGenerator {
             if layout.ty == IrType::I32 {
                 self.emit_sign_extend_i32("t0");
             }
-            self.emit_stack_store("t0", dest.id * 8);
+            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
             if let ExpectedFixedByteSource::SchemaField(parent) = &source {
                 let mut nested_layout = layout.clone();
                 nested_layout.offset += parent.layout.offset;
@@ -810,7 +810,7 @@ impl CodeGenerator {
         self.emit(format!("li a2, {}", width));
         self.emit("call __cellscript_memcpy_fixed");
         self.emit_sp_addi("t0", dest_offset);
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         if let ExpectedFixedByteSource::SchemaField(parent) = &source {
             let mut nested_layout = layout.clone();
             nested_layout.offset += parent.layout.offset;
@@ -844,7 +844,7 @@ impl CodeGenerator {
 
         self.emit(format!("# field access .{}", field));
         self.emit(format!("# cellscript abi: schema field {}.{} offset={} size={}", type_name, field, layout.offset, width));
-        self.emit_stack_load("t4", var.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(var.id));
         if let Some(size_offset) = self.schema_pointer_size_offsets.get(&var.id).copied() {
             if let Some(expected_size) = self.type_fixed_sizes.get(type_name).copied() {
                 self.emit_loaded_schema_exact_size_check(size_offset, expected_size, type_name);
@@ -879,7 +879,7 @@ impl CodeGenerator {
                 self.emit(format!("addi t0, t4, {}", layout.offset));
             }
         }
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         true
     }
 
@@ -907,11 +907,11 @@ impl CodeGenerator {
         let context = format!("{}.{}", type_name, field);
         self.emit(format!("# field access .{}", field));
         self.emit(format!("# cellscript abi: dynamic schema field {} index={} as Molecule vector bytes", context, layout.index));
-        self.emit_stack_load("t4", obj.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(obj.id));
         self.emit_molecule_table_field_span_to_t5_t6("t4", size_offset, layout.index, field_count, &context);
         self.emit("add t0, t4, t5");
         self.emit("sub t1, t6, t5");
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         self.emit_schema_size_store("t1", dest_size_offset);
         true
     }
@@ -939,7 +939,7 @@ impl CodeGenerator {
             layout.offset,
             width
         ));
-        self.emit_stack_load("t4", var.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(var.id));
         if layout_fixed_scalar_width(&layout).is_some() {
             self.emit_unaligned_scalar_load("t4", "t0", "t2", layout.offset, width);
             if layout.ty == IrType::I32 {
@@ -948,7 +948,7 @@ impl CodeGenerator {
         } else {
             self.emit(format!("addi t0, t4, {}", layout.offset));
         }
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         true
     }
 
@@ -962,8 +962,8 @@ impl CodeGenerator {
         self.emit(format!("# field access .{}", field));
         self.emit(format!("# cellscript abi: tuple call return field .{} projected from return register", field));
         if slot_var_id != dest.id {
-            self.emit_stack_load("t0", slot_var_id * 8);
-            self.emit_stack_store("t0", dest.id * 8);
+            self.emit_stack_load("t0", self.scalar_slot_offset(slot_var_id));
+            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         }
         true
     }
@@ -1002,13 +1002,13 @@ impl CodeGenerator {
         }
 
         // Load the object pointer from the stack slot
-        self.emit_stack_load("t4", var.id * 8);
+        self.emit_stack_load("t4", self.scalar_slot_offset(var.id));
         if layout_fixed_scalar_width(&layout).is_some() {
             self.emit_unaligned_scalar_load("t4", "t0", "t2", layout.offset, width);
         } else {
             self.emit(format!("addi t0, t4, {}", layout.offset));
         }
-        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         true
     }
 }

@@ -6,6 +6,10 @@ use std::collections::{BTreeMap, BTreeSet};
 #[path = "support/ckb_script_runner.rs"]
 mod ckb_script_runner;
 
+#[path = "support/cost_measurement.rs"]
+#[allow(dead_code)]
+mod cost_measurement;
+
 use ckb_script_runner::{
     build_dao_data_fixture, build_dao_fixture, build_simple_fixture, compile_cellscript_source_to_elf, execute_cellscript_script,
     load_original_ickb_binary, patch_ickb_logic_dao_hash, FixtureCell, VM_HARNESS_CELL_CAPACITY_ACTION,
@@ -10512,7 +10516,7 @@ fn run_cellscript_receipt_group_mint(
         packed::CellOutput::new_builder()
             .capacity::<packed::Uint64>(MINT_RECEIPT_INPUT_CAPACITY.pack())
             .lock(always_success_lock.clone())
-            .type_(packed::ScriptOpt::from(cellscript_script))
+            .type_(packed::ScriptOpt::from(cellscript_script.clone()))
             .build(),
         receipt_group_input_data(receipt_data_mode, 1),
     );
@@ -10537,6 +10541,26 @@ fn run_cellscript_receipt_group_mint(
     let fee_shannons = fee_shannons(MINT_RECEIPT_INPUT_CAPACITY * 2, &outputs);
     let run =
         side_run_from_result(context.verify_tx(&tx, MINT_FROM_RECEIPT_MAX_CYCLES), &tx, occupied_capacity_shannons, fee_shannons);
+    if matches!(xudt_binding, MintXudtBinding::WrongOwnerHash) {
+        // A changed CellScript code hash can reorder the Type groups in the
+        // pinned verifier's BTreeMap. Both groups reject this fixture; the
+        // transaction's first error is not the selected CellScript outcome.
+        for (script, expected) in [(&cellscript_script, 48), (&xudt_script, -52)] {
+            let observed = cost_measurement::measure_group(
+                &context,
+                &tx,
+                script,
+                ckb_testtool::ckb_script::ScriptGroupType::Type,
+                MINT_FROM_RECEIPT_MAX_CYCLES,
+            );
+            assert!(observed.required_cycles() > 0);
+            let cost_measurement::CycleObservation::Measured { exit_code, .. } = observed.observation else {
+                unreachable!("required_cycles already rejected unavailable evidence")
+            };
+            assert_eq!(exit_code, expected, "wrong-owner group outcome changed: {observed:?}");
+            eprintln!("wrong-owner group: {}", serde_json::to_string(&observed).unwrap());
+        }
+    }
     (run, cellscript_elf)
 }
 

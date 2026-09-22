@@ -1,0 +1,83 @@
+{
+  "scalar-chain-8": {
+    "elf_bytes": 1792,
+    "positive_cycles": 3858,
+    "group_positive_cycles": 3244,
+    "group_rejection_cycles": 3221,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 6656,
+    "witness_bytes": 44
+  },
+  "scalar-chain-64": {
+    "elf_bytes": 2464,
+    "positive_cycles": 4250,
+    "group_positive_cycles": 3636,
+    "group_rejection_cycles": 3613,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 7104,
+    "witness_bytes": 44
+  },
+  "scalar-chain-260": {
+    "elf_bytes": 5056,
+    "positive_cycles": 5748,
+    "group_positive_cycles": 5134,
+    "group_rejection_cycles": 5103,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 8672,
+    "witness_bytes": 44
+  },
+  "scalar-overlap-64": {
+    "elf_bytes": 3776,
+    "positive_cycles": 5157,
+    "group_positive_cycles": 4543,
+    "group_rejection_cycles": 4512,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 7600,
+    "witness_bytes": 44
+  },
+  "scalar-overlap-260": {
+    "elf_bytes": 16384,
+    "positive_cycles": 12441,
+    "group_positive_cycles": 11827,
+    "group_rejection_cycles": 11796,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 10736,
+    "witness_bytes": 44
+  },
+  "nested-nine-arguments": {
+    "elf_bytes": 2704,
+    "positive_cycles": 5398,
+    "group_positive_cycles": 4784,
+    "group_rejection_cycles": 4760,
+    "max_stack_frame_bytes": 5392,
+    "static_call_chain_stack_bound_bytes": 9232,
+    "witness_bytes": 100
+  },
+  "scalar-loop-join": {
+    "elf_bytes": 1816,
+    "positive_cycles": 4136,
+    "group_positive_cycles": 3522,
+    "group_rejection_cycles": 3496,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 6656,
+    "witness_bytes": 44
+  },
+  "generic-repeated": {
+    "elf_bytes": 1800,
+    "positive_cycles": 3892,
+    "group_positive_cycles": 3278,
+    "group_rejection_cycles": 3255,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 7824,
+    "witness_bytes": 44
+  },
+  "generic-distinct": {
+    "elf_bytes": 1976,
+    "positive_cycles": 3993,
+    "group_positive_cycles": 3379,
+    "group_rejection_cycles": 3353,
+    "max_stack_frame_bytes": 5376,
+    "static_call_chain_stack_bound_bytes": 7856,
+    "witness_bytes": 44
+  }
+}

@@ -23,6 +23,14 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{path::Path, process::Command};
 
+#[path = "support/cost_measurement.rs"]
+mod cost_measurement;
+#[path = "support/cost_provenance.rs"]
+#[allow(dead_code)]
+mod cost_provenance;
+#[path = "support/cost_stack.rs"]
+mod cost_stack;
+
 const ORDER_SOURCE: &str = include_str!("fixtures/capability_anchor_order.cell");
 const POLICY_SOURCE: &str = include_str!("fixtures/capability_anchor_policy.cell");
 const TOKEN_SOURCE: &str = include_str!("fixtures/capability_anchor_token.cell");
@@ -117,6 +125,7 @@ struct AnchorBudgets {
 }
 
 struct AnchorResult {
+    cost: Option<Value>,
     verification: Result<u64, String>,
     transaction: TransactionView,
     elf_bytes: usize,
@@ -643,6 +652,10 @@ fn check_anchor_protocol_bundle(
 }
 
 fn run_anchor(mutation: Mutation) -> AnchorResult {
+    run_anchor_with_cost(mutation, false)
+}
+
+fn run_anchor_with_cost(mutation: Mutation, measure_cost: bool) -> AnchorResult {
     assert_eq!(
         blake2b_256(POLICY_DATA),
         [
@@ -758,6 +771,34 @@ fn run_anchor(mutation: Mutation) -> AnchorResult {
             .build(),
     );
     let verification = context.verify_tx(&transaction, MAX_CYCLES).map_err(|error| format!("{error:#?}"));
+    let cost = measure_cost.then(|| {
+        use ckb_testtool::ckb_script::ScriptGroupType;
+        let groups = [
+            (&authorization_lock, ScriptGroupType::Lock),
+            (&always_success_lock, ScriptGroupType::Lock),
+            (&order_type, ScriptGroupType::Type),
+            (&policy_type, ScriptGroupType::Type),
+            (&token_type, ScriptGroupType::Type),
+        ].map(|(script, role)| cost_measurement::measure_group(&context, &transaction, script, role, MAX_CYCLES));
+        let group_total: u64 = groups.iter().map(|group| group.required_cycles()).sum();
+        let all_succeed = groups.iter().all(|group| group.exit_category == cost_measurement::ExitCategory::Success);
+        assert_eq!(all_succeed, verification.is_ok(), "group replay and transaction oracle disagree");
+        if let Ok(cycles) = verification { assert_eq!(group_total, cycles, "complete successful transaction accounting"); }
+        let stacks = [("order", &order), ("policy", &policy), ("token", &token), ("authorization", &authorization)]
+            .map(|(name, artifact)| json!({"name":name,"bound":cost_stack::measure(artifact)}));
+        json!({
+            "name":format!("{mutation:?}"),
+            "raw_transaction_hash":bytes_hex(transaction.hash().as_slice()),
+            "serialized_transaction_hash":hash_hex(transaction.data().as_slice()),
+            "transaction_bytes":transaction.data().serialized_size_in_block(),
+            "witness_bytes":witness_bytes,
+            "elf_bytes":elf_bytes,
+            "max_stack_frame_bytes":max_stack_frame_bytes,
+            "transaction":cost_measurement::CycleMeasurement::transaction(if all_succeed {0} else {1}, verification.as_ref().copied().unwrap_or(0)),
+            "groups":groups,
+            "static_stacks":stacks,
+        })
+    });
     let protocol_bundle = verification.as_ref().ok().copied().filter(|_| matches!(mutation, Mutation::None)).map(|cycles| {
         let specs = [
             AnchorArtifactSpec {
@@ -800,6 +841,7 @@ fn run_anchor(mutation: Mutation) -> AnchorResult {
         check_anchor_protocol_bundle(&context, &transaction, cycles, &specs, &order_plan, occupied_capacity_shannons)
     });
     AnchorResult {
+        cost,
         verification,
         transaction,
         elf_bytes,
@@ -809,6 +851,68 @@ fn run_anchor(mutation: Mutation) -> AnchorResult {
         artifact_identities,
         protocol_bundle,
     }
+}
+
+#[test]
+fn multi_script_cost_accounts_for_each_group_and_rejection() {
+    let rows = [
+        Mutation::None,
+        Mutation::AuthorizationCredential,
+        Mutation::TokenAmount,
+        Mutation::OrderAmount,
+        Mutation::PolicyState,
+        Mutation::Dependency,
+    ]
+    .map(|mutation| run_anchor_with_cost(mutation, true).cost.expect("requested group costs"));
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let measured = root.join("target/cellscript-cost/multi-script-measurements.json");
+    std::fs::create_dir_all(measured.parent().unwrap()).unwrap();
+    std::fs::write(&measured, serde_json::to_vec_pretty(&json!({"status":"measured","rows":rows})).unwrap()).unwrap();
+    let budgets: Value = serde_json::from_slice(
+        &std::fs::read(root.join("tests/fixtures/cost_corpus/multi_script_budgets.json"))
+            .expect("multi-Script budgets must be frozen from measured baseline"),
+    )
+    .unwrap();
+    for row in &rows {
+        let name = row["name"].as_str().unwrap();
+        let budget = &budgets[name];
+        for field in ["elf_bytes", "max_stack_frame_bytes", "transaction_bytes", "witness_bytes"] {
+            assert!(row[field].as_u64().unwrap() <= budget[field].as_u64().unwrap(), "{name} {field}");
+        }
+        for group in row["groups"].as_array().unwrap() {
+            // Script hashes change after code-generation improvements; bind
+            // comparable groups by role and exact input/output membership.
+            let key = format!("{}:{}:{}", group["group"]["role"], group["group"]["input_indices"], group["group"]["output_indices"]);
+            assert!(group["observation"]["cycles"].as_u64().unwrap() <= budget["groups"][&key].as_u64().unwrap(), "{name} {key}");
+        }
+        for stack in row["static_stacks"].as_array().unwrap() {
+            let artifact = stack["name"].as_str().unwrap();
+            assert!(
+                stack["bound"]["static_call_chain_stack_bound_bytes"].as_u64().expect("closed anchor stack")
+                    <= budget["static_stacks"][artifact].as_u64().unwrap(),
+                "{name} {artifact} stack"
+            );
+        }
+    }
+    let report = std::env::var_os("CELLSCRIPT_MULTI_SCRIPT_COST_REPORT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| root.join("target/cellscript-cost/multi-script-cost.json"));
+    std::fs::create_dir_all(report.parent().unwrap()).unwrap();
+    let mut provenance = cost_provenance::capture_source(root);
+    let options = options();
+    provenance["target"] = json!(options.target);
+    provenance["target_profile"] = json!(options.target_profile);
+    provenance["edition"] = json!(options.edition.as_str());
+    provenance["opt_level"] = json!(options.opt_level);
+    provenance["vm_configuration"] = cost_provenance::vm_configuration();
+    std::fs::write(
+        report,
+        serde_json::to_vec_pretty(&json!({
+            "schema":"cellscript-multi-script-cost-v2", "status":"passed", "provenance":provenance, "rows":rows
+        }))
+        .unwrap(),
+    )
+    .unwrap();
 }
 
 #[test]

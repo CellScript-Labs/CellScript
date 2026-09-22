@@ -20,8 +20,8 @@
         "tests/support/ckb_script_runner.rs"
       ],
       "measured": {
-        "cycles": 42093,
-        "elf_bytes": 10304,
+        "cycles": 41639,
+        "elf_bytes": 9696,
         "max_stack_frame_bytes": 5376,
         "witness_bytes": 60,
         "transaction_bytes": 400,
@@ -55,8 +55,8 @@
         "tests/support/ckb_script_runner.rs"
       ],
       "measured": {
-        "cycles": 1403825,
-        "elf_bytes": 10864,
+        "cycles": 1373919,
+        "elf_bytes": 10256,
         "max_stack_frame_bytes": 1344,
         "witness_bytes": 65556,
         "transaction_bytes": 65896,
@@ -91,8 +91,8 @@
         "tests/support/ckb_script_runner.rs"
       ],
       "measured": {
-        "cycles": 358964,
-        "elf_bytes": 24944,
+        "cycles": 338366,
+        "elf_bytes": 23064,
         "max_stack_frame_bytes": 5424,
         "witness_bytes": 732,
         "transaction_bytes": 1072,
@@ -129,8 +129,8 @@
         "tests/support/ckb_script_runner.rs"
       ],
       "measured": {
-        "cycles": 1752419,
-        "elf_bytes": 12424,
+        "cycles": 1720319,
+        "elf_bytes": 11520,
         "max_stack_frame_bytes": 7440,
         "witness_bytes": 65588,
         "transaction_bytes": 79700,
@@ -164,8 +164,8 @@
         "tests/support/ckb_script_runner.rs"
       ],
       "measured": {
-        "cycles": 19029,
-        "elf_bytes": 9848,
+        "cycles": 18679,
+        "elf_bytes": 9192,
         "max_stack_frame_bytes": 5376,
         "witness_bytes": 230,
         "transaction_bytes": 607,
@@ -200,8 +200,8 @@
         "tests/support/ckb_script_runner.rs"
       ],
       "measured": {
-        "cycles": 79848,
-        "elf_bytes": 1456,
+        "cycles": 79836,
+        "elf_bytes": 1408,
         "max_stack_frame_bytes": 1200,
         "witness_bytes": 0,
         "transaction_bytes": 377,
@@ -234,9 +234,9 @@
         "tests/support/cryptographic_resource_budgets.rs"
       ],
       "measured": {
-        "cycles": 6315692,
-        "elf_bytes": 9848,
-        "max_stack_frame_bytes": 5376,
+        "cycles": 6311363,
+        "elf_bytes": 8136,
+        "max_stack_frame_bytes": 4192,
         "witness_bytes": 590,
         "transaction_bytes": 1293,
         "dependency_bytes": 1100920

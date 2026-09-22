@@ -1,59 +1,59 @@
 {
-  "schema": "cellscript-order-amm-scenarios-v1",
-  "source_files": [
-    "tests/fixtures/cost_corpus/pool_merge.cell",
-    "tests/fixtures/order_amm_swap.cell"
-  ],
   "artifact_identities": {
     "amm_swap": {
-      "artifact_hash": "0xaa22d53049e6a6a2c6903736bf4bda2acf117e0f93eb7f9ebeb25b67b4f3424c",
-      "lowering_record_hash": "0xc44722ec85b1413716a2921e0e6ea15a5c63842ba9e7004d4a19d359e14c52ab",
-      "source_map_hash": "0x1376da5caeb57e6dac667c538fdf031b56a80f9f6e91b2fc7c5b2b450140ab03",
-      "verified_bundle_id": "0xab706cbc42c7d0a2e240569b5870bf9956ffec66daef8356f3509693630f9af9"
+      "artifact_hash": "0x6d7f305977e841455f4afba8d3851941472c27ec8c24850062244bdf35b4857a",
+      "lowering_record_hash": "0x3bf156c165ffcd83e8d9225a23906b43629b391ad6f9571c7ccc896c01a4c044",
+      "source_map_hash": "0x45c7d4638d6ad040e392306cd0cfce4c5dc7983a431409b80c7b7e321920db16",
+      "verified_bundle_id": "0xced200049429d0d4ba5806c7390bb429df89e9a68cc6e27e93f09ab434054274"
     },
     "pool_merge": {
-      "artifact_hash": "0x6a50875fbd0f2e4beab28b6dfedc18730f7949d7f8e0bff41bca42313e1bfad8",
-      "lowering_record_hash": "0x3bc7058ac7172dd5699427723368b45c8be63d0d566e7ccab61b313da6383c39",
-      "source_map_hash": "0xa0c426a910aafbff73acdbe3eac96d73aa3dcfd44e3542136e3e9bad450ec114",
-      "verified_bundle_id": "0x978a5e0254a41c80c0cb76a3dcb7ade63b3a1041ce5f5630a45b3f9080ebf05a"
+      "artifact_hash": "0x11e9299df573f77bc3b38d0183f4854b417e933850927b31f259568686f3f57b",
+      "lowering_record_hash": "0x6dd6d4e541de7ae97adc898671bd391eb90b875463eb51595c12be219b96e9f3",
+      "source_map_hash": "0x63ca9c9432481733075049713c15cae7943129a758d87036923794f5a2e59dec",
+      "verified_bundle_id": "0x4f5a64a71f4b3e5477ad3ad00c40185a5d45d5c2f01d16e8055e3f24d20d6cda"
     }
   },
   "cases": [
     {
+      "artifact": "amm_swap",
+      "expected_exit_code": 5,
+      "outcome": "adversarial",
+      "raw_transaction_hash": "0xe221f2f651d1834c10b7cc174ef35a6b5c100da6792596ae59c63e32d4dab6df",
+      "rejection_stage": "ckb-vm",
       "scenario": "output_reordering",
-      "outcome": "adversarial",
-      "artifact": "amm_swap",
-      "rejection_stage": "ckb-vm",
-      "expected_exit_code": 5,
-      "raw_transaction_hash": "0x8d34405595cf07f6870077e1b279faca5e60371ad99b26ea6ef78f013393b1a0",
-      "serialized_transaction_hash": "0x515c12b2400bcc409d21aac44e004d8f29d159902ef121e7e43e504f0ade7e34"
+      "serialized_transaction_hash": "0x78f0781a022c23cc05d048fc351cab000a9b886dd42fa68f3f91f22d981fda3e"
     },
     {
-      "scenario": "pool_merge",
-      "outcome": "positive",
       "artifact": "pool_merge",
-      "rejection_stage": "ckb-vm",
       "expected_exit_code": 0,
-      "raw_transaction_hash": "0x82bef7aa8ed8f6da802bca4115216082edd55c1e925be3dffb223221ea8dc087",
-      "serialized_transaction_hash": "0x9e4bb79d17face29ee97fe6500f7c615e0533c43e84ae44612194ba1029187c4"
-    },
-    {
-      "scenario": "replay",
-      "outcome": "adversarial",
-      "artifact": "pool_merge",
-      "rejection_stage": "local-live-set",
-      "expected_exit_code": null,
-      "raw_transaction_hash": "0x82bef7aa8ed8f6da802bca4115216082edd55c1e925be3dffb223221ea8dc087",
-      "serialized_transaction_hash": "0x9e4bb79d17face29ee97fe6500f7c615e0533c43e84ae44612194ba1029187c4"
-    },
-    {
-      "scenario": "wrong_price",
-      "outcome": "adversarial",
-      "artifact": "amm_swap",
+      "outcome": "positive",
+      "raw_transaction_hash": "0x1c23a2bdaa1a3a5cea5559a6c5ead2076dcba8d7790ec1782d89ce706fae4d97",
       "rejection_stage": "ckb-vm",
+      "scenario": "pool_merge",
+      "serialized_transaction_hash": "0x77a4c2b1dd8a4d8006ce505dacbdc05932b7496c69835e67a2e30067a9517c9b"
+    },
+    {
+      "artifact": "pool_merge",
+      "expected_exit_code": null,
+      "outcome": "adversarial",
+      "raw_transaction_hash": "0x1c23a2bdaa1a3a5cea5559a6c5ead2076dcba8d7790ec1782d89ce706fae4d97",
+      "rejection_stage": "local-live-set",
+      "scenario": "replay",
+      "serialized_transaction_hash": "0x77a4c2b1dd8a4d8006ce505dacbdc05932b7496c69835e67a2e30067a9517c9b"
+    },
+    {
+      "artifact": "amm_swap",
       "expected_exit_code": 5,
-      "raw_transaction_hash": "0xa9a66578c4908d8c81027d3598e51a526eeae9f267356570641c95fdc085ebbe",
-      "serialized_transaction_hash": "0xc09371d93064e0881fc1089f1d67cce46b061d5c9e4c298e3f598622a311a426"
+      "outcome": "adversarial",
+      "raw_transaction_hash": "0xc68b80d2c07fffd8dbaff3738b5fbff260d0b1c9ac907fabdfb4c456b20e9441",
+      "rejection_stage": "ckb-vm",
+      "scenario": "wrong_price",
+      "serialized_transaction_hash": "0xfad33ad0f95cd780902bb257466bb79f6970cc085ad0724bb69f547663c7bfa2"
     }
+  ],
+  "schema": "cellscript-order-amm-scenarios-v1",
+  "source_files": [
+    "tests/fixtures/cost_corpus/pool_merge.cell",
+    "tests/fixtures/order_amm_swap.cell"
   ]
 }

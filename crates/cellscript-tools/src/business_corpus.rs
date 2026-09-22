@@ -332,7 +332,7 @@ pub fn validate_novaseal_resource_report(root: &Path, report_path: &Path, loweri
         &fs::read(lowering_path).with_context(|| format!("failed to read NovaSeal parent lowering {}", lowering_path.display()))?,
     )
     .with_context(|| format!("invalid NovaSeal parent lowering {}", lowering_path.display()))?;
-    if lowering["schema"] != "cellscript-verified-lowering-record-v8" {
+    if lowering["schema"] != "cellscript-verified-lowering-record-v9" {
         bail!("NovaSeal parent lowering has an unexpected schema");
     }
     if report_u64(&lowering, "/artifact_size_bytes")? != parent_elf_bytes {

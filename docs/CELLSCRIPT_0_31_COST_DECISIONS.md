@@ -1,7 +1,8 @@
 # CellScript 0.31 Cost Decisions
 
-**Status:** accepted implementation decisions, recorded 2026-09-21. The work
-below is not implemented by this document.
+**Status:** accepted implementation decisions, recorded 2026-09-21.
+The development implementation and its outstanding acceptance work are recorded
+in [the implementation report](CELLSCRIPT_0_31_COST_IMPLEMENTATION.md).
 
 Owner: Arthur, tracked through [#30](https://github.com/CellScript-Labs/CellScript/issues/30)
 and its five child issues. Each implementation PR must name its implementer and

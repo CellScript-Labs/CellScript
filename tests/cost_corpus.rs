@@ -24,10 +24,23 @@ use ckb_testtool::{
 #[allow(dead_code)]
 mod ckb_script_runner;
 
-use ckb_script_runner::{build_simple_fixture, deterministic_always_success_lock_hash, execute_cellscript_script};
+use ckb_script_runner::{
+    build_simple_fixture, deterministic_always_success_lock_hash, execute_cellscript_script_with_observer, CkbScriptExecutionResult,
+    CkbVmFixture,
+};
 
+#[path = "support/cost_expanded.rs"]
+mod cost_expanded;
 #[path = "support/cost_growth.rs"]
 mod cost_growth;
+#[path = "support/cost_measurement.rs"]
+mod cost_measurement;
+#[path = "support/cost_provenance.rs"]
+mod cost_provenance;
+#[path = "support/cost_scalar.rs"]
+mod cost_scalar;
+#[path = "support/cost_stack.rs"]
+mod cost_stack;
 #[path = "support/cost_toolchain.rs"]
 mod cost_toolchain;
 use cost_toolchain::RUST_CKB_TARGET;
@@ -36,6 +49,37 @@ const PARITY_BUDGET_PERCENT: u64 = 100;
 const NFT_LOCK: &str = include_str!("fixtures/cost_corpus/nft_lock.cell");
 const POOL_MERGE: &str = include_str!("fixtures/cost_corpus/pool_merge.cell");
 const SCHEMA_ROLL: &str = include_str!("fixtures/cost_corpus/schema_roll.cell");
+
+fn measured_run<F>(
+    name: &str,
+    elf: &[u8],
+    fixture: &CkbVmFixture,
+    transform: F,
+    runs: &mut Vec<serde_json::Value>,
+) -> CkbScriptExecutionResult
+where
+    F: FnOnce(ckb_testtool::ckb_types::core::TransactionView, packed::Script) -> ckb_testtool::ckb_types::core::TransactionView,
+{
+    let (oracle, group) = execute_cellscript_script_with_observer(elf, fixture, transform, |context, tx, script| {
+        cost_measurement::measure_group(context, tx, script, ckb_testtool::ckb_script::ScriptGroupType::Type, 10_000_000)
+    });
+    group.required_cycles();
+    if let cost_measurement::CycleObservation::Measured { exit_code, .. } = &group.observation {
+        assert_eq!(i64::from(*exit_code), oracle.exit_code, "selected group and transaction oracle: {name}");
+    }
+    runs.push(serde_json::json!({
+        "name":name,
+        "elf_sha256":cost_provenance::sha256(elf),
+        "raw_transaction_hash":oracle.raw_transaction_hash,
+        "serialized_transaction_hash":oracle.serialized_transaction_hash,
+        "transaction_bytes":oracle.transaction_bytes,
+        "witness_bytes":oracle.witness_bytes,
+        "oracle_exit_code":oracle.exit_code,
+        "transaction":cost_measurement::CycleMeasurement::transaction(oracle.exit_code,oracle.cycles),
+        "group":group,
+    }));
+    oracle
+}
 
 fn options() -> CompileOptions {
     CompileOptions {
@@ -149,6 +193,7 @@ fn matched_cost_corpus_compiles_runs_and_stays_within_budget() {
     fs::write(&report_path, "{\"status\":\"not-generated\"}\n").expect("invalidate previous cost report");
     let strip = cost_toolchain::require_strip();
     let mut matched = Vec::new();
+    let mut executions = Vec::new();
     let temp = tempfile::tempdir().expect("tempdir");
 
     // --- Pool merge (two inputs, checked sum, output lock binding) ---
@@ -167,8 +212,15 @@ fn matched_cost_corpus_compiles_runs_and_stays_within_budget() {
             input.data = token_data(*amount);
         }
         fixture.outputs[0].data = token_data(output);
-        let cs = execute_cellscript_script(strip_vm_abi_trailer(&merge.artifact_bytes), &fixture);
-        let rust = execute_cellscript_script(&merge_rust_elf, &fixture);
+        let cs = measured_run(
+            &format!("pool-merge/cellscript/{amounts:?}/{output}"),
+            strip_vm_abi_trailer(&merge.artifact_bytes),
+            &fixture,
+            |tx, _| tx,
+            &mut executions,
+        );
+        let rust =
+            measured_run(&format!("pool-merge/rust/{amounts:?}/{output}"), &merge_rust_elf, &fixture, |tx, _| tx, &mut executions);
         assert_eq!(cs.exit_code == 0, expected_ok, "cellscript merge {amounts:?}->{output}");
         assert_eq!(rust.exit_code == 0, expected_ok, "rust merge {amounts:?}->{output}");
         if expected_ok {
@@ -192,8 +244,20 @@ fn matched_cost_corpus_compiles_runs_and_stays_within_budget() {
         fixture.current_type_script_input_indices = vec![0];
         fixture.inputs[0].data = note_data(owner, input_amount);
         fixture.outputs[0].data = note_data(owner, output_amount);
-        let cs = execute_cellscript_script(strip_vm_abi_trailer(&roll.artifact_bytes), &fixture);
-        let rust = execute_cellscript_script(&roll_rust_elf, &fixture);
+        let cs = measured_run(
+            &format!("schema-roll/cellscript/{input_amount}/{output_amount}"),
+            strip_vm_abi_trailer(&roll.artifact_bytes),
+            &fixture,
+            |tx, _| tx,
+            &mut executions,
+        );
+        let rust = measured_run(
+            &format!("schema-roll/rust/{input_amount}/{output_amount}"),
+            &roll_rust_elf,
+            &fixture,
+            |tx, _| tx,
+            &mut executions,
+        );
         assert_eq!(cs.exit_code == 0, expected_ok, "cellscript roll {input_amount}->{output_amount}");
         assert_eq!(rust.exit_code == 0, expected_ok, "rust roll {input_amount}->{output_amount}");
         if expected_ok {
@@ -211,13 +275,14 @@ fn matched_cost_corpus_compiles_runs_and_stays_within_budget() {
     let nft_rust = build_rust_reference(&repo, temp.path(), "nft-lock");
     let (nft_bytes, nft_rust_bytes) = assert_byte_parity("nft-lock", &nft, &nft_rust);
     let nft_rust_elf = fs::read(&nft_rust).expect("read rust ref");
-    let run_lock_pair = |data_owner: [u8; 32], elf: &[u8], witness: &Bytes| {
+    let mut run_lock_pair = |name: &str, data_owner: [u8; 32], elf: &[u8], witness: &Bytes| {
         let mut context = Context::new_with_deterministic_rng();
         let code = context.deploy_cell(Bytes::copy_from_slice(elf));
         let script = context
             .build_script_with_hash_type(&code, ckb_testtool::ckb_types::core::ScriptHashType::Data2, Bytes::default())
             .expect("build lock script");
-        let cell = packed::CellOutput::new_builder().capacity::<packed::Uint64>(100_000_000_000u64.pack()).lock(script).build();
+        let cell =
+            packed::CellOutput::new_builder().capacity::<packed::Uint64>(100_000_000_000u64.pack()).lock(script.clone()).build();
         let input = context.create_cell(cell.clone(), Bytes::copy_from_slice(&data_owner));
         let transaction = TransactionBuilder::default()
             .input(packed::CellInput::new_builder().previous_output(input).build())
@@ -226,7 +291,29 @@ fn matched_cost_corpus_compiles_runs_and_stays_within_budget() {
             .witness(witness.clone().pack())
             .build();
         let completed = context.complete_tx(transaction);
-        context.verify_tx(&completed, 20_000_000)
+        let oracle = context.verify_tx(&completed, 20_000_000);
+        let group = cost_measurement::measure_group(
+            &context,
+            &completed,
+            &script,
+            ckb_testtool::ckb_script::ScriptGroupType::Lock,
+            20_000_000,
+        );
+        let cycles = group.required_cycles();
+        let cost_measurement::CycleObservation::Measured { exit_code, .. } = group.observation else { unreachable!() };
+        assert_eq!(oracle.is_ok(), exit_code == 0);
+        if let Ok(transaction_cycles) = &oracle {
+            assert_eq!(*transaction_cycles, cycles, "single Lock group accounting");
+        }
+        executions.push(serde_json::json!({
+            "name":name,"elf_sha256":cost_provenance::sha256(elf),
+            "serialized_transaction_hash":format!("0x{}",hex::encode(ckb_testtool::ckb_hash::blake2b_256(completed.data().as_slice()))),
+            "raw_transaction_hash":format!("0x{}",hex::encode(completed.hash().as_slice())),
+            "transaction_bytes":completed.data().serialized_size_in_block(),"witness_bytes":witness.len(),
+            "oracle_exit_code":exit_code,"group":group,
+            "transaction":cost_measurement::CycleMeasurement::transaction(i64::from(exit_code),oracle.as_ref().copied().unwrap_or(0)),
+        }));
+        oracle
     };
     for (data_owner, claimed, expected_ok) in [
         (owner, owner, true),
@@ -250,7 +337,12 @@ fn matched_cost_corpus_compiles_runs_and_stays_within_budget() {
         ),
     ] {
         let nft_witness = witness_for(&nft, &[EntryWitnessArg::Address(claimed)]);
-        let cs = run_lock_pair(data_owner, strip_vm_abi_trailer(&nft.artifact_bytes), &nft_witness);
+        let cs = run_lock_pair(
+            &format!("nft-lock/cellscript/{}/{claimed:?}", hex::encode(data_owner)),
+            data_owner,
+            strip_vm_abi_trailer(&nft.artifact_bytes),
+            &nft_witness,
+        );
         let rust_witness = packed::WitnessArgs::new_builder()
             .input_type(
                 Some({
@@ -264,7 +356,8 @@ fn matched_cost_corpus_compiles_runs_and_stays_within_budget() {
             )
             .build()
             .as_bytes();
-        let rust = run_lock_pair(data_owner, &nft_rust_elf, &rust_witness);
+        let rust =
+            run_lock_pair(&format!("nft-lock/rust/{}/{claimed:?}", hex::encode(data_owner)), data_owner, &nft_rust_elf, &rust_witness);
         assert_eq!(cs.is_ok(), expected_ok, "cellscript nft lock outcome");
         assert_eq!(rust.is_ok(), expected_ok, "rust nft lock outcome");
         if expected_ok {
@@ -278,11 +371,16 @@ fn matched_cost_corpus_compiles_runs_and_stays_within_budget() {
         }
     }
 
-    let growth = cost_growth::measure();
+    let growth = cost_growth::measure(&mut executions);
+    let expanded = cost_expanded::measure(&mut executions);
+    let scalar = cost_scalar::measure(&mut executions);
     assert_eq!(matched.len(), 3, "all matched samples executed");
     let report = serde_json::json!({
-        "schema": "cellscript-cost-corpus-v1", "status": "passed", "llvm_strip": strip,
+        "schema": "cellscript-cost-corpus-v2", "status": "passed", "llvm_strip": strip,
         "edition": "2027", "opt_level": 3, "matched": matched, "growth": growth,
+        "provenance": cost_provenance::capture(&repo, &strip),
+        "expanded": expanded, "executions": executions,
+        "scalar": scalar,
     });
     fs::write(&report_path, serde_json::to_vec_pretty(&report).expect("serialize cost report")).expect("write executed cost report");
 

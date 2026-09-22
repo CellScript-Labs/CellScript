@@ -11,11 +11,13 @@ export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
 export CELLSCRIPT_BACKEND_SHAPE_REPORT="${CELLSCRIPT_BACKEND_SHAPE_REPORT:-$ROOT_DIR/target/cellscript-backend-shape/backend-shape-report-$MODE.json}"
 export CELLSCRIPT_MOLECULE_SCHEMA_MANIFEST_REPORT="${CELLSCRIPT_MOLECULE_SCHEMA_MANIFEST_REPORT:-$ROOT_DIR/target/cellscript-schema-manifest/schema-manifest-report-$MODE.json}"
 export CELLSCRIPT_COST_CORPUS_REPORT="${CELLSCRIPT_COST_CORPUS_REPORT:-$ROOT_DIR/target/cellscript-cost/cost-corpus-report-$MODE.json}"
+export CELLSCRIPT_MULTI_SCRIPT_COST_REPORT="${CELLSCRIPT_MULTI_SCRIPT_COST_REPORT:-$ROOT_DIR/target/cellscript-cost/multi-script-cost-report-$MODE.json}"
 
 cd "$ROOT_DIR"
 mkdir -p "$(dirname "$CELLSCRIPT_BACKEND_SHAPE_REPORT")"
 mkdir -p "$(dirname "$CELLSCRIPT_MOLECULE_SCHEMA_MANIFEST_REPORT")"
 mkdir -p "$(dirname "$CELLSCRIPT_COST_CORPUS_REPORT")"
+mkdir -p "$(dirname "$CELLSCRIPT_MULTI_SCRIPT_COST_REPORT")"
 
 require_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
@@ -638,17 +640,20 @@ run_dev_gate() {
 
 prepare_cost_evidence() {
     printf '{"status":"not-generated","reason":"cost corpus has not completed"}\n' >"$CELLSCRIPT_COST_CORPUS_REPORT"
+    printf '{"status":"not-generated","reason":"multi-Script corpus has not completed"}\n' >"$CELLSCRIPT_MULTI_SCRIPT_COST_REPORT"
     run cargo test --locked -p cellscript --test cost_toolchain
 }
 
 check_cost_evidence() {
-    # The corpus writes this top-level marker only after all matched and growth
-    # rows pass their VM outcomes and budgets. Resetting it before tests prevents
-    # a filtered/skipped suite from reusing evidence from an earlier run.
-    if ! rg -q -x '  "status": "passed"' "$CELLSCRIPT_COST_CORPUS_REPORT"; then
-        printf 'cost corpus did not produce passing execution evidence: %s\n' "$CELLSCRIPT_COST_CORPUS_REPORT" >&2
+    if ! rg -q -x '  "status": "passed"' "$CELLSCRIPT_COST_CORPUS_REPORT" \
+        || ! rg -q -x '  "status": "passed"' "$CELLSCRIPT_MULTI_SCRIPT_COST_REPORT"; then
+        printf 'cost corpus did not produce passing execution evidence\n' >&2
         exit 1
     fi
+    # Both reports are invalidated before tests. The v2 consumer requires
+    # available group measurements and checks the frozen ceilings again.
+    run cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
+        --root "$ROOT_DIR" check-cost-evidence "$CELLSCRIPT_COST_CORPUS_REPORT" "$CELLSCRIPT_MULTI_SCRIPT_COST_REPORT"
     printf 'CellScript cost corpus report: %s\n' "$CELLSCRIPT_COST_CORPUS_REPORT"
 }
 
