@@ -7,15 +7,15 @@
   "artifact_identities": {
     "policy": {
       "artifact_hash": "0x702f0811e0d0d0b3d5ba776598c8ac58b21a38c3dfb26a6f8307f34a15e1747a",
-      "lowering_record_hash": "0x0e0b3c859e8d99f3f903df6cd4928621318957316dea61afbe32c0eef67f6dbe",
-      "source_map_hash": "0x0bba59c02c4d31c450c43d39536c768826aeb6ac2854b57da3ffcf90f727d3af",
-      "verified_bundle_id": "0xe9718b06984502cee276ab0bf75b850ed6e9eb2940da9b74bc6dee3e6c6d6503"
+      "lowering_record_hash": "0xd2082dbd673ffa1c5a9e779e92b2fdb1c9365f2a6628832ff0dbeb24c51ef311",
+      "source_map_hash": "0x23d9292cf74b593919171e6905fa1ddf1adc98db4bb540c4ca0a5c9281ea34c9",
+      "verified_bundle_id": "0xebb826df1cd1c213072642966fc31c1d357f0c370722785b024a31272c01b83b"
     },
     "capacity": {
       "artifact_hash": "0x56028936f39ad5006cf69ed2f05d556539eb55395a17ed7679391a0c588b0008",
-      "lowering_record_hash": "0xd81c4b0ae11b062a9a4f4a5d5672bcc6f9ecc48569f7c2f14591f179730dd1d8",
-      "source_map_hash": "0x95ce740529ab2a4c36079e75632a4a01e6a37e6780918837307ef216a7575e41",
-      "verified_bundle_id": "0xdee7fcfef9285db660bafae93e1e8d917f16b2ee01004efcf8019b5723be474b"
+      "lowering_record_hash": "0x76a6fd1f4c0c69427124597cae997838c31efcd2bca727397425ed37f38f5e6d",
+      "source_map_hash": "0x9f2e00bfb80c727ffa6ef4324b89890d1668a5f1520fda5bdb77a6ba191ead5e",
+      "verified_bundle_id": "0x31824a4fdaddec379cc07243716e7e7e30735168a86751001106129b9fe6367b"
     }
   },
   "cases": [

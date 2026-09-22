@@ -19,6 +19,81 @@ action main(value: u64) -> u64 {
 }
 "#;
 
+fn large_policy_fixture(count: u32) -> CompileResult {
+    use cellscript::artifact::{compile_artifact, ArtifactAction, ArtifactContext, ArtifactDeclaration, ArtifactDispatch};
+    let mut source = "module policy_error_labels\nresource Token has store, consume { amount: u64\nexpected: [u8; 8] }\n".to_string();
+    for index in 0..count {
+        source.push_str(&format!("action check_{index}(input before: Token, witness payload: [u8; 8]) {{ verification\nrequire before.amount == {}\nrequire payload == before.expected\nconsume before\n}}\n",index+1));
+    }
+    compile_artifact(
+        &source,
+        CompileOptions {
+            edition: NEXT_EDITION,
+            target: Some("riscv64-elf".into()),
+            target_profile: Some("ckb".into()),
+            opt_level: 3,
+            ..Default::default()
+        },
+        ArtifactDeclaration {
+            name: "LabelOrdinalPolicy".into(),
+            context: ArtifactContext::TypeGroup { resource: "Token".into() },
+            dispatch: ArtifactDispatch::PolicyWitnessV1,
+            actions: (0..count).map(|index| ArtifactAction { tag: index, action: format!("check_{index}") }).collect(),
+            common_checks: vec![],
+        },
+        cellscript::ExecutableSurfacePolicy::DenyFailClosed,
+    )
+    .expect("large policy must not interpret label ordinals as errors")
+}
+
+#[test]
+fn policy_failure_label_ordinals_are_not_runtime_error_codes() {
+    for count in [32, 64] {
+        let compiled = large_policy_fixture(count);
+        compiled.validate().expect("independent checker accepts the large policy");
+        let record = compiled.verified_lowering_record.as_ref().unwrap();
+        assert!(
+            record.blocks.iter().any(|block| block.machine_label.as_deref().is_some_and(|label| label
+                .rsplit_once("_fail_")
+                .and_then(|(_, suffix)| suffix.parse::<u32>().ok())
+                .is_some_and(|ordinal| ordinal > 255))),
+            "fixture reaches ordinals beyond the runtime exit-code range"
+        );
+        assert!(record.runtime_error_exits.iter().all(|exit| (1..=255).contains(&exit.code)));
+        assert!(!record.verifier_failure_exits.is_empty(), "actual failure sites must remain bound");
+    }
+}
+
+#[test]
+fn relaxed_policy_branches_reject_condition_skip_and_call_mutations() {
+    let valid = Fixture::from_result(large_policy_fixture(64));
+    assert_eq!(valid.check(), Ok(()));
+    let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+    let pair = elf
+        .instructions
+        .windows(2)
+        .find(|pair| {
+            pair[0].word & 0x7f == 0x63
+                && pair[1].word & 0xfff == 0x6f
+                && valid
+                    .record
+                    .blocks
+                    .iter()
+                    .any(|block| block.range.contains(pair[0].address) && block.range.contains(pair[1].address))
+                && elf.control_flow.iter().any(|flow| flow.address == pair[0].address && flow.target == pair[0].address + 8)
+        })
+        .expect("64 actions exercise a relaxed policy branch");
+    for (address, word) in [
+        (pair[0].address, pair[0].word ^ (1 << 12)), // Invert the accepted condition.
+        (pair[0].address, pair[0].word ^ (1 << 9)),  // Skip twelve bytes instead of eight.
+        (pair[1].address, pair[1].word | (1 << 7)),  // Turn the jump into a call.
+    ] {
+        let mut changed = valid.clone();
+        changed.replace_machine_word(address, word);
+        assert!(changed.check().is_err(), "hash-rebound relaxed-branch mutation at {address:#x} must reject");
+    }
+}
+
 const RUNTIME_PROVENANCE_SOURCE: &str = r#"
 module artifact_checker_runtime_provenance
 

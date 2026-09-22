@@ -591,14 +591,19 @@ fn runtime_error_exits(layout: &MachineLayoutEvidence, blocks: &[LoweringBlock])
             })
         })
         .chain(layout.symbols.iter().filter_map(|(label, address)| {
-            let (_, code) = label.rsplit_once("_fail_")?;
-            let code = code.parse::<i32>().ok()?;
             let block = blocks.iter().find(|block| block.range.contains(*address))?;
+            // Only shared per-function failure labels carry an error code.
+            // Fresh labels such as .Lentry_witness_fail_262 end in a unique
+            // ordinal, not a runtime error. Their actual process-failure site
+            // is recorded separately by the explicit verifier_failure label.
+            let (_, owner) = block.owner_entry.split_once(':')?;
+            let code = label.strip_prefix(&format!(".L{owner}_fail_"))?.parse::<u64>().ok()?;
+            let error = crate::runtime_errors::CellScriptRuntimeError::from_code(code)?;
             Some(RuntimeErrorExit {
                 block_id: block.id.clone(),
                 address: *address,
-                code,
-                name: format!("cellscript-runtime-error-{code}"),
+                code: i32::try_from(code).ok()?,
+                name: error.name().to_string(),
             })
         }))
         .collect::<Vec<_>>();

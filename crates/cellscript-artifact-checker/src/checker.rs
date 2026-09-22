@@ -6540,6 +6540,19 @@ fn bounded_group_input_machine_error(message: impl Into<String>) -> CheckerError
 }
 
 fn validate_policy_dispatch_machine_contract(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result<(), CheckerError> {
+    if !matches!(record.typed_semantics.foundation.entry_contract.dispatch, EntryDispatchContract::PolicyWitnessV1(_)) {
+        return Ok(());
+    }
+    if let Some((logical_record, logical_elf)) =
+        crate::policy_machine::normalize_relaxed_branches(record, elf).map_err(policy_machine_error)?
+    {
+        validate_policy_dispatch_logical_machine_contract(&logical_record, &logical_elf)
+    } else {
+        validate_policy_dispatch_logical_machine_contract(record, elf)
+    }
+}
+
+fn validate_policy_dispatch_logical_machine_contract(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result<(), CheckerError> {
     let EntryDispatchContract::PolicyWitnessV1(contract) = &record.typed_semantics.foundation.entry_contract.dispatch else {
         return Ok(());
     };

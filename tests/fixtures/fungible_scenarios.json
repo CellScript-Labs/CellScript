@@ -3,9 +3,9 @@
   "source_file": "tests/fixtures/fungible_scenarios.cell",
   "artifact_identities": {
     "artifact_hash": "0x186081986b0bff8ab56499800fd08aa5f8ec28c5c6365fc5fd6311ae27c81707",
-    "lowering_record_hash": "0xc3c06e759371c1d9b2061d49efc9f2bbd5869715fe83df2ce90b45ec539ded94",
-    "source_map_hash": "0x4ff766b4b659daeb4e6155fc1d541eec1776a786d40b4e365b75f81db3fc0aba",
-    "verified_bundle_id": "0xa9f1f9c0f39a739925b91c31c0e739d478024dfa0f8e6ca3de8d96a06a388fc8"
+    "lowering_record_hash": "0x3d3f6773b95c299e12e98ff803597503cd7d535d36aaf899d3c074d28a1d39ab",
+    "source_map_hash": "0xa2d21634ea786615473c09408e487a9decfdfd961c5e19a056509409b731b69d",
+    "verified_bundle_id": "0x8229757b9d3deef585005d69cad1dc31c0d6ef9983e1165cec998fc95f54666d"
   },
   "cases": [
     {

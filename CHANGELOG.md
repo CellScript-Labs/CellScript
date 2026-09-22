@@ -9,6 +9,13 @@ for the accepted compatibility boundary and publication channels.
 The entries below retain the evidence state at each implementation step. The
 release notes and capability ledger record the current acceptance state.
 
+- Correct runtime-error sidecars so generated label ordinals are not mistaken
+  for exit codes. Validate large policy dispatchers after conditional-branch
+  relaxation, with mutations that reject changed conditions, skip distances,
+  and call destinations. Generated contract instructions remain unchanged.
+  Run the Registry PostgreSQL suite in the release workflow and require the
+  latest migration and its interface lookup index.
+
 - Restore the edition 2026 generic declaration contract from 0.25; apply the
   stricter public layout declaration boundary only to edition 2027 owners.
   Preserve constraint spelling and explicit abilities during formatting, and

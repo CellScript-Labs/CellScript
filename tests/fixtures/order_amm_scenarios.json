@@ -7,15 +7,15 @@
   "artifact_identities": {
     "amm_swap": {
       "artifact_hash": "0xaa22d53049e6a6a2c6903736bf4bda2acf117e0f93eb7f9ebeb25b67b4f3424c",
-      "lowering_record_hash": "0xc44722ec85b1413716a2921e0e6ea15a5c63842ba9e7004d4a19d359e14c52ab",
-      "source_map_hash": "0x1376da5caeb57e6dac667c538fdf031b56a80f9f6e91b2fc7c5b2b450140ab03",
-      "verified_bundle_id": "0xab706cbc42c7d0a2e240569b5870bf9956ffec66daef8356f3509693630f9af9"
+      "lowering_record_hash": "0xa6b5ccadc8a13401fe14eaecfba6e3cd7f6c54f777e8b591a3c36c60bbfde9ef",
+      "source_map_hash": "0x946dc554a95b5368f2ea71e6f37e85a683dad9541bc739881a4eda1316384f1b",
+      "verified_bundle_id": "0xb29469a8754a6a08b9e37d599cc83d1a02b629027225be2256d29cdc8dfa5867"
     },
     "pool_merge": {
       "artifact_hash": "0x6a50875fbd0f2e4beab28b6dfedc18730f7949d7f8e0bff41bca42313e1bfad8",
-      "lowering_record_hash": "0x3bc7058ac7172dd5699427723368b45c8be63d0d566e7ccab61b313da6383c39",
-      "source_map_hash": "0xa0c426a910aafbff73acdbe3eac96d73aa3dcfd44e3542136e3e9bad450ec114",
-      "verified_bundle_id": "0x978a5e0254a41c80c0cb76a3dcb7ade63b3a1041ce5f5630a45b3f9080ebf05a"
+      "lowering_record_hash": "0x307aabf94a514820dfafa07377d64eb4f542b1856dcd4e6a94cb31d435cb4840",
+      "source_map_hash": "0x58d2b3a48869dac02dddba98ce5c10984156273582865995dcc5450850c2d440",
+      "verified_bundle_id": "0x1702d875e7ffdef99574552e1ad627f48d98067507ec643b6f99bf5942acc7a3"
     }
   },
   "cases": [
