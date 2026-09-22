@@ -4,8 +4,10 @@ This is the development implementation of [D1–D6](CELLSCRIPT_0_31_COST_DECISIO
 It is not a release announcement. Measurements below were collected on
 2026-09-21 and rerun on 2026-09-22 from the `0.31` worktree based on
 `c4a4ec1751a5ea15c6364f2f57744a8bfbafa7bd`.
-Both the baseline and candidate reports declare dirty source. Signed commits,
-clean-source gates, and independent boundary review remain acceptance work.
+Both the baseline and initial candidate reports declare dirty source. The
+implementation is committed as `fe5bc5cdeb9db70d9f9aacdbb657746a9b8f81bc`.
+Local dev and full CI passed on September 22. These measurements precede the
+final clean-source gates. Independent boundary review is still required.
 The workspace package version remains 0.30.0 until release preparation.
 
 ## What changed
