@@ -1056,6 +1056,20 @@ fn run_bounded_output_plan_acceptance(
     }))
 }
 
+fn validate_recipe_artifact_hashes(fixture: &Value, hashes: &BTreeMap<&str, &str>) -> Result<()> {
+    for collection in ["action_cases", "lock_cases"] {
+        for case in fixture[collection].as_array().with_context(|| format!("{collection} missing"))? {
+            let name = case["name"].as_str().context("recipe artifact name missing")?;
+            let expected = case["artifact_data_hash"].as_str().context("recipe artifact hash missing")?;
+            let actual = hashes.get(name).with_context(|| format!("compiled recipe artifact missing for {name}"))?;
+            if *actual != expected {
+                bail!("{name} artifact changed from audited transaction recipe: {actual} != {expected}");
+            }
+        }
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run(
     root: &Path,
@@ -1070,6 +1084,9 @@ pub(crate) fn run(
     if fixture["schema"] != "cellscript-ckb-acceptance-transaction-recipes-v0.23" {
         bail!("unexpected CKB acceptance transaction recipe schema");
     }
+    // Reject stale recipe identities before rebuilding or starting the node.
+    let hashes = evidence.artifacts.iter().map(|artifact| (artifact.name.as_str(), artifact.data_hash.as_str())).collect();
+    validate_recipe_artifact_hashes(&fixture, &hashes)?;
     let pin = verify_pin(root, ckb_repo, mode)?;
     let ckb_bin = build_ckb(root, ckb_repo, configured_ckb_bin, mode, &evidence.run_dir)?;
     let mut devnet = CkbDevnet::new(ckb_repo.to_path_buf(), ckb_bin.clone(), evidence.run_dir.clone())?;
@@ -1280,6 +1297,25 @@ mod tests {
                 args.input_type().to_opt().unwrap_or_else(|| panic!("{label} entry witness must occupy input_type")).raw_data();
             assert!(payload.starts_with(b"CSARGv1\0"), "{label} input_type must contain a CSARG payload");
             *count += 1;
+        }
+    }
+
+    #[test]
+    fn recipe_preflight_rejects_stale_action_lock_and_missing_artifacts() {
+        let fixture = json!({
+            "action_cases": [{"name":"token.cell:mint", "artifact_data_hash":"action-hash"}],
+            "lock_cases": [{"name":"token.cell:owner", "artifact_data_hash":"lock-hash"}]
+        });
+        let hashes = BTreeMap::from([("token.cell:mint", "action-hash"), ("token.cell:owner", "lock-hash")]);
+        validate_recipe_artifact_hashes(&fixture, &hashes).unwrap();
+        for name in ["token.cell:mint", "token.cell:owner"] {
+            let mut changed = hashes.clone();
+            changed.insert(name, "changed-hash");
+            let error = validate_recipe_artifact_hashes(&fixture, &changed).unwrap_err().to_string();
+            assert!(error.contains(name) && error.contains("artifact changed"), "{error}");
+            changed.remove(name);
+            let error = validate_recipe_artifact_hashes(&fixture, &changed).unwrap_err().to_string();
+            assert!(error.contains(name) && error.contains("compiled recipe artifact missing"), "{error}");
         }
     }
 

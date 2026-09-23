@@ -115,6 +115,13 @@ The browser WASM API exposes metadata only, and the editor consumes metadata
 and diagnostics; neither becomes an ELF-verification service. Fresh WASM and
 editor packaging still belong to release validation.
 
+Live acceptance recipes bind the regenerated ELF hashes and the Script hashes
+derived from them. Historical transaction IDs remain recipe lookup keys; the
+replayer replaces outpoints and measures the new transactions on its local
+node. Artifact identity checks now run before rebuilding the node, so a stale
+action or Lock recipe fails during preflight. The transaction scenarios and
+their acceptance rules are unchanged.
+
 The checkpoint reports are local evidence under
 `target/cellscript-cost/baseline-before-optimizations/`; they are not clean
 commit evidence or published release assets. The final backend and CI gates,
