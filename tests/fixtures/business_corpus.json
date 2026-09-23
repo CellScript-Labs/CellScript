@@ -1010,7 +1010,7 @@
       ]
     }
   ],
-  "inventory_sha256": "0xffdccc43ac2235f84f258c82d8a6e0616a99fb6bf7e7b3bceac1cc0ff4a139d4",
+  "inventory_sha256": "0x57c1eb0bc66a417cef88fd26224b3776806de8f9a14fba10788ca80173fa07f8",
   "release_requirements": {
     "backend": "passed",
     "ci": "passed",

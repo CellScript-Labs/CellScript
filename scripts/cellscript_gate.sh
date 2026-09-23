@@ -638,7 +638,8 @@ run_dev_gate() {
 
 prepare_cost_evidence() {
     printf '{"status":"not-generated","reason":"cost corpus has not completed"}\n' >"$CELLSCRIPT_COST_CORPUS_REPORT"
-    run cargo test --locked -p cellscript --test cost_toolchain
+    # Keep temporary executable fixtures and process-launch checks serialized.
+    run cargo test --locked -p cellscript --test cost_toolchain -- --test-threads=1
 }
 
 check_cost_evidence() {
