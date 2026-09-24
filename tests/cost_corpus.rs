@@ -35,6 +35,8 @@ mod cost_expanded;
 mod cost_growth;
 #[path = "support/cost_measurement.rs"]
 mod cost_measurement;
+#[path = "support/cost_memory.rs"]
+mod cost_memory;
 #[path = "support/cost_provenance.rs"]
 mod cost_provenance;
 #[path = "support/cost_scalar.rs"]

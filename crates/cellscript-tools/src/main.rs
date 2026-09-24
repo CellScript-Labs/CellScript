@@ -17,6 +17,7 @@ mod ckb_acceptance;
 mod ckb_acceptance_live;
 mod ckb_adapter_live;
 mod ckb_devnet;
+mod cost_comparison;
 mod cost_evidence;
 mod crypto;
 mod evidence_retention;
@@ -160,6 +161,15 @@ enum Command {
     CheckDocStatus,
     /// Validate versioned cost measurements and the frozen per-fixture ceilings.
     CheckCostEvidence { report: PathBuf, multi_script_report: PathBuf },
+    /// Compare complete baseline/candidate report pairs without changing budgets.
+    CompareCostEvidence {
+        baseline: PathBuf,
+        baseline_multi: PathBuf,
+        candidate: PathBuf,
+        candidate_multi: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
     /// Validate the frozen 0.30 business-capability corpus inventory.
     CheckBusinessCorpus {
         /// Refresh the sorted evidence inventory and its content digest.
@@ -449,6 +459,12 @@ fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => failure(error),
         },
+        Command::CompareCostEvidence { baseline, baseline_multi, candidate, candidate_multi, output } => {
+            match cost_comparison::run(&root, &baseline, &baseline_multi, &candidate, &candidate_multi, &output) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => failure(error),
+            }
+        }
         Command::CheckBusinessCorpus { write, release } => match business_corpus::run(&root, write, release) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => failure(error),

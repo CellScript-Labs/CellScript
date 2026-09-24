@@ -1,0 +1,1503 @@
+diff --git a/crates/cellscript-artifact-checker/src/checker.rs b/crates/cellscript-artifact-checker/src/checker.rs
+index 1687abf6..8b99e467 100644
+--- a/crates/cellscript-artifact-checker/src/checker.rs
++++ b/crates/cellscript-artifact-checker/src/checker.rs
+@@ -5455,0 +5456 @@ const POLICY_ENTRY_FRAME_BYTES: u32 = 4_192;
++const POLICY_ADAPTER_FRAME_BYTES: u32 = 5_376;
+@@ -7167 +7167,0 @@ fn validate_policy_action_adapters(
+-    let mut shared_bindings: BTreeMap<String, (Value, BTreeSet<u64>)> = BTreeMap::new();
+@@ -7176,2 +7176 @@ fn validate_policy_action_adapters(
+-        let (private_frame, private_capacity) = crate::policy::private_adapter_layout(entry, &record.typed_semantics)?;
+-        let expected_record_frame = private_frame
++        let expected_record_frame = POLICY_ADAPTER_FRAME_BYTES
+@@ -7191,3 +7190,3 @@ fn validate_policy_action_adapters(
+-        let saved_ra = private_frame as i32 - 8;
+-        let save_address = base + sp_adjust_instruction_bytes(-(private_frame as i32));
+-        if !matches_sp_adjust_at(elf, base, -(private_frame as i32))? || !matches_stack_slot_at(elf, save_address, 1, saved_ra, false)?
++        let prologue = instructions_from(elf, base, 9)?;
++        if !matches_large_sp_adjust(prologue, 0, -(POLICY_ADAPTER_FRAME_BYTES as i32))
++            || !matches_large_stack_store(prologue, 3, 1, POLICY_ADAPTER_FRAME_BYTES as i32 - 8)
+@@ -7197,50 +7196 @@ fn validate_policy_action_adapters(
+-        let decoder_call_start = save_address + stack_slot_instruction_bytes(saved_ra);
+-        let shared_decoder = elf.control_flow.iter().find(|flow| flow.address == decoder_call_start + 4).and_then(|flow| {
+-            record.entries.iter().find(|candidate| {
+-                candidate.name.starts_with(".Lpolicy_shared_decoder_") && entry_start(record, &candidate.id).ok() == Some(flow.target)
+-            })
+-        });
+-        let decoder_owner = if let Some(decoder) = shared_decoder {
+-            if !is_auipc(instruction_at(elf, decoder_call_start)?.word, 1)
+-                || !is_jalr_call(instruction_at(elf, decoder_call_start + 4)?.word)
+-                || decoder.kind != EntryKind::Runtime
+-                || decoder.frame_size_bytes != 0
+-                || decoder.outgoing_argument_bytes != 0
+-            {
+-                return Err(policy_machine_error("shared decoder call or borrowed-frame contract changed"));
+-            }
+-            let decoder_blocks: Vec<_> = record.blocks.iter().filter(|block| block.owner_entry == decoder.id).collect();
+-            if decoder_blocks.iter().any(|block| block.frame_size_bytes != 0 || block.outgoing_argument_bytes != 0)
+-                || elf
+-                    .stack_adjustments
+-                    .iter()
+-                    .any(|adjustment| decoder_blocks.iter().any(|block| block.range.contains(adjustment.address)))
+-                || elf.instructions.iter().any(|instruction| {
+-                    decoder_blocks.iter().any(|block| block.range.contains(instruction.address))
+-                        && matches!(instruction.word & 0x7f, 0x6f | 0x67)
+-                        && (instruction.word >> 7) & 31 != 0
+-                })
+-            {
+-                return Err(policy_machine_error("shared decoder may neither move sp nor call another function"));
+-            }
+-            let projections = entry
+-                .params
+-                .iter()
+-                .map(|param| crate::policy::builder_parameter_projection(param, entry, &record.typed_semantics))
+-                .collect::<Result<Vec<_>, _>>()?;
+-            let key =
+-                serde_json::json!({"params":entry.params,"projection":projections,"frame":private_frame,"capacity":private_capacity});
+-            let (expected, callers) = shared_bindings.entry(decoder.id.clone()).or_insert_with(|| (key.clone(), BTreeSet::new()));
+-            if *expected != key {
+-                return Err(policy_machine_error("different parameter contracts share one positional decoder"));
+-            }
+-            callers.insert(decoder_call_start + 4);
+-            let decoder_done = unique_policy_block(record, &decoder.id, ".Lentry_witness_done_")?;
+-            if instruction_at(elf, decoder_done.range.start)?.word != 0x0000_8067 {
+-                return Err(policy_machine_error("shared decoder must return with its borrowed frame intact"));
+-            }
+-            &decoder.id
+-        } else {
+-            &adapter.id
+-        };
+-        let fail = unique_policy_block(record, decoder_owner, ".Lentry_witness_fail_")?;
++        let fail = unique_policy_block(record, &adapter.id, ".Lentry_witness_fail_")?;
+@@ -7248,2 +7198 @@ fn validate_policy_action_adapters(
+-        let has_payload =
+-            private_capacity > 0 && entry.params.iter().any(|param| matches!(param.source.as_str(), "default" | "witness"));
++        let has_payload = entry.params.iter().any(|param| matches!(param.source.as_str(), "default" | "witness"));
+@@ -7251,23 +7200,11 @@ fn validate_policy_action_adapters(
+-            let copy = unique_policy_block(record, decoder_owner, ".Lpolicy_args_copy_")?;
+-            let bound_instructions = if private_capacity <= 2047 || private_capacity == 4096 { 1 } else { 2 };
+-            let prefix_address = copy
+-                .range
+-                .start
+-                .checked_sub((5 + bound_instructions) * 4)
+-                .ok_or_else(|| policy_machine_error("policy adapter copy prefix underflows"))?;
+-            let prefix = instructions_from(elf, prefix_address, (5 + bound_instructions) as usize)?;
+-            let bound_matches = if private_capacity <= 2047 {
+-                is_addi(prefix[0].word, 5, 0, private_capacity as i32)
+-            } else if private_capacity == 4096 {
+-                is_lui(prefix[0].word, 5, 0x1000)
+-            } else {
+-                is_lui(prefix[0].word, 5, 0x1000) && is_addi(prefix[1].word, 5, 5, private_capacity as i32 - 4096)
+-            };
+-            let start = bound_instructions as usize;
+-            if !bound_matches
+-                || !is_bltu(prefix[start].word, 5, 11)
+-                || !flow_targets(elf, prefix[start].address, fail.range.start)
+-                || !is_sd(prefix[start + 1].word, 11, 2, 0)
+-                || !is_addi(prefix[start + 2].word, 5, 10, 0)
+-                || !is_addi(prefix[start + 3].word, 6, 2, 8)
+-                || !is_addi(prefix[start + 4].word, 7, 0, 0)
++            let copy = unique_policy_block(record, &adapter.id, ".Lpolicy_args_copy_")?;
++            let prefix_address =
++                copy.range.start.checked_sub(24).ok_or_else(|| policy_machine_error("policy adapter copy prefix underflows"))?;
++            let prefix = instructions_from(elf, prefix_address, 6)?;
++            if !is_lui(prefix[0].word, 5, 0x0000_1000)
++                || !is_bltu(prefix[1].word, 5, 11)
++                || !flow_targets(elf, prefix[1].address, fail.range.start)
++                || !is_sd(prefix[2].word, 11, 2, 0)
++                || !is_addi(prefix[3].word, 5, 10, 0)
++                || !is_addi(prefix[4].word, 6, 2, 8)
++                || !is_addi(prefix[5].word, 7, 0, 0)
+@@ -7277 +7214 @@ fn validate_policy_action_adapters(
+-            let copied = unique_policy_block(record, decoder_owner, ".Lpolicy_args_copied_")?;
++            let copied = unique_policy_block(record, &adapter.id, ".Lpolicy_args_copied_")?;
+@@ -7291,8 +7228,5 @@ fn validate_policy_action_adapters(
+-        } else {
+-            let empty_guard = if shared_decoder.is_some() { entry_start(record, decoder_owner)? } else { decoder_call_start };
+-            if !is_bne(instruction_at(elf, empty_guard)?.word, 11, 0)
+-                || !flow_targets(elf, empty_guard, fail.range.start)
+-                || !is_sd(instruction_at(elf, empty_guard + 4)?.word, 0, 2, 0)
+-            {
+-                return Err(policy_machine_error("payload-free policy adapter no longer requires empty args"));
+-            }
++        } else if !is_bne(prologue[7].word, 11, 0)
++            || !flow_targets(elf, prologue[7].address, fail.range.start)
++            || !is_sd(prologue[8].word, 0, 2, 0)
++        {
++            return Err(policy_machine_error("payload-free policy adapter no longer requires empty args"));
+@@ -7315,7 +7248,0 @@ fn validate_policy_action_adapters(
+-        if shared_decoder.is_some() {
+-            let outgoing_adjustment =
+-                if expected_outgoing == 0 { 0 } else { sp_adjust_instruction_bytes(-(expected_outgoing as i32)) };
+-            if call.address != decoder_call_start + 8 + outgoing_adjustment + 4 {
+-                return Err(policy_machine_error("shared decoder arguments must flow directly to the bound action call"));
+-            }
+-        }
+@@ -7351,4 +7278,4 @@ fn validate_policy_action_adapters(
+-        let restore = done.range.start + stack_slot_instruction_bytes(saved_ra);
+-        if !matches_stack_slot_at(elf, done.range.start, 1, saved_ra, true)?
+-            || !matches_sp_adjust_at(elf, restore, private_frame as i32)?
+-            || instruction_at(elf, restore + sp_adjust_instruction_bytes(private_frame as i32))?.word != 0x0000_8067
++        let done_words = instructions_from(elf, done.range.start, 8)?;
++        if !matches_large_stack_load(done_words, 0, 1, POLICY_ADAPTER_FRAME_BYTES as i32 - 8)
++            || !matches_large_sp_adjust(done_words, 4, POLICY_ADAPTER_FRAME_BYTES as i32)
++            || done_words[7].word != 0x0000_8067
+@@ -7359,8 +7285,0 @@ fn validate_policy_action_adapters(
+-    for decoder in record.entries.iter().filter(|entry| entry.name.starts_with(".Lpolicy_shared_decoder_")) {
+-        let (_, callers) = shared_bindings.get(&decoder.id).ok_or_else(|| policy_machine_error("unbound shared policy decoder"))?;
+-        let target = entry_start(record, &decoder.id)?;
+-        let incoming: BTreeSet<_> = elf.control_flow.iter().filter(|flow| flow.target == target).map(|flow| flow.address).collect();
+-        if callers.len() < 2 || &incoming != callers {
+-            return Err(policy_machine_error("shared decoder has an undeclared caller or no repeated layout"));
+-        }
+-    }
+@@ -7508,22 +7426,0 @@ fn sp_adjust_instruction_bytes(delta: i32) -> u64 {
+-fn stack_slot_instruction_bytes(offset: i32) -> u64 {
+-    if (-2048..=2047).contains(&offset) {
+-        4
+-    } else {
+-        16
+-    }
+-}
+-
+-fn matches_stack_slot_at(elf: &ParsedElf, address: u64, register: u32, offset: i32, load: bool) -> Result<bool, CheckerError> {
+-    if (-2048..=2047).contains(&offset) {
+-        let word = instruction_at(elf, address)?.word;
+-        Ok(if load { is_ld(word, register, 2, offset) } else { is_sd(word, register, 2, offset) })
+-    } else {
+-        let words = instructions_from(elf, address, 4)?;
+-        Ok(if load {
+-            matches_large_stack_load(words, 0, register, offset)
+-        } else {
+-            matches_large_stack_store(words, 0, register, offset)
+-        })
+-    }
+-}
+-
+diff --git a/crates/cellscript-artifact-checker/src/policy.rs b/crates/cellscript-artifact-checker/src/policy.rs
+index e8735524..e8144d69 100644
+--- a/crates/cellscript-artifact-checker/src/policy.rs
++++ b/crates/cellscript-artifact-checker/src/policy.rs
+@@ -22,29 +21,0 @@ const MAX_COMMON_CALLEE_BLOCKS: usize = 262_144;
+-/// Independently derive the private decoder's fixed payload reservation.
+-/// Unknown layouts and Script-argument users retain the old bounded frame.
+-pub(crate) fn private_adapter_layout(entry: &TypedSemanticEntry, typed: &TypedSemanticRecord) -> Result<(u32, u32), CheckerError> {
+-    let fallback = (5376, 4096);
+-    let mut payload = 0u64;
+-    for param in &entry.params {
+-        if param.source == "lockargs" {
+-            return Ok(fallback);
+-        }
+-        let projection = builder_parameter_projection(param, entry, typed)?;
+-        if projection["cell_bound_abi"] == true || param.reference {
+-            continue;
+-        }
+-        let width = projection["fixed_byte_len"].as_u64().or(policy_abi_type(&param.ty, 0)?.static_width());
+-        let Some(width) = width else {
+-            return Ok(fallback);
+-        };
+-        let Some(total) = payload.checked_add(width) else {
+-            return Ok(fallback);
+-        };
+-        payload = total;
+-    }
+-    let capacity = if payload == 0 { 0 } else { payload.saturating_add(8) };
+-    if capacity > 4096 {
+-        return Ok(fallback);
+-    }
+-    Ok((((8 + capacity + 8).next_multiple_of(16)) as u32, capacity as u32))
+-}
+-
+diff --git a/crates/cellscript-artifact-checker/src/schema.rs b/crates/cellscript-artifact-checker/src/schema.rs
+index b9d0284e..1a4fc0c9 100644
+--- a/crates/cellscript-artifact-checker/src/schema.rs
++++ b/crates/cellscript-artifact-checker/src/schema.rs
+@@ -3 +3 @@ use serde::{Deserialize, Serialize};
+-pub const LOWERING_RECORD_SCHEMA: &str = "cellscript-verified-lowering-record-v9";
++pub const LOWERING_RECORD_SCHEMA: &str = "cellscript-verified-lowering-record-v8";
+@@ -11 +11 @@ pub const CHECKER_REPORT_SCHEMA: &str = "cellscript-artifact-checker-report-v1";
+-pub const LOWERING_RECORD_VERSION: u32 = 9;
++pub const LOWERING_RECORD_VERSION: u32 = 8;
+diff --git a/src/codegen/abi.rs b/src/codegen/abi.rs
+index 98436af3..6236e8cf 100644
+--- a/src/codegen/abi.rs
++++ b/src/codegen/abi.rs
+@@ -123 +123 @@ impl CodeGenerator {
+-        self.emit_entry_parameter_wrapper(target, params, None, false)
++        self.emit_entry_parameter_wrapper(target, params, None)
+@@ -131 +131 @@ impl CodeGenerator {
+-        self.emit_entry_parameter_wrapper(target, params, Some(label), false)
++        self.emit_entry_parameter_wrapper(target, params, Some(label))
+@@ -134,59 +134 @@ impl CodeGenerator {
+-    /// Sharing is deliberately limited to complete, fixed private layouts.
+-    /// The key retains ordered parameter types, sources, flags and binding IDs,
+-    /// runtime/TypeHash/plan indices, and the resolved payload representation.
+-    /// Named types resolve within one module; dynamic or Script-argument
+-    /// layouts keep dedicated adapters.
+-    pub(super) fn policy_decoder_key(&self, target: &str) -> Option<(String, usize)> {
+-        let abi = self.callable_abis.get(target)?;
+-        if abi.params.iter().any(|param| param.source == ParamSource::LockArgs) || !abi.bounded_plan_param_indices.is_empty() {
+-            return None;
+-        }
+-        let payload = entry_witness_payload_layout(
+-            &abi.params,
+-            &abi.runtime_bound_param_indices,
+-            &abi.bounded_plan_param_indices,
+-            &self.enum_layouts,
+-        );
+-        if payload.iter().any(|arg| arg.unsupported || arg.schema_dynamic) {
+-            return None;
+-        }
+-        let width: usize = payload.iter().map(|arg| arg.width).sum();
+-        let capacity = if width == 0 { 0 } else { ENTRY_WITNESS_HEADER_SIZE.checked_add(width)? };
+-        if capacity > ENTRY_WITNESS_BUFFER_SIZE {
+-            return None;
+-        }
+-        let frame = align_up(ENTRY_WITNESS_BUFFER_OFFSET + capacity + 8, 16);
+-        Some((format!("policy-private-fixed-v1:{abi:?}:{payload:?}"), frame))
+-    }
+-
+-    pub(super) fn emit_policy_shared_decoder(&mut self, target: &str, params: &[IrParam], label: &str) -> Result<()> {
+-        self.emit_entry_parameter_wrapper(target, params, Some(label), true)
+-    }
+-
+-    pub(super) fn emit_policy_decoder_stub(&mut self, target: &str, label: &str, decoder: &str, frame: usize) {
+-        let abi = self.callable_abis.get(target).expect("shared decoder requires a complete local ABI");
+-        let outgoing = align_stack_arg_bytes(entry_abi_arg_count(&abi.params, Some(abi)).saturating_sub(8) * 8);
+-        let done = self.fresh_label("entry_witness_done");
+-        self.entry_frame_sizes.insert(label.to_string(), frame as u32);
+-        self.emit_global(label);
+-        self.emit_label(label);
+-        self.emit_large_addi("sp", "sp", -(frame as i64));
+-        self.emit_stack_store("ra", frame - 8);
+-        // The stub owns the private copy and saved RA throughout both calls.
+-        // The decoder borrows this frame without moving sp or calling helpers.
+-        self.emit_entry_call_target(decoder, 0);
+-        self.emit_entry_call_target(target, outgoing);
+-        self.emit(format!("j {done}"));
+-        self.emit_label(&done);
+-        self.emit_stack_load("ra", frame - 8);
+-        self.emit_large_addi("sp", "sp", frame as i64);
+-        self.emit("ret");
+-    }
+-
+-    fn emit_entry_parameter_wrapper(
+-        &mut self,
+-        target: &str,
+-        params: &[IrParam],
+-        policy_record_label: Option<&str>,
+-        decoder_only: bool,
+-    ) -> Result<()> {
++    fn emit_entry_parameter_wrapper(&mut self, target: &str, params: &[IrParam], policy_record_label: Option<&str>) -> Result<()> {
+@@ -193,0 +136 @@ impl CodeGenerator {
++        self.entry_frame_sizes.insert(wrapper_label.to_string(), ENTRY_WITNESS_FRAME_SIZE as u32);
+@@ -211,22 +153,0 @@ impl CodeGenerator {
+-        // Only the private selected-record adapter can use the proven fixed
+-        // payload bound. The outer WitnessArgs loader still accepts 4096 bytes,
+-        // including optional fields and records belonging to other Scripts.
+-        let compact = policy_record_label.is_some()
+-            && !has_lock_args
+-            && !has_dynamic_payload
+-            && !payload.iter().any(|arg| arg.unsupported)
+-            && !has_unsupported_bounded_collection_param
+-            && min_witness_len <= ENTRY_WITNESS_BUFFER_SIZE;
+-        let private_capacity = if compact {
+-            if has_witness_payload {
+-                min_witness_len
+-            } else {
+-                0
+-            }
+-        } else {
+-            ENTRY_WITNESS_BUFFER_SIZE
+-        };
+-        let frame_size =
+-            if compact { align_up(ENTRY_WITNESS_BUFFER_OFFSET + private_capacity + 8, 16) } else { ENTRY_WITNESS_FRAME_SIZE };
+-        let return_address_offset = frame_size - 8;
+-        self.entry_frame_sizes.insert(wrapper_label.to_string(), if decoder_only { 0 } else { frame_size as u32 });
+@@ -252,4 +173,2 @@ impl CodeGenerator {
+-        if !decoder_only {
+-            self.emit_large_addi("sp", "sp", -(frame_size as i64));
+-            self.emit_stack_store("ra", return_address_offset);
+-        }
++        self.emit_large_addi("sp", "sp", -(ENTRY_WITNESS_FRAME_SIZE as i64));
++        self.emit_stack_store("ra", ENTRY_WITNESS_RA_OFFSET);
+@@ -263 +182 @@ impl CodeGenerator {
+-            self.emit_policy_preload_entry_args(has_witness_payload, private_capacity, &fail_label);
++            self.emit_policy_preload_entry_args(has_witness_payload, &fail_label);
+@@ -488,3 +407 @@ impl CodeGenerator {
+-            if !decoder_only {
+-                self.emit_entry_call_target(target, outgoing_stack_arg_bytes);
+-            }
++            self.emit_entry_call_target(target, outgoing_stack_arg_bytes);
+@@ -576,3 +493 @@ impl CodeGenerator {
+-            if !decoder_only {
+-                self.emit_entry_call_target(target, outgoing_stack_arg_bytes);
+-            }
++            self.emit_entry_call_target(target, outgoing_stack_arg_bytes);
+@@ -589,4 +504,2 @@ impl CodeGenerator {
+-        if !decoder_only {
+-            self.emit_stack_load("ra", return_address_offset);
+-            self.emit_large_addi("sp", "sp", frame_size as i64);
+-        }
++        self.emit_stack_load("ra", ENTRY_WITNESS_RA_OFFSET);
++        self.emit_large_addi("sp", "sp", ENTRY_WITNESS_FRAME_SIZE as i64);
+@@ -601 +514 @@ impl CodeGenerator {
+-    fn emit_policy_preload_entry_args(&mut self, has_witness_payload: bool, capacity: usize, fail: &str) {
++    fn emit_policy_preload_entry_args(&mut self, has_witness_payload: bool, fail: &str) {
+@@ -610 +523 @@ impl CodeGenerator {
+-        self.emit(format!("li t0, {capacity}"));
++        self.emit(format!("li t0, {ENTRY_WITNESS_BUFFER_SIZE}"));
+diff --git a/src/codegen/assembler.rs b/src/codegen/assembler.rs
+index 01cb98e2..c3ce3062 100644
+--- a/src/codegen/assembler.rs
++++ b/src/codegen/assembler.rs
+@@ -3,2 +2,0 @@ use super::*;
+-mod immediate;
+-
+@@ -1504,8 +1502,16 @@ fn encode_li_sequence(out: &mut Vec<u8>, rd: u8, imm: i128) -> Result<()> {
+-    for step in immediate::plan(imm)? {
+-        let word = match step {
+-            immediate::Step::AddFromZero(value) => encode_i_type(0x13, rd, 0b000, 0, value)?,
+-            immediate::Step::LoadUpper(value) => encode_u_type(0x37, rd, value),
+-            immediate::Step::ShiftLeft(value) => encode_i_type(0x13, rd, 0b001, rd, i64::from(value))?,
+-            immediate::Step::Add(value) => encode_i_type(0x13, rd, 0b000, rd, value)?,
+-        };
+-        out.extend_from_slice(&word.to_le_bytes());
++    match li_form(imm) {
++        LiForm::Addi => {
++            let signed = li_signed_i64(imm).expect("addi form implies an i64 immediate");
++            out.extend_from_slice(&encode_i_type(0x13, rd, 0b000, 0, signed)?.to_le_bytes());
++        }
++        LiForm::Lui => {
++            let signed = li_signed_i64(imm).expect("lui form implies an i64 immediate");
++            out.extend_from_slice(&encode_u_type(0x37, rd, signed >> 12).to_le_bytes());
++        }
++        LiForm::LuiAddi => {
++            let signed = li_signed_i64(imm).expect("lui+addi form implies an i64 immediate");
++            let (hi, lo) = split_hi_lo(signed)?;
++            out.extend_from_slice(&encode_u_type(0x37, rd, hi).to_le_bytes());
++            out.extend_from_slice(&encode_i_type(0x13, rd, 0b000, rd, lo)?.to_le_bytes());
++        }
++        LiForm::Large => encode_large_li_sequence(out, rd, li_bits(imm)?)?,
+@@ -1616,2 +1622,5 @@ fn li_sequence_size(imm: i128) -> usize {
+-    // Parsing validates the literal domain before any layout pass runs.
+-    immediate::plan(imm).expect("parsed RV64 immediate").len() * 4
++    match li_form(imm) {
++        LiForm::Addi | LiForm::Lui => 4,
++        LiForm::LuiAddi => 8,
++        LiForm::Large => 60,
++    }
+@@ -2184,58 +2192,0 @@ mod tests {
+-    #[test]
+-    #[cfg(feature = "vm-runner")]
+-    fn immediate_plans_execute_in_ckb_vm_with_relaxed_branches_and_zero_destination() {
+-        use ckb_vm::{
+-            cost_model::estimate_cycles, machine::VERSION2, Bytes, DefaultCoreMachine, DefaultMachineBuilder, DefaultMachineRunner,
+-            SparseMemory, SupportMachine, TraceMachine, WXorXMemory, ISA_B, ISA_IMC, ISA_MOP,
+-        };
+-        let mut values = vec![
+-            0u64,
+-            2047,
+-            2048,
+-            (-2048i64) as u64,
+-            (-2049i64) as u64,
+-            0x7fff_f7ff,
+-            0x7fff_f800,
+-            0x7fff_ffff,
+-            0x8000_0000,
+-            1 << 56,
+-            1 << 63,
+-            u64::MAX,
+-        ];
+-        let mut state = 0x6d75_a6e7_c4a4_ec17u64;
+-        for _ in 0..512 {
+-            state ^= state << 13;
+-            state ^= state >> 7;
+-            state ^= state << 17;
+-            values.push(state);
+-        }
+-        let mut lines = vec![".section .text".into(), ".global entry".into(), "entry:".into()];
+-        for (index, value) in values.iter().enumerate() {
+-            lines.extend([
+-                format!("li t0, {value}"),
+-                format!("la t1, expected_{index}"),
+-                "ld t2, 0(t1)".into(),
+-                "bne t0, t2, failed".into(),
+-                format!("li zero, {value}"),
+-                "bnez zero, failed".into(),
+-            ]);
+-        }
+-        lines.extend(["li a0, 0".into(), "ret".into(), "failed:".into(), "li a0, 1".into(), "ret".into(), ".section .rodata".into()]);
+-        for (index, value) in values.iter().enumerate() {
+-            lines.extend([
+-                ".align 3".into(),
+-                format!("expected_{index}:"),
+-                format!(".word {}", *value as u32),
+-                format!(".word {}", value >> 32),
+-            ]);
+-        }
+-        let elf = assemble_elf_internal(&lines).expect("immediate VM fixture with far branches");
+-        type Machine = TraceMachine<DefaultCoreMachine<u64, WXorXMemory<SparseMemory<u64>>>>;
+-        let core = <<Machine as DefaultMachineRunner>::Inner as SupportMachine>::new(ISA_IMC | ISA_B | ISA_MOP, VERSION2, 10_000_000);
+-        let mut machine = Machine::new(DefaultMachineBuilder::new(core).instruction_cycle_func(Box::new(estimate_cycles)).build());
+-        machine.load_program(&Bytes::from(elf), std::iter::empty::<std::result::Result<Bytes, ckb_vm::Error>>()).unwrap();
+-        assert_eq!(machine.run().unwrap(), 0, "encoded RV64 immediates must equal independent .rodata values");
+-        assert_eq!(START_TRAMPOLINE_SIZE, 20);
+-        assert!(li_sequence_size(1 << 56) <= 8);
+-    }
+-
+@@ -2677 +2628 @@ mod tests {
+-        let cases = [(0x7fff_f7ffi128, 8usize), (0x7fff_f800i128, 12usize), (0x7fff_ffffi128, 12usize), (0x8000_0000i128, 8usize)];
++        let cases = [(0x7fff_f7ffi128, 8usize), (0x7fff_f800i128, 60usize), (0x7fff_ffffi128, 60usize), (0x8000_0000i128, 60usize)];
+diff --git a/src/codegen/assembler/immediate.rs b/src/codegen/assembler/immediate.rs
+deleted file mode 100644
+index 582cfb8b..00000000
+--- a/src/codegen/assembler/immediate.rs
++++ /dev/null
+@@ -1,129 +0,0 @@
+-//! One RV64 immediate plan shared by layout, relaxation and emission.
+-//!
+-//! All supported steps cost one cycle in the pinned CKB-VM model. Equal-size
+-//! plans therefore also tie on cycles; enum order followed by signed operand
+-//! order supplies the final stable ordering. The entry trampoline does not use
+-//! this planner and keeps its fixed reservation.
+-
+-use super::{li_bits, li_fits_lui_addi_rv64, li_form, split_hi_lo, CompileError, LiForm, Result};
+-
+-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+-pub(super) enum Step {
+-    AddFromZero(i64),
+-    LoadUpper(i64),
+-    ShiftLeft(u8),
+-    Add(i64),
+-}
+-
+-pub(super) fn plan(literal: i128) -> Result<Vec<Step>> {
+-    let bits = li_bits(literal)?;
+-    let fallback = legacy(literal, bits)?;
+-    let candidate = recursive(bits as i64);
+-    // Keep a correctness fallback even if a future candidate generator emits
+-    // an invalid immediate, shift or reconstructed value.
+-    let valid = evaluate(&candidate) == Some(bits);
+-    if valid && (candidate.len(), &candidate) < (fallback.len(), &fallback) {
+-        Ok(candidate)
+-    } else if evaluate(&fallback) == Some(bits) {
+-        Ok(fallback)
+-    } else {
+-        Err(CompileError::new("invalid RV64 immediate plan", crate::error::Span::default()))
+-    }
+-}
+-
+-fn legacy(literal: i128, bits: u64) -> Result<Vec<Step>> {
+-    Ok(match li_form(literal) {
+-        LiForm::Addi => vec![Step::AddFromZero(literal as i64)],
+-        LiForm::Lui => vec![Step::LoadUpper((literal as i64) >> 12)],
+-        LiForm::LuiAddi => {
+-            let (high, low) = split_hi_lo(literal as i64)?;
+-            vec![Step::LoadUpper(high), Step::Add(low)]
+-        }
+-        LiForm::Large => {
+-            let bytes = bits.to_be_bytes();
+-            let mut steps = vec![Step::AddFromZero(i64::from(bytes[0]))];
+-            for byte in &bytes[1..] {
+-                steps.extend([Step::ShiftLeft(8), Step::Add(i64::from(*byte))]);
+-            }
+-            steps
+-        }
+-    })
+-}
+-
+-fn recursive(value: i64) -> Vec<Step> {
+-    if (-2048..=2047).contains(&value) {
+-        return vec![Step::AddFromZero(value)];
+-    }
+-    let mut short = None;
+-    if li_fits_lui_addi_rv64(value) {
+-        let (high, low) = split_hi_lo(value).expect("validated LUI/ADDI range");
+-        let mut steps = vec![Step::LoadUpper(high)];
+-        if low != 0 {
+-            steps.push(Step::Add(low));
+-        }
+-        short = Some(steps);
+-    }
+-    // Sign-extend the low twelve bits before shifting the remaining value.
+-    // i128 subtraction avoids overflow for either signed RV64 endpoint.
+-    let low = (value << 52) >> 52;
+-    let high = ((i128::from(value) - i128::from(low)) >> 12) as i64;
+-    let extra = high.trailing_zeros().min(51);
+-    let mut steps = recursive(high >> extra);
+-    steps.push(Step::ShiftLeft((12 + extra) as u8));
+-    if low != 0 {
+-        steps.push(Step::Add(low));
+-    }
+-    if let Some(short) = short
+-        && (short.len(), &short) <= (steps.len(), &steps)
+-    {
+-        return short;
+-    }
+-    steps
+-}
+-
+-fn evaluate(steps: &[Step]) -> Option<u64> {
+-    let mut value: Option<u64> = None;
+-    for step in steps {
+-        value = Some(match *step {
+-            Step::AddFromZero(imm) if (-2048..=2047).contains(&imm) => imm as u64,
+-            Step::LoadUpper(imm) if (-0x80000..=0x7ffff).contains(&imm) => (imm << 12) as u64,
+-            Step::ShiftLeft(shift) if (1..=63).contains(&shift) => value? << shift,
+-            Step::Add(imm) if (-2048..=2047).contains(&imm) => value?.wrapping_add_signed(imm),
+-            _ => return None,
+-        });
+-    }
+-    value
+-}
+-
+-#[cfg(test)]
+-mod tests {
+-    use super::*;
+-
+-    #[test]
+-    fn signed_boundaries_sparse_patterns_and_full_width_samples_never_grow() {
+-        let mut samples = vec![0, 1, u64::MAX, i64::MIN as u64, i64::MAX as u64];
+-        for bit in 0..64 {
+-            let value = 1u64 << bit;
+-            samples.extend([value, value.wrapping_sub(1), value.wrapping_add(1), !value]);
+-        }
+-        let mut state = 0x6d75_a6e7_c4a4_ec17u64;
+-        for _ in 0..100_000 {
+-            state ^= state << 13;
+-            state ^= state >> 7;
+-            state ^= state << 17;
+-            samples.push(state);
+-        }
+-        for bits in samples {
+-            for literal in [i128::from(bits), i128::from(bits as i64)] {
+-                let steps = plan(literal).unwrap();
+-                assert_eq!(evaluate(&steps), Some(bits), "{literal}");
+-                assert!(steps.len() <= legacy(literal, bits).unwrap().len());
+-                assert_eq!(steps, plan(literal).unwrap());
+-            }
+-        }
+-        assert!(plan(1i128 << 56).unwrap().len() <= 2);
+-        assert_eq!(plan(i128::from(u64::MAX)).unwrap(), vec![Step::AddFromZero(-1)]);
+-        assert!(plan(i128::from(u64::MAX) + 1).is_err());
+-        assert!(plan(i128::from(i64::MIN) - 1).is_err());
+-    }
+-}
+diff --git a/src/codegen/calls.rs b/src/codegen/calls.rs
+index b9322707..dada7ca8 100644
+--- a/src/codegen/calls.rs
++++ b/src/codegen/calls.rs
+@@ -97 +97 @@ impl CodeGenerator {
+-            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++            self.emit_stack_store("t0", dest.id * 8);
+@@ -111 +111 @@ impl CodeGenerator {
+-            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++            self.emit_stack_store("t0", dest.id * 8);
+@@ -190 +190 @@ impl CodeGenerator {
+-            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++            self.emit_stack_store("t0", dest.id * 8);
+@@ -225 +225 @@ impl CodeGenerator {
+-            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++            self.emit_stack_store("t0", dest.id * 8);
+@@ -285 +285 @@ impl CodeGenerator {
+-            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++            self.emit_stack_store("t0", dest.id * 8);
+@@ -318 +318 @@ impl CodeGenerator {
+-            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++            self.emit_stack_store("t0", dest.id * 8);
+@@ -341 +341 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -659 +659 @@ impl CodeGenerator {
+-                    self.emit_stack_store("t0", self.scalar_slot_offset(d.id));
++                    self.emit_stack_store("t0", d.id * 8);
+@@ -675 +675 @@ impl CodeGenerator {
+-                self.emit_stack_store("a0", self.scalar_slot_offset(d.id));
++                self.emit_stack_store("a0", d.id * 8);
+@@ -679 +679 @@ impl CodeGenerator {
+-                        self.emit_stack_store(&format!("a{}", index), self.scalar_slot_offset(field_var_id));
++                        self.emit_stack_store(&format!("a{}", index), field_var_id * 8);
+@@ -683 +683 @@ impl CodeGenerator {
+-                self.emit_stack_store("a0", self.scalar_slot_offset(d.id));
++                self.emit_stack_store("a0", d.id * 8);
+@@ -733 +733 @@ impl CodeGenerator {
+-        self.emit_stack_store("a0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("a0", dest.id * 8);
+@@ -774 +774 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -812 +812 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -849 +849 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -896 +896 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -934 +934 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -973 +973 @@ impl CodeGenerator {
+-            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++            self.emit_stack_store("t0", dest.id * 8);
+@@ -1025 +1025 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -1070 +1070 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+diff --git a/src/codegen/cell_ops.rs b/src/codegen/cell_ops.rs
+index f25c9c28..5d5620f4 100644
+--- a/src/codegen/cell_ops.rs
++++ b/src/codegen/cell_ops.rs
+@@ -204 +204 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -206 +206 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(found.id));
++        self.emit_stack_store("t0", found.id * 8);
+@@ -210,2 +210,2 @@ impl CodeGenerator {
+-        self.emit_stack_store("zero", self.scalar_slot_offset(dest.id));
+-        self.emit_stack_store("zero", self.scalar_slot_offset(found.id));
++        self.emit_stack_store("zero", dest.id * 8);
++        self.emit_stack_store("zero", found.id * 8);
+@@ -252 +252 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(plan_var.id));
++        self.emit_stack_load("t4", plan_var.id * 8);
+@@ -291 +291 @@ impl CodeGenerator {
+-        self.emit_stack_store("zero", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("zero", dest.id * 8);
+@@ -293 +293 @@ impl CodeGenerator {
+-        self.emit_stack_store("zero", self.scalar_slot_offset(found.id));
++        self.emit_stack_store("zero", found.id * 8);
+@@ -300 +300 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(plan_var.id));
++        self.emit_stack_load("t4", plan_var.id * 8);
+@@ -302 +302 @@ impl CodeGenerator {
+-        self.emit_stack_store("t4", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t4", dest.id * 8);
+@@ -306 +306 @@ impl CodeGenerator {
+-        self.emit_stack_store("t1", self.scalar_slot_offset(found.id));
++        self.emit_stack_store("t1", found.id * 8);
+@@ -1305 +1305 @@ impl CodeGenerator {
+-                self.emit_sp_addi("a1", self.scalar_slot_offset(var_id));
++                self.emit_sp_addi("a1", var_id * 8);
+@@ -1317 +1317 @@ impl CodeGenerator {
+-                self.emit_stack_load("a1", self.scalar_slot_offset(var_id));
++                self.emit_stack_load("a1", var_id * 8);
+@@ -2101 +2101 @@ impl CodeGenerator {
+-        self.emit_stack_load("a1", self.scalar_slot_offset(var.id));
++        self.emit_stack_load("a1", var.id * 8);
+diff --git a/src/codegen/collections.rs b/src/codegen/collections.rs
+index 5c1cc83b..0e06de82 100644
+--- a/src/codegen/collections.rs
++++ b/src/codegen/collections.rs
+@@ -50 +50 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(arr_var.id));
++        self.emit_stack_load("t4", arr_var.id * 8);
+@@ -56 +56 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -83 +83 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(arr_var.id));
++        self.emit_stack_load("t4", arr_var.id * 8);
+@@ -97 +97 @@ impl CodeGenerator {
+-            IrOperand::Var(v) => self.emit_stack_load("t1", self.scalar_slot_offset(v.id)),
++            IrOperand::Var(v) => self.emit_stack_load("t1", v.id * 8),
+@@ -120 +120 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -143 +143 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(arr_var.id));
++        self.emit_stack_load("t4", arr_var.id * 8);
+@@ -161 +161 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -191 +191 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(arr_var.id));
++        self.emit_stack_load("t4", arr_var.id * 8);
+@@ -195 +195 @@ impl CodeGenerator {
+-            IrOperand::Var(v) => self.emit_stack_load("t1", self.scalar_slot_offset(v.id)),
++            IrOperand::Var(v) => self.emit_stack_load("t1", v.id * 8),
+@@ -224 +224 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -243 +243 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -255 +255 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(var.id));
++        self.emit_stack_load("t4", var.id * 8);
+@@ -278 +278 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(var.id));
++        self.emit_stack_load("t4", var.id * 8);
+@@ -335 +335 @@ impl CodeGenerator {
+-            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++            self.emit_stack_store("t0", dest.id * 8);
+@@ -352 +352 @@ impl CodeGenerator {
+-            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++            self.emit_stack_store("t0", dest.id * 8);
+@@ -386 +386 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -412 +412 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -450 +450 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -496 +496 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
++        self.emit_stack_load("t4", collection.id * 8);
+@@ -526 +526 @@ impl CodeGenerator {
+-                self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
++                self.emit_stack_load("t4", collection.id * 8);
+@@ -539 +539 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
++        self.emit_stack_load("t4", collection.id * 8);
+@@ -590 +590 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
++        self.emit_stack_load("t4", collection.id * 8);
+@@ -607 +607 @@ impl CodeGenerator {
+-            self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
++            self.emit_stack_load("t4", collection.id * 8);
+@@ -619 +619 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
++        self.emit_stack_load("t4", collection.id * 8);
+@@ -650 +650 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
++        self.emit_stack_load("t4", collection.id * 8);
+@@ -682 +682 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
++        self.emit_stack_load("t4", collection.id * 8);
+@@ -702 +702 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
++        self.emit_stack_load("t4", collection.id * 8);
+@@ -756 +756 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
++        self.emit_stack_load("t4", collection.id * 8);
+@@ -796 +796 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
++        self.emit_stack_load("t4", collection.id * 8);
+@@ -868 +868 @@ impl CodeGenerator {
+-        self.emit_stack_store("zero", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("zero", dest.id * 8);
+@@ -875 +875 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
++        self.emit_stack_load("t4", collection.id * 8);
+@@ -894 +894 @@ impl CodeGenerator {
+-                self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
++                self.emit_stack_load("t4", collection.id * 8);
+@@ -918 +918 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -960 +960 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
++        self.emit_stack_load("t4", collection.id * 8);
+@@ -975 +975 @@ impl CodeGenerator {
+-            self.emit_stack_store("t6", self.scalar_slot_offset(dest.id));
++            self.emit_stack_store("t6", dest.id * 8);
+@@ -990 +990 @@ impl CodeGenerator {
+-            self.emit_stack_store("t6", self.scalar_slot_offset(dest.id));
++            self.emit_stack_store("t6", dest.id * 8);
+@@ -1000 +1000 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
++        self.emit_stack_load("t4", collection.id * 8);
+@@ -1025 +1025 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
++        self.emit_stack_load("t4", collection.id * 8);
+@@ -1061 +1061 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
++        self.emit_stack_load("t4", collection.id * 8);
+@@ -1074 +1074 @@ impl CodeGenerator {
+-            self.emit_stack_store("t6", self.scalar_slot_offset(dest.id));
++            self.emit_stack_store("t6", dest.id * 8);
+@@ -1077 +1077 @@ impl CodeGenerator {
+-            self.emit_stack_store("t5", self.scalar_slot_offset(dest.id));
++            self.emit_stack_store("t5", dest.id * 8);
+@@ -1127 +1127 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
++        self.emit_stack_load("t4", collection.id * 8);
+@@ -1169 +1169 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
++        self.emit_stack_load("t4", collection.id * 8);
+@@ -1203 +1203 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
++        self.emit_stack_load("t4", collection.id * 8);
+@@ -1231 +1231 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
++        self.emit_stack_load("t4", collection.id * 8);
+@@ -1282 +1282 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
++        self.emit_stack_load("t4", collection.id * 8);
+diff --git a/src/codegen/expr.rs b/src/codegen/expr.rs
+index 01512f91..81b3624b 100644
+--- a/src/codegen/expr.rs
++++ b/src/codegen/expr.rs
+@@ -19 +19 @@ impl CodeGenerator {
+-                    self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++                    self.emit_stack_store("t0", dest.id * 8);
+@@ -31 +31 @@ impl CodeGenerator {
+-                    self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++                    self.emit_stack_store("t0", dest.id * 8);
+@@ -38 +38 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -50 +50 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -205 +205 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -256 +256 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -497 +497 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -667 +667 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -671,2 +671,2 @@ impl CodeGenerator {
+-        self.emit_stack_load("a0", self.scalar_slot_offset(left_var.id));
+-        self.emit_stack_load("a1", self.scalar_slot_offset(right_var.id));
++        self.emit_stack_load("a0", left_var.id * 8);
++        self.emit_stack_load("a1", right_var.id * 8);
+@@ -677 +677 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -682 +682 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -690 +690 @@ impl CodeGenerator {
+-            IrOperand::Var(v) => self.emit_stack_load("t0", self.scalar_slot_offset(v.id)),
++            IrOperand::Var(v) => self.emit_stack_load("t0", v.id * 8),
+@@ -700 +700 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -770 +770 @@ impl CodeGenerator {
+-            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++            self.emit_stack_store("t0", dest.id * 8);
+@@ -813 +813 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -847 +847 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(var.id));
++        self.emit_stack_load("t4", var.id * 8);
+@@ -882 +882 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -910 +910 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(obj.id));
++        self.emit_stack_load("t4", obj.id * 8);
+@@ -914 +914 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -942 +942 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(var.id));
++        self.emit_stack_load("t4", var.id * 8);
+@@ -951 +951 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -965,2 +965,2 @@ impl CodeGenerator {
+-            self.emit_stack_load("t0", self.scalar_slot_offset(slot_var_id));
+-            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++            self.emit_stack_load("t0", slot_var_id * 8);
++            self.emit_stack_store("t0", dest.id * 8);
+@@ -1005 +1005 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(var.id));
++        self.emit_stack_load("t4", var.id * 8);
+@@ -1011 +1011 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+diff --git a/src/codegen/frame.rs b/src/codegen/frame.rs
+index 2a5573b6..b7fa8967 100644
+--- a/src/codegen/frame.rs
++++ b/src/codegen/frame.rs
+@@ -4,5 +3,0 @@ impl CodeGenerator {
+-    /// One address calculation for scalar VarIds, including pointer formation.
+-    /// Unclassified functions retain identity mapping.
+-    pub(super) fn scalar_slot_offset(&self, id: impl std::borrow::Borrow<usize>) -> usize {
+-        self.scalar_slot_offsets.get(id.borrow()).copied().unwrap_or_else(|| *id.borrow() * 8)
+-    }
+@@ -245,6 +240 @@ impl CodeGenerator {
+-        let scalar_slots = scalar_slots::allocate(body, params, &self.callable_abis, &self.local_callable_names);
+-        let locals_size = scalar_slots.as_ref().map_or_else(
+-            || max_var_id.map(|id| (id + 1) * 8).unwrap_or(0),
+-            |slots| slots.values().max().map_or(0, |offset| offset + 8),
+-        );
+-        self.scalar_slot_offsets = scalar_slots.unwrap_or_default();
++        let locals_size = max_var_id.map(|id| (id + 1) * 8).unwrap_or(0);
+@@ -884 +874 @@ impl CodeGenerator {
+-                self.emit_spill_abi_arg(abi_index, self.scalar_slot_offset(param.binding.id));
++                self.emit_spill_abi_arg(abi_index, param.binding.id * 8);
+@@ -893 +883 @@ impl CodeGenerator {
+-                self.emit_spill_abi_arg(abi_index, self.scalar_slot_offset(param.binding.id));
++                self.emit_spill_abi_arg(abi_index, param.binding.id * 8);
+@@ -903 +893 @@ impl CodeGenerator {
+-                self.emit_spill_abi_arg(abi_index, self.scalar_slot_offset(param.binding.id));
++                self.emit_spill_abi_arg(abi_index, param.binding.id * 8);
+@@ -915 +905 @@ impl CodeGenerator {
+-                self.emit_spill_abi_arg(abi_index, self.scalar_slot_offset(param.binding.id));
++                self.emit_spill_abi_arg(abi_index, param.binding.id * 8);
+@@ -942 +932 @@ impl CodeGenerator {
+-                self.emit_spill_abi_arg(abi_index, self.scalar_slot_offset(param.binding.id));
++                self.emit_spill_abi_arg(abi_index, param.binding.id * 8);
+@@ -955 +945 @@ impl CodeGenerator {
+-                self.emit_spill_abi_arg(abi_index, self.scalar_slot_offset(param.binding.id));
++                self.emit_spill_abi_arg(abi_index, param.binding.id * 8);
+@@ -961 +951 @@ impl CodeGenerator {
+-                self.emit_spill_abi_arg(abi_index, self.scalar_slot_offset(param.binding.id));
++                self.emit_spill_abi_arg(abi_index, param.binding.id * 8);
+@@ -1330 +1320 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(var_id));
++        self.emit_stack_store("t0", var_id * 8);
+diff --git a/src/codegen/mod.rs b/src/codegen/mod.rs
+index 73fdd3fd..1bcdb3f9 100644
+--- a/src/codegen/mod.rs
++++ b/src/codegen/mod.rs
+@@ -25 +24,0 @@ mod runtime_gather;
+-mod scalar_slots;
+@@ -1159,2 +1157,0 @@ pub struct CodeGenerator {
+-    local_callable_names: BTreeSet<String>,
+-    scalar_slot_offsets: BTreeMap<usize, usize>,
+@@ -1395,2 +1391,0 @@ impl CodeGenerator {
+-            local_callable_names: BTreeSet::new(),
+-            scalar_slot_offsets: BTreeMap::new(),
+@@ -1764 +1758,0 @@ impl CodeGenerator {
+-        self.local_callable_names.clear();
+@@ -1773 +1766,0 @@ impl CodeGenerator {
+-            self.local_callable_names.insert(name.clone());
+@@ -2873 +2866 @@ impl CodeGenerator {
+-            self.emit_stack_store("t0", self.scalar_slot_offset(var_id));
++            self.emit_stack_store("t0", var_id * 8);
+@@ -2906 +2899 @@ impl CodeGenerator {
+-            self.emit_stack_store("t0", self.scalar_slot_offset(var_id));
++            self.emit_stack_store("t0", var_id * 8);
+@@ -2933 +2926 @@ impl CodeGenerator {
+-            self.emit_stack_store("t0", self.scalar_slot_offset(var_id));
++            self.emit_stack_store("t0", var_id * 8);
+@@ -2973 +2966 @@ impl CodeGenerator {
+-            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++            self.emit_stack_store("t0", dest.id * 8);
+@@ -3013 +3006 @@ impl CodeGenerator {
+-                self.emit_stack_store("t0", self.scalar_slot_offset(var_id));
++                self.emit_stack_store("t0", var_id * 8);
+@@ -3127 +3120 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(var_id));
++        self.emit_stack_store("t0", var_id * 8);
+@@ -3429 +3422 @@ impl CodeGenerator {
+-                    self.emit_stack_load("t0", self.scalar_slot_offset(v.id));
++                    self.emit_stack_load("t0", v.id * 8);
+@@ -3475 +3468 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -3496 +3489 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -3520 +3513 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -3532 +3525 @@ impl CodeGenerator {
+-        self.emit_stack_store("zero", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("zero", dest.id * 8);
+@@ -3570 +3563 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -3657 +3650 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -3679 +3672 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -3720 +3713 @@ impl CodeGenerator {
+-            self.emit_stack_store("zero", self.scalar_slot_offset(dest.id));
++            self.emit_stack_store("zero", dest.id * 8);
+@@ -3728 +3721 @@ impl CodeGenerator {
+-            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++            self.emit_stack_store("t0", dest.id * 8);
+@@ -3742 +3735 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -3786 +3779 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -3805 +3798 @@ impl CodeGenerator {
+-            IrOperand::Var(v) => self.emit_stack_load(register, self.scalar_slot_offset(v.id)),
++            IrOperand::Var(v) => self.emit_stack_load(register, v.id * 8),
+@@ -3820 +3813 @@ impl CodeGenerator {
+-            self.emit_stack_store("zero", self.scalar_slot_offset(var.id));
++            self.emit_stack_store("zero", var.id * 8);
+@@ -3882 +3875 @@ impl CodeGenerator {
+-            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++            self.emit_stack_store("t0", dest.id * 8);
+@@ -3901 +3894 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -4191 +4184 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -4228 +4221 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -4244 +4237 @@ impl CodeGenerator {
+-            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++            self.emit_stack_store("t0", dest.id * 8);
+@@ -4263 +4256 @@ impl CodeGenerator {
+-            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++            self.emit_stack_store("t0", dest.id * 8);
+@@ -4282 +4275 @@ impl CodeGenerator {
+-            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++            self.emit_stack_store("t0", dest.id * 8);
+@@ -4298 +4291 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+diff --git a/src/codegen/policy.rs b/src/codegen/policy.rs
+index c2f95672..06987fb4 100644
+--- a/src/codegen/policy.rs
++++ b/src/codegen/policy.rs
+@@ -89,25 +89,5 @@ impl CodeGenerator {
+-        let mut groups: BTreeMap<String, Vec<(usize, usize)>> = BTreeMap::new();
+-        for (index, (_, action, _, _)) in actions.iter().enumerate() {
+-            if let Some((key, frame)) = self.policy_decoder_key(&action.name) {
+-                groups.entry(key).or_default().push((index, frame));
+-            }
+-        }
+-        let mut selected_decoders = BTreeMap::new();
+-        let mut decoders = Vec::new();
+-        for group in groups.values().filter(|group| group.len() > 1) {
+-            let label = self.fresh_label("policy_shared_decoder");
+-            for (index, frame) in group {
+-                selected_decoders.insert(*index, (label.clone(), *frame));
+-            }
+-            decoders.push((group[0].0, label));
+-        }
+-        for (index, (_, action, adapter, _)) in actions.iter().enumerate() {
+-            if let Some((decoder, frame)) = selected_decoders.get(&index) {
+-                self.emit_policy_decoder_stub(&action.name, adapter, decoder, *frame);
+-            } else {
+-                self.emit_policy_action_adapter(&action.name, &action.params, adapter)?;
+-            }
+-        }
+-        for (index, label) in decoders {
+-            let action = actions[index].1;
+-            self.emit_policy_shared_decoder(&action.name, &action.params, &label)?;
++        // The old wrapper and this adapter share the exact positional decoder.
++        // The adapter receives a0=normalized CSARG bytes, a1=length (possibly
++        // zero for a payload-free variant), and must not reload a witness.
++        for (_, action, adapter, _) in &actions {
++            self.emit_policy_action_adapter(&action.name, &action.params, adapter)?;
+diff --git a/src/codegen/scalar_slots.rs b/src/codegen/scalar_slots.rs
+deleted file mode 100644
+index 3d3de77a..00000000
+--- a/src/codegen/scalar_slots.rs
++++ /dev/null
+@@ -1,227 +0,0 @@
+-//! Deterministic scalar-only slot reuse. Any unclassified instruction, pointer,
+-//! resource binding or external call retains the original function layout.
+-//!
+-//! Named mutable-variable slots, buffers, wide values, helper scratch and
+-//! outgoing arguments are allocated separately by frame.rs. No location claim
+-//! is exported from these offsets alone: interference is computed over the CFG.
+-
+-use super::*;
+-
+-type Variables = BTreeSet<usize>;
+-type Effect = (Variables, Variables);
+-
+-pub(super) fn allocate(
+-    body: &IrBody,
+-    params: &[IrParam],
+-    abis: &HashMap<String, CallableAbi>,
+-    local_calls: &BTreeSet<String>,
+-) -> Option<BTreeMap<usize, usize>> {
+-    if !body.cell_bindings.is_empty()
+-        || !body.consume_set.is_empty()
+-        || !body.read_refs.is_empty()
+-        || !body.create_set.is_empty()
+-        || !body.mutate_set.is_empty()
+-        || !body.write_intents.is_empty()
+-        || !body.bounded_collection_ops.is_empty()
+-        || !body.borrow_regions.is_empty()
+-        || !body.trusted_external_calls.is_empty()
+-        || params.iter().any(|param| !scalar(&param.ty) || param.is_ref || param.is_read_ref)
+-    {
+-        return None;
+-    }
+-    let mut variables: Variables = params.iter().map(|param| param.binding.id).collect();
+-    let mut effects = BTreeMap::new();
+-    let mut successors = BTreeMap::new();
+-    for block in &body.blocks {
+-        let mut instructions = Vec::new();
+-        for instruction in &block.instructions {
+-            let (uses, defs) = instruction_effect(instruction, abis, local_calls)?;
+-            variables.extend(uses.iter().chain(&defs).copied());
+-            instructions.push((uses, defs));
+-        }
+-        let mut terminal = Variables::new();
+-        let next = match &block.terminator {
+-            IrTerminator::Return(Some(value)) => {
+-                operand(value, &mut terminal)?;
+-                vec![]
+-            }
+-            IrTerminator::Return(None) => vec![],
+-            IrTerminator::Jump(next) => vec![next.0],
+-            IrTerminator::Branch { cond, then_block, else_block } => {
+-                operand(cond, &mut terminal)?;
+-                vec![then_block.0, else_block.0]
+-            }
+-        };
+-        variables.extend(&terminal);
+-        instructions.push((terminal, Variables::new()));
+-        if effects.insert(block.id.0, instructions).is_some() {
+-            return None;
+-        }
+-        successors.insert(block.id.0, next);
+-    }
+-    if successors.values().flatten().any(|next| !effects.contains_key(next)) {
+-        return None;
+-    }
+-    let (live_in, live_out) = liveness(&effects, &successors);
+-    let mut interference: BTreeMap<_, Variables> = variables.iter().map(|var| (*var, Variables::new())).collect();
+-    // Every parameter is spilled on entry, including unused parameters.
+-    // Distinct parameter slots prevent a later dead spill overwriting a live one.
+-    clique(&params.iter().map(|param| param.binding.id).collect(), &mut interference);
+-    for (block, instructions) in &effects {
+-        let mut live = live_out[block].clone();
+-        clique(&live, &mut interference);
+-        for (uses, defs) in instructions.iter().rev() {
+-            for defined in defs {
+-                for other in &live {
+-                    connect(*defined, *other, &mut interference);
+-                }
+-            }
+-            live = live.difference(defs).copied().collect();
+-            live.extend(uses);
+-            clique(&live, &mut interference);
+-        }
+-        debug_assert_eq!(live, live_in[block]);
+-    }
+-    let mut slots = BTreeMap::new();
+-    for variable in variables {
+-        let occupied: BTreeSet<_> = interference[&variable].iter().filter_map(|other| slots.get(other).copied()).collect();
+-        let slot = (0..).map(|index| index * 8).find(|offset| !occupied.contains(offset))?;
+-        slots.insert(variable, slot);
+-    }
+-    Some(slots)
+-}
+-
+-fn scalar(ty: &IrType) -> bool {
+-    matches!(ty, IrType::Bool | IrType::U8 | IrType::U16 | IrType::U32 | IrType::I32 | IrType::U64)
+-}
+-
+-fn operand(value: &IrOperand, uses: &mut Variables) -> Option<()> {
+-    match value {
+-        IrOperand::Var(var) if scalar(&var.ty) => {
+-            uses.insert(var.id);
+-            Some(())
+-        }
+-        IrOperand::Const(IrConst::Unit | IrConst::Bool(_) | IrConst::U8(_) | IrConst::U16(_) | IrConst::U32(_) | IrConst::U64(_)) => {
+-            Some(())
+-        }
+-        _ => None,
+-    }
+-}
+-
+-fn instruction_effect(
+-    instruction: &IrInstruction,
+-    abis: &HashMap<String, CallableAbi>,
+-    local_calls: &BTreeSet<String>,
+-) -> Option<Effect> {
+-    let mut uses = Variables::new();
+-    let dest = match instruction {
+-        IrInstruction::LoadConst { dest, value } => {
+-            operand(&IrOperand::Const(value.clone()), &mut uses)?;
+-            Some(dest)
+-        }
+-        IrInstruction::LoadVar { dest, .. } => Some(dest),
+-        IrInstruction::StoreVar { src, .. } => {
+-            operand(src, &mut uses)?;
+-            None
+-        }
+-        IrInstruction::Move { dest, src } => {
+-            operand(src, &mut uses)?;
+-            Some(dest)
+-        }
+-        IrInstruction::Unary { dest, operand: value, .. } => {
+-            operand(value, &mut uses)?;
+-            Some(dest)
+-        }
+-        IrInstruction::Binary { dest, left, right, .. } => {
+-            operand(left, &mut uses)?;
+-            operand(right, &mut uses)?;
+-            Some(dest)
+-        }
+-        IrInstruction::Call { dest, func, args } => {
+-            let abi = abis.get(func)?;
+-            if !local_calls.contains(func)
+-                || !abi.type_hash_param_indices.is_empty()
+-                || !abi.runtime_bound_param_indices.is_empty()
+-                || !abi.bounded_plan_param_indices.is_empty()
+-                || abi.params.iter().any(|param| !scalar(&param.ty) || param.is_ref || param.is_read_ref)
+-            {
+-                return None;
+-            }
+-            for arg in args {
+-                operand(arg, &mut uses)?;
+-            }
+-            dest.as_ref()
+-        }
+-        _ => return None,
+-    };
+-    let mut defs = Variables::new();
+-    if let Some(dest) = dest {
+-        if !scalar(&dest.ty) {
+-            return None;
+-        }
+-        defs.insert(dest.id);
+-    }
+-    Some((uses, defs))
+-}
+-
+-fn liveness(
+-    effects: &BTreeMap<usize, Vec<Effect>>,
+-    successors: &BTreeMap<usize, Vec<usize>>,
+-) -> (BTreeMap<usize, Variables>, BTreeMap<usize, Variables>) {
+-    let mut input: BTreeMap<_, Variables> = effects.keys().map(|block| (*block, Variables::new())).collect();
+-    let mut output = input.clone();
+-    loop {
+-        let mut changed = false;
+-        for (block, instructions) in effects.iter().rev() {
+-            let after: Variables = successors[block].iter().flat_map(|next| input[next].iter().copied()).collect();
+-            let mut before = after.clone();
+-            for (uses, defs) in instructions.iter().rev() {
+-                before = before.difference(defs).copied().collect();
+-                before.extend(uses);
+-            }
+-            changed |= input[block] != before || output[block] != after;
+-            input.insert(*block, before);
+-            output.insert(*block, after);
+-        }
+-        if !changed {
+-            return (input, output);
+-        }
+-    }
+-}
+-
+-fn connect(left: usize, right: usize, graph: &mut BTreeMap<usize, Variables>) {
+-    if left != right {
+-        graph.get_mut(&left).expect("classified variable").insert(right);
+-        graph.get_mut(&right).expect("classified variable").insert(left);
+-    }
+-}
+-
+-fn clique(live: &Variables, graph: &mut BTreeMap<usize, Variables>) {
+-    for left in live {
+-        for right in live.range((std::ops::Bound::Excluded(left), std::ops::Bound::Unbounded)) {
+-            connect(*left, *right, graph);
+-        }
+-    }
+-}
+-
+-#[cfg(test)]
+-mod tests {
+-    use super::*;
+-
+-    #[test]
+-    fn liveness_keeps_loop_carried_and_joined_values() {
+-        let set = |values: &[usize]| values.iter().copied().collect::<Variables>();
+-        let effects = BTreeMap::from([
+-            (0, vec![(set(&[]), set(&[0, 1]))]),
+-            (1, vec![(set(&[0, 1]), set(&[2]))]),
+-            (2, vec![(set(&[2]), set(&[0]))]),
+-            (3, vec![(set(&[0, 1]), set(&[]))]),
+-        ]);
+-        let successors = BTreeMap::from([(0, vec![1]), (1, vec![2, 3]), (2, vec![1]), (3, vec![])]);
+-        let (input, output) = liveness(&effects, &successors);
+-        assert_eq!(input[&1], set(&[0, 1]));
+-        assert_eq!(output[&1], set(&[0, 1, 2]));
+-        assert_eq!(input[&2], set(&[1, 2]));
+-        assert_eq!(input[&3], set(&[0, 1]));
+-    }
+-}
+diff --git a/src/codegen/schema.rs b/src/codegen/schema.rs
+index 0449fec6..342cbe1b 100644
+--- a/src/codegen/schema.rs
++++ b/src/codegen/schema.rs
+@@ -226 +226 @@ impl CodeGenerator {
+-                    SourcePointer::StackAddress { offset: self.scalar_slot_offset(var_id) },
++                    SourcePointer::StackAddress { offset: var_id * 8 },
+@@ -257 +257 @@ impl CodeGenerator {
+-                self.emit_stack_load("a1", self.scalar_slot_offset(var_id));
++                self.emit_stack_load("a1", var_id * 8);
+@@ -423 +423 @@ impl CodeGenerator {
+-                self.emit_sp_addi(base_reg, self.scalar_slot_offset(var_id));
++                self.emit_sp_addi(base_reg, var_id * 8);
+@@ -429 +429 @@ impl CodeGenerator {
+-                self.emit_stack_load(base_reg, self.scalar_slot_offset(var_id));
++                self.emit_stack_load(base_reg, var_id * 8);
+@@ -445 +445 @@ impl CodeGenerator {
+-                self.emit_sp_addi(dest_reg, self.scalar_slot_offset(var_id));
++                self.emit_sp_addi(dest_reg, var_id * 8);
+@@ -451 +451 @@ impl CodeGenerator {
+-                self.emit_stack_load(dest_reg, self.scalar_slot_offset(var_id));
++                self.emit_stack_load(dest_reg, var_id * 8);
+@@ -510 +510 @@ impl CodeGenerator {
+-        self.emit_stack_store("t3", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t3", dest.id * 8);
+@@ -559 +559 @@ impl CodeGenerator {
+-        self.emit_stack_store("t3", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t3", dest.id * 8);
+@@ -685 +685 @@ impl CodeGenerator {
+-            self.emit_stack_load("t4", self.scalar_slot_offset(v.id));
++            self.emit_stack_load("t4", v.id * 8);
+@@ -696 +696 @@ impl CodeGenerator {
+-            self.emit_stack_load("t5", self.scalar_slot_offset(v.id));
++            self.emit_stack_load("t5", v.id * 8);
+@@ -719 +719 @@ impl CodeGenerator {
+-        self.emit_stack_store("t3", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t3", dest.id * 8);
+@@ -844 +844 @@ impl CodeGenerator {
+-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
++        self.emit_stack_store("t0", dest.id * 8);
+@@ -865 +865 @@ impl CodeGenerator {
+-                    self.emit_stack_load("t1", self.scalar_slot_offset(var.id));
++                    self.emit_stack_load("t1", var.id * 8);
+@@ -869 +869 @@ impl CodeGenerator {
+-                    self.emit_stack_load("t1", self.scalar_slot_offset(var.id));
++                    self.emit_stack_load("t1", var.id * 8);
+@@ -883,2 +883,2 @@ impl CodeGenerator {
+-            PreludeU64ValueSource::ParamVar(var_id) => self.emit_stack_load("t1", self.scalar_slot_offset(var_id)),
+-            PreludeU64ValueSource::StackVar(var_id) => self.emit_stack_load("t1", self.scalar_slot_offset(var_id)),
++            PreludeU64ValueSource::ParamVar(var_id) => self.emit_stack_load("t1", var_id * 8),
++            PreludeU64ValueSource::StackVar(var_id) => self.emit_stack_load("t1", var_id * 8),
+@@ -938,2 +938,2 @@ impl CodeGenerator {
+-            PreludeU64OperandSource::ParamVar(var_id) => self.emit_stack_load("t1", self.scalar_slot_offset(var_id)),
+-            PreludeU64OperandSource::StackVar(var_id) => self.emit_stack_load("t1", self.scalar_slot_offset(var_id)),
++            PreludeU64OperandSource::ParamVar(var_id) => self.emit_stack_load("t1", var_id * 8),
++            PreludeU64OperandSource::StackVar(var_id) => self.emit_stack_load("t1", var_id * 8),
+@@ -967 +967 @@ impl CodeGenerator {
+-        self.emit_stack_load("t4", self.scalar_slot_offset(source.obj_var_id));
++        self.emit_stack_load("t4", source.obj_var_id * 8);
+@@ -980 +980 @@ impl CodeGenerator {
+-            self.emit_stack_load("t4", self.scalar_slot_offset(source.obj_var_id));
++            self.emit_stack_load("t4", source.obj_var_id * 8);
+@@ -996 +996 @@ impl CodeGenerator {
+-                self.emit_stack_load(dest_reg, self.scalar_slot_offset(source.obj_var_id));
++                self.emit_stack_load(dest_reg, source.obj_var_id * 8);
+@@ -1001 +1001 @@ impl CodeGenerator {
+-                self.emit_stack_load("t4", self.scalar_slot_offset(source.obj_var_id));
++                self.emit_stack_load("t4", source.obj_var_id * 8);
+@@ -1009 +1009 @@ impl CodeGenerator {
+-            self.emit_stack_load(dest_reg, self.scalar_slot_offset(source.obj_var_id));
++            self.emit_stack_load(dest_reg, source.obj_var_id * 8);
+diff --git a/src/lib.rs b/src/lib.rs
+index 2eccf188..29460955 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -26351 +26351 @@ action activate(ticket: Ticket) -> Ticket {
+-        assert!(asm.contains("sd t0, 0(sp)\n    ld a0, 0(sp)"), "missing return load for z:\n{}", asm);
++        assert!(asm.contains("ld a0, 16(sp)"), "missing return load for z:\n{}", asm);
+@@ -26379 +26379 @@ action activate(ticket: Ticket) -> Ticket {
+-        assert!(asm.contains("call double\n    sd a0, 0(sp)\n    ld a0, 0(sp)"), "missing call result spill:\n{}", asm);
++        assert!(asm.contains("sd a0, 8(sp)"), "missing call result spill:\n{}", asm);
+@@ -26394,5 +26394 @@ action activate(ticket: Ticket) -> Ticket {
+-        for block in [1, 2] {
+-            let body = asm.split(&format!(".Lchoose_block_{block}:\n")).nth(1).unwrap().split(".Lchoose_block_").next().unwrap();
+-            assert!(body.contains("ld t0, 0(sp)\n    sd t0, 0(sp)"), "missing branch value move into reused join slot:\n{body}");
+-        }
+-        assert!(asm.contains(".Lchoose_block_3:\n    ld a0, 0(sp)"), "join must return the selected value:\n{asm}");
++        assert!(asm.contains("sd t0, 24(sp)") || asm.contains("sd t0, 32(sp)"), "missing branch value move into join slot:\n{}", asm);
+diff --git a/tests/cost_corpus.rs b/tests/cost_corpus.rs
+index 640d19ce..2a804f9e 100644
+--- a/tests/cost_corpus.rs
++++ b/tests/cost_corpus.rs
+@@ -37,0 +38,2 @@ mod cost_measurement;
++#[path = "support/cost_memory.rs"]
++mod cost_memory;
+diff --git a/tests/support/cost_expanded.rs b/tests/support/cost_expanded.rs
+index 6804b7ad..9fe7f791 100644
+--- a/tests/support/cost_expanded.rs
++++ b/tests/support/cost_expanded.rs
+@@ -208,8 +208,3 @@ pub fn measure(runs: &mut Vec<Value>) -> Vec<Value> {
+-        let expected_decoders = if spec.actions == 1 {
+-            0
+-        } else if spec.mixed_layouts {
+-            2
+-        } else {
+-            1
+-        };
+-        assert_eq!(decoder_count, expected_decoders, "{}: exact repeated decoder layouts must share", spec.id);
++        // Replay the pre-D3 machine shape without changing any fixture,
++        // execution, measurement or budget: this compiler has no sharing.
++        assert_eq!(decoder_count, 0, "{}: baseline must keep dedicated decoders", spec.id);
+diff --git a/tests/support/cost_memory.rs b/tests/support/cost_memory.rs
+new file mode 100644
+index 00000000..77e6bffd
+--- /dev/null
++++ b/tests/support/cost_memory.rs
+@@ -0,0 +1,18 @@
++//! Static instruction counts in validated ELF text, including unreachable code.
++//! These counts do not measure executed memory traffic or syscall memory access.
++
++use cellscript_artifact_checker::{parse_elf, CheckerBudgets};
++use serde_json::{json, Value};
++
++pub fn measure(elf: &[u8]) -> Value {
++    let parsed = parse_elf(elf, CheckerBudgets::default().instructions).expect("decode cost ELF text");
++    let loads = parsed.instructions.iter().filter(|instruction| instruction.word & 0x7f == 0x03).count();
++    let stores = parsed.instructions.iter().filter(|instruction| instruction.word & 0x7f == 0x23).count();
++    json!({
++        "schema": "cellscript-static-memory-counts-v1",
++        "scope": "decoded_elf_text_including_unreachable",
++        "instruction_count": parsed.instructions.len(),
++        "load_instruction_count": loads,
++        "store_instruction_count": stores,
++    })
++}
+diff --git a/tests/support/cost_provenance.rs b/tests/support/cost_provenance.rs
+index b273fa13..efc4d034 100644
+--- a/tests/support/cost_provenance.rs
++++ b/tests/support/cost_provenance.rs
+@@ -32,0 +33,29 @@ pub fn capture_source(root: &Path) -> Value {
++    let fixtures: serde_json::Map<String, Value> = [
++        "tests/cost_corpus.rs",
++        "tests/business_corpus.rs",
++        "tests/support/cost_growth.rs",
++        "tests/support/cost_scalar.rs",
++        "tests/support/cost_memory.rs",
++        "tests/support/cost_measurement.rs",
++        "tests/support/cost_stack.rs",
++        "tests/fixtures/cost_corpus/expanded_fixtures.json",
++        "tests/fixtures/cost_corpus/growth_budgets.json",
++        "tests/fixtures/cost_corpus/expanded_budgets.json",
++        "tests/fixtures/cost_corpus/scalar_budgets.json",
++        "tests/fixtures/cost_corpus/multi_script_budgets.json",
++        "tests/fixtures/cost_corpus/pool_merge.cell",
++        "tests/fixtures/cost_corpus/schema_roll.cell",
++        "tests/fixtures/cost_corpus/nft_lock.cell",
++        "tests/fixtures/cost_corpus/Cargo.toml",
++        "tests/fixtures/cost_corpus/src/common.rs",
++        "tests/fixtures/cost_corpus/src/pool_merge.rs",
++        "tests/fixtures/cost_corpus/src/schema_roll.rs",
++        "tests/fixtures/cost_corpus/src/nft_lock.rs",
++        "tests/fixtures/capability_anchor_order.cell",
++        "tests/fixtures/capability_anchor_policy.cell",
++        "tests/fixtures/capability_anchor_token.cell",
++        "tests/fixtures/capability_anchor_authorization.cell",
++    ]
++    .into_iter()
++    .map(|path| (path.to_string(), json!(sha256(&fs::read(root.join(path)).expect("cost fixture source")))))
++    .collect();
+@@ -40,0 +70 @@ pub fn capture_source(root: &Path) -> Value {
++        "measurement_fixture_sha256": fixtures,
+diff --git a/tests/support/cost_scalar.rs b/tests/support/cost_scalar.rs
+index d6fcd87a..714071dc 100644
+--- a/tests/support/cost_scalar.rs
++++ b/tests/support/cost_scalar.rs
+@@ -127 +127,2 @@ pub fn measure(runs: &mut Vec<Value>) -> Vec<Value> {
+-        let row = json!({"name":spec.name,"source_sha256":sha256(spec.source.as_bytes()),"elf_sha256":sha256(strip_vm_abi_trailer(&compiled.artifact_bytes)),"elf_bytes":strip_vm_abi_trailer(&compiled.artifact_bytes).len(),"positive_cycles":positive_cycles,"group_positive_cycles":group_positive_cycles,"group_rejection_cycles":group_rejection_cycles,"witness_bytes":witness_bytes,"max_stack_frame_bytes":max_stack_frame_bytes,"static_call_chain_stack_bound_bytes":static_call_chain_stack_bound_bytes});
++        let row = json!({"name":spec.name,"source_sha256":sha256(spec.source.as_bytes()),"elf_sha256":sha256(strip_vm_abi_trailer(&compiled.artifact_bytes)),"elf_bytes":strip_vm_abi_trailer(&compiled.artifact_bytes).len(),"positive_cycles":positive_cycles,"group_positive_cycles":group_positive_cycles,"group_rejection_cycles":group_rejection_cycles,"witness_bytes":witness_bytes,"max_stack_frame_bytes":max_stack_frame_bytes,"static_call_chain_stack_bound_bytes":static_call_chain_stack_bound_bytes,
++            "static_memory": super::cost_memory::measure(strip_vm_abi_trailer(&compiled.artifact_bytes))});

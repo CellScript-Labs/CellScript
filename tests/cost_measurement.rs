@@ -5,6 +5,8 @@
 mod ckb_script_runner;
 #[path = "support/cost_measurement.rs"]
 mod cost_measurement;
+#[path = "support/cost_memory.rs"]
+mod cost_memory;
 #[path = "support/cost_stack.rs"]
 mod cost_stack;
 
@@ -14,6 +16,30 @@ use ckb_testtool::{
     ckb_types::{bytes::Bytes, prelude::*},
 };
 use cost_measurement::{measure_group, CycleMeasurement, CycleObservation, CycleScope, ExitCategory};
+
+#[test]
+fn static_memory_counts_decode_text_without_executing_or_scanning_data() {
+    let mut elf =
+        compile_cellscript_source_to_elf("module memory_count\naction verify() -> u64 { verification\nreturn 0\n}", "verify", None);
+    let parsed = cellscript_artifact_checker::parse_elf(&elf, 100_000).unwrap();
+    let instruction =
+        parsed.instructions.iter().find(|instruction| instruction.word & 0x707f == 0x13 && (instruction.word >> 7) & 31 != 2).unwrap();
+    let offset = (parsed.text.offset + instruction.address - parsed.text.address) as usize;
+    let before = cost_memory::measure(&elf);
+    // Replace a non-stack ADDI, preserving paired AUIPC/JALR calls. These loads
+    // need not be executable: the metric counts static text, not a run trace.
+    elf[offset..offset + 4].copy_from_slice(&0x0000_3083u32.to_le_bytes()); // ld ra, 0(zero)
+    let loaded = cost_memory::measure(&elf);
+    assert_eq!(loaded["load_instruction_count"].as_u64().unwrap(), before["load_instruction_count"].as_u64().unwrap() + 1);
+    assert_eq!(loaded["store_instruction_count"], before["store_instruction_count"]);
+    elf[offset..offset + 4].copy_from_slice(&0x0010_3023u32.to_le_bytes()); // sd ra, 0(zero)
+    let stored = cost_memory::measure(&elf);
+    assert_eq!(stored["store_instruction_count"].as_u64().unwrap(), before["store_instruction_count"].as_u64().unwrap() + 1);
+    assert_eq!(stored["load_instruction_count"], before["load_instruction_count"]);
+    assert_eq!(stored["instruction_count"], before["instruction_count"]);
+    elf.extend_from_slice(&0x0000_3083u32.to_le_bytes());
+    assert_eq!(cost_memory::measure(&elf), stored, "bytes outside text are not instructions");
+}
 
 #[test]
 fn nonzero_exits_retain_real_group_cycles_and_transaction_oracle() {

@@ -58,6 +58,12 @@ individual stack-frame, witness and cycle budgets from universal cost claims.
 
 ## The Main Rule
 
+For 0.31 before/after cost review, use the tracked baseline patch and native
+comparison command in the [reproduction package](../reports/0.31/README.md).
+Scalar `static_memory` rows count decoded load/store instructions in ELF text,
+including unreachable instructions. They do not count executed memory accesses.
+Review them separately from frame size, call-chain bounds and measured cycles.
+
 Compiler verification is necessary, but it is not the same thing as a deployed
 transaction or chain acceptance report.
 

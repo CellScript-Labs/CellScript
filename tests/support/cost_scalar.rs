@@ -124,7 +124,8 @@ pub fn measure(runs: &mut Vec<Value>) -> Vec<Value> {
                 group_rejection_cycles = cycles;
             }
         }
-        let row = json!({"name":spec.name,"source_sha256":sha256(spec.source.as_bytes()),"elf_sha256":sha256(strip_vm_abi_trailer(&compiled.artifact_bytes)),"elf_bytes":strip_vm_abi_trailer(&compiled.artifact_bytes).len(),"positive_cycles":positive_cycles,"group_positive_cycles":group_positive_cycles,"group_rejection_cycles":group_rejection_cycles,"witness_bytes":witness_bytes,"max_stack_frame_bytes":max_stack_frame_bytes,"static_call_chain_stack_bound_bytes":static_call_chain_stack_bound_bytes});
+        let row = json!({"name":spec.name,"source_sha256":sha256(spec.source.as_bytes()),"elf_sha256":sha256(strip_vm_abi_trailer(&compiled.artifact_bytes)),"elf_bytes":strip_vm_abi_trailer(&compiled.artifact_bytes).len(),"positive_cycles":positive_cycles,"group_positive_cycles":group_positive_cycles,"group_rejection_cycles":group_rejection_cycles,"witness_bytes":witness_bytes,"max_stack_frame_bytes":max_stack_frame_bytes,"static_call_chain_stack_bound_bytes":static_call_chain_stack_bound_bytes,
+            "static_memory": super::cost_memory::measure(strip_vm_abi_trailer(&compiled.artifact_bytes))});
         eprintln!("[cost-scalar] {row}");
         rows.push(row);
     }

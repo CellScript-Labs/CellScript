@@ -51,6 +51,18 @@ inconsistent stack joins, and external EXEC/SPAWN produce an unknown bound.
 Separate Script VMs do not share a call stack. Neither metric is an observed
 stack high-water mark.
 
+Scalar rows additionally contain `static_memory` with schema
+`cellscript-static-memory-counts-v1`. The independent ELF decoder counts all
+instructions in admitted `.text`, including unreachable instructions. Integer
+load and store instructions are counted separately; data, syscalls' internal
+memory accesses, loop iteration counts and child VMs are excluded. These are
+static code counts, not executed memory traffic. Zero loads or stores is valid;
+missing counts or impossible totals fail evidence validation. Counts are
+reported separately from the existing frozen cost ceilings.
+
+The [0.31 evidence package](reports/0.31/README.md) supplies the baseline patch,
+reproduction commands, before/after reports and native comparison command.
+
 ## Expanded 0.31 baseline
 
 The frozen [policy fixture list](../tests/fixtures/cost_corpus/expanded_fixtures.json)

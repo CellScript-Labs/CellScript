@@ -30,6 +30,35 @@ fn untracked_source_hash(root: &Path) -> String {
 
 pub fn capture_source(root: &Path) -> Value {
     let tracked_diff = output("git", &["diff", "--submodule=diff", "HEAD", "--", "."], root);
+    let fixtures: serde_json::Map<String, Value> = [
+        "tests/cost_corpus.rs",
+        "tests/business_corpus.rs",
+        "tests/support/cost_growth.rs",
+        "tests/support/cost_scalar.rs",
+        "tests/support/cost_memory.rs",
+        "tests/support/cost_measurement.rs",
+        "tests/support/cost_stack.rs",
+        "tests/fixtures/cost_corpus/expanded_fixtures.json",
+        "tests/fixtures/cost_corpus/growth_budgets.json",
+        "tests/fixtures/cost_corpus/expanded_budgets.json",
+        "tests/fixtures/cost_corpus/scalar_budgets.json",
+        "tests/fixtures/cost_corpus/multi_script_budgets.json",
+        "tests/fixtures/cost_corpus/pool_merge.cell",
+        "tests/fixtures/cost_corpus/schema_roll.cell",
+        "tests/fixtures/cost_corpus/nft_lock.cell",
+        "tests/fixtures/cost_corpus/Cargo.toml",
+        "tests/fixtures/cost_corpus/src/common.rs",
+        "tests/fixtures/cost_corpus/src/pool_merge.rs",
+        "tests/fixtures/cost_corpus/src/schema_roll.rs",
+        "tests/fixtures/cost_corpus/src/nft_lock.rs",
+        "tests/fixtures/capability_anchor_order.cell",
+        "tests/fixtures/capability_anchor_policy.cell",
+        "tests/fixtures/capability_anchor_token.cell",
+        "tests/fixtures/capability_anchor_authorization.cell",
+    ]
+    .into_iter()
+    .map(|path| (path.to_string(), json!(sha256(&fs::read(root.join(path)).expect("cost fixture source")))))
+    .collect();
     json!({
         "compiler_version": env!("CARGO_PKG_VERSION"),
         "source_commit": output("git", &["rev-parse", "HEAD"], root),
@@ -38,6 +67,7 @@ pub fn capture_source(root: &Path) -> Value {
         "untracked_source_sha256": untracked_source_hash(root),
         "cargo_lock_sha256": sha256(&fs::read(root.join("Cargo.lock")).expect("compiler lock")),
         "rust_toolchain": output("rustc", &["-vV"], root),
+        "measurement_fixture_sha256": fixtures,
     })
 }
 

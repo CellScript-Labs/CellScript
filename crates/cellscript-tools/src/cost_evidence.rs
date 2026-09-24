@@ -93,6 +93,7 @@ fn same_source(left: &Value, right: &Value) -> Result<()> {
         "cargo_lock_sha256",
         "rust_toolchain",
         "vm_configuration",
+        "measurement_fixture_sha256",
     ] {
         ensure!(!left[field].is_null() && left[field] == right[field], "cost report source/configuration mismatch: {field}");
     }
@@ -104,6 +105,16 @@ fn same_source(left: &Value, right: &Value) -> Result<()> {
         ensure!(value["opt_level"].as_u64().is_some_and(|level| level <= 3), "missing cost-report optimization profile");
         ensure!(value["target"] == "riscv64-elf" && value["target_profile"] == "ckb", "wrong cost-report target");
     }
+    Ok(())
+}
+
+pub(crate) fn static_memory(value: &Value) -> Result<()> {
+    ensure!(value["schema"] == "cellscript-static-memory-counts-v1", "missing static memory count schema");
+    ensure!(value["scope"] == "decoded_elf_text_including_unreachable", "wrong static memory count scope");
+    let instructions = positive(&value["instruction_count"])?;
+    let loads = value["load_instruction_count"].as_u64().context("missing static load count")?;
+    let stores = value["store_instruction_count"].as_u64().context("missing static store count")?;
+    ensure!(loads.checked_add(stores).is_some_and(|total| total <= instructions), "impossible static memory counts");
     Ok(())
 }
 
@@ -139,8 +150,17 @@ pub fn check(root: &Path, path: &Path, multi_path: &Path) -> Result<()> {
         ensure!(!report["provenance"][field].as_str().unwrap_or("").is_empty(), "missing provenance {field}");
     }
     ensure!(report["provenance"]["source_dirty"].is_boolean(), "missing dirty-state declaration");
+    let fixtures = report["provenance"]["measurement_fixture_sha256"].as_object().context("missing measurement fixture hashes")?;
+    ensure!(fixtures.len() == 24, "measurement fixture inventory incomplete");
+    for digest in fixtures.values() {
+        let digest = digest.as_str().context("fixture digest")?;
+        ensure!(digest.len() == 64 && hex::decode(digest).is_ok(), "invalid fixture digest");
+    }
     rows_with_budgets(root, &report, "expanded", "expanded_budgets.json")?;
     rows_with_budgets(root, &report, "scalar", "scalar_budgets.json")?;
+    for row in array(&report, "scalar")? {
+        static_memory(&row["static_memory"])?;
+    }
     let mut names = BTreeSet::new();
     let executions = array(&report, "executions")?;
     ensure!(executions.len() >= 1800, "execution sweep incomplete");
@@ -212,7 +232,7 @@ mod tests {
             "compiler_version":"0.30.0", "source_commit":"commit",
             "source_dirty":true, "tracked_diff_sha256":"tracked",
             "untracked_source_sha256":"untracked", "cargo_lock_sha256":"lock",
-            "rust_toolchain":"rustc", "vm_configuration":{"limit":10_000_000},
+            "rust_toolchain":"rustc", "vm_configuration":{"limit":10_000_000}, "measurement_fixture_sha256":{"fixture":"hash"},
             "edition":"2027", "opt_level":3, "target":"riscv64-elf", "target_profile":"ckb"
         });
         let mut companion = source.clone();
@@ -228,6 +248,7 @@ mod tests {
             "cargo_lock_sha256",
             "rust_toolchain",
             "vm_configuration",
+            "measurement_fixture_sha256",
         ] {
             let mut changed = companion.clone();
             changed[field] = json!("different");
@@ -257,5 +278,21 @@ mod tests {
         assert_eq!(measurement(&value, false).unwrap(), Some(42));
         value["exit_category"] = json!("vm_trap");
         assert!(measurement(&value, false).is_err());
+    }
+    #[test]
+    fn static_memory_requires_explicit_scope_and_consistent_counts() {
+        let value = json!({"schema":"cellscript-static-memory-counts-v1", "scope":"decoded_elf_text_including_unreachable",
+            "instruction_count":10, "load_instruction_count":0, "store_instruction_count":0});
+        static_memory(&value).unwrap();
+        for (field, invalid) in [
+            ("scope", json!("executed")),
+            ("load_instruction_count", json!(11)),
+            ("store_instruction_count", Value::Null),
+            ("instruction_count", json!(0)),
+        ] {
+            let mut changed = value.clone();
+            changed[field] = invalid;
+            assert!(static_memory(&changed).is_err(), "accepted invalid {field}");
+        }
     }
 }

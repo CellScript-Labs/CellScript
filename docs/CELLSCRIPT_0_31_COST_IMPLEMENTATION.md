@@ -108,6 +108,12 @@ that every transaction's first error is identical after recompilation.
 
 ## Compatibility and remaining acceptance
 
+The [reproduction package](reports/0.31/README.md) supplies a fixed source patch
+for replaying the released 0.30 backend with the expanded measurement harness,
+static scalar load/store counts and a native report comparator. The original
+dirty checkpoint reports below remain historical records. Deferred experiments
+are tracked separately in #36–#39 and do not enlarge this release's scope.
+
 Native CLI builds emit v9 records. The standalone checker, the CKB adapter,
 the Registry verifier and the Registry artifact verifier consume the same
 independent checker crate. Their builds and tests must move with this change.

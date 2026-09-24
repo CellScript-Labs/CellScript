@@ -236,6 +236,10 @@ metrics. Child issues remain open until their implementation acceptance passes.
 
 The 0.32 follow-ups above are deferrals, not shipped capabilities or promises of
 0.32 completion. New implementation scope requires a new issue and decision.
+They now have separate trackers: [observed per-VM stack use (#36)](https://github.com/CellScript-Labs/CellScript/issues/36),
+[dispatch alternatives (#37)](https://github.com/CellScript-Labs/CellScript/issues/37),
+[borrowed spans and copy changes (#38)](https://github.com/CellScript-Labs/CellScript/issues/38),
+and [register retention and helper scratch (#39)](https://github.com/CellScript-Labs/CellScript/issues/39).
 The numeric budgets for new fixtures will be accepted from measured baseline
 results; choosing them now would invent evidence.
 

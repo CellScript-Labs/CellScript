@@ -12,6 +12,14 @@ deciding whether a change is ready.
 
 ## Gate Modes
 
+The 0.31 cost corpus also emits static load/store instruction counts. The native
+`cellscript-tools compare-cost-evidence BASELINE BASELINE_MULTI CANDIDATE
+CANDIDATE_MULTI --output REPORT` command validates complete report pairs before
+comparing fixture sets, outcomes, witness sizes and individual cost metrics.
+Static instruction counts are not executed memory traffic. See the
+[reproduction package](reports/0.31/README.md); focused reproduction does not
+replace the gates below.
+
 | Mode | When to run | Evidence boundary |
 |---|---|---|
 | `dev` | Local development before pushing | Native source-policy enforcement; Rust formatting; canonical CellScript example formatting; all workspace-package Rust checks (including the standalone artifact checker and `cellscript-tools`); checker mutation/Myelin handoff tests; exact-handle CKB-VM/transaction-validation tests; deployment-line receipt/value tests; frozen 0.30 business-corpus inventory and same-transaction anchor; simulator package scenarios; frozen/offline canonical workspace-diamond plus resolve-graph/build-plan and transactional-upgrade schema checks, including byte-identical source locks; both Registry verifiers and their compiler-dependency boundaries; reproducible Registry Type Script build and CKB-VM tests; strict backend quick audit, syntax-combination quick audit, parity-gated skill-pack freshness, README-linked CellScript doc Status freshness, local markdown link check, whitespace diff check |

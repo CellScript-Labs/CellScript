@@ -13,6 +13,12 @@ accounting with frozen per-metric ceilings. See the
 [implementation and acceptance report](docs/CELLSCRIPT_0_31_COST_IMPLEMENTATION.md).
 These changes are development work; 0.31 has not been released.
 
+Add decoded-ELF static load/store counts to scalar evidence, hash the shared
+measurement fixtures and frozen budgets, and provide a native before/after
+comparison command. A pinned patch and reproduction script rebuild the released
+0.30 backend with the expanded cost harness; the original dirty measurements
+remain historical evidence. See the [reproduction package](docs/reports/0.31/README.md).
+
 ## 0.30.0 - Capability closure
 
 Publication and the website update were authorized on 2026-09-21, subject to a

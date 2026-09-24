@@ -9,15 +9,15 @@ measurement, immediate planning, shared decoders, private adapter frames, and
 scalar slot reuse. The implementation and remaining acceptance work are tracked
 in [the cost implementation report](docs/CELLSCRIPT_0_31_COST_IMPLEMENTATION.md).
 Cargo versions and the pinned toolchain remain unchanged during development.
-The requested branch layout makes `0.31` the GitHub default branch.
+`0.31` became the GitHub default branch on 2026-09-24. The eight archived
+development branches were removed in one atomic push with exact-tip leases;
+the remote now retains `0.30` and `0.31`, together with all release tags.
 
-`0.30` is retained as the release baseline. Its complete local release gate
-passed on 2026-09-21; its signed tag points at that exact commit. Publication
-still requires verified release/deployment steps. Release tags and submodule
-repositories are preserved. The requested cleanup retires the other root
-branches after a verified local Git bundle backup. The descriptions below
-preserve historical evidence scope; consult the remote branch list for the
-actual completion state of that administrative operation.
+`0.30` is retained as the published release baseline. Its final signed
+`v0.30.0` tag points at `352b4950e7dc7489a4ee7e7ed6d6edf4c7fefd71`.
+Release tags and submodule repositories are preserved. Retired root branch
+tips match the verified September 21 Git bundle. The descriptions below
+preserve historical evidence scope.
 
 ## 0.30
 
