@@ -1,4 +1,33 @@
-# CellScript 0.30 issue status — 2026-09-19
+# CellScript 0.30 issue status
+
+## Publication closure — 2026-09-25
+
+The accepted GitHub-plus-website scope of #27 is complete. The signed
+[`v0.30.0` release](https://github.com/CellScript-Labs/CellScript/releases/tag/v0.30.0)
+was published on September 23 at
+`352b4950e7dc7489a4ee7e7ed6d6edf4c7fefd71`.
+[Tag CI](https://github.com/CellScript-Labs/CellScript/actions/runs/35813354116)
+and the [release workflow](https://github.com/CellScript-Labs/CellScript/actions/runs/35813354154)
+passed on that source. The
+[publication/readback record](https://github.com/CellScript-Labs/CellScript/issues/27#issuecomment-5797185434)
+records the final clean local release/backend gates, four native archives,
+VSIX, installer and checksums, production/testnet website and Registry readback.
+The public WASM SHA-256 is
+`9f5ed7be566bb865cae1be60310bc5fed32ddaece896ebb89cdcc76996555aa5`
+(571,825 gzip bytes). These supersede the candidate identities below.
+
+Independent review was **waived for 0.30 by the maintainer**, not performed.
+The September 21 publication authorization superseded the publication hold;
+no TAC was invoked. Existing Pudge receipts retain their original twelve-artifact
+deployment provenance. They are neither mainnet evidence nor deployment of
+0.31 artifacts. Crates.io, Marketplace, and optional production Registry
+commitment/reproducer activation are separate, unclaimed channels and do not
+reopen the accepted GitHub-plus-website scope. #22/#28/#29 remain deferred.
+
+## Historical candidate audit — 2026-09-19
+
+The following dated audit is preserved as history, including its then-current
+publication hold and candidate hashes. It is not the current release status.
 
 All 24 GitHub issues were checked against their bodies, latest comments, the
 accepted capability ledger, and candidate evidence. Twenty are closed and four

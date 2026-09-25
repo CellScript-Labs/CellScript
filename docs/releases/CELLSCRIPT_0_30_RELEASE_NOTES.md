@@ -1,5 +1,11 @@
 # CellScript 0.30.0 Release Notes
 
+**Published (2026-09-23):** signed tag `v0.30.0` identifies
+`352b4950e7dc7489a4ee7e7ed6d6edf4c7fefd71`. The accepted GitHub assets and
+production/testnet websites are available. See the
+[publication closure](CELLSCRIPT_0_30_ISSUE_STATUS.md#publication-closure--2026-09-25)
+for workflow and readback receipts; older candidate records remain historical.
+
 **Publication decision (2026-09-21):** the maintainer authorized the 0.30.0
 release and the cellscript.dev update, superseding the earlier no-TAC hold.
 Publication requires a fresh full release gate on the final clean source.

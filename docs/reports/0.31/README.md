@@ -68,6 +68,10 @@ matching lengths are not treated as matching identities.
 
 ## Coverage map
 
+The [isolated attribution controls](ATTRIBUTION.md) add a reproducible D2-only
+comparison and a D3 sharing ablation, with component code ranges and independent
+byte/cycle comparisons. They preserve the frozen matrix below.
+
 | Family | Report rows | Frozen budget / fixture source |
 | --- | --- | --- |
 | Matched Rust | `matched`: pool-merge, schema-roll, nft-lock | `tests/cost_corpus.rs`; `tests/fixtures/cost_corpus/*.cell` and Rust sources |
@@ -152,6 +156,11 @@ its previous output. The compiler/backend implementation remains the one at
 Release versions and bundles have not been promoted.
 
 ## Independent review
+
+The [September 25 engineering review](BOUNDARY_REVIEW.md) records the source
+review, acceptance map and additional shared-frame mutation regression. It is
+automated engineering evidence. The requested child-issue closure excludes #30
+release work and the 0.32 scope.
 
 The independent compiler/checker review remains pending. Its scope is the
 optimization diff plus the following reporting changes; an implementation-author

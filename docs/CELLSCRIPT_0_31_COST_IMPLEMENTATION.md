@@ -108,6 +108,12 @@ that every transaction's first error is identical after recompilation.
 
 ## Compatibility and remaining acceptance
 
+The September 25 maintainer instruction scopes the current closure to #27 and
+#31–#35, skips #30, and excludes 0.32 work. The
+[engineering boundary review](reports/0.31/BOUNDARY_REVIEW.md) maps the accepted
+contracts to source and executable/mutation evidence. Engineering issue closure
+does not promote a release or satisfy the independent release-review requirement.
+
 The [reproduction package](reports/0.31/README.md) supplies a fixed source patch
 for replaying the released 0.30 backend with the expanded measurement harness,
 static scalar load/store counts and a native report comparator. The original
@@ -132,8 +138,9 @@ The checkpoint reports are local evidence under
 `target/cellscript-cost/baseline-before-optimizations/`; they are not clean
 commit evidence or published release assets. The final backend and CI gates,
 clean-source release replay, fresh downstream bundles, and a named independent
-compiler/checker reviewer are required before release acceptance. The child
-issues remain open until those conditions are recorded.
+compiler/checker reviewer are required before release acceptance. That release
+work remains under the skipped #30; the child issues track engineering acceptance
+under the September 25 scope decision above.
 
 No dispatch tree, jump table, borrowed witness span, general register allocator,
 or observed stack-peak instrument is included. The 0.32 deferrals in the

@@ -1,0 +1,16 @@
+diff --git a/tests/support/cost_expanded.rs b/tests/support/cost_expanded.rs
+index 6804b7ad..9fe7f791 100644
+--- a/tests/support/cost_expanded.rs
++++ b/tests/support/cost_expanded.rs
+@@ -208,8 +208,3 @@ pub fn measure(runs: &mut Vec<Value>) -> Vec<Value> {
+-        let expected_decoders = if spec.actions == 1 {
+-            0
+-        } else if spec.mixed_layouts {
+-            2
+-        } else {
+-            1
+-        };
+-        assert_eq!(decoder_count, expected_decoders, "{}: exact repeated decoder layouts must share", spec.id);
++        // Replay the pre-D3 machine shape without changing any fixture,
++        // execution, measurement or budget: this compiler has no sharing.
++        assert_eq!(decoder_count, 0, "{}: baseline must keep dedicated decoders", spec.id);

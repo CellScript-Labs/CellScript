@@ -1,0 +1,308 @@
+{
+  "baseline": {
+    "cargo_lock_sha256": "7b1265da970781258cf51c6e87c2f76443ba0d06ff10d114836b82055b6d17b0",
+    "compiler_version": "0.30.0",
+    "edition": "2027",
+    "measurement_fixture_sha256": {
+      "tests/business_corpus.rs": "5c832627c40934589fac4a6ba7c2bc0bae43b1c3f1675d2efc00abcbbfaa19fc",
+      "tests/cost_corpus.rs": "56d45e03402eb26c84a0029c8fc54639d48a012c151adea5991004bdffd6f1c0",
+      "tests/fixtures/capability_anchor_authorization.cell": "710f6d15afc0d7f85a7e714c57db94a140743928a6fbc4642f4054326242b2e3",
+      "tests/fixtures/capability_anchor_order.cell": "b3541a954b6b8a43c2b32a8d5cd8d6075e88bef96014085d515449b676f3e906",
+      "tests/fixtures/capability_anchor_policy.cell": "509b283a27208c6a8d8ca4890d7f8026cb82941ac75a09db75ecb62a95693858",
+      "tests/fixtures/capability_anchor_token.cell": "9b7019de49f86dcbe76de012dbc5afc1d7e956b472c378be8ba1a5b9c174f23d",
+      "tests/fixtures/cost_corpus/Cargo.toml": "fbcda0a45b3a0a0ba194b793812e351f00e9bbd54ddcd4b8905e82f95d387182",
+      "tests/fixtures/cost_corpus/expanded_budgets.json": "ecbb83bcac4d88438a95f014ee0d44c6912221367c63addcda745fe6b9ff97e9",
+      "tests/fixtures/cost_corpus/expanded_fixtures.json": "f926437a0c2439173d43d4a703ba881139cf9293be88a25aab2ac401228ffcd2",
+      "tests/fixtures/cost_corpus/growth_budgets.json": "68ccb8d6faa6eed2fbf94a1b757efc9d6045d85dc89dc973e9481d2b4766b160",
+      "tests/fixtures/cost_corpus/multi_script_budgets.json": "f6de8bc29396c48942813c3908a6ce9da6736b8010f66e63d5ddd7f86929ccd1",
+      "tests/fixtures/cost_corpus/nft_lock.cell": "eadffe28485199937e01d6051c00ce238b6d817f5657dcefe46a0669a619c1d0",
+      "tests/fixtures/cost_corpus/pool_merge.cell": "1f11906e1562c306bce400acb6128457ff28ba19ddda1b2e0bdb9b6d1013f521",
+      "tests/fixtures/cost_corpus/scalar_budgets.json": "49df193a48f3f66782b7d60f85ec37a979b0a991b1c37bb36ac81dc761d3afc6",
+      "tests/fixtures/cost_corpus/schema_roll.cell": "8d005226c687e0a8899a6d10cf4390952d8bad23b3b846ce54b0e93f4db3e0aa",
+      "tests/fixtures/cost_corpus/src/common.rs": "c8f2f8f704ec3f7a089c404ec8da184947b148a8d204169d586aad0235357622",
+      "tests/fixtures/cost_corpus/src/nft_lock.rs": "86a920f9935ec3aa6d72dcc27cdbfd2ab515185d1b4858d27964b0a99326e0cf",
+      "tests/fixtures/cost_corpus/src/pool_merge.rs": "df1ae134b07f56bdcdf9f349184488ab67e64e202ee8c6639337f07d08191b63",
+      "tests/fixtures/cost_corpus/src/schema_roll.rs": "68090359cbd094f6bb41c781b445fb03625bf2bcd069e3b753a2565f1d76eca0",
+      "tests/support/cost_growth.rs": "503cbee74c239241093da0c57be81db4352e0927f842b00c62b5add5deb104d8",
+      "tests/support/cost_measurement.rs": "0d0518aa0e96c56e6007d099521dddf9793b396cf64a1f0640ee9a73c3a48452",
+      "tests/support/cost_memory.rs": "7ff37bf1533b690addc57f4fcd25a2f574f88e01ff550df117dec4d6501c9d0d",
+      "tests/support/cost_scalar.rs": "d941145b410ef4ac893d3ba5286131ee204e412afbf108be0bee64fd3117f444",
+      "tests/support/cost_stack.rs": "8b0ec35c4c737e911fab8963f654d775806b40192998b7be6dadd75310cb0679"
+    },
+    "opt_level": 3,
+    "rust_reference_lock_sha256": "10e7da9157cb40b81851d9d7f4b560209eab2de4a430298ada69d66176533184",
+    "rust_reference_profile": {
+      "codegen_units": 1,
+      "lto": "thin",
+      "opt_level": "z",
+      "panic": "abort",
+      "target": "riscv64imac-unknown-none-elf"
+    },
+    "rust_toolchain": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.97.1\nLLVM version: 22.1.6",
+    "source_commit": "65df937f45c6ba5ab45cf5ee69778bfa3e05cdc5",
+    "source_dirty": true,
+    "strip_sha256": "d618325879963d66b219df11163953f09b3076e43610be4f4b033b8146f22632",
+    "strip_version": "llvm-strip, compatible with GNU strip\nLLVM (http://llvm.org/):\n  LLVM version 22.1.6-rust-1.97.1-stable\n  Optimized build.",
+    "target": "riscv64-elf",
+    "target_profile": "ckb",
+    "tracked_diff_sha256": "c161108a92dae72adead02a48848870685570f738ee352cacffb359e40cd5165",
+    "untracked_source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "vm_configuration": {
+      "ckb_script": "1.1.0",
+      "ckb_testtool": "1.1.1",
+      "ckb_vm": "0.24.14",
+      "consensus": "ConsensusBuilder::default with CKB2021/CKB2023 new_dev_default",
+      "group_cycle_limit": 10000000,
+      "group_scope": "scheduler total including spawned VMs",
+      "stack_scope": "static single-VM call chain; external EXEC/SPAWN unknown",
+      "tip_number": 0,
+      "verification_environment": "submit"
+    }
+  },
+  "candidate": {
+    "cargo_lock_sha256": "7b1265da970781258cf51c6e87c2f76443ba0d06ff10d114836b82055b6d17b0",
+    "compiler_version": "0.30.0",
+    "edition": "2027",
+    "measurement_fixture_sha256": {
+      "tests/business_corpus.rs": "5c832627c40934589fac4a6ba7c2bc0bae43b1c3f1675d2efc00abcbbfaa19fc",
+      "tests/cost_corpus.rs": "56d45e03402eb26c84a0029c8fc54639d48a012c151adea5991004bdffd6f1c0",
+      "tests/fixtures/capability_anchor_authorization.cell": "710f6d15afc0d7f85a7e714c57db94a140743928a6fbc4642f4054326242b2e3",
+      "tests/fixtures/capability_anchor_order.cell": "b3541a954b6b8a43c2b32a8d5cd8d6075e88bef96014085d515449b676f3e906",
+      "tests/fixtures/capability_anchor_policy.cell": "509b283a27208c6a8d8ca4890d7f8026cb82941ac75a09db75ecb62a95693858",
+      "tests/fixtures/capability_anchor_token.cell": "9b7019de49f86dcbe76de012dbc5afc1d7e956b472c378be8ba1a5b9c174f23d",
+      "tests/fixtures/cost_corpus/Cargo.toml": "fbcda0a45b3a0a0ba194b793812e351f00e9bbd54ddcd4b8905e82f95d387182",
+      "tests/fixtures/cost_corpus/expanded_budgets.json": "ecbb83bcac4d88438a95f014ee0d44c6912221367c63addcda745fe6b9ff97e9",
+      "tests/fixtures/cost_corpus/expanded_fixtures.json": "f926437a0c2439173d43d4a703ba881139cf9293be88a25aab2ac401228ffcd2",
+      "tests/fixtures/cost_corpus/growth_budgets.json": "68ccb8d6faa6eed2fbf94a1b757efc9d6045d85dc89dc973e9481d2b4766b160",
+      "tests/fixtures/cost_corpus/multi_script_budgets.json": "f6de8bc29396c48942813c3908a6ce9da6736b8010f66e63d5ddd7f86929ccd1",
+      "tests/fixtures/cost_corpus/nft_lock.cell": "eadffe28485199937e01d6051c00ce238b6d817f5657dcefe46a0669a619c1d0",
+      "tests/fixtures/cost_corpus/pool_merge.cell": "1f11906e1562c306bce400acb6128457ff28ba19ddda1b2e0bdb9b6d1013f521",
+      "tests/fixtures/cost_corpus/scalar_budgets.json": "49df193a48f3f66782b7d60f85ec37a979b0a991b1c37bb36ac81dc761d3afc6",
+      "tests/fixtures/cost_corpus/schema_roll.cell": "8d005226c687e0a8899a6d10cf4390952d8bad23b3b846ce54b0e93f4db3e0aa",
+      "tests/fixtures/cost_corpus/src/common.rs": "c8f2f8f704ec3f7a089c404ec8da184947b148a8d204169d586aad0235357622",
+      "tests/fixtures/cost_corpus/src/nft_lock.rs": "86a920f9935ec3aa6d72dcc27cdbfd2ab515185d1b4858d27964b0a99326e0cf",
+      "tests/fixtures/cost_corpus/src/pool_merge.rs": "df1ae134b07f56bdcdf9f349184488ab67e64e202ee8c6639337f07d08191b63",
+      "tests/fixtures/cost_corpus/src/schema_roll.rs": "68090359cbd094f6bb41c781b445fb03625bf2bcd069e3b753a2565f1d76eca0",
+      "tests/support/cost_growth.rs": "503cbee74c239241093da0c57be81db4352e0927f842b00c62b5add5deb104d8",
+      "tests/support/cost_measurement.rs": "0d0518aa0e96c56e6007d099521dddf9793b396cf64a1f0640ee9a73c3a48452",
+      "tests/support/cost_memory.rs": "7ff37bf1533b690addc57f4fcd25a2f574f88e01ff550df117dec4d6501c9d0d",
+      "tests/support/cost_scalar.rs": "d941145b410ef4ac893d3ba5286131ee204e412afbf108be0bee64fd3117f444",
+      "tests/support/cost_stack.rs": "8b0ec35c4c737e911fab8963f654d775806b40192998b7be6dadd75310cb0679"
+    },
+    "opt_level": 3,
+    "rust_reference_lock_sha256": "10e7da9157cb40b81851d9d7f4b560209eab2de4a430298ada69d66176533184",
+    "rust_reference_profile": {
+      "codegen_units": 1,
+      "lto": "thin",
+      "opt_level": "z",
+      "panic": "abort",
+      "target": "riscv64imac-unknown-none-elf"
+    },
+    "rust_toolchain": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.97.1\nLLVM version: 22.1.6",
+    "source_commit": "65df937f45c6ba5ab45cf5ee69778bfa3e05cdc5",
+    "source_dirty": true,
+    "strip_sha256": "d618325879963d66b219df11163953f09b3076e43610be4f4b033b8146f22632",
+    "strip_version": "llvm-strip, compatible with GNU strip\nLLVM (http://llvm.org/):\n  LLVM version 22.1.6-rust-1.97.1-stable\n  Optimized build.",
+    "target": "riscv64-elf",
+    "target_profile": "ckb",
+    "tracked_diff_sha256": "73b1064bb604945046c2a3990f13db0a13bb9d289b2ef880f62ceac344489c96",
+    "untracked_source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "vm_configuration": {
+      "ckb_script": "1.1.0",
+      "ckb_testtool": "1.1.1",
+      "ckb_vm": "0.24.14",
+      "consensus": "ConsensusBuilder::default with CKB2021/CKB2023 new_dev_default",
+      "group_cycle_limit": 10000000,
+      "group_scope": "scheduler total including spawned VMs",
+      "stack_scope": "static single-VM call chain; external EXEC/SPAWN unknown",
+      "tip_number": 0,
+      "verification_environment": "submit"
+    }
+  },
+  "comparisons": 6782,
+  "regressions": [],
+  "scalar_static_memory": [
+    {
+      "after": {
+        "instruction_count": 354,
+        "load_instruction_count": 55,
+        "schema": "cellscript-static-memory-counts-v1",
+        "scope": "decoded_elf_text_including_unreachable",
+        "store_instruction_count": 26
+      },
+      "after_elf_sha256": "6cac4a01c3b4c81656cb9caaeb48f8692dca0c324019b1399ed543c0f9c95a87",
+      "before": {
+        "instruction_count": 354,
+        "load_instruction_count": 55,
+        "schema": "cellscript-static-memory-counts-v1",
+        "scope": "decoded_elf_text_including_unreachable",
+        "store_instruction_count": 26
+      },
+      "before_elf_sha256": "6cac4a01c3b4c81656cb9caaeb48f8692dca0c324019b1399ed543c0f9c95a87",
+      "name": "generic-distinct",
+      "source_sha256": "b52e40bc35531d1349545c876606631fbec79d750a1a97f305696e7ef7cf127d"
+    },
+    {
+      "after": {
+        "instruction_count": 310,
+        "load_instruction_count": 46,
+        "schema": "cellscript-static-memory-counts-v1",
+        "scope": "decoded_elf_text_including_unreachable",
+        "store_instruction_count": 18
+      },
+      "after_elf_sha256": "f9560da5f0192475d91bbb7cc2180f095ef2cbefc08b1d86e60598f8833440bc",
+      "before": {
+        "instruction_count": 310,
+        "load_instruction_count": 46,
+        "schema": "cellscript-static-memory-counts-v1",
+        "scope": "decoded_elf_text_including_unreachable",
+        "store_instruction_count": 18
+      },
+      "before_elf_sha256": "f9560da5f0192475d91bbb7cc2180f095ef2cbefc08b1d86e60598f8833440bc",
+      "name": "generic-repeated",
+      "source_sha256": "17f75503c55c2e4683e5d6f529c7d9c299b318cef08e3a4102ed48003ce0b9ae"
+    },
+    {
+      "after": {
+        "instruction_count": 535,
+        "load_instruction_count": 124,
+        "schema": "cellscript-static-memory-counts-v1",
+        "scope": "decoded_elf_text_including_unreachable",
+        "store_instruction_count": 46
+      },
+      "after_elf_sha256": "cf46b44264697617754510a2963132e73b6abe251ce09275ec2837c7032231cd",
+      "before": {
+        "instruction_count": 535,
+        "load_instruction_count": 124,
+        "schema": "cellscript-static-memory-counts-v1",
+        "scope": "decoded_elf_text_including_unreachable",
+        "store_instruction_count": 46
+      },
+      "before_elf_sha256": "cf46b44264697617754510a2963132e73b6abe251ce09275ec2837c7032231cd",
+      "name": "nested-nine-arguments",
+      "source_sha256": "9c3879ba97d81c4a18a15037f9f82454f3800061c9ce34e7e3d30a3e77e542cf"
+    },
+    {
+      "after": {
+        "instruction_count": 1063,
+        "load_instruction_count": 43,
+        "schema": "cellscript-static-memory-counts-v1",
+        "scope": "decoded_elf_text_including_unreachable",
+        "store_instruction_count": 271
+      },
+      "after_elf_sha256": "0fc5fbe69d94b1885879cfcd65b737af26a50c23de347a65aab47af17f639099",
+      "before": {
+        "instruction_count": 1063,
+        "load_instruction_count": 43,
+        "schema": "cellscript-static-memory-counts-v1",
+        "scope": "decoded_elf_text_including_unreachable",
+        "store_instruction_count": 271
+      },
+      "before_elf_sha256": "0fc5fbe69d94b1885879cfcd65b737af26a50c23de347a65aab47af17f639099",
+      "name": "scalar-chain-260",
+      "source_sha256": "bf4a2cc0dd5477dcb875ccb70cccf92d9a850eb85c99a34989b711dbc49f5084"
+    },
+    {
+      "after": {
+        "instruction_count": 475,
+        "load_instruction_count": 43,
+        "schema": "cellscript-static-memory-counts-v1",
+        "scope": "decoded_elf_text_including_unreachable",
+        "store_instruction_count": 75
+      },
+      "after_elf_sha256": "54ac2a4c1a78b8c0168b95b7ad7cb00af29459f89e1a4a873f1687957b5be427",
+      "before": {
+        "instruction_count": 475,
+        "load_instruction_count": 43,
+        "schema": "cellscript-static-memory-counts-v1",
+        "scope": "decoded_elf_text_including_unreachable",
+        "store_instruction_count": 75
+      },
+      "before_elf_sha256": "54ac2a4c1a78b8c0168b95b7ad7cb00af29459f89e1a4a873f1687957b5be427",
+      "name": "scalar-chain-64",
+      "source_sha256": "775df30b3876e8f958542fa753a34adf01ba8ba5ca3f7fbb424980ad64751432"
+    },
+    {
+      "after": {
+        "instruction_count": 307,
+        "load_instruction_count": 43,
+        "schema": "cellscript-static-memory-counts-v1",
+        "scope": "decoded_elf_text_including_unreachable",
+        "store_instruction_count": 19
+      },
+      "after_elf_sha256": "06c226402696504f8057d8dc167790b78a0a6ca1e1863d6d9674d70710b5fe25",
+      "before": {
+        "instruction_count": 307,
+        "load_instruction_count": 43,
+        "schema": "cellscript-static-memory-counts-v1",
+        "scope": "decoded_elf_text_including_unreachable",
+        "store_instruction_count": 19
+      },
+      "before_elf_sha256": "06c226402696504f8057d8dc167790b78a0a6ca1e1863d6d9674d70710b5fe25",
+      "name": "scalar-chain-8",
+      "source_sha256": "de01679b2cf79061f9412d61b4715ea756da7a157cc2f40a8f3c8f68220ebe6b"
+    },
+    {
+      "after": {
+        "instruction_count": 314,
+        "load_instruction_count": 51,
+        "schema": "cellscript-static-memory-counts-v1",
+        "scope": "decoded_elf_text_including_unreachable",
+        "store_instruction_count": 20
+      },
+      "after_elf_sha256": "4fc3b46bf23ab5e03f034ed827c4bb48c6b7040286cc7eb7bf8e861f417d948d",
+      "before": {
+        "instruction_count": 314,
+        "load_instruction_count": 51,
+        "schema": "cellscript-static-memory-counts-v1",
+        "scope": "decoded_elf_text_including_unreachable",
+        "store_instruction_count": 20
+      },
+      "before_elf_sha256": "4fc3b46bf23ab5e03f034ed827c4bb48c6b7040286cc7eb7bf8e861f417d948d",
+      "name": "scalar-loop-join",
+      "source_sha256": "695beda46ed88454e0a590ca5aa61236347e3d1466c0cce2246a0a46397007e4"
+    },
+    {
+      "after": {
+        "instruction_count": 2401,
+        "load_instruction_count": 818,
+        "schema": "cellscript-static-memory-counts-v1",
+        "scope": "decoded_elf_text_including_unreachable",
+        "store_instruction_count": 529
+      },
+      "after_elf_sha256": "296376de5bea4dfb3d32bf6530a58920d264ddb0424375be3f98faf9e0fc8293",
+      "before": {
+        "instruction_count": 2401,
+        "load_instruction_count": 818,
+        "schema": "cellscript-static-memory-counts-v1",
+        "scope": "decoded_elf_text_including_unreachable",
+        "store_instruction_count": 529
+      },
+      "before_elf_sha256": "296376de5bea4dfb3d32bf6530a58920d264ddb0424375be3f98faf9e0fc8293",
+      "name": "scalar-overlap-260",
+      "source_sha256": "a6d55d6e60852809cfaa11717a48a0fa2246b751442a5a80d6fda65bc974ff4e"
+    },
+    {
+      "after": {
+        "instruction_count": 786,
+        "load_instruction_count": 231,
+        "schema": "cellscript-static-memory-counts-v1",
+        "scope": "decoded_elf_text_including_unreachable",
+        "store_instruction_count": 137
+      },
+      "after_elf_sha256": "061b3231ef7e9eb8dab2676f6d8b0eec654e59c3804060afb37af7dee1d427ae",
+      "before": {
+        "instruction_count": 786,
+        "load_instruction_count": 231,
+        "schema": "cellscript-static-memory-counts-v1",
+        "scope": "decoded_elf_text_including_unreachable",
+        "store_instruction_count": 137
+      },
+      "before_elf_sha256": "061b3231ef7e9eb8dab2676f6d8b0eec654e59c3804060afb37af7dee1d427ae",
+      "name": "scalar-overlap-64",
+      "source_sha256": "369547be95d3ce2c986d650bff3170d0e5300da73f0e7858ac61c572425ae877"
+    }
+  ],
+  "schema": "cellscript-cost-comparison-v2",
+  "status": "passed"
+}

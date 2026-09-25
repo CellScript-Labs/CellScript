@@ -1,0 +1,927 @@
+{
+  "provenance": {
+    "cargo_lock_sha256": "7b1265da970781258cf51c6e87c2f76443ba0d06ff10d114836b82055b6d17b0",
+    "compiler_version": "0.30.0",
+    "edition": "2026",
+    "measurement_fixture_sha256": {
+      "tests/business_corpus.rs": "5c832627c40934589fac4a6ba7c2bc0bae43b1c3f1675d2efc00abcbbfaa19fc",
+      "tests/cost_corpus.rs": "56d45e03402eb26c84a0029c8fc54639d48a012c151adea5991004bdffd6f1c0",
+      "tests/fixtures/capability_anchor_authorization.cell": "710f6d15afc0d7f85a7e714c57db94a140743928a6fbc4642f4054326242b2e3",
+      "tests/fixtures/capability_anchor_order.cell": "b3541a954b6b8a43c2b32a8d5cd8d6075e88bef96014085d515449b676f3e906",
+      "tests/fixtures/capability_anchor_policy.cell": "509b283a27208c6a8d8ca4890d7f8026cb82941ac75a09db75ecb62a95693858",
+      "tests/fixtures/capability_anchor_token.cell": "9b7019de49f86dcbe76de012dbc5afc1d7e956b472c378be8ba1a5b9c174f23d",
+      "tests/fixtures/cost_corpus/Cargo.toml": "fbcda0a45b3a0a0ba194b793812e351f00e9bbd54ddcd4b8905e82f95d387182",
+      "tests/fixtures/cost_corpus/expanded_budgets.json": "ecbb83bcac4d88438a95f014ee0d44c6912221367c63addcda745fe6b9ff97e9",
+      "tests/fixtures/cost_corpus/expanded_fixtures.json": "f926437a0c2439173d43d4a703ba881139cf9293be88a25aab2ac401228ffcd2",
+      "tests/fixtures/cost_corpus/growth_budgets.json": "68ccb8d6faa6eed2fbf94a1b757efc9d6045d85dc89dc973e9481d2b4766b160",
+      "tests/fixtures/cost_corpus/multi_script_budgets.json": "f6de8bc29396c48942813c3908a6ce9da6736b8010f66e63d5ddd7f86929ccd1",
+      "tests/fixtures/cost_corpus/nft_lock.cell": "eadffe28485199937e01d6051c00ce238b6d817f5657dcefe46a0669a619c1d0",
+      "tests/fixtures/cost_corpus/pool_merge.cell": "1f11906e1562c306bce400acb6128457ff28ba19ddda1b2e0bdb9b6d1013f521",
+      "tests/fixtures/cost_corpus/scalar_budgets.json": "49df193a48f3f66782b7d60f85ec37a979b0a991b1c37bb36ac81dc761d3afc6",
+      "tests/fixtures/cost_corpus/schema_roll.cell": "8d005226c687e0a8899a6d10cf4390952d8bad23b3b846ce54b0e93f4db3e0aa",
+      "tests/fixtures/cost_corpus/src/common.rs": "c8f2f8f704ec3f7a089c404ec8da184947b148a8d204169d586aad0235357622",
+      "tests/fixtures/cost_corpus/src/nft_lock.rs": "86a920f9935ec3aa6d72dcc27cdbfd2ab515185d1b4858d27964b0a99326e0cf",
+      "tests/fixtures/cost_corpus/src/pool_merge.rs": "df1ae134b07f56bdcdf9f349184488ab67e64e202ee8c6639337f07d08191b63",
+      "tests/fixtures/cost_corpus/src/schema_roll.rs": "68090359cbd094f6bb41c781b445fb03625bf2bcd069e3b753a2565f1d76eca0",
+      "tests/support/cost_growth.rs": "503cbee74c239241093da0c57be81db4352e0927f842b00c62b5add5deb104d8",
+      "tests/support/cost_measurement.rs": "0d0518aa0e96c56e6007d099521dddf9793b396cf64a1f0640ee9a73c3a48452",
+      "tests/support/cost_memory.rs": "7ff37bf1533b690addc57f4fcd25a2f574f88e01ff550df117dec4d6501c9d0d",
+      "tests/support/cost_scalar.rs": "d941145b410ef4ac893d3ba5286131ee204e412afbf108be0bee64fd3117f444",
+      "tests/support/cost_stack.rs": "8b0ec35c4c737e911fab8963f654d775806b40192998b7be6dadd75310cb0679"
+    },
+    "opt_level": 0,
+    "rust_toolchain": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.97.1\nLLVM version: 22.1.6",
+    "source_commit": "65df937f45c6ba5ab45cf5ee69778bfa3e05cdc5",
+    "source_dirty": true,
+    "target": "riscv64-elf",
+    "target_profile": "ckb",
+    "tracked_diff_sha256": "72ae3a94305a584d03b84931d80025321f3648071287c6d61274963948cac78a",
+    "untracked_source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "vm_configuration": {
+      "ckb_script": "1.1.0",
+      "ckb_testtool": "1.1.1",
+      "ckb_vm": "0.24.14",
+      "consensus": "ConsensusBuilder::default with CKB2021/CKB2023 new_dev_default",
+      "group_cycle_limit": 10000000,
+      "group_scope": "scheduler total including spawned VMs",
+      "stack_scope": "static single-VM call chain; external EXEC/SPAWN unknown",
+      "tip_number": 0,
+      "verification_environment": "submit"
+    }
+  },
+  "rows": [
+    {
+      "elf_bytes": 14536,
+      "groups": [
+        {
+          "exit_category": "success",
+          "group": {
+            "input_indices": [
+              0
+            ],
+            "output_indices": [],
+            "role": "lock",
+            "script_hash": "0x25e0687141d664194ee386073c70f91b0920157808aea3ec2d743dfa3e1616ba"
+          },
+          "observation": {
+            "cycles": 1896,
+            "exit_code": 0,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        },
+        {
+          "exit_category": "success",
+          "group": {
+            "input_indices": [
+              1,
+              2,
+              3
+            ],
+            "output_indices": [],
+            "role": "lock",
+            "script_hash": "0x0c74989acafd3574dc668c686443b7b0a2e6f4ead44cab6dbb9339a51d8a3089"
+          },
+          "observation": {
+            "cycles": 2107,
+            "exit_code": 0,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        },
+        {
+          "exit_category": "success",
+          "group": {
+            "input_indices": [
+              1,
+              2
+            ],
+            "output_indices": [
+              1,
+              3
+            ],
+            "role": "type",
+            "script_hash": "0x727f872352e568301709f974c1599c628f87be8e8caaa92e8a09086d80da3777"
+          },
+          "observation": {
+            "cycles": 18384,
+            "exit_code": 0,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        },
+        {
+          "exit_category": "success",
+          "group": {
+            "input_indices": [
+              3
+            ],
+            "output_indices": [
+              2
+            ],
+            "role": "type",
+            "script_hash": "0x1664cc96db26646b551f0482f6db86649ab2e845d1feee2d1b13cacad6d5a7f1"
+          },
+          "observation": {
+            "cycles": 14870,
+            "exit_code": 0,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        },
+        {
+          "exit_category": "success",
+          "group": {
+            "input_indices": [
+              0
+            ],
+            "output_indices": [
+              0
+            ],
+            "role": "type",
+            "script_hash": "0x8ff9f47f35a457633d8c6448bfc7bdae5cb28f84c30def1a43b2c2d6f49c9d78"
+          },
+          "observation": {
+            "cycles": 3669,
+            "exit_code": 0,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        }
+      ],
+      "max_stack_frame_bytes": 5376,
+      "name": "None",
+      "raw_transaction_hash": "0x346ee593b69060cbdafc2a2eddcceed8a88c39e2c50f5f9a5e5020e4fb0b86c2",
+      "serialized_transaction_hash": "0x7a440a25092a5afb60bf51c58be0ac72a5a47b30483fd8c4f7447a504a93a704",
+      "static_stacks": [
+        {
+          "bound": {
+            "static_call_chain_stack_bound_bytes": 7968,
+            "status": "bounded"
+          },
+          "name": "order"
+        },
+        {
+          "bound": {
+            "static_call_chain_stack_bound_bytes": 11504,
+            "status": "bounded"
+          },
+          "name": "policy"
+        },
+        {
+          "bound": {
+            "static_call_chain_stack_bound_bytes": 2576,
+            "status": "bounded"
+          },
+          "name": "token"
+        },
+        {
+          "bound": {
+            "static_call_chain_stack_bound_bytes": 6576,
+            "status": "bounded"
+          },
+          "name": "authorization"
+        }
+      ],
+      "transaction": {
+        "exit_category": "success",
+        "group": null,
+        "observation": {
+          "cycles": 40926,
+          "exit_code": 0,
+          "status": "measured"
+        },
+        "scope": "transaction_scripts"
+      },
+      "transaction_bytes": 1423,
+      "witness_bytes": 321
+    },
+    {
+      "elf_bytes": 14536,
+      "groups": [
+        {
+          "exit_category": "nonzero_exit",
+          "group": {
+            "input_indices": [
+              0
+            ],
+            "output_indices": [],
+            "role": "lock",
+            "script_hash": "0x25e0687141d664194ee386073c70f91b0920157808aea3ec2d743dfa3e1616ba"
+          },
+          "observation": {
+            "cycles": 1873,
+            "exit_code": 5,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        },
+        {
+          "exit_category": "success",
+          "group": {
+            "input_indices": [
+              1,
+              2,
+              3
+            ],
+            "output_indices": [],
+            "role": "lock",
+            "script_hash": "0x0c74989acafd3574dc668c686443b7b0a2e6f4ead44cab6dbb9339a51d8a3089"
+          },
+          "observation": {
+            "cycles": 2107,
+            "exit_code": 0,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        },
+        {
+          "exit_category": "success",
+          "group": {
+            "input_indices": [
+              1,
+              2
+            ],
+            "output_indices": [
+              1,
+              3
+            ],
+            "role": "type",
+            "script_hash": "0x727f872352e568301709f974c1599c628f87be8e8caaa92e8a09086d80da3777"
+          },
+          "observation": {
+            "cycles": 18384,
+            "exit_code": 0,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        },
+        {
+          "exit_category": "success",
+          "group": {
+            "input_indices": [
+              3
+            ],
+            "output_indices": [
+              2
+            ],
+            "role": "type",
+            "script_hash": "0x1664cc96db26646b551f0482f6db86649ab2e845d1feee2d1b13cacad6d5a7f1"
+          },
+          "observation": {
+            "cycles": 14870,
+            "exit_code": 0,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        },
+        {
+          "exit_category": "success",
+          "group": {
+            "input_indices": [
+              0
+            ],
+            "output_indices": [
+              0
+            ],
+            "role": "type",
+            "script_hash": "0x8ff9f47f35a457633d8c6448bfc7bdae5cb28f84c30def1a43b2c2d6f49c9d78"
+          },
+          "observation": {
+            "cycles": 3669,
+            "exit_code": 0,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        }
+      ],
+      "max_stack_frame_bytes": 5376,
+      "name": "AuthorizationCredential",
+      "raw_transaction_hash": "0x346ee593b69060cbdafc2a2eddcceed8a88c39e2c50f5f9a5e5020e4fb0b86c2",
+      "serialized_transaction_hash": "0xe0566dd5787f201b3da3aed4406b4b262649144770fad261f9f53218dc5c926c",
+      "static_stacks": [
+        {
+          "bound": {
+            "static_call_chain_stack_bound_bytes": 7968,
+            "status": "bounded"
+          },
+          "name": "order"
+        },
+        {
+          "bound": {
+            "static_call_chain_stack_bound_bytes": 11504,
+            "status": "bounded"
+          },
+          "name": "policy"
+        },
+        {
+          "bound": {
+            "static_call_chain_stack_bound_bytes": 2576,
+            "status": "bounded"
+          },
+          "name": "token"
+        },
+        {
+          "bound": {
+            "static_call_chain_stack_bound_bytes": 6576,
+            "status": "bounded"
+          },
+          "name": "authorization"
+        }
+      ],
+      "transaction": {
+        "exit_category": "transaction_rejected",
+        "group": null,
+        "observation": {
+          "reason": "ordinary transaction verifier does not return cycles on rejection",
+          "status": "unavailable"
+        },
+        "scope": "transaction_scripts"
+      },
+      "transaction_bytes": 1423,
+      "witness_bytes": 321
+    },
+    {
+      "elf_bytes": 14536,
+      "groups": [
+        {
+          "exit_category": "success",
+          "group": {
+            "input_indices": [
+              0
+            ],
+            "output_indices": [],
+            "role": "lock",
+            "script_hash": "0x25e0687141d664194ee386073c70f91b0920157808aea3ec2d743dfa3e1616ba"
+          },
+          "observation": {
+            "cycles": 1896,
+            "exit_code": 0,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        },
+        {
+          "exit_category": "success",
+          "group": {
+            "input_indices": [
+              1,
+              2,
+              3
+            ],
+            "output_indices": [],
+            "role": "lock",
+            "script_hash": "0x0c74989acafd3574dc668c686443b7b0a2e6f4ead44cab6dbb9339a51d8a3089"
+          },
+          "observation": {
+            "cycles": 2107,
+            "exit_code": 0,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        },
+        {
+          "exit_category": "success",
+          "group": {
+            "input_indices": [
+              1,
+              2
+            ],
+            "output_indices": [
+              1,
+              3
+            ],
+            "role": "type",
+            "script_hash": "0x727f872352e568301709f974c1599c628f87be8e8caaa92e8a09086d80da3777"
+          },
+          "observation": {
+            "cycles": 18384,
+            "exit_code": 0,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        },
+        {
+          "exit_category": "success",
+          "group": {
+            "input_indices": [
+              3
+            ],
+            "output_indices": [
+              2
+            ],
+            "role": "type",
+            "script_hash": "0x1664cc96db26646b551f0482f6db86649ab2e845d1feee2d1b13cacad6d5a7f1"
+          },
+          "observation": {
+            "cycles": 14870,
+            "exit_code": 0,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        },
+        {
+          "exit_category": "nonzero_exit",
+          "group": {
+            "input_indices": [
+              0
+            ],
+            "output_indices": [
+              0
+            ],
+            "role": "type",
+            "script_hash": "0x8ff9f47f35a457633d8c6448bfc7bdae5cb28f84c30def1a43b2c2d6f49c9d78"
+          },
+          "observation": {
+            "cycles": 3647,
+            "exit_code": 5,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        }
+      ],
+      "max_stack_frame_bytes": 5376,
+      "name": "TokenAmount",
+      "raw_transaction_hash": "0x3a1135368dd3186afdb1d25caaf995f08121df96d4f7acff6c6195472ba69d37",
+      "serialized_transaction_hash": "0xa1dc45277d7cd0329305e145ed7e773794950732728dc14ac22da8506ca2c5e2",
+      "static_stacks": [
+        {
+          "bound": {
+            "static_call_chain_stack_bound_bytes": 7968,
+            "status": "bounded"
+          },
+          "name": "order"
+        },
+        {
+          "bound": {
+            "static_call_chain_stack_bound_bytes": 11504,
+            "status": "bounded"
+          },
+          "name": "policy"
+        },
+        {
+          "bound": {
+            "static_call_chain_stack_bound_bytes": 2576,
+            "status": "bounded"
+          },
+          "name": "token"
+        },
+        {
+          "bound": {
+            "static_call_chain_stack_bound_bytes": 6576,
+            "status": "bounded"
+          },
+          "name": "authorization"
+        }
+      ],
+      "transaction": {
+        "exit_category": "transaction_rejected",
+        "group": null,
+        "observation": {
+          "reason": "ordinary transaction verifier does not return cycles on rejection",
+          "status": "unavailable"
+        },
+        "scope": "transaction_scripts"
+      },
+      "transaction_bytes": 1423,
+      "witness_bytes": 321
+    },
+    {
+      "elf_bytes": 14536,
+      "groups": [
+        {
+          "exit_category": "success",
+          "group": {
+            "input_indices": [
+              0
+            ],
+            "output_indices": [],
+            "role": "lock",
+            "script_hash": "0x25e0687141d664194ee386073c70f91b0920157808aea3ec2d743dfa3e1616ba"
+          },
+          "observation": {
+            "cycles": 1896,
+            "exit_code": 0,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        },
+        {
+          "exit_category": "success",
+          "group": {
+            "input_indices": [
+              1,
+              2,
+              3
+            ],
+            "output_indices": [],
+            "role": "lock",
+            "script_hash": "0x0c74989acafd3574dc668c686443b7b0a2e6f4ead44cab6dbb9339a51d8a3089"
+          },
+          "observation": {
+            "cycles": 2107,
+            "exit_code": 0,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        },
+        {
+          "exit_category": "nonzero_exit",
+          "group": {
+            "input_indices": [
+              1,
+              2
+            ],
+            "output_indices": [
+              1,
+              3
+            ],
+            "role": "type",
+            "script_hash": "0x727f872352e568301709f974c1599c628f87be8e8caaa92e8a09086d80da3777"
+          },
+          "observation": {
+            "cycles": 12113,
+            "exit_code": 3,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        },
+        {
+          "exit_category": "success",
+          "group": {
+            "input_indices": [
+              3
+            ],
+            "output_indices": [
+              2
+            ],
+            "role": "type",
+            "script_hash": "0x1664cc96db26646b551f0482f6db86649ab2e845d1feee2d1b13cacad6d5a7f1"
+          },
+          "observation": {
+            "cycles": 14870,
+            "exit_code": 0,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        },
+        {
+          "exit_category": "success",
+          "group": {
+            "input_indices": [
+              0
+            ],
+            "output_indices": [
+              0
+            ],
+            "role": "type",
+            "script_hash": "0x8ff9f47f35a457633d8c6448bfc7bdae5cb28f84c30def1a43b2c2d6f49c9d78"
+          },
+          "observation": {
+            "cycles": 3669,
+            "exit_code": 0,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        }
+      ],
+      "max_stack_frame_bytes": 5376,
+      "name": "OrderAmount",
+      "raw_transaction_hash": "0xbde89780e5c5863a06272574f63688f36d79c2a05526cd565b2e45e78705a074",
+      "serialized_transaction_hash": "0x1b65fc5b06a5048a51278559ed1d9378ac49fbf86b9dd665019cb49785c65bbe",
+      "static_stacks": [
+        {
+          "bound": {
+            "static_call_chain_stack_bound_bytes": 7968,
+            "status": "bounded"
+          },
+          "name": "order"
+        },
+        {
+          "bound": {
+            "static_call_chain_stack_bound_bytes": 11504,
+            "status": "bounded"
+          },
+          "name": "policy"
+        },
+        {
+          "bound": {
+            "static_call_chain_stack_bound_bytes": 2576,
+            "status": "bounded"
+          },
+          "name": "token"
+        },
+        {
+          "bound": {
+            "static_call_chain_stack_bound_bytes": 6576,
+            "status": "bounded"
+          },
+          "name": "authorization"
+        }
+      ],
+      "transaction": {
+        "exit_category": "transaction_rejected",
+        "group": null,
+        "observation": {
+          "reason": "ordinary transaction verifier does not return cycles on rejection",
+          "status": "unavailable"
+        },
+        "scope": "transaction_scripts"
+      },
+      "transaction_bytes": 1423,
+      "witness_bytes": 321
+    },
+    {
+      "elf_bytes": 14536,
+      "groups": [
+        {
+          "exit_category": "success",
+          "group": {
+            "input_indices": [
+              0
+            ],
+            "output_indices": [],
+            "role": "lock",
+            "script_hash": "0x25e0687141d664194ee386073c70f91b0920157808aea3ec2d743dfa3e1616ba"
+          },
+          "observation": {
+            "cycles": 1896,
+            "exit_code": 0,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        },
+        {
+          "exit_category": "success",
+          "group": {
+            "input_indices": [
+              1,
+              2,
+              3
+            ],
+            "output_indices": [],
+            "role": "lock",
+            "script_hash": "0x0c74989acafd3574dc668c686443b7b0a2e6f4ead44cab6dbb9339a51d8a3089"
+          },
+          "observation": {
+            "cycles": 2107,
+            "exit_code": 0,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        },
+        {
+          "exit_category": "success",
+          "group": {
+            "input_indices": [
+              1,
+              2
+            ],
+            "output_indices": [
+              1,
+              3
+            ],
+            "role": "type",
+            "script_hash": "0x727f872352e568301709f974c1599c628f87be8e8caaa92e8a09086d80da3777"
+          },
+          "observation": {
+            "cycles": 18384,
+            "exit_code": 0,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        },
+        {
+          "exit_category": "nonzero_exit",
+          "group": {
+            "input_indices": [
+              3
+            ],
+            "output_indices": [
+              2
+            ],
+            "role": "type",
+            "script_hash": "0x1664cc96db26646b551f0482f6db86649ab2e845d1feee2d1b13cacad6d5a7f1"
+          },
+          "observation": {
+            "cycles": 13769,
+            "exit_code": 3,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        },
+        {
+          "exit_category": "success",
+          "group": {
+            "input_indices": [
+              0
+            ],
+            "output_indices": [
+              0
+            ],
+            "role": "type",
+            "script_hash": "0x8ff9f47f35a457633d8c6448bfc7bdae5cb28f84c30def1a43b2c2d6f49c9d78"
+          },
+          "observation": {
+            "cycles": 3669,
+            "exit_code": 0,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        }
+      ],
+      "max_stack_frame_bytes": 5376,
+      "name": "PolicyState",
+      "raw_transaction_hash": "0x67221aea4eb76d5ab73de7494eb01d55e00af4fa7d17cf1e80fe898adfc15e68",
+      "serialized_transaction_hash": "0xe9b083496419d5c312a922f333752047ed01d1e6dbed41db5ab310e63ddf7942",
+      "static_stacks": [
+        {
+          "bound": {
+            "static_call_chain_stack_bound_bytes": 7968,
+            "status": "bounded"
+          },
+          "name": "order"
+        },
+        {
+          "bound": {
+            "static_call_chain_stack_bound_bytes": 11504,
+            "status": "bounded"
+          },
+          "name": "policy"
+        },
+        {
+          "bound": {
+            "static_call_chain_stack_bound_bytes": 2576,
+            "status": "bounded"
+          },
+          "name": "token"
+        },
+        {
+          "bound": {
+            "static_call_chain_stack_bound_bytes": 6576,
+            "status": "bounded"
+          },
+          "name": "authorization"
+        }
+      ],
+      "transaction": {
+        "exit_category": "transaction_rejected",
+        "group": null,
+        "observation": {
+          "reason": "ordinary transaction verifier does not return cycles on rejection",
+          "status": "unavailable"
+        },
+        "scope": "transaction_scripts"
+      },
+      "transaction_bytes": 1423,
+      "witness_bytes": 321
+    },
+    {
+      "elf_bytes": 14536,
+      "groups": [
+        {
+          "exit_category": "success",
+          "group": {
+            "input_indices": [
+              0
+            ],
+            "output_indices": [],
+            "role": "lock",
+            "script_hash": "0x25e0687141d664194ee386073c70f91b0920157808aea3ec2d743dfa3e1616ba"
+          },
+          "observation": {
+            "cycles": 1896,
+            "exit_code": 0,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        },
+        {
+          "exit_category": "success",
+          "group": {
+            "input_indices": [
+              1,
+              2,
+              3
+            ],
+            "output_indices": [],
+            "role": "lock",
+            "script_hash": "0x0c74989acafd3574dc668c686443b7b0a2e6f4ead44cab6dbb9339a51d8a3089"
+          },
+          "observation": {
+            "cycles": 2107,
+            "exit_code": 0,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        },
+        {
+          "exit_category": "nonzero_exit",
+          "group": {
+            "input_indices": [
+              1,
+              2
+            ],
+            "output_indices": [
+              1,
+              3
+            ],
+            "role": "type",
+            "script_hash": "0x727f872352e568301709f974c1599c628f87be8e8caaa92e8a09086d80da3777"
+          },
+          "observation": {
+            "cycles": 5432,
+            "exit_code": 5,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        },
+        {
+          "exit_category": "success",
+          "group": {
+            "input_indices": [
+              3
+            ],
+            "output_indices": [
+              2
+            ],
+            "role": "type",
+            "script_hash": "0x1664cc96db26646b551f0482f6db86649ab2e845d1feee2d1b13cacad6d5a7f1"
+          },
+          "observation": {
+            "cycles": 14870,
+            "exit_code": 0,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        },
+        {
+          "exit_category": "success",
+          "group": {
+            "input_indices": [
+              0
+            ],
+            "output_indices": [
+              0
+            ],
+            "role": "type",
+            "script_hash": "0x8ff9f47f35a457633d8c6448bfc7bdae5cb28f84c30def1a43b2c2d6f49c9d78"
+          },
+          "observation": {
+            "cycles": 3669,
+            "exit_code": 0,
+            "status": "measured"
+          },
+          "scope": "script_group_scheduler_including_children"
+        }
+      ],
+      "max_stack_frame_bytes": 5376,
+      "name": "Dependency",
+      "raw_transaction_hash": "0x07febce9e4c7b6d1707012001eec158b8ce9f924cfc800958bca67cb5ccebc01",
+      "serialized_transaction_hash": "0x32371c3953d50b0b7b623716a04afc992ce54af7599b24133c89af17255e442f",
+      "static_stacks": [
+        {
+          "bound": {
+            "static_call_chain_stack_bound_bytes": 7968,
+            "status": "bounded"
+          },
+          "name": "order"
+        },
+        {
+          "bound": {
+            "static_call_chain_stack_bound_bytes": 11504,
+            "status": "bounded"
+          },
+          "name": "policy"
+        },
+        {
+          "bound": {
+            "static_call_chain_stack_bound_bytes": 2576,
+            "status": "bounded"
+          },
+          "name": "token"
+        },
+        {
+          "bound": {
+            "static_call_chain_stack_bound_bytes": 6576,
+            "status": "bounded"
+          },
+          "name": "authorization"
+        }
+      ],
+      "transaction": {
+        "exit_category": "transaction_rejected",
+        "group": null,
+        "observation": {
+          "reason": "ordinary transaction verifier does not return cycles on rejection",
+          "status": "unavailable"
+        },
+        "scope": "transaction_scripts"
+      },
+      "transaction_bytes": 1423,
+      "witness_bytes": 321
+    }
+  ],
+  "schema": "cellscript-multi-script-cost-v2",
+  "status": "passed"
+}

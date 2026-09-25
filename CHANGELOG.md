@@ -21,6 +21,10 @@ remain historical evidence. See the [reproduction package](docs/reports/0.31/REA
 
 ## 0.30.0 - Capability closure
 
+Published September 23 at signed tag `v0.30.0` (`352b4950`). GitHub assets and
+the website are complete within the accepted publication scope; see the
+[current closure record](docs/releases/CELLSCRIPT_0_30_ISSUE_STATUS.md).
+
 Publication and the website update were authorized on 2026-09-21, subject to a
 fresh full release gate. See [the 0.30 release notes](docs/releases/CELLSCRIPT_0_30_RELEASE_NOTES.md)
 for the accepted compatibility boundary and publication channels.

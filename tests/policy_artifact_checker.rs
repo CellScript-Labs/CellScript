@@ -394,6 +394,38 @@ fn typed_outgoing_stack_args_are_bound_to_the_policy_adapter_frame() {
     assert!(error.message.contains("policy positional adapter frame contract changed"), "{error}");
 }
 
+#[test]
+fn shared_decoder_preserves_private_return_storage_with_outgoing_stack_arguments() {
+    let second = STACK_ARGS_SOURCE.split_once("action mint(").unwrap().1;
+    let source = format!("{STACK_ARGS_SOURCE}\naction mint_other({second}");
+    let declaration = ArtifactDeclaration {
+        name: "shared-stack-policy".into(),
+        context: ArtifactContext::TypeGroup { resource: "Token".into() },
+        dispatch: ArtifactDispatch::PolicyWitnessV1,
+        actions: vec![ArtifactAction { tag: 1, action: "mint".into() }, ArtifactAction { tag: 2, action: "mint_other".into() }],
+        common_checks: Vec::new(),
+    };
+    let valid = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, 3, declaration);
+    let decoders: Vec<_> = valid.record.entries.iter().filter(|entry| entry.name.starts_with(".Lpolicy_shared_decoder_")).collect();
+    assert_eq!(decoders.len(), 1);
+    assert_eq!(decoders[0].frame_size_bytes, 0);
+    let adapters: Vec<_> = valid.record.entries.iter().filter(|entry| entry.name.starts_with(".Lpolicy_action_adapter_")).collect();
+    assert_eq!(adapters.len(), 2);
+    let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+    for adapter in adapters {
+        assert_eq!(adapter.frame_size_bytes, 160, "128 private bytes plus 32 outgoing bytes");
+        let start = valid.record.blocks.iter().find(|block| block.id == adapter.entry_block).unwrap().range.start;
+        let saved_ra = elf.instructions.iter().find(|instruction| instruction.address == start + 4).unwrap();
+        let mut changed = valid.clone();
+        // Move saved ra from sp+120 to sp+112, into the selected payload.
+        // Rebind hashes so rejection depends on the independent frame contract.
+        changed.replace_machine_word(saved_ra.address, saved_ra.word ^ (1 << 10));
+        let error = changed.check().unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{error}");
+        assert!(error.message.contains("private copy frame"), "{error}");
+    }
+}
+
 fn is_add(word: u32, rd: u32, rs1: u32, rs2: u32) -> bool {
     word & 0x7f == 0x33
         && (word >> 25) & 0x7f == 0
