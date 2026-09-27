@@ -703,6 +703,34 @@ mod tests {
     }
 
     #[test]
+    fn timelock_release_recipes_bind_owner_fields_and_witnesses_to_current_scripts() {
+        use ckb_types::{packed, prelude::*};
+
+        let fixture: Value = serde_json::from_str(include_str!("../fixtures/ckb_acceptance/transactions-v0.23.json")).unwrap();
+        for (name, owner_fields) in [
+            ("timelock.cell:request_release", vec![("initial_tx", 1, 32), ("valid_tx", 0, 32)]),
+            ("timelock.cell:execute_release", vec![("initial_tx", 0, 32), ("initial_tx", 2, 32), ("valid_tx", 1, 40)]),
+        ] {
+            let case = fixture["action_cases"].as_array().unwrap().iter().find(|case| case["name"] == name).unwrap();
+            let initial = &fixture["transactions"][case["initial_tx"].as_str().unwrap()];
+            let script: ckb_jsonrpc_types::Script = serde_json::from_value(initial["outputs"][0]["lock"].clone()).unwrap();
+            let script: packed::Script = script.into();
+            let owner = script.calc_script_hash();
+            let valid = &fixture["transactions"][case["valid_tx"].as_str().unwrap()];
+            let witness_bytes = hex::decode(valid["witnesses"][0].as_str().unwrap().trim_start_matches("0x")).unwrap();
+            let witness = packed::WitnessArgs::from_slice(&witness_bytes).unwrap();
+            let payload = witness.input_type().to_opt().unwrap().raw_data();
+            assert_eq!(&payload[..8], b"CSARGv1\0");
+            assert_eq!(&payload[8..], owner.as_slice(), "{name}: stale requester/executor witness identity");
+            for (transaction, index, offset) in owner_fields {
+                let data = &fixture["transactions"][case[transaction].as_str().unwrap()]["outputs_data"][index];
+                let data = hex::decode(data.as_str().unwrap().trim_start_matches("0x")).unwrap();
+                assert_eq!(&data[offset..offset + 32], owner.as_slice(), "{name}: stale owner in {transaction} output {index}");
+            }
+        }
+    }
+
+    #[test]
     fn transaction_recipe_fixture_is_native_v023() {
         fn assert_generated_scripts_use_data2(value: &Value, generated_hashes: &BTreeSet<String>) -> usize {
             match value {

@@ -90,9 +90,13 @@ transaction hashes while preserving their outcomes, error codes and inputs.
 
 The compile-only CKB acceptance matrix independently regenerated 69 artifacts.
 Exactly three transaction-recipe identities changed: timelock `request_release`,
-`execute_release` and `can_unlock_lock`. Their 22 exact hash references were
-rebound without changing transaction inputs, witnesses, expected results or
-budgets. Historical transaction keys remain replay identifiers: the existing
+`execute_release` and `can_unlock_lock`. Their 22 code-hash references and 13
+derived full-Script-hash references in owner fields and witness arguments were
+rebound while preserving inputs, field layouts, expected results and budgets.
+The live replay rejected a partial refresh that left the old owner identities;
+a native `ckb-types` regression now derives the current Script hash and checks
+both timelock release actions' owner fields and witness parameters before replay.
+Historical transaction keys remain replay identifiers: the existing
 replayer replaces them with actual newly submitted transaction hashes.
 
 ## Reproduction
