@@ -7,20 +7,20 @@
       "verified_bundle_id": "0xad9dd15ffd9f2bb7e9f8049b110a55c6e375d0789a6b4f52fb2f48eb020e55db"
     },
     "policy": {
-      "artifact_hash": "0xf56e3beeffd7d78ef1e6f9d9c07cd3b7564eb72663be6bcf89e086ec2ae3543a",
-      "lowering_record_hash": "0x9cd5f251597d183b62fed2c7fabd7d7f3a4e963463f5c9d5ca0107d421737ca9",
-      "source_map_hash": "0x8aa160e0f4e0198f8cc10a1ce0ac1a317fc20190492396c5cca40a40be0823bb",
-      "verified_bundle_id": "0x7b82292ddde5df1727c3e8416bbb865278a641f36054d65e32923c70ed43ab23"
+      "artifact_hash": "0x84e7fc868c4d81486236d5fb7f6cf975cd8b695ad4e311c873d33a60b67bd5ca",
+      "lowering_record_hash": "0x1cce0e2485f49fa7eccd9dbd45f4f22c55c9b8cf1a0ee43b513df48483744be2",
+      "source_map_hash": "0x201ca90d781d3398173d2c9d3ea23ccd4bcb03e336434f9dd7772dc334350d79",
+      "verified_bundle_id": "0x8cdf960bb02472f4d728f48e8cd3bb26b82210835655f458e0daf1d4e622ec09"
     }
   },
   "cases": [
     {
       "expected_exit_code": 0,
       "outcome": "positive",
-      "raw_transaction_hash": "0x6c0f9aaedfd7fc068bc7e0645a417dc58bdbec88af461cc6102b88de94603efd",
+      "raw_transaction_hash": "0x36c25211d51db7f2292704486d51dfe7593583121aa2edcc808fd0aea86cb529",
       "rejection_stage": "ckb-vm",
       "scenario": "burn",
-      "serialized_transaction_hash": "0x6920ec69954c5406b1a1c4e7df47d35881d9aae7c82cb164c0189b92872f026e"
+      "serialized_transaction_hash": "0x6229091a481ab9cd106f9e34a6626b58ac325bb563443a59b330cb1a1065e88e"
     },
     {
       "expected_exit_code": 0,
@@ -33,66 +33,66 @@
     {
       "expected_exit_code": 21,
       "outcome": "adversarial",
-      "raw_transaction_hash": "0xc0750788dd2bd81cd743cdfd9a0e69235815945701aa36e806032a56f1826cc6",
+      "raw_transaction_hash": "0xb8c12f724def9912cc839c06d0b6ac69b22ed8861022d0ca99d3f67fd7819dbe",
       "rejection_stage": "ckb-vm",
       "scenario": "duplicate_identity",
-      "serialized_transaction_hash": "0x4d6a2aec72eef1762c3f624129c68a22e92a86f45b327f340ad7cc96df8968da"
+      "serialized_transaction_hash": "0x3dd3172ad272d31bb2c69c227e5ec818eed835ccc368d5d45ab16fd5f5c20431"
     },
     {
       "expected_exit_code": 0,
       "outcome": "positive",
-      "raw_transaction_hash": "0x542763062e20d6ee8414ebd6b1dfca649415e71bc227d3e93565d88f5d594f0f",
+      "raw_transaction_hash": "0x7c1474a5757497042e69a0c330df8afcc3fad10dc27d30c6e4b0599206df3de8",
       "rejection_stage": "ckb-vm",
       "scenario": "metadata_update",
-      "serialized_transaction_hash": "0xf68335214f9f2f06890739d5b25c94032c5a86cfef5e2ea76436af613fddbdcb"
+      "serialized_transaction_hash": "0x10e61270f21249b6a4604c9542de43adcea0335c02def72f1b75f4fbf6e93fea"
     },
     {
       "expected_exit_code": 0,
       "outcome": "positive",
-      "raw_transaction_hash": "0xaca937d056ce9da1adc455db5448bca2da1191b000dfa99320e844f121a930e0",
+      "raw_transaction_hash": "0xbb499169038555e8a7cd04b4e8a7ff565d67ee70fdef6f8feb27960b1cf2daf9",
       "rejection_stage": "ckb-vm",
       "scenario": "mint_unique",
-      "serialized_transaction_hash": "0x32d57bd30de6fcfb247b49ffae4f9e5947cbe0b366a5f628b639f78186fc95c9"
+      "serialized_transaction_hash": "0x3ad7c6c65adee39e0019548dcb367a95e5f45f40bd6451a45c9a1952a52d5e6b"
     },
     {
       "expected_exit_code": 0,
       "outcome": "positive",
-      "raw_transaction_hash": "0xd401aec18fe85646337d0845d52913a8546d36bf49500ddbf82dee21a1e0aa26",
+      "raw_transaction_hash": "0xa05b527ce920fcfb2e2ca19e93f7606bb390112964334759a117c5d41f61292f",
       "rejection_stage": "ckb-vm",
       "scenario": "ownership_transfer",
-      "serialized_transaction_hash": "0x654e2d728b2541061a9a2204175a255ffd906027c55b2c1e2d31ef79c0f1de1c"
+      "serialized_transaction_hash": "0x40a490c52c4223ba0d621778d7022a30fdc3a1991078d5fe130b3942b0130430"
     },
     {
       "expected_exit_code": 3,
       "outcome": "adversarial",
-      "raw_transaction_hash": "0xab66f6d4ad4fd219d4ff605ff30c3054a481e2c3adc3ffaf04f48430a585c589",
+      "raw_transaction_hash": "0xad5af1b348ec9ecba3c23c446f43ec6a258e001068b867cd849d567ca5675645",
       "rejection_stage": "ckb-vm",
       "scenario": "stale_state",
-      "serialized_transaction_hash": "0xb3a9402e6c001a14300f891d80f408113d4955c6dfa8261d6c691a47261c56ca"
+      "serialized_transaction_hash": "0xfdee178fdc070ff964f23fb09c3f448f5725ca0d1d78ea89eddb0fd1e4a42244"
     },
     {
       "expected_exit_code": -11,
       "outcome": "adversarial",
-      "raw_transaction_hash": "0x542763062e20d6ee8414ebd6b1dfca649415e71bc227d3e93565d88f5d594f0f",
+      "raw_transaction_hash": "0x7c1474a5757497042e69a0c330df8afcc3fad10dc27d30c6e4b0599206df3de8",
       "rejection_stage": "ckb-vm",
       "scenario": "unauthorized_update",
-      "serialized_transaction_hash": "0x07daddb783e505252c637d875dad385fd80cc46aae0f37f1f0b174a922301240"
+      "serialized_transaction_hash": "0x40e9c3899caba820f73b3866243c1cac3bdce5e7c5cad65bd7496a8e4b4b9f8d"
     },
     {
       "expected_exit_code": 3,
       "outcome": "adversarial",
-      "raw_transaction_hash": "0x9dad70f5dabd8e17ee3aabb88ee820c2460660925aa8cfac4cf5fd7aacb82648",
+      "raw_transaction_hash": "0x07ff39747ec301746b9329f8d89b68f9afea97db05660c1b9f9b4a8b2d4c5e1b",
       "rejection_stage": "ckb-vm",
       "scenario": "wrong_lock",
-      "serialized_transaction_hash": "0x488797c105eb599a76c74383b737e70991a74d78cf019f7451f84721ba22b3c0"
+      "serialized_transaction_hash": "0x67838839fc174a048b7337ed1a570495096402c21d5583e5d471e6500db21b50"
     },
     {
       "expected_exit_code": 47,
       "outcome": "adversarial",
-      "raw_transaction_hash": "0x653a9169da3a7db24f254413dc80bf9333a9a505b742dae7659744aebe33d6db",
+      "raw_transaction_hash": "0x54976e366908bfbf860e4cf97eebfca328c31ea201b13cdd33155a99496fab07",
       "rejection_stage": "ckb-vm",
       "scenario": "wrong_type",
-      "serialized_transaction_hash": "0xb7e9eefc13f09a86d8c2b63691e292c565d2470c9fc69eeeb15057aa3f3d5dd6"
+      "serialized_transaction_hash": "0x75048bef998cafe676e861be3676680e480f56e9aa3b1c6bb2385b67e9caf0e3"
     }
   ],
   "schema": "cellscript-nft-scenarios-v1",

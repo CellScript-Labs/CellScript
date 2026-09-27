@@ -1,5 +1,18 @@
 # Branch Context
 
+## 0.32 — bounded immediate follow-up
+
+`0.32` starts at `54d639a7230060cc0bcc009dcf26e1830e2011c6`, the signed
+merge of the published 0.30 history into 0.31. That merge has the same tree as
+the validated `648bb836` engineering closure. The September 27 maintainer
+instruction authorizes the low-mask immediate slice in
+[#41](https://github.com/CellScript-Labs/CellScript/issues/41), under the
+[#40](https://github.com/CellScript-Labs/CellScript/issues/40) research umbrella.
+It does not authorize the other proposed 0.32 experiments. See the
+[implementation and measurement record](docs/reports/0.32/IMMEDIATE_MASKS.md).
+Cargo versions remain 0.30.0; this branch is not a release announcement.
+The `0.30` published baseline and `0.31` engineering scope remain separate.
+
 ## Branch decision — 2026-09-21
 
 `0.31` is the development branch, starting from the tested

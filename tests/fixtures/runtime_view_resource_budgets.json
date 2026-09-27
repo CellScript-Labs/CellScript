@@ -13,9 +13,9 @@
         "raw transaction hash"
       ],
       "measured": {
-        "cycles": 18329,
+        "cycles": 18313,
         "dependency_bytes": 28,
-        "elf_bytes": 9896,
+        "elf_bytes": 9864,
         "max_stack_frame_bytes": 5376,
         "transaction_bytes": 469,
         "witness_bytes": 60

@@ -13,6 +13,7 @@ pub(super) enum Step {
     LoadUpper(i64),
     ShiftLeft(u8),
     Add(i64),
+    ShiftRight(u8),
 }
 
 pub(super) fn plan(literal: i128) -> Result<Vec<Step>> {
@@ -22,13 +23,23 @@ pub(super) fn plan(literal: i128) -> Result<Vec<Step>> {
     // Keep a correctness fallback even if a future candidate generator emits
     // an invalid immediate, shift or reconstructed value.
     let valid = evaluate(&candidate) == Some(bits);
-    if valid && (candidate.len(), &candidate) < (fallback.len(), &fallback) {
-        Ok(candidate)
+    let mut best = if valid && (candidate.len(), &candidate) < (fallback.len(), &fallback) {
+        candidate
     } else if evaluate(&fallback) == Some(bits) {
-        Ok(fallback)
+        fallback
     } else {
-        Err(CompileError::new("invalid RV64 immediate plan", crate::error::Span::default()))
+        return Err(CompileError::new("invalid RV64 immediate plan", crate::error::Span::default()));
+    };
+    // A nonempty low-bit mask can be built from all ones and a logical right
+    // shift. Keep the 0.31 plan on ties, including its one-instruction cases.
+    // Excluding both endpoints also excludes zero/64-bit shifts and overflow.
+    if bits != 0 && bits != u64::MAX && bits & (bits + 1) == 0 {
+        let mask = vec![Step::AddFromZero(-1), Step::ShiftRight(bits.leading_zeros() as u8)];
+        if mask.len() < best.len() && evaluate(&mask) == Some(bits) {
+            best = mask;
+        }
     }
+    Ok(best)
 }
 
 fn legacy(literal: i128, bits: u64) -> Result<Vec<Step>> {
@@ -89,6 +100,7 @@ fn evaluate(steps: &[Step]) -> Option<u64> {
             Step::LoadUpper(imm) if (-0x80000..=0x7ffff).contains(&imm) => (imm << 12) as u64,
             Step::ShiftLeft(shift) if (1..=63).contains(&shift) => value? << shift,
             Step::Add(imm) if (-2048..=2047).contains(&imm) => value?.wrapping_add_signed(imm),
+            Step::ShiftRight(shift) if (1..=63).contains(&shift) => value? >> shift,
             _ => return None,
         });
     }
@@ -118,6 +130,7 @@ mod tests {
                 let steps = plan(literal).unwrap();
                 assert_eq!(evaluate(&steps), Some(bits), "{literal}");
                 assert!(steps.len() <= legacy(literal, bits).unwrap().len());
+                assert!(steps.len() <= recursive(bits as i64).len(), "must not grow relative to 0.31");
                 assert_eq!(steps, plan(literal).unwrap());
             }
         }
@@ -125,5 +138,26 @@ mod tests {
         assert_eq!(plan(i128::from(u64::MAX)).unwrap(), vec![Step::AddFromZero(-1)]);
         assert!(plan(i128::from(u64::MAX) + 1).is_err());
         assert!(plan(i128::from(i64::MIN) - 1).is_err());
+    }
+
+    #[test]
+    fn low_masks_shorten_only_when_the_existing_plan_needs_more_than_two_steps() {
+        for width in 1..64 {
+            let bits = (1u64 << width) - 1;
+            let previous = recursive(bits as i64);
+            let actual = plan(i128::from(bits)).unwrap();
+            assert_eq!(evaluate(&actual), Some(bits));
+            if width >= 31 {
+                assert_eq!(previous.len(), 3);
+                assert_eq!(actual, vec![Step::AddFromZero(-1), Step::ShiftRight(64 - width)]);
+            } else {
+                assert_eq!(actual, previous, "preserve shorter and equal-size plans");
+            }
+        }
+        for value in [0, -1, -2, i128::from(i64::MIN), i128::from(u64::MAX)] {
+            assert!(!plan(value).unwrap().iter().any(|step| matches!(step, Step::ShiftRight(_))));
+        }
+        assert_eq!(evaluate(&[Step::AddFromZero(-1), Step::ShiftRight(0)]), None);
+        assert_eq!(evaluate(&[Step::AddFromZero(-1), Step::ShiftRight(64)]), None);
     }
 }

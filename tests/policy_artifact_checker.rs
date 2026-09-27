@@ -278,6 +278,47 @@ fn policy_dispatch_machine_contract_covers_editions_optimizers_tag_extremes_and_
 }
 
 #[test]
+fn low_mask_policy_tags_reject_rebound_shift_and_seed_mutations() {
+    let mut policy = declaration();
+    policy.actions =
+        vec![ArtifactAction { tag: 0x7fff_ffff, action: "burn".into() }, ArtifactAction { tag: u32::MAX, action: "mint".into() }];
+    for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+        for opt_level in 0..=3 {
+            let valid = Fixture::new_with(edition, opt_level, policy.clone());
+            let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+            let sequences: Vec<_> = elf
+                .instructions
+                .windows(2)
+                .filter(|pair| {
+                    // addi t1, zero, -1; srli t1, t1, 32/33. These tags
+                    // appear in both the precheck and final action routing.
+                    pair[0].word == 0xfff0_0313
+                        && matches!(pair[1].word, 0x0203_5313 | 0x0213_5313)
+                        && valid
+                            .record
+                            .blocks
+                            .iter()
+                            .any(|block| block.owner_entry == "wrapper:_cellscript_entry" && block.range.contains(pair[1].address))
+                })
+                .collect();
+            assert_eq!(sequences.len(), 4, "both tags use the short plan in both dispatch checks");
+            for pair in sequences {
+                for (address, word) in [
+                    (pair[0].address, 0x0000_0313),              // zero instead of all ones
+                    (pair[1].address, pair[1].word ^ (1 << 20)), // neighboring shift amount
+                    (pair[1].address, pair[1].word | (1 << 30)), // arithmetic instead of logical shift
+                ] {
+                    let mut changed = valid.clone();
+                    changed.replace_machine_word(address, word);
+                    let error = changed.check().expect_err("altered tag must reject after all outer hashes are rebound");
+                    assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn rebound_policy_machine_mutations_cannot_change_selector_dispatch_or_adapter_dataflow() {
     let valid = Fixture::new(CellScriptEdition::Edition2027);
     let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();

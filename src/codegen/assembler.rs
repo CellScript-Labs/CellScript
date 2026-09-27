@@ -1507,6 +1507,7 @@ fn encode_li_sequence(out: &mut Vec<u8>, rd: u8, imm: i128) -> Result<()> {
             immediate::Step::LoadUpper(value) => encode_u_type(0x37, rd, value),
             immediate::Step::ShiftLeft(value) => encode_i_type(0x13, rd, 0b001, rd, i64::from(value))?,
             immediate::Step::Add(value) => encode_i_type(0x13, rd, 0b000, rd, value)?,
+            immediate::Step::ShiftRight(value) => encode_i_type(0x13, rd, 0b101, rd, i64::from(value))?,
         };
         out.extend_from_slice(&word.to_le_bytes());
     }
@@ -2183,6 +2184,62 @@ mod tests {
 
     #[test]
     #[cfg(feature = "vm-runner")]
+    fn low_mask_encoding_saves_one_executed_instruction_per_materialization() {
+        use ckb_vm::{
+            cost_model::estimate_cycles, machine::VERSION2, Bytes, DefaultCoreMachine, DefaultMachineBuilder, DefaultMachineRunner,
+            SparseMemory, SupportMachine, TraceMachine, WXorXMemory, ISA_B, ISA_IMC, ISA_MOP,
+        };
+
+        let mut encoded = Vec::new();
+        encode_li_sequence(&mut encoded, 5, 0x7fff_ffff).unwrap();
+        assert_eq!(encoded, [0xfff0_0293u32.to_le_bytes(), 0x0212_d293u32.to_le_bytes()].concat());
+        assert_eq!(li_sequence_size(0x7fff_ffff), encoded.len());
+
+        let execute = |count: usize, previous: bool| {
+            let mut lines = vec![".section .text".into(), ".global entry".into(), "entry:".into()];
+            for _ in 0..count {
+                if previous {
+                    // Exact 0.31 expansion for this literal, kept explicit so
+                    // this control cannot call the new immediate planner.
+                    lines.extend(["addi t0, zero, 1".into(), "slli t0, t0, 31".into(), "addi t0, t0, -1".into()]);
+                } else {
+                    lines.push("li t0, 2147483647".into());
+                }
+                lines.extend(["la t1, expected".into(), "ld t2, 0(t1)".into(), "bne t0, t2, failed".into()]);
+            }
+            lines.extend([
+                "li a0, 0".into(),
+                "ret".into(),
+                "failed:".into(),
+                "li a0, 1".into(),
+                "ret".into(),
+                ".section .rodata".into(),
+                ".align 3".into(),
+                "expected:".into(),
+                ".word 2147483647".into(),
+                ".word 0".into(),
+            ]);
+            let elf = assemble_elf_internal(&lines).unwrap();
+            let bytes = elf.len();
+            type Machine = TraceMachine<DefaultCoreMachine<u64, WXorXMemory<SparseMemory<u64>>>>;
+            let core =
+                <<Machine as DefaultMachineRunner>::Inner as SupportMachine>::new(ISA_IMC | ISA_B | ISA_MOP, VERSION2, 1_000_000);
+            let mut machine = Machine::new(DefaultMachineBuilder::new(core).instruction_cycle_func(Box::new(estimate_cycles)).build());
+            machine.load_program(&Bytes::from(elf), std::iter::empty::<std::result::Result<Bytes, ckb_vm::Error>>()).unwrap();
+            assert_eq!(machine.run().unwrap(), 0, "each constructed value equals independent read-only data");
+            (bytes, machine.machine.cycles())
+        };
+        for count in [1, 8, 64] {
+            let (old_bytes, old_cycles) = execute(count, true);
+            let (new_bytes, new_cycles) = execute(count, false);
+            assert_eq!(old_cycles - new_cycles, count as u64);
+            assert!(new_bytes <= old_bytes, "whole ELF padding may absorb a local four-byte saving");
+            eprintln!("[low-mask] {count} sites: ELF {old_bytes}->{new_bytes} bytes; VM {old_cycles}->{new_cycles} cycles");
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "vm-runner")]
     fn immediate_plans_execute_in_ckb_vm_with_relaxed_branches_and_zero_destination() {
         use ckb_vm::{
             cost_model::estimate_cycles, machine::VERSION2, Bytes, DefaultCoreMachine, DefaultMachineBuilder, DefaultMachineRunner,
@@ -2203,6 +2260,10 @@ mod tests {
             u64::MAX,
         ];
         let mut state = 0x6d75_a6e7_c4a4_ec17u64;
+        for width in 1..64 {
+            let mask = (1u64 << width) - 1;
+            values.extend([mask - 1, mask, mask + 1, !mask]);
+        }
         for _ in 0..512 {
             state ^= state << 13;
             state ^= state >> 7;
@@ -2674,7 +2735,7 @@ mod tests {
 
     #[test]
     fn rv64_li_boundary_values_materialize_correct_bits() {
-        let cases = [(0x7fff_f7ffi128, 8usize), (0x7fff_f800i128, 12usize), (0x7fff_ffffi128, 12usize), (0x8000_0000i128, 8usize)];
+        let cases = [(0x7fff_f7ffi128, 8usize), (0x7fff_f800i128, 12usize), (0x7fff_ffffi128, 8usize), (0x8000_0000i128, 8usize)];
 
         for (value, expected_size) in cases {
             let mut bytes = Vec::new();
@@ -2703,6 +2764,10 @@ mod tests {
                 (0x13, 0b001) => {
                     let shamt = (inst >> 20) & 0x3f;
                     regs[rd] = regs[rs1] << shamt;
+                }
+                (0x13, 0b101) if inst >> 26 == 0 => {
+                    let shamt = (inst >> 20) & 0x3f;
+                    regs[rd] = regs[rs1] >> shamt;
                 }
                 _ => panic!("unexpected instruction in li sequence: 0x{inst:08x}"),
             }
