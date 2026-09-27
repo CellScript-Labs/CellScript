@@ -63,9 +63,13 @@ right shifts after artifact/sidecar hashes and block digests are rebound.
 The unchanged cost corpus and multi-Script companion are measured separately
 on the baseline and candidate, in distinct worktrees/build directories.
 Frozen fixtures, Rust references, acceptance rules and budgets are retained.
-The initial implementation comparison passes 6,782 comparable metrics with no
-regression. The clean-source baseline is the commit above; the initial
-candidate is a dirty engineering checkpoint, not a release build.
+The archived comparison passes 6,782 comparable metrics with no regression.
+Both report pairs declare clean source. The baseline is the commit above;
+the measured implementation is `0e544ce1858288c09758617adc929b31a38cd2a4`.
+The later evidence-packaging and acceptance-recipe refresh do not change the
+compiler implementation or frozen cost fixtures. Raw reports are retained as
+`baseline.json`, `baseline-multi.json`, `candidate.json`, `candidate-multi.json`
+and `comparison.json`; `SHA256SUMS` binds those files from the repository root.
 
 | Existing fixture | ELF bytes, before → after | Worst successful transaction cycles | Selected-group rejection cycles |
 | --- | ---: | ---: | ---: |
@@ -83,6 +87,13 @@ from 9,896 to 9,864 ELF bytes and from 18,329 to 18,313 successful transaction
 cycles. Its acceptance budget is unchanged. Authorization, fungible, NFT and
 temporal scenario fixtures are replayed to refresh changed artifact/sidecar and
 transaction hashes while preserving their outcomes, error codes and inputs.
+
+The compile-only CKB acceptance matrix independently regenerated 69 artifacts.
+Exactly three transaction-recipe identities changed: timelock `request_release`,
+`execute_release` and `can_unlock_lock`. Their 22 exact hash references were
+rebound without changing transaction inputs, witnesses, expected results or
+budgets. Historical transaction keys remain replay identifiers: the existing
+replayer replaces them with actual newly submitted transaction hashes.
 
 ## Reproduction
 
@@ -106,5 +117,9 @@ cargo test --locked -p cellscript --lib low_mask_encoding_saves_one_executed_ins
 cargo test --locked -p cellscript --test policy_artifact_checker low_mask_policy_tags_reject_rebound_shift_and_seed_mutations -- --exact
 ```
 
-Full gate results and exact clean-source report identities are recorded after
-validation. The microbenchmark is not a substitute for the full corpus.
+The implementation commit passed `dev` and `ci`. The final evidence/recipe
+commit is checked with `dev`, `ci` and `backend`; exact results and commit
+identities are recorded in [#41](https://github.com/CellScript-Labs/CellScript/issues/41).
+The backend gate includes live local-node stateful replay. Compile-only evidence
+alone is not that replay, and neither is a release publication. The microbenchmark
+is not a substitute for the full corpus.

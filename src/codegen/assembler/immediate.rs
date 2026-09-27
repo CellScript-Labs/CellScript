@@ -1,9 +1,10 @@
 //! One RV64 immediate plan shared by layout, relaxation and emission.
 //!
 //! All supported steps cost one cycle in the pinned CKB-VM model. Equal-size
-//! plans therefore also tie on cycles; enum order followed by signed operand
-//! order supplies the final stable ordering. The entry trampoline does not use
-//! this planner and keeps its fixed reservation.
+//! plans therefore also tie on cycles. Existing constructions use enum order
+//! followed by signed operand order; the low-mask candidate replaces them only
+//! on a strict improvement. The entry trampoline does not use this planner and
+//! keeps its fixed reservation.
 
 use super::{li_bits, li_fits_lui_addi_rv64, li_form, split_hi_lo, CompileError, LiForm, Result};
 
