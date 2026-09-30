@@ -13,6 +13,13 @@ accounting with frozen per-metric ceilings. See the
 [implementation and acceptance report](docs/CELLSCRIPT_0_31_COST_IMPLEMENTATION.md).
 These changes are development work; 0.31 has not been released.
 
+Reject source-byte loop fusion when a discarded loop-prefix instruction
+defines the byte offset or memory pointer, preventing optimized builds from
+reading an uninitialized stack slot. Derive self-hosted Registry client
+addresses from the socket peer and an explicit trusted-proxy hop count instead
+of accepting caller-supplied forwarding and ASN headers. Propagate RV64
+immediate-planner failures through assembly layout rather than panicking.
+
 Add decoded-ELF static load/store counts to scalar evidence, hash the shared
 measurement fixtures and frozen budgets, and provide a native before/after
 comparison command. A pinned patch and reproduction script rebuild the released

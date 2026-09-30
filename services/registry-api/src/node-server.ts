@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 
 import { createApp, type Env } from "./index";
+import { applyNodeClientIdentity, parseTrustedProxyHops } from "./node-client-ip";
 import { FilesystemObjectStore } from "./filesystem-object-store";
 import { nodeCkbRpcEnv } from "./node-runtime-env";
 import { SqlRegistryStore } from "./sql-store";
@@ -14,6 +15,7 @@ const databaseUrl = requiredEnv("DATABASE_URL");
 const objectRoot = resolve(requiredEnv("REGISTRY_OBJECTS_DIR"));
 const adminToken = requiredEnv("REGISTRY_ADMIN_TOKEN");
 const maxIncomingBodyBytes = integerEnv("MAX_INCOMING_BODY_BYTES", 7 * 1024 * 1024, 1_024, 64 * 1024 * 1024);
+const trustedProxyHops = parseTrustedProxyHops(process.env["REGISTRY_TRUSTED_PROXY_HOPS"]);
 const requireVerifierReady = process.env["REQUIRE_REGISTRY_VERIFIER_READY"] === "true";
 const verifierHeartbeatPath = resolve(process.env["REGISTRY_VERIFIER_SHARED_HEARTBEAT"] ?? `${objectRoot}/.health/verifier-ready`);
 const verifierHeartbeatMaxAgeSeconds = integerEnv("REGISTRY_VERIFIER_HEARTBEAT_MAX_AGE_SECONDS", 120, 30, 600);
@@ -103,6 +105,9 @@ const server = createServer(async (request, response) => {
         headers.set(name, value);
       }
     }
+    // The shared Worker/Node handler consumes Cloudflare's canonical header.
+    // Node must synthesize it only after discarding client-controlled copies.
+    applyNodeClientIdentity(headers, request.socket.remoteAddress, request.headers["x-forwarded-for"], trustedProxyHops);
     headers.set("x-request-id", requestId);
     const method = request.method ?? "GET";
     const body = method === "GET" || method === "HEAD" ? undefined : await readIncomingBody(request, maxIncomingBodyBytes);
