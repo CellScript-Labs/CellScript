@@ -18,6 +18,13 @@ Its capability ledger must identify the current package major/minor version.
 The accepted 0.30 ledger, review waiver and Pudge deployment cannot authorize
 the new candidate; pending requirements fail the strict release preflight.
 
+For 0.31.0 only, the maintainer explicitly authorized direct publication on
+2026-10-01 without completing the pending review and release-evidence records.
+The distribution workflow checks native source and locked dependencies against
+validated candidate `6c111a30` and records the exception. It does not report a
+passing full release gate or fresh public-network deployment. Other release
+versions retain the normal gate. See the [0.31 release notes](releases/CELLSCRIPT_0_31_RELEASE_NOTES.md).
+
 The 0.31 cost corpus also emits static load/store instruction counts. The native
 `cellscript-tools compare-cost-evidence BASELINE BASELINE_MULTI CANDIDATE
 CANDIDATE_MULTI --output REPORT` command validates complete report pairs before

@@ -1,6 +1,11 @@
 # CellScript 0.31 release readiness
 
-Status: candidate preparation, 2026-10-01. No 0.31 release has been published.
+Status: publication authorized, 2026-10-01. The maintainer explicitly instructed
+direct 0.31 publication without the pending review records and release evidence.
+This supersedes the preparation hold below for this version only. The full
+release gate remains unpassed; the candidate ledgers are not relabeled as
+accepted evidence. The release workflow verifies that native source and locked
+dependencies still match validated `6c111a30` before building distributions.
 
 ## Scope and issue review
 
@@ -46,13 +51,13 @@ of this candidate.
 | Requirement | Candidate status | Completion evidence |
 | --- | --- | --- |
 | Coordinated versions and dependency locks | Prepared | Workspace, verifier and editor manifests; tooling-release validator |
-| Native development and CI checks | Pending | Fresh `dev` and `ci` logs and cost reports from this candidate |
-| Backend and pinned local-node replay | Pending | Fresh `backend` report, 43 actions, 17 Lock matrices and 26 stateful scenarios |
+| Native development and CI checks | Passed locally at `6c111a30` | Fresh `dev` and `ci` logs; version-aligned comparison passed 6,782 metrics |
+| Backend and pinned local-node replay | Passed locally at `6c111a30` | Fresh `backend` report, 43 actions, 17 Lock matrices and 26 stateful scenarios |
 | Browser and editor distributions | Built and locally validated | Canonical WASM and VSIX identities below; website production/testnet build passed |
-| Independent compiler/checker release review | Pending | Named reviewer, reviewed commit range and finding dispositions |
-| Selected-network evidence | Pending | New exact-artifact deployment/readback evidence if included in the release scope |
-| Full clean-source release gate | Pending | `./scripts/cellscript_gate.sh release` on the final committed candidate |
-| Publication | Not performed | Matching version tag and verified selected distribution channels |
+| Independent compiler/checker release review | Waived by maintainer for 0.31 | Explicit direct-publication instruction on 2026-10-01; no review claimed |
+| Selected-network evidence | Excluded from this publication | No new public-testnet deployment claimed; historical receipts retain their scope |
+| Full clean-source release gate | Not passed; publication exception authorized | Strict acceptance preflight remains fail-closed on pending records |
+| Publication | Authorized | GitHub distributions, website and browser compiler; see release notes |
 
 The strict business-corpus preflight must reject this candidate while required
 acceptance remains pending. Development checks validate inventory integrity;

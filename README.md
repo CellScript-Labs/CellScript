@@ -4,7 +4,7 @@
 </p>
 
 [![CellScript CI](https://github.com/CellScript-Labs/CellScript/actions/workflows/ci.yml/badge.svg)](https://github.com/CellScript-Labs/CellScript/actions/workflows/ci.yml)
-[![Release: v0.25.0](https://img.shields.io/badge/release-v0.25.0-2f6f4e.svg)](https://github.com/CellScript-Labs/CellScript/releases/tag/v0.25.0)
+[![Release: v0.31.0](https://img.shields.io/badge/release-v0.31.0-2f6f4e.svg)](https://github.com/CellScript-Labs/CellScript/releases/tag/v0.31.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE-MIT)
 [![Rust 1.97.1](https://img.shields.io/badge/rust-1.97.1-orange.svg)](Cargo.toml)
 [![Targets: CKB](https://img.shields.io/badge/targets-CKB-2f6f4e.svg)](#target-profiles)
@@ -19,15 +19,11 @@ CKB. It compiles `.cell` source into ckb-vm RISC-V assembly or ELF
 artifacts, together with typed metadata for auditing, policy checks, schema
 binding, and scheduler-aware execution.
 
-Release preparation continues on `0.31`; the accepted
-[0.31 cost decisions](docs/CELLSCRIPT_0_31_COST_DECISIONS.md) define its scope.
-The [0.31 readiness record](docs/releases/CELLSCRIPT_0_31_RELEASE_READINESS.md)
-tracks the candidate versions, fresh bundles, review and release gates.
-
-The current published stable release is
-[CellScript v0.30.0](https://github.com/CellScript-Labs/CellScript/releases/tag/v0.30.0).
-The [0.30 release notes](docs/releases/CELLSCRIPT_0_30_RELEASE_NOTES.md)
-describe the published release and its evidence limits.
+The current release is
+[CellScript v0.31.0](https://github.com/CellScript-Labs/CellScript/releases/tag/v0.31.0).
+The [0.31 release notes](docs/releases/CELLSCRIPT_0_31_RELEASE_NOTES.md)
+describe the cost optimizations, compatibility boundary, validation results and
+the maintainer-authorized exception for pending review and evidence records.
 
 In this README, metadata means machine-readable semantic facts emitted by the
 compiler: schema layout, Cell effects, access summaries, source hashes,

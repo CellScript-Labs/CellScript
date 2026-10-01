@@ -1,10 +1,14 @@
-# CellScript 0.31 — release candidate notes
+# CellScript 0.31.0
 
-Status: preparation only. Package and editor manifests identify 0.31.0;
-0.31 has not been published. The independent boundary review, fresh downstream
-bundles and final full release gate remain prerequisites. See the
-[candidate readiness record](CELLSCRIPT_0_31_RELEASE_READINESS.md) for current
-evidence. This document is not a publication or deployment receipt.
+Release date: 2026-10-01. The maintainer explicitly authorized direct publication
+and waived the pending independent review and release-evidence requirements for
+this version. This exception does not claim that the full release gate passed or
+that new public-testnet deployments were performed. The earlier 0.30 receipts
+continue to describe their original artifacts only.
+
+Compiler, standalone checker, adapters, native tools, browser compiler, Registry
+verifier packages and VS Code extension identify 0.31.0. Native distributions,
+the browser bundle and the VSIX retain their separate supported boundaries.
 
 ## Compiler changes
 
@@ -52,11 +56,17 @@ claim follows from these samples.
 
 ## Validation and limits
 
-Implementation validation uses `./scripts/cellscript_gate.sh backend` and
-`./scripts/cellscript_gate.sh ci`. Release acceptance additionally requires
-`./scripts/cellscript_gate.sh release` on clean source, with coordinated compiler,
-checker, editor and browser artifacts and a named independent boundary review.
-The 0.30 review waiver and Pudge deployment receipts are not 0.31 evidence.
+The local `dev`, `ci` and `backend` gates passed on candidate `6c111a30`.
+The pinned local CKB replay passed 43 actions, 17 Lock matrices and 26 stateful
+scenarios. The version-aligned cost comparison passed 6,782 comparable metrics
+with the existing budgets. Canonical WASM packaging and VSIX validation passed.
+The browser bundle is 572,053 bytes gzip, within its 600 KB budget.
+
+The complete release gate stopped at pending acceptance records. Publication
+uses the maintainer's explicit 0.31 exception, not a claim of independent review,
+a transferred 0.30 waiver, or fresh Pudge deployment evidence. The normal gate
+remains unchanged for other versions. These tests do not establish general
+production equivalence or constitute an independent security audit.
 
 Observed stack peaks, alternative dispatch trees/tables, borrowed witness spans,
 and general register allocation remain outside this release. The browser path

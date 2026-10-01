@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.31.0 - Cost optimization (unreleased)
+## 0.31.0 - Cost optimization (2026-10-01)
 
 Implement deterministic RV64 immediate plans, shared policy decoders behind
 direct action stubs, bounded private adapter frames, and CFG-liveness scalar
@@ -11,7 +11,8 @@ Cost-report v2 adds measured nonzero group exits, explicit unavailable results,
 static call-chain bounds, expanded policy/scalar sweeps, and multi-Script
 accounting with frozen per-metric ceilings. See the
 [implementation and acceptance report](docs/CELLSCRIPT_0_31_COST_IMPLEMENTATION.md).
-These changes are development work; 0.31 has not been released.
+Publication is authorized with a release-specific waiver of the pending review
+and evidence records; see the [release notes](docs/releases/CELLSCRIPT_0_31_RELEASE_NOTES.md).
 
 Reject source-byte loop fusion when discarded loop-prefix instructions define
 an offset or memory pointer. Propagate immediate-planner errors through assembly

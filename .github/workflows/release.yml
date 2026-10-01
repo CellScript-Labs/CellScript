@@ -108,11 +108,34 @@ jobs:
           printf 'version=%s\n' "$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Run authoritative release gate
+        if: steps.version.outputs.version != '0.31.0'
         env:
           CELLSCRIPT_RELEASE_REQUIRE_TAG: "1"
           CELLSCRIPT_RELEASE_VERSION: ${{ steps.version.outputs.version }}
           CKB_REPO: ${{ github.workspace }}/../ckb
         run: ./scripts/cellscript_gate.sh release
+
+      - name: Record the maintainer-authorized 0.31 publication exception
+        if: steps.version.outputs.version == '0.31.0'
+        run: |
+          # The maintainer explicitly authorized publication without the pending
+          # review/evidence requirements on 2026-10-01. This exception is limited
+          # to the already validated 0.31 candidate and does not mark a gate passed.
+          BASE=6c111a30a9a9ddfb50dadbd12b8f2572647a7563
+          git merge-base --is-ancestor "$BASE" HEAD
+          git diff --exit-code "$BASE" HEAD -- src crates contracts services \
+            examples scripts tests proposals Cargo.toml Cargo.lock rust-toolchain.toml
+          test "$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)" = '0.31.0'
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ## 0.31 publication exception
+
+          The maintainer authorized direct publication on 2026-10-01 without
+          completing the pending independent review and release evidence records.
+          Native implementation and dependency identities match validated candidate
+          `6c111a30`; its local dev, CI and backend gates passed. The full release
+          gate is **not claimed to have passed**. No fresh public-testnet deployment
+          is claimed. See `docs/releases/CELLSCRIPT_0_31_RELEASE_NOTES.md`.
+          EOF
 
       - name: Upload release evidence
         if: always()
@@ -174,10 +197,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y musl-tools
 
-      - name: Build cellc
+      - name: Build compiler and matching standalone checker
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
-        run: cargo build --locked --release --bin cellc --target ${{ matrix.target }}
+        run: cargo build --locked --release -p cellscript -p cellscript-artifact-checker --bin cellc --bin cellscript-artifact-checker --target ${{ matrix.target }}
 
       - name: Package archive
         id: package
@@ -188,7 +211,8 @@ jobs:
           fi
           ARCHIVE="cellscript-${VERSION}-${{ matrix.target }}.tar.gz"
           cp "target/${{ matrix.target }}/release/cellc" cellc
-          tar czf "$ARCHIVE" cellc
+          cp "target/${{ matrix.target }}/release/cellscript-artifact-checker" cellscript-artifact-checker
+          tar czf "$ARCHIVE" cellc cellscript-artifact-checker
           printf 'archive=%s\n' "$ARCHIVE" >> "$GITHUB_OUTPUT"
           printf 'version=%s\n' "$VERSION" >> "$GITHUB_OUTPUT"
 
@@ -250,6 +274,8 @@ jobs:
             artifacts/**/*.tar.gz
             SHA256SUMS
           body: |
+            ${{ steps.version.outputs.version == '0.31.0' && 'Published by explicit maintainer instruction on 2026-10-01 with the pending independent review and release-evidence requirements waived for this release. Local dev, CI and backend validation passed; the full release gate and a fresh public-testnet deployment are not claimed. See [0.31 release notes](https://github.com/CellScript-Labs/CellScript/blob/v0.31.0/docs/releases/CELLSCRIPT_0_31_RELEASE_NOTES.md).' || '' }}
+
             ## Installation
 
             ### One-line install (Global)
@@ -280,12 +306,6 @@ jobs:
             curl -fsSL https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.version }}/install.sh | CELLSCRIPT_VERSION=${{ steps.version.outputs.version }} sh
             ```
 
-            ### Alternative: cargo install
-
-            ```bash
-            cargo install cellscript
-            ```
-
             ---
 
             ## Manual download
@@ -305,6 +325,9 @@ jobs:
             ```
 
             Verify: `cellc --version`
+
+            Each archive also includes the matching `cellscript-artifact-checker`
+            executable for independent artifact verification.
 
             ---
 
