@@ -81,6 +81,23 @@ checks optimization levels 0 and 3, valid execution, and exact assertion failure
 after changing the final compared byte. The five Node client-IP boundary tests
 pass. The full CI/backend gates remain the release validation contract.
 
+## Fresh resource evidence
+
+The four-artifact business anchor retains its ELF and transaction identities.
+Its lowering/source-map and verified-bundle identities are refreshed because
+those records bind the promoted compiler/checker version. The protocol-bundle
+identity is refreshed with them; fixture inputs and budget ceilings are unchanged.
+
+The NovaSeal fixed BIP340 envelope was recompiled and executed against the
+reproducibly built child. All four cases matched (one acceptance and three
+rejections), including the full transaction verifier and both exact IPC transfers.
+Measured cycles fell from 3,679,593 to 3,679,149; parent ELF size fell from 13,472
+to 12,768 bytes. Stack (15,792), witness (418), transaction (879), and child ELF
+(100,912) byte counts are unchanged. The resource profile records these exact
+measurements with the existing ceilings. The published 0.30 matrix remains a
+historical record. NovaSeal Rust tooling checks and both transaction-measure
+unit tests also passed.
+
 ## Distribution and compatibility
 
 Native users must pair the compiler with the 0.31 checker and Registry
