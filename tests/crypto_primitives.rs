@@ -242,3 +242,62 @@ fn cached_exact_reads_preserve_data_witness_script_kind_and_window_boundaries() 
     assert_eq!(result.exit_code, 0, "cached exact reads changed source identity or byte order: {:?}", result.captured_debug);
     assert!(result.cycles > 0);
 }
+
+#[test]
+fn byte_loop_prefix_offset_preserves_success_and_last_byte_rejection_in_ckb_vm() {
+    let source = r#"
+module byte_loop_prefix_vm
+
+#[effect(ReadOnly)]
+fn same(start: u64, length: u64) -> bool {
+    let input = source::input(0)
+    let mut index: u64 = 0
+    while index < length {
+        let base = start * 4
+        if ckb::cell_data_u8(input, base + index) != witness::byte(input, index) {
+            return false
+        }
+        index += 1
+    }
+    return true
+}
+
+action verify() -> u64 {
+    verification
+        require same(2, 20)
+        return 0
+}
+"#;
+    let witness = (1..=20).collect::<Vec<u8>>();
+    let mut data = vec![0xa5; 8];
+    data.extend_from_slice(&witness);
+    for opt_level in [0, 3] {
+        let compiled = cellscript::compile(
+            source,
+            cellscript::CompileOptions {
+                opt_level,
+                target: Some("riscv64-elf".to_string()),
+                target_profile: Some("ckb".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("compile loop with a prefix-defined non-add offset");
+        let elf = cellscript::strip_vm_abi_trailer(&compiled.artifact_bytes);
+        let mut fixture = build_simple_fixture(Bytes::default(), 1, 1);
+        fixture.inputs[0].data = Bytes::from(data.clone());
+        fixture.witnesses = vec![Bytes::from(witness.clone())];
+        let valid = execute_cellscript_script(elf, &fixture);
+        assert_eq!(valid.exit_code, 0, "opt level {opt_level}: {:?}", valid.captured_debug);
+        assert!(valid.cycles > 0);
+
+        let mut changed = data.clone();
+        *changed.last_mut().unwrap() ^= 1;
+        fixture.inputs[0].data = Bytes::from(changed);
+        let invalid = execute_cellscript_script(elf, &fixture);
+        assert_eq!(
+            invalid.exit_code,
+            cellscript::runtime_errors::CellScriptRuntimeError::AssertionFailed as i64,
+            "opt level {opt_level}: final-byte mismatch must fail the source requirement"
+        );
+    }
+}

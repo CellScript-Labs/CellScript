@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — 0.31 cost work
+## 0.31.0 - Cost optimization (unreleased)
 
 Implement deterministic RV64 immediate plans, shared policy decoders behind
 direct action stubs, bounded private adapter frames, and CFG-liveness scalar
@@ -12,6 +12,12 @@ static call-chain bounds, expanded policy/scalar sweeps, and multi-Script
 accounting with frozen per-metric ceilings. See the
 [implementation and acceptance report](docs/CELLSCRIPT_0_31_COST_IMPLEMENTATION.md).
 These changes are development work; 0.31 has not been released.
+
+Reject source-byte loop fusion when discarded loop-prefix instructions define
+an offset or memory pointer. Propagate immediate-planner errors through assembly
+layout. The self-hosted Registry derives client identity from the socket peer
+and an explicit trusted-proxy count, discarding caller-supplied IP/ASN headers.
+These corrections originate in `9c441094` on `arthur/fix-audit-bugs`.
 
 Add decoded-ELF static load/store counts to scalar evidence, hash the shared
 measurement fixtures and frozen budgets, and provide a native before/after

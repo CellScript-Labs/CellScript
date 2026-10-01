@@ -251,6 +251,7 @@ fn match_source_memory_equality_loop(function: &super::IrPureFn) -> Option<(Bloc
         if source_form.index_count != 1
             || source_form.terms.len() > 1
             || operand_depends_on_prefix_or_index(source.view, loop_shape.index, loop_shape.prefix)
+            || operand_depends_on_prefix_or_index(&IrOperand::Var(memory.pointer.clone()), loop_shape.index, loop_shape.prefix)
         {
             continue;
         }
@@ -465,21 +466,18 @@ fn decompose_indexed_offset(
     match operand {
         IrOperand::Var(var) if var.id == index.id => Some(IndexedOffset { index_count: 1, terms: Vec::new(), constant: 0 }),
         IrOperand::Const(IrConst::U64(value)) => Some(IndexedOffset { index_count: 0, terms: Vec::new(), constant: *value }),
-        IrOperand::Var(var) => {
-            let definition = definitions
-                .iter()
-                .rev()
-                .find(|instruction| matches!(instruction, IrInstruction::Binary { dest, .. } if dest.id == var.id));
-            let Some(IrInstruction::Binary { op: BinaryOp::Add, left, right, .. }) = definition else {
-                return Some(IndexedOffset { index_count: 0, terms: vec![operand.clone()], constant: 0 });
-            };
-            let mut left = decompose_indexed_offset(left, index, definitions, remaining_depth - 1)?;
-            let right = decompose_indexed_offset(right, index, definitions, remaining_depth - 1)?;
-            left.index_count += right.index_count;
-            left.constant = left.constant.wrapping_add(right.constant);
-            left.terms.extend(right.terms);
-            Some(left)
-        }
+        IrOperand::Var(var) => match definition_for(var.id, definitions) {
+            None => Some(IndexedOffset { index_count: 0, terms: vec![operand.clone()], constant: 0 }),
+            Some(IrInstruction::Binary { op: BinaryOp::Add, left, right, .. }) => {
+                let mut left = decompose_indexed_offset(left, index, definitions, remaining_depth - 1)?;
+                let right = decompose_indexed_offset(right, index, definitions, remaining_depth - 1)?;
+                left.index_count += right.index_count;
+                left.constant = left.constant.wrapping_add(right.constant);
+                left.terms.extend(right.terms);
+                Some(left)
+            }
+            Some(_) => None,
+        },
         _ => None,
     }
 }
@@ -487,9 +485,7 @@ fn decompose_indexed_offset(
 fn operand_depends_on_prefix_or_index(operand: &IrOperand, index: &IrVar, definitions: &[IrInstruction]) -> bool {
     match operand {
         IrOperand::Var(var) if var.id == index.id => true,
-        IrOperand::Var(var) => {
-            definitions.iter().any(|instruction| matches!(instruction, IrInstruction::Binary { dest, .. } if dest.id == var.id))
-        }
+        IrOperand::Var(var) => definition_for(var.id, definitions).is_some(),
         _ => false,
     }
 }
@@ -780,6 +776,38 @@ mod tests {
     }
 
     #[test]
+    fn leaves_prefix_defined_non_add_byte_offset_loop_unchanged() {
+        let mut module = lower(
+            r#"
+            module test
+            #[effect(ReadOnly)]
+            fn same(a: u64, start: u64, b: u64, length: u64) -> bool {
+                let mut index: u64 = 0
+                while index < length {
+                    let base = start * 4
+                    if witness::byte(a, base + index) != ckb::cell_lock_u8(b, index) { return false }
+                    index += 1
+                }
+                return true
+            }
+            "#,
+        );
+        optimize_source_byte_equality(&mut module);
+        let function = module.items.iter().find_map(|item| match item {
+            IrItem::PureFn(function) => Some(function),
+            _ => None,
+        });
+        let function = function.unwrap();
+        assert!(function.body.blocks.len() > 2);
+        assert!(!function
+            .body
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .any(|instruction| matches!(instruction, IrInstruction::Call { func, .. } if func == SOURCE_BYTES_EQUAL_HELPER)));
+    }
+
+    #[test]
     fn leaves_non_affine_byte_index_loop_unchanged() {
         let mut module = lower(
             r#"
@@ -828,6 +856,38 @@ mod tests {
         assert!(function.unwrap().body.blocks.iter().any(|block| {
             matches!(block.instructions.last(), Some(IrInstruction::Call { func, .. }) if func == SOURCE_BYTES_EQUAL_MEMORY_HELPER)
         }));
+    }
+
+    #[test]
+    fn leaves_prefix_defined_memory_pointer_loop_unchanged() {
+        let mut module = lower(
+            r#"
+            module test
+            #[effect(ReadOnly)]
+            fn same(a: u64, start: u64, value: Hash) -> bool {
+                let mut index: u64 = 0
+                while index < 20 {
+                    let bytes = value.0
+                    if witness::byte(a, start + index) != bytes[index] as u64 { return false }
+                    index += 1
+                }
+                return true
+            }
+            "#,
+        );
+        optimize_source_byte_equality(&mut module);
+        let function = module.items.iter().find_map(|item| match item {
+            IrItem::PureFn(function) => Some(function),
+            _ => None,
+        });
+        let function = function.unwrap();
+        assert!(function.body.blocks.len() > 2);
+        assert!(!function
+            .body
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .any(|instruction| matches!(instruction, IrInstruction::Call { func, .. } if func == SOURCE_BYTES_EQUAL_MEMORY_HELPER)));
     }
 
     #[test]

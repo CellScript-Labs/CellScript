@@ -1,9 +1,10 @@
 # CellScript 0.31 — release candidate notes
 
-Status: preparation only. 0.31 has not been published. The independent boundary
-review, coordinated package versions, fresh downstream bundles and final full
-release gate remain prerequisites. Do not use this document as a publication
-or deployment receipt.
+Status: preparation only. Package and editor manifests identify 0.31.0;
+0.31 has not been published. The independent boundary review, fresh downstream
+bundles and final full release gate remain prerequisites. See the
+[candidate readiness record](CELLSCRIPT_0_31_RELEASE_READINESS.md) for current
+evidence. This document is not a publication or deployment receipt.
 
 ## Compiler changes
 
@@ -17,6 +18,12 @@ order and source-language semantics are preserved.
 The language gains no new syntax in this release. Edition 2026 and the bounded
 Edition 2027 source identity remain as in 0.30. Existing witness payload and
 placement formats are unchanged.
+
+Loop fusion retains the original loop when its prefix defines a byte offset
+or memory pointer needed by the replacement. Immediate-planner errors propagate
+as assembly diagnostics. The self-hosted Registry ignores caller-provided
+IP/ASN identities and uses the socket peer or its configured trusted proxy
+chain; operators must match `REGISTRY_TRUSTED_PROXY_HOPS` to their topology.
 
 ## Artifact compatibility
 

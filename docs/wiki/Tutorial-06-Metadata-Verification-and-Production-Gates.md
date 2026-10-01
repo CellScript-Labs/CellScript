@@ -24,11 +24,15 @@ compatibility profile. Edition contributes source semantics only.
 The profile combines that with independently versioned target,
 primitive-assurance, entry payload, witness placement, and metadata-schema
 axes. Verification rejects a sidecar whose profile does not resolve from those
-inputs; it never guesses another contract. Current `0.30` outputs use metadata
+inputs; it never guesses another contract. Current `0.31` outputs use metadata
 schema 72, source schema 2, artifact schema 1, and constraints schema 4. Runtime
 metadata binds the closed `cellscript-ckb-runtime-view-v1` contract and the
 structured `cellscript-ckb-runtime-access-provenance-v1` source/index/range
 contract.
+Native 0.31 bundles use lowering record v9 with the matching independent
+checker. The current capability ledger must name the candidate's package
+major/minor version; prior-release review and deployment acceptance do not
+transfer. See the [0.31 readiness record](../releases/CELLSCRIPT_0_31_RELEASE_READINESS.md).
 Schema 71 also records `runtime.signing_message_domains`. For
 `cellscript-ckb-sighash-all-zero-lock-v1`, verify the current input Script-group
 scope, complete first-lock zero transform, witness ordering, `SighashAllDigest`

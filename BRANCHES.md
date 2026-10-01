@@ -8,10 +8,14 @@
 measurement, immediate planning, shared decoders, private adapter frames, and
 scalar slot reuse. The implementation and remaining acceptance work are tracked
 in [the cost implementation report](docs/CELLSCRIPT_0_31_COST_IMPLEMENTATION.md).
-Cargo versions and the pinned toolchain remain unchanged during development.
+The October 1 release preparation promotes package versions to 0.31.0;
+the pinned Rust toolchain remains 1.97.1. See the
+[candidate readiness record](docs/releases/CELLSCRIPT_0_31_RELEASE_READINESS.md).
 `0.31` became the GitHub default branch on 2026-09-24. The eight archived
 development branches were removed in one atomic push with exact-tip leases;
-the remote now retains `0.30` and `0.31`, together with all release tags.
+the remote then retained `0.30` and `0.31`, together with all release tags.
+The later `0.32` branch carries separate optimization work and is outside the
+0.31 release candidate.
 
 `0.30` is retained as the published release baseline. Its final signed
 `v0.30.0` tag points at `352b4950e7dc7489a4ee7e7ed6d6edf4c7fefd71`.

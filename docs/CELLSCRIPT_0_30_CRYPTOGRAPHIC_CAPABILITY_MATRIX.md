@@ -2,8 +2,10 @@
 
 ## Status and claim
 
-**Status: accepted matrix for the frozen 0.30 release-candidate corpus.** The
-machine-readable source is
+**Status: accepted matrix for the frozen, published 0.30 corpus.** Its
+[tagged matrix](https://github.com/CellScript-Labs/CellScript/blob/v0.30.0/tests/fixtures/cryptographic_capability_matrix.json)
+retains the historical acceptance. Fresh 0.31 acceptance remains pending in
+the current machine-readable source,
 [`tests/fixtures/cryptographic_capability_matrix.json`](../tests/fixtures/cryptographic_capability_matrix.json).
 `check-business-corpus` validates its complete row and value-domain set, binds
 all cited evidence and the resource-budget manifest into the corpus digest,

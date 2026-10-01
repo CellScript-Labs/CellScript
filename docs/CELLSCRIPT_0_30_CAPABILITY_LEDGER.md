@@ -1,8 +1,9 @@
 # CellScript 0.30 Capability Ledger
 
-**Status:** accepted bounded capability contract for the 0.30.0 release.
-The maintainer authorized publication and the website update on 2026-09-21;
-the final source still requires a fresh full release gate.
+**Status:** accepted bounded capability contract for the published 0.30.0 release.
+The [tagged ledger](https://github.com/CellScript-Labs/CellScript/blob/v0.30.0/tests/fixtures/capability_ledger.json)
+preserves that acceptance. The working-tree ledger now tracks 0.31 candidate
+acceptance; see the [readiness record](releases/CELLSCRIPT_0_31_RELEASE_READINESS.md).
 
 This document separates two different completeness claims:
 

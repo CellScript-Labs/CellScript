@@ -506,6 +506,14 @@ REGISTRY_API_IMAGE
 REGISTRY_VERIFIER_IMAGE
 ```
 
+`REGISTRY_TRUSTED_PROXY_HOPS` defaults to `0` in the Node process, which uses
+the direct socket peer and ignores forwarding headers. The checked-in Compose
+stacks set it to `1` for their single external TLS proxy. If the deployment has
+more trusted proxy hops, set the exact count; the adapter selects from the
+trusted end of `X-Forwarded-For`, removes all inbound client-IP/ASN headers,
+and supplies one canonical address to the shared API. Do not increase this
+value to accommodate untrusted intermediaries.
+
 Mainnet deployment checks use `CKB_MAINNET_RPC_URL`. Chain commitments remain
 disabled unless `REGISTRY_TYPE_SCRIPT_JSON`,
 `REGISTRY_TYPE_SCRIPT_CELL_DEP_JSON`, `REGISTRY_COMMITMENT_LOCK_SCRIPT_JSON`,

@@ -19,15 +19,15 @@ CKB. It compiles `.cell` source into ckb-vm RISC-V assembly or ELF
 artifacts, together with typed metadata for auditing, policy checks, schema
 binding, and scheduler-aware execution.
 
-Development now continues on `0.31`; the accepted
+Release preparation continues on `0.31`; the accepted
 [0.31 cost decisions](docs/CELLSCRIPT_0_31_COST_DECISIONS.md) define its scope.
-The `0.30` release baseline has passed the full local release gate and has a
-signed tag. Public release and website deployment are tracked separately.
+The [0.31 readiness record](docs/releases/CELLSCRIPT_0_31_RELEASE_READINESS.md)
+tracks the candidate versions, fresh bundles, review and release gates.
 
 The current published stable release is
-[CellScript v0.25.0](https://github.com/CellScript-Labs/CellScript/releases/tag/v0.25.0).
+[CellScript v0.30.0](https://github.com/CellScript-Labs/CellScript/releases/tag/v0.30.0).
 The [0.30 release notes](docs/releases/CELLSCRIPT_0_30_RELEASE_NOTES.md)
-describe the prepared release and its evidence limits.
+describe the published release and its evidence limits.
 
 In this README, metadata means machine-readable semantic facts emitted by the
 compiler: schema layout, Cell effects, access summaries, source hashes,
@@ -759,7 +759,7 @@ policy defaults:
 [package]
 edition = "2026"
 name = "token"
-version = "0.30.0"
+version = "0.31.0"
 entry = "src/main.cell"
 source_roots = ["src"]
 

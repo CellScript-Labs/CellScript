@@ -12,6 +12,12 @@ deciding whether a change is ready.
 
 ## Gate Modes
 
+The 0.31 candidate reuses the bounded business portfolio, with fresh release
+acceptance tracked in [the readiness record](releases/CELLSCRIPT_0_31_RELEASE_READINESS.md).
+Its capability ledger must identify the current package major/minor version.
+The accepted 0.30 ledger, review waiver and Pudge deployment cannot authorize
+the new candidate; pending requirements fail the strict release preflight.
+
 The 0.31 cost corpus also emits static load/store instruction counts. The native
 `cellscript-tools compare-cost-evidence BASELINE BASELINE_MULTI CANDIDATE
 CANDIDATE_MULTI --output REPORT` command validates complete report pairs before
