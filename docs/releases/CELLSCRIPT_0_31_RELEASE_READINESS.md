@@ -88,6 +88,18 @@ Its lowering/source-map and verified-bundle identities are refreshed because
 those records bind the promoted compiler/checker version. The protocol-bundle
 identity is refreshed with them; fixture inputs and budget ceilings are unchanged.
 
+The same version binding is refreshed in the committed-substate, external-verifier,
+fungible, authorization, NFT, Order/AMM, temporal, and runtime-view fixtures.
+The refresh checks that every other field is identical, including ELF and
+transaction hashes, exit codes, measured costs and budgets. The bundled package
+graph is repinned with `cellc lock`; only its resolving compiler version changes.
+
+The archived September cost comparison used 0.30 package versions. A fresh
+release comparison must rebuild the archived baseline replay with the candidate's
+package manifests and exact Cargo.lock, then run both cost suites. Keep that
+baseline's actual dirty-source provenance and its complete replay patch; do not
+rewrite old reports or weaken the comparison's lockfile equality check.
+
 The NovaSeal fixed BIP340 envelope was recompiled and executed against the
 reproducibly built child. All four cases matched (one acceptance and three
 rejections), including the full transaction verifier and both exact IPC transfers.
