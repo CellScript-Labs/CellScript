@@ -1,6 +1,7 @@
 # CellScript 0.32 implementation and acceptance
 
-Status: implementation in progress. No completion or release claim.
+Status: implementation in progress. Cost/research candidate gates pass; #22
+application admission remains unfinished. No overall completion or release claim.
 
 ## Maintainer decision — 2026-10-03
 
@@ -17,11 +18,11 @@ authorize a release publication or a new chain deployment.
 | Issue | Required outcome | Current evidence |
 | --- | --- | --- |
 | #41 | Validated low-mask immediates | Implemented at `8017a7bd`; historical evidence retained; integrated clean replay passes 6,782 comparable metrics |
-| #36 | Versioned observed per-VM stack measurements | Implemented diagnostic replay; 13 focused tests passed; final gates pending |
-| #37 | Measured dispatch alternatives and explicit selection | 402 tree and 804 saved-selector cases measured; retain current routing; final gates pending |
+| #36 | Versioned observed per-VM stack measurements | Implemented diagnostic replay; 13 focused tests and unified gates pass |
+| #37 | Measured dispatch alternatives and explicit selection | 402 tree and 804 saved-selector cases measured; retain current routing; unified gates pass |
 | #38 | Separately measured borrowing, word copies and staged loading | 18 borrowed-span, 96 word-copy and 24 staged-loader cases measured; default ownership/loading retained pending full equivalence and checker contracts |
 | #39 | Bounded register-retention experiment and scratch-ownership decision | Candidate patch archived and rejected after 1,707 unchanged runs; conservative scratch ownership retained |
-| #40 | Cost attribution, experiment decisions, combined comparison and residual-cost report | Clean 1,707-run attribution, 6,782-metric replay, paired cost frontier and residual sites archived; wider transformations have explicit blockers; final gates pending |
+| #40 | Cost attribution, experiment decisions, combined comparison and residual-cost report | Clean 1,707-run attribution, 6,782-metric replay, paired cost frontier and residual sites archived; wider transformations have explicit blockers; unified gates pass |
 | #22 | One exact typed ZK profile, real verifier execution and state binding | Canonical codec and exact child research implemented; real pairing/context mutations pass; application circuit and parent/compiler/checker/builder closure pending |
 
 #42 remains post-0.32 application tooling. Compatible-open handles (#28) and
@@ -62,13 +63,28 @@ builder/editor parity, real scheduler/stateful tests and production resource
 and reproducibility evidence. Independent review is waived; these executable
 requirements are not.
 
-## Validation still required
+## Completed candidate validation
+
+`dev`, `ci` and `backend` pass. The final clean CI/backend source is
+`6a453d3015784784a27ba1aa0a4b6b1a73db79a8`, including the inventory correction
+for the parent-pinned benchmark. Backend includes a fresh build of pinned CKB
+`f7fa4436737756f97a24e254f22c13a36316ecea` and passing local-node stateful
+acceptance. The exact dev source adjustment, logs and scope limitations are
+recorded in [validation.json](reports/0.32/validation.json).
+
+The node report covers the existing acceptance harness. It retains
+`production_resource_identity_claim = false` and the
+`always-success-fixture-only` resource-identity scope. These results do not
+admit the unfinished ZK application profile.
+
+## Validation still required for #22 and future adopted transformations
 
 - Focused positive, negative and boundary tests for each implementation.
 - Exact independent-checker machine mutations for new executable contracts.
 - Real CKB-VM and stateful transaction execution for the admitted ZK profile.
 - Frozen cost budgets, separate new ZK budgets and version-aligned comparison.
-- `./scripts/cellscript_gate.sh dev`, `ci` and `backend` on the final candidate.
+- Re-run `./scripts/cellscript_gate.sh dev`, `ci` and `backend` after the
+  remaining executable implementation; run release gates before publication.
 
 The independent artifact checker is a software verification boundary and
 remains required. Waiving human independent review does not waive its checks.

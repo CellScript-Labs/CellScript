@@ -1,6 +1,6 @@
 # 0.32 cost research: decisions and remaining work
 
-Status: research candidate under final gates, not release acceptance. Implementer: Codex. Independent
+Status: research candidate passes dev/CI/backend gates, not release acceptance. Implementer: Codex. Independent
 review was waived by the maintainer on 2026-10-03. The waiver does not waive
 the independent artifact checker or the frozen budgets. This record extends
 the completed [low-mask experiment](IMMEDIATE_MASKS.md).
@@ -147,8 +147,14 @@ zero regressions. Its main report is archived separately; its multi-Script
 report is byte-identical to the integrated baseline. This validates same-code
 reproduction and the unchanged budgets, not another before/after saving.
 
-Final `backend` and `ci` gates are still required. Deferred wider outlining,
-general CSE, immediate/pool search and layout transformations retain their
+Final `backend` and `ci` gates pass at clean commit
+`6a453d3015784784a27ba1aa0a4b6b1a73db79a8`; see
+[validation.json](validation.json) for logs, the dev source adjustment and
+fresh pinned-node acceptance. The final inventory/report correction also
+passes all 6,782 comparable metrics in [final-comparison.json](final-comparison.json).
+It does not change compiler code or claim a new optimization saving.
+
+Deferred wider outlining, general CSE, immediate/pool search and layout transformations retain their
 specific blockers above and remain owned by #40. Span/alias admission remains
 owned by #38 and wider retention/scratch admission by #39. This report does
 not silently turn unmeasured transformations into rejected experiments or

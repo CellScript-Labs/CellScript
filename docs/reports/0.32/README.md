@@ -16,6 +16,8 @@ required. The accepted scope and unfinished ZK admission work are recorded in
 | Execution attribution | `execution-attribution.json.gz`, `attribution-summary.json`, `residual-sites.json` | 1,707 separate diagnostic scheduler replays, each checked against ordinary group verdict and cycles; 38 distinct ELFs |
 | Isolated alternatives | `experiments/`, `experiment-frontier.json` | Finite paired probes and explicit cost tradeoffs; admission decisions and blockers in [RESEARCH.md](RESEARCH.md) |
 | ZK child research | `zk-child-research.json` | Real child pairing with modeled syscalls and a public-seed, non-authorizing test circuit; no production profile or stateful transaction claim |
+| Final gate acceptance | `validation.json`, `gate-*.log.gz`, `strict-backend-full.json.gz`, `ckb-stateful-acceptance.json.gz` | Passed dev/CI/backend records; final clean CI/backend commit is `6a453d30`; exact scopes and dev adjustment are recorded |
+| Final corrected-source costs | `final-main.json.gz`, `final-multi.json.gz`, `final-comparison.json` | All 6,782 comparable metrics pass after the one-field inventory correction and evidence packaging; no compiler-code change |
 
 The integrated replay is a new baseline, not another claimed optimization.
 The two main reports differ only in 12 dynamically assigned transaction hash
@@ -34,6 +36,13 @@ Archive compression does not reduce a deployed ELF. Summary totals weight
 each recorded execution once; they do not model production transaction
 frequency. Copied-byte semantics, host syscall memory traffic and unexercised
 paths are not inferred from guest load/store counts.
+
+`validation.json` records uncompressed SHA-256 hashes for the compressed gate
+logs and native reports. The CKB report is for the existing local-node
+acceptance harness, with `production_resource_identity_claim = false` and
+`always-success-fixture-only` resource-identity evidence. It is not #22 ZK
+application acceptance. No release gate or external-chain deployment is
+claimed by this evidence package.
 
 ## Reproduction
 

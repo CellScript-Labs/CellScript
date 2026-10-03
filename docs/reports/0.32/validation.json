@@ -1,0 +1,73 @@
+{
+  "schema": "cellscript-0.32-candidate-validation-v1",
+  "all_0_32_issues_complete": false,
+  "source_commit": "6a453d3015784784a27ba1aa0a4b6b1a73db79a8",
+  "source_dirty": false,
+  "human_independent_review": "waived by maintainer on 2026-10-03; no independent human review claimed",
+  "gates": {
+    "dev": {
+      "status": "passed",
+      "source_base": "4e1047980bce94d8ad0317b132a6f4c15a45df08",
+      "source_adjustment": "Only tests/fixtures/business_corpus.json inventory_sha256 changed to 0xd23c15c23ea7b187eb445231486765cb74171e359258aa099cd42a5d0a914105 before the fix was committed; report packaging differs from the final CI checkout."
+    },
+    "ci": {
+      "status": "passed",
+      "source_commit": "6a453d3015784784a27ba1aa0a4b6b1a73db79a8"
+    },
+    "backend": {
+      "status": "passed",
+      "source_commit": "6a453d3015784784a27ba1aa0a4b6b1a73db79a8",
+      "strict_audit": "full",
+      "ckb_revision": "f7fa4436737756f97a24e254f22c13a36316ecea",
+      "ckb_build": "fresh-dedicated-cargo-target",
+      "stateful_acceptance": "passed"
+    }
+  },
+  "cost_comparison": {
+    "status": "passed",
+    "comparable_metrics": 6782,
+    "regressions": 0,
+    "scope": "integrated baseline versus inventory/report correction; compiler code unchanged; not a new optimization saving"
+  },
+  "benchmark": {
+    "tested_revision": "f2a200a366ed1d97fbb22ac4633ae5abba591b5e",
+    "original_workspace_revision_preserved": "53c5078a266fc4bd979ce07d9813fcdf94a9fc70"
+  },
+  "boundaries": [
+    "The CKB production-mode report applies to the existing acceptance harness and records production_resource_identity_claim=false, resource scope always-success-fixture-only.",
+    "The ZK child research uses modeled syscalls and a public-seed non-authorizing circuit; these passing gates do not establish ZK application admission.",
+    "Issue #22 still needs an application relation/circuit/VK and parent/compiler/checker/builder/editor/stateful closure.",
+    "Wider cost transformations remain deferred with explicit blockers in RESEARCH.md.",
+    "No release gate, release publication, or external-chain deployment is claimed."
+  ],
+  "archives": {
+    "gate-dev.log.gz": {
+      "uncompressed_sha256": "ddc9dcfcc13c3b463121f43f134fbe49e99889e0b31c80c67c2ecf09b8cf4bfa",
+      "uncompressed_bytes": 78630
+    },
+    "gate-ci.log.gz": {
+      "uncompressed_sha256": "2282ffb3d2d2d045933411a09612e74b356313ce85c67ea827954ff4497320a0",
+      "uncompressed_bytes": 329515
+    },
+    "gate-backend.log.gz": {
+      "uncompressed_sha256": "53c47ec63bd8e25f3e59011201decf01325389e96003019e300c939eaedfa4f3",
+      "uncompressed_bytes": 217061
+    },
+    "strict-backend-full.json.gz": {
+      "uncompressed_sha256": "1f37baf0921dece59b83daa50d1449233d9bb9c5b0ab70186e70940cfc63a2c7",
+      "uncompressed_bytes": 156894
+    },
+    "ckb-stateful-acceptance.json.gz": {
+      "uncompressed_sha256": "496707c47f7084265fec8328f193ce9420abe7c2bf9babf1c8a67645b8de5a60",
+      "uncompressed_bytes": 766010
+    },
+    "final-main.json.gz": {
+      "uncompressed_sha256": "486e70f943378bf4980dcfbab5fb67f2a6bfb647d8cdde350ebf4e8cc6778701",
+      "uncompressed_bytes": 6450691
+    },
+    "final-multi.json.gz": {
+      "uncompressed_sha256": "a04f66523fa885d4d84c829feea087a202d6777f7fdd4e7b710313533e1ecb73",
+      "uncompressed_bytes": 28758
+    }
+  }
+}
