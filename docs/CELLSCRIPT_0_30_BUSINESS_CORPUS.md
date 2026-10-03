@@ -1,7 +1,9 @@
 # CellScript 0.30 Business Corpus
 
-**Status**: Accepted bounded inventory for the 0.30.0 release candidate;
-public publication remains separate and withheld under no-TAC.
+**Status**: Accepted bounded inventory for the published 0.30.0 release.
+The [tagged inventory](https://github.com/CellScript-Labs/CellScript/blob/v0.30.0/tests/fixtures/business_corpus.json)
+retains that acceptance. The current inventory keeps the same portfolio and
+tracks fresh 0.31 acceptance in the [readiness record](releases/CELLSCRIPT_0_31_RELEASE_READINESS.md).
 
 This document defines the finite business portfolio behind the statement that
 CellScript 0.30 aims to provide application-layer coverage comparable to

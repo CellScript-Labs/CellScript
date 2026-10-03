@@ -5,6 +5,7 @@ mod failure;
 mod policy;
 mod policy_machine;
 mod schema;
+pub mod zk;
 
 pub use checker::{
     canonical_bytes, canonical_hash, check_bundle, check_bundle_values, domain_hash_bytes, parse_lowering_record, parse_source_map,

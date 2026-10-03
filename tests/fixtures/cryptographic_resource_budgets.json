@@ -274,8 +274,8 @@
         "scripts/cellscript_gate.sh"
       ],
       "measured": {
-        "cycles": 3679593,
-        "elf_bytes": 13472,
+        "cycles": 3679149,
+        "elf_bytes": 12768,
         "max_stack_frame_bytes": 15792,
         "witness_bytes": 418,
         "transaction_bytes": 879,

@@ -929,6 +929,9 @@ mod tests {
 
         let mut candidate = matrix();
         candidate.status = "candidate".to_string();
+        for status in candidate.release_requirements.values_mut() {
+            *status = "passed".to_string();
+        }
         assert!(validate_crypto_matrix(&candidate, &budgets, true).unwrap_err().to_string().contains("must be accepted"));
 
         let mut invalid_waiver = matrix();

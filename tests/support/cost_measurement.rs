@@ -96,7 +96,7 @@ fn resolve_cell(context: &Context, out_point: &packed::OutPoint) -> Result<CellM
     Ok(builder.build())
 }
 
-fn resolve_transaction(context: &Context, tx: &TransactionView) -> Result<ResolvedTransaction, String> {
+pub(super) fn resolve_transaction(context: &Context, tx: &TransactionView) -> Result<ResolvedTransaction, String> {
     let resolved_inputs =
         tx.inputs().into_iter().map(|input| resolve_cell(context, &input.previous_output())).collect::<Result<_, _>>()?;
     let mut resolved_cell_deps = Vec::new();

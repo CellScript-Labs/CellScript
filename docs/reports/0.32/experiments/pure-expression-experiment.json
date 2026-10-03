@@ -1,0 +1,164 @@
+{
+  "blocker": "value numbering must account for mutable definitions, calls, traps, resource effects and first-failure order",
+  "decision": "defer-general-cse",
+  "rows": [
+    {
+      "elf_bytes": 1608,
+      "executions": [
+        {
+          "exit": 5,
+          "group_cycles": 3119,
+          "seed": 0,
+          "valid": false
+        },
+        {
+          "exit": 0,
+          "group_cycles": 3152,
+          "seed": 0,
+          "valid": true
+        },
+        {
+          "exit": 5,
+          "group_cycles": 3119,
+          "seed": 1,
+          "valid": false
+        },
+        {
+          "exit": 0,
+          "group_cycles": 3152,
+          "seed": 1,
+          "valid": true
+        },
+        {
+          "exit": 5,
+          "group_cycles": 3119,
+          "seed": 255,
+          "valid": false
+        },
+        {
+          "exit": 0,
+          "group_cycles": 3152,
+          "seed": 255,
+          "valid": true
+        },
+        {
+          "exit": 5,
+          "group_cycles": 3119,
+          "seed": 256,
+          "valid": false
+        },
+        {
+          "exit": 0,
+          "group_cycles": 3152,
+          "seed": 256,
+          "valid": true
+        },
+        {
+          "exit": 5,
+          "group_cycles": 3119,
+          "seed": 18446744073709551615,
+          "valid": false
+        },
+        {
+          "exit": 0,
+          "group_cycles": 3152,
+          "seed": 18446744073709551615,
+          "valid": true
+        }
+      ],
+      "memory": {
+        "instruction_count": 297,
+        "load_instruction_count": 47,
+        "schema": "cellscript-static-memory-counts-v1",
+        "scope": "decoded_elf_text_including_unreachable",
+        "store_instruction_count": 13
+      },
+      "reused": false,
+      "source": "module cse_probe\naction verify(witness seed: u64,witness expected: u64) { verification\nlet first = seed & 255\nlet second = seed & 255\nrequire first == expected\nrequire second == expected\n}",
+      "static_stack": {
+        "static_call_chain_stack_bound_bytes": 6592,
+        "status": "bounded"
+      }
+    },
+    {
+      "elf_bytes": 1584,
+      "executions": [
+        {
+          "exit": 5,
+          "group_cycles": 3105,
+          "seed": 0,
+          "valid": false
+        },
+        {
+          "exit": 0,
+          "group_cycles": 3138,
+          "seed": 0,
+          "valid": true
+        },
+        {
+          "exit": 5,
+          "group_cycles": 3105,
+          "seed": 1,
+          "valid": false
+        },
+        {
+          "exit": 0,
+          "group_cycles": 3138,
+          "seed": 1,
+          "valid": true
+        },
+        {
+          "exit": 5,
+          "group_cycles": 3105,
+          "seed": 255,
+          "valid": false
+        },
+        {
+          "exit": 0,
+          "group_cycles": 3138,
+          "seed": 255,
+          "valid": true
+        },
+        {
+          "exit": 5,
+          "group_cycles": 3105,
+          "seed": 256,
+          "valid": false
+        },
+        {
+          "exit": 0,
+          "group_cycles": 3138,
+          "seed": 256,
+          "valid": true
+        },
+        {
+          "exit": 5,
+          "group_cycles": 3105,
+          "seed": 18446744073709551615,
+          "valid": false
+        },
+        {
+          "exit": 0,
+          "group_cycles": 3138,
+          "seed": 18446744073709551615,
+          "valid": true
+        }
+      ],
+      "memory": {
+        "instruction_count": 292,
+        "load_instruction_count": 45,
+        "schema": "cellscript-static-memory-counts-v1",
+        "scope": "decoded_elf_text_including_unreachable",
+        "store_instruction_count": 12
+      },
+      "reused": true,
+      "source": "module cse_probe\naction verify(witness seed: u64,witness expected: u64) { verification\nlet first = seed & 255\nlet second = first\nrequire first == expected\nrequire second == expected\n}",
+      "static_stack": {
+        "static_call_chain_stack_bound_bytes": 6592,
+        "status": "bounded"
+      }
+    }
+  ],
+  "schema": "cellscript-pure-expression-experiment-v1",
+  "scope": "explicit source rewrite of repeated nontrapping scalar AND; not a general compiler CSE pass"
+}

@@ -1,6 +1,6 @@
 # Branch Context
 
-## 0.32 — bounded immediate follow-up
+## 0.32 — cost research and exact ZK profile work
 
 `0.32` starts at `54d639a7230060cc0bcc009dcf26e1830e2011c6`, the signed
 merge of the published 0.30 history into 0.31. That merge has the same tree as
@@ -8,10 +8,15 @@ the validated `648bb836` engineering closure. The September 27 maintainer
 instruction authorizes the low-mask immediate slice in
 [#41](https://github.com/CellScript-Labs/CellScript/issues/41), under the
 [#40](https://github.com/CellScript-Labs/CellScript/issues/40) research umbrella.
-It does not authorize the other proposed 0.32 experiments. See the
-[implementation and measurement record](docs/reports/0.32/IMMEDIATE_MASKS.md).
-Cargo versions remain 0.30.0; this branch is not a release announcement.
-The `0.30` published baseline and `0.31` engineering scope remain separate.
+The October 3 maintainer instruction extends that scope to #36–#40 and
+explicitly includes #22. Independent review is waived for this work; compiler,
+independent-checker, runtime and resource validation remain required. See the
+[current implementation scope](docs/CELLSCRIPT_0_32_IMPLEMENTATION.md) and the
+[completed immediate slice](docs/reports/0.32/IMMEDIATE_MASKS.md).
+The branch integrates the published 0.31 history through `5fd4c469`; workspace
+versions remain 0.31.0 pending coordinated release preparation. An in-progress
+ZK experiment is not an admitted executable language feature. This branch is
+not a release announcement or deployment receipt.
 
 ## Branch decision — 2026-09-21
 
@@ -21,10 +26,14 @@ The `0.30` published baseline and `0.31` engineering scope remain separate.
 measurement, immediate planning, shared decoders, private adapter frames, and
 scalar slot reuse. The implementation and remaining acceptance work are tracked
 in [the cost implementation report](docs/CELLSCRIPT_0_31_COST_IMPLEMENTATION.md).
-Cargo versions and the pinned toolchain remain unchanged during development.
+The October 1 release preparation promotes package versions to 0.31.0;
+the pinned Rust toolchain remains 1.97.1. See the
+[candidate readiness record](docs/releases/CELLSCRIPT_0_31_RELEASE_READINESS.md).
 `0.31` became the GitHub default branch on 2026-09-24. The eight archived
 development branches were removed in one atomic push with exact-tip leases;
-the remote now retains `0.30` and `0.31`, together with all release tags.
+the remote then retained `0.30` and `0.31`, together with all release tags.
+The later `0.32` branch carries separate optimization work and is outside the
+0.31 release candidate.
 
 `0.30` is retained as the published release baseline. Its final signed
 `v0.30.0` tag points at `352b4950e7dc7489a4ee7e7ed6d6edf4c7fefd71`.

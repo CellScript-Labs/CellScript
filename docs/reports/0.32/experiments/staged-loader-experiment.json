@@ -1,0 +1,262 @@
+{
+  "decision": "retain-full-bounded-load",
+  "reason": "staging trades reserved stack and transferred bytes against extra syscalls; does not establish canonical runtime offset/late-record validation",
+  "rows": [
+    {
+      "elf_bytes": 544,
+      "group_cycles": 1116,
+      "load_calls": 1,
+      "optional_field_bytes_each": 0,
+      "staged": false,
+      "static_frame_bytes": 4112,
+      "width": 8,
+      "witness_bytes": 36
+    },
+    {
+      "elf_bytes": 728,
+      "group_cycles": 2723,
+      "load_calls": 4,
+      "optional_field_bytes_each": 0,
+      "staged": true,
+      "static_frame_bytes": 160,
+      "width": 8,
+      "witness_bytes": 36
+    },
+    {
+      "elf_bytes": 544,
+      "group_cycles": 1148,
+      "load_calls": 1,
+      "optional_field_bytes_each": 64,
+      "staged": false,
+      "static_frame_bytes": 4112,
+      "width": 8,
+      "witness_bytes": 164
+    },
+    {
+      "elf_bytes": 728,
+      "group_cycles": 2723,
+      "load_calls": 4,
+      "optional_field_bytes_each": 64,
+      "staged": true,
+      "static_frame_bytes": 160,
+      "width": 8,
+      "witness_bytes": 164
+    },
+    {
+      "elf_bytes": 544,
+      "group_cycles": 1629,
+      "load_calls": 1,
+      "optional_field_bytes_each": 1024,
+      "staged": false,
+      "static_frame_bytes": 4112,
+      "width": 8,
+      "witness_bytes": 2084
+    },
+    {
+      "elf_bytes": 736,
+      "group_cycles": 2727,
+      "load_calls": 4,
+      "optional_field_bytes_each": 1024,
+      "staged": true,
+      "static_frame_bytes": 160,
+      "width": 8,
+      "witness_bytes": 2084
+    },
+    {
+      "elf_bytes": 544,
+      "group_cycles": 2017,
+      "load_calls": 1,
+      "optional_field_bytes_each": 1800,
+      "staged": false,
+      "static_frame_bytes": 4112,
+      "width": 8,
+      "witness_bytes": 3636
+    },
+    {
+      "elf_bytes": 736,
+      "group_cycles": 2727,
+      "load_calls": 4,
+      "optional_field_bytes_each": 1800,
+      "staged": true,
+      "static_frame_bytes": 160,
+      "width": 8,
+      "witness_bytes": 3636
+    },
+    {
+      "elf_bytes": 544,
+      "group_cycles": 1122,
+      "load_calls": 1,
+      "optional_field_bytes_each": 0,
+      "staged": false,
+      "static_frame_bytes": 4112,
+      "width": 32,
+      "witness_bytes": 60
+    },
+    {
+      "elf_bytes": 728,
+      "group_cycles": 2729,
+      "load_calls": 4,
+      "optional_field_bytes_each": 0,
+      "staged": true,
+      "static_frame_bytes": 160,
+      "width": 32,
+      "witness_bytes": 60
+    },
+    {
+      "elf_bytes": 544,
+      "group_cycles": 1154,
+      "load_calls": 1,
+      "optional_field_bytes_each": 64,
+      "staged": false,
+      "static_frame_bytes": 4112,
+      "width": 32,
+      "witness_bytes": 188
+    },
+    {
+      "elf_bytes": 728,
+      "group_cycles": 2729,
+      "load_calls": 4,
+      "optional_field_bytes_each": 64,
+      "staged": true,
+      "static_frame_bytes": 160,
+      "width": 32,
+      "witness_bytes": 188
+    },
+    {
+      "elf_bytes": 544,
+      "group_cycles": 1635,
+      "load_calls": 1,
+      "optional_field_bytes_each": 1024,
+      "staged": false,
+      "static_frame_bytes": 4112,
+      "width": 32,
+      "witness_bytes": 2108
+    },
+    {
+      "elf_bytes": 736,
+      "group_cycles": 2733,
+      "load_calls": 4,
+      "optional_field_bytes_each": 1024,
+      "staged": true,
+      "static_frame_bytes": 160,
+      "width": 32,
+      "witness_bytes": 2108
+    },
+    {
+      "elf_bytes": 544,
+      "group_cycles": 2023,
+      "load_calls": 1,
+      "optional_field_bytes_each": 1800,
+      "staged": false,
+      "static_frame_bytes": 4112,
+      "width": 32,
+      "witness_bytes": 3660
+    },
+    {
+      "elf_bytes": 736,
+      "group_cycles": 2733,
+      "load_calls": 4,
+      "optional_field_bytes_each": 1800,
+      "staged": true,
+      "static_frame_bytes": 160,
+      "width": 32,
+      "witness_bytes": 3660
+    },
+    {
+      "elf_bytes": 544,
+      "group_cycles": 1146,
+      "load_calls": 1,
+      "optional_field_bytes_each": 0,
+      "staged": false,
+      "static_frame_bytes": 4112,
+      "width": 128,
+      "witness_bytes": 156
+    },
+    {
+      "elf_bytes": 728,
+      "group_cycles": 2753,
+      "load_calls": 4,
+      "optional_field_bytes_each": 0,
+      "staged": true,
+      "static_frame_bytes": 160,
+      "width": 128,
+      "witness_bytes": 156
+    },
+    {
+      "elf_bytes": 544,
+      "group_cycles": 1178,
+      "load_calls": 1,
+      "optional_field_bytes_each": 64,
+      "staged": false,
+      "static_frame_bytes": 4112,
+      "width": 128,
+      "witness_bytes": 284
+    },
+    {
+      "elf_bytes": 728,
+      "group_cycles": 2753,
+      "load_calls": 4,
+      "optional_field_bytes_each": 64,
+      "staged": true,
+      "static_frame_bytes": 160,
+      "width": 128,
+      "witness_bytes": 284
+    },
+    {
+      "elf_bytes": 544,
+      "group_cycles": 1659,
+      "load_calls": 1,
+      "optional_field_bytes_each": 1024,
+      "staged": false,
+      "static_frame_bytes": 4112,
+      "width": 128,
+      "witness_bytes": 2204
+    },
+    {
+      "elf_bytes": 736,
+      "group_cycles": 2757,
+      "load_calls": 4,
+      "optional_field_bytes_each": 1024,
+      "staged": true,
+      "static_frame_bytes": 160,
+      "width": 128,
+      "witness_bytes": 2204
+    },
+    {
+      "elf_bytes": 544,
+      "group_cycles": 2047,
+      "load_calls": 1,
+      "optional_field_bytes_each": 1800,
+      "staged": false,
+      "static_frame_bytes": 4112,
+      "width": 128,
+      "witness_bytes": 3756
+    },
+    {
+      "elf_bytes": 736,
+      "group_cycles": 2757,
+      "load_calls": 4,
+      "optional_field_bytes_each": 1800,
+      "staged": true,
+      "static_frame_bytes": 160,
+      "width": 128,
+      "witness_bytes": 3756
+    }
+  ],
+  "schema": "cellscript-staged-loader-experiment-v1",
+  "scope": "real CKB scheduler and LOAD_WITNESS calls; known field offsets and lengths; excludes canonical decoder work",
+  "source_sha256": {
+    "Cargo.lock": "643d60820b5ca8267149289e814f14dd15b39bce087eb0a0a680527bc6b8e11e",
+    "rust-toolchain.toml": "052bff4f93a35dc619c39b032847438d22441c149527e7ab91d1afff20c3d1e3",
+    "src/codegen/assembler.rs": "5b36ba3bb81b02a9ec8afe2df788448886343f0923b39e60046131572e7b4f0c",
+    "src/codegen/assembler/cost_experiments.rs": "b7e4853a8169e1255389c6bb6f234655b4ca59d6a85771da3699d9f75beebb35",
+    "src/codegen/assembler/immediate.rs": "8d4c2ab43df4ee16b6d486d6a2bebac0c0d8831c693bce9b2631cf4c9e3055f9"
+  },
+  "vm_configuration": {
+    "ckb_script": "1.1.0",
+    "ckb_vm": "0.24.14",
+    "cycle_limit": 10000000,
+    "isa": "IMC|B|MOP",
+    "version": 2
+  }
+}

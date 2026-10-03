@@ -1,0 +1,28 @@
+{
+  "baseline": {
+    "cycles": 509,
+    "elf_bytes": 448
+  },
+  "blocker": "assembler sizing/relaxation, four-byte checker ranges and source maps require a coordinated versioned migration",
+  "decision": "defer-production-support",
+  "mixed": {
+    "cycles": 509,
+    "elf_bytes": 448
+  },
+  "schema": "cellscript-compressed-probe-v1",
+  "scope": "two exact compressed instructions inside unchanged ELF layout; independent checker deliberately rejects mixed width",
+  "source_sha256": {
+    "Cargo.lock": "643d60820b5ca8267149289e814f14dd15b39bce087eb0a0a680527bc6b8e11e",
+    "rust-toolchain.toml": "052bff4f93a35dc619c39b032847438d22441c149527e7ab91d1afff20c3d1e3",
+    "src/codegen/assembler.rs": "5b36ba3bb81b02a9ec8afe2df788448886343f0923b39e60046131572e7b4f0c",
+    "src/codegen/assembler/cost_experiments.rs": "b7e4853a8169e1255389c6bb6f234655b4ca59d6a85771da3699d9f75beebb35",
+    "src/codegen/assembler/immediate.rs": "8d4c2ab43df4ee16b6d486d6a2bebac0c0d8831c693bce9b2631cf4c9e3055f9"
+  },
+  "vm_configuration": {
+    "ckb_script": "1.1.0",
+    "ckb_vm": "0.24.14",
+    "cycle_limit": 10000000,
+    "isa": "IMC|B|MOP",
+    "version": 2
+  }
+}

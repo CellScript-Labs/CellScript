@@ -1,6 +1,6 @@
 {
   "schema": "cellscript-cryptographic-capability-matrix-v1",
-  "status": "accepted",
+  "status": "candidate",
   "scope": "cryptographic and authorization operations used by the frozen CellScript 0.30 eight-family business corpus",
   "claim": "Each admitted row is either executable CellScript behavior or an exact composition boundary. External verifier and standard Lock internals are never counted as compiler-proved behavior.",
   "documentation": "docs/CELLSCRIPT_0_30_CRYPTOGRAPHIC_CAPABILITY_MATRIX.md",
@@ -704,9 +704,9 @@
     "address-string decoding and network-prefix interpretation inside CKB-VM"
   ],
   "release_requirements": {
-    "independent_review": "waived",
-    "release_gate": "passed",
-    "selected_network_deployment": "passed"
+    "independent_review": "pending",
+    "release_gate": "pending",
+    "selected_network_deployment": "pending"
   },
   "resource_budget_manifest": "tests/fixtures/cryptographic_resource_budgets.json"
 }

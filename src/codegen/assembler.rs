@@ -483,7 +483,7 @@ impl ParsedAssembly {
             }
 
             let op = parse_asm_op(clean).map_err(|error| provenance.attach(error))?;
-            *offset += op_size(&op, *offset, current_section, op_index, branch_size_mode);
+            *offset += op_size(&op, *offset, current_section, op_index, branch_size_mode).map_err(|error| provenance.attach(error))?;
             ops.push(LocatedAsmOp { op, provenance });
         }
 
@@ -512,7 +512,8 @@ impl ParsedAssembly {
                     relaxed.insert(index);
                 }
             }
-            offset += op_size(&op.op, offset, SectionKind::Text, index, BranchSizeMode::Conservative);
+            offset += op_size(&op.op, offset, SectionKind::Text, index, BranchSizeMode::Conservative)
+                .map_err(|error| op.provenance.attach(error))?;
         }
         Ok(relaxed)
     }
@@ -751,19 +752,20 @@ enum MachineTerminator {
     Return,
 }
 
-fn text_op_layouts(parsed: &ParsedAssembly) -> Vec<TextOpLayout> {
+fn text_op_layouts(parsed: &ParsedAssembly) -> Result<Vec<TextOpLayout>> {
     let mut offset = 0usize;
     let mut layouts = Vec::with_capacity(parsed.text_ops.len());
     for (op_index, op) in parsed.text_ops.iter().enumerate() {
-        let size = op_size(&op.op, offset, SectionKind::Text, op_index, BranchSizeMode::Exact(&parsed.relaxed_text_branches));
+        let size = op_size(&op.op, offset, SectionKind::Text, op_index, BranchSizeMode::Exact(&parsed.relaxed_text_branches))
+            .map_err(|error| op.provenance.attach(error))?;
         layouts.push(TextOpLayout { op_index, offset, size });
         offset += size;
     }
-    layouts
+    Ok(layouts)
 }
 
-fn machine_blocks(parsed: &ParsedAssembly) -> Vec<MachineBlock> {
-    let layouts = text_op_layouts(parsed);
+fn machine_blocks(parsed: &ParsedAssembly) -> Result<Vec<MachineBlock>> {
+    let layouts = text_op_layouts(parsed)?;
     let mut blocks = Vec::new();
     let mut block_start = 0usize;
     let mut block_label = None;
@@ -790,11 +792,11 @@ fn machine_blocks(parsed: &ParsedAssembly) -> Vec<MachineBlock> {
         blocks.push(build_machine_block(parsed, &layouts, block_start, parsed.text_ops.len(), block_label));
     }
 
-    blocks
+    Ok(blocks)
 }
 
 fn machine_cfg(parsed: &ParsedAssembly) -> Result<MachineCfg> {
-    let blocks = machine_blocks(parsed);
+    let blocks = machine_blocks(parsed)?;
     let label_to_block = machine_label_to_block(parsed, &blocks);
     let mut edges = Vec::new();
 
@@ -1019,7 +1021,7 @@ impl ParsedAssembly {
         machine_order: &MachineLayoutOrder,
         coverage: MachineBlockCoverage,
     ) -> Result<BackendLayoutMetrics> {
-        let text_op_layouts = text_op_layouts(self);
+        let text_op_layouts = text_op_layouts(self)?;
         let text_size = text_op_layouts.iter().map(|op| op.size).sum();
         let mut max_cond_branch_abs_distance = 0u64;
         for op_layout in text_op_layouts {
@@ -1553,10 +1555,16 @@ fn encode_call_sequence(out: &mut Vec<u8>, pc: u64, target: u64) -> Result<()> {
     Ok(())
 }
 
-fn op_size(op: &AsmOp, current_offset: usize, section: SectionKind, op_index: usize, branch_size_mode: BranchSizeMode<'_>) -> usize {
-    match op {
+fn op_size(
+    op: &AsmOp,
+    current_offset: usize,
+    section: SectionKind,
+    op_index: usize,
+    branch_size_mode: BranchSizeMode<'_>,
+) -> Result<usize> {
+    let size = match op {
         AsmOp::Label(_) => 0,
-        AsmOp::Instruction(Instruction::Li { imm, .. }) => li_sequence_size(*imm),
+        AsmOp::Instruction(Instruction::Li { imm, .. }) => li_sequence_size(*imm)?,
         AsmOp::Instruction(Instruction::La { .. }) => 8,
         AsmOp::Instruction(Instruction::Call { .. }) => 8,
         AsmOp::Instruction(
@@ -1578,7 +1586,8 @@ fn op_size(op: &AsmOp, current_offset: usize, section: SectionKind, op_index: us
         AsmOp::Byte(_) => 1,
         AsmOp::Ascii(bytes) => bytes.len(),
         AsmOp::Align(bytes) => padding_for(current_offset, *bytes),
-    }
+    };
+    Ok(size)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1613,9 +1622,8 @@ fn li_form(imm: i128) -> LiForm {
     }
 }
 
-fn li_sequence_size(imm: i128) -> usize {
-    // Parsing validates the literal domain before any layout pass runs.
-    immediate::plan(imm).expect("parsed RV64 immediate").len() * 4
+fn li_sequence_size(imm: i128) -> Result<usize> {
+    Ok(immediate::plan(imm)?.len() * 4)
 }
 
 fn write_elf_header(
@@ -2193,7 +2201,7 @@ mod tests {
         let mut encoded = Vec::new();
         encode_li_sequence(&mut encoded, 5, 0x7fff_ffff).unwrap();
         assert_eq!(encoded, [0xfff0_0293u32.to_le_bytes(), 0x0212_d293u32.to_le_bytes()].concat());
-        assert_eq!(li_sequence_size(0x7fff_ffff), encoded.len());
+        assert_eq!(li_sequence_size(0x7fff_ffff).expect("valid low-mask immediate"), encoded.len());
 
         let execute = |count: usize, previous: bool| {
             let mut lines = vec![".section .text".into(), ".global entry".into(), "entry:".into()];
@@ -2297,7 +2305,7 @@ mod tests {
         machine.load_program(&Bytes::from(elf), std::iter::empty::<std::result::Result<Bytes, ckb_vm::Error>>()).unwrap();
         assert_eq!(machine.run().unwrap(), 0, "encoded RV64 immediates must equal independent .rodata values");
         assert_eq!(START_TRAMPOLINE_SIZE, 20);
-        assert!(li_sequence_size(1 << 56) <= 8);
+        assert!(li_sequence_size(1 << 56).expect("valid immediate") <= 8);
     }
 
     fn assert_generated_assembly_error(error: &CompileError, expected_line: usize, expected_message: &str) {
@@ -2651,7 +2659,7 @@ mod tests {
     fn internal_assembler_encodes_small_li_forms_and_boundaries() {
         // ADDI form: signed 12-bit range, one instruction.
         for (imm, size) in [(0i128, 4), (1, 4), (2047, 4), (-2048, 4)] {
-            assert_eq!(li_sequence_size(imm), size, "imm {imm}");
+            assert_eq!(li_sequence_size(imm).expect("valid immediate"), size, "imm {imm}");
             assert_eq!(li_form(imm), LiForm::Addi, "imm {imm}");
         }
         // LUI form: low 12 bits zero, 20-bit signed high part. +2^31 is
@@ -2660,18 +2668,18 @@ mod tests {
         // routes it to the wide construction).
         for imm in [4096i128, -4096, -(1i128 << 31), 0x7ffff000] {
             assert_eq!(li_form(imm), LiForm::Lui, "imm {imm}");
-            assert_eq!(li_sequence_size(imm), 4, "imm {imm}");
+            assert_eq!(li_sequence_size(imm).expect("valid immediate"), 4, "imm {imm}");
         }
         // Just outside both single forms: two instructions.
         for imm in [2048i128, -2049, 4097] {
             assert_eq!(li_form(imm), LiForm::LuiAddi, "imm {imm}");
-            assert_eq!(li_sequence_size(imm), 8, "imm {imm}");
+            assert_eq!(li_sequence_size(imm).expect("valid immediate"), 8, "imm {imm}");
         }
         // The encoding and the size model agree on every form.
         for imm in [-2049i128, -2048, -1, 0, 1, 2047, 2048, 4095, 4096, 6144, 1 << 31, -(1 << 31), 0x7fffffff, -(1i128 << 31)] {
             let mut encoded = Vec::new();
             encode_li_sequence(&mut encoded, 10, imm).expect("encode li");
-            assert_eq!(encoded.len(), li_sequence_size(imm), "size model diverges for imm {imm}");
+            assert_eq!(encoded.len(), li_sequence_size(imm).expect("valid immediate"), "size model diverges for imm {imm}");
         }
         // Exact ADDI word for the canonical small constant.
         let mut encoded = Vec::new();
@@ -2681,6 +2689,13 @@ mod tests {
         let mut encoded = Vec::new();
         encode_li_sequence(&mut encoded, 10, 4096).unwrap();
         assert_eq!(encoded, 0x00001537u32.to_le_bytes().to_vec());
+    }
+
+    #[test]
+    fn li_size_model_rejects_out_of_domain_immediates_without_panicking() {
+        let invalid = i128::from(u64::MAX) + 1;
+        let error = li_sequence_size(invalid).expect_err("out-of-domain immediate must be rejected");
+        assert!(error.message.contains("does not fit 64 bits"), "unexpected diagnostic: {}", error.message);
     }
 
     #[test]
@@ -3385,3 +3400,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(all(test, feature = "vm-runner"))]
+mod cost_experiments;

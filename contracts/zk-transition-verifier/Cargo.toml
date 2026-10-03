@@ -1,0 +1,27 @@
+[package]
+name = "cellscript-zk-transition-verifier"
+version = "0.32.0"
+edition = "2024"
+rust-version = "1.97.1"
+publish = false
+license = "MIT"
+
+[[bin]]
+name = "cellscript-zk-transition-verifier"
+path = "src/main.rs"
+test = false
+bench = false
+
+[workspace]
+
+[dependencies]
+ckb-std = { version = "=1.1.0", default-features = false, features = ["allocator", "ckb-types"] }
+verifier-core = { git = "https://github.com/CECILIA-MULANDI/groth16-ckb", rev = "d64c769ffe2d2edb5eb308dc59058efda77c2f83" }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "z"
+overflow-checks = true
+panic = "abort"
+strip = false

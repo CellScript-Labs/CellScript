@@ -527,6 +527,16 @@ run_registry_type_script_check() {
     fi
 }
 
+run_zk_child_research_check() {
+    # Research evidence only: no source-level ZK admission or deployment claim.
+    run cargo fmt --manifest-path contracts/zk-transition-verifier/Cargo.toml -- --check
+    run cargo fmt --manifest-path contracts/zk-transition-verifier/host/Cargo.toml -- --check
+    run cargo build --locked --manifest-path contracts/zk-transition-verifier/Cargo.toml \
+        --target riscv64imac-unknown-none-elf --release
+    run cargo test --locked --manifest-path contracts/zk-transition-verifier/host/Cargo.toml \
+        --release -- --test-threads=1
+}
+
 check_wasm_release_bundle() {
     require_cmd docker
     run website/scripts/build-wasm.sh
@@ -621,6 +631,7 @@ run_dev_gate() {
     check_registry_artifact_verifier_dependency_boundary
     check_artifact_checker_dependency_boundary
     run_registry_type_script_check
+    run_zk_child_research_check
     check_canonical_cellscript_format
     check_example_u64_boundaries
     run ./scripts/cellscript_strict_backend_audit.sh quick
@@ -694,6 +705,7 @@ run_ci_gate() {
     run cargo clippy --locked -p cellscript-ckb-sdk-builder-example --all-targets -- -D warnings
     run cargo clippy --locked -p cellscript-tools --all-targets -- -D warnings
     run_registry_type_script_check
+    run_zk_child_research_check
     run cargo clippy --locked --manifest-path contracts/registry-type-script/Cargo.toml --tests -- -D warnings
     run ./scripts/cellscript_strict_backend_audit.sh ci
     run cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
@@ -741,6 +753,7 @@ run_backend_gate() {
     check_registry_artifact_verifier_dependency_boundary
     check_artifact_checker_dependency_boundary
     run_executable_package_scenarios all
+    run_zk_child_research_check
     run ./scripts/cellscript_strict_backend_audit.sh full
     run git diff --check
 }

@@ -1,0 +1,14 @@
+// cellscript-zk-transition-groth16-bn254-v1. All readers use strict table
+// validation: exactly six fields, exact offsets and no trailing bytes.
+array ZkByte8 [byte; 8];
+array ZkByte32 [byte; 32];
+array ZkProof128 [byte; 128];
+array ZkStatement196 [byte; 196];
+table ZkTransitionRequest {
+    magic: ZkByte8,
+    version_flags: ZkByte8,
+    profile: ZkByte32,
+    verification_key: ZkByte32,
+    proof: ZkProof128,
+    statement: ZkStatement196,
+}

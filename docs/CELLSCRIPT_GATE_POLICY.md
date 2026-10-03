@@ -12,6 +12,19 @@ deciding whether a change is ready.
 
 ## Gate Modes
 
+The 0.31 candidate reuses the bounded business portfolio, with fresh release
+acceptance tracked in [the readiness record](releases/CELLSCRIPT_0_31_RELEASE_READINESS.md).
+Its capability ledger must identify the current package major/minor version.
+The accepted 0.30 ledger, review waiver and Pudge deployment cannot authorize
+the new candidate; pending requirements fail the strict release preflight.
+
+For 0.31.0 only, the maintainer explicitly authorized direct publication on
+2026-10-01 without completing the pending review and release-evidence records.
+The distribution workflow checks native source and locked dependencies against
+validated candidate `6c111a30` and records the exception. It does not report a
+passing full release gate or fresh public-network deployment. Other release
+versions retain the normal gate. See the [0.31 release notes](releases/CELLSCRIPT_0_31_RELEASE_NOTES.md).
+
 The 0.31 cost corpus also emits static load/store instruction counts. The native
 `cellscript-tools compare-cost-evidence BASELINE BASELINE_MULTI CANDIDATE
 CANDIDATE_MULTI --output REPORT` command validates complete report pairs before
@@ -19,6 +32,14 @@ comparing fixture sets, outcomes, witness sizes and individual cost metrics.
 Static instruction counts are not executed memory traffic. See the
 [reproduction package](reports/0.31/README.md); focused reproduction does not
 replace the gates below.
+
+The 0.32 development line adds observed per-VM diagnostic replay without
+changing the frozen cost oracle or ceilings. `dev`, `ci` and `backend` also
+build and test the experimental exact ZK child. Its deterministic test setup
+and modeled-syscall harness are research evidence, not an admitted language
+profile or stateful transaction proof. See the
+[0.32 scope](CELLSCRIPT_0_32_IMPLEMENTATION.md) and
+[child boundary](../contracts/zk-transition-verifier/README.md).
 
 | Mode | When to run | Evidence boundary |
 |---|---|---|

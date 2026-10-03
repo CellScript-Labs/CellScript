@@ -1,0 +1,83 @@
+{
+  "ckb_vm": "0.24.14",
+  "isa": "IMC|B|MOP",
+  "rows": [
+    {
+      "case": "valid",
+      "exit": 0,
+      "instruction_cycles": 102683418
+    },
+    {
+      "case": "changed-statement-236",
+      "exit": 83,
+      "instruction_cycles": 102664611
+    },
+    {
+      "case": "changed-statement-268",
+      "exit": 83,
+      "instruction_cycles": 102680606
+    },
+    {
+      "case": "changed-statement-300",
+      "exit": 83,
+      "instruction_cycles": 102656023
+    },
+    {
+      "case": "changed-statement-332",
+      "exit": 83,
+      "instruction_cycles": 102673950
+    },
+    {
+      "case": "changed-statement-364",
+      "exit": 83,
+      "instruction_cycles": 102661822
+    },
+    {
+      "case": "changed-statement-396",
+      "exit": 83,
+      "instruction_cycles": 102668245
+    },
+    {
+      "case": "changed-statement-428",
+      "exit": 83,
+      "instruction_cycles": 102650645
+    },
+    {
+      "case": "truncated",
+      "exit": 80,
+      "instruction_cycles": 31986
+    },
+    {
+      "case": "trailing",
+      "exit": 80,
+      "instruction_cycles": 32545
+    },
+    {
+      "case": "missing-fd",
+      "exit": 80,
+      "instruction_cycles": 1128
+    },
+    {
+      "case": "extra-fd",
+      "exit": 80,
+      "instruction_cycles": 1128
+    },
+    {
+      "case": "partial-read",
+      "exit": 80,
+      "instruction_cycles": 2571
+    }
+  ],
+  "schema": "cellscript-zk-child-research-v1",
+  "scope": "exact child ELF with modeled syscalls; excludes CKB scheduler charges and transaction binding",
+  "setup": "public deterministic test-only seed; no production authorization circuit",
+  "vm_version": 2,
+  "artifact_sha256": "2e314ed2b8f6e0d34ceccd7ac4825f5c006e07992c5d69a912df73cc9209f402",
+  "source_sha256": {
+    "contracts/zk-transition-verifier/Cargo.lock": "d717b29e5a17bb6c9f60f6b042338d12e7262dbb2b1c88e5903b6b1dcc1f3c07",
+    "contracts/zk-transition-verifier/src/main.rs": "510bfcfcee404c358fbe76aa89075f0faffff4b163c6b11e49d46cae238a998c",
+    "contracts/zk-transition-verifier/host/Cargo.lock": "a7790d159ea73a210e02300c1e75582e6cf9759c7a2faa0df1b9287990882c8f",
+    "contracts/zk-transition-verifier/host/src/lib.rs": "9e02801feb7a0bfb9654c17995e7f0129969b89fd47e31e6712f3ec213ec0543",
+    "crates/cellscript-artifact-checker/src/zk.rs": "ba54a3da8dbc684eeb22b7668494d690306f5efc43e1da6388db54aadc12a785"
+  }
+}

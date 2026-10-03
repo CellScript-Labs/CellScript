@@ -1,4 +1,4 @@
-//! Validation for the versioned 0.30 product-capability ledger.
+//! Validation for the current release's product-capability ledger.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -9,7 +9,7 @@ use serde::Deserialize;
 
 pub const MANIFEST: &str = "tests/fixtures/capability_ledger.json";
 const SCHEMA: &str = "cellscript-capability-ledger-v1";
-const DOCUMENTATION: &str = "docs/CELLSCRIPT_0_30_CAPABILITY_LEDGER.md";
+const DOCUMENTATION: &str = "docs/releases/CELLSCRIPT_0_31_RELEASE_READINESS.md";
 const REQUIRED_RELEASE_GATES: [&str; 4] = ["independent_review", "release", "repository_gates", "selected_network_evidence"];
 
 #[derive(Debug, Deserialize)]
@@ -82,8 +82,9 @@ pub fn validate(root: &Path, ledger: &CapabilityLedger, release: bool) -> Result
     if ledger.schema != SCHEMA {
         bail!("capability ledger schema must be {SCHEMA}");
     }
-    if ledger.release_line != "0.30" || !matches!(ledger.status.as_str(), "candidate" | "accepted") {
-        bail!("capability ledger must identify the 0.30 line and candidate or accepted status");
+    let release_line = concat!(env!("CARGO_PKG_VERSION_MAJOR"), ".", env!("CARGO_PKG_VERSION_MINOR"));
+    if ledger.release_line != release_line || !matches!(ledger.status.as_str(), "candidate" | "accepted") {
+        bail!("capability ledger must identify the {release_line} line and candidate or accepted status");
     }
     if ledger.claim.trim().is_empty() || ledger.documentation != DOCUMENTATION {
         bail!("capability ledger claim and canonical documentation must be explicit");
@@ -239,6 +240,10 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let mut accepted = ledger();
         accepted.status = "accepted".to_string();
+        for status in accepted.release_requirements.values_mut() {
+            *status = "passed".to_string();
+        }
+        accepted.release_requirements.insert("independent_review".to_string(), "waived".to_string());
         for entry in &mut accepted.entries {
             if entry.release_scope == "required" {
                 entry.release_eligibility = "stable".to_string();
@@ -253,5 +258,18 @@ mod tests {
         accepted.entries[0].issue_disposition = "close-after-merge".to_string();
         accepted.release_requirements.insert("independent_review".to_string(), "passed".to_string());
         assert!(validate(&root, &accepted, true).unwrap_err().to_string().contains("incomplete"));
+    }
+
+    #[test]
+    fn previous_release_acceptance_cannot_authorize_the_current_candidate() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut previous = ledger();
+        previous.release_line = "0.30".to_string();
+        previous.status = "accepted".to_string();
+        for status in previous.release_requirements.values_mut() {
+            *status = "passed".to_string();
+        }
+        previous.release_requirements.insert("independent_review".to_string(), "waived".to_string());
+        assert!(validate(&root, &previous, true).unwrap_err().to_string().contains("must identify the 0.31 line"));
     }
 }

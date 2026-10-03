@@ -10,11 +10,11 @@
   },
   "identities": {
     "artifact_hash": "0x7cfcfeb4ced54cbe51fc79562397453a0dd64c48bc8fd2509e78f7ec0fde26c6",
-    "lowering_record_hash": "0xae3486ca600722bd38db53108fe2b517313fb7851fcdb062fdcb773021c179b0",
+    "lowering_record_hash": "0x3c5e47baee849aeb242c690200323a14d5c4a56418f49f2d90de199f4214f9e3",
     "raw_transaction_hash": "0xb301a23ad526c83b76b49ae44d783caf34134174817d8a6d33d489db94abadde",
     "serialized_transaction_hash": "0xe6ee2ff6df25b47a974e702f2b2bf8443f2ba4a589c3d4842c37d0c1cbd40297",
-    "source_map_hash": "0x6b9b6c5a46932864fcb29286c30e15d25e4e9d89b67f9135c2e998aab98a6c2f",
-    "verified_bundle_id": "0x099b44b4a5e230750eb67d54ca38766142a1904984441e32bdb67e1dd065ab23"
+    "source_map_hash": "0xbeaa711e3eccb2b91c44687d1689ebcaf369ac874d9352e965e86de08b8a65de",
+    "verified_bundle_id": "0x49e5c1af1bf27fc4c8bc88285ebb53fbb8683cb223c4fff3ceaf7258c37bc645"
   },
   "measured": {
     "cycles": 77619,

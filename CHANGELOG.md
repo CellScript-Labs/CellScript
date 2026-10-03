@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — 0.32 low-mask immediates
+## Unreleased — 0.32
 
 Construct low-bit masks `2^n - 1` for n=31..63 with `addi -1; srli`
 when this is strictly shorter than the 0.31 immediate plan. Preserve existing
@@ -11,7 +11,15 @@ independent checker cover the new sequence without a schema or ISA change.
 See the [implementation and measurement record](docs/reports/0.32/IMMEDIATE_MASKS.md)
 and [issue #41](https://github.com/CellScript-Labs/CellScript/issues/41).
 
-## Unreleased — 0.31 cost work
+Add a diagnostic execution-trace contract that replays the pinned CKB scheduler,
+checks exact exit/cycle agreement with the existing oracle, and records separate
+observed stack peaks for each VM and EXEC generation. Preserve static bounds
+and unavailable outcomes as distinct categories. Add isolated dispatch and
+copy experiments; these do not change the production emitter's routing or
+witness ownership. Broader acceptance remains tracked in the
+[0.32 implementation record](docs/CELLSCRIPT_0_32_IMPLEMENTATION.md).
+
+## 0.31.0 - Cost optimization (2026-10-01)
 
 Implement deterministic RV64 immediate plans, shared policy decoders behind
 direct action stubs, bounded private adapter frames, and CFG-liveness scalar
@@ -22,7 +30,14 @@ Cost-report v2 adds measured nonzero group exits, explicit unavailable results,
 static call-chain bounds, expanded policy/scalar sweeps, and multi-Script
 accounting with frozen per-metric ceilings. See the
 [implementation and acceptance report](docs/CELLSCRIPT_0_31_COST_IMPLEMENTATION.md).
-These changes are development work; 0.31 has not been released.
+Publication is authorized with a release-specific waiver of the pending review
+and evidence records; see the [release notes](docs/releases/CELLSCRIPT_0_31_RELEASE_NOTES.md).
+
+Reject source-byte loop fusion when discarded loop-prefix instructions define
+an offset or memory pointer. Propagate immediate-planner errors through assembly
+layout. The self-hosted Registry derives client identity from the socket peer
+and an explicit trusted-proxy count, discarding caller-supplied IP/ASN headers.
+These corrections originate in `9c441094` on `arthur/fix-audit-bugs`.
 
 Add decoded-ELF static load/store counts to scalar evidence, hash the shared
 measurement fixtures and frozen budgets, and provide a native before/after

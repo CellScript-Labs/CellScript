@@ -1,10 +1,10 @@
 {
   "schema": "cellscript-capability-ledger-v1",
-  "release_line": "0.30",
-  "status": "accepted",
+  "release_line": "0.31",
+  "status": "candidate",
   "claim": "Product-capability status for issues #7 through #27; this ledger does not redefine the executable-surface registry and does not claim release completion.",
-  "documentation": "docs/CELLSCRIPT_0_30_CAPABILITY_LEDGER.md",
-  "base_commit": "3a81fd0bedc751f870c17ddcf7a079a70149c84e",
+  "documentation": "docs/releases/CELLSCRIPT_0_31_RELEASE_READINESS.md",
+  "base_commit": "54d639a7230060cc0bcc009dcf26e1830e2011c6",
   "entries": [
     {
       "issue": 7,
@@ -509,14 +509,14 @@
         "Version bumps, publication, or deployment before every required identity and gate agrees"
       ],
       "remaining_work": [
-        "The maintainer authorized the 0.30 release and website update on 2026-09-21; #27 stays open until the final clean-source release gate and each selected publication channel are verified."
+        "Issue #27 closed for 0.30. Issue #30 owns fresh 0.31 candidate review, distribution bundles, selected-network evidence and the full clean-source release gate."
       ]
     }
   ],
   "release_requirements": {
-    "independent_review": "waived",
-    "release": "passed",
-    "repository_gates": "passed",
-    "selected_network_evidence": "passed"
+    "independent_review": "pending",
+    "release": "pending",
+    "repository_gates": "pending",
+    "selected_network_evidence": "pending"
   }
 }

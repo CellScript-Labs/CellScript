@@ -1,0 +1,88 @@
+diff --git a/src/codegen/expr.rs b/src/codegen/expr.rs
+index 01512f91..9080ce96 100644
+--- a/src/codegen/expr.rs
++++ b/src/codegen/expr.rs
+@@ -64,6 +64,13 @@ impl CodeGenerator {
+     }
+
+     pub(super) fn emit_binary(&mut self, dest: &IrVar, op: BinaryOp, left: &IrOperand, right: &IrOperand) -> Result<()> {
++        self.emit_binary_with_retained_left(dest, op, left, right, false)
++    }
++
++    /// Only generate_block may supply retained_left: the immediately preceding
++    /// eligible scalar instruction left this exact SSA value in t0. Stack
++    /// materialization remains intact, including at every join and call.
++    pub(super) fn emit_binary_with_retained_left(&mut self, dest: &IrVar, op: BinaryOp, left: &IrOperand, right: &IrOperand, retained_left: bool) -> Result<()> {
+         if self.emit_u128_add_sub_with_u64(dest, op, left, right) {
+             return Ok(());
+         }
+@@ -106,8 +113,15 @@ impl CodeGenerator {
+         // program point. Loading them directly avoids recursively rebuilding
+         // expression provenance (which is reserved for prelude checks) and
+         // avoids using the destination stack slot as a temporary.
+-        self.emit_operand_to_register("t0", left);
+-        self.emit_operand_to_register("t1", right);
++        if !retained_left {
++            self.emit_operand_to_register("t0", left);
++        }
++        if let IrOperand::Var(var) = right {
++            // t0 is live even when the stack address needs materialization.
++            self.emit_stack_load_with_avoid("t1", self.scalar_slot_offset(var.id), &["t0"]);
++        } else {
++            self.emit_operand_to_register("t1", right);
++        }
+
+         if matches!(op, BinaryOp::Div | BinaryOp::Mod) {
+             let divisor_ok = self.fresh_label("scalar_divisor_nonzero");
+diff --git a/src/codegen/mod.rs b/src/codegen/mod.rs
+index 73fdd3fd..8ad05460 100644
+--- a/src/codegen/mod.rs
++++ b/src/codegen/mod.rs
+@@ -3134,8 +3134,22 @@ impl CodeGenerator {
+
+         let fused = block.instructions.last().is_some_and(|instruction| self.can_fuse_branch(instruction, &block.terminator));
+         let instruction_count = block.instructions.len().saturating_sub(usize::from(fused));
++        // The scalar allocator's closed eligibility excludes address-exposed,
++        // wide and resource values. Retain only across adjacent instructions
++        // inside this block; every other operation invalidates the fact.
++        let retain_scalar = self.options.opt_level > 0 && !self.scalar_slot_offsets.is_empty();
++        let mut retained_t0 = None;
+         for instruction in &block.instructions[..instruction_count] {
+-            self.generate_instruction(instruction)?;
++            if let IrInstruction::Binary { dest, op, left: IrOperand::Var(left), right } = instruction
++                && retain_scalar
++                && retained_t0 == Some(left.id)
++                && scalar_slots::retained_scalar_binary(instruction).is_some()
++            {
++                self.emit_binary_with_retained_left(dest, *op, &IrOperand::Var(left.clone()), right, true)?;
++            } else {
++                self.generate_instruction(instruction)?;
++            }
++            retained_t0 = retain_scalar.then(|| scalar_slots::retained_scalar_binary(instruction)).flatten();
+         }
+         if fused {
+             self.try_emit_fused_branch(
+diff --git a/src/codegen/scalar_slots.rs b/src/codegen/scalar_slots.rs
+index 3d3de77a..c53e8a3e 100644
+--- a/src/codegen/scalar_slots.rs
++++ b/src/codegen/scalar_slots.rs
+@@ -10,6 +10,19 @@ use super::*;
+ type Variables = BTreeSet<usize>;
+ type Effect = (Variables, Variables);
+
++/// The ordinary scalar binary emitter ends with the normalized result in t0.
++/// Constants, loads, stores, calls and helper paths deliberately do not carry
++/// this fact. All values are still stored to their existing stack slots.
++pub(super) fn retained_scalar_binary(instruction: &IrInstruction) -> Option<usize> {
++    let IrInstruction::Binary { dest, left, right, .. } = instruction else { return None };
++    if !scalar(&dest.ty) { return None; }
++    let eligible = |operand: &IrOperand| match operand {
++        IrOperand::Var(var) => scalar(&var.ty),
++        IrOperand::Const(value) => matches!(value, IrConst::U8(_) | IrConst::U16(_) | IrConst::U32(_) | IrConst::U64(_) | IrConst::Bool(_)),
++    };
++    (eligible(left) && eligible(right)).then_some(dest.id)
++}
++
+ pub(super) fn allocate(
+     body: &IrBody,
+     params: &[IrParam],

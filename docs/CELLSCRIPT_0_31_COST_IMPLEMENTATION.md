@@ -8,7 +8,9 @@ Both the baseline and initial candidate reports declare dirty source. The
 implementation is committed as `fe5bc5cdeb9db70d9f9aacdbb657746a9b8f81bc`.
 Local dev and full CI passed on September 22. These measurements precede the
 final clean-source gates. Independent boundary review is still required.
-The workspace package version remains 0.30.0 until release preparation.
+The workspace package version was 0.30.0 at that checkpoint. The October 1
+[release preparation](releases/CELLSCRIPT_0_31_RELEASE_READINESS.md) promotes
+the coordinated package manifests to 0.31.0 without changing source semantics.
 
 ## What changed
 
