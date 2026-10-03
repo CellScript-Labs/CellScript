@@ -31,10 +31,10 @@
       "tests/support/cost_stack.rs": "8b0ec35c4c737e911fab8963f654d775806b40192998b7be6dadd75310cb0679"
     },
     "rust_toolchain": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.97.1\nLLVM version: 22.1.6",
-    "source_commit": "8017a7bd32a7d4cdfca510c43b66dcbf98253d7d",
-    "source_dirty": true,
-    "tracked_diff_sha256": "c116722902f0b12411337dd36f59f497502b908059e4de2a825e32aba90dbd18",
-    "untracked_source_sha256": "bc67b4f9cf31cf241cc0118b0320dc8f9c5938e850e9c3ef59dcd25255cbf112"
+    "source_commit": "4e1047980bce94d8ad0317b132a6f4c15a45df08",
+    "source_dirty": false,
+    "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "untracked_source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   },
   "runs": 1707,
   "artifacts": 38,
@@ -779,7 +779,7 @@
       }
     }
   ],
-  "raw_sha256": "d87fd18ffca6a147021500881620f1b238e003a78ecbfe30a077bf75a3560af6",
+  "raw_sha256": "770b1ce194900930917ea8d2c40897f0e64181210986b05473d2f5d5f3606f1a",
   "raw_artifact": "execution-attribution.json.gz",
   "limitations": [
     "host-syscall-memory-traffic",

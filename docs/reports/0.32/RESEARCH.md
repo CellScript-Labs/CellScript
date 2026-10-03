@@ -1,6 +1,6 @@
 # 0.32 cost research: decisions and remaining work
 
-Status: in progress, not release acceptance. Implementer: Codex. Independent
+Status: research candidate under final gates, not release acceptance. Implementer: Codex. Independent
 review was waived by the maintainer on 2026-10-03. The waiver does not waive
 the independent artifact checker or the frozen budgets. This record extends
 the completed [low-mask experiment](IMMEDIATE_MASKS.md).
@@ -70,6 +70,23 @@ scheduler. They do not establish whole-transaction speedups or a global optimum.
 No new optimization profile or CLI switch is selected. The default remains the
 published 0.31 backend plus the separately validated #41 low-mask slice.
 
+The complete paired observations and their cost dominance classifications are
+in [experiment-frontier.json](experiment-frontier.json). Dominance compares
+every listed dimension and every recorded row, without averaging away a
+regression. Balanced routing has 314 byte/cycle tradeoff rows, 82 rows favoring
+linear routing and six ties. Saved-selector routing has 205 tradeoff rows and
+599 rows favoring the current design. Word copies have 72 tradeoff rows and
+24 rows favoring byte copies. All 12 staged-load pairs trade stack space for
+cycles and ELF bytes. Borrowing dominates its 18 isolated copy counterparts,
+and source expression reuse dominates its ten counterparts; neither result
+supplies the missing general semantic/checker contract. The compressed probe
+ties under its unchanged layout.
+
+These routing probes embed the selected input in each paired program. They
+establish the recorded local comparisons, not a production dispatcher
+threshold. The existing complete policy fixture matrix separately exercises
+the retained production dispatcher, decoder and rejection paths.
+
 The compressed-site survey follows the operand restrictions in the
 [RISC-V C 2.0 specification](https://docs.riscv.org/reference/isa/v20260120/unpriv/c-st-ext.html)
 for C.LI, C.ADDI, C.LDSP, C.SDSP and C.JR only. It excludes the fixed entry
@@ -99,6 +116,16 @@ Existing malformed/boundary tests remain authoritative for the retained design.
 
 ## Residual costs and unfinished acceptance
 
+[residual-sites.json](residual-sites.json) lists each of the 38 distinct ELF
+artifacts, its worst observed case, per-VM stack maximum, per-class charges
+and hottest program-counter sites across the 1,707 executions. Each recorded
+execution contributes once; this is coverage-weighted diagnostic evidence,
+not an assumed production workload. The largest observed group cost is
+27,373 cycles for `policy-dense-64-width-128/action-63/witness-at-bound`, with
+a 43,592-byte ELF and a 6,352-byte observed VM stack peak. Neither maximum
+is a bound over untested inputs. Guest accesses alone do not identify copied
+bytes, and host syscall memory traffic remains unavailable.
+
 The observed scalar stack traffic includes explicit named-variable storage,
 entry parameter spills and joins/calls; the rejected adjacency experiment does
 not remove them. Policy costs include canonical outer validation, scanning all
@@ -106,11 +133,26 @@ records, linear routing, private argument copies and actual action checks.
 Some checks are required by the selected contract; redundancy has not been
 proved merely because a site is hot or repeated.
 
-Still required before closing the umbrella: archive a fresh clean-source
-integrated baseline and final diagnostic report, replay the full frozen
-comparator, finish the explicitly unmeasured probes or record agreed narrower
-closure, and pass final `backend` and `ci` gates. The original issues retain
-ownership of deferred implementation; this report does not silently close them.
+The fresh integrated baseline is commit
+`4e1047980bce94d8ad0317b132a6f4c15a45df08`. Its clean-source main and
+multi-Script reports are [integrated-main.json](integrated-main.json) and
+[integrated-multi.json](integrated-multi.json). The compressed full attribution
+report and its summary now identify that same clean commit. The historical
+before/after #41 evidence retains its original identities and is not relabeled
+as a new optimization result.
+
+The second clean CI replay passes all 6,782 comparable metrics in
+[integrated-replay-comparison.json](integrated-replay-comparison.json), with
+zero regressions. Its main report is archived separately; its multi-Script
+report is byte-identical to the integrated baseline. This validates same-code
+reproduction and the unchanged budgets, not another before/after saving.
+
+Final `backend` and `ci` gates are still required. Deferred wider outlining,
+general CSE, immediate/pool search and layout transformations retain their
+specific blockers above and remain owned by #40. Span/alias admission remains
+owned by #38 and wider retention/scratch admission by #39. This report does
+not silently turn unmeasured transformations into rejected experiments or
+close their owning issues.
 
 Reproduce the diagnostic companion with the existing Cargo test target:
 

@@ -1,0 +1,3644 @@
+{
+  "schema": "cellscript-cost-residual-sites-v1",
+  "source": {
+    "cargo_lock_sha256": "643d60820b5ca8267149289e814f14dd15b39bce087eb0a0a680527bc6b8e11e",
+    "compiler_version": "0.31.0",
+    "measurement_fixture_sha256": {
+      "tests/business_corpus.rs": "5c832627c40934589fac4a6ba7c2bc0bae43b1c3f1675d2efc00abcbbfaa19fc",
+      "tests/cost_corpus.rs": "56d45e03402eb26c84a0029c8fc54639d48a012c151adea5991004bdffd6f1c0",
+      "tests/fixtures/capability_anchor_authorization.cell": "710f6d15afc0d7f85a7e714c57db94a140743928a6fbc4642f4054326242b2e3",
+      "tests/fixtures/capability_anchor_order.cell": "b3541a954b6b8a43c2b32a8d5cd8d6075e88bef96014085d515449b676f3e906",
+      "tests/fixtures/capability_anchor_policy.cell": "509b283a27208c6a8d8ca4890d7f8026cb82941ac75a09db75ecb62a95693858",
+      "tests/fixtures/capability_anchor_token.cell": "9b7019de49f86dcbe76de012dbc5afc1d7e956b472c378be8ba1a5b9c174f23d",
+      "tests/fixtures/cost_corpus/Cargo.toml": "fbcda0a45b3a0a0ba194b793812e351f00e9bbd54ddcd4b8905e82f95d387182",
+      "tests/fixtures/cost_corpus/expanded_budgets.json": "ecbb83bcac4d88438a95f014ee0d44c6912221367c63addcda745fe6b9ff97e9",
+      "tests/fixtures/cost_corpus/expanded_fixtures.json": "f926437a0c2439173d43d4a703ba881139cf9293be88a25aab2ac401228ffcd2",
+      "tests/fixtures/cost_corpus/growth_budgets.json": "68ccb8d6faa6eed2fbf94a1b757efc9d6045d85dc89dc973e9481d2b4766b160",
+      "tests/fixtures/cost_corpus/multi_script_budgets.json": "f6de8bc29396c48942813c3908a6ce9da6736b8010f66e63d5ddd7f86929ccd1",
+      "tests/fixtures/cost_corpus/nft_lock.cell": "eadffe28485199937e01d6051c00ce238b6d817f5657dcefe46a0669a619c1d0",
+      "tests/fixtures/cost_corpus/pool_merge.cell": "1f11906e1562c306bce400acb6128457ff28ba19ddda1b2e0bdb9b6d1013f521",
+      "tests/fixtures/cost_corpus/scalar_budgets.json": "49df193a48f3f66782b7d60f85ec37a979b0a991b1c37bb36ac81dc761d3afc6",
+      "tests/fixtures/cost_corpus/schema_roll.cell": "8d005226c687e0a8899a6d10cf4390952d8bad23b3b846ce54b0e93f4db3e0aa",
+      "tests/fixtures/cost_corpus/src/common.rs": "c8f2f8f704ec3f7a089c404ec8da184947b148a8d204169d586aad0235357622",
+      "tests/fixtures/cost_corpus/src/nft_lock.rs": "86a920f9935ec3aa6d72dcc27cdbfd2ab515185d1b4858d27964b0a99326e0cf",
+      "tests/fixtures/cost_corpus/src/pool_merge.rs": "df1ae134b07f56bdcdf9f349184488ab67e64e202ee8c6639337f07d08191b63",
+      "tests/fixtures/cost_corpus/src/schema_roll.rs": "68090359cbd094f6bb41c781b445fb03625bf2bcd069e3b753a2565f1d76eca0",
+      "tests/support/cost_growth.rs": "503cbee74c239241093da0c57be81db4352e0927f842b00c62b5add5deb104d8",
+      "tests/support/cost_measurement.rs": "030746e0603b1a5c63f952e8d5ad328d303a7f7c266dd8d7fc67190d2039d7b4",
+      "tests/support/cost_memory.rs": "7ff37bf1533b690addc57f4fcd25a2f574f88e01ff550df117dec4d6501c9d0d",
+      "tests/support/cost_scalar.rs": "d941145b410ef4ac893d3ba5286131ee204e412afbf108be0bee64fd3117f444",
+      "tests/support/cost_stack.rs": "8b0ec35c4c737e911fab8963f654d775806b40192998b7be6dadd75310cb0679"
+    },
+    "rust_toolchain": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.97.1\nLLVM version: 22.1.6",
+    "source_commit": "4e1047980bce94d8ad0317b132a6f4c15a45df08",
+    "source_dirty": false,
+    "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "untracked_source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "raw_sha256": "770b1ce194900930917ea8d2c40897f0e64181210986b05473d2f5d5f3606f1a",
+  "scope": "38 unique ELF artifacts across 1707 frozen scalar/policy observations",
+  "weighting": "Every recorded execution once. Totals are coverage-weighted diagnostics, not an application workload distribution.",
+  "limitations": [
+    "Instruction attempts and guest load/store counts do not identify copied bytes or host syscall memory traffic",
+    "Hottest PCs can be mapped to ELF/source-map ranges; equality of instruction bytes does not prove outlining equivalence",
+    "Maximum observed stack/cycles are not bounds on untested inputs",
+    "dispatch class includes complete entry witness validation and scanning, not tag comparison alone"
+  ],
+  "artifacts": [
+    {
+      "elf_sha256": "3c9ca069674fafa817edb821d6cbeadd2128aaa4a627bfbf42972ac9a4294dc3",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 19,
+        "rodata": 36,
+        "text": 43136,
+        "total": 43592
+      },
+      "observations": 135,
+      "maximum_group_cycles": 27373,
+      "worst_observed_case": "policy-dense-64-width-128/action-63/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6352,
+      "class_cycle_totals": {
+        "action": 220144,
+        "decoder": 278119,
+        "dispatch": 773542,
+        "other_runtime": 712323,
+        "stub": 1758,
+        "unmapped-trampoline-or-runtime": 33035
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "3c9ca069674fafa817edb821d6cbeadd2128aaa4a627bfbf42972ac9a4294dc3",
+          "pc": "66028",
+          "attempts": 28675,
+          "instruction_cycles": 86025,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "3c9ca069674fafa817edb821d6cbeadd2128aaa4a627bfbf42972ac9a4294dc3",
+          "pc": "66036",
+          "attempts": 28541,
+          "instruction_cycles": 85623,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "3c9ca069674fafa817edb821d6cbeadd2128aaa4a627bfbf42972ac9a4294dc3",
+          "pc": "66044",
+          "attempts": 28541,
+          "instruction_cycles": 85623,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "3c9ca069674fafa817edb821d6cbeadd2128aaa4a627bfbf42972ac9a4294dc3",
+          "pc": "66052",
+          "attempts": 28541,
+          "instruction_cycles": 85623,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "3c9ca069674fafa817edb821d6cbeadd2128aaa4a627bfbf42972ac9a4294dc3",
+          "pc": "65628",
+          "attempts": 135,
+          "instruction_cycles": 67500,
+          "synchronous_syscall_cycles": 9893
+        },
+        {
+          "program_sha256": "3c9ca069674fafa817edb821d6cbeadd2128aaa4a627bfbf42972ac9a4294dc3",
+          "pc": "66276",
+          "attempts": 134,
+          "instruction_cycles": 67000,
+          "synchronous_syscall_cycles": 1072
+        },
+        {
+          "program_sha256": "3c9ca069674fafa817edb821d6cbeadd2128aaa4a627bfbf42972ac9a4294dc3",
+          "pc": "108336",
+          "attempts": 129,
+          "instruction_cycles": 64500,
+          "synchronous_syscall_cycles": 1032
+        },
+        {
+          "program_sha256": "3c9ca069674fafa817edb821d6cbeadd2128aaa4a627bfbf42972ac9a4294dc3",
+          "pc": "108396",
+          "attempts": 129,
+          "instruction_cycles": 64500,
+          "synchronous_syscall_cycles": 1032
+        },
+        {
+          "program_sha256": "3c9ca069674fafa817edb821d6cbeadd2128aaa4a627bfbf42972ac9a4294dc3",
+          "pc": "108524",
+          "attempts": 129,
+          "instruction_cycles": 64500,
+          "synchronous_syscall_cycles": 1032
+        },
+        {
+          "program_sha256": "3c9ca069674fafa817edb821d6cbeadd2128aaa4a627bfbf42972ac9a4294dc3",
+          "pc": "73360",
+          "attempts": 17809,
+          "instruction_cycles": 53427,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "c49e0b756e89fbbd75e1152595fd651bd0d6df1cccc12563ff429efc94ae1bf8",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 19,
+        "rodata": 36,
+        "text": 8192,
+        "total": 8648
+      },
+      "observations": 161,
+      "maximum_group_cycles": 25526,
+      "worst_observed_case": "records-8-first-mixed-common/action-7/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6176,
+      "class_cycle_totals": {
+        "action": 203091,
+        "decoder": 98553,
+        "dispatch": 1472195,
+        "other_runtime": 353997,
+        "stub": 1722,
+        "unmapped-trampoline-or-runtime": 32109
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "c49e0b756e89fbbd75e1152595fd651bd0d6df1cccc12563ff429efc94ae1bf8",
+          "pc": "65984",
+          "attempts": 50409,
+          "instruction_cycles": 151227,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "c49e0b756e89fbbd75e1152595fd651bd0d6df1cccc12563ff429efc94ae1bf8",
+          "pc": "65992",
+          "attempts": 50255,
+          "instruction_cycles": 150765,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "c49e0b756e89fbbd75e1152595fd651bd0d6df1cccc12563ff429efc94ae1bf8",
+          "pc": "66000",
+          "attempts": 50255,
+          "instruction_cycles": 150765,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "c49e0b756e89fbbd75e1152595fd651bd0d6df1cccc12563ff429efc94ae1bf8",
+          "pc": "66008",
+          "attempts": 50255,
+          "instruction_cycles": 150765,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "c49e0b756e89fbbd75e1152595fd651bd0d6df1cccc12563ff429efc94ae1bf8",
+          "pc": "65628",
+          "attempts": 161,
+          "instruction_cycles": 80500,
+          "synchronous_syscall_cycles": 27099
+        },
+        {
+          "program_sha256": "c49e0b756e89fbbd75e1152595fd651bd0d6df1cccc12563ff429efc94ae1bf8",
+          "pc": "66192",
+          "attempts": 154,
+          "instruction_cycles": 77000,
+          "synchronous_syscall_cycles": 1232
+        },
+        {
+          "program_sha256": "c49e0b756e89fbbd75e1152595fd651bd0d6df1cccc12563ff429efc94ae1bf8",
+          "pc": "73392",
+          "attempts": 119,
+          "instruction_cycles": 59500,
+          "synchronous_syscall_cycles": 952
+        },
+        {
+          "program_sha256": "c49e0b756e89fbbd75e1152595fd651bd0d6df1cccc12563ff429efc94ae1bf8",
+          "pc": "73452",
+          "attempts": 119,
+          "instruction_cycles": 59500,
+          "synchronous_syscall_cycles": 952
+        },
+        {
+          "program_sha256": "c49e0b756e89fbbd75e1152595fd651bd0d6df1cccc12563ff429efc94ae1bf8",
+          "pc": "73580",
+          "attempts": 119,
+          "instruction_cycles": 59500,
+          "synchronous_syscall_cycles": 952
+        },
+        {
+          "program_sha256": "c49e0b756e89fbbd75e1152595fd651bd0d6df1cccc12563ff429efc94ae1bf8",
+          "pc": "65980",
+          "attempts": 50409,
+          "instruction_cycles": 50409,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "5be21e83df494597332f3d2f1573b99b93eef5cb376b705c90567fc351267332",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 23,
+        "rodata": 36,
+        "text": 7732,
+        "total": 8192
+      },
+      "observations": 161,
+      "maximum_group_cycles": 25113,
+      "worst_observed_case": "records-8-first-matching-common/action-7/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6160,
+      "class_cycle_totals": {
+        "action": 202650,
+        "decoder": 87633,
+        "dispatch": 1459469,
+        "other_runtime": 353997,
+        "stub": 1722,
+        "unmapped-trampoline-or-runtime": 32109
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "5be21e83df494597332f3d2f1573b99b93eef5cb376b705c90567fc351267332",
+          "pc": "65984",
+          "attempts": 49625,
+          "instruction_cycles": 148875,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "5be21e83df494597332f3d2f1573b99b93eef5cb376b705c90567fc351267332",
+          "pc": "65992",
+          "attempts": 49471,
+          "instruction_cycles": 148413,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "5be21e83df494597332f3d2f1573b99b93eef5cb376b705c90567fc351267332",
+          "pc": "66000",
+          "attempts": 49471,
+          "instruction_cycles": 148413,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "5be21e83df494597332f3d2f1573b99b93eef5cb376b705c90567fc351267332",
+          "pc": "66008",
+          "attempts": 49471,
+          "instruction_cycles": 148413,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "5be21e83df494597332f3d2f1573b99b93eef5cb376b705c90567fc351267332",
+          "pc": "65628",
+          "attempts": 161,
+          "instruction_cycles": 80500,
+          "synchronous_syscall_cycles": 26917
+        },
+        {
+          "program_sha256": "5be21e83df494597332f3d2f1573b99b93eef5cb376b705c90567fc351267332",
+          "pc": "66192",
+          "attempts": 154,
+          "instruction_cycles": 77000,
+          "synchronous_syscall_cycles": 1232
+        },
+        {
+          "program_sha256": "5be21e83df494597332f3d2f1573b99b93eef5cb376b705c90567fc351267332",
+          "pc": "72932",
+          "attempts": 119,
+          "instruction_cycles": 59500,
+          "synchronous_syscall_cycles": 952
+        },
+        {
+          "program_sha256": "5be21e83df494597332f3d2f1573b99b93eef5cb376b705c90567fc351267332",
+          "pc": "72992",
+          "attempts": 119,
+          "instruction_cycles": 59500,
+          "synchronous_syscall_cycles": 952
+        },
+        {
+          "program_sha256": "5be21e83df494597332f3d2f1573b99b93eef5cb376b705c90567fc351267332",
+          "pc": "73120",
+          "attempts": 119,
+          "instruction_cycles": 59500,
+          "synchronous_syscall_cycles": 952
+        },
+        {
+          "program_sha256": "5be21e83df494597332f3d2f1573b99b93eef5cb376b705c90567fc351267332",
+          "pc": "65980",
+          "attempts": 49625,
+          "instruction_cycles": 49625,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "e5b0c9eb189d94b240d8acba110631dbff54b1637cc92db85e27691b52dd6b76",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 23,
+        "rodata": 36,
+        "text": 22756,
+        "total": 23216
+      },
+      "observations": 71,
+      "maximum_group_cycles": 22151,
+      "worst_observed_case": "policy-dense-32-width-128/action-31/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6352,
+      "class_cycle_totals": {
+        "action": 110928,
+        "decoder": 141159,
+        "dispatch": 400029,
+        "other_runtime": 360291,
+        "stub": 894,
+        "unmapped-trampoline-or-runtime": 16779
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "e5b0c9eb189d94b240d8acba110631dbff54b1637cc92db85e27691b52dd6b76",
+          "pc": "65984",
+          "attempts": 14979,
+          "instruction_cycles": 44937,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "e5b0c9eb189d94b240d8acba110631dbff54b1637cc92db85e27691b52dd6b76",
+          "pc": "65992",
+          "attempts": 14909,
+          "instruction_cycles": 44727,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "e5b0c9eb189d94b240d8acba110631dbff54b1637cc92db85e27691b52dd6b76",
+          "pc": "66000",
+          "attempts": 14909,
+          "instruction_cycles": 44727,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "e5b0c9eb189d94b240d8acba110631dbff54b1637cc92db85e27691b52dd6b76",
+          "pc": "66008",
+          "attempts": 14909,
+          "instruction_cycles": 44727,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "e5b0c9eb189d94b240d8acba110631dbff54b1637cc92db85e27691b52dd6b76",
+          "pc": "65628",
+          "attempts": 71,
+          "instruction_cycles": 35500,
+          "synchronous_syscall_cycles": 6117
+        },
+        {
+          "program_sha256": "e5b0c9eb189d94b240d8acba110631dbff54b1637cc92db85e27691b52dd6b76",
+          "pc": "66192",
+          "attempts": 70,
+          "instruction_cycles": 35000,
+          "synchronous_syscall_cycles": 560
+        },
+        {
+          "program_sha256": "e5b0c9eb189d94b240d8acba110631dbff54b1637cc92db85e27691b52dd6b76",
+          "pc": "87956",
+          "attempts": 65,
+          "instruction_cycles": 32500,
+          "synchronous_syscall_cycles": 520
+        },
+        {
+          "program_sha256": "e5b0c9eb189d94b240d8acba110631dbff54b1637cc92db85e27691b52dd6b76",
+          "pc": "88016",
+          "attempts": 65,
+          "instruction_cycles": 32500,
+          "synchronous_syscall_cycles": 520
+        },
+        {
+          "program_sha256": "e5b0c9eb189d94b240d8acba110631dbff54b1637cc92db85e27691b52dd6b76",
+          "pc": "88144",
+          "attempts": 65,
+          "instruction_cycles": 32500,
+          "synchronous_syscall_cycles": 520
+        },
+        {
+          "program_sha256": "e5b0c9eb189d94b240d8acba110631dbff54b1637cc92db85e27691b52dd6b76",
+          "pc": "70260",
+          "attempts": 9041,
+          "instruction_cycles": 27123,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "3c96742f1a3ff238c89f1484a9342c7649641e2d152d7e766cf8afead71e8cd1",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 23,
+        "rodata": 36,
+        "text": 43692,
+        "total": 44152
+      },
+      "observations": 135,
+      "maximum_group_cycles": 21952,
+      "worst_observed_case": "policy-high-64-width-32/action-63/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6160,
+      "class_cycle_totals": {
+        "action": 217048,
+        "decoder": 90919,
+        "dispatch": 573352,
+        "other_runtime": 365571,
+        "stub": 1758,
+        "unmapped-trampoline-or-runtime": 33035
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "3c96742f1a3ff238c89f1484a9342c7649641e2d152d7e766cf8afead71e8cd1",
+          "pc": "65628",
+          "attempts": 135,
+          "instruction_cycles": 67500,
+          "synchronous_syscall_cycles": 6701
+        },
+        {
+          "program_sha256": "3c96742f1a3ff238c89f1484a9342c7649641e2d152d7e766cf8afead71e8cd1",
+          "pc": "66276",
+          "attempts": 134,
+          "instruction_cycles": 67000,
+          "synchronous_syscall_cycles": 1072
+        },
+        {
+          "program_sha256": "3c96742f1a3ff238c89f1484a9342c7649641e2d152d7e766cf8afead71e8cd1",
+          "pc": "108892",
+          "attempts": 129,
+          "instruction_cycles": 64500,
+          "synchronous_syscall_cycles": 1032
+        },
+        {
+          "program_sha256": "3c96742f1a3ff238c89f1484a9342c7649641e2d152d7e766cf8afead71e8cd1",
+          "pc": "108952",
+          "attempts": 129,
+          "instruction_cycles": 64500,
+          "synchronous_syscall_cycles": 1032
+        },
+        {
+          "program_sha256": "3c96742f1a3ff238c89f1484a9342c7649641e2d152d7e766cf8afead71e8cd1",
+          "pc": "109080",
+          "attempts": 129,
+          "instruction_cycles": 64500,
+          "synchronous_syscall_cycles": 1032
+        },
+        {
+          "program_sha256": "3c96742f1a3ff238c89f1484a9342c7649641e2d152d7e766cf8afead71e8cd1",
+          "pc": "66028",
+          "attempts": 15811,
+          "instruction_cycles": 47433,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "3c96742f1a3ff238c89f1484a9342c7649641e2d152d7e766cf8afead71e8cd1",
+          "pc": "66036",
+          "attempts": 15677,
+          "instruction_cycles": 47031,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "3c96742f1a3ff238c89f1484a9342c7649641e2d152d7e766cf8afead71e8cd1",
+          "pc": "66044",
+          "attempts": 15677,
+          "instruction_cycles": 47031,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "3c96742f1a3ff238c89f1484a9342c7649641e2d152d7e766cf8afead71e8cd1",
+          "pc": "66052",
+          "attempts": 15677,
+          "instruction_cycles": 47031,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "3c96742f1a3ff238c89f1484a9342c7649641e2d152d7e766cf8afead71e8cd1",
+          "pc": "109220",
+          "attempts": 70,
+          "instruction_cycles": 35000,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "9f2cdcf7d796dccd391563babd9b0f6f0468c45d35df302cd176be05f0dd5394",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 19,
+        "rodata": 36,
+        "text": 43432,
+        "total": 43888
+      },
+      "observations": 135,
+      "maximum_group_cycles": 21823,
+      "worst_observed_case": "policy-sparse-64-width-32/action-63/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6160,
+      "class_cycle_totals": {
+        "action": 217048,
+        "decoder": 90919,
+        "dispatch": 568942,
+        "other_runtime": 365571,
+        "stub": 1758,
+        "unmapped-trampoline-or-runtime": 33035
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "9f2cdcf7d796dccd391563babd9b0f6f0468c45d35df302cd176be05f0dd5394",
+          "pc": "65628",
+          "attempts": 135,
+          "instruction_cycles": 67500,
+          "synchronous_syscall_cycles": 6701
+        },
+        {
+          "program_sha256": "9f2cdcf7d796dccd391563babd9b0f6f0468c45d35df302cd176be05f0dd5394",
+          "pc": "66276",
+          "attempts": 134,
+          "instruction_cycles": 67000,
+          "synchronous_syscall_cycles": 1072
+        },
+        {
+          "program_sha256": "9f2cdcf7d796dccd391563babd9b0f6f0468c45d35df302cd176be05f0dd5394",
+          "pc": "108632",
+          "attempts": 129,
+          "instruction_cycles": 64500,
+          "synchronous_syscall_cycles": 1032
+        },
+        {
+          "program_sha256": "9f2cdcf7d796dccd391563babd9b0f6f0468c45d35df302cd176be05f0dd5394",
+          "pc": "108692",
+          "attempts": 129,
+          "instruction_cycles": 64500,
+          "synchronous_syscall_cycles": 1032
+        },
+        {
+          "program_sha256": "9f2cdcf7d796dccd391563babd9b0f6f0468c45d35df302cd176be05f0dd5394",
+          "pc": "108820",
+          "attempts": 129,
+          "instruction_cycles": 64500,
+          "synchronous_syscall_cycles": 1032
+        },
+        {
+          "program_sha256": "9f2cdcf7d796dccd391563babd9b0f6f0468c45d35df302cd176be05f0dd5394",
+          "pc": "66028",
+          "attempts": 15811,
+          "instruction_cycles": 47433,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "9f2cdcf7d796dccd391563babd9b0f6f0468c45d35df302cd176be05f0dd5394",
+          "pc": "66036",
+          "attempts": 15677,
+          "instruction_cycles": 47031,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "9f2cdcf7d796dccd391563babd9b0f6f0468c45d35df302cd176be05f0dd5394",
+          "pc": "66044",
+          "attempts": 15677,
+          "instruction_cycles": 47031,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "9f2cdcf7d796dccd391563babd9b0f6f0468c45d35df302cd176be05f0dd5394",
+          "pc": "66052",
+          "attempts": 15677,
+          "instruction_cycles": 47031,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "9f2cdcf7d796dccd391563babd9b0f6f0468c45d35df302cd176be05f0dd5394",
+          "pc": "108960",
+          "attempts": 70,
+          "instruction_cycles": 35000,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "b8aaecd25576d49ddd1fe5c509a21f6cfaf38222726c50792cca256fb11dccd9",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 19,
+        "rodata": 36,
+        "text": 43136,
+        "total": 43592
+      },
+      "observations": 135,
+      "maximum_group_cycles": 21685,
+      "worst_observed_case": "policy-dense-64-width-32/action-63/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6160,
+      "class_cycle_totals": {
+        "action": 217048,
+        "decoder": 90919,
+        "dispatch": 564526,
+        "other_runtime": 365571,
+        "stub": 1758,
+        "unmapped-trampoline-or-runtime": 33035
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "b8aaecd25576d49ddd1fe5c509a21f6cfaf38222726c50792cca256fb11dccd9",
+          "pc": "65628",
+          "attempts": 135,
+          "instruction_cycles": 67500,
+          "synchronous_syscall_cycles": 6701
+        },
+        {
+          "program_sha256": "b8aaecd25576d49ddd1fe5c509a21f6cfaf38222726c50792cca256fb11dccd9",
+          "pc": "66276",
+          "attempts": 134,
+          "instruction_cycles": 67000,
+          "synchronous_syscall_cycles": 1072
+        },
+        {
+          "program_sha256": "b8aaecd25576d49ddd1fe5c509a21f6cfaf38222726c50792cca256fb11dccd9",
+          "pc": "108336",
+          "attempts": 129,
+          "instruction_cycles": 64500,
+          "synchronous_syscall_cycles": 1032
+        },
+        {
+          "program_sha256": "b8aaecd25576d49ddd1fe5c509a21f6cfaf38222726c50792cca256fb11dccd9",
+          "pc": "108396",
+          "attempts": 129,
+          "instruction_cycles": 64500,
+          "synchronous_syscall_cycles": 1032
+        },
+        {
+          "program_sha256": "b8aaecd25576d49ddd1fe5c509a21f6cfaf38222726c50792cca256fb11dccd9",
+          "pc": "108524",
+          "attempts": 129,
+          "instruction_cycles": 64500,
+          "synchronous_syscall_cycles": 1032
+        },
+        {
+          "program_sha256": "b8aaecd25576d49ddd1fe5c509a21f6cfaf38222726c50792cca256fb11dccd9",
+          "pc": "66028",
+          "attempts": 15811,
+          "instruction_cycles": 47433,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "b8aaecd25576d49ddd1fe5c509a21f6cfaf38222726c50792cca256fb11dccd9",
+          "pc": "66036",
+          "attempts": 15677,
+          "instruction_cycles": 47031,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "b8aaecd25576d49ddd1fe5c509a21f6cfaf38222726c50792cca256fb11dccd9",
+          "pc": "66044",
+          "attempts": 15677,
+          "instruction_cycles": 47031,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "b8aaecd25576d49ddd1fe5c509a21f6cfaf38222726c50792cca256fb11dccd9",
+          "pc": "66052",
+          "attempts": 15677,
+          "instruction_cycles": 47031,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "b8aaecd25576d49ddd1fe5c509a21f6cfaf38222726c50792cca256fb11dccd9",
+          "pc": "108664",
+          "attempts": 70,
+          "instruction_cycles": 35000,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "ba7fefee5026ef5982eac3edc677d469c9bf1a00ac785a59b9fcf769e14e6aa8",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 19,
+        "rodata": 36,
+        "text": 41688,
+        "total": 42144
+      },
+      "observations": 135,
+      "maximum_group_cycles": 19827,
+      "worst_observed_case": "policy-dense-64-width-8/action-63/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6080,
+      "class_cycle_totals": {
+        "action": 215113,
+        "decoder": 49021,
+        "dispatch": 512272,
+        "other_runtime": 265596,
+        "stub": 1758,
+        "unmapped-trampoline-or-runtime": 33035
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "ba7fefee5026ef5982eac3edc677d469c9bf1a00ac785a59b9fcf769e14e6aa8",
+          "pc": "65628",
+          "attempts": 135,
+          "instruction_cycles": 67500,
+          "synchronous_syscall_cycles": 5903
+        },
+        {
+          "program_sha256": "ba7fefee5026ef5982eac3edc677d469c9bf1a00ac785a59b9fcf769e14e6aa8",
+          "pc": "66276",
+          "attempts": 134,
+          "instruction_cycles": 67000,
+          "synchronous_syscall_cycles": 1072
+        },
+        {
+          "program_sha256": "ba7fefee5026ef5982eac3edc677d469c9bf1a00ac785a59b9fcf769e14e6aa8",
+          "pc": "106888",
+          "attempts": 129,
+          "instruction_cycles": 64500,
+          "synchronous_syscall_cycles": 1032
+        },
+        {
+          "program_sha256": "ba7fefee5026ef5982eac3edc677d469c9bf1a00ac785a59b9fcf769e14e6aa8",
+          "pc": "106948",
+          "attempts": 129,
+          "instruction_cycles": 64500,
+          "synchronous_syscall_cycles": 1032
+        },
+        {
+          "program_sha256": "ba7fefee5026ef5982eac3edc677d469c9bf1a00ac785a59b9fcf769e14e6aa8",
+          "pc": "107076",
+          "attempts": 129,
+          "instruction_cycles": 64500,
+          "synchronous_syscall_cycles": 1032
+        },
+        {
+          "program_sha256": "ba7fefee5026ef5982eac3edc677d469c9bf1a00ac785a59b9fcf769e14e6aa8",
+          "pc": "66028",
+          "attempts": 12595,
+          "instruction_cycles": 37785,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "ba7fefee5026ef5982eac3edc677d469c9bf1a00ac785a59b9fcf769e14e6aa8",
+          "pc": "66036",
+          "attempts": 12461,
+          "instruction_cycles": 37383,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "ba7fefee5026ef5982eac3edc677d469c9bf1a00ac785a59b9fcf769e14e6aa8",
+          "pc": "66044",
+          "attempts": 12461,
+          "instruction_cycles": 37383,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "ba7fefee5026ef5982eac3edc677d469c9bf1a00ac785a59b9fcf769e14e6aa8",
+          "pc": "66052",
+          "attempts": 12461,
+          "instruction_cycles": 37383,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "ba7fefee5026ef5982eac3edc677d469c9bf1a00ac785a59b9fcf769e14e6aa8",
+          "pc": "107216",
+          "attempts": 70,
+          "instruction_cycles": 35000,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "cc5924ade870f86fc3574245406e2622bc4291f48e05cbf8d55ee07f697d1c88",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 23,
+        "rodata": 36,
+        "text": 12644,
+        "total": 13104
+      },
+      "observations": 39,
+      "maximum_group_cycles": 19559,
+      "worst_observed_case": "policy-dense-16-width-128/action-15/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6352,
+      "class_cycle_totals": {
+        "action": 56320,
+        "decoder": 72679,
+        "dispatch": 216349,
+        "other_runtime": 184275,
+        "stub": 462,
+        "unmapped-trampoline-or-runtime": 8651
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "cc5924ade870f86fc3574245406e2622bc4291f48e05cbf8d55ee07f697d1c88",
+          "pc": "65984",
+          "attempts": 8131,
+          "instruction_cycles": 24393,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "cc5924ade870f86fc3574245406e2622bc4291f48e05cbf8d55ee07f697d1c88",
+          "pc": "65992",
+          "attempts": 8093,
+          "instruction_cycles": 24279,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "cc5924ade870f86fc3574245406e2622bc4291f48e05cbf8d55ee07f697d1c88",
+          "pc": "66000",
+          "attempts": 8093,
+          "instruction_cycles": 24279,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "cc5924ade870f86fc3574245406e2622bc4291f48e05cbf8d55ee07f697d1c88",
+          "pc": "66008",
+          "attempts": 8093,
+          "instruction_cycles": 24279,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "cc5924ade870f86fc3574245406e2622bc4291f48e05cbf8d55ee07f697d1c88",
+          "pc": "65628",
+          "attempts": 39,
+          "instruction_cycles": 19500,
+          "synchronous_syscall_cycles": 4229
+        },
+        {
+          "program_sha256": "cc5924ade870f86fc3574245406e2622bc4291f48e05cbf8d55ee07f697d1c88",
+          "pc": "66192",
+          "attempts": 38,
+          "instruction_cycles": 19000,
+          "synchronous_syscall_cycles": 304
+        },
+        {
+          "program_sha256": "cc5924ade870f86fc3574245406e2622bc4291f48e05cbf8d55ee07f697d1c88",
+          "pc": "77844",
+          "attempts": 33,
+          "instruction_cycles": 16500,
+          "synchronous_syscall_cycles": 264
+        },
+        {
+          "program_sha256": "cc5924ade870f86fc3574245406e2622bc4291f48e05cbf8d55ee07f697d1c88",
+          "pc": "77904",
+          "attempts": 33,
+          "instruction_cycles": 16500,
+          "synchronous_syscall_cycles": 264
+        },
+        {
+          "program_sha256": "cc5924ade870f86fc3574245406e2622bc4291f48e05cbf8d55ee07f697d1c88",
+          "pc": "78032",
+          "attempts": 33,
+          "instruction_cycles": 16500,
+          "synchronous_syscall_cycles": 264
+        },
+        {
+          "program_sha256": "cc5924ade870f86fc3574245406e2622bc4291f48e05cbf8d55ee07f697d1c88",
+          "pc": "68788",
+          "attempts": 4657,
+          "instruction_cycles": 13971,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "f1a7f452e43b0fc056d4c0484591f80855e2dde833f68c3424bac1c3e0c1e324",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 23,
+        "rodata": 36,
+        "text": 7588,
+        "total": 8048
+      },
+      "observations": 23,
+      "maximum_group_cycles": 18263,
+      "worst_observed_case": "policy-dense-8-width-128/action-7/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6352,
+      "class_cycle_totals": {
+        "action": 29016,
+        "decoder": 38439,
+        "dispatch": 125277,
+        "other_runtime": 96267,
+        "stub": 246,
+        "unmapped-trampoline-or-runtime": 4587
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "f1a7f452e43b0fc056d4c0484591f80855e2dde833f68c3424bac1c3e0c1e324",
+          "pc": "65628",
+          "attempts": 23,
+          "instruction_cycles": 11500,
+          "synchronous_syscall_cycles": 3285
+        },
+        {
+          "program_sha256": "f1a7f452e43b0fc056d4c0484591f80855e2dde833f68c3424bac1c3e0c1e324",
+          "pc": "65984",
+          "attempts": 4707,
+          "instruction_cycles": 14121,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "f1a7f452e43b0fc056d4c0484591f80855e2dde833f68c3424bac1c3e0c1e324",
+          "pc": "65992",
+          "attempts": 4685,
+          "instruction_cycles": 14055,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "f1a7f452e43b0fc056d4c0484591f80855e2dde833f68c3424bac1c3e0c1e324",
+          "pc": "66000",
+          "attempts": 4685,
+          "instruction_cycles": 14055,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "f1a7f452e43b0fc056d4c0484591f80855e2dde833f68c3424bac1c3e0c1e324",
+          "pc": "66008",
+          "attempts": 4685,
+          "instruction_cycles": 14055,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "f1a7f452e43b0fc056d4c0484591f80855e2dde833f68c3424bac1c3e0c1e324",
+          "pc": "66192",
+          "attempts": 22,
+          "instruction_cycles": 11000,
+          "synchronous_syscall_cycles": 176
+        },
+        {
+          "program_sha256": "f1a7f452e43b0fc056d4c0484591f80855e2dde833f68c3424bac1c3e0c1e324",
+          "pc": "72788",
+          "attempts": 17,
+          "instruction_cycles": 8500,
+          "synchronous_syscall_cycles": 136
+        },
+        {
+          "program_sha256": "f1a7f452e43b0fc056d4c0484591f80855e2dde833f68c3424bac1c3e0c1e324",
+          "pc": "72848",
+          "attempts": 17,
+          "instruction_cycles": 8500,
+          "synchronous_syscall_cycles": 136
+        },
+        {
+          "program_sha256": "f1a7f452e43b0fc056d4c0484591f80855e2dde833f68c3424bac1c3e0c1e324",
+          "pc": "72976",
+          "attempts": 17,
+          "instruction_cycles": 8500,
+          "synchronous_syscall_cycles": 136
+        },
+        {
+          "program_sha256": "f1a7f452e43b0fc056d4c0484591f80855e2dde833f68c3424bac1c3e0c1e324",
+          "pc": "68052",
+          "attempts": 2465,
+          "instruction_cycles": 7395,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "de60fbf8cd635616b15de3cf28218142cccb1014e63fcc51e6a67d5fe731ed5a",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 23,
+        "rodata": 36,
+        "text": 5060,
+        "total": 5520
+      },
+      "observations": 15,
+      "maximum_group_cycles": 17615,
+      "worst_observed_case": "policy-dense-4-width-128/action-3/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6352,
+      "class_cycle_totals": {
+        "action": 15364,
+        "decoder": 21319,
+        "dispatch": 79933,
+        "other_runtime": 52263,
+        "stub": 138,
+        "unmapped-trampoline-or-runtime": 2555
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "de60fbf8cd635616b15de3cf28218142cccb1014e63fcc51e6a67d5fe731ed5a",
+          "pc": "65628",
+          "attempts": 15,
+          "instruction_cycles": 7500,
+          "synchronous_syscall_cycles": 2813
+        },
+        {
+          "program_sha256": "de60fbf8cd635616b15de3cf28218142cccb1014e63fcc51e6a67d5fe731ed5a",
+          "pc": "65984",
+          "attempts": 2995,
+          "instruction_cycles": 8985,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "de60fbf8cd635616b15de3cf28218142cccb1014e63fcc51e6a67d5fe731ed5a",
+          "pc": "65992",
+          "attempts": 2981,
+          "instruction_cycles": 8943,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "de60fbf8cd635616b15de3cf28218142cccb1014e63fcc51e6a67d5fe731ed5a",
+          "pc": "66000",
+          "attempts": 2981,
+          "instruction_cycles": 8943,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "de60fbf8cd635616b15de3cf28218142cccb1014e63fcc51e6a67d5fe731ed5a",
+          "pc": "66008",
+          "attempts": 2981,
+          "instruction_cycles": 8943,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "de60fbf8cd635616b15de3cf28218142cccb1014e63fcc51e6a67d5fe731ed5a",
+          "pc": "66192",
+          "attempts": 14,
+          "instruction_cycles": 7000,
+          "synchronous_syscall_cycles": 112
+        },
+        {
+          "program_sha256": "de60fbf8cd635616b15de3cf28218142cccb1014e63fcc51e6a67d5fe731ed5a",
+          "pc": "70588",
+          "attempts": 10,
+          "instruction_cycles": 5000,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "de60fbf8cd635616b15de3cf28218142cccb1014e63fcc51e6a67d5fe731ed5a",
+          "pc": "70260",
+          "attempts": 9,
+          "instruction_cycles": 4500,
+          "synchronous_syscall_cycles": 72
+        },
+        {
+          "program_sha256": "de60fbf8cd635616b15de3cf28218142cccb1014e63fcc51e6a67d5fe731ed5a",
+          "pc": "70320",
+          "attempts": 9,
+          "instruction_cycles": 4500,
+          "synchronous_syscall_cycles": 72
+        },
+        {
+          "program_sha256": "de60fbf8cd635616b15de3cf28218142cccb1014e63fcc51e6a67d5fe731ed5a",
+          "pc": "70448",
+          "attempts": 9,
+          "instruction_cycles": 4500,
+          "synchronous_syscall_cycles": 72
+        }
+      ]
+    },
+    {
+      "elf_sha256": "a515ca9bf50556705c4b1d345c4a8a2d419c61fb9c32215186f56f6eabc553b5",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 23,
+        "rodata": 36,
+        "text": 3796,
+        "total": 4256
+      },
+      "observations": 11,
+      "maximum_group_cycles": 17291,
+      "worst_observed_case": "policy-dense-2-width-128/action-1/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6352,
+      "class_cycle_totals": {
+        "action": 8538,
+        "decoder": 12759,
+        "dispatch": 57309,
+        "other_runtime": 30261,
+        "stub": 84,
+        "unmapped-trampoline-or-runtime": 1539
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "a515ca9bf50556705c4b1d345c4a8a2d419c61fb9c32215186f56f6eabc553b5",
+          "pc": "65628",
+          "attempts": 11,
+          "instruction_cycles": 5500,
+          "synchronous_syscall_cycles": 2577
+        },
+        {
+          "program_sha256": "a515ca9bf50556705c4b1d345c4a8a2d419c61fb9c32215186f56f6eabc553b5",
+          "pc": "65984",
+          "attempts": 2139,
+          "instruction_cycles": 6417,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "a515ca9bf50556705c4b1d345c4a8a2d419c61fb9c32215186f56f6eabc553b5",
+          "pc": "65992",
+          "attempts": 2129,
+          "instruction_cycles": 6387,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "a515ca9bf50556705c4b1d345c4a8a2d419c61fb9c32215186f56f6eabc553b5",
+          "pc": "66000",
+          "attempts": 2129,
+          "instruction_cycles": 6387,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "a515ca9bf50556705c4b1d345c4a8a2d419c61fb9c32215186f56f6eabc553b5",
+          "pc": "66008",
+          "attempts": 2129,
+          "instruction_cycles": 6387,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "a515ca9bf50556705c4b1d345c4a8a2d419c61fb9c32215186f56f6eabc553b5",
+          "pc": "66192",
+          "attempts": 10,
+          "instruction_cycles": 5000,
+          "synchronous_syscall_cycles": 80
+        },
+        {
+          "program_sha256": "a515ca9bf50556705c4b1d345c4a8a2d419c61fb9c32215186f56f6eabc553b5",
+          "pc": "69324",
+          "attempts": 8,
+          "instruction_cycles": 4000,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "a515ca9bf50556705c4b1d345c4a8a2d419c61fb9c32215186f56f6eabc553b5",
+          "pc": "68996",
+          "attempts": 5,
+          "instruction_cycles": 2500,
+          "synchronous_syscall_cycles": 40
+        },
+        {
+          "program_sha256": "a515ca9bf50556705c4b1d345c4a8a2d419c61fb9c32215186f56f6eabc553b5",
+          "pc": "69056",
+          "attempts": 5,
+          "instruction_cycles": 2500,
+          "synchronous_syscall_cycles": 40
+        },
+        {
+          "program_sha256": "a515ca9bf50556705c4b1d345c4a8a2d419c61fb9c32215186f56f6eabc553b5",
+          "pc": "69184",
+          "attempts": 5,
+          "instruction_cycles": 2500,
+          "synchronous_syscall_cycles": 40
+        }
+      ]
+    },
+    {
+      "elf_sha256": "a57fbf8ecfbde2362e2548661e9e14d3bbf61a5ed125f91aadd70b9ba1465d82",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 23,
+        "rodata": 36,
+        "text": 3148,
+        "total": 3608
+      },
+      "observations": 9,
+      "maximum_group_cycles": 17116,
+      "worst_observed_case": "policy-dense-1-width-128/action-0/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6352,
+      "class_cycle_totals": {
+        "action": 5125,
+        "dedicated_decoder_adapter": 8503,
+        "dispatch": 46009,
+        "other_runtime": 19260,
+        "unmapped-trampoline-or-runtime": 1031
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "a57fbf8ecfbde2362e2548661e9e14d3bbf61a5ed125f91aadd70b9ba1465d82",
+          "pc": "65628",
+          "attempts": 9,
+          "instruction_cycles": 4500,
+          "synchronous_syscall_cycles": 2459
+        },
+        {
+          "program_sha256": "a57fbf8ecfbde2362e2548661e9e14d3bbf61a5ed125f91aadd70b9ba1465d82",
+          "pc": "65984",
+          "attempts": 1711,
+          "instruction_cycles": 5133,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "a57fbf8ecfbde2362e2548661e9e14d3bbf61a5ed125f91aadd70b9ba1465d82",
+          "pc": "65992",
+          "attempts": 1703,
+          "instruction_cycles": 5109,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "a57fbf8ecfbde2362e2548661e9e14d3bbf61a5ed125f91aadd70b9ba1465d82",
+          "pc": "66000",
+          "attempts": 1703,
+          "instruction_cycles": 5109,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "a57fbf8ecfbde2362e2548661e9e14d3bbf61a5ed125f91aadd70b9ba1465d82",
+          "pc": "66008",
+          "attempts": 1703,
+          "instruction_cycles": 5109,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "a57fbf8ecfbde2362e2548661e9e14d3bbf61a5ed125f91aadd70b9ba1465d82",
+          "pc": "66192",
+          "attempts": 8,
+          "instruction_cycles": 4000,
+          "synchronous_syscall_cycles": 64
+        },
+        {
+          "program_sha256": "a57fbf8ecfbde2362e2548661e9e14d3bbf61a5ed125f91aadd70b9ba1465d82",
+          "pc": "68676",
+          "attempts": 7,
+          "instruction_cycles": 3500,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "a57fbf8ecfbde2362e2548661e9e14d3bbf61a5ed125f91aadd70b9ba1465d82",
+          "pc": "65980",
+          "attempts": 1711,
+          "instruction_cycles": 1711,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "a57fbf8ecfbde2362e2548661e9e14d3bbf61a5ed125f91aadd70b9ba1465d82",
+          "pc": "65988",
+          "attempts": 1703,
+          "instruction_cycles": 1703,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "a57fbf8ecfbde2362e2548661e9e14d3bbf61a5ed125f91aadd70b9ba1465d82",
+          "pc": "65996",
+          "attempts": 1703,
+          "instruction_cycles": 1703,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "2cb4f9ecbcbde1a3117dea7304876fe2a5f4c15e847ec05fd5c8b59680c0531f",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 19,
+        "rodata": 36,
+        "text": 23008,
+        "total": 23464
+      },
+      "observations": 71,
+      "maximum_group_cycles": 16588,
+      "worst_observed_case": "policy-high-32-width-32/action-31/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6160,
+      "class_cycle_totals": {
+        "action": 109368,
+        "decoder": 46119,
+        "dispatch": 293215,
+        "other_runtime": 185571,
+        "stub": 894,
+        "unmapped-trampoline-or-runtime": 16779
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "2cb4f9ecbcbde1a3117dea7304876fe2a5f4c15e847ec05fd5c8b59680c0531f",
+          "pc": "65628",
+          "attempts": 71,
+          "instruction_cycles": 35500,
+          "synchronous_syscall_cycles": 4461
+        },
+        {
+          "program_sha256": "2cb4f9ecbcbde1a3117dea7304876fe2a5f4c15e847ec05fd5c8b59680c0531f",
+          "pc": "66192",
+          "attempts": 70,
+          "instruction_cycles": 35000,
+          "synchronous_syscall_cycles": 560
+        },
+        {
+          "program_sha256": "2cb4f9ecbcbde1a3117dea7304876fe2a5f4c15e847ec05fd5c8b59680c0531f",
+          "pc": "88208",
+          "attempts": 65,
+          "instruction_cycles": 32500,
+          "synchronous_syscall_cycles": 520
+        },
+        {
+          "program_sha256": "2cb4f9ecbcbde1a3117dea7304876fe2a5f4c15e847ec05fd5c8b59680c0531f",
+          "pc": "88268",
+          "attempts": 65,
+          "instruction_cycles": 32500,
+          "synchronous_syscall_cycles": 520
+        },
+        {
+          "program_sha256": "2cb4f9ecbcbde1a3117dea7304876fe2a5f4c15e847ec05fd5c8b59680c0531f",
+          "pc": "88396",
+          "attempts": 65,
+          "instruction_cycles": 32500,
+          "synchronous_syscall_cycles": 520
+        },
+        {
+          "program_sha256": "2cb4f9ecbcbde1a3117dea7304876fe2a5f4c15e847ec05fd5c8b59680c0531f",
+          "pc": "65984",
+          "attempts": 8259,
+          "instruction_cycles": 24777,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "2cb4f9ecbcbde1a3117dea7304876fe2a5f4c15e847ec05fd5c8b59680c0531f",
+          "pc": "65992",
+          "attempts": 8189,
+          "instruction_cycles": 24567,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "2cb4f9ecbcbde1a3117dea7304876fe2a5f4c15e847ec05fd5c8b59680c0531f",
+          "pc": "66000",
+          "attempts": 8189,
+          "instruction_cycles": 24567,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "2cb4f9ecbcbde1a3117dea7304876fe2a5f4c15e847ec05fd5c8b59680c0531f",
+          "pc": "66008",
+          "attempts": 8189,
+          "instruction_cycles": 24567,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "2cb4f9ecbcbde1a3117dea7304876fe2a5f4c15e847ec05fd5c8b59680c0531f",
+          "pc": "88536",
+          "attempts": 38,
+          "instruction_cycles": 19000,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "dbf800c8b84483819b26f79ab9c74b4a563469937d06988242487177eec5faba",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 23,
+        "rodata": 36,
+        "text": 22884,
+        "total": 23344
+      },
+      "observations": 71,
+      "maximum_group_cycles": 16527,
+      "worst_observed_case": "policy-sparse-32-width-32/action-31/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6160,
+      "class_cycle_totals": {
+        "action": 109368,
+        "decoder": 46119,
+        "dispatch": 292037,
+        "other_runtime": 185571,
+        "stub": 894,
+        "unmapped-trampoline-or-runtime": 16779
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "dbf800c8b84483819b26f79ab9c74b4a563469937d06988242487177eec5faba",
+          "pc": "65628",
+          "attempts": 71,
+          "instruction_cycles": 35500,
+          "synchronous_syscall_cycles": 4461
+        },
+        {
+          "program_sha256": "dbf800c8b84483819b26f79ab9c74b4a563469937d06988242487177eec5faba",
+          "pc": "66192",
+          "attempts": 70,
+          "instruction_cycles": 35000,
+          "synchronous_syscall_cycles": 560
+        },
+        {
+          "program_sha256": "dbf800c8b84483819b26f79ab9c74b4a563469937d06988242487177eec5faba",
+          "pc": "88084",
+          "attempts": 65,
+          "instruction_cycles": 32500,
+          "synchronous_syscall_cycles": 520
+        },
+        {
+          "program_sha256": "dbf800c8b84483819b26f79ab9c74b4a563469937d06988242487177eec5faba",
+          "pc": "88144",
+          "attempts": 65,
+          "instruction_cycles": 32500,
+          "synchronous_syscall_cycles": 520
+        },
+        {
+          "program_sha256": "dbf800c8b84483819b26f79ab9c74b4a563469937d06988242487177eec5faba",
+          "pc": "88272",
+          "attempts": 65,
+          "instruction_cycles": 32500,
+          "synchronous_syscall_cycles": 520
+        },
+        {
+          "program_sha256": "dbf800c8b84483819b26f79ab9c74b4a563469937d06988242487177eec5faba",
+          "pc": "65984",
+          "attempts": 8259,
+          "instruction_cycles": 24777,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "dbf800c8b84483819b26f79ab9c74b4a563469937d06988242487177eec5faba",
+          "pc": "65992",
+          "attempts": 8189,
+          "instruction_cycles": 24567,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "dbf800c8b84483819b26f79ab9c74b4a563469937d06988242487177eec5faba",
+          "pc": "66000",
+          "attempts": 8189,
+          "instruction_cycles": 24567,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "dbf800c8b84483819b26f79ab9c74b4a563469937d06988242487177eec5faba",
+          "pc": "66008",
+          "attempts": 8189,
+          "instruction_cycles": 24567,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "dbf800c8b84483819b26f79ab9c74b4a563469937d06988242487177eec5faba",
+          "pc": "88412",
+          "attempts": 38,
+          "instruction_cycles": 19000,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "b5e5aefd9fa81002160dd8b31e046d3b4c5e11dc0cd664fcbd3647fec239d4e1",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 23,
+        "rodata": 36,
+        "text": 22756,
+        "total": 23216
+      },
+      "observations": 71,
+      "maximum_group_cycles": 16463,
+      "worst_observed_case": "policy-dense-32-width-32/action-31/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6160,
+      "class_cycle_totals": {
+        "action": 109368,
+        "decoder": 46119,
+        "dispatch": 290853,
+        "other_runtime": 185571,
+        "stub": 894,
+        "unmapped-trampoline-or-runtime": 16779
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "b5e5aefd9fa81002160dd8b31e046d3b4c5e11dc0cd664fcbd3647fec239d4e1",
+          "pc": "65628",
+          "attempts": 71,
+          "instruction_cycles": 35500,
+          "synchronous_syscall_cycles": 4461
+        },
+        {
+          "program_sha256": "b5e5aefd9fa81002160dd8b31e046d3b4c5e11dc0cd664fcbd3647fec239d4e1",
+          "pc": "66192",
+          "attempts": 70,
+          "instruction_cycles": 35000,
+          "synchronous_syscall_cycles": 560
+        },
+        {
+          "program_sha256": "b5e5aefd9fa81002160dd8b31e046d3b4c5e11dc0cd664fcbd3647fec239d4e1",
+          "pc": "87956",
+          "attempts": 65,
+          "instruction_cycles": 32500,
+          "synchronous_syscall_cycles": 520
+        },
+        {
+          "program_sha256": "b5e5aefd9fa81002160dd8b31e046d3b4c5e11dc0cd664fcbd3647fec239d4e1",
+          "pc": "88016",
+          "attempts": 65,
+          "instruction_cycles": 32500,
+          "synchronous_syscall_cycles": 520
+        },
+        {
+          "program_sha256": "b5e5aefd9fa81002160dd8b31e046d3b4c5e11dc0cd664fcbd3647fec239d4e1",
+          "pc": "88144",
+          "attempts": 65,
+          "instruction_cycles": 32500,
+          "synchronous_syscall_cycles": 520
+        },
+        {
+          "program_sha256": "b5e5aefd9fa81002160dd8b31e046d3b4c5e11dc0cd664fcbd3647fec239d4e1",
+          "pc": "65984",
+          "attempts": 8259,
+          "instruction_cycles": 24777,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "b5e5aefd9fa81002160dd8b31e046d3b4c5e11dc0cd664fcbd3647fec239d4e1",
+          "pc": "65992",
+          "attempts": 8189,
+          "instruction_cycles": 24567,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "b5e5aefd9fa81002160dd8b31e046d3b4c5e11dc0cd664fcbd3647fec239d4e1",
+          "pc": "66000",
+          "attempts": 8189,
+          "instruction_cycles": 24567,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "b5e5aefd9fa81002160dd8b31e046d3b4c5e11dc0cd664fcbd3647fec239d4e1",
+          "pc": "66008",
+          "attempts": 8189,
+          "instruction_cycles": 24567,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "b5e5aefd9fa81002160dd8b31e046d3b4c5e11dc0cd664fcbd3647fec239d4e1",
+          "pc": "88284",
+          "attempts": 38,
+          "instruction_cycles": 19000,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "7e0baef20a9683e1a565098d5e223911aab542d32c53b3a30251db3c9a023644",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 23,
+        "rodata": 36,
+        "text": 22076,
+        "total": 22536
+      },
+      "observations": 71,
+      "maximum_group_cycles": 14797,
+      "worst_observed_case": "policy-dense-32-width-8/action-31/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6080,
+      "class_cycle_totals": {
+        "action": 108393,
+        "decoder": 24829,
+        "dispatch": 263559,
+        "other_runtime": 135196,
+        "stub": 894,
+        "unmapped-trampoline-or-runtime": 16779
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "7e0baef20a9683e1a565098d5e223911aab542d32c53b3a30251db3c9a023644",
+          "pc": "65628",
+          "attempts": 71,
+          "instruction_cycles": 35500,
+          "synchronous_syscall_cycles": 4047
+        },
+        {
+          "program_sha256": "7e0baef20a9683e1a565098d5e223911aab542d32c53b3a30251db3c9a023644",
+          "pc": "66192",
+          "attempts": 70,
+          "instruction_cycles": 35000,
+          "synchronous_syscall_cycles": 560
+        },
+        {
+          "program_sha256": "7e0baef20a9683e1a565098d5e223911aab542d32c53b3a30251db3c9a023644",
+          "pc": "87276",
+          "attempts": 65,
+          "instruction_cycles": 32500,
+          "synchronous_syscall_cycles": 520
+        },
+        {
+          "program_sha256": "7e0baef20a9683e1a565098d5e223911aab542d32c53b3a30251db3c9a023644",
+          "pc": "87336",
+          "attempts": 65,
+          "instruction_cycles": 32500,
+          "synchronous_syscall_cycles": 520
+        },
+        {
+          "program_sha256": "7e0baef20a9683e1a565098d5e223911aab542d32c53b3a30251db3c9a023644",
+          "pc": "87464",
+          "attempts": 65,
+          "instruction_cycles": 32500,
+          "synchronous_syscall_cycles": 520
+        },
+        {
+          "program_sha256": "7e0baef20a9683e1a565098d5e223911aab542d32c53b3a30251db3c9a023644",
+          "pc": "65984",
+          "attempts": 6579,
+          "instruction_cycles": 19737,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "7e0baef20a9683e1a565098d5e223911aab542d32c53b3a30251db3c9a023644",
+          "pc": "65992",
+          "attempts": 6509,
+          "instruction_cycles": 19527,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "7e0baef20a9683e1a565098d5e223911aab542d32c53b3a30251db3c9a023644",
+          "pc": "66000",
+          "attempts": 6509,
+          "instruction_cycles": 19527,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "7e0baef20a9683e1a565098d5e223911aab542d32c53b3a30251db3c9a023644",
+          "pc": "66008",
+          "attempts": 6509,
+          "instruction_cycles": 19527,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "7e0baef20a9683e1a565098d5e223911aab542d32c53b3a30251db3c9a023644",
+          "pc": "87604",
+          "attempts": 38,
+          "instruction_cycles": 19000,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "38d6247587d3ab146035daaeab65481d5a1537d2b0680d429c9871d821a81a84",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 23,
+        "rodata": 36,
+        "text": 12644,
+        "total": 13104
+      },
+      "observations": 39,
+      "maximum_group_cycles": 13871,
+      "worst_observed_case": "policy-dense-16-width-32/action-15/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6160,
+      "class_cycle_totals": {
+        "action": 55528,
+        "decoder": 23719,
+        "dispatch": 157093,
+        "other_runtime": 95571,
+        "stub": 462,
+        "unmapped-trampoline-or-runtime": 8651
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "38d6247587d3ab146035daaeab65481d5a1537d2b0680d429c9871d821a81a84",
+          "pc": "65628",
+          "attempts": 39,
+          "instruction_cycles": 19500,
+          "synchronous_syscall_cycles": 3341
+        },
+        {
+          "program_sha256": "38d6247587d3ab146035daaeab65481d5a1537d2b0680d429c9871d821a81a84",
+          "pc": "66192",
+          "attempts": 38,
+          "instruction_cycles": 19000,
+          "synchronous_syscall_cycles": 304
+        },
+        {
+          "program_sha256": "38d6247587d3ab146035daaeab65481d5a1537d2b0680d429c9871d821a81a84",
+          "pc": "77844",
+          "attempts": 33,
+          "instruction_cycles": 16500,
+          "synchronous_syscall_cycles": 264
+        },
+        {
+          "program_sha256": "38d6247587d3ab146035daaeab65481d5a1537d2b0680d429c9871d821a81a84",
+          "pc": "77904",
+          "attempts": 33,
+          "instruction_cycles": 16500,
+          "synchronous_syscall_cycles": 264
+        },
+        {
+          "program_sha256": "38d6247587d3ab146035daaeab65481d5a1537d2b0680d429c9871d821a81a84",
+          "pc": "78032",
+          "attempts": 33,
+          "instruction_cycles": 16500,
+          "synchronous_syscall_cycles": 264
+        },
+        {
+          "program_sha256": "38d6247587d3ab146035daaeab65481d5a1537d2b0680d429c9871d821a81a84",
+          "pc": "65984",
+          "attempts": 4483,
+          "instruction_cycles": 13449,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "38d6247587d3ab146035daaeab65481d5a1537d2b0680d429c9871d821a81a84",
+          "pc": "65992",
+          "attempts": 4445,
+          "instruction_cycles": 13335,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "38d6247587d3ab146035daaeab65481d5a1537d2b0680d429c9871d821a81a84",
+          "pc": "66000",
+          "attempts": 4445,
+          "instruction_cycles": 13335,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "38d6247587d3ab146035daaeab65481d5a1537d2b0680d429c9871d821a81a84",
+          "pc": "66008",
+          "attempts": 4445,
+          "instruction_cycles": 13335,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "38d6247587d3ab146035daaeab65481d5a1537d2b0680d429c9871d821a81a84",
+          "pc": "78172",
+          "attempts": 22,
+          "instruction_cycles": 11000,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "d8fdb17514ee622900bfbea1f8c6ecd0bf8b90d788ca35ca8f18cf7be734392c",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 19,
+        "rodata": 36,
+        "text": 7648,
+        "total": 8104
+      },
+      "observations": 23,
+      "maximum_group_cycles": 12604,
+      "worst_observed_case": "policy-high-8-width-32/action-7/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6160,
+      "class_cycle_totals": {
+        "action": 28608,
+        "decoder": 12519,
+        "dispatch": 91183,
+        "other_runtime": 50571,
+        "stub": 246,
+        "unmapped-trampoline-or-runtime": 4587
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "d8fdb17514ee622900bfbea1f8c6ecd0bf8b90d788ca35ca8f18cf7be734392c",
+          "pc": "65628",
+          "attempts": 23,
+          "instruction_cycles": 11500,
+          "synchronous_syscall_cycles": 2781
+        },
+        {
+          "program_sha256": "d8fdb17514ee622900bfbea1f8c6ecd0bf8b90d788ca35ca8f18cf7be734392c",
+          "pc": "66192",
+          "attempts": 22,
+          "instruction_cycles": 11000,
+          "synchronous_syscall_cycles": 176
+        },
+        {
+          "program_sha256": "d8fdb17514ee622900bfbea1f8c6ecd0bf8b90d788ca35ca8f18cf7be734392c",
+          "pc": "72848",
+          "attempts": 17,
+          "instruction_cycles": 8500,
+          "synchronous_syscall_cycles": 136
+        },
+        {
+          "program_sha256": "d8fdb17514ee622900bfbea1f8c6ecd0bf8b90d788ca35ca8f18cf7be734392c",
+          "pc": "72908",
+          "attempts": 17,
+          "instruction_cycles": 8500,
+          "synchronous_syscall_cycles": 136
+        },
+        {
+          "program_sha256": "d8fdb17514ee622900bfbea1f8c6ecd0bf8b90d788ca35ca8f18cf7be734392c",
+          "pc": "73036",
+          "attempts": 17,
+          "instruction_cycles": 8500,
+          "synchronous_syscall_cycles": 136
+        },
+        {
+          "program_sha256": "d8fdb17514ee622900bfbea1f8c6ecd0bf8b90d788ca35ca8f18cf7be734392c",
+          "pc": "65984",
+          "attempts": 2595,
+          "instruction_cycles": 7785,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "d8fdb17514ee622900bfbea1f8c6ecd0bf8b90d788ca35ca8f18cf7be734392c",
+          "pc": "65992",
+          "attempts": 2573,
+          "instruction_cycles": 7719,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "d8fdb17514ee622900bfbea1f8c6ecd0bf8b90d788ca35ca8f18cf7be734392c",
+          "pc": "66000",
+          "attempts": 2573,
+          "instruction_cycles": 7719,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "d8fdb17514ee622900bfbea1f8c6ecd0bf8b90d788ca35ca8f18cf7be734392c",
+          "pc": "66008",
+          "attempts": 2573,
+          "instruction_cycles": 7719,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "d8fdb17514ee622900bfbea1f8c6ecd0bf8b90d788ca35ca8f18cf7be734392c",
+          "pc": "73176",
+          "attempts": 14,
+          "instruction_cycles": 7000,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "26e628d03d6e72f72d2bdd255c1c5a62aee8671804bcf29de24f2cc4a91097aa",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 23,
+        "rodata": 36,
+        "text": 7620,
+        "total": 8080
+      },
+      "observations": 23,
+      "maximum_group_cycles": 12591,
+      "worst_observed_case": "policy-sparse-8-width-32/action-7/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6160,
+      "class_cycle_totals": {
+        "action": 28608,
+        "decoder": 12519,
+        "dispatch": 91085,
+        "other_runtime": 50571,
+        "stub": 246,
+        "unmapped-trampoline-or-runtime": 4587
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "26e628d03d6e72f72d2bdd255c1c5a62aee8671804bcf29de24f2cc4a91097aa",
+          "pc": "65628",
+          "attempts": 23,
+          "instruction_cycles": 11500,
+          "synchronous_syscall_cycles": 2781
+        },
+        {
+          "program_sha256": "26e628d03d6e72f72d2bdd255c1c5a62aee8671804bcf29de24f2cc4a91097aa",
+          "pc": "66192",
+          "attempts": 22,
+          "instruction_cycles": 11000,
+          "synchronous_syscall_cycles": 176
+        },
+        {
+          "program_sha256": "26e628d03d6e72f72d2bdd255c1c5a62aee8671804bcf29de24f2cc4a91097aa",
+          "pc": "72820",
+          "attempts": 17,
+          "instruction_cycles": 8500,
+          "synchronous_syscall_cycles": 136
+        },
+        {
+          "program_sha256": "26e628d03d6e72f72d2bdd255c1c5a62aee8671804bcf29de24f2cc4a91097aa",
+          "pc": "72880",
+          "attempts": 17,
+          "instruction_cycles": 8500,
+          "synchronous_syscall_cycles": 136
+        },
+        {
+          "program_sha256": "26e628d03d6e72f72d2bdd255c1c5a62aee8671804bcf29de24f2cc4a91097aa",
+          "pc": "73008",
+          "attempts": 17,
+          "instruction_cycles": 8500,
+          "synchronous_syscall_cycles": 136
+        },
+        {
+          "program_sha256": "26e628d03d6e72f72d2bdd255c1c5a62aee8671804bcf29de24f2cc4a91097aa",
+          "pc": "65984",
+          "attempts": 2595,
+          "instruction_cycles": 7785,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "26e628d03d6e72f72d2bdd255c1c5a62aee8671804bcf29de24f2cc4a91097aa",
+          "pc": "65992",
+          "attempts": 2573,
+          "instruction_cycles": 7719,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "26e628d03d6e72f72d2bdd255c1c5a62aee8671804bcf29de24f2cc4a91097aa",
+          "pc": "66000",
+          "attempts": 2573,
+          "instruction_cycles": 7719,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "26e628d03d6e72f72d2bdd255c1c5a62aee8671804bcf29de24f2cc4a91097aa",
+          "pc": "66008",
+          "attempts": 2573,
+          "instruction_cycles": 7719,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "26e628d03d6e72f72d2bdd255c1c5a62aee8671804bcf29de24f2cc4a91097aa",
+          "pc": "73148",
+          "attempts": 14,
+          "instruction_cycles": 7000,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "fc01b2d61490d215ad4ecf926070fa100839ac9a9bbf8622c80c9de67200d008",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 23,
+        "rodata": 36,
+        "text": 7588,
+        "total": 8048
+      },
+      "observations": 23,
+      "maximum_group_cycles": 12575,
+      "worst_observed_case": "policy-dense-8-width-32/action-7/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6160,
+      "class_cycle_totals": {
+        "action": 28608,
+        "decoder": 12519,
+        "dispatch": 90981,
+        "other_runtime": 50571,
+        "stub": 246,
+        "unmapped-trampoline-or-runtime": 4587
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "fc01b2d61490d215ad4ecf926070fa100839ac9a9bbf8622c80c9de67200d008",
+          "pc": "65628",
+          "attempts": 23,
+          "instruction_cycles": 11500,
+          "synchronous_syscall_cycles": 2781
+        },
+        {
+          "program_sha256": "fc01b2d61490d215ad4ecf926070fa100839ac9a9bbf8622c80c9de67200d008",
+          "pc": "66192",
+          "attempts": 22,
+          "instruction_cycles": 11000,
+          "synchronous_syscall_cycles": 176
+        },
+        {
+          "program_sha256": "fc01b2d61490d215ad4ecf926070fa100839ac9a9bbf8622c80c9de67200d008",
+          "pc": "72788",
+          "attempts": 17,
+          "instruction_cycles": 8500,
+          "synchronous_syscall_cycles": 136
+        },
+        {
+          "program_sha256": "fc01b2d61490d215ad4ecf926070fa100839ac9a9bbf8622c80c9de67200d008",
+          "pc": "72848",
+          "attempts": 17,
+          "instruction_cycles": 8500,
+          "synchronous_syscall_cycles": 136
+        },
+        {
+          "program_sha256": "fc01b2d61490d215ad4ecf926070fa100839ac9a9bbf8622c80c9de67200d008",
+          "pc": "72976",
+          "attempts": 17,
+          "instruction_cycles": 8500,
+          "synchronous_syscall_cycles": 136
+        },
+        {
+          "program_sha256": "fc01b2d61490d215ad4ecf926070fa100839ac9a9bbf8622c80c9de67200d008",
+          "pc": "65984",
+          "attempts": 2595,
+          "instruction_cycles": 7785,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "fc01b2d61490d215ad4ecf926070fa100839ac9a9bbf8622c80c9de67200d008",
+          "pc": "65992",
+          "attempts": 2573,
+          "instruction_cycles": 7719,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "fc01b2d61490d215ad4ecf926070fa100839ac9a9bbf8622c80c9de67200d008",
+          "pc": "66000",
+          "attempts": 2573,
+          "instruction_cycles": 7719,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "fc01b2d61490d215ad4ecf926070fa100839ac9a9bbf8622c80c9de67200d008",
+          "pc": "66008",
+          "attempts": 2573,
+          "instruction_cycles": 7719,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "fc01b2d61490d215ad4ecf926070fa100839ac9a9bbf8622c80c9de67200d008",
+          "pc": "73116",
+          "attempts": 14,
+          "instruction_cycles": 7000,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "ae3ac9134ad04543c6e5c50870a7887881ae06914e19c0d947d55690541a2940",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 23,
+        "rodata": 36,
+        "text": 12348,
+        "total": 12808
+      },
+      "observations": 39,
+      "maximum_group_cycles": 12301,
+      "worst_observed_case": "policy-dense-16-width-8/action-15/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6080,
+      "class_cycle_totals": {
+        "action": 55033,
+        "decoder": 12733,
+        "dispatch": 142279,
+        "other_runtime": 69996,
+        "stub": 462,
+        "unmapped-trampoline-or-runtime": 8651
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "ae3ac9134ad04543c6e5c50870a7887881ae06914e19c0d947d55690541a2940",
+          "pc": "65628",
+          "attempts": 39,
+          "instruction_cycles": 19500,
+          "synchronous_syscall_cycles": 3119
+        },
+        {
+          "program_sha256": "ae3ac9134ad04543c6e5c50870a7887881ae06914e19c0d947d55690541a2940",
+          "pc": "66192",
+          "attempts": 38,
+          "instruction_cycles": 19000,
+          "synchronous_syscall_cycles": 304
+        },
+        {
+          "program_sha256": "ae3ac9134ad04543c6e5c50870a7887881ae06914e19c0d947d55690541a2940",
+          "pc": "77548",
+          "attempts": 33,
+          "instruction_cycles": 16500,
+          "synchronous_syscall_cycles": 264
+        },
+        {
+          "program_sha256": "ae3ac9134ad04543c6e5c50870a7887881ae06914e19c0d947d55690541a2940",
+          "pc": "77608",
+          "attempts": 33,
+          "instruction_cycles": 16500,
+          "synchronous_syscall_cycles": 264
+        },
+        {
+          "program_sha256": "ae3ac9134ad04543c6e5c50870a7887881ae06914e19c0d947d55690541a2940",
+          "pc": "77736",
+          "attempts": 33,
+          "instruction_cycles": 16500,
+          "synchronous_syscall_cycles": 264
+        },
+        {
+          "program_sha256": "ae3ac9134ad04543c6e5c50870a7887881ae06914e19c0d947d55690541a2940",
+          "pc": "77876",
+          "attempts": 22,
+          "instruction_cycles": 11000,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "ae3ac9134ad04543c6e5c50870a7887881ae06914e19c0d947d55690541a2940",
+          "pc": "65984",
+          "attempts": 3571,
+          "instruction_cycles": 10713,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "ae3ac9134ad04543c6e5c50870a7887881ae06914e19c0d947d55690541a2940",
+          "pc": "65992",
+          "attempts": 3533,
+          "instruction_cycles": 10599,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "ae3ac9134ad04543c6e5c50870a7887881ae06914e19c0d947d55690541a2940",
+          "pc": "66000",
+          "attempts": 3533,
+          "instruction_cycles": 10599,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "ae3ac9134ad04543c6e5c50870a7887881ae06914e19c0d947d55690541a2940",
+          "pc": "66008",
+          "attempts": 3533,
+          "instruction_cycles": 10599,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "beaa5b82cb95b3262827e1df8ec159e2c71fa1e98810529a31945d2f109fb0c9",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 23,
+        "rodata": 36,
+        "text": 5060,
+        "total": 5520
+      },
+      "observations": 15,
+      "maximum_group_cycles": 11927,
+      "worst_observed_case": "policy-dense-4-width-32/action-3/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6160,
+      "class_cycle_totals": {
+        "action": 15148,
+        "decoder": 6919,
+        "dispatch": 58117,
+        "other_runtime": 28071,
+        "stub": 138,
+        "unmapped-trampoline-or-runtime": 2555
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "beaa5b82cb95b3262827e1df8ec159e2c71fa1e98810529a31945d2f109fb0c9",
+          "pc": "65628",
+          "attempts": 15,
+          "instruction_cycles": 7500,
+          "synchronous_syscall_cycles": 2501
+        },
+        {
+          "program_sha256": "beaa5b82cb95b3262827e1df8ec159e2c71fa1e98810529a31945d2f109fb0c9",
+          "pc": "66192",
+          "attempts": 14,
+          "instruction_cycles": 7000,
+          "synchronous_syscall_cycles": 112
+        },
+        {
+          "program_sha256": "beaa5b82cb95b3262827e1df8ec159e2c71fa1e98810529a31945d2f109fb0c9",
+          "pc": "70588",
+          "attempts": 10,
+          "instruction_cycles": 5000,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "beaa5b82cb95b3262827e1df8ec159e2c71fa1e98810529a31945d2f109fb0c9",
+          "pc": "65984",
+          "attempts": 1651,
+          "instruction_cycles": 4953,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "beaa5b82cb95b3262827e1df8ec159e2c71fa1e98810529a31945d2f109fb0c9",
+          "pc": "65992",
+          "attempts": 1637,
+          "instruction_cycles": 4911,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "beaa5b82cb95b3262827e1df8ec159e2c71fa1e98810529a31945d2f109fb0c9",
+          "pc": "66000",
+          "attempts": 1637,
+          "instruction_cycles": 4911,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "beaa5b82cb95b3262827e1df8ec159e2c71fa1e98810529a31945d2f109fb0c9",
+          "pc": "66008",
+          "attempts": 1637,
+          "instruction_cycles": 4911,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "beaa5b82cb95b3262827e1df8ec159e2c71fa1e98810529a31945d2f109fb0c9",
+          "pc": "70260",
+          "attempts": 9,
+          "instruction_cycles": 4500,
+          "synchronous_syscall_cycles": 72
+        },
+        {
+          "program_sha256": "beaa5b82cb95b3262827e1df8ec159e2c71fa1e98810529a31945d2f109fb0c9",
+          "pc": "70320",
+          "attempts": 9,
+          "instruction_cycles": 4500,
+          "synchronous_syscall_cycles": 72
+        },
+        {
+          "program_sha256": "beaa5b82cb95b3262827e1df8ec159e2c71fa1e98810529a31945d2f109fb0c9",
+          "pc": "70448",
+          "attempts": 9,
+          "instruction_cycles": 4500,
+          "synchronous_syscall_cycles": 72
+        }
+      ]
+    },
+    {
+      "elf_sha256": "3428b5ccbf5c2ed9874ea4b1a46f728074037b1efe4ed8aba10fae62aa6d4656",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 23,
+        "rodata": 36,
+        "text": 3796,
+        "total": 4256
+      },
+      "observations": 11,
+      "maximum_group_cycles": 11603,
+      "worst_observed_case": "policy-dense-2-width-32/action-1/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6160,
+      "class_cycle_totals": {
+        "action": 8418,
+        "decoder": 4119,
+        "dispatch": 41733,
+        "other_runtime": 16821,
+        "stub": 84,
+        "unmapped-trampoline-or-runtime": 1539
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "3428b5ccbf5c2ed9874ea4b1a46f728074037b1efe4ed8aba10fae62aa6d4656",
+          "pc": "65628",
+          "attempts": 11,
+          "instruction_cycles": 5500,
+          "synchronous_syscall_cycles": 2361
+        },
+        {
+          "program_sha256": "3428b5ccbf5c2ed9874ea4b1a46f728074037b1efe4ed8aba10fae62aa6d4656",
+          "pc": "66192",
+          "attempts": 10,
+          "instruction_cycles": 5000,
+          "synchronous_syscall_cycles": 80
+        },
+        {
+          "program_sha256": "3428b5ccbf5c2ed9874ea4b1a46f728074037b1efe4ed8aba10fae62aa6d4656",
+          "pc": "69324",
+          "attempts": 8,
+          "instruction_cycles": 4000,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "3428b5ccbf5c2ed9874ea4b1a46f728074037b1efe4ed8aba10fae62aa6d4656",
+          "pc": "65984",
+          "attempts": 1179,
+          "instruction_cycles": 3537,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "3428b5ccbf5c2ed9874ea4b1a46f728074037b1efe4ed8aba10fae62aa6d4656",
+          "pc": "65992",
+          "attempts": 1169,
+          "instruction_cycles": 3507,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "3428b5ccbf5c2ed9874ea4b1a46f728074037b1efe4ed8aba10fae62aa6d4656",
+          "pc": "66000",
+          "attempts": 1169,
+          "instruction_cycles": 3507,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "3428b5ccbf5c2ed9874ea4b1a46f728074037b1efe4ed8aba10fae62aa6d4656",
+          "pc": "66008",
+          "attempts": 1169,
+          "instruction_cycles": 3507,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "3428b5ccbf5c2ed9874ea4b1a46f728074037b1efe4ed8aba10fae62aa6d4656",
+          "pc": "68996",
+          "attempts": 5,
+          "instruction_cycles": 2500,
+          "synchronous_syscall_cycles": 40
+        },
+        {
+          "program_sha256": "3428b5ccbf5c2ed9874ea4b1a46f728074037b1efe4ed8aba10fae62aa6d4656",
+          "pc": "69056",
+          "attempts": 5,
+          "instruction_cycles": 2500,
+          "synchronous_syscall_cycles": 40
+        },
+        {
+          "program_sha256": "3428b5ccbf5c2ed9874ea4b1a46f728074037b1efe4ed8aba10fae62aa6d4656",
+          "pc": "69184",
+          "attempts": 5,
+          "instruction_cycles": 2500,
+          "synchronous_syscall_cycles": 40
+        }
+      ]
+    },
+    {
+      "elf_sha256": "fcea1294403d6625debc9b4df225729971610a379045327fed059aa9b990000e",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 23,
+        "rodata": 36,
+        "text": 3148,
+        "total": 3608
+      },
+      "observations": 9,
+      "maximum_group_cycles": 11428,
+      "worst_observed_case": "policy-dense-1-width-32/action-0/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6160,
+      "class_cycle_totals": {
+        "action": 5053,
+        "dedicated_decoder_adapter": 2743,
+        "dispatch": 33553,
+        "other_runtime": 11196,
+        "unmapped-trampoline-or-runtime": 1031
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "fcea1294403d6625debc9b4df225729971610a379045327fed059aa9b990000e",
+          "pc": "65628",
+          "attempts": 9,
+          "instruction_cycles": 4500,
+          "synchronous_syscall_cycles": 2291
+        },
+        {
+          "program_sha256": "fcea1294403d6625debc9b4df225729971610a379045327fed059aa9b990000e",
+          "pc": "66192",
+          "attempts": 8,
+          "instruction_cycles": 4000,
+          "synchronous_syscall_cycles": 64
+        },
+        {
+          "program_sha256": "fcea1294403d6625debc9b4df225729971610a379045327fed059aa9b990000e",
+          "pc": "68676",
+          "attempts": 7,
+          "instruction_cycles": 3500,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "fcea1294403d6625debc9b4df225729971610a379045327fed059aa9b990000e",
+          "pc": "65984",
+          "attempts": 943,
+          "instruction_cycles": 2829,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "fcea1294403d6625debc9b4df225729971610a379045327fed059aa9b990000e",
+          "pc": "65992",
+          "attempts": 935,
+          "instruction_cycles": 2805,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "fcea1294403d6625debc9b4df225729971610a379045327fed059aa9b990000e",
+          "pc": "66000",
+          "attempts": 935,
+          "instruction_cycles": 2805,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "fcea1294403d6625debc9b4df225729971610a379045327fed059aa9b990000e",
+          "pc": "66008",
+          "attempts": 935,
+          "instruction_cycles": 2805,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "fcea1294403d6625debc9b4df225729971610a379045327fed059aa9b990000e",
+          "pc": "67860",
+          "attempts": 3,
+          "instruction_cycles": 1500,
+          "synchronous_syscall_cycles": 30
+        },
+        {
+          "program_sha256": "fcea1294403d6625debc9b4df225729971610a379045327fed059aa9b990000e",
+          "pc": "68348",
+          "attempts": 3,
+          "instruction_cycles": 1500,
+          "synchronous_syscall_cycles": 24
+        },
+        {
+          "program_sha256": "fcea1294403d6625debc9b4df225729971610a379045327fed059aa9b990000e",
+          "pc": "68408",
+          "attempts": 3,
+          "instruction_cycles": 1500,
+          "synchronous_syscall_cycles": 24
+        }
+      ]
+    },
+    {
+      "elf_sha256": "a230923a18646a6f44c1b98543a7da4099c5e6ac0f22bf77e46cd7002d89b623",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 23,
+        "rodata": 36,
+        "text": 7484,
+        "total": 7944
+      },
+      "observations": 23,
+      "maximum_group_cycles": 11053,
+      "worst_observed_case": "policy-dense-8-width-8/action-7/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6080,
+      "class_cycle_totals": {
+        "action": 28353,
+        "decoder": 6685,
+        "dispatch": 82407,
+        "other_runtime": 37396,
+        "stub": 246,
+        "unmapped-trampoline-or-runtime": 4587
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "a230923a18646a6f44c1b98543a7da4099c5e6ac0f22bf77e46cd7002d89b623",
+          "pc": "65628",
+          "attempts": 23,
+          "instruction_cycles": 11500,
+          "synchronous_syscall_cycles": 2655
+        },
+        {
+          "program_sha256": "a230923a18646a6f44c1b98543a7da4099c5e6ac0f22bf77e46cd7002d89b623",
+          "pc": "66192",
+          "attempts": 22,
+          "instruction_cycles": 11000,
+          "synchronous_syscall_cycles": 176
+        },
+        {
+          "program_sha256": "a230923a18646a6f44c1b98543a7da4099c5e6ac0f22bf77e46cd7002d89b623",
+          "pc": "72684",
+          "attempts": 17,
+          "instruction_cycles": 8500,
+          "synchronous_syscall_cycles": 136
+        },
+        {
+          "program_sha256": "a230923a18646a6f44c1b98543a7da4099c5e6ac0f22bf77e46cd7002d89b623",
+          "pc": "72744",
+          "attempts": 17,
+          "instruction_cycles": 8500,
+          "synchronous_syscall_cycles": 136
+        },
+        {
+          "program_sha256": "a230923a18646a6f44c1b98543a7da4099c5e6ac0f22bf77e46cd7002d89b623",
+          "pc": "72872",
+          "attempts": 17,
+          "instruction_cycles": 8500,
+          "synchronous_syscall_cycles": 136
+        },
+        {
+          "program_sha256": "a230923a18646a6f44c1b98543a7da4099c5e6ac0f22bf77e46cd7002d89b623",
+          "pc": "73012",
+          "attempts": 14,
+          "instruction_cycles": 7000,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "a230923a18646a6f44c1b98543a7da4099c5e6ac0f22bf77e46cd7002d89b623",
+          "pc": "65984",
+          "attempts": 2067,
+          "instruction_cycles": 6201,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "a230923a18646a6f44c1b98543a7da4099c5e6ac0f22bf77e46cd7002d89b623",
+          "pc": "65992",
+          "attempts": 2045,
+          "instruction_cycles": 6135,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "a230923a18646a6f44c1b98543a7da4099c5e6ac0f22bf77e46cd7002d89b623",
+          "pc": "66000",
+          "attempts": 2045,
+          "instruction_cycles": 6135,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "a230923a18646a6f44c1b98543a7da4099c5e6ac0f22bf77e46cd7002d89b623",
+          "pc": "66008",
+          "attempts": 2045,
+          "instruction_cycles": 6135,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "cc4e41012604dc3b74ff10233bbd6bcb31f5b6d604d73e5650768713bebd2632",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 23,
+        "rodata": 36,
+        "text": 5052,
+        "total": 5512
+      },
+      "observations": 15,
+      "maximum_group_cycles": 10429,
+      "worst_observed_case": "policy-dense-4-width-8/action-3/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6080,
+      "class_cycle_totals": {
+        "action": 15013,
+        "decoder": 3661,
+        "dispatch": 52663,
+        "other_runtime": 21096,
+        "stub": 138,
+        "unmapped-trampoline-or-runtime": 2555
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "cc4e41012604dc3b74ff10233bbd6bcb31f5b6d604d73e5650768713bebd2632",
+          "pc": "65628",
+          "attempts": 15,
+          "instruction_cycles": 7500,
+          "synchronous_syscall_cycles": 2423
+        },
+        {
+          "program_sha256": "cc4e41012604dc3b74ff10233bbd6bcb31f5b6d604d73e5650768713bebd2632",
+          "pc": "66192",
+          "attempts": 14,
+          "instruction_cycles": 7000,
+          "synchronous_syscall_cycles": 112
+        },
+        {
+          "program_sha256": "cc4e41012604dc3b74ff10233bbd6bcb31f5b6d604d73e5650768713bebd2632",
+          "pc": "70580",
+          "attempts": 10,
+          "instruction_cycles": 5000,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "cc4e41012604dc3b74ff10233bbd6bcb31f5b6d604d73e5650768713bebd2632",
+          "pc": "70252",
+          "attempts": 9,
+          "instruction_cycles": 4500,
+          "synchronous_syscall_cycles": 72
+        },
+        {
+          "program_sha256": "cc4e41012604dc3b74ff10233bbd6bcb31f5b6d604d73e5650768713bebd2632",
+          "pc": "70312",
+          "attempts": 9,
+          "instruction_cycles": 4500,
+          "synchronous_syscall_cycles": 72
+        },
+        {
+          "program_sha256": "cc4e41012604dc3b74ff10233bbd6bcb31f5b6d604d73e5650768713bebd2632",
+          "pc": "70440",
+          "attempts": 9,
+          "instruction_cycles": 4500,
+          "synchronous_syscall_cycles": 72
+        },
+        {
+          "program_sha256": "cc4e41012604dc3b74ff10233bbd6bcb31f5b6d604d73e5650768713bebd2632",
+          "pc": "65984",
+          "attempts": 1315,
+          "instruction_cycles": 3945,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "cc4e41012604dc3b74ff10233bbd6bcb31f5b6d604d73e5650768713bebd2632",
+          "pc": "65992",
+          "attempts": 1301,
+          "instruction_cycles": 3903,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "cc4e41012604dc3b74ff10233bbd6bcb31f5b6d604d73e5650768713bebd2632",
+          "pc": "66000",
+          "attempts": 1301,
+          "instruction_cycles": 3903,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "cc4e41012604dc3b74ff10233bbd6bcb31f5b6d604d73e5650768713bebd2632",
+          "pc": "66008",
+          "attempts": 1301,
+          "instruction_cycles": 3903,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "778c9730845895c63f0bcd242211c2569011ef2d2a68a3b3c1d3fc418860705b",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 23,
+        "rodata": 36,
+        "text": 3836,
+        "total": 4296
+      },
+      "observations": 11,
+      "maximum_group_cycles": 10117,
+      "worst_observed_case": "policy-dense-2-width-8/action-1/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6080,
+      "class_cycle_totals": {
+        "action": 8343,
+        "decoder": 2149,
+        "dispatch": 37839,
+        "other_runtime": 12946,
+        "stub": 84,
+        "unmapped-trampoline-or-runtime": 1539
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "778c9730845895c63f0bcd242211c2569011ef2d2a68a3b3c1d3fc418860705b",
+          "pc": "65628",
+          "attempts": 11,
+          "instruction_cycles": 5500,
+          "synchronous_syscall_cycles": 2307
+        },
+        {
+          "program_sha256": "778c9730845895c63f0bcd242211c2569011ef2d2a68a3b3c1d3fc418860705b",
+          "pc": "66192",
+          "attempts": 10,
+          "instruction_cycles": 5000,
+          "synchronous_syscall_cycles": 80
+        },
+        {
+          "program_sha256": "778c9730845895c63f0bcd242211c2569011ef2d2a68a3b3c1d3fc418860705b",
+          "pc": "69364",
+          "attempts": 8,
+          "instruction_cycles": 4000,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "778c9730845895c63f0bcd242211c2569011ef2d2a68a3b3c1d3fc418860705b",
+          "pc": "65984",
+          "attempts": 939,
+          "instruction_cycles": 2817,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "778c9730845895c63f0bcd242211c2569011ef2d2a68a3b3c1d3fc418860705b",
+          "pc": "65992",
+          "attempts": 929,
+          "instruction_cycles": 2787,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "778c9730845895c63f0bcd242211c2569011ef2d2a68a3b3c1d3fc418860705b",
+          "pc": "66000",
+          "attempts": 929,
+          "instruction_cycles": 2787,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "778c9730845895c63f0bcd242211c2569011ef2d2a68a3b3c1d3fc418860705b",
+          "pc": "66008",
+          "attempts": 929,
+          "instruction_cycles": 2787,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "778c9730845895c63f0bcd242211c2569011ef2d2a68a3b3c1d3fc418860705b",
+          "pc": "69036",
+          "attempts": 5,
+          "instruction_cycles": 2500,
+          "synchronous_syscall_cycles": 40
+        },
+        {
+          "program_sha256": "778c9730845895c63f0bcd242211c2569011ef2d2a68a3b3c1d3fc418860705b",
+          "pc": "69096",
+          "attempts": 5,
+          "instruction_cycles": 2500,
+          "synchronous_syscall_cycles": 40
+        },
+        {
+          "program_sha256": "778c9730845895c63f0bcd242211c2569011ef2d2a68a3b3c1d3fc418860705b",
+          "pc": "69224",
+          "attempts": 5,
+          "instruction_cycles": 2500,
+          "synchronous_syscall_cycles": 40
+        }
+      ]
+    },
+    {
+      "elf_sha256": "050d2b0af8bf2b039f07492974026e05444dd7a87da90e3662b37122c38b3656",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 23,
+        "rodata": 36,
+        "text": 3212,
+        "total": 3672
+      },
+      "observations": 9,
+      "maximum_group_cycles": 9948,
+      "worst_observed_case": "policy-dense-1-width-8/action-0/witness-at-bound",
+      "maximum_observed_vm_stack_bytes": 6080,
+      "class_cycle_totals": {
+        "action": 5008,
+        "dedicated_decoder_adapter": 1417,
+        "dispatch": 30439,
+        "other_runtime": 8871,
+        "unmapped-trampoline-or-runtime": 1031
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "050d2b0af8bf2b039f07492974026e05444dd7a87da90e3662b37122c38b3656",
+          "pc": "65628",
+          "attempts": 9,
+          "instruction_cycles": 4500,
+          "synchronous_syscall_cycles": 2249
+        },
+        {
+          "program_sha256": "050d2b0af8bf2b039f07492974026e05444dd7a87da90e3662b37122c38b3656",
+          "pc": "66192",
+          "attempts": 8,
+          "instruction_cycles": 4000,
+          "synchronous_syscall_cycles": 64
+        },
+        {
+          "program_sha256": "050d2b0af8bf2b039f07492974026e05444dd7a87da90e3662b37122c38b3656",
+          "pc": "68740",
+          "attempts": 7,
+          "instruction_cycles": 3500,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "050d2b0af8bf2b039f07492974026e05444dd7a87da90e3662b37122c38b3656",
+          "pc": "65984",
+          "attempts": 751,
+          "instruction_cycles": 2253,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "050d2b0af8bf2b039f07492974026e05444dd7a87da90e3662b37122c38b3656",
+          "pc": "65992",
+          "attempts": 743,
+          "instruction_cycles": 2229,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "050d2b0af8bf2b039f07492974026e05444dd7a87da90e3662b37122c38b3656",
+          "pc": "66000",
+          "attempts": 743,
+          "instruction_cycles": 2229,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "050d2b0af8bf2b039f07492974026e05444dd7a87da90e3662b37122c38b3656",
+          "pc": "66008",
+          "attempts": 743,
+          "instruction_cycles": 2229,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "050d2b0af8bf2b039f07492974026e05444dd7a87da90e3662b37122c38b3656",
+          "pc": "68412",
+          "attempts": 3,
+          "instruction_cycles": 1500,
+          "synchronous_syscall_cycles": 24
+        },
+        {
+          "program_sha256": "050d2b0af8bf2b039f07492974026e05444dd7a87da90e3662b37122c38b3656",
+          "pc": "68472",
+          "attempts": 3,
+          "instruction_cycles": 1500,
+          "synchronous_syscall_cycles": 24
+        },
+        {
+          "program_sha256": "050d2b0af8bf2b039f07492974026e05444dd7a87da90e3662b37122c38b3656",
+          "pc": "68600",
+          "attempts": 3,
+          "instruction_cycles": 1500,
+          "synchronous_syscall_cycles": 24
+        }
+      ]
+    },
+    {
+      "elf_sha256": "296376de5bea4dfb3d32bf6530a58920d264ddb0424375be3f98faf9e0fc8293",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 19,
+        "rodata": 0,
+        "text": 9604,
+        "total": 10024
+      },
+      "observations": 2,
+      "maximum_group_cycles": 8645,
+      "worst_observed_case": "scalar-overlap-260/valid-true",
+      "maximum_observed_vm_stack_bytes": 8656,
+      "class_cycle_totals": {
+        "_cellscript_entry": 4510,
+        "unmapped-trampoline-or-runtime": 508,
+        "verify": 6864,
+        "__cellscript_abort": 501
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "296376de5bea4dfb3d32bf6530a58920d264ddb0424375be3f98faf9e0fc8293",
+          "pc": "65744",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 22
+        },
+        {
+          "program_sha256": "296376de5bea4dfb3d32bf6530a58920d264ddb0424375be3f98faf9e0fc8293",
+          "pc": "65628",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "296376de5bea4dfb3d32bf6530a58920d264ddb0424375be3f98faf9e0fc8293",
+          "pc": "65684",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "296376de5bea4dfb3d32bf6530a58920d264ddb0424375be3f98faf9e0fc8293",
+          "pc": "65552",
+          "attempts": 1,
+          "instruction_cycles": 500,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "296376de5bea4dfb3d32bf6530a58920d264ddb0424375be3f98faf9e0fc8293",
+          "pc": "75132",
+          "attempts": 1,
+          "instruction_cycles": 500,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "296376de5bea4dfb3d32bf6530a58920d264ddb0424375be3f98faf9e0fc8293",
+          "pc": "66000",
+          "attempts": 50,
+          "instruction_cycles": 150,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "296376de5bea4dfb3d32bf6530a58920d264ddb0424375be3f98faf9e0fc8293",
+          "pc": "66008",
+          "attempts": 48,
+          "instruction_cycles": 144,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "296376de5bea4dfb3d32bf6530a58920d264ddb0424375be3f98faf9e0fc8293",
+          "pc": "66016",
+          "attempts": 48,
+          "instruction_cycles": 144,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "296376de5bea4dfb3d32bf6530a58920d264ddb0424375be3f98faf9e0fc8293",
+          "pc": "66024",
+          "attempts": 48,
+          "instruction_cycles": 144,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "296376de5bea4dfb3d32bf6530a58920d264ddb0424375be3f98faf9e0fc8293",
+          "pc": "65996",
+          "attempts": 50,
+          "instruction_cycles": 50,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "0fc5fbe69d94b1885879cfcd65b737af26a50c23de347a65aab47af17f639099",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 19,
+        "rodata": 0,
+        "text": 4252,
+        "total": 4672
+      },
+      "observations": 2,
+      "maximum_group_cycles": 4936,
+      "worst_observed_case": "scalar-chain-260/valid-true",
+      "maximum_observed_vm_stack_bytes": 6576,
+      "class_cycle_totals": {
+        "_cellscript_entry": 4510,
+        "unmapped-trampoline-or-runtime": 508,
+        "verify": 2130,
+        "__cellscript_abort": 501
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "0fc5fbe69d94b1885879cfcd65b737af26a50c23de347a65aab47af17f639099",
+          "pc": "65744",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 22
+        },
+        {
+          "program_sha256": "0fc5fbe69d94b1885879cfcd65b737af26a50c23de347a65aab47af17f639099",
+          "pc": "65628",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "0fc5fbe69d94b1885879cfcd65b737af26a50c23de347a65aab47af17f639099",
+          "pc": "65684",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "0fc5fbe69d94b1885879cfcd65b737af26a50c23de347a65aab47af17f639099",
+          "pc": "65552",
+          "attempts": 1,
+          "instruction_cycles": 500,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "0fc5fbe69d94b1885879cfcd65b737af26a50c23de347a65aab47af17f639099",
+          "pc": "69780",
+          "attempts": 1,
+          "instruction_cycles": 500,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "0fc5fbe69d94b1885879cfcd65b737af26a50c23de347a65aab47af17f639099",
+          "pc": "66000",
+          "attempts": 50,
+          "instruction_cycles": 150,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "0fc5fbe69d94b1885879cfcd65b737af26a50c23de347a65aab47af17f639099",
+          "pc": "66008",
+          "attempts": 48,
+          "instruction_cycles": 144,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "0fc5fbe69d94b1885879cfcd65b737af26a50c23de347a65aab47af17f639099",
+          "pc": "66016",
+          "attempts": 48,
+          "instruction_cycles": 144,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "0fc5fbe69d94b1885879cfcd65b737af26a50c23de347a65aab47af17f639099",
+          "pc": "66024",
+          "attempts": 48,
+          "instruction_cycles": 144,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "0fc5fbe69d94b1885879cfcd65b737af26a50c23de347a65aab47af17f639099",
+          "pc": "65996",
+          "attempts": 50,
+          "instruction_cycles": 50,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "cf46b44264697617754510a2963132e73b6abe251ce09275ec2837c7032231cd",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 19,
+        "rodata": 0,
+        "text": 2140,
+        "total": 2560
+      },
+      "observations": 2,
+      "maximum_group_cycles": 4712,
+      "worst_observed_case": "nested-nine-arguments/valid-true",
+      "maximum_observed_vm_stack_bytes": 9216,
+      "class_cycle_totals": {
+        "_cellscript_entry": 6897,
+        "leaf": 90,
+        "middle": 128,
+        "unmapped-trampoline-or-runtime": 508,
+        "verify": 132,
+        "__cellscript_abort": 501
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "cf46b44264697617754510a2963132e73b6abe251ce09275ec2837c7032231cd",
+          "pc": "65744",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 50
+        },
+        {
+          "program_sha256": "cf46b44264697617754510a2963132e73b6abe251ce09275ec2837c7032231cd",
+          "pc": "65628",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "cf46b44264697617754510a2963132e73b6abe251ce09275ec2837c7032231cd",
+          "pc": "65684",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "cf46b44264697617754510a2963132e73b6abe251ce09275ec2837c7032231cd",
+          "pc": "65552",
+          "attempts": 1,
+          "instruction_cycles": 500,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "cf46b44264697617754510a2963132e73b6abe251ce09275ec2837c7032231cd",
+          "pc": "67668",
+          "attempts": 1,
+          "instruction_cycles": 500,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "cf46b44264697617754510a2963132e73b6abe251ce09275ec2837c7032231cd",
+          "pc": "66000",
+          "attempts": 162,
+          "instruction_cycles": 486,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "cf46b44264697617754510a2963132e73b6abe251ce09275ec2837c7032231cd",
+          "pc": "66008",
+          "attempts": 160,
+          "instruction_cycles": 480,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "cf46b44264697617754510a2963132e73b6abe251ce09275ec2837c7032231cd",
+          "pc": "66016",
+          "attempts": 160,
+          "instruction_cycles": 480,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "cf46b44264697617754510a2963132e73b6abe251ce09275ec2837c7032231cd",
+          "pc": "66024",
+          "attempts": 160,
+          "instruction_cycles": 480,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "cf46b44264697617754510a2963132e73b6abe251ce09275ec2837c7032231cd",
+          "pc": "65996",
+          "attempts": 162,
+          "instruction_cycles": 162,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "061b3231ef7e9eb8dab2676f6d8b0eec654e59c3804060afb37af7dee1d427ae",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 15,
+        "rodata": 0,
+        "text": 3144,
+        "total": 3560
+      },
+      "observations": 2,
+      "maximum_group_cycles": 4435,
+      "worst_observed_case": "scalar-overlap-64/valid-true",
+      "maximum_observed_vm_stack_bytes": 7088,
+      "class_cycle_totals": {
+        "_cellscript_entry": 4510,
+        "unmapped-trampoline-or-runtime": 508,
+        "verify": 1684,
+        "__cellscript_abort": 501
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "061b3231ef7e9eb8dab2676f6d8b0eec654e59c3804060afb37af7dee1d427ae",
+          "pc": "65744",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 22
+        },
+        {
+          "program_sha256": "061b3231ef7e9eb8dab2676f6d8b0eec654e59c3804060afb37af7dee1d427ae",
+          "pc": "65628",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "061b3231ef7e9eb8dab2676f6d8b0eec654e59c3804060afb37af7dee1d427ae",
+          "pc": "65684",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "061b3231ef7e9eb8dab2676f6d8b0eec654e59c3804060afb37af7dee1d427ae",
+          "pc": "65552",
+          "attempts": 1,
+          "instruction_cycles": 500,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "061b3231ef7e9eb8dab2676f6d8b0eec654e59c3804060afb37af7dee1d427ae",
+          "pc": "68672",
+          "attempts": 1,
+          "instruction_cycles": 500,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "061b3231ef7e9eb8dab2676f6d8b0eec654e59c3804060afb37af7dee1d427ae",
+          "pc": "66000",
+          "attempts": 50,
+          "instruction_cycles": 150,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "061b3231ef7e9eb8dab2676f6d8b0eec654e59c3804060afb37af7dee1d427ae",
+          "pc": "66008",
+          "attempts": 48,
+          "instruction_cycles": 144,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "061b3231ef7e9eb8dab2676f6d8b0eec654e59c3804060afb37af7dee1d427ae",
+          "pc": "66016",
+          "attempts": 48,
+          "instruction_cycles": 144,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "061b3231ef7e9eb8dab2676f6d8b0eec654e59c3804060afb37af7dee1d427ae",
+          "pc": "66024",
+          "attempts": 48,
+          "instruction_cycles": 144,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "061b3231ef7e9eb8dab2676f6d8b0eec654e59c3804060afb37af7dee1d427ae",
+          "pc": "65996",
+          "attempts": 50,
+          "instruction_cycles": 50,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "54ac2a4c1a78b8c0168b95b7ad7cb00af29459f89e1a4a873f1687957b5be427",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 19,
+        "rodata": 0,
+        "text": 1900,
+        "total": 2320
+      },
+      "observations": 2,
+      "maximum_group_cycles": 3564,
+      "worst_observed_case": "scalar-chain-64/valid-true",
+      "maximum_observed_vm_stack_bytes": 6576,
+      "class_cycle_totals": {
+        "_cellscript_entry": 4510,
+        "unmapped-trampoline-or-runtime": 508,
+        "verify": 562,
+        "__cellscript_abort": 501
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "54ac2a4c1a78b8c0168b95b7ad7cb00af29459f89e1a4a873f1687957b5be427",
+          "pc": "65744",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 22
+        },
+        {
+          "program_sha256": "54ac2a4c1a78b8c0168b95b7ad7cb00af29459f89e1a4a873f1687957b5be427",
+          "pc": "65628",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "54ac2a4c1a78b8c0168b95b7ad7cb00af29459f89e1a4a873f1687957b5be427",
+          "pc": "65684",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "54ac2a4c1a78b8c0168b95b7ad7cb00af29459f89e1a4a873f1687957b5be427",
+          "pc": "65552",
+          "attempts": 1,
+          "instruction_cycles": 500,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "54ac2a4c1a78b8c0168b95b7ad7cb00af29459f89e1a4a873f1687957b5be427",
+          "pc": "67428",
+          "attempts": 1,
+          "instruction_cycles": 500,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "54ac2a4c1a78b8c0168b95b7ad7cb00af29459f89e1a4a873f1687957b5be427",
+          "pc": "66000",
+          "attempts": 50,
+          "instruction_cycles": 150,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "54ac2a4c1a78b8c0168b95b7ad7cb00af29459f89e1a4a873f1687957b5be427",
+          "pc": "66008",
+          "attempts": 48,
+          "instruction_cycles": 144,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "54ac2a4c1a78b8c0168b95b7ad7cb00af29459f89e1a4a873f1687957b5be427",
+          "pc": "66016",
+          "attempts": 48,
+          "instruction_cycles": 144,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "54ac2a4c1a78b8c0168b95b7ad7cb00af29459f89e1a4a873f1687957b5be427",
+          "pc": "66024",
+          "attempts": 48,
+          "instruction_cycles": 144,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "54ac2a4c1a78b8c0168b95b7ad7cb00af29459f89e1a4a873f1687957b5be427",
+          "pc": "65996",
+          "attempts": 50,
+          "instruction_cycles": 50,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "4fc3b46bf23ab5e03f034ed827c4bb48c6b7040286cc7eb7bf8e861f417d948d",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 15,
+        "rodata": 0,
+        "text": 1256,
+        "total": 1672
+      },
+      "observations": 2,
+      "maximum_group_cycles": 3450,
+      "worst_observed_case": "scalar-loop-join/valid-true",
+      "maximum_observed_vm_stack_bytes": 6608,
+      "class_cycle_totals": {
+        "_cellscript_entry": 4510,
+        "unmapped-trampoline-or-runtime": 508,
+        "verify": 655,
+        "__cellscript_abort": 501
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "4fc3b46bf23ab5e03f034ed827c4bb48c6b7040286cc7eb7bf8e861f417d948d",
+          "pc": "65744",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 22
+        },
+        {
+          "program_sha256": "4fc3b46bf23ab5e03f034ed827c4bb48c6b7040286cc7eb7bf8e861f417d948d",
+          "pc": "65628",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "4fc3b46bf23ab5e03f034ed827c4bb48c6b7040286cc7eb7bf8e861f417d948d",
+          "pc": "65684",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "4fc3b46bf23ab5e03f034ed827c4bb48c6b7040286cc7eb7bf8e861f417d948d",
+          "pc": "65552",
+          "attempts": 1,
+          "instruction_cycles": 500,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "4fc3b46bf23ab5e03f034ed827c4bb48c6b7040286cc7eb7bf8e861f417d948d",
+          "pc": "66784",
+          "attempts": 1,
+          "instruction_cycles": 500,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "4fc3b46bf23ab5e03f034ed827c4bb48c6b7040286cc7eb7bf8e861f417d948d",
+          "pc": "66000",
+          "attempts": 50,
+          "instruction_cycles": 150,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "4fc3b46bf23ab5e03f034ed827c4bb48c6b7040286cc7eb7bf8e861f417d948d",
+          "pc": "66008",
+          "attempts": 48,
+          "instruction_cycles": 144,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "4fc3b46bf23ab5e03f034ed827c4bb48c6b7040286cc7eb7bf8e861f417d948d",
+          "pc": "66016",
+          "attempts": 48,
+          "instruction_cycles": 144,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "4fc3b46bf23ab5e03f034ed827c4bb48c6b7040286cc7eb7bf8e861f417d948d",
+          "pc": "66024",
+          "attempts": 48,
+          "instruction_cycles": 144,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "4fc3b46bf23ab5e03f034ed827c4bb48c6b7040286cc7eb7bf8e861f417d948d",
+          "pc": "66500",
+          "attempts": 18,
+          "instruction_cycles": 54,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "6cac4a01c3b4c81656cb9caaeb48f8692dca0c324019b1399ed543c0f9c95a87",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 15,
+        "rodata": 0,
+        "text": 1416,
+        "total": 1832
+      },
+      "observations": 2,
+      "maximum_group_cycles": 3307,
+      "worst_observed_case": "generic-distinct/valid-true",
+      "maximum_observed_vm_stack_bytes": 7808,
+      "class_cycle_totals": {
+        "_cellscript_entry": 4510,
+        "same__mono__753136": 42,
+        "same__mono__753332": 42,
+        "same__mono__7538": 42,
+        "unmapped-trampoline-or-runtime": 508,
+        "verify": 163,
+        "__cellscript_abort": 501
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "6cac4a01c3b4c81656cb9caaeb48f8692dca0c324019b1399ed543c0f9c95a87",
+          "pc": "65744",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 22
+        },
+        {
+          "program_sha256": "6cac4a01c3b4c81656cb9caaeb48f8692dca0c324019b1399ed543c0f9c95a87",
+          "pc": "65628",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "6cac4a01c3b4c81656cb9caaeb48f8692dca0c324019b1399ed543c0f9c95a87",
+          "pc": "65684",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "6cac4a01c3b4c81656cb9caaeb48f8692dca0c324019b1399ed543c0f9c95a87",
+          "pc": "65552",
+          "attempts": 1,
+          "instruction_cycles": 500,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "6cac4a01c3b4c81656cb9caaeb48f8692dca0c324019b1399ed543c0f9c95a87",
+          "pc": "66944",
+          "attempts": 1,
+          "instruction_cycles": 500,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "6cac4a01c3b4c81656cb9caaeb48f8692dca0c324019b1399ed543c0f9c95a87",
+          "pc": "66000",
+          "attempts": 50,
+          "instruction_cycles": 150,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "6cac4a01c3b4c81656cb9caaeb48f8692dca0c324019b1399ed543c0f9c95a87",
+          "pc": "66008",
+          "attempts": 48,
+          "instruction_cycles": 144,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "6cac4a01c3b4c81656cb9caaeb48f8692dca0c324019b1399ed543c0f9c95a87",
+          "pc": "66016",
+          "attempts": 48,
+          "instruction_cycles": 144,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "6cac4a01c3b4c81656cb9caaeb48f8692dca0c324019b1399ed543c0f9c95a87",
+          "pc": "66024",
+          "attempts": 48,
+          "instruction_cycles": 144,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "6cac4a01c3b4c81656cb9caaeb48f8692dca0c324019b1399ed543c0f9c95a87",
+          "pc": "65996",
+          "attempts": 50,
+          "instruction_cycles": 50,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "f9560da5f0192475d91bbb7cc2180f095ef2cbefc08b1d86e60598f8833440bc",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 15,
+        "rodata": 0,
+        "text": 1240,
+        "total": 1656
+      },
+      "observations": 2,
+      "maximum_group_cycles": 3206,
+      "worst_observed_case": "generic-repeated/valid-true",
+      "maximum_observed_vm_stack_bytes": 7776,
+      "class_cycle_totals": {
+        "_cellscript_entry": 4510,
+        "same__mono__753634": 84,
+        "unmapped-trampoline-or-runtime": 508,
+        "verify": 94,
+        "__cellscript_abort": 501
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "f9560da5f0192475d91bbb7cc2180f095ef2cbefc08b1d86e60598f8833440bc",
+          "pc": "65744",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 22
+        },
+        {
+          "program_sha256": "f9560da5f0192475d91bbb7cc2180f095ef2cbefc08b1d86e60598f8833440bc",
+          "pc": "65628",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "f9560da5f0192475d91bbb7cc2180f095ef2cbefc08b1d86e60598f8833440bc",
+          "pc": "65684",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "f9560da5f0192475d91bbb7cc2180f095ef2cbefc08b1d86e60598f8833440bc",
+          "pc": "65552",
+          "attempts": 1,
+          "instruction_cycles": 500,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "f9560da5f0192475d91bbb7cc2180f095ef2cbefc08b1d86e60598f8833440bc",
+          "pc": "66768",
+          "attempts": 1,
+          "instruction_cycles": 500,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "f9560da5f0192475d91bbb7cc2180f095ef2cbefc08b1d86e60598f8833440bc",
+          "pc": "66000",
+          "attempts": 50,
+          "instruction_cycles": 150,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "f9560da5f0192475d91bbb7cc2180f095ef2cbefc08b1d86e60598f8833440bc",
+          "pc": "66008",
+          "attempts": 48,
+          "instruction_cycles": 144,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "f9560da5f0192475d91bbb7cc2180f095ef2cbefc08b1d86e60598f8833440bc",
+          "pc": "66016",
+          "attempts": 48,
+          "instruction_cycles": 144,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "f9560da5f0192475d91bbb7cc2180f095ef2cbefc08b1d86e60598f8833440bc",
+          "pc": "66024",
+          "attempts": 48,
+          "instruction_cycles": 144,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "f9560da5f0192475d91bbb7cc2180f095ef2cbefc08b1d86e60598f8833440bc",
+          "pc": "65996",
+          "attempts": 50,
+          "instruction_cycles": 50,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    },
+    {
+      "elf_sha256": "06c226402696504f8057d8dc167790b78a0a6ca1e1863d6d9674d70710b5fe25",
+      "elf_bytes": {
+        "headers": 376,
+        "other_sections": 25,
+        "padding": 19,
+        "rodata": 0,
+        "text": 1228,
+        "total": 1648
+      },
+      "observations": 2,
+      "maximum_group_cycles": 3172,
+      "worst_observed_case": "scalar-chain-8/valid-true",
+      "maximum_observed_vm_stack_bytes": 6576,
+      "class_cycle_totals": {
+        "_cellscript_entry": 4510,
+        "unmapped-trampoline-or-runtime": 508,
+        "verify": 114,
+        "__cellscript_abort": 501
+      },
+      "hottest_sites": [
+        {
+          "program_sha256": "06c226402696504f8057d8dc167790b78a0a6ca1e1863d6d9674d70710b5fe25",
+          "pc": "65744",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 22
+        },
+        {
+          "program_sha256": "06c226402696504f8057d8dc167790b78a0a6ca1e1863d6d9674d70710b5fe25",
+          "pc": "65628",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "06c226402696504f8057d8dc167790b78a0a6ca1e1863d6d9674d70710b5fe25",
+          "pc": "65684",
+          "attempts": 2,
+          "instruction_cycles": 1000,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "06c226402696504f8057d8dc167790b78a0a6ca1e1863d6d9674d70710b5fe25",
+          "pc": "65552",
+          "attempts": 1,
+          "instruction_cycles": 500,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "06c226402696504f8057d8dc167790b78a0a6ca1e1863d6d9674d70710b5fe25",
+          "pc": "66756",
+          "attempts": 1,
+          "instruction_cycles": 500,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "06c226402696504f8057d8dc167790b78a0a6ca1e1863d6d9674d70710b5fe25",
+          "pc": "66000",
+          "attempts": 50,
+          "instruction_cycles": 150,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "06c226402696504f8057d8dc167790b78a0a6ca1e1863d6d9674d70710b5fe25",
+          "pc": "66008",
+          "attempts": 48,
+          "instruction_cycles": 144,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "06c226402696504f8057d8dc167790b78a0a6ca1e1863d6d9674d70710b5fe25",
+          "pc": "66016",
+          "attempts": 48,
+          "instruction_cycles": 144,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "06c226402696504f8057d8dc167790b78a0a6ca1e1863d6d9674d70710b5fe25",
+          "pc": "66024",
+          "attempts": 48,
+          "instruction_cycles": 144,
+          "synchronous_syscall_cycles": 0
+        },
+        {
+          "program_sha256": "06c226402696504f8057d8dc167790b78a0a6ca1e1863d6d9674d70710b5fe25",
+          "pc": "65996",
+          "attempts": 50,
+          "instruction_cycles": 50,
+          "synchronous_syscall_cycles": 0
+        }
+      ]
+    }
+  ]
+}

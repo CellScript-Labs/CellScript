@@ -16,12 +16,12 @@ authorize a release publication or a new chain deployment.
 
 | Issue | Required outcome | Current evidence |
 | --- | --- | --- |
-| #41 | Validated low-mask immediates | Implemented at `8017a7bd`; historical evidence in `reports/0.32/IMMEDIATE_MASKS.md`; replay required after integration |
+| #41 | Validated low-mask immediates | Implemented at `8017a7bd`; historical evidence retained; integrated clean replay passes 6,782 comparable metrics |
 | #36 | Versioned observed per-VM stack measurements | Implemented diagnostic replay; 13 focused tests passed; final gates pending |
 | #37 | Measured dispatch alternatives and explicit selection | 402 tree and 804 saved-selector cases measured; retain current routing; final gates pending |
 | #38 | Separately measured borrowing, word copies and staged loading | 18 borrowed-span, 96 word-copy and 24 staged-loader cases measured; default ownership/loading retained pending full equivalence and checker contracts |
 | #39 | Bounded register-retention experiment and scratch-ownership decision | Candidate patch archived and rejected after 1,707 unchanged runs; conservative scratch ownership retained |
-| #40 | Cost attribution, experiment decisions, combined comparison and residual-cost report | Attribution companion and [research inventory](reports/0.32/RESEARCH.md) added; clean integrated comparison and remaining probes pending |
+| #40 | Cost attribution, experiment decisions, combined comparison and residual-cost report | Clean 1,707-run attribution, 6,782-metric replay, paired cost frontier and residual sites archived; wider transformations have explicit blockers; final gates pending |
 | #22 | One exact typed ZK profile, real verifier execution and state binding | Canonical codec and exact child research implemented; real pairing/context mutations pass; application circuit and parent/compiler/checker/builder closure pending |
 
 #42 remains post-0.32 application tooling. Compatible-open handles (#28) and
@@ -31,13 +31,36 @@ unimplemented or unmeasured experiment must not be described as complete.
 
 ## Integration baseline
 
-Integrate the published 0.31 history through
+Integrated the published 0.31 history through
 `5fd4c4690512b3df4cd5a46d64194d7d4d3b9491` with the 0.32 low-mask changes.
 The 0.31 release includes loop-fusion and assembly diagnostic corrections as
 well as version, package and artifact-identity updates. Preserve the low-mask
 planner and regenerate affected evidence rather than choosing an old hash
 merely to resolve a merge conflict. Historical deployment receipts remain
 bound to their original artifacts.
+
+The integrated implementation is local commit
+`4e1047980bce94d8ad0317b132a6f4c15a45df08`. See the
+[evidence index](reports/0.32/README.md) for original versus integrated report
+identities. The 220 iCKB differential tests pass with the pinned benchmark
+`f2a200a366ed1d97fbb22ac4633ae5abba591b5e`; a pre-existing older benchmark
+checkout was preserved and tested separately rather than overwritten.
+
+## Required application input for #22
+
+The first application must specify the relation between old state, new state
+and authority, and identify its circuit/VK or authorize a concrete circuit
+specification. The current public-seed identity circuit is deliberately
+non-authorizing and cannot supply that decision. The draft profile, strict
+codec, child ELF and all 13 recorded VM observations reproduce across two
+local checkout builds, but production source admission remains unavailable.
+
+After the application relation is fixed, #22 still requires nominal proof
+typing, named exact verifier/VK binding, transaction-derived statements,
+mandatory parent result checking, ProofPlan and machine/checker closure,
+builder/editor parity, real scheduler/stateful tests and production resource
+and reproducibility evidence. Independent review is waived; these executable
+requirements are not.
 
 ## Validation still required
 

@@ -78,6 +78,17 @@
     "contracts/zk-transition-verifier/src/main.rs": "510bfcfcee404c358fbe76aa89075f0faffff4b163c6b11e49d46cae238a998c",
     "contracts/zk-transition-verifier/host/Cargo.lock": "a7790d159ea73a210e02300c1e75582e6cf9759c7a2faa0df1b9287990882c8f",
     "contracts/zk-transition-verifier/host/src/lib.rs": "9e02801feb7a0bfb9654c17995e7f0129969b89fd47e31e6712f3ec213ec0543",
-    "crates/cellscript-artifact-checker/src/zk.rs": "ba54a3da8dbc684eeb22b7668494d690306f5efc43e1da6388db54aadc12a785"
+    "crates/cellscript-artifact-checker/src/zk.rs": "ba54a3da8dbc684eeb22b7668494d690306f5efc43e1da6388db54aadc12a785",
+    "contracts/zk-transition-verifier/Cargo.toml": "24817b0b9f5b6a08e4b60c116e6143be804b3e24e124c6ca4ce33480be8f4fda",
+    "contracts/zk-transition-verifier/host/Cargo.toml": "1ece0738a47a9be736c7b719d1270b2ba3bd5e73c5079007f968bd0e108d6db6",
+    "rust-toolchain.toml": "052bff4f93a35dc619c39b032847438d22441c149527e7ab91d1afff20c3d1e3"
+  },
+  "clean_replay": {
+    "source_commit": "4e1047980bce94d8ad0317b132a6f4c15a45df08",
+    "source_dirty": false,
+    "artifact_sha256": "2e314ed2b8f6e0d34ceccd7ac4825f5c006e07992c5d69a912df73cc9209f402",
+    "isolated_checkout_matches_original": true,
+    "all_recorded_exits_and_instruction_cycles_identical": true,
+    "scope": "two local checkout builds with the pinned toolchain and locks; not a production setup or deployment reproducibility claim"
   }
 }
