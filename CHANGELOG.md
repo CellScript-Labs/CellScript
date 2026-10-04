@@ -12,6 +12,12 @@ admission is scoped to the private counter under explicit local single-party
 setup trust. Named package resolution, shared Rust/TypeScript codecs and
 separate stack-resource replay complete the first profile acceptance surface. See the [composition boundary](contracts/zk-transition-verifier/README.md).
 
+Add a runnable counter walkthrough and a TypeScript example importing its
+generated SDK. Fix generated packages crashing on import when their Molecule
+schema list is empty; exercise the complete package in a Node regression test.
+The [DX assessment](docs/CELLSCRIPT_ZK_DEVELOPER_EXPERIENCE.md) records remaining
+wallet, deployment and application-builder work.
+
 Construct low-bit masks `2^n - 1` for n=31..63 with `addi -1; srli`
 when this is strictly shorter than the 0.31 immediate plan. Preserve existing
 plans on ties, validate the complete RV64 result, and keep the fixed entry

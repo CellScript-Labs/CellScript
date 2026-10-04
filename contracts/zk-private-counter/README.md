@@ -5,6 +5,11 @@ Cell's counter update. The witness proves knowledge of a 32-byte secret. The
 counter and its owner commitment are public; this is private authorization,
 not confidential state or a payment protocol.
 
+Start with the [application walkthrough](../../examples/zk/README.md) for a
+single command that runs the counter in CKB-VM and imports its generated
+TypeScript SDK. It includes corruption/replay negatives and a concrete
+[developer-experience assessment](../../docs/CELLSCRIPT_ZK_DEVELOPER_EXPERIENCE.md).
+
 ## Relation and lifecycle
 
 Cell data is exactly 48 bytes: `CSZKCNT1 || owner[32] || counter_u64_le`.

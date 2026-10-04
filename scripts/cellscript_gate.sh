@@ -719,6 +719,9 @@ run_ci_gate() {
     run cargo clippy --locked -p cellscript-tools --all-targets -- -D warnings
     run_registry_type_script_check
     run_zk_child_research_check
+    local zk_walkthrough_dir
+    zk_walkthrough_dir="$(mktemp -d "$ROOT_DIR/target/zk-walkthrough.XXXXXX")"
+    run bash examples/zk/run.sh "$zk_walkthrough_dir/run"
     run cargo clippy --locked --manifest-path contracts/registry-type-script/Cargo.toml --tests -- -D warnings
     run ./scripts/cellscript_strict_backend_audit.sh ci
     run cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \

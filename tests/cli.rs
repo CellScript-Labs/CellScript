@@ -10524,6 +10524,48 @@ fn cellc_cross_module_launch_composition_distributes_correctly() {
 }
 
 #[test]
+fn cellc_generated_builder_without_schemas_imports_and_creates_a_plan() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("empty_schema.cell");
+    std::fs::write(&source, "module empty_schema\naction ping() -> u64 { verification return 0 }\n").unwrap();
+    let package = temp.path().join("sdk");
+    let generated = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .args(["gen-builder", "--target", "typescript", "--target-profile", "ckb"])
+        .arg(&source)
+        .arg("--output")
+        .arg(&package)
+        .output()
+        .unwrap();
+    assert!(generated.status.success(), "{}", String::from_utf8_lossy(&generated.stderr));
+    let smoke = package.join("smoke.mjs");
+    std::fs::write(
+        &smoke,
+        "import assert from 'node:assert/strict';\n\
+         import { protocolBundleArtifactIdentity, planPing } from './src/index.ts';\n\
+         assert.deepEqual(protocolBundleArtifactIdentity.schemaContracts, []);\n\
+         assert.equal(planPing({}).canSubmit, false);\n",
+    )
+    .unwrap();
+    let imported = Command::new("node")
+        .arg("--experimental-strip-types")
+        .arg(&smoke)
+        .output()
+        .expect("generated-builder execution requires Node with TypeScript stripping, as do the ZK gate vectors");
+    assert!(imported.status.success(), "generated SDK import failed: {}", String::from_utf8_lossy(&imported.stderr));
+    let generated_tests =
+        std::fs::read_to_string(package.join("test/builder.test.mjs")).unwrap().replace("../dist/index.js", "../src/index.ts");
+    let test_path = package.join("test/schema-free.test.mjs");
+    std::fs::write(&test_path, generated_tests).unwrap();
+    let tested = Command::new("node").args(["--experimental-strip-types", "--test"]).arg(test_path).output().unwrap();
+    assert!(
+        tested.status.success(),
+        "generated schema-free SDK tests failed: {}\n{}",
+        String::from_utf8_lossy(&tested.stdout),
+        String::from_utf8_lossy(&tested.stderr)
+    );
+}
+
+#[test]
 fn cellc_gen_builder_typescript_emits_package_scaffold() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();

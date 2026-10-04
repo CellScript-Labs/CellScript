@@ -14,9 +14,10 @@ independent-checker, runtime and resource validation remain required. See the
 [current implementation scope](docs/CELLSCRIPT_0_32_IMPLEMENTATION.md) and the
 [completed immediate slice](docs/reports/0.32/IMMEDIATE_MASKS.md).
 The branch integrates the published 0.31 history through `5fd4c469`; workspace
-versions remain 0.31.0 pending coordinated release preparation. An in-progress
-ZK interface now executes the exact experimental composition; its test circuit
-does not establish production application admission. This branch is
+versions remain 0.31.0 pending coordinated release preparation. The exact
+ZK interface has completed first-profile acceptance with a private-counter
+circuit and scoped local-setup admission. The [developer walkthrough](examples/zk/README.md)
+documents the application flow and remaining SDK work. This branch is
 not a release announcement or deployment receipt.
 
 ## Branch decision — 2026-09-21

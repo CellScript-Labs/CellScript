@@ -44,6 +44,12 @@ reproduction and observed stack replay; backend also runs local-node acceptance.
 [0.32 scope](CELLSCRIPT_0_32_IMPLEMENTATION.md) and
 [child boundary](../contracts/zk-transition-verifier/README.md).
 
+`ci` also runs `examples/zk/run.sh` in a fresh ignored target directory: public
+test setup, counter creation/two updates, corrupt-proof/replay rejection and
+actual generated TypeScript SDK import/byte binding. These example records do
+not overwrite candidate admission evidence. The CLI suite executes a generated
+schema-free SDK and its own tests to catch package-import regressions.
+
 | Mode | When to run | Evidence boundary |
 |---|---|---|
 | `dev` | Local development before pushing | Native source-policy enforcement; Rust formatting; canonical CellScript example formatting; all workspace-package Rust checks (including the standalone artifact checker and `cellscript-tools`); checker mutation/Myelin handoff tests; exact-handle CKB-VM/transaction-validation tests; deployment-line receipt/value tests; frozen 0.30 business-corpus inventory and same-transaction anchor; simulator package scenarios; frozen/offline canonical workspace-diamond plus resolve-graph/build-plan and transactional-upgrade schema checks, including byte-identical source locks; both Registry verifiers and their compiler-dependency boundaries; reproducible Registry Type Script build and CKB-VM tests; strict backend quick audit, syntax-combination quick audit, parity-gated skill-pack freshness, README-linked CellScript doc Status freshness, local markdown link check, whitespace diff check |

@@ -9289,7 +9289,9 @@ export const protocolBundleArtifactIdentity = Object.freeze({
   targetProfileHash: builderManifest.target_profile_hash,
   runtimeAbiHash: builderManifest.runtime_abi_hash,
   verifiedBundleId: builderManifest.verified_bundle_id,
-  schemaContracts: Object.freeze(builderManifest.molecule_schema_manifest.entries.map((entry) => Object.freeze({
+  schemaContracts: Object.freeze(((builderManifest.molecule_schema_manifest as {
+    entries?: readonly ProtocolBundleRoleSchemaIdentity[];
+  }).entries ?? []).map((entry) => Object.freeze({
     type_name: entry.type_name,
     schema_hash: entry.schema_hash,
   }))),
@@ -10880,15 +10882,19 @@ fn typescript_builder_test(metadata: &CompileMetadata, actions: &[&crate::Action
              entry: { kind: \"action\", name: actionCases[0].name }, scriptRole: \"type\", deployment,\n\
            });\n\
            const second = Object.freeze({ ...first, id: \"second\" });\n\
-           const sharedSchema = first.schemaContracts[0];\n\
-           assert.ok(sharedSchema);\n\
-           const closedRole = builder.bindClosedProtocolRole({\n\
+           const sharedSchema = first.schemaContracts[0] ?? { type_name: \"AbsentTutorialSchema\", schema_hash: \"a\".repeat(64) };\n\
+           const roleOptions = {\n\
              roleId: \"shared-token\", kind: \"cell\", schemaIdentity: sharedSchema,\n\
              provider: { artifact: first, claim: \"shared-output\" },\n\
              consumers: [{ artifact: second, claim: \"shared-output\" }],\n\
-           });\n\
-           assert.equal(closedRole.schema, builder.PROTOCOL_CLOSED_ROLE_SCHEMA);\n\
-           assert.deepEqual(closedRole.provider, { artifact: \"first\", claim: \"shared-output\" });\n\
+           };\n\
+           if (first.schemaContracts.length > 0) {\n\
+             const closedRole = builder.bindClosedProtocolRole(roleOptions);\n\
+             assert.equal(closedRole.schema, builder.PROTOCOL_CLOSED_ROLE_SCHEMA);\n\
+             assert.deepEqual(closedRole.provider, { artifact: \"first\", claim: \"shared-output\" });\n\
+           } else {\n\
+             assert.throws(() => builder.bindClosedProtocolRole(roleOptions), /does not expose the closed-role schema identity/);\n\
+           }\n\
            if (typeof first.verifiedBundleId === \"string\") {\n\
              const exactReceipt = {\n\
                schema: builder.EXACT_SCRIPT_HANDLE_RECEIPT_SCHEMA, version: 1, class: \"script\", script_role: first.scriptRole,\n\
