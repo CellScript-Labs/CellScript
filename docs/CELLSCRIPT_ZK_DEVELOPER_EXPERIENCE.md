@@ -38,7 +38,7 @@ passed TypeScript compilation and all ten generated tests.
 
 | Developer step | Current experience | Assessment |
 | --- | --- | --- |
-| First successful local run | `examples/zk/run.sh NEW_DIR` now builds and runs both examples; Rust/Node and the RISC-V target remain prerequisites | Adequate for a repository tutorial |
+| First successful local run | `examples/zk/run.sh NEW_DIR` builds and runs both examples after installing Rust/Node, the RISC-V target and sibling `ckb-sdk-rust v5.1.0` path dependency | Adequate for a prepared repository; still awkward for a fresh checkout |
 | Author the parent | Short action, but four large commitment literals and an explicit CellDep index are generated through Rust helpers | Too much identity plumbing for ordinary application authoring |
 | Start a different application | Counter circuit, setup and lifecycle cannot express another relation by editing the parent | A new circuit remains expert work; do not market an arbitrary-circuit starter |
 | Generate a usable SDK | Generation originally succeeded but importing a schema-free package crashed on `entries.map` | Fixed together with generated tests that incorrectly assumed every artifact exposes a shared schema; generation alone was insufficient evidence |

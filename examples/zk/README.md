@@ -16,13 +16,20 @@ uses a public test secret. Counter values and owner commitment remain public.
 ## Run both
 
 Use a checkout of the `0.32` development branch with Rust 1.97.1 and Node supporting
-`--experimental-strip-types` (tested with Node 22.23.1). The published 0.31 CLI
-and browser bundle do not expose this new profile. From the repository root:
+`--experimental-strip-types` (tested with Node 22.23.1). Source builds also require
+a sibling `../ckb-sdk-rust` checkout at tag `v5.1.0`, because the workspace uses
+path dependencies. The published 0.31 CLI and browser bundle do not expose this
+new profile. From the repository root:
 
 ```bash
+git clone --branch v5.1.0 --depth 1 https://github.com/nervosnetwork/ckb-sdk-rust.git ../ckb-sdk-rust
 rustup target add riscv64imac-unknown-none-elf
 examples/zk/run.sh target/my-zk-app
 ```
+
+Skip the clone if the matching sibling checkout already exists. Repository-wide
+gates additionally require the submodules described in the root development guide;
+the walkthrough does not run those gates automatically.
 
 Choose an output directory that does not exist. A first build downloads/builds
 locked dependencies; subsequent runs reuse Cargo caches. No RPC, wallet, Docker,
