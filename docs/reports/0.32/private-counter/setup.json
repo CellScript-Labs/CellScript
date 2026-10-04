@@ -1,0 +1,18 @@
+{
+  "schema": "cellscript-counter-setup-v1",
+  "circuit": {
+    "application": "cellscript-private-counter-v1",
+    "r1cs_sha256": "ec73a1e355384c722dcae3013f026afd8c97b9d6c804376277111f33df7d40d0",
+    "constraints": 149179,
+    "public_inputs": 15,
+    "witnesses": 147904
+  },
+  "rust_toolchain": "1.97.1",
+  "dependency_lock_sha256": "aa29e13729505d86c425a789dd7c2e2284c32ce5392a832d02b90f4c8828ed0f",
+  "proving_key_sha256": "89e240d993e45d678eca31ac42bb38462b47c9fb2f60d15c35428e442d4afd5b",
+  "verification_key_sha256": "2e24c47ff1c8be23781bf64d55701a5b8d5dfb095e5b6b06b6b465576a571c49",
+  "verification_key_data_hash": "5e55e7ad3831793e622f1ef3d9ae70bea5085a81a836050df52019caba38ea1e",
+  "setup_kind": "local-single-party",
+  "setup_unix_seconds": 1791103560,
+  "production_admitted": false
+}

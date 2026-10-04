@@ -1,0 +1,14 @@
+{
+  "circuit_sha256": "ec73a1e355384c722dcae3013f026afd8c97b9d6c804376277111f33df7d40d0",
+  "evidence_sha256": "25602f77863df8c870626ff5024a2ebc447bb119a5baecbe942d041c4799ac77",
+  "independent_review": false,
+  "mpc_ceremony": false,
+  "production_admitted": true,
+  "proving_key_sha256": "89e240d993e45d678eca31ac42bb38462b47c9fb2f60d15c35428e442d4afd5b",
+  "public_network_deployment": false,
+  "schema": "cellscript-counter-admission-v1",
+  "scope": "private-counter-v1 engineering admission under local single-party setup trust",
+  "setup_manifest_sha256": "34081d9b781dd55b7ff7ba12d3b9f0a6897dc2a02b3ff34df282b67bdd8dbfbe",
+  "trust_model": "single-party-local-setup;operator-and-host-trusted;erasure-not-independently-proven",
+  "verification_key_data_hash": "5e55e7ad3831793e622f1ef3d9ae70bea5085a81a836050df52019caba38ea1e"
+}

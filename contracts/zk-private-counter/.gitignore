@@ -1,0 +1,7 @@
+/target/
+/script/target/
+# Setup artifacts and witness secrets must be exported deliberately, never swept into a commit.
+*.pk
+proving-key.bin
+witness.json
+secret.bin

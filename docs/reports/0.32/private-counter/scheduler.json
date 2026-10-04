@@ -1,0 +1,97 @@
+{
+  "child_data_hash": "c4f44b54784727c78802efdf49fb3586d488dbb4ee581b18781698317848a039",
+  "circuit": {
+    "application": "cellscript-private-counter-v1",
+    "constraints": 149179,
+    "public_inputs": 15,
+    "r1cs_sha256": "ec73a1e355384c722dcae3013f026afd8c97b9d6c804376277111f33df7d40d0",
+    "witnesses": 147904
+  },
+  "circuit_sha256": "ec73a1e355384c722dcae3013f026afd8c97b9d6c804376277111f33df7d40d0",
+  "lifecycle_data_hash": "258407bcb253c794e2ef391717fcd6c0c603107a10b896fa72a9a2f9ae23972b",
+  "parent_data_hash": "8149cbc81d9b740d1276eafb9d030610b473dd6c645060530e1b651c3c26999d",
+  "production_admitted": false,
+  "rows": [
+    {
+      "case": "create",
+      "cycles": 26610
+    },
+    {
+      "case": "create-nonzero",
+      "error": "Script(TransactionScriptError { source: Outputs[0].Type, cause: ValidationFailure: see error code 93 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2bea7f3113dc98e5a4ba7d96b8565c24d0655f2190e5437a816ebba0fea02f58.html#93 })",
+      "error_code": 93
+    },
+    {
+      "case": "create-wrong-type-id",
+      "error": "Script(TransactionScriptError { source: Outputs[0].Type, cause: ValidationFailure: see error code 95 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2bea7f3113dc98e5a4ba7d96b8565c24d0655f2190e5437a816ebba0fea02f58.html#95 })",
+      "error_code": 95
+    },
+    {
+      "bytes": 917,
+      "case": "update-0-1",
+      "cycles": 109973746,
+      "transaction_hash": "17604bb92c5c9a23ab10d01c3d72ad2b28e851b2b4020fafbf9e24ce1dc17b4c"
+    },
+    {
+      "case": "skip-counter",
+      "error": "Script(TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 79 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2bea7f3113dc98e5a4ba7d96b8565c24d0655f2190e5437a816ebba0fea02f58.html#79 })",
+      "error_code": 79
+    },
+    {
+      "case": "change-owner",
+      "error": "Script(TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 92 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2bea7f3113dc98e5a4ba7d96b8565c24d0655f2190e5437a816ebba0fea02f58.html#92 })",
+      "error_code": 92
+    },
+    {
+      "case": "change-capacity",
+      "error": "Script(TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 92 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2bea7f3113dc98e5a4ba7d96b8565c24d0655f2190e5437a816ebba0fea02f58.html#92 })",
+      "error_code": 92
+    },
+    {
+      "case": "burn",
+      "error": "Script(TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 94 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2bea7f3113dc98e5a4ba7d96b8565c24d0655f2190e5437a816ebba0fea02f58.html#94 })",
+      "error_code": 94
+    },
+    {
+      "case": "duplicate-state",
+      "error": "Script(TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 95 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2bea7f3113dc98e5a4ba7d96b8565c24d0655f2190e5437a816ebba0fea02f58.html#95 })",
+      "error_code": 95
+    },
+    {
+      "case": "change-lock",
+      "error": "Script(TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 92 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2bea7f3113dc98e5a4ba7d96b8565c24d0655f2190e5437a816ebba0fea02f58.html#92 })",
+      "error_code": 92
+    },
+    {
+      "case": "truncated-state",
+      "error": "Script(TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 92 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2bea7f3113dc98e5a4ba7d96b8565c24d0655f2190e5437a816ebba0fea02f58.html#92 })",
+      "error_code": 92
+    },
+    {
+      "case": "missing-parent",
+      "error": "Script(TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 96 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2bea7f3113dc98e5a4ba7d96b8565c24d0655f2190e5437a816ebba0fea02f58.html#96 })",
+      "error_code": 96
+    },
+    {
+      "case": "corrupt-proof",
+      "error": "Script(TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 79 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2bea7f3113dc98e5a4ba7d96b8565c24d0655f2190e5437a816ebba0fea02f58.html#79 })",
+      "error_code": 79
+    },
+    {
+      "case": "successor-replay",
+      "error": "Script(TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 79 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2bea7f3113dc98e5a4ba7d96b8565c24d0655f2190e5437a816ebba0fea02f58.html#79 })",
+      "error_code": 79
+    },
+    {
+      "bytes": 917,
+      "case": "update-1-2",
+      "cycles": 110171095,
+      "transaction_hash": "1c87cc93a86e36474831713f4e127d3ab3b157c5eb4054e4c577b2133c947ab8"
+    }
+  ],
+  "schema": "cellscript-counter-application-evidence-v1",
+  "scope": "CKB testtool scheduler; real private authorization circuit; public test witness; not a chain deployment",
+  "setup_kind": "local-single-party",
+  "status": "passed",
+  "verification_key_data_hash": "5e55e7ad3831793e622f1ef3d9ae70bea5085a81a836050df52019caba38ea1e"
+}

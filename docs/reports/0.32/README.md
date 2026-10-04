@@ -3,7 +3,7 @@
 This directory contains measured research, not a 0.32 release receipt.
 Independent human review was waived by the maintainer on 2026-10-03.
 The standalone artifact checker, executable negative tests and gates remain
-required. The accepted scope and unfinished ZK admission work are recorded in
+required. The accepted scope and application admission boundary are recorded in
 [the implementation checklist](../../CELLSCRIPT_0_32_IMPLEMENTATION.md).
 
 ## Separate evidence sets
@@ -17,6 +17,7 @@ required. The accepted scope and unfinished ZK admission work are recorded in
 | Isolated alternatives | `experiments/`, `experiment-frontier.json` | Finite paired probes and explicit cost tradeoffs; admission decisions and blockers in [RESEARCH.md](RESEARCH.md) |
 | ZK child research | `zk-child-research.json` | Real child pairing with modeled syscalls and a public-seed, non-authorizing test circuit; no production profile or stateful transaction claim |
 | ZK v2 composition | [zk-composition-scheduler.json](zk-composition-scheduler.json) | Exact generated parent and real child under the CKB scheduler; two accepted successive transitions and five rejected replay/substitution cases, with artifact hashes and resource measurements; non-authorizing test circuit |
+| Private authorization counter | [private-counter/evidence.json](private-counter/evidence.json), [admission](private-counter/admission.json), [setup](private-counter/setup.json) | Real secret-knowledge circuit, OS-random candidate VK, successful scheduler and local-node transactions, replay rejection and reproduced ELFs; engineering admission under explicit local single-party setup trust; no public-network deployment |
 | Final gate acceptance | `validation.json`, `gate-*.log.gz`, `strict-backend-full.json.gz`, `ckb-stateful-acceptance.json.gz` | Passed dev/CI/backend records; final clean CI/backend commit is `6a453d30`; exact scopes and dev adjustment are recorded |
 | Final corrected-source costs | `final-main.json.gz`, `final-multi.json.gz`, `final-comparison.json` | All 6,782 comparable metrics pass after the one-field inventory correction and evidence packaging; no compiler-code change |
 

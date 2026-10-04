@@ -537,6 +537,15 @@ run_zk_child_research_check() {
         --target riscv64imac-unknown-none-elf --release
     run cargo test --locked --manifest-path contracts/zk-transition-verifier/host/Cargo.toml \
         --release -- --test-threads=1
+    run cargo fmt --manifest-path contracts/zk-private-counter/Cargo.toml -- --check
+    run cargo fmt --manifest-path contracts/zk-private-counter/script/Cargo.toml -- --check
+    run cargo build --locked --manifest-path contracts/zk-private-counter/script/Cargo.toml \
+        --target riscv64imac-unknown-none-elf --release
+    run cargo clippy --locked --release --manifest-path contracts/zk-private-counter/Cargo.toml --all-targets -- -D warnings
+    run cargo clippy --locked --manifest-path contracts/zk-private-counter/script/Cargo.toml \
+        --target riscv64imac-unknown-none-elf --release -- -D warnings
+    run cargo test --locked --manifest-path contracts/zk-private-counter/Cargo.toml --release -- --test-threads=1
+    run bash contracts/zk-private-counter/reproduce.sh
 }
 
 check_wasm_release_bundle() {
@@ -757,6 +766,8 @@ run_backend_gate() {
     run_executable_package_scenarios all
     run_zk_child_research_check
     run ./scripts/cellscript_strict_backend_audit.sh full
+    run cargo test --locked --release --manifest-path contracts/zk-private-counter/Cargo.toml \
+        --test node counter_node_acceptance -- --ignored --nocapture
     run git diff --check
 }
 

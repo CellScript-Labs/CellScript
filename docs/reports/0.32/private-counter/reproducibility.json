@@ -1,0 +1,17 @@
+{
+  "artifacts": {
+    "cellscript-counter-lifecycle": {
+      "bytes": 64336,
+      "data_hash": "258407bcb253c794e2ef391717fcd6c0c603107a10b896fa72a9a2f9ae23972b",
+      "sha256": "b82c9a80636d0647ed96ff9ceb9896ed0459a3020a9da6afb6801ea33f019217"
+    },
+    "cellscript-zk-transition-verifier": {
+      "bytes": 197384,
+      "data_hash": "c4f44b54784727c78802efdf49fb3586d488dbb4ee581b18781698317848a039",
+      "sha256": "d3b0c172b4f6a807b203b888e45a6656e69761b7fffc2e4d3524b8b379e6a555"
+    }
+  },
+  "schema": "cellscript-counter-reproducibility-v1",
+  "scope": "same pinned sources/toolchain; independent Cargo target directories",
+  "status": "passed"
+}

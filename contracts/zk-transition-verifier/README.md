@@ -80,7 +80,10 @@ cargo test --locked --manifest-path contracts/zk-transition-verifier/host/Cargo.
 ```
 
 All three development gates (`dev`, `ci`, `backend`) build the child and run
-the host/scheduler tests. Remaining production admission work includes an
-accepted application relation and circuit/VK, named package-level dependency
-resolution, production resource/reproducibility evidence and deployment.
-No issue should be closed on the strength of the non-authorizing test circuit.
+the host/scheduler tests. They also check the separate
+[private authorization counter](../zk-private-counter/README.md), which supplies
+a real application relation, proving/VK packages, lifecycle and reproducibility
+checks. `backend` additionally runs its local-node acceptance after the pinned
+CKB acceptance harness. The public-seed identity circuit above remains
+non-authorizing. Named package-level verifier resolution and public-network
+deployment are separate from this exact, deployment-bound application.

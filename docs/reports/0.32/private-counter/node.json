@@ -1,0 +1,194 @@
+{
+  "admission": "send_transaction with passthrough outputs validator; consensus and pool verification enabled",
+  "circuit_sha256": "ec73a1e355384c722dcae3013f026afd8c97b9d6c804376277111f33df7d40d0",
+  "ckb_binary_sha256": "57a36a20c260934538a2298613741c77acc4f093ac05a925fb8b711c3588deb9",
+  "ckb_revision": "f7fa4436737756f97a24e254f22c13a36316ecea",
+  "ckb_version": "ckb 0.207.0 (f7fa443 2026-06-18)",
+  "deployments": [
+    {
+      "artifact_size_bytes": 197384,
+      "cell_dep": {
+        "dep_type": "code",
+        "out_point": {
+          "index": "0x0",
+          "tx_hash": "0x97376ff9f3be7195af58af8c26f85bcd65cf0dc2f738779e6649cba92c89730d"
+        }
+      },
+      "commit": {
+        "generated_blocks_after_submit": 4,
+        "status": {
+          "block_hash": "0x91335db188f6bb977f39fb58ccb34e5af5559127224f010f4d5f7bbf5424077e",
+          "block_number": "0x5f",
+          "reason": null,
+          "status": "committed",
+          "tx_index": "0x1"
+        },
+        "tx_hash": "0x97376ff9f3be7195af58af8c26f85bcd65cf0dc2f738779e6649cba92c89730d"
+      },
+      "data_hash": "0xc4f44b54784727c78802efdf49fb3586d488dbb4ee581b18781698317848a039",
+      "name": "zk-child",
+      "valid_deploy_dry_run": {
+        "cycles": "0x219"
+      }
+    },
+    {
+      "artifact_size_bytes": 744,
+      "cell_dep": {
+        "dep_type": "code",
+        "out_point": {
+          "index": "0x0",
+          "tx_hash": "0x57a38cc7ce8e2b8a1b28230942c804b57395b0d2849a9619368f85ad7c7316e9"
+        }
+      },
+      "commit": {
+        "generated_blocks_after_submit": 4,
+        "status": {
+          "block_hash": "0xfc72572804ec63062614147243636edbedffa7e745aab699db692761fd289a9e",
+          "block_number": "0x64",
+          "reason": null,
+          "status": "committed",
+          "tx_index": "0x1"
+        },
+        "tx_hash": "0x57a38cc7ce8e2b8a1b28230942c804b57395b0d2849a9619368f85ad7c7316e9"
+      },
+      "data_hash": "0x5e55e7ad3831793e622f1ef3d9ae70bea5085a81a836050df52019caba38ea1e",
+      "name": "counter-vk",
+      "valid_deploy_dry_run": {
+        "cycles": "0x219"
+      }
+    },
+    {
+      "artifact_size_bytes": 14560,
+      "cell_dep": {
+        "dep_type": "code",
+        "out_point": {
+          "index": "0x0",
+          "tx_hash": "0x9db0276a8380c509573f0c63ab1f6b5a91688d099666024bf56a1083af66c297"
+        }
+      },
+      "commit": {
+        "generated_blocks_after_submit": 4,
+        "status": {
+          "block_hash": "0xea3a891008e7ee4dc02c17902aa8ae475ee57c0c151dbdbe8b859815a4791283",
+          "block_number": "0x6f",
+          "reason": null,
+          "status": "committed",
+          "tx_index": "0x1"
+        },
+        "tx_hash": "0x9db0276a8380c509573f0c63ab1f6b5a91688d099666024bf56a1083af66c297"
+      },
+      "data_hash": "0xbee6c7f34cc60f0672193796cad71cf0c75cba83fb97e55395ae13ed0ec785b2",
+      "name": "counter-parent",
+      "valid_deploy_dry_run": {
+        "cycles": "0x219"
+      }
+    },
+    {
+      "artifact_size_bytes": 64336,
+      "cell_dep": {
+        "dep_type": "code",
+        "out_point": {
+          "index": "0x0",
+          "tx_hash": "0x303c82ccfe8170334fbbb2e9e98fc55de642437a5c73801d45f9d25a24583c10"
+        }
+      },
+      "commit": {
+        "generated_blocks_after_submit": 4,
+        "status": {
+          "block_hash": "0x85fd05cff65c56bdf3a51c814f993125b4f1df2e4227632964b8957e41e640ec",
+          "block_number": "0x8e",
+          "reason": null,
+          "status": "committed",
+          "tx_index": "0x1"
+        },
+        "tx_hash": "0x303c82ccfe8170334fbbb2e9e98fc55de642437a5c73801d45f9d25a24583c10"
+      },
+      "data_hash": "0x258407bcb253c794e2ef391717fcd6c0c603107a10b896fa72a9a2f9ae23972b",
+      "name": "counter-lifecycle",
+      "valid_deploy_dry_run": {
+        "cycles": "0x219"
+      }
+    }
+  ],
+  "network": "local integration chain",
+  "production_admitted": false,
+  "rows": [
+    {
+      "case": "create",
+      "commit": {
+        "block_hash": "0xf746ce1989d2b5b038356e2395a33749b8e510961a0d92db3da3ed4ec14f558f",
+        "block_number": "0x92",
+        "reason": null,
+        "status": "committed",
+        "tx_index": "0x1"
+      },
+      "dry_run": {
+        "cycles": "0x61d0"
+      },
+      "tx_hash": "cf5e6bfbd37705c6866f8c85b17dc7d621cf70d8074d41ae224126dafaf76fcb"
+    },
+    {
+      "expected": {
+        "data_hash": null,
+        "error_code": 79,
+        "source": null
+      },
+      "label": "skip-counter",
+      "matched_expected": true,
+      "reason": "RPC dry_run_transaction returned error: {\"code\":-302,\"data\":\"Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 79 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-data-hash/258407bcb253c794e2ef391717fcd6c0c603107a10b896fa72a9a2f9ae23972b.html#79 } }\",\"message\":\"TransactionFailedToVerify: Script(TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 79 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-data-hash/258407bcb253c794e2ef391717fcd6c0c603107a10b896fa72a9a2f9ae23972b.html#79 })\"}",
+      "status": "rejected"
+    },
+    {
+      "bytes": 1050,
+      "case": "update-0-1",
+      "commit": {
+        "block_hash": "0x4f6567ffca010a2bb71a55f7ed1408ac5f5b0373a5ba358adbf583650514560d",
+        "block_number": "0x96",
+        "reason": null,
+        "status": "committed",
+        "tx_index": "0x1"
+      },
+      "cycles": 110415398,
+      "tx_hash": "0x946ea93b3ca9fbd6d8acc9f8341f68ff5e5f68b826b54d45f087f5582377dc19"
+    },
+    {
+      "expected": {
+        "data_hash": null,
+        "error_code": 79,
+        "source": null
+      },
+      "label": "successor-replay",
+      "matched_expected": true,
+      "reason": "RPC dry_run_transaction returned error: {\"code\":-302,\"data\":\"Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 79 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-data-hash/258407bcb253c794e2ef391717fcd6c0c603107a10b896fa72a9a2f9ae23972b.html#79 } }\",\"message\":\"TransactionFailedToVerify: Script(TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 79 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-data-hash/258407bcb253c794e2ef391717fcd6c0c603107a10b896fa72a9a2f9ae23972b.html#79 })\"}",
+      "status": "rejected"
+    },
+    {
+      "expected": {
+        "data_hash": null,
+        "error_code": 79,
+        "source": null
+      },
+      "label": "skip-counter",
+      "matched_expected": true,
+      "reason": "RPC dry_run_transaction returned error: {\"code\":-302,\"data\":\"Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 79 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-data-hash/258407bcb253c794e2ef391717fcd6c0c603107a10b896fa72a9a2f9ae23972b.html#79 } }\",\"message\":\"TransactionFailedToVerify: Script(TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 79 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-data-hash/258407bcb253c794e2ef391717fcd6c0c603107a10b896fa72a9a2f9ae23972b.html#79 })\"}",
+      "status": "rejected"
+    },
+    {
+      "bytes": 1050,
+      "case": "update-1-2",
+      "commit": {
+        "block_hash": "0x6662a21992f6b57fce5804e4e8badc0693fcf3c35f2896aaac02550d231cc29f",
+        "block_number": "0x9a",
+        "reason": null,
+        "status": "committed",
+        "tx_index": "0x1"
+      },
+      "cycles": 110452705,
+      "tx_hash": "0x78590b65dcb6a1e7925b3774a0778836587d22d46fe3eae6b1214920d79d9213"
+    }
+  ],
+  "schema": "cellscript-counter-node-evidence-v1",
+  "setup_kind": "local-single-party",
+  "status": "passed",
+  "verification_key_data_hash": "5e55e7ad3831793e622f1ef3d9ae70bea5085a81a836050df52019caba38ea1e"
+}
