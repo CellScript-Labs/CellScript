@@ -198,7 +198,7 @@
   "report_sha256": {
     "node_acceptance": "26b8dd2b3c70e254b5a7a314e86979d125de1cc78a5c0579e5f452d641aac40e",
     "reproducibility": "ee0ab5a6ce351c7a77e20478a70e169a4d8f4a2fce4117857e0817ec737966d7",
-    "scheduler": "f53dea94969073d4440cfb6fccb88470f93fb33305d35d2c21b414c6cae272d5"
+    "scheduler": "38529b0350883d09ee761e4906f6610421089f081867280a343637da2f4acdc8"
   },
   "reproducibility": {
     "artifacts": {
@@ -218,6 +218,12 @@
     "status": "passed"
   },
   "scheduler": {
+    "artifacts": {
+      "child_bytes": 197384,
+      "lifecycle_bytes": 64336,
+      "parent_bytes": 14560,
+      "vk_bytes": 744
+    },
     "child_data_hash": "c4f44b54784727c78802efdf49fb3586d488dbb4ee581b18781698317848a039",
     "circuit": {
       "application": "cellscript-private-counter-v1",
@@ -227,6 +233,17 @@
       "witnesses": 147904
     },
     "circuit_sha256": "ec73a1e355384c722dcae3013f026afd8c97b9d6c804376277111f33df7d40d0",
+    "environment": {
+      "call_cycle_limit": 250000000,
+      "child_heap_budget_bytes": 532480,
+      "ckb_testtool": "1.1.1",
+      "max_inherited_fds": 1,
+      "max_resolved_dependencies": 64,
+      "max_verifier_calls": 1,
+      "memory_measurement": "allocator budget, not observed peak",
+      "rust": "1.97.1",
+      "vm_version": 2
+    },
     "lifecycle_data_hash": "258407bcb253c794e2ef391717fcd6c0c603107a10b896fa72a9a2f9ae23972b",
     "parent_data_hash": "8149cbc81d9b740d1276eafb9d030610b473dd6c645060530e1b651c3c26999d",
     "production_admitted": false,
@@ -248,8 +265,12 @@
       {
         "bytes": 917,
         "case": "update-0-1",
-        "cycles": 109973746,
-        "transaction_hash": "17604bb92c5c9a23ab10d01c3d72ad2b28e851b2b4020fafbf9e24ce1dc17b4c"
+        "cycles": 110177720,
+        "proof_bytes": 128,
+        "state_capacity_shannons": 100000000000,
+        "state_occupied_capacity_shannons": 18600000000,
+        "transaction_hash": "037070cb0604bd9fb35dcfd27cd4d876dedac969b550758178581e23dfe965d7",
+        "witness_bytes": 370
       },
       {
         "case": "skip-counter",
@@ -304,8 +325,12 @@
       {
         "bytes": 917,
         "case": "update-1-2",
-        "cycles": 110171095,
-        "transaction_hash": "1c87cc93a86e36474831713f4e127d3ab3b157c5eb4054e4c577b2133c947ab8"
+        "cycles": 110105802,
+        "proof_bytes": 128,
+        "state_capacity_shannons": 100000000000,
+        "state_occupied_capacity_shannons": 18600000000,
+        "transaction_hash": "0711a038ec419246b8235dc50a406525d114c6b3301a0fc8cb84283d17c8da12",
+        "witness_bytes": 370
       }
     ],
     "schema": "cellscript-counter-application-evidence-v1",

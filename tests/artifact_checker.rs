@@ -454,9 +454,40 @@ action update(witness proof: ZkTransitionProof, witness verifier: ExactScriptHan
         assert!(changed.check().is_err(), "ZK machine mutation accepted at {:#x}: {word:#x}", instruction.address);
         changed_count += 1;
     }
+    let stack_store = elf
+        .instructions
+        .iter()
+        .find(|instruction| {
+            let word = instruction.word;
+            begin <= instruction.address
+                && instruction.address < end
+                && word & 0x7f == 0x23
+                && (word >> 12) & 7 == 3
+                && (word >> 15) & 31 == 2
+                && (word >> 20) & 31 == 5
+        })
+        .expect("ZK canonical request has a stack store");
+    let mut changed_stack = valid.clone();
+    changed_stack.replace_machine_word(stack_store.address, stack_store.word ^ (1 << 10));
+    assert!(changed_stack.check().is_err(), "accepted changed request stack slot");
     assert!(changed_count > 150);
     let mut changed = valid.clone();
     changed.metadata["runtime"]["zk_verifiers"][0]["verification_key_hash"] = Value::String("ff".repeat(32));
+    changed.rebind_sidecars();
+    assert!(changed.check().is_err());
+    for (field, value) in [
+        ("request_bytes", serde_json::json!(465)),
+        ("max_calls", serde_json::json!(2)),
+        ("max_cycles", serde_json::json!(250_000_001)),
+        ("context_binding", serde_json::json!("witness-selected")),
+    ] {
+        let mut changed = valid.clone();
+        changed.metadata["runtime"]["zk_verifiers"][0][field] = value;
+        changed.rebind_sidecars();
+        assert!(changed.check().is_err(), "accepted changed ZK {field}");
+    }
+    let mut changed = valid.clone();
+    changed.metadata["runtime"]["zk_verifiers"][0]["source"]["fields"][0] = serde_json::json!("domain=witness");
     changed.rebind_sidecars();
     assert!(changed.check().is_err());
 }

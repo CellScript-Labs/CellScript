@@ -103,7 +103,24 @@ fn private_authorization_creation_and_successors() {
         }
         let tx = with_proof(&proof);
         let cycles = context.verify_tx(&tx, 250_000_000).unwrap();
-        rows.push(json!({"case":format!("update-{n}-{}",n+1),"cycles":cycles,"transaction_hash":hex::encode(tx.hash().as_slice()),"bytes":tx.data().as_slice().len()}));
+        if n == 0 {
+            let mut cells = Vec::new();
+            for out in tx.inputs().into_iter().map(|i| i.previous_output()).chain(tx.cell_deps().into_iter().map(|d| d.out_point())) {
+                let (output, data) = context.get_cell(&out).unwrap();
+                cells.push(
+                    json!({"out_point":hex::encode(out.as_slice()),"output":hex::encode(output.as_slice()),"data":hex::encode(data)}),
+                );
+            }
+            let snapshot =
+                json!({"transaction":hex::encode(tx.data().as_slice()),"script":hex::encode(script.as_slice()),"cells":cells});
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/resource-fixture.json");
+            std::fs::write(path, serde_json::to_vec(&snapshot).unwrap()).unwrap();
+        }
+
+        rows.push(json!({"case":format!("update-{n}-{}",n+1),"cycles":cycles,"transaction_hash":hex::encode(tx.hash().as_slice()),"bytes":tx.data().as_slice().len(),
+            "proof_bytes":proof.len(), "witness_bytes":tx.witnesses().as_slice().len(),
+            "state_capacity_shannons":Unpack::<u64>::unpack(&cell.capacity()),
+            "state_occupied_capacity_shannons":cell.occupied_capacity(ckb_types::core::Capacity::bytes(data(n+1).len()).unwrap()).unwrap().as_u64()}));
         if n == 0 {
             reject(&context, &tx.as_advanced_builder().set_outputs_data(vec![data(2).pack()]).build(), 79, "skip-counter", &mut rows);
             reject(
@@ -157,7 +174,9 @@ fn private_authorization_creation_and_successors() {
     let report = json!({"schema":"cellscript-counter-application-evidence-v1","status":"passed","circuit_sha256":manifest.circuit.r1cs_sha256,
         "circuit":manifest.circuit,"verification_key_data_hash":hex::encode(counter::hash(&key)),"setup_kind":manifest.setup_kind,
         "child_data_hash":hex::encode(counter::hash(&child)),"parent_data_hash":hex::encode(counter::hash(parent_bytes)),
-        "lifecycle_data_hash":hex::encode(counter::hash(&lifecycle)),"rows":rows,"production_admitted":false,
+        "lifecycle_data_hash":hex::encode(counter::hash(&lifecycle)),
+        "environment":{"ckb_testtool":"1.1.1","rust":"1.97.1","vm_version":2,"child_heap_budget_bytes":532480,"memory_measurement":"allocator budget, not observed peak","max_verifier_calls":1,"max_inherited_fds":1,"max_resolved_dependencies":64,"call_cycle_limit":250000000},
+        "artifacts":{"child_bytes":child.len(),"parent_bytes":parent_bytes.len(),"lifecycle_bytes":lifecycle.len(),"vk_bytes":key.len()},"rows":rows,"production_admitted":false,
         "scope":"CKB testtool scheduler; real private authorization circuit; public test witness; not a chain deployment"});
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target");
     std::fs::create_dir_all(&dir).unwrap();

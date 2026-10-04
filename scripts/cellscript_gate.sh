@@ -528,8 +528,9 @@ run_registry_type_script_check() {
 }
 
 run_zk_child_research_check() {
-    # Experimental composition and real scheduler evidence; no production circuit or deployment claim.
-    run cargo test --locked -p cellscript --test zk_transition
+    # Exact composition and scoped application evidence; no public deployment claim.
+    run cargo test --locked -p cellscript --test zk_transition --test zk_vectors
+    run node --experimental-strip-types --test src/cli/zk_builder_test.mjs
     run cargo test --locked -p cellscript-wasm --features wasm wasm_zk_metadata_preserves_exact_contract
     run cargo fmt --manifest-path contracts/zk-transition-verifier/Cargo.toml -- --check
     run cargo fmt --manifest-path contracts/zk-transition-verifier/host/Cargo.toml -- --check
@@ -546,6 +547,7 @@ run_zk_child_research_check() {
         --target riscv64imac-unknown-none-elf --release -- -D warnings
     run cargo test --locked --manifest-path contracts/zk-private-counter/Cargo.toml --release -- --test-threads=1
     run bash contracts/zk-private-counter/reproduce.sh
+    run cargo test --locked -p cellscript --release --test zk_resources -- --ignored --nocapture
 }
 
 check_wasm_release_bundle() {

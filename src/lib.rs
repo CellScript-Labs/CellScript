@@ -60,6 +60,7 @@ pub mod types;
 mod verified_artifact;
 pub mod wasm;
 pub mod zk_contract;
+pub mod zk_package;
 
 pub use assumptions::{BuilderAssumptionMetadata, TxValidationReport, TxValidationViolation};
 pub use cellscript_artifact_checker::{
@@ -234,7 +235,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
-const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v56-0.32-exact-zk-transition";
+const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v57-0.32-named-zk-package";
 pub const METADATA_SCHEMA_VERSION: u32 = 72;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 2;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -7400,6 +7401,17 @@ pub fn compile_with_executable_surface_policy(
     Ok(result)
 }
 
+/// Compile source against the same named ZK deployment declarations used by Cell.toml.
+/// This checks package intent before code generation; deployment liveness is external.
+#[cfg(not(feature = "wasm"))]
+pub fn compile_with_zk_deploy(source: &str, options: CompileOptions, deploy: &package::CkbDeployConfig) -> Result<CompileResult> {
+    let ast = generics::monomorphize_for_edition(&frontend::parse(source, options.edition)?, options.edition)?;
+    let mut result = compile_ast_with_build(&ast, &options, None, None, Some(deploy), None, ExecutableSurfacePolicy::AllowFailClosed)?;
+    bind_compile_result_source_metadata(&mut result, vec![source_unit_from_bytes("<memory>", "memory", source.as_bytes())])?;
+    result.validate()?;
+    Ok(result)
+}
+
 /// Compile the unique structurally eligible fungible Type Script invariant
 /// from in-memory source as the payload-free `fungible-type-group-v1` entry.
 pub fn compile_fungible_type_group_entry(source: &str, options: CompileOptions) -> Result<CompileResult> {
@@ -7683,6 +7695,12 @@ fn compile_file_metadata_with_diagnostics(
         .and_then(|manifest| manifest.deploy.ckb.as_ref())
         .map_or(&[][..], |ckb| ckb.trusted_external_verifiers.as_slice());
     if let Err(error) = apply_trusted_external_verifiers(&mut metadata, &ir, trusted_external_verifiers) {
+        diagnostics.push(error);
+        return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
+    }
+    if let Some(manifest) = &manifest
+        && let Err(error) = zk_package::validate(&ir, manifest.deploy.ckb.as_ref().unwrap_or(&package::CkbDeployConfig::default()))
+    {
         diagnostics.push(error);
         return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
     }
@@ -8121,7 +8139,7 @@ fn compile_ast_with_build(
     options: &CompileOptions,
     resolver: Option<(&ModuleResolver, &str)>,
     build: Option<&BuildConfig>,
-    trusted_external_verifiers: Option<&[CkbTrustedExternalVerifierConfig]>,
+    ckb_deploy: Option<&package::CkbDeployConfig>,
     entry_scope: Option<&CompileEntryScope>,
     executable_surface_policy: ExecutableSurfacePolicy,
 ) -> Result<CompileResult> {
@@ -8136,7 +8154,10 @@ fn compile_ast_with_build(
     let mut metadata =
         compile_metadata_from_ir(ir, artifact_format, target_profile, options.edition, options.primitive_compat.as_deref());
     bind_public_interface(&mut metadata, lowering_ast);
-    apply_trusted_external_verifiers(&mut metadata, ir, trusted_external_verifiers.unwrap_or_default())?;
+    apply_trusted_external_verifiers(&mut metadata, ir, ckb_deploy.map_or(&[], |ckb| ckb.trusted_external_verifiers.as_slice()))?;
+    if let Some(ckb) = ckb_deploy {
+        zk_package::validate(ir, ckb)?;
+    }
     bind_typed_semantics(&mut metadata, ir);
     let target_policy_violations = target_profile_artifact_policy_violations(&metadata, target_profile);
     if !target_policy_violations.is_empty() {
@@ -8405,12 +8426,13 @@ fn compile_file_with_entry_scope<P: AsRef<Utf8Path>>(
 
     let entry = project.entry();
     let ast = &entry.ast;
+    let empty_ckb = package::CkbDeployConfig::default();
     let mut result = compile_ast_with_build(
         ast,
         &options,
         Some((&project.resolver, &ast.name)),
         manifest.as_ref().map(|manifest| &manifest.build),
-        manifest.as_ref().and_then(|manifest| manifest.deploy.ckb.as_ref()).map(|ckb| ckb.trusted_external_verifiers.as_slice()),
+        manifest.as_ref().map(|manifest| manifest.deploy.ckb.as_ref().unwrap_or(&empty_ckb)),
         entry_scope.as_ref(),
         executable_surface_policy,
     )?;

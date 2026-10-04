@@ -802,3 +802,26 @@ not external production release evidence.
 
 Once the verification boundary is clear, continue with
 [LSP and Tooling](https://github.com/CellScript-Labs/CellScript/wiki/Tutorial-07-LSP-and-Tooling).
+
+## Exact ZK transition profile on the 0.32 development branch
+
+The first ZK profile connects a CellScript parent to a pinned Groth16/BN254
+verifier through Spawn/IPC/Wait. Proof generation stays off chain. The parent
+constructs public inputs from the actual single-Cell transition, current Script,
+action, domain, consumed outpoint and full raw transaction hash; it rejects
+failed verification before the action can return successfully.
+
+`ZkTransitionProof`, `VerificationKeyCommitment` and `ExactScriptHandle` expose
+this contract to source code. Packages additionally bind a named policy to an
+exact deployment receipt in `deploy.ckb.zk_verifiers`. Compiler metadata and the
+independent artifact checker retain identities, source origins, fixed codecs
+and runtime bounds. Generated TypeScript and native Rust builders share public
+input/request vectors. This development capability is not part of the published
+0.31 browser bundle; use a matching 0.32 compiler for its source and metadata.
+
+The private counter application proves knowledge of an owner secret and permits
+one increment while preserving its public owner commitment. Its admission is
+limited to explicit local single-party setup trust and local execution evidence.
+It does not establish an MPC ceremony, independent review or public deployment.
+See the [profile specification](https://github.com/CellScript-Labs/CellScript/blob/0.32/docs/CELLSCRIPT_ZK_PROFILE.md)
+and [acceptance map](https://github.com/CellScript-Labs/CellScript/blob/0.32/docs/reports/0.32/ZK_ACCEPTANCE.md).

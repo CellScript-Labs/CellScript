@@ -3,8 +3,10 @@
 This is the experimental exact #22 composition interface for 0.32. It provides
 an executable source interface, not a production application circuit, VK or deployment.
 The maintainer waived independent review on October 3; no independent review
-is claimed. The application circuit and exact state-transition policy still
-need to be selected before production application admission.
+is claimed. The [counter application](../zk-private-counter/README.md) supplies the real
+circuit and scoped setup admission; the child itself does not select a business
+relation. The [accepted profile](../../docs/CELLSCRIPT_ZK_PROFILE.md) defines the
+complete composition contract.
 
 The child uses `verifier-core` from `CECILIA-MULANDI/groth16-ckb` at
 `d64c769ffe2d2edb5eb308dc59058efda77c2f83`, with Arkworks 0.5 and the exact
@@ -85,5 +87,5 @@ the host/scheduler tests. They also check the separate
 a real application relation, proving/VK packages, lifecycle and reproducibility
 checks. `backend` additionally runs its local-node acceptance after the pinned
 CKB acceptance harness. The public-seed identity circuit above remains
-non-authorizing. Named package-level verifier resolution and public-network
-deployment are separate from this exact, deployment-bound application.
+non-authorizing. Named package-level verifier resolution checks exact deployment receipts before
+code generation. Public-network deployment remains separate.

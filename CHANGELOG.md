@@ -8,7 +8,9 @@ transport. Bind metadata, ProofPlan and machine checks to the same exact handle,
 VK and raw transaction; expose builder and browser metadata plus LSP completion.
 Real scheduler tests cover successor transitions and rejected replay/substitution.
 The public-seed fixture circuit is non-authorizing; production application
-admission remains pending. See the [composition boundary](contracts/zk-transition-verifier/README.md).
+admission is scoped to the private counter under explicit local single-party
+setup trust. Named package resolution, shared Rust/TypeScript codecs and
+separate stack-resource replay complete the first profile acceptance surface. See the [composition boundary](contracts/zk-transition-verifier/README.md).
 
 Construct low-bit masks `2^n - 1` for n=31..63 with `addi -1; srli`
 when this is strictly shorter than the 0.31 immediate plan. Preserve existing

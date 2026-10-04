@@ -1,0 +1,86 @@
+{
+  "cells": [
+    {
+      "capacity_shannons": 100000000000,
+      "data_bytes": 48,
+      "occupied_capacity_shannons": 18600000000,
+      "out_point": "6533a5f71d187d53e1aebbee39dcac035825e2c6184420eb9cd2e4d5de7d6f9d00000000"
+    },
+    {
+      "capacity_shannons": 19749000000000,
+      "data_bytes": 197384,
+      "occupied_capacity_shannons": 19749000000000,
+      "out_point": "a0d36c0983a1b8fe801fe9c49fc39ed40e0f3deea71d0c3a4c651dad9b50eb4500000000"
+    },
+    {
+      "capacity_shannons": 85000000000,
+      "data_bytes": 744,
+      "occupied_capacity_shannons": 85000000000,
+      "out_point": "efce416880fd39c66df6a3ea6549e43662cf6c1eead2b78553e4fa7a0042d3e600000000"
+    },
+    {
+      "capacity_shannons": 1466600000000,
+      "data_bytes": 14560,
+      "occupied_capacity_shannons": 1466600000000,
+      "out_point": "58fe2f0fbc0359f2f7646d8cb55ca308acc000a3f9c53310c21cea0946269c3000000000"
+    },
+    {
+      "capacity_shannons": 729000000000,
+      "data_bytes": 7184,
+      "occupied_capacity_shannons": 729000000000,
+      "out_point": "ed4ae9c93777a60795ab3f9cbe035ca839c194f5c9febe4a222fd50b261ffa0b00000000"
+    },
+    {
+      "capacity_shannons": 6444200000000,
+      "data_bytes": 64336,
+      "occupied_capacity_shannons": 6444200000000,
+      "out_point": "15aa37124857afec5b647180fd011a201d6965875dda03b24adcdadeb6197e1900000000"
+    }
+  ],
+  "child_allocator_budget_bytes": 532480,
+  "max_calls": 1,
+  "proof_bytes": 128,
+  "replayed_type_group_cycles": 110175613,
+  "request_bytes": 464,
+  "schema": "cellscript-zk-resources-v1",
+  "scope": "separate scheduler replay; stack observations are not heap peaks or static bounds",
+  "status": "passed",
+  "transaction_bytes": 917,
+  "transaction_cycles": 110177720,
+  "transaction_hash": "037070cb0604bd9fb35dcfd27cd4d876dedac969b550758178581e23dfe965d7",
+  "type_group_cycles": 110175613,
+  "vk_bytes": 744,
+  "vms": [
+    {
+      "entry_sp": 4194288,
+      "generation": 0,
+      "isa": 3,
+      "minimum_sp": 4192912,
+      "observed_stack_bytes": 1376,
+      "program_sha256": "b82c9a80636d0647ed96ff9ceb9896ed0459a3020a9da6afb6801ea33f019217",
+      "vm_id": 0,
+      "vm_version": 2
+    },
+    {
+      "entry_sp": 4194288,
+      "generation": 1,
+      "isa": 3,
+      "minimum_sp": 4187136,
+      "observed_stack_bytes": 7152,
+      "program_sha256": "1f72c2b080f7b7c30b6303876b5ce558c34c5ae58ad820724cf0dce67a2ad755",
+      "vm_id": 0,
+      "vm_version": 2
+    },
+    {
+      "entry_sp": 4194288,
+      "generation": 0,
+      "isa": 3,
+      "minimum_sp": 4174080,
+      "observed_stack_bytes": 20208,
+      "program_sha256": "d3b0c172b4f6a807b203b888e45a6656e69761b7fffc2e4d3524b8b379e6a555",
+      "vm_id": 1,
+      "vm_version": 2
+    }
+  ],
+  "witness_bytes": 370
+}

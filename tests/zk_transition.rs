@@ -24,6 +24,15 @@ action update(witness proof: ZkTransitionProof, witness verifier: ExactScriptHan
 #[test]
 #[cfg(not(feature = "wasm"))]
 fn exact_zk_parent_compiles_and_checks() {
+    let parsed = cellscript::frontend::parse(&source(), "2026".parse().unwrap()).unwrap();
+    let formatted = cellscript::fmt::format_default(&parsed).unwrap();
+    compile(
+        &formatted,
+        CompileOptions { target: Some("riscv64-elf".into()), target_profile: Some("ckb".into()), ..Default::default() },
+    )
+    .unwrap()
+    .validate()
+    .unwrap();
     let compiled = compile(
         &source(),
         CompileOptions { target: Some("riscv64-elf".into()), target_profile: Some("ckb".into()), ..Default::default() },
@@ -87,4 +96,92 @@ fn zk_metadata_preserves_exact_contract_and_source_origins() {
     assert_eq!(contract.public_input_count, 15);
     assert_eq!(contract.source.fields, cellscript_artifact_checker::zk_profile::statement_origins());
     assert!(source()[contract.source.start..contract.source.end].contains("zk::require_valid"));
+}
+
+#[test]
+#[cfg(not(feature = "wasm"))]
+fn named_package_policy_binds_receipt_key_and_dependency_before_codegen() {
+    use cellscript::{package::*, protocol_bundle::*, script_handle::*, zk_package::NamedZkVerifier};
+    let profile = hex::encode(cellscript_artifact_checker::zk::PROFILE_ID);
+    let deployment = ProtocolDeploymentIdentity {
+        network: ProtocolNetworkIdentity { chain_id: "ckb-testnet".into(), genesis_hash: format!("0x{}", "11".repeat(32)) },
+        artifact_hash: "22".repeat(32),
+        script: ProtocolScriptIdentity { code_hash: format!("0x{}", "22".repeat(32)), hash_type: "data2".into(), args: "0x".into() },
+        code_cell_dep: ProtocolCellDep {
+            out_point: ProtocolOutPoint { tx_hash: format!("0x{}", "33".repeat(32)), index: 4 },
+            dep_type: ProtocolDepType::Code,
+        },
+    };
+    let entry = ProtocolEntryIdentity { kind: ProtocolEntryKind::Action, name: "verify".into() };
+    let (receipt, handle) = build_exact_script_handle(ExactScriptHandleReceiptInput {
+        package_coordinate: "test/verifier@0.32.0",
+        lock_node_id: "verifier",
+        entry: &entry,
+        script_role: ProtocolScriptRole::SpawnedVerifier,
+        interface_hash: &profile,
+        typed_semantics_hash: &profile,
+        artifact_hash: &deployment.artifact_hash,
+        target_profile_hash: &profile,
+        runtime_abi_hash: &profile,
+        verified_bundle_id: &profile,
+        deployment: &deployment,
+    })
+    .unwrap();
+    let literal = format!(
+        "Hash::from_bytes(b\"{}\")",
+        hex::decode(exact_script_handle_value_hash(&handle).unwrap())
+            .unwrap()
+            .iter()
+            .map(|b| format!("\\x{b:02x}"))
+            .collect::<String>()
+    );
+    let source = source().replace(&hash(1), &literal);
+    let deploy = CkbDeployConfig {
+        cell_deps: vec![CkbCellDepConfig {
+            name: Some("groth16".into()),
+            tx_hash: Some(deployment.code_cell_dep.out_point.tx_hash),
+            index: Some(4),
+            data_hash: Some("22".repeat(32)),
+            ..Default::default()
+        }],
+        zk_verifiers: vec![NamedZkVerifier {
+            policy: "transition".into(),
+            dependency: "groth16".into(),
+            verification_key_hash: "02".repeat(32),
+            receipt,
+        }],
+        ..Default::default()
+    };
+    let options = CompileOptions { target: Some("riscv64-elf".into()), target_profile: Some("ckb".into()), ..Default::default() };
+    cellscript::compile_with_zk_deploy(&source, options.clone(), &deploy).unwrap().validate().unwrap();
+    for mutation in 0..8 {
+        let mut changed = deploy.clone();
+        match mutation {
+            0 => changed.zk_verifiers.clear(),
+            1 => changed.zk_verifiers[0].verification_key_hash = "ff".repeat(32),
+            2 => changed.cell_deps[0].index = Some(5),
+            3 => changed.cell_deps[0].data_hash = Some("ff".repeat(32)),
+            4 => changed.zk_verifiers.push(changed.zk_verifiers[0].clone()),
+            5 => changed.cell_deps.push(changed.cell_deps[0].clone()),
+            6 => changed.cell_deps[0].dep_type = Some("dep_group".into()),
+            7 => changed.zk_verifiers[0].receipt.runtime_abi_hash = "ff".repeat(32),
+            _ => unreachable!(),
+        }
+        assert!(cellscript::compile_with_zk_deploy(&source, options.clone(), &changed).is_err(), "mutation {mutation}");
+    }
+    assert!(
+        cellscript::compile_with_zk_deploy(&source.replace("ckb::cell_dep(0)", "ckb::cell_dep(1)"), options.clone(), &deploy).is_err()
+    );
+    // Exercise actual Cell.toml loading and the metadata/LSP path as well.
+    let dir = tempfile::tempdir().unwrap();
+    let root = camino::Utf8Path::from_path(dir.path()).unwrap();
+    std::fs::write(root.join("main.cell"), &source).unwrap();
+    let document = format!(
+        "[package]\nname = \"zk_package\"\nversion = \"0.1.0\"\nedition = \"2026\"\nentry = \"main.cell\"\n\n{}",
+        toml::to_string(&DeployConfig { ckb: Some(deploy) }).unwrap().replace("[ckb", "[deploy.ckb")
+    );
+    std::fs::write(root.join("Cell.toml"), document).unwrap();
+    cellscript::compile_path(root, options.clone()).unwrap().validate().unwrap();
+    let report = cellscript::compile_path_metadata_with_diagnostics(root, options);
+    assert!(report.diagnostics.is_empty(), "{:?}", report.diagnostics);
 }

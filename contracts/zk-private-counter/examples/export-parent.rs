@@ -19,11 +19,14 @@ fn main() -> Result<()> {
     let child = support::child_bytes();
     ensure!(counter::hash(&child) == hash(&args[6])?, "deployed child hash differs from built child");
     let out = packed::OutPoint::new_builder().tx_hash(hash(&args[2])?).index(args[3].parse::<u32>()?).build();
-    let (compiled, handle) = support::parent_for_network(&child, &counter::serialize(&pk.vk)?, &out, &args[0], hash(&args[1])?);
+    let (compiled, handle, source, deploy) =
+        support::parent_with_package(&child, &counter::serialize(&pk.vk)?, &out, &args[0], hash(&args[1])?);
     let output = std::path::Path::new(&args[5]);
     std::fs::create_dir(output)?;
     let elf = cellscript::strip_vm_abi_trailer(&compiled.artifact_bytes);
     std::fs::write(output.join("parent.elf"), elf)?;
+    std::fs::write(output.join("parent.cell"), source)?;
+    std::fs::write(output.join("named-deployment.json"), serde_json::to_vec_pretty(&deploy)?)?;
     std::fs::write(output.join("parent-metadata.json"), serde_json::to_vec_pretty(&compiled.metadata)?)?;
     std::fs::write(output.join("exact-handle.bin"), &handle)?;
     std::fs::write(

@@ -131,3 +131,18 @@ Stable lifecycle errors: 90 context, 91 args, 92 state/owner/lock/capacity,
 93 nonzero creation, 94 burn, 95 Type ID/group uniqueness, 96 parent dependency,
 97 EXEC failure. Child rejection appears as parent error 79. The hard call
 budget remains 250,000,000 cycles.
+
+## Package and resource closure
+
+The [accepted profile](../../docs/CELLSCRIPT_ZK_PROFILE.md) defines the named
+`Cell.toml` policy. Parent generation now validates that policy through the same
+compiler path as packages; export also includes source and `named-deployment.json`.
+`reproduce.sh` compares parents from two fresh compiler processes as well as
+two independent build directories for the child/lifecycle. Deployment coordinates
+for the parent reproduction fixture are synthetic.
+
+The application test exports `target/resource-fixture.json`. The root
+`zk_resources` ignored test replays it with the maintained diagnostic scheduler,
+requires exact agreement with the normal group verifier, and writes
+`target/resources.json` in this crate. That report distinguishes per-VM/EXEC
+stack observations from allocator budgets. It runs explicitly in all three gates.

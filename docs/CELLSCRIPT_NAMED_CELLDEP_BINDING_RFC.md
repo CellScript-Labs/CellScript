@@ -1,5 +1,10 @@
 # RFC: Named CellDep Binding And Deployment-Resolved Dependency Identity
 
+For the 0.32 exact ZK subset, the [accepted profile](CELLSCRIPT_ZK_PROFILE.md)
+supersedes this draft: named package policies reuse exact handle receipts and
+bind direct deployment dependencies before code generation. The broader
+`cell_deps` source block and arbitrary data-policy proposal below remains a draft.
+
 ## Status
 
 Draft for community review. Targets the 0.22 release line as the earliest

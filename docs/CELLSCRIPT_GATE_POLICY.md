@@ -37,8 +37,10 @@ The 0.32 development line adds observed per-VM diagnostic replay without
 changing the frozen cost oracle or ceilings. `dev`, `ci` and `backend` also
 build and test the experimental exact ZK composition. The modeled-syscall
 child harness remains separate from the real scheduler's parent/child and
-successor-transaction tests. Both use a non-authorizing deterministic circuit;
-neither establishes production application admission. See the
+successor-transaction tests. Those generic fixtures use a non-authorizing deterministic circuit. The
+separate private-counter suite covers its real relation and scoped setup
+admission, named package resolution, shared Rust/TypeScript vectors, parent
+reproduction and observed stack replay; backend also runs local-node acceptance. See the
 [0.32 scope](CELLSCRIPT_0_32_IMPLEMENTATION.md) and
 [child boundary](../contracts/zk-transition-verifier/README.md).
 

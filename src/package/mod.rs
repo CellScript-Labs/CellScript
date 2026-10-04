@@ -341,6 +341,8 @@ pub struct CkbDeployConfig {
     pub cell_deps: Vec<CkbCellDepConfig>,
     #[serde(default)]
     pub trusted_external_verifiers: Vec<CkbTrustedExternalVerifierConfig>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub zk_verifiers: Vec<crate::zk_package::NamedZkVerifier>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

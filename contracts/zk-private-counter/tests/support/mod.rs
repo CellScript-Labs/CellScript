@@ -1,6 +1,6 @@
 use cellscript::protocol_bundle::*;
 use cellscript::script_handle::{build_exact_script_handle, ExactScriptHandleReceiptInput};
-use cellscript::{compile, CompileOptions, EntryWitnessArg};
+use cellscript::{compile_with_zk_deploy, CompileOptions, EntryWitnessArg};
 use cellscript_zk_private_counter::{self as counter, wire};
 use ckb_testtool::ckb_types::{bytes::Bytes, core::TransactionView, packed, prelude::*};
 fn literal(bytes: &[u8]) -> String {
@@ -30,6 +30,16 @@ pub fn parent_for_network(
     chain_id: &str,
     genesis: [u8; 32],
 ) -> (cellscript::CompileResult, Vec<u8>) {
+    let (compiled, handle, _, _) = parent_with_package(child, key, out, chain_id, genesis);
+    (compiled, handle)
+}
+pub fn parent_with_package(
+    child: &[u8],
+    key: &[u8],
+    out: &packed::OutPoint,
+    chain_id: &str,
+    genesis: [u8; 32],
+) -> (cellscript::CompileResult, Vec<u8>, String, cellscript::package::CkbDeployConfig) {
     let code_hash = hex::encode(counter::hash(child));
     let profile = hex::encode(wire::PROFILE_ID);
     let entry = ProtocolEntryIdentity { kind: ProtocolEntryKind::Action, name: "verify".into() };
@@ -45,7 +55,7 @@ pub fn parent_for_network(
             dep_type: ProtocolDepType::Code,
         },
     };
-    let (_, handle) = build_exact_script_handle(ExactScriptHandleReceiptInput {
+    let (receipt, handle) = build_exact_script_handle(ExactScriptHandleReceiptInput {
         package_coordinate: "test/counter-verifier@0.32.0",
         lock_node_id: "counter-verifier-v1",
         entry: &entry,
@@ -59,6 +69,23 @@ pub fn parent_for_network(
         deployment: &deployment,
     })
     .unwrap();
+    let deploy = cellscript::package::CkbDeployConfig {
+        cell_deps: vec![cellscript::package::CkbCellDepConfig {
+            name: Some("counter_verifier".into()),
+            tx_hash: Some(format!("0x{}", hex::encode(out.tx_hash().as_slice()))),
+            index: Some(out.index().unpack()),
+            data_hash: Some(code_hash),
+            dep_type: Some("code".into()),
+            ..Default::default()
+        }],
+        zk_verifiers: vec![cellscript::zk_package::NamedZkVerifier {
+            policy: "private_counter".into(),
+            dependency: "counter_verifier".into(),
+            verification_key_hash: hex::encode(counter::hash(key)),
+            receipt,
+        }],
+        ..Default::default()
+    };
     let handle = hex::decode(handle.encoded.trim_start_matches("0x")).unwrap();
     let source = format!(
         r#"module private_counter
@@ -73,13 +100,14 @@ action increment(witness proof: ZkTransitionProof, witness verifier: ExactScript
         literal(&counter::domain()),
         literal(&counter::action())
     );
-    let compiled = compile(
+    let compiled = compile_with_zk_deploy(
         &source,
         CompileOptions { target: Some("riscv64-elf".into()), target_profile: Some("ckb".into()), ..Default::default() },
+        &deploy,
     )
     .unwrap();
     compiled.validate().unwrap();
-    (compiled, handle)
+    (compiled, handle, source, deploy)
 }
 pub fn dep(out: packed::OutPoint) -> packed::CellDep {
     packed::CellDep::new_builder().out_point(out).build()

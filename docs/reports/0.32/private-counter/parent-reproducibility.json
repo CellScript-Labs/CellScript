@@ -1,0 +1,13 @@
+{
+  "full_artifact_sha256": "30781520395b0c2039aedbbb141e3dfeff690d8cf85d0240431ae0586bcf31d3",
+  "lowering_sha256": "513d9c3ab1afb51109f81b8cd281c7ef4a03daebf37d4b33b2605862524972bc",
+  "metadata_sha256": "395c1d7276d7f8a53984906ec269466dec4458ecd71238c962bf7169ed33a08f",
+  "parent_bytes": 14560,
+  "parent_data_hash": "3286c3a1db9f223deb8cd11d14c3b4c45e063363ea3b631f64f0eb2c0f270c4b",
+  "parent_sha256": "30781520395b0c2039aedbbb141e3dfeff690d8cf85d0240431ae0586bcf31d3",
+  "profile": "cellscript-zk-transition-groth16-bn254-v2",
+  "rust": "1.97.1",
+  "schema": "cellscript-zk-parent-reproduction-v1",
+  "scope": "two fresh compiler processes; fixed synthetic deployment; not live chain evidence",
+  "source_map_sha256": "39b01f9d3c2ec82640daf169e014e00e370f242d5130de49f3b455b53c8dfa06"
+}

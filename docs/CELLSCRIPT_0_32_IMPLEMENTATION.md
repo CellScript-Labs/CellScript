@@ -1,7 +1,8 @@
 # CellScript 0.32 implementation and acceptance
 
-Status: implementation in progress. Cost/research candidate gates pass; #22
-application admission remains unfinished. No overall completion or release claim.
+Status: #22 exact-profile implementation and scoped application admission are
+implemented; see [acceptance evidence](reports/0.32/ZK_ACCEPTANCE.md). No overall
+0.32 release or public deployment claim.
 
 ## Maintainer decision — 2026-10-03
 
@@ -62,7 +63,8 @@ deployment-specific parent/handle export, scheduler and local-node acceptance,
 and independent-target-directory ELF reproduction. Admission is explicitly
 scoped to this relation and local single-party setup trust. It does not claim
 MPC, an independent audit or public-network deployment. Named package-level
-verifier resolution remains separate from exact deployment binding.
+verifier resolution now checks the exact receipt, source index and VK before
+code generation.
 
 The historical [v2 scheduler record](reports/0.32/zk-composition-scheduler.json)
 uses a public-seed non-authorizing circuit; it is not application evidence.
