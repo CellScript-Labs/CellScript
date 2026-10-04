@@ -2,6 +2,14 @@
 
 ## Unreleased — 0.32
 
+Add the experimental `zk::require_valid` exact Groth16 transition interface,
+nominal proof/VK types, transaction-derived v2 statements and bounded parent/child
+transport. Bind metadata, ProofPlan and machine checks to the same exact handle,
+VK and raw transaction; expose builder and browser metadata plus LSP completion.
+Real scheduler tests cover successor transitions and rejected replay/substitution.
+The public-seed fixture circuit is non-authorizing; production application
+admission remains pending. See the [composition boundary](contracts/zk-transition-verifier/README.md).
+
 Construct low-bit masks `2^n - 1` for n=31..63 with `addi -1; srli`
 when this is strictly shorter than the 0.31 immediate plan. Preserve existing
 plans on ties, validate the complete RV64 result, and keep the fixed entry

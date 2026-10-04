@@ -17,6 +17,8 @@ The table was introduced in compile metadata schema 30 and is emitted by the
 current metadata schema 72 on the `0.30` development branch under
 `constraints.runtime_errors`, so `cellc constraints`, `cellc check --json`, and
 sidecar metadata all expose the same machine-readable registry.
+The experimental ZK codes 74–79 and 84 are included in artifact metadata and
+generated builders only when the artifact uses the exact ZK transition profile.
 The experimental `0.26b` baseline emitted the same registry in schema 67.
 The verified lowering record also identifies mapped runtime-error exits, and
 `cellc test` negative scenarios must match both the numeric code and stable
@@ -119,6 +121,13 @@ for the independent check's exact scope.
 | 71 | `deployment-line-handle-invalid` | A deployment-line handle was not the active canonical value, its full-value commitment differed, or its admission CellDep, code CellDep, or selected Script identity was substituted. | Use the checked `CSLINv1-fixed-386` value, bind its complete CKB Blake2b-256 hash as a source literal, and preserve the exact active admission and code CellDeps selected by the ProtocolBundle. |
 | 72 | `script-construction-invalid` | A constructed CKB Script used a null source/output, more than 459 args bytes, or a hash type outside data/type/data1/data2. | Construct the Script with `script::new`, fixed bounded `script::args`, and one of the four named CKB hash-type helpers. |
 | 73 | `commitment-opening-mismatch` | An explicit fixed-width opening did not hash to the expected typed commitment. | Check the `Opening<T>` witness bytes, `Commitment<T>` value, canonical type spelling, and packed-hash domain. |
+| 74 | `zk-context-invalid` | The exact single-input/single-output Type group or transaction context could not be loaded. | Check group cardinality, Type hashes and the transaction-derived statement. |
+| 75 | `zk-pipe-failed` | The bounded ZK request pipe could not be created. | Check the target VM profile and available descriptors. |
+| 76 | `zk-spawn-failed` | The exact verifier child could not be spawned. | Check the verifier CellDep, exact handle and target VM profile. |
+| 77 | `zk-write-failed` | A ZK request write failed or transferred a partial word. | Check the child's request profile and complete bounded IPC writes. |
+| 78 | `zk-close-failed` | The ZK request writer could not be closed. | Check parent descriptor ownership and transport state. |
+| 79 | `zk-child-rejected` | The child rejected the proof or Wait failed. | Check the exact VK, proof, finalized transaction statement and child exit. |
+| 84 | `zk-cycle-bound-exceeded` | The exact verifier call exceeded its declared cycle budget. | Check the exact child artifact and the profile's 250,000,000-cycle ceiling. |
 
 ## Stability
 

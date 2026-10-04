@@ -1,6 +1,7 @@
 //! Covenant ProofPlan metadata for CKB trigger/scope/coverage auditing.
 
 pub mod soundness;
+mod zk;
 
 use crate::aggregate_lowering::{
     aggregate_group_amount_endpoint, fungible_type_group_v1_conservation_type, xudt_group_amount_conservation_type,
@@ -177,6 +178,7 @@ pub fn build_for_body(
     plans
         .extend(body.borrow_regions.iter().enumerate().map(|(index, region)| plan_for_borrow_region(scope_kind, name, index, region)));
     plans.extend(exact_script_handle_plans(scope_kind, name, body));
+    plans.extend(zk::plans(scope_kind, name, body));
     plans.extend(deployment_line_handle_plans(scope_kind, name, body));
     plans.extend(committed_state_plans(scope_kind, name, body));
 

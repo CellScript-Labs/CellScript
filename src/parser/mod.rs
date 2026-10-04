@@ -3098,6 +3098,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_postfix(&mut self) -> Result<Expr> {
+        let start_span = self.current().span;
         let mut expr = self.parse_primary()?;
 
         loop {
@@ -3136,8 +3137,17 @@ impl<'a> Parser<'a> {
                 let args = self.parse_args()?;
                 expr = Expr::Call(CallExpr { func: Box::new(expr), type_args, args, span: self.current().span });
             } else if self.check(&TokenKind::LParen) {
+                let exact_zk_origin = matches!(&expr, Expr::Identifier(name) if name == "zk::require_valid");
                 let args = self.parse_args()?;
-                expr = Expr::Call(CallExpr { func: Box::new(expr), type_args: Vec::new(), args, span: self.current().span });
+                // Exact ZK statement provenance belongs to the source call,
+                // not the following token. Preserve existing span identities
+                // for unrelated, already-versioned callable surfaces.
+                let span = if exact_zk_origin {
+                    Span::new(start_span.start, self.previous_non_newline().span.end, start_span.line, start_span.column)
+                } else {
+                    self.current().span
+                };
+                expr = Expr::Call(CallExpr { func: Box::new(expr), type_args: Vec::new(), args, span });
             } else if self.check(&TokenKind::LBracket) {
                 self.advance();
                 let index = self.parse_expr()?;

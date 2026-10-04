@@ -3,23 +3,23 @@
 //! This module is also compiled by the no_std verifier child. Parsing is not
 //! proof verification: only the exact child/VK and pairing check can admit it.
 
-pub const PROFILE: &str = "cellscript-zk-transition-groth16-bn254-v1";
-pub const PROFILE_PREIMAGE: &str = "cellscript-zk-transition-groth16-bn254-v1|arkworks-compressed-proof-128|hash-u128-limbs-le|domain,action,script,old-data,new-data,input-tx,index-u32|molecule-request-432";
+pub const PROFILE: &str = "cellscript-zk-transition-groth16-bn254-v2";
+pub const PROFILE_PREIMAGE: &str = "cellscript-zk-transition-groth16-bn254-v2|arkworks-compressed-proof-128|hash-u128-limbs-le|domain,action,script,old-data,new-data,input-tx,index-u32,transaction-hash|molecule-request-464";
 pub const PROFILE_ID: [u8; 32] = [
-    0x9c, 0x19, 0xfe, 0x71, 0x88, 0x0f, 0x61, 0x2c, 0xd3, 0xf9, 0x20, 0xe9, 0xa7, 0x20, 0xe8, 0x4b, 0x58, 0x0e, 0x2e, 0x27, 0x5b,
-    0xc3, 0x00, 0x2d, 0xcc, 0x7e, 0x87, 0xe1, 0x1b, 0x91, 0x6a, 0x96,
+    0x43, 0x0e, 0x4c, 0xf7, 0xa6, 0x67, 0x7d, 0x9b, 0xfa, 0x16, 0x19, 0xd7, 0x24, 0x40, 0xd3, 0x92, 0xe9, 0xec, 0x77, 0x24, 0x86,
+    0xc4, 0xe7, 0x85, 0x1a, 0xaf, 0x91, 0xdf, 0x58, 0x88, 0x11, 0x01,
 ];
 pub const PROOF_BYTES: usize = 128;
-pub const STATEMENT_BYTES: usize = 196;
-pub const PUBLIC_INPUT_COUNT: usize = 13;
+pub const STATEMENT_BYTES: usize = 228;
+pub const PUBLIC_INPUT_COUNT: usize = 15;
 pub const PUBLIC_INPUT_BYTES: usize = 4 + PUBLIC_INPUT_COUNT * 32;
 pub const VK_BYTES: usize = 232 + (PUBLIC_INPUT_COUNT + 1) * 32;
-pub const REQUEST_BYTES: usize = 432;
+pub const REQUEST_BYTES: usize = 464;
 pub const REQUEST_WORDS: usize = REQUEST_BYTES / 8;
 pub const MAGIC: &[u8; 8] = b"CSZKIPC1";
 // Molecule table: total size, then six canonical field offsets. Every field
 // has fixed width; compatible extra fields and trailing bytes are forbidden.
-pub const TABLE_WORDS: [u32; 7] = [432, 28, 36, 44, 76, 108, 236];
+pub const TABLE_WORDS: [u32; 7] = [464, 28, 36, 44, 76, 108, 236];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -40,6 +40,7 @@ pub struct Statement {
     pub new_data_hash: [u8; 32],
     pub input_transaction_hash: [u8; 32],
     pub input_output_index: u32,
+    pub transaction_hash: [u8; 32],
 }
 
 impl Statement {
@@ -52,7 +53,8 @@ impl Statement {
         {
             bytes[index * 32..(index + 1) * 32].copy_from_slice(*value);
         }
-        bytes[192..].copy_from_slice(&self.input_output_index.to_le_bytes());
+        bytes[192..196].copy_from_slice(&self.input_output_index.to_le_bytes());
+        bytes[196..].copy_from_slice(&self.transaction_hash);
         bytes
     }
 
@@ -73,12 +75,14 @@ impl Statement {
             new_data_hash: hash(4),
             input_transaction_hash: hash(5),
             input_output_index: u32::from_le_bytes([bytes[192], bytes[193], bytes[194], bytes[195]]),
+            transaction_hash: bytes[196..228].try_into().map_err(|_| DecodeError::Length)?,
         })
     }
 
     /// Inject each hash as two unsigned little-endian 128-bit limbs. Every
     /// value is strictly below the BN254 scalar modulus; no modular reduction
-    /// or truncated-hash binding is involved. The final input is the u32 index.
+    /// or truncated-hash binding is involved. Input 12 is the u32 index;
+    /// inputs 13 and 14 bind the full raw transaction hash.
     pub fn public_inputs(&self) -> [u8; PUBLIC_INPUT_BYTES] {
         let statement = self.encode();
         let mut bytes = [0; PUBLIC_INPUT_BYTES];
@@ -87,6 +91,9 @@ impl Statement {
             bytes[4 + index * 32..20 + index * 32].copy_from_slice(&statement[index * 16..(index + 1) * 16]);
         }
         bytes[4 + 12 * 32..8 + 12 * 32].copy_from_slice(&self.input_output_index.to_le_bytes());
+        for i in 0..2 {
+            bytes[420 + i * 32..436 + i * 32].copy_from_slice(&self.transaction_hash[i * 16..(i + 1) * 16]);
+        }
         bytes
     }
 }
@@ -156,6 +163,7 @@ mod tests {
                 new_data_hash: [5; 32],
                 input_transaction_hash: [0xff; 32],
                 input_output_index: u32::MAX,
+                transaction_hash: [0x99; 32],
             },
         }
     }
@@ -184,13 +192,17 @@ mod tests {
         let statement = request().statement;
         let encoded = statement.encode();
         let inputs = statement.public_inputs();
-        assert_eq!(&inputs[..4], &13u32.to_le_bytes());
+        assert_eq!(&inputs[..4], &15u32.to_le_bytes());
         for index in 0..12 {
             assert_eq!(&inputs[4 + index * 32..20 + index * 32], &encoded[index * 16..(index + 1) * 16]);
             assert!(inputs[20 + index * 32..36 + index * 32].iter().all(|byte| *byte == 0));
         }
         assert_eq!(&inputs[388..392], &u32::MAX.to_le_bytes());
-        assert!(inputs[392..].iter().all(|byte| *byte == 0));
+        assert!(inputs[392..420].iter().all(|byte| *byte == 0));
+        for index in 0..2 {
+            assert_eq!(&inputs[420 + index * 32..436 + index * 32], &statement.transaction_hash[index * 16..(index + 1) * 16]);
+            assert!(inputs[436 + index * 32..452 + index * 32].iter().all(|byte| *byte == 0));
+        }
         for index in 0..STATEMENT_BYTES {
             let mut changed = encoded;
             changed[index] ^= 1;

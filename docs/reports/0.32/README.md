@@ -16,6 +16,7 @@ required. The accepted scope and unfinished ZK admission work are recorded in
 | Execution attribution | `execution-attribution.json.gz`, `attribution-summary.json`, `residual-sites.json` | 1,707 separate diagnostic scheduler replays, each checked against ordinary group verdict and cycles; 38 distinct ELFs |
 | Isolated alternatives | `experiments/`, `experiment-frontier.json` | Finite paired probes and explicit cost tradeoffs; admission decisions and blockers in [RESEARCH.md](RESEARCH.md) |
 | ZK child research | `zk-child-research.json` | Real child pairing with modeled syscalls and a public-seed, non-authorizing test circuit; no production profile or stateful transaction claim |
+| ZK v2 composition | [zk-composition-scheduler.json](zk-composition-scheduler.json) | Exact generated parent and real child under the CKB scheduler; two accepted successive transitions and five rejected replay/substitution cases, with artifact hashes and resource measurements; non-authorizing test circuit |
 | Final gate acceptance | `validation.json`, `gate-*.log.gz`, `strict-backend-full.json.gz`, `ckb-stateful-acceptance.json.gz` | Passed dev/CI/backend records; final clean CI/backend commit is `6a453d30`; exact scopes and dev adjustment are recorded |
 | Final corrected-source costs | `final-main.json.gz`, `final-multi.json.gz`, `final-comparison.json` | All 6,782 comparable metrics pass after the one-field inventory correction and evidence packaging; no compiler-code change |
 

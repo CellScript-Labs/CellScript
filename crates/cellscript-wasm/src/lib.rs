@@ -286,6 +286,7 @@ fn browser_metadata_value(metadata: &cellscript::CompileMetadata) -> serde_json:
             "fail_closed_runtime_features": metadata.runtime.fail_closed_runtime_features,
             "fail_closed_obligations": fail_closed_obligations,
             "signing_message_domains": metadata.runtime.signing_message_domains,
+            "zk_verifiers": metadata.runtime.zk_verifiers,
         },
         "native_records_omitted": [
             "public_interface",
@@ -370,6 +371,25 @@ fn line_column_at(source: &str, byte_offset: usize) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wasm_zk_metadata_preserves_exact_contract() {
+        let hash = |byte: u8| format!("Hash::from_bytes(b\"{}\")", format!("\\x{byte:02x}").repeat(32));
+        let source = format!(
+            "module zk_browser\naction update(witness proof: ZkTransitionProof, witness verifier: ExactScriptHandle) -> u64 {{\nverification\nzk::require_valid(\"transition\", proof, ckb::cell_dep(0), verifier, {}, {}, {}, {})\nreturn 0\n}}\n",
+            hash(1), hash(2).replace("Hash::", "VerificationKeyCommitment::"), hash(3), hash(4),
+        );
+        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(&source, "2026", None)).unwrap();
+        let contract = &result["runtime"]["zk_verifiers"][0];
+        assert_eq!(contract["policy"], "transition", "{result}");
+        assert_eq!(contract["verification_key_hash"], "02".repeat(32));
+        assert_eq!(contract["request_bytes"], 464);
+        assert_eq!(contract["public_input_count"], 15);
+        let start = contract["source"]["start"].as_u64().unwrap() as usize;
+        let end = contract["source"]["end"].as_u64().unwrap() as usize;
+        assert!(source[start..end].starts_with("zk::require_valid("));
+        assert!(source[start..end].ends_with(')'));
+    }
 
     #[test]
     fn wasm_success_returns_bounded_browser_summary() {

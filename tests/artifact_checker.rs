@@ -392,6 +392,75 @@ impl Fixture {
     }
 }
 
+#[test]
+fn exact_zk_machine_mutations_reject_after_hash_rebinding() {
+    let hash = |byte: u8| format!("Hash::from_bytes(b\"{}\")", format!("\\x{byte:02x}").repeat(32));
+    let source = format!(
+        r#"module zk_mutations
+action update(witness proof: ZkTransitionProof, witness verifier: ExactScriptHandle) -> u64 {{
+    verification
+    zk::require_valid("transition", proof, ckb::cell_dep(0), verifier, {}, {}, {}, {})
+    return 0
+}}
+"#,
+        hash(1),
+        hash(2).replace("Hash::", "VerificationKeyCommitment::"),
+        hash(3),
+        hash(4)
+    );
+    let valid = Fixture::from_result(
+        compile(
+            &source,
+            CompileOptions { target: Some("riscv64-elf".into()), target_profile: Some("ckb".into()), ..Default::default() },
+        )
+        .unwrap(),
+    );
+    let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+    let begin = valid
+        .record
+        .blocks
+        .iter()
+        .find(|block| block.machine_label.as_deref().is_some_and(|label| label.starts_with(".Lzk_begin_")))
+        .unwrap()
+        .range
+        .start;
+    let end = valid
+        .record
+        .blocks
+        .iter()
+        .find(|block| block.machine_label.as_deref().is_some_and(|label| label.starts_with(".Lzk_verified_")))
+        .unwrap()
+        .range
+        .start;
+    let instructions: Vec<_> =
+        elf.instructions.iter().filter(|instruction| begin <= instruction.address && instruction.address < end).collect();
+    // Request identities, context source/index, read/write lengths, mandatory
+    // result conditions and error exits. Rehashing must not bless any change.
+    let mut changed_count = 0;
+    for instruction in instructions {
+        let word = instruction.word;
+        let opcode = word & 0x7f;
+        let rd = (word >> 7) & 31;
+        let source1 = (word >> 15) & 31;
+        let function = (word >> 12) & 7;
+        let is_constant = opcode == 0x13 && function == 0 && source1 == 0 && matches!(rd, 5 | 6 | 13 | 14 | 15);
+        let is_checked_branch = opcode == 0x63 && function == 0;
+        let is_dependency_shift = opcode == 0x13 && matches!(function, 1 | 5) && rd == 10 && source1 == 10;
+        if !is_constant && !is_checked_branch && !is_dependency_shift {
+            continue;
+        }
+        let mut changed = valid.clone();
+        changed.replace_machine_word(instruction.address, word ^ if is_checked_branch { 1 << 12 } else { 1 << 20 });
+        assert!(changed.check().is_err(), "ZK machine mutation accepted at {:#x}: {word:#x}", instruction.address);
+        changed_count += 1;
+    }
+    assert!(changed_count > 150);
+    let mut changed = valid.clone();
+    changed.metadata["runtime"]["zk_verifiers"][0]["verification_key_hash"] = Value::String("ff".repeat(32));
+    changed.rebind_sidecars();
+    assert!(changed.check().is_err());
+}
+
 fn bounded_lock_handle(metadata: &mut Value) -> &mut Value {
     metadata["runtime"]["transaction_view_handles"]
         .as_array_mut()

@@ -567,6 +567,7 @@ pub struct IrBody {
     /// semantic foundation distinguish the claim itself from auxiliary
     /// ProofPlan/runtime obligations.
     pub enforced_claims: Vec<IrEnforcedClaim>,
+    pub zk_origins: Vec<cellscript_artifact_checker::zk_profile::ZkSourceOrigin>,
     pub blocks: Vec<IrBlock>,
 }
 
@@ -1119,6 +1120,7 @@ pub struct IrGenerator {
     borrow_regions: Vec<IrBorrowRegion>,
     trusted_external_calls: Vec<IrTrustedExternalCall>,
     enforced_claims: Vec<IrEnforcedClaim>,
+    zk_origins: Vec<cellscript_artifact_checker::zk_profile::ZkSourceOrigin>,
     loop_targets: Vec<LoopTarget>,
     errors: Vec<CompileError>,
 }
@@ -1366,6 +1368,7 @@ impl IrGenerator {
             borrow_regions: Vec::new(),
             trusted_external_calls: Vec::new(),
             enforced_claims: Vec::new(),
+            zk_origins: Vec::new(),
             loop_targets: Vec::new(),
             errors: Vec::new(),
         }
@@ -2738,6 +2741,7 @@ impl IrGenerator {
     ) -> (Vec<IrParam>, IrBody) {
         self.borrow_regions.clear();
         self.enforced_claims.clear();
+        self.zk_origins.clear();
         self.loop_targets.clear();
         let mut vars = HashMap::new();
         let mut ir_params = params
@@ -2816,6 +2820,7 @@ impl IrGenerator {
                 borrow_regions,
                 trusted_external_calls,
                 enforced_claims,
+                zk_origins: std::mem::take(&mut self.zk_origins),
                 blocks,
             },
         )
@@ -6659,7 +6664,7 @@ impl IrGenerator {
                 "Hash::zero" if call.args.is_empty() => {
                     Some(LoweredExpr { operand: IrOperand::Const(IrConst::Hash([0; 32])), current: Some(current) })
                 }
-                "Hash::from_bytes" if call.args.len() == 1 => {
+                "Hash::from_bytes" | "VerificationKeyCommitment::from_bytes" if call.args.len() == 1 => {
                     Some(self.lower_hash_from_bytes(&call.args[0], current, blocks, vars, call.span))
                 }
                 "Hash::from_sighash_all" if call.args.len() == 1 => Some(self.lower_expr(&call.args[0], current, blocks, vars)),
@@ -7102,6 +7107,47 @@ impl IrGenerator {
                 ),
                 "ckb::require_sha256d_merkle_root" if call.args.len() == 5 => {
                     self.lower_void_runtime_call("__ckb_require_sha256d_merkle_root", &call.args, current, blocks, vars)
+                }
+                "zk::require_valid" if call.args.len() == 8 => {
+                    let mut active = current;
+                    let mut lowered = Vec::new();
+                    let Expr::String(policy) = &call.args[0] else { return None };
+                    self.zk_origins.push(cellscript_artifact_checker::zk_profile::ZkSourceOrigin {
+                        policy: policy.clone(),
+                        start: call.span.start,
+                        end: call.span.end,
+                        line: call.span.line,
+                        column: call.span.column,
+                        fields: cellscript_artifact_checker::zk_profile::statement_origins(),
+                    });
+                    lowered.push(IrOperand::Const(IrConst::Array(policy.bytes().map(IrConst::U8).collect())));
+                    for arg in &call.args[1..] {
+                        let value = self.lower_expr(arg, active, blocks, vars);
+                        active = value.current?;
+                        lowered.push(value.operand);
+                    }
+                    if lowered[4..].iter().any(|value| !matches!(value, IrOperand::Const(IrConst::Hash(_)))) {
+                        self.record_error("ZK handle, VK, domain and action identities must be compile-time Hash literals", call.span);
+                    }
+                    self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+                        dest: None,
+                        func: "__ckb_require_cell_dep_exact_verifier_handle".to_string(),
+                        args: vec![lowered[2].clone(), lowered[3].clone(), lowered[4].clone()],
+                    });
+                    self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+                        dest: None,
+                        func: crate::zk_contract::REQUIRE_HELPER.to_string(),
+                        args: vec![
+                            lowered[0].clone(),
+                            lowered[1].clone(),
+                            lowered[2].clone(),
+                            lowered[4].clone(),
+                            lowered[5].clone(),
+                            lowered[6].clone(),
+                            lowered[7].clone(),
+                        ],
+                    });
+                    Some(LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: Some(active) })
                 }
                 "verifier::btc::bip340::require_signature" if call.args.len() == 3 => {
                     self.lower_void_runtime_call("__novaseal_bip340_require_signature", &call.args, current, blocks, vars)

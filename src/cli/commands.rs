@@ -8900,10 +8900,11 @@ fn write_typescript_builder_package(
     }))
 }
 
-fn runtime_error_catalog_json() -> Vec<serde_json::Value> {
+fn runtime_error_catalog_json(metadata: &CompileMetadata) -> Vec<serde_json::Value> {
     ALL_RUNTIME_ERRORS
         .iter()
         .copied()
+        .filter(|error| metadata.constraints.runtime_errors.iter().any(|declared| declared.code == error.code()))
         .map(|error| {
             let info = runtime_error_info(error);
             serde_json::json!({
@@ -9027,7 +9028,7 @@ fn typescript_builder_manifest(
             ],
             "private_keys": "never-in-bundle-or-evidence"
         },
-        "runtime_error_catalog": runtime_error_catalog_json(),
+        "runtime_error_catalog": runtime_error_catalog_json(metadata),
         "runtime_contract": {
             "requires_live_cell_resolution": true,
             "requires_deployment_resolution": true,
@@ -9715,7 +9716,7 @@ fn typescript_builder_index(
         .collect::<Vec<_>>();
     let action_specs_json = json_string_pretty("action specs", &action_specs)?;
     let action_error_contexts_json = json_string_pretty("action error contexts", &builder_action_error_contexts_json(actions))?;
-    let runtime_error_catalog_json = json_string_pretty("runtime error catalog", &runtime_error_catalog_json())?;
+    let runtime_error_catalog_json = json_string_pretty("runtime error catalog", &runtime_error_catalog_json(metadata))?;
     let builder_manifest =
         typescript_builder_manifest(package_name, metadata, actions, metadata_hash, locked_identity, deployment_identity)?;
     let manifest_json = json_string_pretty("builder manifest", &builder_manifest)?;
@@ -9732,6 +9733,10 @@ fn typescript_builder_index(
     ts.push_str("export const runtimeAccessProvenanceContract = metadata.runtime.ckb_runtime_access_provenance_contract;\n");
     ts.push_str("export const transactionViewHandles = builderManifest.transaction_view_handles;\n");
     ts.push_str(&format!("export const signingMessageDomains = {signing_message_domains_json} as const;\n"));
+    ts.push_str(&format!(
+        "export const zkVerifierContracts = {} as const;\n",
+        json_string_pretty("ZK verifier contracts", &metadata.runtime.zk_verifiers)?
+    ));
     ts.push_str(&format!("export const actionSpecs = {action_specs_json} as const;\n\n"));
     ts.push_str(&format!("export const actionErrorContexts = {action_error_contexts_json} as const;\n"));
     ts.push_str(&format!("export const runtimeErrorCatalog = {runtime_error_catalog_json} as const;\n\n"));

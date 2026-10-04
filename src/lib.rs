@@ -59,6 +59,7 @@ mod typed_semantics;
 pub mod types;
 mod verified_artifact;
 pub mod wasm;
+pub mod zk_contract;
 
 pub use assumptions::{BuilderAssumptionMetadata, TxValidationReport, TxValidationViolation};
 pub use cellscript_artifact_checker::{
@@ -233,7 +234,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
-const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v55-0.32-low-mask-immediates";
+const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v56-0.32-exact-zk-transition";
 pub const METADATA_SCHEMA_VERSION: u32 = 72;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 2;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -981,6 +982,8 @@ pub struct RuntimeMetadata {
     pub ckb_runtime_accesses: Vec<CkbRuntimeAccessMetadata>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub signing_message_domains: Vec<CkbSigningMessageDomainMetadata>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub zk_verifiers: Vec<cellscript_artifact_checker::zk_profile::ZkVerifierContract>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub trusted_external_verifiers: Vec<cellscript_artifact_checker::TrustedExternalVerifierRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2603,8 +2606,16 @@ fn constraints_metadata(
     if backend_shape.is_none() {
         warnings.push("backend shape metrics were not available for this artifact".to_string());
     }
+    use runtime_errors::CellScriptRuntimeError as RuntimeError;
+    let uses_zk = metadata.runtime.ckb_runtime_features.iter().any(|feature| feature == "zk-exact-transition-verifier");
     let runtime_errors = runtime_errors::ALL_RUNTIME_ERRORS
         .iter()
+        // Keep existing artifacts' metadata identities and size budgets stable.
+        // The experimental profile's diagnostics belong only to ZK artifacts.
+        .filter(|error| uses_zk || !matches!(error,
+            RuntimeError::ZkContextInvalid | RuntimeError::ZkPipeFailed | RuntimeError::ZkSpawnFailed
+            | RuntimeError::ZkWriteFailed | RuntimeError::ZkCloseFailed | RuntimeError::ZkChildRejected
+            | RuntimeError::ZkCycleBoundExceeded))
         .map(|error| {
             let info = runtime_errors::runtime_error_info(*error);
             RuntimeErrorConstraintsMetadata {
@@ -6503,6 +6514,7 @@ pub(crate) fn entry_witness_static_type_len(ty: &str) -> Option<usize> {
         "u128" => return Some(16),
         "Address" | "Hash" => return Some(32),
         other if ir::is_ckb_fixed_hash_domain_name(other) => return Some(32),
+        other if zk_contract::fixed_width(other).is_some() => return zk_contract::fixed_width(other),
         other if other == script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE => {
             return Some(script_handle_contract::EXACT_SCRIPT_HANDLE_BYTES)
         }
@@ -9191,11 +9203,15 @@ fn bind_typed_semantics(metadata: &mut CompileMetadata, ir: &ir::IrModule) {
     metadata.typed_semantics_hash =
         cellscript_artifact_checker::canonical_hash(cellscript_artifact_checker::TYPED_SEMANTICS_SCHEMA, &typed)
             .expect("compiler-emitted typed semantics are serializable");
+    metadata.runtime.zk_verifiers =
+        cellscript_artifact_checker::zk_profile::contracts(&typed).expect("validated exact ZK IR has canonical typed operands");
     metadata.typed_semantics = typed;
 }
 
 #[cfg(feature = "wasm")]
-fn bind_typed_semantics(_metadata: &mut CompileMetadata, _ir: &ir::IrModule) {}
+fn bind_typed_semantics(metadata: &mut CompileMetadata, ir: &ir::IrModule) {
+    metadata.runtime.zk_verifiers = zk_contract::browser_contracts(ir);
+}
 
 #[cfg(feature = "wasm")]
 fn browser_type_metadata(type_def: &ir::IrTypeDef, type_defs: &BTreeMap<String, &ir::IrTypeDef>) -> TypeMetadata {
@@ -9475,6 +9491,7 @@ fn compile_metadata_from_ir(
             fail_closed_runtime_features,
             ckb_runtime_accesses: Vec::new(),
             signing_message_domains: ckb_signing_message_domains(ir),
+            zk_verifiers: Vec::new(),
             trusted_external_verifiers: Vec::new(),
             transaction_view_handles: Vec::new(),
             borrow_regions: Vec::new(),
@@ -9634,6 +9651,7 @@ fn compile_metadata_from_ir(
             fail_closed_runtime_features,
             ckb_runtime_accesses,
             signing_message_domains: ckb_signing_message_domains(ir),
+            zk_verifiers: Vec::new(),
             trusted_external_verifiers: Vec::new(),
             transaction_view_handles,
             borrow_regions,
@@ -10142,6 +10160,7 @@ fn scope_ir_to_fungible_type_group_v1(ir: &ir::IrModule, selected_type: Option<&
             borrow_regions: Vec::new(),
             trusted_external_calls: Vec::new(),
             enforced_claims: Vec::new(),
+            zk_origins: Vec::new(),
             blocks: vec![ir::IrBlock {
                 id: ir::BlockId(0),
                 instructions: vec![ir::IrInstruction::Call {
@@ -18439,6 +18458,7 @@ fn metadata_fixed_byte_width(ty: &ir::IrType, fixed_size: Option<usize>) -> Opti
     match (ty, fixed_size) {
         (ir::IrType::Address | ir::IrType::Hash, Some(32)) => Some(32),
         (ir::IrType::Array(inner, len), Some(size)) if matches!(inner.as_ref(), ir::IrType::U8) && *len == size => Some(size),
+        (ir::IrType::Named(name), Some(size)) if zk_contract::fixed_width(name) == Some(size) => Some(size),
         (ir::IrType::Named(name), Some(size))
             if name == script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE
                 && size == script_handle_contract::EXACT_SCRIPT_HANDLE_BYTES =>
@@ -19040,6 +19060,10 @@ fn body_ckb_runtime_features(
                 }
                 ir::IrInstruction::Call { func, .. } if func.starts_with("__ckb_spawn") => {
                     features.insert("ckb-spawn-ipc".to_string());
+                }
+                ir::IrInstruction::Call { func, .. } if func == zk_contract::REQUIRE_HELPER => {
+                    features.insert("zk-exact-transition-verifier".into());
+                    features.insert("ckb-spawn-ipc".into());
                 }
                 ir::IrInstruction::Call { func, .. }
                     if matches!(
@@ -21691,6 +21715,7 @@ fn operand_fixed_byte_width(operand: &ir::IrOperand) -> Option<usize> {
         ir::IrOperand::Var(var) => match &var.ty {
             ir::IrType::Address | ir::IrType::Hash => Some(32),
             ir::IrType::Array(inner, len) if matches!(inner.as_ref(), ir::IrType::U8) => Some(*len),
+            ir::IrType::Named(name) if zk_contract::fixed_width(name).is_some() => zk_contract::fixed_width(name),
             ir::IrType::Named(name) if name == script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE => {
                 Some(script_handle_contract::EXACT_SCRIPT_HANDLE_BYTES)
             }
@@ -21723,6 +21748,7 @@ fn type_static_length(ty: &ir::IrType) -> Option<usize> {
         ir::IrType::Named(name) if ir::is_ckb_temporal_scalar_name(name) => Some(8),
         ir::IrType::Named(name) if ir::is_ckb_fixed_hash_domain_name(name) => Some(32),
         ir::IrType::Named(name) if commitment_contract::commitment_inner_type(name).is_some() => Some(32),
+        ir::IrType::Named(name) if zk_contract::fixed_width(name).is_some() => zk_contract::fixed_width(name),
         ir::IrType::Named(name) if name == script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE => {
             Some(script_handle_contract::EXACT_SCRIPT_HANDLE_BYTES)
         }
@@ -21785,6 +21811,7 @@ fn param_metadata(
         !ir::is_ckb_temporal_scalar_name(name)
             && !ir::is_ckb_fixed_hash_domain_name(name)
             && commitment_contract::commitment_inner_type(name).is_none()
+            && zk_contract::fixed_width(name).is_none()
             && name != script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE
             && name != script_handle_contract::DEPLOYMENT_LINE_HANDLE_TYPE
     }) && enum_fixed_len.is_none();

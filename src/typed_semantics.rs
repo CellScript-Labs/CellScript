@@ -1585,6 +1585,7 @@ fn build_entry(
         })
         .collect();
     TypedSemanticEntry {
+        zk_origins: body.zk_origins.clone(),
         id: format!("{kind}:{name}"),
         kind: kind.to_string(),
         name: name.to_string(),

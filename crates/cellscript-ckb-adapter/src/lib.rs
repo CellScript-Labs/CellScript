@@ -28,6 +28,7 @@ use std::{
 
 pub mod policy_witness;
 mod protocol_bundle;
+pub mod zk;
 
 pub use protocol_bundle::{
     materialize_protocol_bundle_report, protocol_bundle_confirmation_evidence, protocol_bundle_dependency_resolution_evidence,

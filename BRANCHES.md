@@ -15,7 +15,8 @@ independent-checker, runtime and resource validation remain required. See the
 [completed immediate slice](docs/reports/0.32/IMMEDIATE_MASKS.md).
 The branch integrates the published 0.31 history through `5fd4c469`; workspace
 versions remain 0.31.0 pending coordinated release preparation. An in-progress
-ZK experiment is not an admitted executable language feature. This branch is
+ZK interface now executes the exact experimental composition; its test circuit
+does not establish production application admission. This branch is
 not a release announcement or deployment receipt.
 
 ## Branch decision — 2026-09-21

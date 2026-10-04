@@ -528,7 +528,9 @@ run_registry_type_script_check() {
 }
 
 run_zk_child_research_check() {
-    # Research evidence only: no source-level ZK admission or deployment claim.
+    # Experimental composition and real scheduler evidence; no production circuit or deployment claim.
+    run cargo test --locked -p cellscript --test zk_transition
+    run cargo test --locked -p cellscript-wasm --features wasm wasm_zk_metadata_preserves_exact_contract
     run cargo fmt --manifest-path contracts/zk-transition-verifier/Cargo.toml -- --check
     run cargo fmt --manifest-path contracts/zk-transition-verifier/host/Cargo.toml -- --check
     run cargo build --locked --manifest-path contracts/zk-transition-verifier/Cargo.toml \

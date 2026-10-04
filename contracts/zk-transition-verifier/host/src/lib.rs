@@ -1,9 +1,13 @@
 //! Research harness only. The deterministic setup and identity circuit below
 //! test the cryptographic transport. They are not an authorization circuit,
-//! trusted setup ceremony, production VK, or stateful transaction evidence.
+//! trusted setup ceremony or production VK. The scheduler module separately
+//! exercises parent/child composition and stateful transaction binding.
 
 #[path = "../../../../crates/cellscript-artifact-checker/src/zk.rs"]
 pub mod wire;
+
+#[cfg(test)]
+mod scheduler;
 
 #[cfg(test)]
 mod tests {
@@ -49,7 +53,7 @@ mod tests {
         h.finalize(&mut out);
         out
     }
-    fn fixture() -> (Vec<u8>, wire::Request) {
+    pub(super) fn fixture() -> (Vec<u8>, wire::Request) {
         let statement = wire::Statement {
             domain: [1; 32],
             action: [2; 32],
@@ -58,7 +62,12 @@ mod tests {
             new_data_hash: [5; 32],
             input_transaction_hash: [6; 32],
             input_output_index: 7,
+            transaction_hash: [8; 32],
         };
+        fixture_for(statement)
+    }
+
+    pub(super) fn fixture_for(statement: wire::Statement) -> (Vec<u8>, wire::Request) {
         let pi = statement.public_inputs();
         let inputs = pi[4..].chunks_exact(32).map(|bytes| Fr::deserialize_compressed(bytes).unwrap()).collect();
         let circuit = BindingCircuit(inputs);
@@ -192,7 +201,7 @@ mod tests {
         let (exit, cycles) = run(canonical.to_vec(), key.clone(), 1, false);
         assert_eq!(exit, 0);
         rows.push(serde_json::json!({"case":"valid","exit":exit,"instruction_cycles":cycles}));
-        for index in [236, 268, 300, 332, 364, 396, 428] {
+        for index in [236, 268, 300, 332, 364, 396, 428, 432] {
             let mut bytes = canonical;
             bytes[index] ^= 1;
             let (exit, cycles) = run(bytes.to_vec(), key.clone(), 1, false);
@@ -200,7 +209,7 @@ mod tests {
             rows.push(serde_json::json!({"case":format!("changed-statement-{index}"),"exit":exit,"instruction_cycles":cycles}));
         }
         for (name, bytes, fd_count, partial, expected) in [
-            ("truncated", canonical[..431].to_vec(), 1, false, 80),
+            ("truncated", canonical[..wire::REQUEST_BYTES - 1].to_vec(), 1, false, 80),
             ("trailing", [canonical.as_slice(), &[0]].concat(), 1, false, 80),
             ("missing-fd", canonical.to_vec(), 0, false, 80),
             ("extra-fd", canonical.to_vec(), 2, false, 80),

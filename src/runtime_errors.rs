@@ -72,6 +72,13 @@ pub enum CellScriptRuntimeError {
     DeploymentLineHandleInvalid = 71,
     ScriptConstructionInvalid = 72,
     CommitmentOpeningMismatch = 73,
+    ZkContextInvalid = 74,
+    ZkPipeFailed = 75,
+    ZkSpawnFailed = 76,
+    ZkWriteFailed = 77,
+    ZkCloseFailed = 78,
+    ZkChildRejected = 79,
+    ZkCycleBoundExceeded = 84,
 }
 
 impl CellScriptRuntimeError {
@@ -147,11 +154,25 @@ impl CellScriptRuntimeError {
             Self::DeploymentLineHandleInvalid => "deployment-line-handle-invalid",
             Self::ScriptConstructionInvalid => "script-construction-invalid",
             Self::CommitmentOpeningMismatch => "commitment-opening-mismatch",
+            Self::ZkContextInvalid => "zk-context-invalid",
+            Self::ZkPipeFailed => "zk-pipe-failed",
+            Self::ZkSpawnFailed => "zk-spawn-failed",
+            Self::ZkWriteFailed => "zk-write-failed",
+            Self::ZkCloseFailed => "zk-close-failed",
+            Self::ZkChildRejected => "zk-child-rejected",
+            Self::ZkCycleBoundExceeded => "zk-cycle-bound-exceeded",
         }
     }
 
     pub const fn description(self) -> &'static str {
         match self {
+            Self::ZkContextInvalid => "The exact single-input/single-output Type group or transaction context could not be loaded.",
+            Self::ZkPipeFailed => "The bounded ZK request pipe could not be created.",
+            Self::ZkSpawnFailed => "The exact verifier child could not be spawned.",
+            Self::ZkWriteFailed => "The ZK request write failed or transferred a partial word.",
+            Self::ZkCloseFailed => "The ZK request writer could not be closed.",
+            Self::ZkChildRejected => "The verifier child rejected the proof or Wait failed.",
+            Self::ZkCycleBoundExceeded => "The exact verifier call exceeded its declared cycle budget.",
             Self::SyscallFailed => "A target VM syscall returned a non-zero status while loading transaction context.",
             Self::BoundsCheckFailed => "Loaded bytes were smaller than the verifier-required minimum.",
             Self::CellLoadFailed => "Cell data or field loading failed or returned an unusable result.",
@@ -251,6 +272,13 @@ impl CellScriptRuntimeError {
 
     pub const fn hint(self) -> &'static str {
         match self {
+            Self::ZkContextInvalid => "Check the exact ZK profile, transaction-derived statement, verifier/VK CellDeps and bounded Spawn/IPC evidence.",
+            Self::ZkPipeFailed => "Check the exact ZK profile, transaction-derived statement, verifier/VK CellDeps and bounded Spawn/IPC evidence.",
+            Self::ZkSpawnFailed => "Check the exact ZK profile, transaction-derived statement, verifier/VK CellDeps and bounded Spawn/IPC evidence.",
+            Self::ZkWriteFailed => "Check the exact ZK profile, transaction-derived statement, verifier/VK CellDeps and bounded Spawn/IPC evidence.",
+            Self::ZkCloseFailed => "Check the exact ZK profile, transaction-derived statement, verifier/VK CellDeps and bounded Spawn/IPC evidence.",
+            Self::ZkChildRejected => "Check the exact ZK profile, transaction-derived statement, verifier/VK CellDeps and bounded Spawn/IPC evidence.",
+            Self::ZkCycleBoundExceeded => "Check the exact ZK profile, transaction-derived statement, verifier/VK CellDeps and bounded Spawn/IPC evidence.",
             Self::SyscallFailed => {
                 "Check transaction input/output/cell_dep indexes, source flags, and target-profile syscall compatibility."
             }
@@ -438,6 +466,13 @@ impl CellScriptRuntimeError {
             71 => Some(Self::DeploymentLineHandleInvalid),
             72 => Some(Self::ScriptConstructionInvalid),
             73 => Some(Self::CommitmentOpeningMismatch),
+            74 => Some(Self::ZkContextInvalid),
+            75 => Some(Self::ZkPipeFailed),
+            76 => Some(Self::ZkSpawnFailed),
+            77 => Some(Self::ZkWriteFailed),
+            78 => Some(Self::ZkCloseFailed),
+            79 => Some(Self::ZkChildRejected),
+            84 => Some(Self::ZkCycleBoundExceeded),
             _ => None,
         }
     }
@@ -518,6 +553,13 @@ pub const ALL_RUNTIME_ERRORS: &[CellScriptRuntimeError] = &[
     CellScriptRuntimeError::DeploymentLineHandleInvalid,
     CellScriptRuntimeError::ScriptConstructionInvalid,
     CellScriptRuntimeError::CommitmentOpeningMismatch,
+    CellScriptRuntimeError::ZkContextInvalid,
+    CellScriptRuntimeError::ZkPipeFailed,
+    CellScriptRuntimeError::ZkSpawnFailed,
+    CellScriptRuntimeError::ZkWriteFailed,
+    CellScriptRuntimeError::ZkCloseFailed,
+    CellScriptRuntimeError::ZkChildRejected,
+    CellScriptRuntimeError::ZkCycleBoundExceeded,
 ];
 
 pub const RESERVED_RUNTIME_ERROR_CODES: &[u64] = &[6, 19, 27, 28, 29, 30, 31];

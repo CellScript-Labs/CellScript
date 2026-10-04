@@ -894,6 +894,25 @@ impl LspServer {
                 }
                 return items;
             }
+            "zk" => {
+                items.push(CompletionItem {
+                    label: "require_valid".into(), kind: CompletionItemKind::Function,
+                    detail: Some("Exact Groth16 single Type-group transition; returns Unit and rejects child failures".into()),
+                    documentation: None,
+                    insert_text: Some("zk::require_valid(\"${1:policy}\", ${2:proof}, ${3:dependency}, ${4:verifier}, ${5:handle_hash}, ${6:vk_hash}, ${7:domain}, ${8:action})".into()),
+                });
+                return items;
+            }
+            "VerificationKeyCommitment" => {
+                items.push(CompletionItem {
+                    label: "from_bytes".into(),
+                    kind: CompletionItemKind::Function,
+                    detail: Some("Literal 32-byte verification-key CellDep data hash".into()),
+                    documentation: None,
+                    insert_text: Some("VerificationKeyCommitment::from_bytes(${1:bytes})".into()),
+                });
+                return items;
+            }
             "verifier::btc::bip340" => {
                 for (name, insert) in [
                     (
@@ -1237,6 +1256,8 @@ impl LspServer {
             "Hash",
             "ScriptHash",
             "ExactScriptHandle",
+            "ZkTransitionProof",
+            "VerificationKeyCommitment",
             "DeploymentLineHandle",
             "SighashAllDigest",
             "EpochNumber",
@@ -3226,6 +3247,14 @@ mod tests {
     #[test]
     fn test_ckb_namespace_completions() {
         let server = LspServer::new();
+
+        let zk = server.member_completions("file:///test.cell", "zk");
+        assert!(zk.iter().any(|item| item.label == "require_valid"));
+        let vk = server.member_completions("file:///test.cell", "VerificationKeyCommitment");
+        assert!(vk.iter().any(|item| item.label == "from_bytes"));
+        let types = server.type_completions();
+        assert!(types.iter().any(|item| item.label == "ZkTransitionProof"));
+        assert!(types.iter().any(|item| item.label == "VerificationKeyCommitment"));
 
         let env = server.member_completions("file:///test.cell", "env");
         assert!(env.iter().any(|item| item.label == "sighash_all"));

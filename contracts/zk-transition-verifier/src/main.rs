@@ -2,7 +2,9 @@
 #![no_main]
 
 ckb_std::entry!(program_entry);
-ckb_std::default_alloc!();
+const SMALL_HEAP_BYTES: usize = 4 * 1024;
+const LARGE_HEAP_BYTES: usize = 516 * 1024;
+ckb_std::default_alloc!(SMALL_HEAP_BYTES, LARGE_HEAP_BYTES, 64);
 
 // Shared allocation-free codec; importing this file does not link the
 // standalone checker's host parsing or the CellScript compiler into the TCB.
@@ -46,31 +48,37 @@ fn receive() -> Result<[u8; wire::REQUEST_BYTES], i8> {
 fn verification_key(hash: &[u8; 32]) -> Result<[u8; wire::VK_BYTES], i8> {
     // A bounded resolved CellDep search. DepGroup members use the CKB syscall
     // CellDep view, so the selected hash belongs to the actual VK bytes.
-    for index in 0..64 {
+    let mut found = None;
+    for index in 0..=64 {
         let candidate = match load_cell_data_hash(index, Source::CellDep) {
             Ok(candidate) => candidate,
             Err(SysError::IndexOutOfBound) => break,
             Err(_) => return Err(INVALID_KEY),
         };
+        if index == 64 {
+            return Err(INVALID_KEY);
+        }
         if &candidate == hash {
+            if found.is_some() {
+                return Err(INVALID_KEY);
+            }
             let mut key = [0; wire::VK_BYTES];
             if syscalls::load_cell_data(&mut key, 0, index, Source::CellDep) != Ok(wire::VK_BYTES) {
                 return Err(INVALID_KEY);
             }
-            if key[224..232] != 14u64.to_le_bytes() {
+            if key[224..232] != ((wire::PUBLIC_INPUT_COUNT + 1) as u64).to_le_bytes() {
                 return Err(INVALID_KEY);
             }
-            return Ok(key);
+            found = Some(key);
         }
     }
-    Err(INVALID_KEY)
+    found.ok_or(INVALID_KEY)
 }
 
 fn verify() -> Result<(), i8> {
     let bytes = receive()?;
-    // An admitted parent must bind this key commitment to its exact profile
-    // before sending. Parent admission is still unfinished; this research
-    // child only authenticates the matching CellDep bytes.
+    // The parent binds this key commitment to the named exact profile before
+    // sending. The child authenticates matching CellDep bytes and the proof.
     let mut key_hash = [0; 32];
     key_hash.copy_from_slice(&bytes[76..108]);
     let request = wire::Request::decode(&bytes, &key_hash).map_err(|_| INVALID_ENVELOPE)?;

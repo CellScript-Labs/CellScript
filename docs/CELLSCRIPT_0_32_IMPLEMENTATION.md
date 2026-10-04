@@ -23,7 +23,7 @@ authorize a release publication or a new chain deployment.
 | #38 | Separately measured borrowing, word copies and staged loading | 18 borrowed-span, 96 word-copy and 24 staged-loader cases measured; default ownership/loading retained pending full equivalence and checker contracts |
 | #39 | Bounded register-retention experiment and scratch-ownership decision | Candidate patch archived and rejected after 1,707 unchanged runs; conservative scratch ownership retained |
 | #40 | Cost attribution, experiment decisions, combined comparison and residual-cost report | Clean 1,707-run attribution, 6,782-metric replay, paired cost frontier and residual sites archived; wider transformations have explicit blockers; unified gates pass |
-| #22 | One exact typed ZK profile, real verifier execution and state binding | Canonical codec and exact child research implemented; real pairing/context mutations pass; application circuit and parent/compiler/checker/builder closure pending |
+| #22 | One exact typed ZK profile, real verifier execution and state binding | Experimental v2 parent/compiler/checker/builder interface and real scheduler fixtures implemented; production application circuit/VK and admission pending |
 
 #42 remains post-0.32 application tooling. Compatible-open handles (#28) and
 runtime-selected open roles (#29) are not prerequisites for the exact profile.
@@ -56,14 +56,27 @@ non-authorizing and cannot supply that decision. The draft profile, strict
 codec, child ELF and all 13 recorded VM observations reproduce across two
 local checkout builds, but production source admission remains unavailable.
 
-After the application relation is fixed, #22 still requires nominal proof
-typing, named exact verifier/VK binding, transaction-derived statements,
-mandatory parent result checking, ProofPlan and machine/checker closure,
-builder/editor parity, real scheduler/stateful tests and production resource
-and reproducibility evidence. Independent review is waived; these executable
-requirements are not.
+The experimental v2 interface now includes nominal proof/VK typing, literal
+exact handle/VK commitments, transaction-derived statements, mandatory parent
+result checking, ProofPlan and machine/checker binding, builder helpers,
+browser metadata and LSP completion. Real scheduler fixtures exercise successive
+state transitions, replay and substitution rejection. The v2 statement adds the
+full raw transaction hash; historical v1 child reports above are not v2 evidence.
+See the [composition contract](../contracts/zk-transition-verifier/README.md).
 
-## Completed candidate validation
+Named package-level verifier resolution, the application relation/circuit/VK,
+and production resource and reproducibility evidence remain admission work.
+Independent review is waived; these application requirements are not.
+
+The [v2 scheduler record](reports/0.32/zk-composition-scheduler.json) binds a
+14,512-byte parent, 197,384-byte child and 744-byte VK to two successive accepted
+transactions (107,898,922 and 108,181,913 cycles). Five negative cases reject
+stale proof reuse, output data/capacity changes, extra group outputs and handle
+substitution. The 250,000,000-cycle call ceiling is an experimental profile
+bound, not evidence of production transaction-pool admission. The test uses
+a public-seed non-authorizing circuit and makes no deployment claim.
+
+## Completed cost/research candidate validation (before ZK composition)
 
 `dev`, `ci` and `backend` pass. The final clean CI/backend source is
 `6a453d3015784784a27ba1aa0a4b6b1a73db79a8`, including the inventory correction

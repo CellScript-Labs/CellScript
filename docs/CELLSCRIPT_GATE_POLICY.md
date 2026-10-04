@@ -35,9 +35,10 @@ replace the gates below.
 
 The 0.32 development line adds observed per-VM diagnostic replay without
 changing the frozen cost oracle or ceilings. `dev`, `ci` and `backend` also
-build and test the experimental exact ZK child. Its deterministic test setup
-and modeled-syscall harness are research evidence, not an admitted language
-profile or stateful transaction proof. See the
+build and test the experimental exact ZK composition. The modeled-syscall
+child harness remains separate from the real scheduler's parent/child and
+successor-transaction tests. Both use a non-authorizing deterministic circuit;
+neither establishes production application admission. See the
 [0.32 scope](CELLSCRIPT_0_32_IMPLEMENTATION.md) and
 [child boundary](../contracts/zk-transition-verifier/README.md).
 

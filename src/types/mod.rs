@@ -6837,6 +6837,16 @@ impl<'a> TypeChecker<'a> {
                             self.validate_builtin_arity(name, 0, arg_types, call.span)?;
                             Type::U64
                         }
+                        ("VerificationKeyCommitment", "from_bytes") => {
+                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
+                            if !matches!(&call.args[0], Expr::ByteString(bytes) if bytes.len() == 32) {
+                                return Err(CompileError::new(
+                                    "VerificationKeyCommitment::from_bytes requires a literal 32-byte VK data hash",
+                                    call.span,
+                                ));
+                            }
+                            Type::Named("VerificationKeyCommitment".into())
+                        }
                         ("Hash", "from_bytes") => {
                             self.validate_builtin_arity(name, 1, arg_types, call.span)?;
                             if !Self::is_hash_bytes_type(&arg_types[0]) {
@@ -7529,6 +7539,20 @@ impl<'a> TypeChecker<'a> {
                                     ),
                                     call.span,
                                 ));
+                            }
+                            Type::Unit
+                        }
+                        ("zk", "require_valid") => {
+                            self.validate_builtin_arity(name, 8, arg_types, call.span)?;
+                            if arg_types[1] != Type::Named(crate::zk_contract::PROOF_TYPE.to_string())
+                                || arg_types[2] != Type::Named(CKB_CELL_DEP_VIEW_TYPE.to_string())
+                                || arg_types[3] != Type::Named(CKB_EXACT_SCRIPT_HANDLE_TYPE.to_string())
+                                || arg_types[4] != Type::Hash
+                                || arg_types[5] != Type::Named("VerificationKeyCommitment".into())
+                                || arg_types[6..].iter().any(|ty| *ty != Type::Hash)
+                                || !matches!(&call.args[0], Expr::String(policy) if !policy.is_empty() && policy.len() <= 64 && policy.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'))
+                            {
+                                return Err(CompileError::new("zk::require_valid expects (literal_policy_name, ZkTransitionProof, CellDepView, ExactScriptHandle, literal_handle_hash, literal_vk_hash, literal_domain, literal_action); hashes use Hash", call.span));
                             }
                             Type::Unit
                         }
@@ -8627,6 +8651,7 @@ impl<'a> TypeChecker<'a> {
             | CKB_OUT_POINT_TYPE
             | CKB_SCRIPT_VIEW_TYPE
             | CKB_SCRIPT_HASH_TYPE
+            | "ZkTransitionProof"
             | CKB_EXACT_SCRIPT_HANDLE_TYPE
             | CKB_DEPLOYMENT_LINE_HANDLE_TYPE
             | CKB_SIGHASH_ALL_DIGEST_TYPE

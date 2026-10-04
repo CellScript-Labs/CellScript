@@ -20,3 +20,8 @@ ckb-vm = "=0.24.14"
 blake2b-ref = "=0.3.1"
 serde_json = "1.0"
 verifier-core = { git = "https://github.com/CECILIA-MULANDI/groth16-ckb", rev = "d64c769ffe2d2edb5eb308dc59058efda77c2f83" }
+
+[dev-dependencies]
+cellscript = { path = "../../.." }
+ckb-testtool = "1.1"
+hex = "0.4"

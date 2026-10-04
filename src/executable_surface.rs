@@ -430,6 +430,7 @@ pub static EXECUTABLE_SURFACE: &[ExecutableSurfaceEntry] = &[
 
 pub fn validate_ir_module(module: &IrModule) -> Result<()> {
     module.validate_entry_selection()?;
+    crate::zk_contract::validate(module)?;
     for external in &module.external_type_defs {
         require_registered("ir-item:type-def")?;
         for field in &external.fields {

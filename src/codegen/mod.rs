@@ -24,6 +24,7 @@ mod runtime;
 mod runtime_gather;
 mod scalar_slots;
 mod schema;
+mod zk;
 #[cfg(not(feature = "wasm"))]
 pub(crate) use abi::{entry_param_abi_sources, EntryParamAbiSource};
 pub use assembler::BackendShapeMetrics;
@@ -222,6 +223,9 @@ fn referenced_v014_runtime_helpers(ir: &IrModule) -> BTreeSet<String> {
         helpers.insert("__ckb_close".to_string());
         helpers.insert("__ckb_spawn_with_fd1".to_string());
         helpers.insert("__ckb_wait".to_string());
+    }
+    if helpers.contains(crate::zk_contract::REQUIRE_HELPER) {
+        helpers.extend(["__ckb_pipe", "__ckb_close", "__ckb_spawn_with_fd1", "__ckb_wait"].map(str::to_string));
     }
     helpers
 }
@@ -457,6 +461,7 @@ fn is_v014_runtime_helper(func: &str) -> bool {
             | "__ckb_hash_sha256_pair"
             | "__ckb_hash_sha256d_pair"
             | "__ckb_require_sha256d_merkle_root"
+            | "__zk_require_transition"
             | "__novaseal_bip340_require_signature"
             | "__novaseal_bip340_require_signature_from_cell_dep"
     )
@@ -623,6 +628,7 @@ fn fixed_byte_width(ty: &IrType, fixed_size: Option<usize>) -> Option<usize> {
         (IrType::Address | IrType::Hash, Some(32)) => Some(32),
         (IrType::U128, Some(16)) => Some(16),
         (IrType::Array(inner, len), Some(size)) if matches!(inner.as_ref(), IrType::U8) && *len == size => Some(size),
+        (IrType::Named(name), Some(size)) if crate::zk_contract::fixed_width(name) == Some(size) => Some(size),
         (IrType::Named(name), Some(size))
             if name == crate::script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE
                 && size == crate::script_handle_contract::EXACT_SCRIPT_HANDLE_BYTES =>
@@ -708,6 +714,7 @@ fn type_static_length(ty: &IrType) -> Option<usize> {
         IrType::Named(name) if is_ckb_temporal_scalar_name(name) => Some(8),
         IrType::Named(name) if is_ckb_fixed_hash_domain_name(name) => Some(32),
         IrType::Named(name) if crate::commitment_contract::commitment_inner_type(name).is_some() => Some(32),
+        IrType::Named(name) if crate::zk_contract::fixed_width(name).is_some() => crate::zk_contract::fixed_width(name),
         IrType::Named(name) if name == crate::script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE => {
             Some(crate::script_handle_contract::EXACT_SCRIPT_HANDLE_BYTES)
         }
@@ -730,6 +737,7 @@ fn operand_fixed_byte_width(operand: &IrOperand) -> Option<usize> {
         IrType::Address | IrType::Hash => Some(32),
         IrType::U128 => Some(16),
         IrType::Array(_, _) | IrType::Tuple(_) => type_static_length(ty),
+        IrType::Named(name) if crate::zk_contract::fixed_width(name).is_some() => crate::zk_contract::fixed_width(name),
         IrType::Named(name) if name == crate::script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE => {
             Some(crate::script_handle_contract::EXACT_SCRIPT_HANDLE_BYTES)
         }
@@ -1283,6 +1291,7 @@ pub struct CodeGenerator {
 impl CodeGenerator {
     fn fixed_named_type_width(&self, ty: &IrType) -> Option<usize> {
         match ty {
+            IrType::Named(name) if crate::zk_contract::fixed_width(name).is_some() => crate::zk_contract::fixed_width(name),
             IrType::Named(name) if name == crate::script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE => {
                 Some(crate::script_handle_contract::EXACT_SCRIPT_HANDLE_BYTES)
             }
@@ -4450,7 +4459,8 @@ fn entry_witness_dynamic_schema_param(ty: &IrType) -> bool {
     if matches!(
         ty,
         IrType::Named(name)
-            if name == crate::script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE
+            if crate::zk_contract::fixed_width(name).is_some()
+                || name == crate::script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE
                 || name == crate::script_handle_contract::DEPLOYMENT_LINE_HANDLE_TYPE
     ) {
         return false;

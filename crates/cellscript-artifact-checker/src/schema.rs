@@ -501,6 +501,8 @@ pub struct TypedSemanticVariantField {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TypedSemanticEntry {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub zk_origins: Vec<crate::zk_profile::ZkSourceOrigin>,
     pub id: String,
     pub kind: String,
     pub name: String,

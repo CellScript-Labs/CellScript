@@ -2892,6 +2892,7 @@ mod tests {
             borrow_regions: Vec::new(),
             trusted_external_calls: Vec::new(),
             enforced_claims: Vec::new(),
+            zk_origins: Vec::new(),
             blocks: Vec::new(),
         };
 
@@ -3365,6 +3366,7 @@ mod tests {
                     borrow_regions: vec![],
                     trusted_external_calls: vec![],
                     enforced_claims: vec![],
+                    zk_origins: vec![],
                     blocks: vec![IrBlock {
                         id: BlockId(0),
                         instructions: vec![],

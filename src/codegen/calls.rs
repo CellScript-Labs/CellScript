@@ -356,6 +356,9 @@ impl CodeGenerator {
             self.emit_fail(CellScriptRuntimeError::CollectionRuntimeUnsupported);
             return Ok(());
         }
+        if func == crate::zk_contract::REQUIRE_HELPER {
+            return self.emit_zk_transition(args);
+        }
         if self.emit_commitment_open_call(dest, func, args)? {
             return Ok(());
         }

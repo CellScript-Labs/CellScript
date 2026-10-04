@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
+mod zk;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CheckerRejectionCode {
     V2400BudgetExceeded,
@@ -269,6 +271,19 @@ pub fn check_bundle_values(
     validate_stack_discipline(record, &elf, terminal_sink)?;
     validate_syscalls(record, &elf)?;
     validate_script_hash_machine_contract(record, &elf)?;
+    zk::validate(record, &elf)?;
+    let zk_contracts = crate::zk_profile::contracts(&record.typed_semantics)
+        .map_err(|message| CheckerError::new(CheckerRejectionCode::V2419TypedSemanticsInvalid, message))?;
+    if !zk_contracts.is_empty() || metadata.pointer("/runtime/zk_verifiers").is_some() {
+        let expected = serde_json::to_value(&zk_contracts)
+            .map_err(|error| CheckerError::new(CheckerRejectionCode::V2419TypedSemanticsInvalid, error.to_string()))?;
+        if metadata.pointer("/runtime/zk_verifiers") != Some(&expected) {
+            return Err(CheckerError::new(
+                CheckerRejectionCode::V2410MetadataBindingMismatch,
+                "ZK builder contract differs from typed lowering",
+            ));
+        }
+    }
     validate_committed_state_machine_contract(record, &elf)?;
     validate_bounded_group_input_machine_contract(record, &elf)?;
     validate_bounded_output_plan_machine_contract(metadata, record, &elf)?;

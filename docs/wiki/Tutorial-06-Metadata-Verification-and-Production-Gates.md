@@ -1,5 +1,13 @@
 # Tutorial 06: Metadata Verification and Production Gates
 
+The experimental 0.32 exact ZK interface adds `runtime.zk_verifiers` to metadata.
+It records the profile, exact handle/VK commitments, transaction statement
+origins, witness placement and resource bounds. The independent checker
+reconstructs the contract and checks the generated parent transport. Browser
+metadata alone does not establish machine or cryptographic verification. See
+the [exact composition boundary](../../contracts/zk-transition-verifier/README.md)
+for its non-authorizing test circuit and remaining production requirements.
+
 Every CellScript CKB ELF build should be treated as one four-file bundle:
 
 ```text
