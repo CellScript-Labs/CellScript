@@ -46,11 +46,11 @@
     {
       "bytes": 917,
       "case": "update-0-1",
-      "cycles": 110177720,
+      "cycles": 110088776,
       "proof_bytes": 128,
       "state_capacity_shannons": 100000000000,
       "state_occupied_capacity_shannons": 18600000000,
-      "transaction_hash": "037070cb0604bd9fb35dcfd27cd4d876dedac969b550758178581e23dfe965d7",
+      "transaction_hash": "b95e06e42e1bbc5289d6315f5165b4b39d01a01d5d948a1d8fc412ea0374b1d9",
       "witness_bytes": 370
     },
     {
@@ -106,11 +106,11 @@
     {
       "bytes": 917,
       "case": "update-1-2",
-      "cycles": 110105802,
+      "cycles": 110267688,
       "proof_bytes": 128,
       "state_capacity_shannons": 100000000000,
       "state_occupied_capacity_shannons": 18600000000,
-      "transaction_hash": "0711a038ec419246b8235dc50a406525d114c6b3301a0fc8cb84283d17c8da12",
+      "transaction_hash": "9da3705e763d9751c5dd846eed223660a7ec13dff0e3a997cc2df9a9caba7c40",
       "witness_bytes": 370
     }
   ],

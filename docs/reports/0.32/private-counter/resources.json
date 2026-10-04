@@ -4,7 +4,7 @@
       "capacity_shannons": 100000000000,
       "data_bytes": 48,
       "occupied_capacity_shannons": 18600000000,
-      "out_point": "6533a5f71d187d53e1aebbee39dcac035825e2c6184420eb9cd2e4d5de7d6f9d00000000"
+      "out_point": "d1d6ae9f5d956f0cb4a067d15f074f7a170b89ba5d8e8c6cc5a5c9ffe985105a00000000"
     },
     {
       "capacity_shannons": 19749000000000,
@@ -40,15 +40,15 @@
   "child_allocator_budget_bytes": 532480,
   "max_calls": 1,
   "proof_bytes": 128,
-  "replayed_type_group_cycles": 110175613,
+  "replayed_type_group_cycles": 110086669,
   "request_bytes": 464,
   "schema": "cellscript-zk-resources-v1",
   "scope": "separate scheduler replay; stack observations are not heap peaks or static bounds",
   "status": "passed",
   "transaction_bytes": 917,
-  "transaction_cycles": 110177720,
-  "transaction_hash": "037070cb0604bd9fb35dcfd27cd4d876dedac969b550758178581e23dfe965d7",
-  "type_group_cycles": 110175613,
+  "transaction_cycles": 110088776,
+  "transaction_hash": "b95e06e42e1bbc5289d6315f5165b4b39d01a01d5d948a1d8fc412ea0374b1d9",
+  "type_group_cycles": 110086669,
   "vk_bytes": 744,
   "vms": [
     {

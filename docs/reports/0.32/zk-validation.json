@@ -1,0 +1,104 @@
+{
+  "schema": "cellscript-issue22-validation-v1",
+  "status": "passed",
+  "source_commit": "c884c3926c8e08392de4fb04359536dbde7b7aac",
+  "source_commit_signature": "N",
+  "backend_source_tree_clean": true,
+  "gates": {
+    "dev": {
+      "status": "passed",
+      "log": "zk-gate-dev.log.gz",
+      "uncompressed_log_sha256": "3d086d4f1f924c54e5c8392b75684b544ae73940cbcd610d3d76a070c72513d7",
+      "executor_collection_exit_code": 0,
+      "completion_evidence": "Final gate passed marker",
+      "checkout": "primary checkout; unrelated financial-planning documentation excluded from this delivery"
+    },
+    "ci": {
+      "status": "passed",
+      "log": "zk-gate-ci.log.gz",
+      "uncompressed_log_sha256": "b025b64d990d34cefd42a1994f9ab660a06f2c6308f7347e0ac5a1c371d971a8",
+      "executor_collection_exit_code": 0,
+      "completion_evidence": "Final gate passed marker",
+      "checkout": "primary checkout; unrelated financial-planning documentation excluded from this delivery"
+    },
+    "backend": {
+      "status": "passed",
+      "log": "zk-gate-backend.log.gz",
+      "uncompressed_log_sha256": "2536516691544474c808c21baf0b8600a5179762cf298a603aa445ed28814e70",
+      "executor_collection_exit_code": 143,
+      "completion_evidence": "Final gate passed marker and all child checks completed; the long-running executor session returned 143 on final collection",
+      "checkout": "clean detached source commit"
+    }
+  },
+  "application_admission": {
+    "circuit_sha256": "ec73a1e355384c722dcae3013f026afd8c97b9d6c804376277111f33df7d40d0",
+    "evidence_sha256": "8512c6eae964c8b5579dc7f81505be7e9f74048d2bae84ecad45086930565e59",
+    "independent_review": false,
+    "mpc_ceremony": false,
+    "production_admitted": true,
+    "proving_key_sha256": "89e240d993e45d678eca31ac42bb38462b47c9fb2f60d15c35428e442d4afd5b",
+    "public_network_deployment": false,
+    "schema": "cellscript-counter-admission-v1",
+    "scope": "private-counter-v1 engineering admission under local single-party setup trust",
+    "setup_manifest_sha256": "34081d9b781dd55b7ff7ba12d3b9f0a6897dc2a02b3ff34df282b67bdd8dbfbe",
+    "trust_model": "single-party-local-setup;operator-and-host-trusted;erasure-not-independently-proven",
+    "verification_key_data_hash": "5e55e7ad3831793e622f1ef3d9ae70bea5085a81a836050df52019caba38ea1e"
+  },
+  "fresh_ckb_acceptance": {
+    "status": "passed",
+    "report": "zk-ckb-acceptance.json.gz",
+    "uncompressed_sha256": "3cd4c5b4e3ee9ff037b9409c5bffbcf31bad094bf0eefa05921c25b465cbf46b",
+    "source_provenance": {
+      "repo_commit": "c884c3926c8e08392de4fb04359536dbde7b7aac",
+      "git_dirty": false,
+      "tracked_source_sha256": "0x19c6709b15aee05d7a1b0953cdd6742ea240a3e73a41909f135aca7675e48fea",
+      "generated_at_utc": "2026-10-04T11:28:43.873624128Z"
+    },
+    "ckb_runtime_provenance": {
+      "binary_archived_with_report": true,
+      "binary_path": "/home/arthur/RustRoverProjects/CellScript-issue22-acceptance/target/ckb-cellscript-acceptance/1791113245-production-464132/ckb-runtime/ckb",
+      "binary_sha256": "0xd78945c76a8e8f8bfaffbeb70ced9d2723ce7fdc5f488653aed12046b15e3a91",
+      "build_mode": "fresh-dedicated-cargo-target",
+      "cxx_compatibility_contract": "ckb-librocksdb-sys-8.5.4-explicit-cstdint-v1",
+      "cxxflags": "-include cstdint",
+      "effective_config_path": "/home/arthur/RustRoverProjects/CellScript-issue22-acceptance/target/ckb-cellscript-acceptance/1791113245-production-464132/ckb-node/ckb.toml",
+      "effective_config_sha256": "0x41c6bd4e2f257f88a7f1ac1a82571854cb01981c8b6f10bfe69e00788a8adaf9",
+      "effective_spec_path": "/home/arthur/RustRoverProjects/CellScript-issue22-acceptance/target/ckb-cellscript-acceptance/1791113245-production-464132/ckb-node/specs/integration.toml",
+      "effective_spec_sha256": "0x48000a5eedb9c90d9400cf5f47d06fa024e6c66589393f629843a37bed98276f",
+      "genesis_hash": "0xb1308c5915db1ae2ed1511f83daf95224bbdef11e226d7054b5720b9efee90d5",
+      "pin_file_sha256": "0x4fafb388f5b267b6fc0afe8e80a2ef2784daf700a5963e1e898a60faf43e0505",
+      "pin_schema": "cellscript-ckb-acceptance-pin-v0.22",
+      "repo_dirty": false,
+      "repo_head": "f7fa4436737756f97a24e254f22c13a36316ecea",
+      "repository": "https://github.com/nervosnetwork/ckb.git",
+      "revision": "f7fa4436737756f97a24e254f22c13a36316ecea",
+      "schema": "cellscript-ckb-runtime-provenance-v0.22",
+      "source_spec_path": "/home/arthur/RustRoverProjects/CellScript/target/0.32-checkouts/ckb-pinned/test/template/specs/integration.toml",
+      "source_spec_sha256": "0x48000a5eedb9c90d9400cf5f47d06fa024e6c66589393f629843a37bed98276f",
+      "source_template_path": "/home/arthur/RustRoverProjects/CellScript/target/0.32-checkouts/ckb-pinned/test/template/ckb.toml",
+      "source_template_sha256": "0x560869e4d7818c1675cd44589f71ef6e5afd22084178ae94268ccf9148f1f11f",
+      "version": "0.207.0",
+      "version_output": "ckb 0.207.0 (f7fa443 2026-06-18)"
+    }
+  },
+  "report_sha256": {
+    "admission.json": "088dce937c450fe2ed174354a235bdb7c6bfdd4d8156d8653c8b62832e165f09",
+    "evidence.json": "8512c6eae964c8b5579dc7f81505be7e9f74048d2bae84ecad45086930565e59",
+    "node.json": "b90b82dd44b93708bd30e0253633edfbe5db1b7cd6a5cbbae9ca7ead9ff24ea2",
+    "parent-reproducibility.json": "1f7e22e0fc6a3433d31ba6206a31344e75bbe9813497572cfe425bef8dde61d5",
+    "reproducibility.json": "ee0ab5a6ce351c7a77e20478a70e169a4d8f4a2fce4117857e0817ec737966d7",
+    "resources.json": "0ae5236ecd003a9ddcb6e79a6b04bdc9c15967ea6cc28aed6f86adffe4ba4a63",
+    "scheduler.json": "a9f038ddcc29ab4006b62171d7e4c59246b5dace41af169d47a85bd1aad58309",
+    "setup.json": "34081d9b781dd55b7ff7ba12d3b9f0a6897dc2a02b3ff34df282b67bdd8dbfbe"
+  },
+  "validation_notes": [
+    "Initial CI stopped at README release-boundary validation after a concurrent README refresh; c884c392 restores the three required literals, then full CI was rerun.",
+    "Backend began at 7c6d39ab; the README-only c884c392 was checked out before local-node acceptance. All executable sources were unchanged."
+  ],
+  "editor_commit": "6be19e35dbbfa2ed0e76148f8fe1753a21a5f6cc",
+  "setup_archive_sha256": "677a45c1912713f03c010565c26dae32e647db25d4e63c551d8952c23b6b22c0",
+  "independent_review": "waived by maintainer; not performed",
+  "public_network_deployment": false,
+  "release_publication": false,
+  "evidence_commit_note": "This report and refreshed execution records are an evidence-only commit after the tested source commit; no executable source changes."
+}

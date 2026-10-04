@@ -1,7 +1,7 @@
 {
   "admission": "send_transaction with passthrough outputs validator; consensus and pool verification enabled",
   "circuit_sha256": "ec73a1e355384c722dcae3013f026afd8c97b9d6c804376277111f33df7d40d0",
-  "ckb_binary_sha256": "57a36a20c260934538a2298613741c77acc4f093ac05a925fb8b711c3588deb9",
+  "ckb_binary_sha256": "d78945c76a8e8f8bfaffbeb70ced9d2723ce7fdc5f488653aed12046b15e3a91",
   "ckb_revision": "f7fa4436737756f97a24e254f22c13a36316ecea",
   "ckb_version": "ckb 0.207.0 (f7fa443 2026-06-18)",
   "deployments": [
@@ -17,7 +17,7 @@
       "commit": {
         "generated_blocks_after_submit": 4,
         "status": {
-          "block_hash": "0x91335db188f6bb977f39fb58ccb34e5af5559127224f010f4d5f7bbf5424077e",
+          "block_hash": "0x663f023d76bc90fe0472fff709c63d7e085bb389b052184b1523893b779305c0",
           "block_number": "0x5f",
           "reason": null,
           "status": "committed",
@@ -43,7 +43,7 @@
       "commit": {
         "generated_blocks_after_submit": 4,
         "status": {
-          "block_hash": "0xfc72572804ec63062614147243636edbedffa7e745aab699db692761fd289a9e",
+          "block_hash": "0x8d8cd0151ab184381000fb9e1359c129a296779499326594cf7ee2a0f34dda38",
           "block_number": "0x64",
           "reason": null,
           "status": "committed",
@@ -69,7 +69,7 @@
       "commit": {
         "generated_blocks_after_submit": 4,
         "status": {
-          "block_hash": "0xea3a891008e7ee4dc02c17902aa8ae475ee57c0c151dbdbe8b859815a4791283",
+          "block_hash": "0x455c6986451014f83aaf598bbcb6c500c2fd5ff0b0d04739985ee49e1e926860",
           "block_number": "0x6f",
           "reason": null,
           "status": "committed",
@@ -95,7 +95,7 @@
       "commit": {
         "generated_blocks_after_submit": 4,
         "status": {
-          "block_hash": "0x85fd05cff65c56bdf3a51c814f993125b4f1df2e4227632964b8957e41e640ec",
+          "block_hash": "0x1585fff69f0a399f615be575b13f004d6a6d59c309e305eba247499e385ddb56",
           "block_number": "0x8e",
           "reason": null,
           "status": "committed",
@@ -116,7 +116,7 @@
     {
       "case": "create",
       "commit": {
-        "block_hash": "0xf746ce1989d2b5b038356e2395a33749b8e510961a0d92db3da3ed4ec14f558f",
+        "block_hash": "0x7a920082f2aad0eb44cc41567f366b59e92ba61fc02e21f56c6c05045cf4ce26",
         "block_number": "0x92",
         "reason": null,
         "status": "committed",
@@ -142,13 +142,13 @@
       "bytes": 1050,
       "case": "update-0-1",
       "commit": {
-        "block_hash": "0x4f6567ffca010a2bb71a55f7ed1408ac5f5b0373a5ba358adbf583650514560d",
+        "block_hash": "0xb68578886d55088b8fb754b6c74f675a23f9a551ca8a37dc79cc31a2f835982e",
         "block_number": "0x96",
         "reason": null,
         "status": "committed",
         "tx_index": "0x1"
       },
-      "cycles": 110415398,
+      "cycles": 110416910,
       "tx_hash": "0x946ea93b3ca9fbd6d8acc9f8341f68ff5e5f68b826b54d45f087f5582377dc19"
     },
     {
@@ -177,13 +177,13 @@
       "bytes": 1050,
       "case": "update-1-2",
       "commit": {
-        "block_hash": "0x6662a21992f6b57fce5804e4e8badc0693fcf3c35f2896aaac02550d231cc29f",
+        "block_hash": "0xe2e2091da7b03693692ad499f3c528eaad17db10f74cd17ab828c2213ffe3ef9",
         "block_number": "0x9a",
         "reason": null,
         "status": "committed",
         "tx_index": "0x1"
       },
-      "cycles": 110452705,
+      "cycles": 110438510,
       "tx_hash": "0x78590b65dcb6a1e7925b3774a0778836587d22d46fe3eae6b1214920d79d9213"
     }
   ],
