@@ -14,20 +14,45 @@ review occurred and does not waive compiler/checker agreement, adversarial
 tests, resource budgets, reproducibility, or the unified gates. It does not
 authorize a release publication or a new chain deployment.
 
+## Follow-up scope decision — 2026-10-04
+
+The maintainer requested that #28, #29, #36–#40 and #42 be resolved within
+0.32 and receive individual issue comments. This promotes the previously
+post-v1/post-0.32 work into the implementation scope. It does not make an
+unfinished contract implemented. The separate finance plan (#43) is not part
+of this closure request.
+
+Implementer for this follow-up work: Codex. Independent security review for
+the newly promoted compatible-open handles and open roles is still required
+before stable admission; the earlier waiver is not assumed to cover these
+new contracts. Their reviewer remains to be assigned. Work can proceed through
+implementation and executable verification before that final admission step.
+
+The scope of each issue remains its stated acceptance contract. In particular,
+the cost research can conclude by rejecting a measured candidate and retaining
+the current implementation; this does not implement a deferred optimization.
+#42 requires executable P1 evidence and accepted outcomes or linked scoped
+follow-ups for its remaining tracks. A roadmap alone cannot close it.
+The [open-participant work plan](CELLSCRIPT_OPEN_PARTICIPANTS_PLAN.md) records
+the missing #28/#29 contracts and their implementation/acceptance order.
+
 ## Scope and evidence
 
 | Issue | Required outcome | Current evidence |
 | --- | --- | --- |
 | #41 | Validated low-mask immediates | Implemented at `8017a7bd`; historical evidence retained; integrated clean replay passes 6,782 comparable metrics |
-| #36 | Versioned observed per-VM stack measurements | Implemented diagnostic replay; 13 focused tests and unified gates pass |
-| #37 | Measured dispatch alternatives and explicit selection | 402 tree and 804 saved-selector cases measured; retain current routing; unified gates pass |
+| #36 | Versioned observed per-VM stack measurements | Implemented; historical gate archives verified and 13 focused tests replayed; [closed with evidence](https://github.com/CellScript-Labs/CellScript/issues/36#issuecomment-5980845985) |
+| #37 | Measured dispatch alternatives and explicit selection | 402 tree and 804 saved-selector cases measured; retain current routing; checker/experiment replay passed; [closed with evidence](https://github.com/CellScript-Labs/CellScript/issues/37#issuecomment-5980846593) |
 | #38 | Separately measured borrowing, word copies and staged loading | 18 borrowed-span, 96 word-copy and 24 staged-loader cases measured; default ownership/loading retained pending full equivalence and checker contracts |
 | #39 | Bounded register-retention experiment and scratch-ownership decision | Candidate patch archived and rejected after 1,707 unchanged runs; conservative scratch ownership retained |
 | #40 | Cost attribution, experiment decisions, combined comparison and residual-cost report | Clean 1,707-run attribution, 6,782-metric replay, paired cost frontier and residual sites archived; wider transformations have explicit blockers; unified gates pass |
 | #22 | One exact typed ZK profile, real verifier execution and state binding | V2 composition plus private-counter application circuit, proving/VK package, lifecycle and explicit single-party setup admission implemented |
+| #28 | Independently verified compatible-open Script/verifier handle selection | Exact handles and deployment lines are foundations; the new compatible-set authority, receipt, source/runtime and checker closure remains pending |
+| #29 | Bounded runtime-selected cross-Script roles | Depends on #28; participant/claim attribution, builder materialization and current-Script enforcement remain pending |
+| #42 | Usable ZK application workflow and explicit disposition of remaining tracks | Native/CCC proof snapshot binding and cancellation/retry pass the walkthrough, nine TypeScript tests and pinned-node acceptance (two confirmed updates; corrupted proof rejects with parent error 79); migration and remaining-track acceptance are still open |
 
-#42 remains post-0.32 application tooling. Compatible-open handles (#28) and
-runtime-selected open roles (#29) are not prerequisites for the exact profile.
+#28 and #29 are now independent 0.32 deliverables; they remain unnecessary for
+the already implemented exact ZK profile. #42 no longer has a post-0.32 target.
 An experimental optimization can be rejected on measured evidence; an
 unimplemented or unmeasured experiment must not be described as complete.
 

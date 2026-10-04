@@ -1,9 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ccc } from '@ckb-ccc/shell';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { tmpdir } from 'node:os';
+import { localProver } from './increment.ts';
 import { deriveStatement, PreparedCounter } from './client.ts';
 import type { CounterDeployment, CounterSdk } from './client.ts';
 
@@ -75,4 +77,62 @@ test('snapshot cannot be changed through input objects or statement bytes', () =
   prepared.statementBytes.fill(0);
   assert.equal(prepared.transactionHash, tx.hash());
   assert.deepEqual(prepared.statementBytes, bytes(bridge.statement_bytes));
+});
+test('caller cannot substitute both sides of the proof comparison or sign a placeholder', async () => {
+  const prepared = prepare();
+  assert.throws(() => prepared.checkSigned(tx, tx), /no completed proof/);
+  const proved = await prepared.prove(prover);
+  const changed = proved.clone();
+  const witness = ccc.bytesFrom(changed.getWitnessArgs(0)!.inputType!);
+  witness[witness.length - 1] ^= 1;
+  changed.setWitnessArgs(0, { ...changed.getWitnessArgs(0), inputType: witness });
+  assert.throws(() => prepared.checkSigned(changed, changed), /non-Lock witness/);
+  prepared.checkSigned(proved, proved);
+});
+test('cancelled and failed proving invalidate signing; late completion cannot overwrite a retry', async () => {
+  const prepared = prepare(), oldProof = await prepared.prove(prover);
+  const controller = new AbortController();
+  let finish!: (value: Awaited<ReturnType<typeof prover>>) => void;
+  const pending = prepared.prove(async (_statement, _counters, options) => {
+    assert.equal(options?.signal, controller.signal);
+    return new Promise((resolve) => { finish = resolve; });
+  }, { signal: controller.signal });
+  assert.throws(() => prepared.checkSigned(oldProof, oldProof), /no completed proof/);
+  await assert.rejects(() => prepared.prove(prover), /already in progress/);
+  controller.abort();
+  await assert.rejects(() => pending, /cancelled/);
+  assert.throws(() => prepared.checkSigned(oldProof, oldProof), /no completed proof/);
+  const retry = await prepared.prove(prover);
+  finish({ proof: new Uint8Array(127), publicInputs: new Uint8Array(0) });
+  await Promise.resolve();
+  prepared.checkSigned(retry, retry);
+  await assert.rejects(() => prepared.prove(async () => { throw new Error('prover interrupted'); }), /interrupted/);
+  assert.throws(() => prepared.checkSigned(retry, retry), /no completed proof/);
+  const recovered = await prepared.prove(prover);
+  prepared.checkSigned(recovered, recovered);
+});
+test('spent input fails before invoking the wallet', async () => {
+  const prepared = prepare(), proved = await prepared.prove(prover);
+  let signed = false;
+  const signer = { client: { getCellLive: async () => undefined }, signOnlyTransaction: async () => { signed = true; return proved; } } as unknown as ccc.Signer;
+  await assert.rejects(() => prepared.signAndSend(signer, proved), /spent, missing or inconsistent/);
+  assert.equal(signed, false);
+});
+test('local prover failure redacts captured private data and removes witness files', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'counter-prover-test-'));
+  try {
+    const executable = join(directory, 'prover'), secret = join(directory, 'secret.bin');
+    writeFileSync(secret, new Uint8Array(32).fill(123), { mode: 0o600 });
+    writeFileSync(executable, '#!/bin/sh\ndirname "$4" > "$2/recorded"\ncat "$4" >&2\nexit 9\n', { mode: 0o700 });
+    const prepared = prepare();
+    await assert.rejects(() => prepared.prove(localProver(executable, directory, secret, sdk)), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal(error.message, 'local prover failed or timed out; no proof accepted');
+      assert.equal(error.cause, undefined);
+      assert.ok(!String(error.stack).includes('123,123'));
+      return true;
+    });
+    assert.equal(existsSync(readFileSync(join(directory, 'recorded'), 'utf8').trim()), false);
+    assert.throws(() => prepared.checkSigned(tx, tx), /no completed proof/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });

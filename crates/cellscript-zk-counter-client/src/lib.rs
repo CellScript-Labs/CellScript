@@ -59,6 +59,7 @@ pub struct PreparedIncrement {
     transaction: TransactionView,
     statement: wire::Statement,
     witness_index: usize,
+    proved: Option<TransactionView>,
 }
 
 impl PreparedIncrement {
@@ -100,7 +101,7 @@ impl PreparedIncrement {
         // Both crates expose the same checked profile; decode avoids a cross-crate type assumption.
         let statement =
             wire::Statement::decode(&statement.encode()).map_err(|error| anyhow::anyhow!("ZK statement encoding: {error:?}"))?;
-        Ok(Self { transaction, statement, witness_index })
+        Ok(Self { transaction, statement, witness_index, proved: None })
     }
 
     pub fn statement(&self) -> &wire::Statement {
@@ -109,12 +110,13 @@ impl PreparedIncrement {
 
     /// Performs native Groth16 verification before installing the metadata-encoded payload.
     pub fn attach_proof(
-        &self,
+        &mut self,
         compiled: &cellscript::CompileResult,
         handle: &[u8],
         key: &[u8],
         proof: &[u8],
     ) -> Result<TransactionView> {
+        self.proved = None;
         let contracts: Vec<_> =
             compiled.metadata.runtime.zk_verifiers.iter().filter(|contract| contract.entry == "action:increment").collect();
         let [contract] = contracts.as_slice() else {
@@ -146,28 +148,38 @@ impl PreparedIncrement {
             packed::WitnessArgs::from_slice(&previous).context("counter witness is not WitnessArgs")?
         };
         witnesses[self.witness_index] = args.as_builder().input_type(Some(Bytes::from(payload)).pack()).build().as_bytes().pack();
-        Ok(self.transaction.as_advanced_builder().set_witnesses(witnesses).build())
+        let proved = self.transaction.as_advanced_builder().set_witnesses(witnesses).build();
+        self.proved = Some(proved.clone());
+        Ok(proved)
     }
 
     pub fn check_signed(&self, proved: &TransactionView, signed: &TransactionView) -> Result<()> {
+        let accepted =
+            self.proved.as_ref().context("no completed proof for this prepared transaction; attach proof before signing")?;
         ensure!(
             proved.hash() == self.transaction.hash() && signed.hash() == self.transaction.hash(),
             "ZK raw transaction changed after proving; finalize fees/dependencies and generate a new proof"
         );
-        ensure!(proved.witnesses().len() == signed.witnesses().len(), "wallet changed witness count after proving");
-        for (before, after) in proved.witnesses().into_iter().zip(signed.witnesses()) {
-            if before == after {
-                continue;
-            }
-            let before = packed::WitnessArgs::from_slice(&before.raw_data()).context("original witness is not WitnessArgs")?;
-            let after = packed::WitnessArgs::from_slice(&after.raw_data()).context("signed witness is not WitnessArgs")?;
-            ensure!(
-                before.input_type() == after.input_type() && before.output_type() == after.output_type(),
-                "wallet changed a proof or non-Lock witness field"
-            );
-        }
+        check_witness_fields(accepted, proved)?;
+        check_witness_fields(proved, signed)?;
         let witness = signed.witnesses().get(self.witness_index).context("counter witness missing")?.raw_data();
         ensure!(packed::WitnessArgs::from_slice(&witness)?.input_type().to_opt().is_some(), "counter proof witness missing");
         Ok(())
     }
+}
+
+fn check_witness_fields(proved: &TransactionView, signed: &TransactionView) -> Result<()> {
+    ensure!(proved.witnesses().len() == signed.witnesses().len(), "wallet changed witness count after proving");
+    for (before, after) in proved.witnesses().into_iter().zip(signed.witnesses()) {
+        if before == after {
+            continue;
+        }
+        let before = packed::WitnessArgs::from_slice(&before.raw_data()).context("original witness is not WitnessArgs")?;
+        let after = packed::WitnessArgs::from_slice(&after.raw_data()).context("signed witness is not WitnessArgs")?;
+        ensure!(
+            before.input_type() == after.input_type() && before.output_type() == after.output_type(),
+            "wallet changed a proof or non-Lock witness field"
+        );
+    }
+    Ok(())
 }

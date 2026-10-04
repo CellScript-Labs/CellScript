@@ -92,7 +92,8 @@ fn main() -> Result<()> {
                 .set_cell_deps(deps.clone())
                 .build(),
         );
-        let prepared = PreparedIncrement::new(transaction.clone(), &[(previous.clone(), cell.clone(), data(old))], &script)?;
+        let mut prepared = PreparedIncrement::new(transaction.clone(), &[(previous.clone(), cell.clone(), data(old))], &script)?;
+        ensure!(prepared.check_signed(&transaction, &transaction).is_err(), "unproved transaction must not pass signing checks");
         let statement = prepared.statement().clone();
         let proving = Instant::now();
         let proof = counter::prove(
@@ -112,6 +113,8 @@ fn main() -> Result<()> {
         }
         let signed = prepared.attach_proof(&compiled, &handle, &key, &proof)?; // Fixture Lock needs no signature.
         prepared.check_signed(&signed, &signed)?;
+        let forged = signed.as_advanced_builder().set_witnesses(vec![unchecked_witness(&compiled, &[0; 128], &handle).pack()]).build();
+        ensure!(prepared.check_signed(&forged, &forged).is_err(), "replacing both comparison inputs must not bypass proof binding");
         let changed = signed.as_advanced_builder().version(1u32).build();
         ensure!(prepared.check_signed(&signed, &changed).is_err(), "raw mutation must require reproving");
         ensure!(signed.hash() == transaction.hash(), "installing witnesses must preserve the raw transaction hash");
@@ -123,6 +126,7 @@ fn main() -> Result<()> {
             let mut corrupt = proof;
             corrupt[0] ^= 1;
             ensure!(prepared.attach_proof(&compiled, &handle, &key, &corrupt).is_err(), "native verifier must reject corruption");
+            ensure!(prepared.check_signed(&signed, &signed).is_err(), "failed proof replacement must invalidate signing");
             let mut wrong_key = key.clone();
             wrong_key[0] ^= 1;
             ensure!(
@@ -139,6 +143,8 @@ fn main() -> Result<()> {
                     .contains("exact handle differs"),
                 "handle mismatch needs a precise diagnosis"
             );
+            let recovered = prepared.attach_proof(&compiled, &handle, &key, &proof)?;
+            prepared.check_signed(&recovered, &recovered)?;
 
             let error = context.verify_tx(&with_proof(&corrupt), 250_000_000).expect_err("corrupt proof must reject");
             ensure!(error.to_string().contains("error code 79"), "unexpected corrupt-proof failure: {error}");

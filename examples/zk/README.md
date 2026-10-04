@@ -40,7 +40,7 @@ wallet/deployment plumbing do not repin the circuit's setup-bound `Cargo.lock`.
 ```rust
 let parent = client::parent(&deployment, &child_elf, &verification_key)?;
 // Resolve inputs and complete dependencies, fee inputs and change first.
-let prepared = client::PreparedIncrement::new(transaction, &resolved_inputs, &type_script)?;
+let mut prepared = client::PreparedIncrement::new(transaction, &resolved_inputs, &type_script)?;
 let proof = counter::prove(&pk, CounterCircuit {
     statement: prepared.statement().clone(), witness,
 }, &mut OsRng)?;
@@ -54,6 +54,10 @@ prepared.check_signed(&proved, &signed)?;
 final raw transaction, checks the counter transition, verifies Groth16 locally,
 and preserves an existing Lock witness while placing the metadata-encoded proof.
 `check_signed` rejects raw transaction changes and changes to the counter proof.
+It checks against the privately retained result of `attach_proof`, so replacing
+both caller-supplied comparison arguments cannot authorize a different proof.
+An unsuccessful proof replacement invalidates the prior signing state; attach
+a valid proof again before signing.
 The caller's chain provider remains responsible for current liveness and submission.
 The executable walkthrough supplies concrete values for every application type;
 the wallet call above is an integration point, not a bundled Rust wallet.
@@ -115,6 +119,23 @@ wallet key is a separate 32-byte hex key. `localProver` uses a private temporary
 directory, invokes the native prover without secret command-line arguments,
 and removes its witness files on completion. Browser apps supply their own prover
 callback; secrets should stay within their chosen prover trust boundary.
+The local process is asynchronous, has a 120-second timeout and bounded output,
+and its captured diagnostics are not included in thrown errors because a prover
+could print private witness data. To cancel, call
+`prepared.prove(prover, { signal: controller.signal })` with an `AbortController`.
+Custom callbacks receive that signal as their third argument and should stop
+their underlying work. Even if a callback ignores cancellation, a late result
+cannot become the accepted proof or replace a successful retry. Only one proof
+request per prepared transaction may be active at once.
+
+Cancelled or failed proving leaves the prepared transaction unsigned. Retry
+`prove` against the same finalized transaction if its inputs remain live;
+otherwise resolve the intended successor and prepare a new transaction and
+proof. The adapter checks live inputs and deployment before invoking the wallet
+and again before dry-run/submission. These checks cannot prevent another
+transaction spending an input immediately afterward. The adapter retains its
+own accepted proof witness and rejects caller-side proof substitution even when
+the supplied comparison arguments agree. Only Lock witness fields may change.
 
 The CLI's default known scripts are testnet deployments. For a custom chain,
 construct a CCC client with that chain's `scripts` configuration and call the API;
@@ -167,6 +188,41 @@ with the local runner first.
 
 ## Diagnostics and remaining DX limits
 
+### Privacy and transaction linkage
+
+The protected witness is the 32-byte owner secret. The owner commitment and
+counter are public Cell data; the input outpoint, successor, capacities, Locks,
+dependencies, fee inputs and final raw transaction are public as well. The
+statement binds the Script hash, old/new data hashes, consumed outpoint and raw
+transaction hash. Its public-input encoding does not hide those values.
+Successive states remain linkable through the consumed outpoint and instance
+Script, and funding/fee inputs can link the application to the signing wallet.
+Proof validity is therefore a secret-knowledge authorization claim, not an
+anonymity, hidden-balance or hidden-counter claim.
+
+The local prover process and its host see the secret. Temporary witness files
+are removed on success/failure; this is not verified secure erasure and does not
+remove the caller's original secret file. A remote/browser prover callback has
+its own trust and logging boundary. Default walkthrough setup and secrets are
+public fixtures. Circuit correctness, setup trust, proof validity and these
+privacy properties must be assessed separately.
+
+### Recovery boundaries
+
+Before calling `signAndSend`, retain `prepared.transactionHash` with the user
+intent. A dry-run error stops this attempt before submission; inspect its cause
+to distinguish execution rejection from an unavailable RPC result. An exception from
+submission or confirmation can leave the outcome unknown: reconcile that exact
+hash with the node before preparing a replacement increment. A timeout does not
+prove that the transaction failed. The adapter does not automatically retry a
+different transaction or authorize an additional increment.
+
+An already spent input must be resolved against the application's intended
+instance and expected counter before preparing again. The client deliberately
+does not discover an arbitrary successor or silently move the user's intent to
+another instance. Changing raw fields requires a fresh statement/proof; retrying
+interrupted proving against an unchanged, still-live transaction is supported.
+
 | Failure | Client response |
 | --- | --- |
 | Wrong genesis, child or VK | Names the mismatched deployment before proving |
@@ -175,6 +231,8 @@ with the local runner first.
 | Wallet overwrites proof | Preserve `WitnessArgs.input_type`; sign Lock fields |
 | Wrong owner, overflow or skipped count | Reject the application transition locally |
 | Stale public inputs or short proof | Reject before witness insertion |
+| Cancelled/failed proving | Invalidate signing state; re-run proving before signing |
+| Uncertain submission/confirmation | Reconcile the saved transaction hash before a new increment |
 | Cryptographic/node rejection | Preserve the node cause; parent 79 alone cannot identify why the child rejected |
 
 The counter integration now has a reusable native library and a complete CCC

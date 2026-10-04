@@ -1,15 +1,17 @@
 // Run a counter update with a CCC signer and the native local prover.
 import { ccc } from '@ckb-ccc/shell';
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
 import { prepareIncrement } from './client.ts';
 import type { CounterDeployment, CounterSdk, Prover } from './client.ts';
 
 export function localProver(executable: string, setupPackage: string, secretFile: string, sdk: CounterSdk): Prover {
-  return async (statement, counters) => {
+  return async (statement, counters, { signal } = {}) => {
+    signal?.throwIfAborted();
     const directory = mkdtempSync(join(tmpdir(), 'cellscript-counter-'));
     try {
       const secret = readFileSync(secretFile);
@@ -17,7 +19,13 @@ export function localProver(executable: string, setupPackage: string, secretFile
       writeFileSync(join(directory, 'statement.bin'), statement, { mode: 0o600 });
       // Emit u64 as JSON integer tokens without conversion through JavaScript Number.
       writeFileSync(join(directory, 'witness.json'), `{"secret":${JSON.stringify([...secret])},"old_counter":${counters.oldCounter},"new_counter":${counters.newCounter}}`, { mode: 0o600 });
-      execFileSync(executable, ['prove', setupPackage, join(directory, 'statement.bin'), join(directory, 'witness.json'), join(directory, 'proof.bin')], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 120_000 });
+      try {
+        await promisify(execFile)(executable, ['prove', setupPackage, join(directory, 'statement.bin'), join(directory, 'witness.json'), join(directory, 'proof.bin')], { timeout: 120_000, maxBuffer: 64 * 1024, killSignal: 'SIGKILL', signal });
+      } catch {
+        signal?.throwIfAborted();
+        // Child diagnostics may contain the private witness; never expose them.
+        throw new Error('local prover failed or timed out; no proof accepted');
+      }
       // Public inputs are canonical limbs of the exact statement sent to this prover.
       const view = new DataView(statement.buffer, statement.byteOffset, statement.byteLength);
       const publicInputs = sdk.encodeZkPublicInputs({ domain: statement.slice(0,32), action: statement.slice(32,64), scriptHash: statement.slice(64,96), oldDataHash: statement.slice(96,128), newDataHash: statement.slice(128,160), inputTransactionHash: statement.slice(160,192), inputOutputIndex: view.getUint32(192,true), transactionHash: statement.slice(196,228) });
