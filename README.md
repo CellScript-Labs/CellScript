@@ -30,7 +30,7 @@ review and release-evidence records; publication does not imply a passed full
 release gate or fresh public-network deployment.
 
 The `0.32` branch contains unreleased cost and experimental ZK work. Workspace
-versions remain 0.31.0 until coordinated release preparation. See
+manifests keep `version = "0.31.0"` until coordinated release preparation. See
 [branch context](BRANCHES.md) and the [changelog](CHANGELOG.md) for the distinction
 between published artifacts and development work.
 
@@ -318,14 +318,14 @@ Frequently used reports and tools include:
 |---|---|
 | `cellc metadata` / `expand` / `constraints` | Inspect semantic facts, canonical expansion, and policy constraints |
 | `cellc abi` / `entry-witness` | Inspect or encode the entry witness ABI |
-| `cellc action build` / `gen-builder --target typescript` | Generate builder contracts and TypeScript packages |
+| `cellc action build` / `cellc gen-builder --target typescript` | Generate builder contracts and TypeScript packages |
 | `cellc scheduler-plan` / `explain assumptions` | Inspect access summaries and builder obligations |
 | `cellc tx validate` / `tx solve` | Check transaction shape or generate a transaction template |
 | `cellc deploy plan` / `deploy verify` | Plan or verify deployment identity |
 | `cellc verify-artifact` | Independently check the complete ELF bundle |
 | `cellc profile` / `opt-report` / `audit-bundle` | Inspect cost, optimization, and audit reports |
 | `cellc fmt` / `doc` | Format source or generate documentation |
-| `cellc package verify` / `registry verify` | Verify package or deployment identities |
+| `cellc package verify` / `cellc registry verify --live` | Verify package or live deployment identities |
 | `cellc artifact ls-idl validate\|bind\|fetch\|bundle` | Work with byte-exact Lock Script interfaces |
 
 `--json` writes a machine-readable result to stdout for both success and
