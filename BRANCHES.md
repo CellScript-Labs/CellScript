@@ -17,7 +17,7 @@ The branch integrates the published 0.31 history through `5fd4c469`; workspace
 versions remain 0.31.0 pending coordinated release preparation. The exact
 ZK interface has completed first-profile acceptance with a private-counter
 circuit and scoped local-setup admission. The [developer walkthrough](examples/zk/README.md)
-documents the application flow and remaining SDK work. This branch is
+documents the native/CCC application flow and remaining setup/deployment work. This branch is
 not a release announcement or deployment receipt.
 
 ## Branch decision — 2026-09-21

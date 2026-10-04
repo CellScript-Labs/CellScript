@@ -17,8 +17,11 @@ cargo build --locked --manifest-path contracts/zk-transition-verifier/Cargo.toml
 cargo build --locked --manifest-path contracts/zk-private-counter/script/Cargo.toml --target riscv64imac-unknown-none-elf --release
 args=("$output")
 if [[ $# -eq 2 ]]; then args+=("$2"); fi
-cargo run --locked --release --manifest-path contracts/zk-private-counter/Cargo.toml --example counter-walkthrough -- "${args[@]}"
+cargo run --locked --release --manifest-path crates/cellscript-zk-counter-client/Cargo.toml --example counter-walkthrough -- "${args[@]}"
 cargo run --locked -p cellscript --bin cellc -- gen-builder --target typescript \
     --metadata "$output/parent-metadata.json" --output "$output/sdk"
 node --experimental-strip-types examples/zk/accept-proof.ts "$output"
+npm --prefix examples/zk ci --ignore-scripts --no-audit --no-fund
+npm --prefix examples/zk run check
+CELLSCRIPT_ZK_WALKTHROUGH="$(cd "$output" && pwd)" npm --prefix examples/zk test
 printf '\nExamples passed. Read %s/walkthrough-report.json and typescript-report.json\n' "$output"

@@ -1,0 +1,24 @@
+[package]
+name = "cellscript-zk-counter-client"
+version = "0.31.0"
+edition = "2024"
+rust-version = "1.97.1"
+publish = false
+license = "MIT"
+description = "Native client for the exact private-counter ZK application"
+
+[workspace]
+
+[dependencies]
+anyhow = "1.0"
+cellscript = { path = "../.." }
+cellscript-ckb-adapter = { path = "../cellscript-ckb-adapter" }
+cellscript-zk-private-counter = { path = "../../contracts/zk-private-counter" }
+ckb-types = "1.0.0"
+hex = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[dev-dependencies]
+ark-std = "0.5.0"
+ckb-testtool = "1.1.1"

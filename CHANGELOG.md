@@ -15,8 +15,10 @@ separate stack-resource replay complete the first profile acceptance surface. Se
 Add a runnable counter walkthrough and a TypeScript example importing its
 generated SDK. Fix generated packages crashing on import when their Molecule
 schema list is empty; exercise the complete package in a Node regression test.
-The [DX assessment](docs/CELLSCRIPT_ZK_DEVELOPER_EXPERIENCE.md) records remaining
-wallet, deployment and application-builder work.
+Add a native counter client, checked manifest export and a CCC adapter that
+resolves Cells, completes fees before proving, preserves proof witnesses during
+signing, dry-runs and awaits commitment. Consolidate the DX assessment into the
+[developer guide](examples/zk/README.md); retain the profile and acceptance records.
 
 Construct low-bit masks `2^n - 1` for n=31..63 with `addi -1; srli`
 when this is strictly shorter than the 0.31 immediate plan. Preserve existing

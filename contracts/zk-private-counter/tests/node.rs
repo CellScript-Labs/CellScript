@@ -1,5 +1,7 @@
 //! Explicit local-node acceptance, separately invoked with a pinned CKB build.
 // Reuse the repository's maintained node lifecycle/RPC harness.
+#[path = "support/ccc.rs"]
+mod ccc;
 #[allow(dead_code)]
 #[path = "../../../crates/cellscript-tools/src/ckb_devnet.rs"]
 mod devnet;
@@ -83,6 +85,11 @@ fn counter_node_acceptance() {
         std::process::id()
     ));
     let mut node = devnet::CkbDevnet::new(repo, bin.clone(), run.clone()).unwrap();
+    if std::env::var_os("CELLSCRIPT_COUNTER_CCC").is_some() {
+        let config = node.ckb_dir.join("ckb.toml");
+        let text = std::fs::read_to_string(&config).unwrap().replace("\"IntegrationTest\"", "\"IntegrationTest\", \"Indexer\"");
+        std::fs::write(config, text).unwrap();
+    }
     node.start().unwrap();
     let genesis = node.get_block_by_number(0).unwrap();
     let always_dep = devnet::always_success_dep(genesis["transactions"][0]["hash"].as_str().unwrap());
@@ -187,6 +194,19 @@ fn counter_node_acceptance() {
         rows.push(json!({"case":format!("update-{n}-{}",n+1),"cycles":cycles,"commit":committed,"tx_hash":tx_hash,"bytes":tx.data().as_slice().len()}));
         previous = packed::OutPoint::new_builder().tx_hash(tx.hash()).index(0u32).build();
         old_proof = Some(proof.to_vec());
+    }
+    if std::env::var_os("CELLSCRIPT_COUNTER_CCC").is_some() {
+        rows.push(ccc::run(
+            &mut node,
+            &root,
+            &run,
+            &genesis,
+            &[child_deploy.clone(), vk_deploy.clone(), parent_deploy.clone(), lifecycle_deploy.clone()],
+            &previous,
+            &compiled,
+            &handle,
+            &key,
+        ));
     }
     node.stop();
     let report = json!({"schema":"cellscript-counter-node-evidence-v1","status":"passed","circuit_sha256":manifest.circuit.r1cs_sha256,"verification_key_data_hash":manifest.verification_key_data_hash,

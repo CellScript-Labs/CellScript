@@ -7,8 +7,8 @@ not confidential state or a payment protocol.
 
 Start with the [application walkthrough](../../examples/zk/README.md) for a
 single command that runs the counter in CKB-VM and imports its generated
-TypeScript SDK. It includes corruption/replay negatives and a concrete
-[developer-experience assessment](../../docs/CELLSCRIPT_ZK_DEVELOPER_EXPERIENCE.md).
+TypeScript SDK. The same guide covers the native client, CCC wallet integration,
+manifest export and remaining developer-experience limits.
 
 ## Relation and lifecycle
 
@@ -78,21 +78,11 @@ contents. `prove` accepts the exact 228-byte statement and a JSON object with
 `secret` (32 byte values), `old_counter`, and `new_counter`. Protect that JSON
 as a secret. Existing output files are not overwritten.
 
-After deploying the exact child, export its deployment-specific parent:
-
-```bash
-cargo run --locked --release --manifest-path contracts/zk-private-counter/Cargo.toml \
-  --example export-parent -- CHAIN_ID GENESIS_HASH CHILD_TX_HASH CHILD_INDEX \
-  PACKAGE OUTPUT_DIR EXPECTED_CHILD_DATA_HASH
-```
-
-This writes the parent ELF, compile metadata, encoded ExactScriptHandle and
-binding identities. It does not attest that a supplied outpoint is live.
-`tests/support/mod.rs` contains the same transaction/statement/witness builders
-used by the scheduler and node suites. CellDep index 0 is the child; the exact
-VK, parent and lifecycle code must also be available. Script hash type `data2`
-is used on the node. A fresh deployment outpoint changes the exact handle and
-therefore requires a new parent, even if the child ELF bytes are identical.
+Use the [developer guide](../../examples/zk/README.md#export-the-exact-parent)
+for manifest-driven parent export and transaction clients. The supported host
+library is `crates/cellscript-zk-counter-client`; tests use the same native
+parent builder. CellDep slot 0 is the exact child, and the VK, parent and
+lifecycle must also be available.
 
 ## Evidence and admission
 

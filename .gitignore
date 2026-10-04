@@ -99,3 +99,5 @@ docs/**/*_ZH.md
 docs/**/*_CH.md
 !README_CH.md
 AGENTS.md
+
+/crates/cellscript-zk-counter-client/target/

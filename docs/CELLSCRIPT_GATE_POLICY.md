@@ -46,7 +46,10 @@ reproduction and observed stack replay; backend also runs local-node acceptance.
 
 `ci` also runs `examples/zk/run.sh` in a fresh ignored target directory: public
 test setup, counter creation/two updates, corrupt-proof/replay rejection and
-actual generated TypeScript SDK import/byte binding. These example records do
+actual generated TypeScript SDK import, CCC-derived statements and proof/wallet mutation checks.
+All three gates check the native counter client; the opt-in
+`CELLSCRIPT_COUNTER_CCC=1` node suite exercises confirmed CCC updates with real
+secp256k1 fee-input signatures. These example records do
 not overwrite candidate admission evidence. The CLI suite executes a generated
 schema-free SDK and its own tests to catch package-import regressions.
 

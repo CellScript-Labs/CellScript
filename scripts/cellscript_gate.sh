@@ -546,6 +546,9 @@ run_zk_child_research_check() {
     run cargo clippy --locked --manifest-path contracts/zk-private-counter/script/Cargo.toml \
         --target riscv64imac-unknown-none-elf --release -- -D warnings
     run cargo test --locked --manifest-path contracts/zk-private-counter/Cargo.toml --release -- --test-threads=1
+    run cargo fmt --manifest-path crates/cellscript-zk-counter-client/Cargo.toml -- --check
+    run cargo clippy --locked --release --manifest-path crates/cellscript-zk-counter-client/Cargo.toml --all-targets -- -D warnings
+    run cargo test --locked --release --manifest-path crates/cellscript-zk-counter-client/Cargo.toml
     run bash contracts/zk-private-counter/reproduce.sh
     run cargo test --locked -p cellscript --release --test zk_resources -- --ignored --nocapture
 }

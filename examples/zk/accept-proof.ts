@@ -50,4 +50,4 @@ writeFileSync(join(output, 'typescript-report.json'), JSON.stringify({
   corrupt_proof_requires_onchain_verifier: true, plan_status: plan.status, can_submit: plan.canSubmit,
 }, null, 2) + '\n');
 console.log('Rust/TypeScript bytes match; stale transaction and truncated proof rejected.');
-console.log(`Generated plan: ${plan.status}, canSubmit=${plan.canSubmit}. RPC/wallet integration is still required.`);
+console.log(`Generated plan: ${plan.status}, canSubmit=${plan.canSubmit}. Use client.ts to resolve, prove, sign and submit this plan.`);

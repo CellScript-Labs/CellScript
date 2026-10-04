@@ -9736,6 +9736,7 @@ fn typescript_builder_index(
     ts.push_str("export const transactionViewHandles = builderManifest.transaction_view_handles;\n");
     ts.push_str(&format!("export const signingMessageDomains = {signing_message_domains_json} as const;\n"));
     ts.push_str(include_str!("zk_builder.ts"));
+    ts.push_str(include_str!("zk_witness_builder.ts"));
     ts.push_str(&format!(
         "export const zkVerifierContracts = {} as const;\n",
         json_string_pretty("ZK verifier contracts", &metadata.runtime.zk_verifiers)?

@@ -1,166 +1,192 @@
-# Build a ZK-backed CellScript application
+# Build a ZK counter application
 
-These two examples use the existing private-authorization counter circuit:
+This is the developer entry point for the private-authorization counter: a public
+counter advances by one when the caller proves knowledge of its owner's secret.
+It demonstrates one circuit with Rust and TypeScript clients. Another relation
+needs its own circuit, setup/VK and lifecycle; editing the `.cell` parent alone
+cannot turn this counter into a payment or membership application.
 
-1. **Rust application walkthrough:** create a counter, prove `0 -> 1` and `1 -> 2`,
-   execute the lifecycle/CellScript parent/Groth16 child in CKB-VM, and reject a
-   corrupt proof and a replayed proof.
-2. **TypeScript integration:** import an actual generated SDK, consume the first
-   walkthrough's proof, reproduce the Rust statement/public inputs/request,
-   reject stale public inputs, and inspect the generated action plan.
+## Run locally
 
-They are one application with two integration examples, not two different
-circuits. The owner secret is private in the protocol; this tutorial deliberately
-uses a public test secret. Counter values and owner commitment remain public.
-
-## Run both
-
-Use a checkout of the `0.32` development branch with Rust 1.97.1 and Node supporting
-`--experimental-strip-types` (tested with Node 22.23.1). Source builds also require
-a sibling `../ckb-sdk-rust` checkout at tag `v5.1.0`, because the workspace uses
-path dependencies. The published 0.31 CLI and browser bundle do not expose this
-new profile. From the repository root:
+Use the repository's Rust 1.97.1 toolchain, the
+`riscv64imac-unknown-none-elf` target, Node 22.18+ and npm. The current workspace
+also requires `ckb-sdk-rust` at tag `v5.1.0` in a sibling directory:
 
 ```bash
-git clone --branch v5.1.0 --depth 1 https://github.com/nervosnetwork/ckb-sdk-rust.git ../ckb-sdk-rust
+git clone --branch v5.1.0 https://github.com/nervosnetwork/ckb-sdk-rust.git ../ckb-sdk-rust
 rustup target add riscv64imac-unknown-none-elf
-examples/zk/run.sh target/my-zk-app
+bash examples/zk/run.sh target/my-zk-app
 ```
 
-Skip the clone if the matching sibling checkout already exists. Repository-wide
-gates additionally require the submodules described in the root development guide;
-the walkthrough does not run those gates automatically.
+The runner builds the scripts, creates a public test setup, verifies creation and
+two increments in CKB-VM, generates a TypeScript SDK, then tests the CCC adapter.
+It rejects reused/corrupt proofs, changed transactions and overwritten witnesses.
+Choose a new output directory for each run. Supply a matching setup package as a
+second argument to reuse it. Tutorial secrets and default setup are public test
+fixtures; their output is not production admission.
 
-Choose an output directory that does not exist. A first build downloads/builds
-locked dependencies; subsequent runs reuse Cargo caches. No RPC, wallet, Docker,
-public deployment or existing PK is needed. The script builds the child and
-lifecycle binaries, generates a **public test setup**, runs the Rust example,
-generates a TypeScript SDK and executes the TypeScript example.
+The [Rust walkthrough](../../crates/cellscript-zk-counter-client/examples/counter-walkthrough.rs)
+uses the supported `cellscript-zk-counter-client` library. Its chain store is
+`ckb-testtool`, with an always-success fixture Lock. Read `walkthrough-report.json`
+for VM cycles, and `parent.cell` for the actual generated action. This fixture
+run does not submit to a node or establish live deployment availability.
 
-To exercise a previously generated, matching setup package instead:
+## Rust application API
+
+Add path dependencies on `crates/cellscript-zk-counter-client` and
+`contracts/zk-private-counter`. The client is a separate host crate so changes to
+wallet/deployment plumbing do not repin the circuit's setup-bound `Cargo.lock`.
+
+```rust
+let parent = client::parent(&deployment, &child_elf, &verification_key)?;
+// Resolve inputs and complete dependencies, fee inputs and change first.
+let prepared = client::PreparedIncrement::new(transaction, &resolved_inputs, &type_script)?;
+let proof = counter::prove(&pk, CounterCircuit {
+    statement: prepared.statement().clone(), witness,
+}, &mut OsRng)?;
+let proved = prepared.attach_proof(&parent.compiled, &parent.handle, &verification_key, &proof)?;
+let signed = wallet_sign(proved.clone())?; // Your chosen wallet implementation.
+prepared.check_signed(&proved, &signed)?;
+// Dry-run the signed transaction, submit it and wait for commitment.
+```
+
+`PreparedIncrement` derives the statement from the ordered resolved inputs and
+final raw transaction, checks the counter transition, verifies Groth16 locally,
+and preserves an existing Lock witness while placing the metadata-encoded proof.
+`check_signed` rejects raw transaction changes and changes to the counter proof.
+The caller's chain provider remains responsible for current liveness and submission.
+The executable walkthrough supplies concrete values for every application type;
+the wallet call above is an integration point, not a bundled Rust wallet.
+
+## TypeScript / CCC application API
+
+[`client.ts`](client.ts) uses pinned `@ckb-ccc/shell` APIs for live input/code
+resolution, genesis and deployment checks, fee completion, statement derivation,
+proof placement, signing, node dry-run, submission and confirmation. It accepts a
+CCC `Signer`, including a connector wallet's signer. The generated SDK supplies
+the exact codecs, parent identities and witness encoder.
+
+```typescript
+const prepared = await prepareIncrement(signer, counterOutPoint, deployment, sdk);
+const proved = await prepared.prove(prover);
+const { hash } = await prepared.signAndSend(signer, proved);
+```
+
+`prepareIncrement` reserves the entire proof/handle payload before CCC calculates
+fees and prepares wallet dependencies. The returned snapshot cannot be mutated.
+The prover receives the finalized statement and counter values. Signing uses
+`signOnlyTransaction`; a wallet that requires raw changes must return to preparation
+and generate a new proof. Extra Lock dependencies can be supplied in `lockDeps`.
+The counter's capacity and Lock stay unchanged; fees come from separate Cells.
+
+For a node script with a local prover and a secp256k1 wallet, use
+[`increment.ts`](increment.ts):
 
 ```bash
-examples/zk/run.sh target/my-zk-app-candidate /absolute/path/to/setup-package
+cargo build --locked --release --manifest-path contracts/zk-private-counter/Cargo.toml
+node --experimental-strip-types examples/zk/increment.ts /path/to/config.json
 ```
 
-Passing a candidate package does not make these tutorial transactions deployable:
-the owner secret and proof randomness are still public fixtures. It does not
-rewrite existing admission reports. Do not use the tutorial's keys or custody
-for real assets.
+Configuration paths resolve from the current working directory:
 
-The final lines should report matching Rust/TypeScript bytes and
-`canSubmit=false`. Both report files must say `"status": "passed"`.
+```json
+{
+  "rpcUrl": "http://127.0.0.1:8114",
+  "sdkDirectory": "/path/to/generated-sdk",
+  "proverExecutable": "/path/to/cellscript-zk-private-counter",
+  "setupPackage": "/path/to/setup-package",
+  "ownerSecretFile": "/path/to/owner.bin",
+  "walletKeyFile": "/path/to/wallet.hex",
+  "counter": { "txHash": "0x<live counter transaction hash>", "index": 0 },
+  "deployment": {
+    "genesisHash": "0x<genesis hash>",
+    "child": { "outPoint": { "txHash": "0x<hash>", "index": 0 }, "dataHash": "0x<child hash>" },
+    "verificationKey": { "outPoint": { "txHash": "0x<hash>", "index": 0 }, "dataHash": "0x<VK hash>" },
+    "parent": { "outPoint": { "txHash": "0x<hash>", "index": 0 }, "dataHash": "0x<parent hash>" },
+    "lifecycle": { "outPoint": { "txHash": "0x<hash>", "index": 0 }, "dataHash": "0x<lifecycle hash>" },
+    "handle": "0x<exact-handle.bin bytes>"
+  }
+}
+```
 
-## Example 1: the application
+Replace all angle-bracket placeholders with the observed deployment identities.
+The owner secret is 32 binary bytes from the native `new-secret` command; the
+wallet key is a separate 32-byte hex key. `localProver` uses a private temporary
+directory, invokes the native prover without secret command-line arguments,
+and removes its witness files on completion. Browser apps supply their own prover
+callback; secrets should stay within their chosen prover trust boundary.
 
-Read [`counter-walkthrough.rs`](../../contracts/zk-private-counter/examples/counter-walkthrough.rs).
-Its application flow is:
+The CLI's default known scripts are testnet deployments. For a custom chain,
+construct a CCC client with that chain's `scripts` configuration and call the API;
+[`node-client.ts`](node-client.ts) demonstrates this with the local genesis secp
+script and DAO definition; its wallet limits address discovery to secp because
+the integration chain has no ACP deployment. No public deployment is included in the example.
 
-1. Choose the **relation**, not just a proof system: know the owner secret, preserve
-   the owner commitment, increment exactly once, reject u64 overflow. The pinned
-   Rust circuit implements this relation; CellScript does not compile a circuit.
-2. Bind the exact verifier deployment and VK. The shared fixture builder produces
-   the named dependency configuration and calls `compile_with_zk_deploy`.
-3. Create a zero-valued Cell. A separate lifecycle Type Script controls creation,
-   owner/Lock/capacity preservation, unique successor and non-burning. It EXECs
-   the generated CellScript parent on an update.
-4. Finish the raw transaction, including all dependencies, before deriving the
-   statement. It binds domain, action, Script, old/new data, consumed outpoint and
-   the complete raw transaction hash.
-5. Generate and locally verify the Groth16 proof, encode the action's entry
-   witness from compiler metadata, then verify the complete transaction in CKB-VM.
-6. Resolve the resulting Cell and repeat. Reusing the previous proof must fail.
+## Export the exact parent
 
-Inspect the artifacts:
+After deploying the child, write a `Deployment` JSON with `chain_id`,
+`genesis_hash`, `child_tx_hash`, `child_index`, `child_data_hash` and
+`verification_key_hash`. Hashes are 32-byte hex strings; unknown fields reject.
+The VM walkthrough exports a complete `deployment.json` as a format example,
+with synthetic coordinates that must not be reused on a live chain.
 
 ```bash
-cat target/my-zk-app/parent.cell
-cat target/my-zk-app/named-deployment.json
-cat target/my-zk-app/walkthrough-report.json
+cargo run --locked --release --manifest-path crates/cellscript-zk-counter-client/Cargo.toml \
+  --example export-parent -- deployment.json child.elf SETUP_PACKAGE NEW_OUTPUT_DIR
 ```
 
-`parent.cell` is runnable generated source, including the four exact commitment
-literals. Its `zk::require_valid` call passes `ZkTransitionProof`, an
-`ExactScriptHandle`, the named policy and an explicit dependency index. The
-compiler cross-checks that index against the named deployment declaration; the
-on-chain parent checks the actual bytes and enforces Spawn/IPC/Wait success.
-The generated JSON is `CkbDeployConfig` for the native API, not a `Cell.toml` file.
+The exporter checks both binary identities and emits source, ELF, compiler
+metadata, named deployment configuration and exact handle. Generate the SDK from
+that metadata using `cellc gen-builder --target typescript`. Deploy the emitted
+parent and lifecycle before creating an instance. A new child outpoint changes
+the handle and requires a new parent even when the child bytes are unchanged.
+The exporter binds supplied coordinates; the CCC client checks them against live
+Cells and genesis. Neither operation replaces setup admission.
 
-The example exports `parent.elf`, full compile metadata, the exact handle,
-`statement.bin`, `proof.bin`, the first `transaction.bin`, `bridge.json`, and
-`walkthrough-report.json`. The default run also writes its public test PK/VK.
+## Verify against a real node
 
-The shared deployment/source/witness helpers currently come from
-`contracts/zk-private-counter/tests/support/mod.rs`. This is deliberate reuse of
-the exercised fixture implementation, **not a stable application SDK**. The
-walkthrough exposes that dependency rather than copying it into another API.
-
-This run uses the real CKB-VM scheduler and real Groth16 verification, but its
-Cell store and deployments come from `ckb-testtool`. It does not prove mempool
-admission, confirmation, live Cell availability or fee balance. Its fixture
-Lock is always-success, with no wallet signing. The synthetic receipt network
-and genesis identify fixture data, not a queried chain.
-
-## Example 2: a TypeScript client
-
-Read [`accept-proof.ts`](accept-proof.ts). The runner first executes:
+After the repository's pinned CKB acceptance harness has produced a passing
+`target/ckb-cellscript-acceptance/latest-production.json`, run:
 
 ```bash
-cargo run --locked -p cellscript --bin cellc -- gen-builder \
-  --target typescript --metadata target/my-zk-app/parent-metadata.json \
-  --output target/my-zk-app/sdk
-node --experimental-strip-types examples/zk/accept-proof.ts target/my-zk-app
+CELLSCRIPT_CKB_REPO=/path/to/pinned/ckb \
+CELLSCRIPT_COUNTER_PACKAGE=/path/to/setup-package \
+CELLSCRIPT_COUNTER_CCC=1 \
+cargo test --locked --release --manifest-path contracts/zk-private-counter/Cargo.toml \
+  --test node counter_node_acceptance -- --ignored --nocapture
 ```
 
-For normal package compilation and the generated SDK's own tests, run:
+This starts a fresh disposable node, deploys code/VK, funds a real secp wallet fee
+Cell and calls the shipped CCC adapter. It checks two confirmed client updates,
+a corrupt proof's dry-run rejection and a spent input's preflight rejection.
+The harness mines blocks; normal `send_transaction` and script verification remain
+active. `passthrough` refers only to CKB's output-policy validator. Results are in
+`target/counter-node/<run>/ccc/ccc-report.json`. Public fixture keys are used only
+on that chain. Install example dependencies and generate `target/debug/cellc`
+with the local runner first.
 
-```bash
-npm --prefix target/my-zk-app/sdk install --ignore-scripts
-npm --prefix target/my-zk-app/sdk test
-```
+## Diagnostics and remaining DX limits
 
-The client imports `sdk/src/index.ts`, so this checks that the **whole generated
-package loads**, not just that a copied codec works. It:
+| Failure | Client response |
+| --- | --- |
+| Wrong genesis, child or VK | Names the mismatched deployment before proving |
+| Spent/missing input | Resolve a new live Cell before preparing |
+| Changed fee, output or dependency | Finalize again and generate a new proof |
+| Wallet overwrites proof | Preserve `WitnessArgs.input_type`; sign Lock fields |
+| Wrong owner, overflow or skipped count | Reject the application transition locally |
+| Stale public inputs or short proof | Reject before witness insertion |
+| Cryptographic/node rejection | Preserve the node cause; parent 79 alone cannot identify why the child rejected |
 
-- compares the 228-byte statement, 484-byte public-input encoding and 464-byte
-  verifier request with the Rust output;
-- accepts the real 128-byte proof produced by Example 1;
-- rejects the old public inputs after changing the transaction hash;
-- rejects a truncated proof;
-- demonstrates that a corrupt proof can still pass the SDK's byte-binding check;
-  only the cryptographic verifier determines proof validity;
-- calls `planIncrement` and confirms that its plan cannot yet submit.
+The counter integration now has a reusable native library and a complete CCC
+transaction path. Deployment still involves several code Cells, setup policy is
+an explicit developer responsibility, and new circuits remain specialist work.
+This is adequate for building a counter dApp, not a one-command arbitrary-ZK app
+scaffold. TypeScript byte binding is not Groth16 verification: native verification
+and the node's signed dry-run establish that separately. Concurrent spending can
+still invalidate a prepared transaction; re-resolve and reprove instead of retrying
+it with changed raw fields.
 
-The statement fields in `bridge.json` were derived by the Rust host from the
-finalized fixture transaction. They are **not independently resolved by this
-TypeScript client**. A real application must resolve live Cells/deployments,
-recompute its own statement, provide the runtime transaction/witness adapter,
-reserve capacity and fees, sign and dry-run the final transaction before sending.
-Never adopt a prover-supplied statement as the transaction's authority.
-
-The 464-byte request is the parent/child IPC envelope; do not put it directly in
-`WitnessArgs`. The parent needs its metadata-defined action witness containing
-the proof and exact handle. The Rust example uses `entry_witness_args` for that.
-
-## Changing the application
-
-Changing an instance's owner or initial transaction does not require a new circuit.
-Changing the relation (for example an age threshold, membership proof or a private
-payment) does: implement and test that external circuit, create/import its setup,
-pin its VK and identities, and design its lifecycle and replay bindings. Reusing
-the generic composition path is possible; reusing this counter VK for another
-relation is not.
-
-Reuse is limited to the current v2 statement and its 15 public-input limbs.
-Additional public inputs, a different proof system or a different wire format
-require a separately supported profile. A new circuit/VK also needs its own
-application admission; it does not inherit the counter's acceptance evidence.
-
-For a real counter instance, use an OS-random owner secret and secure prover
-randomness, a trusted setup policy, exact live code/VK deployment receipts and
-appropriate custody/fee inputs. The [application guide](../../contracts/zk-private-counter/README.md)
-contains the native CLI and node acceptance commands. The current profile rejects
-burning, so this example is not a recoverable deposit or payment application.
-
-See the [DX assessment](../../docs/CELLSCRIPT_ZK_DEVELOPER_EXPERIENCE.md) for the
-remaining integration work and the bug this walkthrough uncovered.
+Keep this guide for development, the [counter reference](../../contracts/zk-private-counter/README.md)
+for circuit/setup/admission details, and the [profile specification](../../docs/CELLSCRIPT_ZK_PROFILE.md)
+for exact wire and compiler contracts. Acceptance records remain under
+[`docs/reports/0.32`](../../docs/reports/0.32/ZK_ACCEPTANCE.md).

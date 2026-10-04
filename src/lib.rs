@@ -59,6 +59,8 @@ mod typed_semantics;
 pub mod types;
 mod verified_artifact;
 pub mod wasm;
+#[cfg(not(feature = "wasm"))]
+pub mod zk_client;
 pub mod zk_contract;
 pub mod zk_package;
 
