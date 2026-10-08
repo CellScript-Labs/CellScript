@@ -1735,6 +1735,7 @@ fn validate_typed_semantics(record: &VerifiedLoweringRecord) -> Result<(), Check
     }
     crate::value_abilities::verify(typed)?;
     crate::generic_projection::verify(typed)?;
+    crate::interface::verify_nominal_declarations(typed)?;
     let nominal_aliases = crate::generic_projection::nominal_aliases(typed);
     for entry in &typed.entries {
         let Some(lowering) = lowering_entries.get(entry.id.as_str()) else {

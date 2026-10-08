@@ -153,13 +153,12 @@ fn metadata_from_ast(
     let target_profile = crate::TargetProfile::from_options(options, build)?;
     target_profile.ensure_compile_supported()?;
     let artifact_format = crate::ArtifactFormat::from_target(crate::resolve_target(options, build))?;
-    let (optimized_ast, ir) = crate::prepare_compile_ir(ast, options, resolver, scope)?;
-    let lowering_ast = optimized_ast.as_ref().unwrap_or(ast);
+    let (_optimized_ast, ir) = crate::prepare_compile_ir(ast, options, resolver, scope)?;
     let mut metadata =
         crate::compile_metadata_from_ir(&ir, artifact_format, target_profile, options.edition, options.primitive_compat.as_deref());
-    crate::bind_public_interface(&mut metadata, lowering_ast);
+    crate::bind_public_interface(&mut metadata, ast);
     crate::apply_trusted_external_verifiers(&mut metadata, &ir, trusted_external_verifiers.unwrap_or_default())?;
-    crate::bind_typed_semantics(&mut metadata, &ir);
+    crate::bind_typed_semantics(&mut metadata, &ir, ast, resolver.map(|(resolver, _)| resolver));
     // Executable-surface policy intentionally does not reject metadata-only
     // inspection. Target/profile shape checks still apply to the requested view.
     let violations = crate::target_profile_artifact_policy_violations(&metadata, target_profile);

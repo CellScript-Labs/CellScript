@@ -119,8 +119,108 @@ pub struct TypedSemanticRecord {
     pub types: Vec<TypedSemanticType>,
     pub entries: Vec<TypedSemanticEntry>,
     pub instantiations: Vec<TypedSemanticInstantiation>,
+    /// Symbolic declarations retained even when no concrete instance survives
+    /// artifact selection. This extension does not make a template executable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generic_declarations: Option<GenericDeclarationCatalog>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nominal_declarations: Option<NominalDeclarationCatalog>,
     pub trusted_external_verifiers: Vec<TrustedExternalVerifierRecord>,
     pub foundation: SemanticFoundationRecord,
+}
+
+pub const GENERIC_DECLARATION_CATALOG_SCHEMA: &str = "cellscript-generic-declaration-catalog-v1";
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GenericDeclarationCatalog {
+    pub schema: String,
+    pub declarations: Vec<GenericDeclarationContract>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GenericDeclarationContract {
+    pub module: String,
+    pub name: String,
+    pub kind: String,
+    pub visibility: String,
+    pub parameters: Vec<TypedSemanticGenericParameter>,
+    pub declaration: TypedSemanticGenericDeclaration,
+}
+
+pub const NOMINAL_DECLARATION_CATALOG_SCHEMA: &str = "cellscript-nominal-declaration-catalog-v1";
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NominalDeclarationCatalog {
+    pub schema: String,
+    pub declarations: Vec<NominalDeclarationContract>,
+    pub scopes: Vec<NominalDeclarationScope>,
+    pub callables: Vec<SourceCallableContract>,
+    pub constants: Vec<SourceConstantContract>,
+    pub layout_bindings: Vec<NominalLayoutBinding>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NominalLayoutBinding {
+    pub owner_module: String,
+    pub source_name: String,
+    pub lowered_name: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NominalDeclarationContract {
+    pub module: String,
+    pub name: String,
+    pub kind: String,
+    pub visibility: String,
+    pub fields: Vec<TypedSemanticGenericField>,
+    pub variants: Vec<TypedSemanticGenericVariant>,
+    pub abilities: Vec<String>,
+    pub capabilities: Vec<String>,
+    pub identity_policy: String,
+    pub type_identity: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SourceCallableContract {
+    pub module: String,
+    pub name: String,
+    pub kind: String,
+    pub visibility: String,
+    pub type_parameters: Vec<crate::interface::InterfaceTypeParameter>,
+    pub params: Vec<crate::interface::InterfaceParam>,
+    pub outputs: Vec<crate::interface::InterfaceParam>,
+    pub return_type: Option<String>,
+    pub declared_effect: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SourceConstantContract {
+    pub module: String,
+    pub name: String,
+    pub visibility: String,
+    pub ty: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NominalDeclarationScope {
+    pub module: String,
+    pub bindings: Vec<NominalDeclarationBinding>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NominalDeclarationBinding {
+    pub local_name: String,
+    pub owner_module: String,
+    pub source_name: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -163,6 +263,21 @@ impl VerifierFailureSemantics {
 
 impl TypedSemanticRecord {
     pub fn canonicalize(&mut self) {
+        if let Some(catalog) = &mut self.generic_declarations {
+            catalog
+                .declarations
+                .sort_by(|left, right| (&left.module, &left.name, &left.kind).cmp(&(&right.module, &right.name, &right.kind)));
+        }
+        if let Some(catalog) = &mut self.nominal_declarations {
+            catalog.layout_bindings.sort_by(|left, right| left.lowered_name.cmp(&right.lowered_name));
+            catalog.declarations.sort_by(|left, right| (&left.module, &left.name).cmp(&(&right.module, &right.name)));
+            catalog.scopes.sort_by(|left, right| left.module.cmp(&right.module));
+            for scope in &mut catalog.scopes {
+                scope.bindings.sort_by(|left, right| left.local_name.cmp(&right.local_name));
+            }
+            catalog.callables.sort_by(|left, right| (&left.module, &left.name).cmp(&(&right.module, &right.name)));
+            catalog.constants.sort_by(|left, right| (&left.module, &left.name).cmp(&(&right.module, &right.name)));
+        }
         self.types.sort_by(|left, right| left.name.cmp(&right.name));
         for ty in &mut self.types {
             // In fixed layouts, empty ranges precede occupied ranges at an

@@ -4,14 +4,14 @@
 use crate::{CheckerError, CheckerRejectionCode, TypedSemanticRecord};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-const COPY: u8 = 1;
-const DROP: u8 = 2;
-const STORE: u8 = 4;
+pub(crate) const COPY: u8 = 1;
+pub(crate) const DROP: u8 = 2;
+pub(crate) const STORE: u8 = 4;
 pub(crate) const FIXED: u8 = 8;
 pub(crate) const SERIALIZABLE: u8 = 16;
 pub(crate) const NON_LINEAR: u8 = 32;
 pub(crate) const CELL: u8 = 64;
-const PLAIN: u8 = COPY | DROP | STORE | FIXED | SERIALIZABLE | NON_LINEAR;
+pub(crate) const PLAIN: u8 = COPY | DROP | STORE | FIXED | SERIALIZABLE | NON_LINEAR;
 const ALL: u8 = PLAIN | CELL;
 const ORDER: [&str; 7] = ["copy", "drop", "store", "fixed", "serializable", "non_linear", "cell"];
 const MAX_TYPE_NESTING: usize = 32;

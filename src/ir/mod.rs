@@ -75,6 +75,15 @@ pub struct IrModule {
     pub enum_fixed_sizes: HashMap<String, usize>,
     pub enum_layouts: HashMap<String, IrEnumLayout>,
     pub generic_contracts: BTreeMap<String, IrGenericContract>,
+    /// Source ownership survives entry pruning and imported helper merging.
+    /// None records an ambiguous lowered name; it cannot supply open admission.
+    pub source_type_origins: BTreeMap<String, Option<IrSourceTypeOrigin>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IrSourceTypeOrigin {
+    pub module: String,
+    pub name: String,
 }
 
 /// Artifact-local entry choice, separate from the retained callable set.
@@ -1336,6 +1345,7 @@ impl IrGenerator {
                 enum_fixed_sizes: HashMap::new(),
                 enum_layouts: HashMap::new(),
                 generic_contracts: BTreeMap::new(),
+                source_type_origins: BTreeMap::new(),
             },
             var_counter: 0,
             block_counter: 0,
@@ -1554,6 +1564,13 @@ impl IrGenerator {
         self.infer_module_function_effects(&ast.items);
 
         for item in &ast.items {
+            if matches!(item, Item::Resource(_) | Item::Shared(_) | Item::Receipt(_) | Item::Struct(_) | Item::Enum(_))
+                && let Some(name) = item.name()
+            {
+                self.module
+                    .source_type_origins
+                    .insert(name.into(), Some(IrSourceTypeOrigin { module: ast.name.clone(), name: name.into() }));
+            }
             match item {
                 Item::Resource(r) => {
                     let ir_item = IrItem::TypeDef(self.gen_resource(r));
@@ -10167,6 +10184,7 @@ fn generate_with_resolver_diagnostics_inner(
 
     let mut resolved_external_types: Vec<(String, String, TypeDef)> = Vec::new();
     let mut imported_generic_contracts = BTreeMap::new();
+    let mut source_type_origins = BTreeMap::new();
 
     for item in &ast.items {
         let Item::Use(use_stmt) = item else {
@@ -10190,6 +10208,10 @@ fn generate_with_resolver_diagnostics_inner(
                 }
             }
             if let Some(type_def) = resolver.resolve_type(module_name, &local_name) {
+                source_type_origins.insert(
+                    local_name.clone(),
+                    Some(IrSourceTypeOrigin { module: use_stmt.module_path.join("::"), name: import.name.clone() }),
+                );
                 if let Some(kind) = resolver_type_kind(&type_def) {
                     type_kinds.insert(local_name.clone(), kind);
                 }
@@ -10284,6 +10306,7 @@ fn generate_with_resolver_diagnostics_inner(
     );
     let mut ir = generator.generate_diagnostics(ast)?;
     ir.generic_contracts.extend(imported_generic_contracts);
+    ir.source_type_origins.extend(source_type_origins);
     ir.external_type_defs = external_type_defs;
     ir.external_callable_abis = external_callable_abis;
     if include_external_callables {
@@ -10469,6 +10492,12 @@ fn ir_item_callable_name(item: &IrItem) -> Option<&str> {
 }
 
 fn merge_external_type_defs(ir: &mut IrModule, external_ir: &IrModule) {
+    for (name, origin) in &external_ir.source_type_origins {
+        let retained = ir.source_type_origins.entry(name.clone()).or_insert_with(|| origin.clone());
+        if retained != origin {
+            *retained = None;
+        }
+    }
     let mut names = ir.external_type_defs.iter().map(|type_def| type_def.name.clone()).collect::<HashSet<_>>();
     for type_def in &external_ir.external_type_defs {
         if names.insert(type_def.name.clone()) {

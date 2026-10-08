@@ -17,7 +17,10 @@ use cellscript_artifact_checker::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
+mod declarations;
+mod nominals;
 mod policy;
+pub(crate) use nominals::{generic_catalog_for_context, nominal_catalog};
 
 pub(crate) fn generic_declaration(
     declaration: &ir::IrGenericDeclaration,
@@ -250,6 +253,8 @@ pub(crate) fn build(module: &ir::IrModule, metadata: &CompileMetadata) -> TypedS
             entries
         },
         instantiations,
+        generic_declarations: None,
+        nominal_declarations: None,
         trusted_external_verifiers: metadata.runtime.trusted_external_verifiers.clone(),
         foundation: SemanticFoundationRecord::default(),
     };

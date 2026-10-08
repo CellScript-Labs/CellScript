@@ -196,5 +196,12 @@ cannot close #28; a bundle-only precheck cannot close #29. Independent security
 review is a final stable-admission requirement for these newly promoted
 contracts. Do not infer that it occurred from the earlier 0.32 review waiver.
 
+The declaration prerequisite now retains optional bounded pre-optimization
+source catalogs, qualified ordinary layout origins and complete public sets.
+A separate symbolic checker rejects unsupported universal ability guarantees
+without inferring them from a concrete instance. See the
+[receipt contract](CELLSCRIPT_OPEN_INTERFACE_RECEIPT.md) for its exact limits.
+Full H1 receipt projection/admission and H2 runtime enforcement remain pending.
+
 No phase in this document is yet accepted. This plan identifies the work that
 remains; it is not a replacement for either issue's acceptance evidence.

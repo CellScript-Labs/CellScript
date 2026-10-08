@@ -6,6 +6,7 @@ use crate::{
     TypedSemanticRecord,
 };
 use std::collections::{BTreeMap, BTreeSet};
+mod catalog;
 
 /// Restore source spellings only from instantiations whose concrete-name and
 /// argument identity were checked with the bundle. Replacement is a single
@@ -143,6 +144,7 @@ fn check_layout_parameters<'a>(
 }
 
 pub(crate) fn verify(record: &TypedSemanticRecord) -> Result<(), CheckerError> {
+    catalog::verify(record)?;
     let instances = type_instances(record);
     let mut templates = BTreeMap::new();
     for instance in &record.instantiations {

@@ -533,3 +533,39 @@ fresh source-bound node run. Full CI remains deferred as requested.
 - #42 P1 now has the continuous old-key update → old-key-authorized migration → new-key successor update, confirmed with actual fee signatures. Both setup versions are public test fixtures. Immutable legacy Cells are not retroactively migratable. P2/P3/P4 remain #44/#45/#46.
 - Continue the ordered queue with #28 then #29, followed by #44/#45/#46. Full CI remains deferred until all implementations are complete. Independent security review for #28/#29 remains unassigned and has not been waived.
 - The attached `fixed-result-contract` worktree is based on `bfb19100` and contains an uncommitted H1 declaration-evidence prototype plus its design draft. The first generic-catalog slice passed 13 entry-selection, eight interface-inspection and 25 policy/checker tests. The subsequent nominal-scope extension is still under focused verification and is not admitted source syntax or a complete compatibility receipt. Preserve that work when continuing.
+
+
+## Resumed #28 declaration prerequisite — 2026-10-08
+
+Base: signed/published `1dffc25d`, including the clean `bfb19100` CCC/backend
+archive. The managed `fixed-result-contract` worktree retains the next H1
+prerequisite; no full receipt or runtime open-handle admission is claimed.
+
+- Optional native generic/nominal catalogs retain the original source API before
+  optimization. This fixes removal of unused public functions from declarations;
+  their executable availability remains separately absent when pruned.
+- Qualified owner/import scopes and ordinary IR type origins survive imported
+  helper merging and entry pruning. Conflicting merged lowered names have no
+  source evidence. The checker binds ordinary concrete layouts to complete
+  source field order/types, variants, abilities, capabilities and identity policy.
+- Bounded independent type parsing preserves Unicode identifiers, references,
+  arrays/tuples, complete token boundaries and generic binder shadowing.
+- A separate symbolic declaration check uses parameter minima, recursively
+  checks nested generic demands and rejects cyclic/unknown/unbounded contracts.
+  It never uses one observed specialization as a universal guarantee and does
+  not claim generic body behavior or source-to-machine equivalence.
+- Catalog omissions, duplicate declarations/bindings, same-width foreign owner
+  swaps, malformed types and rebound public omissions/additions have real
+  compiler-bundle mutation fixtures. Oversized absent templates keep ordinary
+  compilation but fail the new open-interface prerequisite.
+- Cache generation advances to v64. Package/toolchain/dependency pins, historical
+  exact receipts, v3 wire/digest rules, v9 global records and source-map v2 remain.
+  Corrected pre-optimization declaration retention can change newly compiled
+  interface hashes; historical archives are not relabeled or rewritten.
+
+Targeted compiler/checker tests and strict clippy were used during development.
+Formal dev/backend checks and final source publication must be recorded after
+this slice is frozen. Whole CI remains deferred until the entire user-ordered
+queue is implemented. Full H1 receipt projection/directional admission, H2
+nominal values/runtime, #29 and #44/#45/#46 remain outstanding. Independent
+security reviewer for #28/#29 is still unassigned and has not been waived.

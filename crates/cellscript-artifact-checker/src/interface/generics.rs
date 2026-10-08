@@ -32,6 +32,36 @@ pub(super) fn check(
     instances: &BTreeMap<&str, String>,
 ) -> Result<(), CheckerError> {
     let abilities = crate::value_abilities::verify(effective)?;
+    if let Some(catalog) = &effective.generic_declarations {
+        for declared in interface.types.iter().filter(|ty| !ty.type_parameters.is_empty()) {
+            let contract = catalog
+                .declarations
+                .iter()
+                .find(|contract| {
+                    contract.module == interface.module && contract.name == declared.name && contract.kind == declared.kind
+                })
+                .ok_or_else(|| mismatch("public generic type lacks its retained declaration catalog contract"))?;
+            check_parameter_binding(&declared.type_parameters, &contract.parameters)?;
+            if declared.visibility != contract.visibility {
+                return Err(mismatch("public generic type visibility differs from its retained declaration"));
+            }
+            check_type_declaration(declared, &contract.declaration)?;
+        }
+        for declared in interface.callables.iter().filter(|entry| !entry.type_parameters.is_empty()) {
+            let contract = catalog
+                .declarations
+                .iter()
+                .find(|contract| {
+                    contract.module == interface.module && contract.name == declared.name && contract.kind == declared.kind
+                })
+                .ok_or_else(|| mismatch("public generic callable lacks its retained declaration catalog contract"))?;
+            check_parameter_binding(&declared.type_parameters, &contract.parameters)?;
+            if declared.visibility != contract.visibility {
+                return Err(mismatch("public generic callable visibility differs from its retained declaration"));
+            }
+            check_function_declaration(declared, &contract.declaration)?;
+        }
+    }
     for instance in effective.instantiations.iter().filter(|instance| instance.module == interface.module) {
         if instance.kind == "function" {
             let Some(declared) = interface.callables.iter().find(|entry| entry.name == instance.template) else { continue };

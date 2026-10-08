@@ -3345,6 +3345,7 @@ mod tests {
         let ir = IrModule {
             name: "shape_test".to_string(),
             generic_contracts: Default::default(),
+            source_type_origins: Default::default(),
             entry_selection: crate::ir::IrEntrySelection::Legacy,
             items: vec![IrItem::Action(IrAction {
                 name: "shape".to_string(),

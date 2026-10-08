@@ -386,6 +386,7 @@ mod tests {
         let ir = IrModule {
             name: "types_only".to_string(),
             generic_contracts: Default::default(),
+            source_type_origins: Default::default(),
             items: Vec::new(),
             entry_selection: crate::ir::IrEntrySelection::Legacy,
             external_type_defs: Vec::new(),
@@ -403,6 +404,7 @@ mod tests {
         let ir = IrModule {
             name: "demo".to_string(),
             generic_contracts: Default::default(),
+            source_type_origins: Default::default(),
             entry_selection: crate::ir::IrEntrySelection::Legacy,
             external_type_defs: Vec::new(),
             external_callable_abis: Vec::new(),

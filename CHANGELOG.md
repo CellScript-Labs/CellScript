@@ -2,6 +2,14 @@
 
 ## Unreleased — 0.32
 
+Retain bounded source declaration catalogs before optimization, including absent
+public templates and pruned public functions. Bind ordinary imported layouts to
+their qualified declaration owners and independently reject inconsistent scopes,
+field order and alias substitutions. Add a separate symbolic type/ability check
+using parameter minima rather than observed instances. This is a prerequisite
+for compatible-open receipts; receipt admission and on-chain open handles remain
+pending. Historical bundles remain inspectable without granting open admission.
+
 Bind fixed ordinary-struct helper results to a feature-specific caller-owned
 buffer ABI checked independently from decoded RISC-V, including source pointer,
 hidden argument placement, bounded copy and frame teardown. Preserve nominal

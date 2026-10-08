@@ -3,6 +3,54 @@ use cellscript::{compile_with_executable_surface_policy, CompileOptions, Executa
 use cellscript_artifact_checker::{interface::inspect_bundle, CheckerBudgets, CheckerRejectionCode};
 
 #[test]
+fn qualified_types_preserve_generic_shadowing_and_complete_unicode_names() {
+    use cellscript_artifact_checker::{
+        interface::{qualified_source_type, qualified_source_type_with_parameters},
+        NominalDeclarationBinding, NominalDeclarationScope,
+    };
+    let scope = NominalDeclarationScope {
+        module: "consumer".into(),
+        bindings: vec![
+            NominalDeclarationBinding { local_name: "数".into(), owner_module: "foreign".into(), source_name: "Tag".into() },
+            NominalDeclarationBinding { local_name: "箱".into(), owner_module: "owner".into(), source_name: "Box".into() },
+        ],
+    };
+    assert_eq!(qualified_source_type("箱<[数; 2]>", &scope).unwrap(), "owner::Box<[foreign::Tag;2]>");
+    assert_eq!(qualified_source_type_with_parameters("箱<(数, &mut 数)>", &scope, &["数"]).unwrap(), "owner::Box<(数,&mut 数)>");
+    assert_eq!(qualified_source_type("already::数", &scope).unwrap(), "already::数");
+    assert_eq!(qualified_source_type("&mutable", &scope).unwrap(), "&mutable");
+    for invalid in ["箱<>", "箱<数,>", "数 数", "[数; -1]", "[数;18446744073709551616]", "数::", "数;;", "&mut", "(数,,数)"]
+    {
+        assert!(qualified_source_type(invalid, &scope).is_err(), "invalid spelling accepted: {invalid}");
+    }
+}
+
+#[test]
+fn oversized_uninstantiated_templates_keep_the_existing_declaration_only_language() {
+    let fields = (0..65).map(|index| format!("field_{index}: T")).collect::<Vec<_>>().join(", ");
+    let source = format!("module declaration_only\npublic struct Large<T: fixed_value> {{ {fields} }}\npublic action verify() {{ verification require true }}");
+    let compiled = compile_with_executable_surface_policy(
+        &source,
+        CompileOptions { target: Some("riscv64-elf".into()), ..CompileOptions::default() },
+        ExecutableSurfacePolicy::DenyFailClosed,
+    )
+    .unwrap();
+    let inspected = inspect_bundle(
+        &compiled.artifact_bytes,
+        &serde_json::to_vec(&compiled.metadata).unwrap(),
+        &serde_json::to_vec(compiled.verified_lowering_record.as_ref().unwrap()).unwrap(),
+        &serde_json::to_vec(compiled.source_artifact_map.as_ref().unwrap()).unwrap(),
+        &CheckerBudgets::default(),
+    )
+    .unwrap();
+    assert_eq!(inspected.declared().types[0].fields.len(), 65);
+    assert!(inspected.effective().generic_declarations.is_none());
+    assert!(inspected.effective().nominal_declarations.is_none());
+    assert!(inspected.effective().instantiations.is_empty());
+    assert!(inspected.validate_symbolic_declarations().is_err());
+}
+
+#[test]
 fn interface_generic_projection_checks_nested_structs_enums_and_functions() {
     let source = r#"
 module inspected_generic_projection
@@ -36,6 +84,7 @@ public action verify(witness choice: Choice<Hash>, witness pair: Pair<u64>, witn
         )
         .unwrap_or_else(|error| panic!("opt={opt_level}: {error}"));
         assert_eq!(inspected.declared(), &compiled.metadata.public_interface);
+        inspected.validate_symbolic_declarations().unwrap();
         for template in ["Pair", "Envelope", "Choice", "Tagged", "UnitFields", "MixedFields", "WithUnits", "first"] {
             assert!(inspected.effective().instantiations.iter().any(|instance| instance.template == template));
         }
@@ -140,6 +189,10 @@ public action verify() { verification require true }
     assert_eq!(template.type_parameters.len(), 1);
     assert_eq!(template.params[0].r#type, "Pair<T>");
     assert!(!inspected.effective().entries.iter().any(|entry| entry.name == "first"));
+    let catalog = inspected.effective().generic_declarations.as_ref().unwrap();
+    assert_eq!(catalog.declarations.iter().map(|contract| contract.name.as_str()).collect::<Vec<_>>(), ["Pair", "first"]);
+    assert!(inspected.effective().instantiations.is_empty());
+    inspected.validate_symbolic_declarations().unwrap();
 }
 
 #[test]

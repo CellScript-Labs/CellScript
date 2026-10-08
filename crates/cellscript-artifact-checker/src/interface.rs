@@ -8,6 +8,16 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 mod generics;
+mod layouts;
+mod nominals;
+mod source_types;
+mod universal;
+pub(crate) use source_types::SourceType;
+pub(crate) fn parse_source_type(value: &str) -> Result<SourceType, crate::CheckerError> {
+    SourceType::parse(value)
+}
+pub(crate) use nominals::verify_catalog as verify_nominal_declarations;
+pub use nominals::{qualified_source_type, qualified_source_type_with_parameters};
 
 use crate::{CheckerBudgets, CheckerError, CheckerRejectionCode, CheckerReport, EvidenceState, TypedSemanticRecord};
 
@@ -35,6 +45,13 @@ impl InterfaceInspection {
 
     pub fn report(&self) -> &CheckerReport {
         &self.report
+    }
+
+    /// Check universal type/ability guarantees, including absent templates.
+    /// This prerequisite does not establish execution availability, compatibility
+    /// or deployment admission; historical bundles without catalogs reject here.
+    pub fn validate_symbolic_declarations(&self) -> Result<(), CheckerError> {
+        universal::verify(self)
     }
 }
 
@@ -244,6 +261,7 @@ fn check_declaration_bindings(
         return Err(mismatch("interface deployment digest differs from its runtime contract"));
     }
     generics::check(interface, effective, &instances)?;
+    nominals::check_public(interface, effective)?;
     Ok(())
 }
 
