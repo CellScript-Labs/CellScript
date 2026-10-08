@@ -3781,7 +3781,10 @@ impl CodeGenerator {
             return false;
         };
         let mut ordered = layouts.values().cloned().collect::<Vec<_>>();
-        ordered.sort_by_key(|layout| layout.offset);
+        // Zero-width fields can share an offset with their successor. The
+        // declaration index, not an unordered map or byte offset, defines the
+        // tuple operand order.
+        ordered.sort_by_key(|layout| layout.index);
         if ordered.len() != fields.len() {
             return false;
         }
@@ -3791,6 +3794,9 @@ impl CodeGenerator {
             let Some(field_width) = layout_fixed_byte_width(layout).or_else(|| self.fixed_named_type_width(&layout.ty)) else {
                 return false;
             };
+            if field_width == 0 {
+                continue;
+            }
             let Some(source) = self.expected_fixed_byte_source(field, field_width) else {
                 self.emit("# cellscript abi: fail closed because fixed aggregate field source is unavailable");
                 self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);

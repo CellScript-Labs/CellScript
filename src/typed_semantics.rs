@@ -213,6 +213,7 @@ pub(crate) fn build(module: &ir::IrModule, metadata: &CompileMetadata) -> TypedS
             ir::IrItem::TypeDef(_) | ir::IrItem::Invariant(_) => None,
         })
         .collect::<Vec<_>>();
+    project_named_tuple_field_order(module, &types, &mut entries);
     let instantiations = metadata
         .generic_instantiations
         .iter()
@@ -256,6 +257,46 @@ pub(crate) fn build(module: &ir::IrModule, metadata: &CompileMetadata) -> TypedS
     record.foundation = build_semantic_foundation(module, metadata, &record.types, &record.entries);
     record.canonicalize();
     record
+}
+
+/// Named tuple operations use the record's canonical field order. IR and
+/// codegen retain declaration order, while the record canonicalizes empty
+/// fields sharing an offset by name. Reorder the corresponding operands by
+/// field identity without moving their earlier evaluation operations.
+fn project_named_tuple_field_order(module: &ir::IrModule, types: &[TypedSemanticType], entries: &mut [TypedSemanticEntry]) {
+    let orders = module
+        .external_type_defs
+        .iter()
+        .chain(module.items.iter().filter_map(|item| match item {
+            ir::IrItem::TypeDef(definition) => Some(definition),
+            _ => None,
+        }))
+        .filter_map(|definition| {
+            let layout = types.iter().find(|layout| layout.name == definition.name && layout.encoded_size.is_some())?;
+            let order = layout
+                .fields
+                .iter()
+                .map(|field| definition.fields.iter().position(|declared| declared.name == field.name))
+                .collect::<Option<Vec<_>>>()?;
+            Some((definition.name.as_str(), order))
+        })
+        .collect::<BTreeMap<_, _>>();
+    for entry in entries {
+        let local_types = entry.locals.iter().map(|local| (local.id, local.ty.as_str())).collect::<BTreeMap<_, _>>();
+        for operation in entry.blocks.iter_mut().flat_map(|block| &mut block.operations) {
+            if operation.opcode != "tuple" {
+                continue;
+            }
+            let Some(order) = operation.destinations.first().and_then(|id| local_types.get(id)).and_then(|ty| orders.get(ty)) else {
+                continue;
+            };
+            if order.len() != operation.operands.len() {
+                continue;
+            }
+            let original = operation.operands.clone();
+            operation.operands = order.iter().map(|index| original[*index].clone()).collect();
+        }
+    }
 }
 
 fn build_semantic_foundation(

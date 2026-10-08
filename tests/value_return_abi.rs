@@ -13,6 +13,14 @@ fn execute(source: &str, opt_level: u8, args: &[EntryWitnessArg], expected: i64)
         ExecutableSurfacePolicy::DenyFailClosed,
     )
     .unwrap();
+    cellscript_artifact_checker::check_bundle_values(
+        &compiled.artifact_bytes,
+        &serde_json::to_value(&compiled.metadata).unwrap(),
+        compiled.verified_lowering_record.as_ref().unwrap(),
+        compiled.source_artifact_map.as_ref().unwrap(),
+        &cellscript_artifact_checker::CheckerBudgets::default(),
+    )
+    .expect("fixed struct results must preserve the existing checked bundle boundary");
     let payload = compiled.metadata.actions[0].entry_witness_args(args).unwrap();
     let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
     fixture.witnesses = vec![packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(payload)).pack()).build().as_bytes()];
@@ -118,5 +126,36 @@ action verify(witness left: u64, witness right: u64) {
 "#;
     for opt_level in 0..=3 {
         execute(source, opt_level, &[EntryWitnessArg::U64(11), EntryWitnessArg::U64(23)], 0);
+    }
+}
+
+#[test]
+fn fixed_struct_result_preserves_nested_values_and_zero_width_field_order() {
+    let source = r#"
+module nested_result_fields
+struct EmptyZ {}
+struct EmptyA {}
+struct Inner { left: u64, right: u64 }
+struct Payload { z_empty: EmptyZ, a_empty: EmptyA, inner: Inner, tail: u64 }
+fn build(left: u64, right: u64) -> Payload {
+    Payload {
+        tail: 37,
+        a_empty: EmptyA {},
+        inner: Inner { right: right, left: left },
+        z_empty: EmptyZ {}
+    }
+}
+fn relay(left: u64, right: u64) -> Payload { build(left, right) }
+action verify(witness left: u64, witness right: u64, witness expected: u64) {
+    verification
+    let result: Payload = relay(left, right)
+    require result.inner.left == left
+    require result.inner.right == right
+    require result.tail == expected
+}
+"#;
+    for opt_level in 0..=3 {
+        execute(source, opt_level, &[EntryWitnessArg::U64(11), EntryWitnessArg::U64(23), EntryWitnessArg::U64(37)], 0);
+        execute(source, opt_level, &[EntryWitnessArg::U64(11), EntryWitnessArg::U64(23), EntryWitnessArg::U64(38)], 5);
     }
 }

@@ -4714,7 +4714,9 @@ version = "0.1.0"
         assert_eq!(math.name, "math");
         assert_eq!(math.version, "0.1.0");
         assert!(matches!(math.source, PackageSource::Local(_)));
-        assert_eq!(manager.get_source_paths(), vec![root.join("deps/math/src")]);
+        // Temporary-directory prefixes can be symlinks (for example /var on
+        // macOS); dependency resolution returns canonical source paths.
+        assert_eq!(manager.get_source_paths(), vec![root.join("deps/math/src").canonicalize().unwrap()]);
     }
 
     #[test]

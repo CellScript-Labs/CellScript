@@ -2,10 +2,11 @@
 
 ## Status and publication boundary
 
-Implementation is **paused at the maintainer's explicit request**. This document
-and its containing WIP commit preserve the current work for another session or
-engineer. They are not a release receipt, a completed issue, or a merge-readiness
-claim. Do not resume implementation until requested.
+The original WIP snapshot was **paused at the maintainer's explicit request**.
+The maintainer requested resumption on 2026-10-08. The historical inventory and
+logs below describe the paused snapshot; the resumed work is recorded separately
+at the end of this document. Neither record is a release receipt, a completed
+issue, or a merge-readiness claim.
 
 - Branch: `codex/post-032-followups`.
 - Remote: `https://github.com/CellScript-Labs/CellScript.git`.
@@ -275,3 +276,123 @@ dependency versions; no version bump is authorized by this WIP handoff.
 
 The latest declaration-shape/return-ABI work was not separately posted as a
 completed issue update. Publishing this WIP must not close those issues.
+
+## Resumed implementation — 2026-10-08
+
+The resumed checkout is `/Users/arthur/RustroverProjects/CellScript`, on
+`codex/post-032-followups` after fetching and fast-forward-only pulling the
+remote WIP commit `ba86b1c5`. Existing editor, website, NovaSeal and benchmark
+branches and commits were preserved. Their clean checkouts were then aligned
+to the parent commit's gitlinks for validation; no submodule commit was created.
+
+The first slice repairs the fixed ordinary-struct return regressions:
+
+- Reproduced the original three `E2105` field-access failures (one of four
+  tests passed before changes).
+- Track result storage only for retained ordinary-struct helper declarations
+  whose complete layouts are fixed, and propagate that origin through local
+  bindings. Dynamic, Cell and enum returns retain their separate admission
+  rules; the bounded policy-witness call contract is unchanged.
+- Evaluate struct initializer expressions in source order, then arrange tuple
+  operands in declaration order, including imported declarations. Use the
+  backend's declaration indices for zero-width offset ties and skip copying
+  empty fields.
+- Project named tuple operands by field identity into the typed record's
+  canonical layout order. Distinct empty nominal fields at the same offset
+  must not be swapped merely because canonical order differs from declaration
+  order. The checker retains its existing strict tuple type rule.
+- Advance the internal artifact-cache marker to
+  `project-source-set-v61-0.32-fixed-struct-results`; package, toolchain and
+  public schema versions are unchanged in this slice.
+- Recheck the handoff's source-pointer register-liveness adjustment through
+  O0–O3 VM execution, and add nested-layout/zero-width and IR evaluation-order
+  regressions. Each VM fixture also checks its complete compiler-produced
+  four-file bundle with the existing independent checker.
+- Canonicalize the local-dependency test's expected temporary source path,
+  matching the resolver on macOS where `/var` aliases `/private/var`.
+
+Focused validation on this slice passed: all five `value_return_abi` tests
+(100 O0–O3 CKB-VM executions with bundle checks), the initializer evaluation
+order regression, the imported-generic return regression, all eight interface
+inspection tests, all 22 policy checker tests, and the independent checker's
+40 unit plus nine integration tests. The full 992-test compiler library suite
+and strict `cargo clippy --locked -p cellscript --all-targets -- -D warnings`
+also passed. These results do not replace the required gates.
+
+The gate attempts exposed stale sidecar identities in the WIP's business,
+committed-state and runtime-view fixtures. Refresh only measured lowering,
+source-map, bundle and ProtocolBundle hashes from compiler/test outputs while
+preserving ELF hashes, raw/serialized transaction hashes, measured costs,
+budgets, expected failures and candidate release status. Re-run the positive,
+adversarial and resource checks after each refresh; hash updates alone are
+not execution evidence. The business-corpus suite passed all seven tests after
+its refresh. All 25 tests across commitment opening, external verifiers,
+fungible/NFT/authorization, Order/AMM, temporal scenarios and runtime views
+passed after the remaining fixture refreshes.
+
+The resumed `dev` gate passed (exit 0), including strict backend quick audit,
+133 syntax combinations (75 accepted, 58 expected rejections, zero failures),
+simulator package scenarios, Registry and ZK build/runtime checks, fixture and
+documentation freshness, native source policy and `git diff --check`. Its local
+log is `.cap/logs/1791434999-73646.log`. The subsequent `backend` gate's compiler
+test section passed 1,875 tests, with four explicitly ignored tests and zero
+failures; gate-wide status must still include its later checks. These local,
+dirty-checkout logs are diagnostic evidence, not clean release receipts.
+
+The `backend` gate exited 1 at production stateful acceptance: it requires a
+clean CellScript source tree, while this reviewable slice is still uncommitted.
+Its full audit passed every preceding contract, including the 177-case CI
+syntax matrix (103 accepted, 74 expected rejections, zero failures). See
+`.cap/logs/1791435919-9330.log` and
+`target/cellscript-strict-backend-audit/strict-backend-audit-full-20261008-131955.json`.
+The sibling CKB checkout is also at `a7b8fb5365296a97bbf552741a258e40db53bc64`,
+whereas acceptance pins `f7fa4436737756f97a24e254f22c13a36316ecea`; do not
+overwrite that checkout or infer fresh node evidence from historical receipts.
+This gate attempt did not reach the final counter-node acceptance test.
+
+An overlapping CI attempt had one CLI process-launch `ENOENT` while another
+gate was rebuilding the shared binary. The exact failing test passed when
+rerun alone (`.cap/logs/1791437086-48848.log`), without a source change. Preserve
+the CI test-thread flags and run subsequent gates serially; the overlapping run
+is not a passing CI receipt.
+
+The following serial CI attempt passed all Rust tests, Clippy, package checks,
+Registry API/Node builds and both independent Registry verifiers, then failed
+the website CSS assertion (`.cap/logs/1791437161-50950.log`). Existing website
+dependencies belonged to the previous checkout: Astro 5.18.2 was installed
+while the current lockfile pins 7.3.2. `npm --prefix website ci` restored the
+locked dependencies without source or lockfile changes. The complete website
+`build:ci` then passed (`.cap/logs/1791438478-95673.log`); the website submodule
+remains clean. Do not substitute this focused success for a complete CI receipt.
+
+A later serial attempt passed the complete compiler test section but failed
+`check-cost-evidence` with `tracked_diff_sha256` mismatch
+(`.cap/logs/1791438524-97448.log`): this handoff was edited while that run was
+capturing source-bound cost reports. Freeze all tracked files, including docs,
+during subsequent gates. The next full serial run must regenerate both reports
+from one unchanged checkout. Record its final status in the chat/local logs;
+editing this file again would change the tracked-diff identity of those reports.
+
+The hidden return ABI is still an experimental prototype. Existing bundle
+checks do not supply the missing dedicated machine-contract validation,
+schema/compatibility decision or adversarial hidden-pointer mutations from
+resume step 4. The next implementation slice must make these obligations
+independently reviewable:
+
+1. Bind the result's nominal type and byte width, the hidden pointer's machine
+   argument position, its register/outgoing-stack placement, and the caller's
+   result-buffer extent after all ordinary argument expansion.
+2. Record and check the callee's saved destination, live source pointer, bounded
+   copy and frame teardown. Zero-width returns must have an explicit contract
+   without requiring a dereference. Implement this in the standalone checker
+   without importing compiler/codegen structures.
+3. Mutate hidden-pointer positions, saved/outgoing offsets, copy lengths and
+   buffer ownership after rebinding outer hashes. Reject callee-frame escapes
+   and overlap with witness/ordinary outgoing arguments. Keep the O0–O3 nested,
+   branch, wide-field and stack-argument VM fixtures as positive evidence.
+4. Decide the versioned lowering/source-map and compatibility boundary before
+   treating this return convention as admitted. Keep Cell, enum and dynamic
+   returns, and the policy-witness helper-call boundary, outside this slice.
+
+H1/H2, open participants and independent security review remain unfinished;
+no issue has been closed or externally commented on by this slice.

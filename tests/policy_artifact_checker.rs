@@ -261,6 +261,59 @@ fn policy_block<'a>(fixture: &'a Fixture, prefix: &str) -> &'a cellscript_artifa
 }
 
 #[test]
+fn distinct_zero_width_constructor_fields_reject_swapped_nominal_operands_after_rebinding() {
+    let source = r#"
+module zero_width_constructor
+struct EmptyZ {}
+struct EmptyA {}
+struct Payload { z_empty: EmptyZ, a_empty: EmptyA, tail: u64 }
+fn build() -> Payload { Payload { tail: 37, z_empty: EmptyZ {}, a_empty: EmptyA {} } }
+action verify() {
+    verification
+    let value: Payload = build()
+    require value.tail == 37
+}
+"#;
+    for opt_level in 0..=3 {
+        // This prototype belongs to the single-entry ABI. Keep policy-witness
+        // helper-call admission separate from its typed constructor contract.
+        let compiled = cellscript::compile_with_executable_surface_policy(
+            source,
+            CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..CompileOptions::default() },
+            ExecutableSurfacePolicy::DenyFailClosed,
+        )
+        .unwrap();
+        let mut changed = Fixture {
+            artifact: compiled.artifact_bytes,
+            metadata: serde_json::to_value(compiled.metadata).unwrap(),
+            record: compiled.verified_lowering_record.unwrap(),
+            source_map: compiled.source_artifact_map.unwrap(),
+        };
+        changed.check().unwrap();
+        let constructor = changed.record.typed_semantics.entries.iter_mut().find(|entry| entry.name == "build").unwrap();
+        let operation = constructor
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.operations)
+            .find(|operation| operation.opcode == "tuple" && operation.operands.len() == 3)
+            .unwrap();
+        assert_eq!(operation.operands[0].ty, "EmptyA");
+        assert_eq!(operation.operands[1].ty, "EmptyZ");
+        operation.operands.swap(0, 1);
+        // Operations do not change the entry-selection or declared-layout
+        // identities. Preserve those and rebind only the mutated typed record
+        // and outer sidecars, including their bundle identity.
+        changed.record.typed_semantics_hash = canonical_hash(TYPED_SEMANTICS_SCHEMA, &changed.record.typed_semantics).unwrap();
+        changed.metadata["typed_semantics"] = serde_json::to_value(&changed.record.typed_semantics).unwrap();
+        changed.metadata["typed_semantics_hash"] = changed.record.typed_semantics_hash.clone().into();
+        changed.rebind_sidecars();
+        let error = changed.check().unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid, "O{opt_level}: {error}");
+        assert!(error.message.contains("'tuple'"), "O{opt_level}: {error}");
+    }
+}
+
+#[test]
 fn real_policy_bundle_and_unchanged_identity_rebinding_are_valid_in_both_editions() {
     for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
         let mut fixture = Fixture::new(edition);

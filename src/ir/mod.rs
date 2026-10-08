@@ -1099,6 +1099,7 @@ pub struct IrGenerator {
     transition_param_ids: HashSet<usize>,
     transition_coverable_value_ids: HashSet<usize>,
     type_fields: HashMap<String, HashMap<String, IrType>>,
+    type_field_order: HashMap<String, Vec<String>>,
     type_kinds: HashMap<String, IrTypeKind>,
     type_capacity_floors: HashMap<String, u64>,
     type_identities: HashMap<String, IrIdentityPolicy>,
@@ -1311,6 +1312,7 @@ fn protocol_role_name(name: &str) -> Option<String> {
 
 struct IrImportContext {
     type_fields: HashMap<String, HashMap<String, IrType>>,
+    type_field_order: HashMap<String, Vec<String>>,
     type_kinds: HashMap<String, IrTypeKind>,
     receipt_claim_outputs: HashMap<String, Option<IrType>>,
     flow_states: HashMap<String, Vec<String>>,
@@ -1348,6 +1350,7 @@ impl IrGenerator {
             transition_param_ids: HashSet::new(),
             transition_coverable_value_ids: HashSet::new(),
             type_fields: HashMap::new(),
+            type_field_order: HashMap::new(),
             type_kinds: HashMap::new(),
             type_capacity_floors: HashMap::new(),
             type_identities: HashMap::new(),
@@ -1389,6 +1392,7 @@ impl IrGenerator {
     fn with_import_context(module_name: String, context: IrImportContext) -> Self {
         let IrImportContext {
             type_fields,
+            type_field_order,
             type_kinds,
             receipt_claim_outputs,
             flow_states,
@@ -1400,6 +1404,7 @@ impl IrGenerator {
             call_target_labels,
         } = context;
         let mut generator = Self::with_type_fields(module_name, type_fields);
+        generator.type_field_order = type_field_order;
         generator.type_kinds.extend(type_kinds);
         generator.receipt_claim_outputs.extend(receipt_claim_outputs);
         generator.flow_states.extend(flow_states);
@@ -1434,6 +1439,16 @@ impl IrGenerator {
             })
             .collect::<HashSet<_>>();
         for item in &ast.items {
+            let declaration = match item {
+                Item::Resource(value) => Some((&value.name, &value.fields)),
+                Item::Shared(value) => Some((&value.name, &value.fields)),
+                Item::Receipt(value) => Some((&value.name, &value.fields)),
+                Item::Struct(value) => Some((&value.name, &value.fields)),
+                _ => None,
+            };
+            if let Some((name, fields)) = declaration {
+                self.type_field_order.insert(name.clone(), fields.iter().map(|field| field.name.clone()).collect());
+            }
             if let Item::Const(c) = item {
                 self.constants.insert(c.name.clone(), (c.value.clone(), Self::convert_type(&c.ty)));
             }
@@ -5917,7 +5932,7 @@ impl IrGenerator {
     ) -> LoweredExpr {
         let aggregate = self.new_var("struct_tmp", IrType::Named(init.ty.clone()));
         let mut field_map = HashMap::new();
-        let mut tuple_operands = Vec::new();
+        let mut field_operands = HashMap::new();
         let mut active = current;
 
         for (field_name, field_expr) in &init.fields {
@@ -5937,7 +5952,7 @@ impl IrGenerator {
                 IrOperand::Const(value) => self.const_type(value),
             };
             let field_var = self.new_var(format!("{}_{}", init.ty, field_name), field_ty);
-            tuple_operands.push(lowered.operand.clone());
+            field_operands.insert(field_name.clone(), lowered.operand.clone());
             self.block_mut(blocks, active).instructions.push(IrInstruction::Move { dest: field_var.clone(), src: lowered.operand });
             field_map.insert(field_name.clone(), field_var);
         }
@@ -5946,6 +5961,18 @@ impl IrGenerator {
             return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
         };
 
+        // Evaluate initializers in source order above, then serialize in the
+        // declared layout order. Sorting by byte offset loses zero-width ties.
+        let Some(order) = self.type_field_order.get(&init.ty) else {
+            self.errors.push(CompileError::without_span(format!("struct '{}' lacks its declaration field order", init.ty)));
+            return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
+        };
+        let tuple_operands = order.iter().filter_map(|name| field_operands.remove(name)).collect::<Vec<_>>();
+        if tuple_operands.len() != order.len() || !field_operands.is_empty() {
+            self.errors
+                .push(CompileError::without_span(format!("struct '{}' initializer fields differ from its declaration", init.ty)));
+            return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
+        }
         self.block_mut(blocks, active).instructions.push(IrInstruction::Tuple { dest: aggregate.clone(), fields: tuple_operands });
         self.aggregate_fields.insert(aggregate.id, field_map);
         LoweredExpr { operand: IrOperand::Var(aggregate), current: Some(active) }
@@ -10224,6 +10251,10 @@ fn generate_with_resolver_diagnostics_inner(
         ast.name.clone(),
         IrImportContext {
             type_fields,
+            type_field_order: external_type_defs
+                .iter()
+                .map(|definition| (definition.name.clone(), definition.fields.iter().map(|field| field.name.clone()).collect()))
+                .collect(),
             type_kinds,
             receipt_claim_outputs,
             flow_states,
@@ -11653,6 +11684,51 @@ mod tests {
         crate::types::check(&ast).unwrap();
         crate::flow::check(&ast).unwrap();
         generate(&ast).unwrap()
+    }
+
+    #[test]
+    fn struct_initializers_preserve_evaluation_order_and_use_declaration_order() {
+        let ir = parse_and_lower(
+            r#"
+module initializer_order
+struct Pair { left: u64, right: u64 }
+fn left() -> u64 { 11 }
+fn right() -> u64 { 23 }
+fn build() -> Pair { Pair { right: right(), left: left() } }
+"#,
+        );
+        let function = ir
+            .items
+            .iter()
+            .find_map(|item| match item {
+                IrItem::PureFn(function) if function.name == "build" => Some(function),
+                _ => None,
+            })
+            .unwrap();
+        let instructions = function.body.blocks.iter().flat_map(|block| &block.instructions).collect::<Vec<_>>();
+        let calls = instructions
+            .iter()
+            .filter_map(|instruction| match instruction {
+                IrInstruction::Call { dest: Some(dest), func, .. } => Some((func.as_str(), dest.id)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(calls.iter().map(|(name, _)| *name).collect::<Vec<_>>(), ["right", "left"]);
+        let fields = instructions
+            .iter()
+            .find_map(|instruction| match instruction {
+                IrInstruction::Tuple { fields, .. } => Some(fields),
+                _ => None,
+            })
+            .unwrap();
+        let field_ids = fields
+            .iter()
+            .map(|field| match field {
+                IrOperand::Var(var) => var.id,
+                _ => panic!("expected call-result operand"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(field_ids, [calls[1].1, calls[0].1]);
     }
 
     #[test]

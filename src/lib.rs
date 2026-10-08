@@ -237,7 +237,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
-const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v60-0.32-generic-shapes";
+const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v61-0.32-fixed-struct-results";
 pub const METADATA_SCHEMA_VERSION: u32 = 72;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 2;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -6770,6 +6770,7 @@ struct MetadataFieldLayout {
 struct MetadataTypeLayouts {
     fields: HashMap<String, HashMap<String, MetadataFieldLayout>>,
     enum_fixed_sizes: HashMap<String, usize>,
+    fixed_struct_returns: HashMap<String, ir::IrType>,
 }
 
 impl std::ops::Deref for MetadataTypeLayouts {
@@ -17453,6 +17454,14 @@ fn metadata_prelude_availability(
                     }
                     if named_fixed_vars.contains_key(name) {
                         availability.fixed_value_vars.insert(dest.id);
+                        if let Some(source) = named_fixed_vars
+                            .get(name)
+                            .and_then(|id| availability.aggregate_pointer_vars.get(id))
+                            .filter(|source| source.ty == dest.ty)
+                            .cloned()
+                        {
+                            availability.aggregate_pointer_vars.insert(dest.id, source);
+                        }
                     }
                     if named_scalar_vars.contains_key(name) {
                         availability.scalar_vars.insert(dest.id);
@@ -17464,6 +17473,15 @@ fn metadata_prelude_availability(
                 }
                 ir::IrInstruction::Call { dest: Some(dest), .. } if matches!(dest.ty, ir::IrType::Tuple(_)) => {
                     availability.tuple_call_return_vars.insert(dest.id, dest.ty.clone());
+                }
+                ir::IrInstruction::Call { dest: Some(dest), func, .. }
+                    if type_layouts.fixed_struct_returns.get(func) == Some(&dest.ty) =>
+                {
+                    // Only local fixed ordinary-struct helpers use caller-owned
+                    // result storage. Cell, enum and dynamic returns retain their
+                    // separate admission rules.
+                    availability.fixed_value_vars.insert(dest.id);
+                    availability.aggregate_pointer_vars.insert(dest.id, MetadataAggregatePointerSource { ty: dest.ty.clone() });
                 }
                 ir::IrInstruction::Call { dest: Some(dest), func, .. } if pure_const_returns.contains_key(func) => {
                     let value = pure_const_returns.get(func).expect("guarded pure const return");
@@ -20480,7 +20498,24 @@ fn metadata_type_layouts(ir: &ir::IrModule) -> MetadataTypeLayouts {
         let fields = metadata_layout_fields(type_def, &type_defs, &ir.enum_fixed_sizes);
         layouts.insert(type_def.name.clone(), fields);
     }
-    MetadataTypeLayouts { fields: layouts, enum_fixed_sizes: ir.enum_fixed_sizes.clone() }
+    let fixed_struct_returns = ir
+        .items
+        .iter()
+        .filter_map(|item| {
+            let ir::IrItem::PureFn(function) = item else { return None };
+            let ty = function.return_type.as_ref()?;
+            let ir::IrType::Named(name) = ty else { return None };
+            let definition = type_defs.get(name)?;
+            if definition.kind != ir::IrTypeKind::Struct
+                || ir.enum_fixed_sizes.contains_key(name)
+                || layouts.get(name)?.values().any(|field| field.fixed_size.is_none())
+            {
+                return None;
+            }
+            Some((function.name.clone(), ty.clone()))
+        })
+        .collect();
+    MetadataTypeLayouts { fields: layouts, enum_fixed_sizes: ir.enum_fixed_sizes.clone(), fixed_struct_returns }
 }
 
 fn metadata_layout_fields(
