@@ -689,3 +689,35 @@ Frozen-source prerequisite `53c36dc6` is signed. Its full worktree dev passed in
 `.cap/logs/1791461406-69970.log`; staging the new native sources and rerunning
 source policy also passed in `.cap/logs/1791462349-21846.log`. Whole H1/H2, #29
 and #44–#46 remain unfinished, review is unassigned, and full CI remains deferred.
+
+
+### Fixed policy parameter decoder prerequisite
+
+Transaction-pool snapshot synchronization is signed `23822919`; root dev passed
+in `.cap/logs/1791462533-25880.log`. A fresh clean backend/CCC replay is running
+on that exact source state. The isolated worktree adds optional independent
+`entry_codec` evidence described in `docs/FIXED_POLICY_PARAMETER_DECODER.md`.
+This does not change the emitter, ordinary checker admission, source syntax or
+metadata/resource ceilings. Runtime-bound null transport is not Cell-data
+codec evidence. Bool, enums, named/dynamic witness values, Script.args, outgoing
+stack arguments and profiles exceeding 1536 payload bytes/eight ABI registers
+reject rather than downgrade.
+
+Five new focused checker tests plus two existing fixed-result tests passed in
+worktree `.cap/logs/1791463805-58584.log`. Twenty rebound machine mutations
+across O0–O3 reject despite ordinary bundle inspection passing, including
+removed i32 sign extension. The original real-VM test name filter mistakenly
+selected zero tests; it is not evidence. The corrected qualified invocation
+passes in `.cap/logs/1791463601-50873.log`, with 16 positive and 48 malformed
+parameter cases. A host encoder rejection was fixed by corrupting magic only
+after canonical envelope construction. Initial aggregate-index VM experiments
+failed closed before codegen and are not executable aggregate evidence; the
+remaining shared-variant VM test uses supported signed scalar comparisons; it
+passes in `.cap/logs/1791464032-67375.log` with eight positive and eight negative
+cases across both variants and O0–O3. Strict checker clippy passes in
+`.cap/logs/1791464086-68469.log`.
+
+Full dev, fresh matching backend and signed commit remain required for this
+slice. Full H1/H2, #29 and #44–#46 remain unfinished. Independent security review
+is still unassigned, and full CI remains deferred until the whole queue is
+implemented.

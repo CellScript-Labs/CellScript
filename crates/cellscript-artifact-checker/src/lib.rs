@@ -1,6 +1,7 @@
 mod bindings;
 mod checker;
 mod elf;
+pub mod entry_codec;
 mod failure;
 mod fixed_results;
 mod generic_projection;

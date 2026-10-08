@@ -6640,7 +6640,7 @@ fn validate_policy_dispatch_logical_machine_contract(record: &VerifiedLoweringRe
     Ok(())
 }
 
-fn unique_policy_block<'a>(
+pub(crate) fn unique_policy_block<'a>(
     record: &'a VerifiedLoweringRecord,
     owner: &str,
     label_prefix: &str,
@@ -6684,7 +6684,7 @@ fn instructions_from(elf: &ParsedElf, address: u64, count: usize) -> Result<&[cr
         .ok_or_else(|| policy_machine_error(format!("truncated instruction range at {address:#x}")))
 }
 
-fn flow_targets(elf: &ParsedElf, address: u64, target: u64) -> bool {
+pub(crate) fn flow_targets(elf: &ParsedElf, address: u64, target: u64) -> bool {
     elf.control_flow.iter().any(|edge| edge.address == address && edge.target == target)
 }
 
@@ -7423,7 +7423,7 @@ fn policy_outgoing_argument_bytes(entry: &TypedSemanticEntry, typed: &TypedSeman
         .map_err(|_| policy_machine_error("policy adapter outgoing argument frame exceeds u32"))
 }
 
-fn entry_start(record: &VerifiedLoweringRecord, entry_id: &str) -> Result<u64, CheckerError> {
+pub(crate) fn entry_start(record: &VerifiedLoweringRecord, entry_id: &str) -> Result<u64, CheckerError> {
     let entry = record
         .entries
         .iter()
@@ -7789,7 +7789,7 @@ fn owner_has_abort_error(record: &VerifiedLoweringRecord, elf: &ParsedElf, owner
     })
 }
 
-fn is_addi(word: u32, rd: u32, rs1: u32, immediate: i32) -> bool {
+pub(crate) fn is_addi(word: u32, rd: u32, rs1: u32, immediate: i32) -> bool {
     word & 0x7f == 0x13
         && (word >> 12) & 0x7 == 0
         && (word >> 7) & 0x1f == rd
@@ -7801,7 +7801,7 @@ fn is_lui(word: u32, rd: u32, immediate: u32) -> bool {
     word & 0x7f == 0x37 && (word >> 7) & 0x1f == rd && word & 0xffff_f000 == immediate
 }
 
-fn is_ld(word: u32, rd: u32, rs1: u32, immediate: i32) -> bool {
+pub(crate) fn is_ld(word: u32, rd: u32, rs1: u32, immediate: i32) -> bool {
     word & 0x7f == 0x03
         && (word >> 12) & 0x7 == 0x3
         && (word >> 7) & 0x1f == rd
@@ -7809,7 +7809,7 @@ fn is_ld(word: u32, rd: u32, rs1: u32, immediate: i32) -> bool {
         && (word as i32) >> 20 == immediate
 }
 
-fn is_sd(word: u32, rs2: u32, rs1: u32, immediate: i32) -> bool {
+pub(crate) fn is_sd(word: u32, rs2: u32, rs1: u32, immediate: i32) -> bool {
     let decoded = (((word >> 25) & 0x7f) << 5) | ((word >> 7) & 0x1f);
     let decoded = ((decoded as i32) << 20) >> 20;
     word & 0x7f == 0x23
@@ -7819,7 +7819,7 @@ fn is_sd(word: u32, rs2: u32, rs1: u32, immediate: i32) -> bool {
         && decoded == immediate
 }
 
-fn is_sub(word: u32, rd: u32, rs1: u32, rs2: u32) -> bool {
+pub(crate) fn is_sub(word: u32, rd: u32, rs1: u32, rs2: u32) -> bool {
     word & 0x7f == 0x33
         && (word >> 25) & 0x7f == 0x20
         && (word >> 12) & 0x7 == 0
@@ -7846,7 +7846,7 @@ fn is_mul(word: u32, rd: u32, rs1: u32, rs2: u32) -> bool {
         && (word >> 20) & 0x1f == rs2
 }
 
-fn is_or(word: u32, rd: u32, rs1: u32, rs2: u32) -> bool {
+pub(crate) fn is_or(word: u32, rd: u32, rs1: u32, rs2: u32) -> bool {
     word & 0x7f == 0x33
         && (word >> 25) & 0x7f == 0
         && (word >> 12) & 0x7 == 6
@@ -7864,7 +7864,7 @@ fn is_and(word: u32, rd: u32, rs1: u32, rs2: u32) -> bool {
         && (word >> 20) & 0x1f == rs2
 }
 
-fn is_sltu(word: u32, rd: u32, rs1: u32, rs2: u32) -> bool {
+pub(crate) fn is_sltu(word: u32, rd: u32, rs1: u32, rs2: u32) -> bool {
     word & 0x7f == 0x33
         && (word >> 25) & 0x7f == 0
         && (word >> 12) & 0x7 == 3
@@ -7873,7 +7873,7 @@ fn is_sltu(word: u32, rd: u32, rs1: u32, rs2: u32) -> bool {
         && (word >> 20) & 0x1f == rs2
 }
 
-fn is_lbu(word: u32, rd: u32, rs1: u32, immediate: i32) -> bool {
+pub(crate) fn is_lbu(word: u32, rd: u32, rs1: u32, immediate: i32) -> bool {
     word & 0x7f == 0x03
         && (word >> 12) & 0x7 == 4
         && (word >> 7) & 0x1f == rd
@@ -7908,7 +7908,7 @@ fn is_srli(word: u32, rd: u32, rs1: u32, shift: u32) -> bool {
         && (word >> 20) & 0x3f == shift
 }
 
-fn is_slli(word: u32, rd: u32, rs1: u32, shift: u32) -> bool {
+pub(crate) fn is_slli(word: u32, rd: u32, rs1: u32, shift: u32) -> bool {
     word & 0x7f == 0x13
         && (word >> 12) & 0x7 == 1
         && (word >> 26) & 0x3f == 0
@@ -7917,19 +7917,19 @@ fn is_slli(word: u32, rd: u32, rs1: u32, shift: u32) -> bool {
         && (word >> 20) & 0x3f == shift
 }
 
-fn is_auipc(word: u32, rd: u32) -> bool {
+pub(crate) fn is_auipc(word: u32, rd: u32) -> bool {
     word & 0x7f == 0x17 && (word >> 7) & 0x1f == rd
 }
 
-fn is_jalr_call(word: u32) -> bool {
+pub(crate) fn is_jalr_call(word: u32) -> bool {
     word & 0x7f == 0x67 && (word >> 7) & 0x1f == 1 && (word >> 12) & 0x7 == 0 && (word >> 15) & 0x1f == 1
 }
 
-fn is_beq(word: u32, rs1: u32, rs2: u32) -> bool {
+pub(crate) fn is_beq(word: u32, rs1: u32, rs2: u32) -> bool {
     is_branch(word, 0, rs1, rs2)
 }
 
-fn is_bne(word: u32, rs1: u32, rs2: u32) -> bool {
+pub(crate) fn is_bne(word: u32, rs1: u32, rs2: u32) -> bool {
     is_branch(word, 1, rs1, rs2)
 }
 
@@ -7945,7 +7945,7 @@ fn is_branch(word: u32, function: u32, rs1: u32, rs2: u32) -> bool {
     word & 0x7f == 0x63 && (word >> 12) & 0x7 == function && (word >> 15) & 0x1f == rs1 && (word >> 20) & 0x1f == rs2
 }
 
-fn is_jal_zero(word: u32) -> bool {
+pub(crate) fn is_jal_zero(word: u32) -> bool {
     word & 0x7f == 0x6f && (word >> 7) & 0x1f == 0
 }
 

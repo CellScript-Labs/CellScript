@@ -195,6 +195,103 @@ fn unchanged(bundle: Vec<u8>, _: &packed::Script, _: &packed::Script) -> Vec<u8>
     bundle
 }
 
+#[test]
+fn fixed_policy_parameter_decoder_certificate_has_real_vm_byte_oracles() {
+    for opt_level in 0..=3 {
+        let compiled = compile_artifact(
+            SOURCE,
+            CompileOptions { source_contracts: true, opt_level, ..options() },
+            declaration(),
+            ExecutableSurfacePolicy::DenyFailClosed,
+        )
+        .unwrap();
+        cellscript_artifact_checker::entry_codec::check_fixed_policy_parameter_decoders(
+            &compiled.artifact_bytes,
+            &serde_json::to_vec(&compiled.metadata).unwrap(),
+            &serde_json::to_vec(compiled.verified_lowering_record.as_ref().unwrap()).unwrap(),
+            &serde_json::to_vec(compiled.source_artifact_map.as_ref().unwrap()).unwrap(),
+            &cellscript_artifact_checker::CheckerBudgets::default(),
+        )
+        .unwrap();
+        for (tag, inputs, outputs) in
+            [(MINT, &[][..], &[7][..]), (TRANSFER, &[7][..], &[7][..]), (MERGE, &[7, 5][..], &[12][..]), (BURN, &[7][..], &[][..])]
+        {
+            execute(&compiled, Case::new(tag, inputs, outputs), unchanged).unwrap();
+            for mode in 0..3 {
+                let error = execute(&compiled, Case::new(tag, inputs, outputs), |bundle, _, _| {
+                    let mut records = decode_policy_witness_bundle(&bundle).unwrap();
+                    if tag == BURN {
+                        records[0].args = crate::ENTRY_WITNESS_ABI_MAGIC.to_vec();
+                    } else if mode == 1 {
+                        records[0].args.pop();
+                    } else if mode == 2 {
+                        records[0].args.push(1);
+                    }
+                    let mut encoded = encode_policy_witness_bundle(&records).unwrap();
+                    if mode == 0 {
+                        // Corrupt after canonical envelope construction: the
+                        // host encoder deliberately rejects invalid magic.
+                        encoded[POLICY_WITNESS_MAGIC.len() + 8 + 61] ^= 1;
+                    }
+                    encoded
+                })
+                .unwrap_err();
+                assert_exit(error, 25);
+            }
+        }
+    }
+}
+
+#[test]
+fn certified_shared_fixed_decoders_preserve_signed_bytes_in_vm() {
+    let mut source = "module signed_fixed_decoder\nresource Token has store, consume { amount: u64 }\n".to_string();
+    for name in ["first", "second"] {
+        source.push_str(&format!("action {name}(witness signed: i32, witness zero: i32, witness recipient: Address) {{\nverification\nrequire signed < zero\ncreate Token {{ amount: 7 }} with_lock(recipient)\n}}\n"));
+    }
+    for opt_level in 0..=3 {
+        let declaration = ArtifactDeclaration {
+            name: "SignedFixedDecoder".into(),
+            context: ArtifactContext::TypeGroup { resource: "Token".into() },
+            dispatch: ArtifactDispatch::PolicyWitnessV1,
+            actions: vec![ArtifactAction { tag: 100, action: "first".into() }, ArtifactAction { tag: 101, action: "second".into() }],
+            common_checks: Vec::new(),
+        };
+        let compiled = compile_artifact(
+            &source,
+            CompileOptions { source_contracts: true, opt_level, ..options() },
+            declaration,
+            ExecutableSurfacePolicy::DenyFailClosed,
+        )
+        .unwrap();
+        cellscript_artifact_checker::entry_codec::check_fixed_policy_parameter_decoders(
+            &compiled.artifact_bytes,
+            &serde_json::to_vec(&compiled.metadata).unwrap(),
+            &serde_json::to_vec(compiled.verified_lowering_record.as_ref().unwrap()).unwrap(),
+            &serde_json::to_vec(compiled.source_artifact_map.as_ref().unwrap()).unwrap(),
+            &cellscript_artifact_checker::CheckerBudgets::default(),
+        )
+        .unwrap();
+        for (tag, name) in [(100, "first"), (101, "second")] {
+            for valid in [true, false] {
+                let result = execute(&compiled, Case::new(tag, &[], &[7]), |_, script, recipient| {
+                    let values = [
+                        EntryWitnessArg::I32(if valid { -1 } else { 1 }),
+                        EntryWitnessArg::I32(0),
+                        EntryWitnessArg::Address(recipient.calc_script_hash().unpack()),
+                    ];
+                    let action = compiled.metadata.actions.iter().find(|action| action.name == name).unwrap();
+                    encode_policy_witness_bundle(&[record(script, tag, action.entry_witness_args(&values).unwrap())]).unwrap()
+                });
+                if valid {
+                    result.unwrap();
+                } else {
+                    assert_exit(result.unwrap_err(), 5);
+                }
+            }
+        }
+    }
+}
+
 fn assert_exit(error: String, code: u64) {
     assert!(error.contains(&format!("error code {code}")) || error.contains(&format!("error code: {code}")), "{error}");
 }

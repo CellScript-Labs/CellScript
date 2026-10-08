@@ -60,6 +60,181 @@ struct Fixture {
     source_map: SourceArtifactMap,
 }
 
+#[test]
+fn fixed_policy_parameter_decoders_bind_actual_offsets_and_source_contracts() {
+    let mut identity = None;
+    for opt in 0..=3 {
+        let fixture = Fixture::new_with(CellScriptEdition::Edition2026, opt, declaration());
+        let checked = cellscript_artifact_checker::entry_codec::check_fixed_policy_parameter_decoders(
+            &fixture.artifact,
+            &serde_json::to_vec(&fixture.metadata).unwrap(),
+            &serde_json::to_vec(&fixture.record).unwrap(),
+            &serde_json::to_vec(&fixture.source_map).unwrap(),
+            &CheckerBudgets::default(),
+        )
+        .unwrap();
+        let value: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
+        assert_eq!(value["variants"]["10"]["action"], "mint");
+        assert_eq!(value["variants"]["10"]["parameters"][0]["width_bytes"], 8);
+        assert_eq!(value["variants"]["10"]["parameters"][1]["payload_offset"], 8);
+        assert_eq!(value["variants"]["10"]["parameters"][1]["transport"], "fixed-byte-pointer");
+        assert_eq!(value["variants"]["40"]["parameters"][0]["transport"], "runtime-bound-null");
+        assert!(!checked.module_projection().artifact_report().semantic_equivalence_claimed);
+        if let Some(previous) = &identity {
+            assert_eq!(previous, checked.identity())
+        } else {
+            identity = Some(checked.identity().to_owned())
+        }
+    }
+}
+
+#[test]
+fn fixed_decoder_rejects_rebound_parameter_instructions_that_ordinary_inspection_does_not_certify() {
+    for opt in 0..=3 {
+        let fixture = Fixture::new_with(CellScriptEdition::Edition2026, opt, declaration());
+        let params = fixture
+            .record
+            .blocks
+            .iter()
+            .find(|block| block.machine_label.as_deref().is_some_and(|label| label.starts_with(".Lentry_witness_exact_size_ok_")))
+            .unwrap()
+            .range
+            .start;
+        let size_ok = fixture
+            .record
+            .blocks
+            .iter()
+            .find(|block| block.machine_label.as_deref().is_some_and(|label| label.starts_with(".Lentry_witness_size_ok_")))
+            .unwrap()
+            .range
+            .start;
+        let elf = parse_elf(&fixture.artifact, CheckerBudgets::default().instructions).unwrap();
+        for (address, kind) in [(params + 4, 0), (params + 8, 1), (params + 16, 2), (size_ok + 4, 3)] {
+            let mut changed = fixture.clone();
+            let word = elf.instructions.iter().find(|instruction| instruction.address == address).unwrap().word;
+            let modified = match kind {
+                0 => (word & 0x000f_ffff) | (17 << 20), // duplicate next byte instead of byte zero
+                1 => (word & !(31 << 7)) | (11 << 7),   // overwrite the following ABI argument
+                2 => (word & 0x000f_ffff) | (16 << 20), // shift second byte by sixteen instead of eight
+                _ => (word & 0x000f_ffff) | (68 << 20), // accept a different witness magic
+            };
+            changed.replace_machine_word(address, modified);
+            changed.check().expect("ordinary inspection does not grant a decoder certificate");
+            let error = cellscript_artifact_checker::entry_codec::check_fixed_policy_parameter_decoders(
+                &changed.artifact,
+                &serde_json::to_vec(&changed.metadata).unwrap(),
+                &serde_json::to_vec(&changed.record).unwrap(),
+                &serde_json::to_vec(&changed.source_map).unwrap(),
+                &CheckerBudgets::default(),
+            )
+            .unwrap_err();
+            assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "O{opt} mutation {kind}: {error}");
+        }
+    }
+}
+
+#[test]
+fn fixed_decoder_evidence_never_downgrades_unsupported_codec_or_stack_profiles() {
+    for source in [
+        SOURCE.replace("witness recipient: Address)", "witness recipient: Address, witness flag: bool)"),
+        STACK_ARGS_SOURCE.to_owned(),
+    ] {
+        let mut artifact = declaration();
+        artifact.actions.retain(|action| action.action == "mint");
+        artifact.common_checks.clear();
+        let fixture = Fixture::new_source_with(&source, CellScriptEdition::Edition2026, 0, artifact);
+        assert!(cellscript_artifact_checker::entry_codec::check_fixed_policy_parameter_decoders(
+            &fixture.artifact,
+            &serde_json::to_vec(&fixture.metadata).unwrap(),
+            &serde_json::to_vec(&fixture.record).unwrap(),
+            &serde_json::to_vec(&fixture.source_map).unwrap(),
+            &CheckerBudgets::default(),
+        )
+        .is_err());
+    }
+}
+
+#[test]
+fn fixed_decoder_checks_signed_extension_small_aggregates_and_shared_variants() {
+    let source = SOURCE.replace("witness amount: u64, witness recipient: Address", "witness amount: u64, witness recipient: Address, witness signed: i32, witness bytes: [u8; 4], witness pair: (u16, u8)")
+        + "\naction other(witness amount: u64, witness recipient: Address, witness signed: i32, witness bytes: [u8; 4], witness pair: (u16, u8)) { verification require amount > 0 create Token { amount: amount } with_lock(recipient) }\n";
+    for opt in 0..=3 {
+        let mut declaration = declaration();
+        declaration.actions.push(ArtifactAction { tag: 11, action: "other".into() });
+        let fixture = Fixture::new_source_with(&source, CellScriptEdition::Edition2026, opt, declaration);
+        let checked = certify_fixed_decoder(&fixture).unwrap();
+        let value: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
+        let params = &value["variants"]["10"]["parameters"];
+        assert_eq!(params[2]["width_bytes"], 4);
+        assert_eq!(params[3]["width_bytes"], 4);
+        assert_eq!(params[4]["width_bytes"], 3);
+        assert_eq!(value["variants"]["11"]["action"], "other");
+        assert!(fixture.record.entries.iter().any(|entry| entry.name.starts_with(".Lpolicy_shared_decoder_")));
+        let elf = parse_elf(&fixture.artifact, CheckerBudgets::default().instructions).unwrap();
+        let signed = elf
+            .instructions
+            .iter()
+            .find(|instruction| {
+                let word = instruction.word;
+                word & 0x707f == 0x5013 && word >> 20 == 0x420 && (word >> 7) & 31 == 13
+            })
+            .expect("signed a3 must be extended from 32 bits");
+        let mut changed = fixture.clone();
+        changed.replace_machine_word(signed.address, signed.word & !(0x400 << 20));
+        changed.check().unwrap();
+        assert!(certify_fixed_decoder(&changed).is_err(), "unsigned substitute cannot certify i32 at O{opt}");
+    }
+}
+
+#[test]
+fn fixed_decoder_profile_limits_are_exact_and_never_raise_checker_budgets() {
+    let mut single = declaration();
+    single.actions.retain(|action| action.action == "mint");
+    single.common_checks.clear();
+    for (padding, accepted) in [(1496, true), (1497, false)] {
+        let source =
+            SOURCE.replace("witness recipient: Address)", &format!("witness recipient: Address, witness padding: [u8; {padding}])"));
+        let fixture = Fixture::new_source_with(&source, CellScriptEdition::Edition2026, 0, single.clone());
+        assert_eq!(certify_fixed_decoder(&fixture).is_ok(), accepted, "padding={padding}");
+    }
+    for (extra, accepted) in [(5, true), (6, false)] {
+        let parameters = (0..extra).map(|index| format!(", witness p{index}: u8")).collect::<String>();
+        let source = SOURCE.replace("witness recipient: Address)", &format!("witness recipient: Address{parameters})"));
+        let fixture = Fixture::new_source_with(&source, CellScriptEdition::Edition2026, 0, single.clone());
+        assert_eq!(certify_fixed_decoder(&fixture).is_ok(), accepted, "extra={extra}");
+    }
+    let fixture = Fixture::new_with(CellScriptEdition::Edition2026, 0, declaration());
+    let budgets = CheckerBudgets { instructions: 1, ..CheckerBudgets::default() };
+    assert!(cellscript_artifact_checker::entry_codec::check_fixed_policy_parameter_decoders(
+        &fixture.artifact,
+        &serde_json::to_vec(&fixture.metadata).unwrap(),
+        &serde_json::to_vec(&fixture.record).unwrap(),
+        &serde_json::to_vec(&fixture.source_map).unwrap(),
+        &budgets,
+    )
+    .is_err());
+    assert!(cellscript_artifact_checker::entry_codec::check_fixed_policy_parameter_decoders(
+        &fixture.artifact,
+        &vec![b' '; 4 * 1024 * 1024 + 1],
+        b"{}",
+        b"{}",
+        &CheckerBudgets::default(),
+    )
+    .is_err());
+}
+
+fn certify_fixed_decoder(
+    fixture: &Fixture,
+) -> Result<cellscript_artifact_checker::entry_codec::CheckedFixedPolicyParameterDecoders, CheckerError> {
+    cellscript_artifact_checker::entry_codec::check_fixed_policy_parameter_decoders(
+        &fixture.artifact,
+        &serde_json::to_vec(&fixture.metadata).unwrap(),
+        &serde_json::to_vec(&fixture.record).unwrap(),
+        &serde_json::to_vec(&fixture.source_map).unwrap(),
+        &CheckerBudgets::default(),
+    )
+}
+
 impl Fixture {
     fn new(edition: CellScriptEdition) -> Self {
         Self::new_with(edition, 0, declaration())

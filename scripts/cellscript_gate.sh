@@ -651,6 +651,8 @@ run_dev_gate() {
         --test interface_inspection --test interface_projection --test frozen_interface --test entry_selection --test policy_artifact_checker --test value_return_abi \
         --test vec_constructor --test bounded_byte_context
     run cargo test --locked -p cellscript --test cli cellc_source_contract_builds_and_plans_keep_separate_cache_entries -- --exact --test-threads=1
+    run cargo test --locked -p cellscript artifact::vm_tests::fixed_policy_parameter_decoder_certificate_has_real_vm_byte_oracles --lib -- --exact --test-threads=1
+    run cargo test --locked -p cellscript artifact::vm_tests::certified_shared_fixed_decoders_preserve_signed_bytes_in_vm --lib -- --exact --test-threads=1
     run cargo test --locked -p cellscript deployment_line_handle --lib
     run cargo test --locked -p cellscript --test exact_script_handles
     run cargo check --locked -p cellscript-fiber-adapter --all-targets

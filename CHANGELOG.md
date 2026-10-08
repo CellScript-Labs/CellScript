@@ -2,6 +2,12 @@
 
 ## Unreleased — 0.32
 
+Add optional independent machine evidence for bounded fixed policy parameter
+decoding, with exact length/magic, byte offsets, ABI registers and
+signed extension checks. Unsupported profiles reject without weakening ordinary
+inspection. This prerequisite grants no complete codec or open-handle admission;
+see `docs/FIXED_POLICY_PARAMETER_DECODER.md`.
+
 Synchronize local CKB acceptance submissions with the transaction pool's actual
 chain snapshot before spending freshly generated funds and after commitment.
 Bounded waits fail closed on stale/malformed tips and do not retry rejected
