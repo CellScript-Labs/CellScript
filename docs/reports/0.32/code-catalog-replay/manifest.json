@@ -10,7 +10,8 @@
     "catalog": "16e6b7215d85d3680704f1b180ddbb382f9c05a1",
     "owner": "04a70f612587255b1aec1c422f004b155cde2b92",
     "sources": "3a15ed9a0a462c089845bff6eb08993dd9221deb",
-    "target": "35a9565b260890e2b32f6082af51e5cfa36b3866"
+    "target": "35a9565b260890e2b32f6082af51e5cfa36b3866",
+    "receipt": "e546d0f93dafc52a2e522f80b7422a7f88307a34"
   },
   "dev_source_state": "exact staged source files later G-signed; not a clean-HEAD dev claim",
   "ci": "deferred until complete implementation queue",
@@ -136,8 +137,33 @@
       "raw_sha256": "8eeee1860cf80e7b261965fb21e10accedc1d8eee2164bf31bf1aabc53cd3124",
       "stored_bytes": 120,
       "stored_sha256": "ee84e3180a477dbe3107a7c0f879481d51a5011ddd1d5e1a333312dcf8ba6d43"
+    },
+    {
+      "name": "receipt-staged-dev.log.gz",
+      "original_path": "/Users/arthur/.codex/worktrees/fixed-result-contract/CellScript/.cap/logs/1791490595-38964.log",
+      "raw_bytes": 98264,
+      "raw_sha256": "cf13ef3bf60b7dcce2dde3503ff1e6297621474d2fb984b86a9edf46dea3f53a",
+      "stored_bytes": 16572,
+      "stored_sha256": "b18fe414ca5ad54d6f34d0beb24f7dda2ce44c0cf467f84dd51d2f1608c3aa4a"
+    },
+    {
+      "name": "receipt-public-push.log.gz",
+      "original_path": "/Users/arthur/RustroverProjects/CellScript/.cap/logs/1791491476-59406.log",
+      "raw_bytes": 167,
+      "raw_sha256": "ce5074e41e3392c951520f4fea8e6b38f71963ef9e04af9778e9493a33ea61c0",
+      "stored_bytes": 130,
+      "stored_sha256": "13277f8799a1728bc94243929b62f053b7a0a31696ab9e0745f38f7a46cfcbdb"
+    },
+    {
+      "name": "receipt-public-head.log.gz",
+      "original_path": "/Users/arthur/RustroverProjects/CellScript/.cap/logs/1791491483-59727.log",
+      "raw_bytes": 84,
+      "raw_sha256": "d9f24ef222c22160d89bf458a17dc0ce00ba8280686cede693ac632896a79001",
+      "stored_bytes": 94,
+      "stored_sha256": "c52de0c7428c79be0416f0b12ca7f5caa0f1166a216b90b79a5327399ec091c5"
     }
   ],
   "sources_scope": "native parsed-source capture only; no fresh backend claim",
-  "target_scope": "native/checker target selection only; no fresh clean backend claim"
+  "target_scope": "native/checker target selection only; no fresh clean backend claim",
+  "receipt_scope": "native/checker finite receipts only; no fresh clean backend claim"
 }

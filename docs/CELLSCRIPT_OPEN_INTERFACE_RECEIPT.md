@@ -254,3 +254,15 @@ conservative relation. Source publisher authority, version/status/floors,
 authenticated Type history, active chain context, immutable authorization,
 complete general public codecs and H2 remain required. No full H1, source handle,
 behavioral equivalence, peer execution or stable admission is claimed.
+
+## Finite declared-policy field binding
+
+The [native code-policy binding](FROZEN_CODE_POLICY.md) matches all finite receipts
+against a separately declared authorization-set wire snapshot, binding required
+API, pinned genesis, checked target/runtime and every candidate's receipt,
+interface, ELF, complete Script and exact creation OutPoint. Exact/compatible
+selection returns host evidence for the real candidate and rejects declared
+yank/floor violations and later input/source changes. This data2 Type-policy
+path rejects Type-hash history without evidence. Snapshot status/sequence choices
+are not verified Registry/version facts. Root authority, full admission, nominal
+source handles and H2 remain required.

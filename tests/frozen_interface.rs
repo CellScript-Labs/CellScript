@@ -972,3 +972,336 @@ fn parsed_source_closure_rejects_even_identical_planned_lock_overrides() {
     .unwrap();
     parsed.check_unchanged().unwrap();
 }
+
+fn policy_hash(text: &str) -> [u8; 32] {
+    let text = text.strip_prefix("0x").unwrap_or(text);
+    assert_eq!(text.len(), 64);
+    std::array::from_fn(|index| u8::from_str_radix(&text[index * 2..index * 2 + 2], 16).unwrap())
+}
+fn policy_sources(
+    library: &Path,
+    candidate: &Path,
+    consumer: &Path,
+    opt: u8,
+    count: usize,
+) -> cellscript::package::frozen_interface::ResolvedSourceCatalog {
+    use cellscript::package::frozen_interface::{freeze_code_catalog, freeze_package_sources, resolve_source_catalog};
+    let inputs = (0..count)
+        .map(|index| code_candidate(compile_code(if index % 2 == 0 { library } else { candidate }, opt), vec![index as u8 + 1]))
+        .collect();
+    let catalog = freeze_code_catalog(compile_code(library, opt), inputs, &Default::default()).unwrap();
+    resolve_source_catalog(freeze_package_sources(Utf8Path::from_path(consumer).unwrap(), "dev").unwrap(), catalog).unwrap()
+}
+fn policy_records(
+    sources: &cellscript::package::frozen_interface::ResolvedSourceCatalog,
+    exact: bool,
+) -> (cellscript_artifact_checker::open_handle_policy::PolicyHeader, Vec<cellscript_artifact_checker::open_handle_policy::PolicyMember>)
+{
+    use cellscript_artifact_checker::open_handle_policy::*;
+    let catalog = sources.catalog();
+    let runtime = catalog.required().projection().runtime_contract();
+    let members = catalog
+        .candidates()
+        .iter()
+        .map(|candidate| PolicyMember {
+            status: MemberStatus::Active,
+            hash_type: CodeHashType::Data2,
+            admission_sequence: 4,
+            deployment_sequence: 0,
+            receipt: policy_hash(candidate.receipt().identity()),
+            interface: policy_hash(candidate.module().projection().identity()),
+            artifact: policy_hash(candidate.origin().artifact_hash()),
+            script: policy_hash(candidate.origin().selected_script_hash()),
+            code_hash: policy_hash(candidate.origin().artifact_hash()),
+            code_tx_hash: policy_hash(candidate.origin().transaction_hash()),
+            deployment_line: [0; 32],
+            history_tip: [0; 32],
+            code_output_index: candidate.origin().output_index(),
+        })
+        .collect::<Vec<_>>();
+    let header = PolicyHeader {
+        class: HandleClass::Script,
+        role: ScriptRole::Type,
+        mode: if exact { SelectionMode::Exact } else { SelectionMode::Compatible },
+        member_count: members.len() as u8,
+        sequence: 5,
+        minimum_admission_sequence: 3,
+        required_interface: policy_hash(catalog.required().projection().identity()),
+        exact_receipt: if exact { members[0].receipt } else { [0; 32] },
+        network_genesis: [0x11; 32],
+        target_profile: policy_hash(
+            &cellscript_artifact_checker::canonical_hash("cellscript-code-policy-target-id-v1", &runtime.target_profile).unwrap(),
+        ),
+        runtime_abi: policy_hash(
+            &cellscript_artifact_checker::canonical_hash("cellscript-code-policy-runtime-id-v1", runtime).unwrap(),
+        ),
+    };
+    (header, members)
+}
+fn policy_fixture() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+    let directory = tempfile::tempdir().unwrap();
+    let library = directory.path().join("library");
+    let candidate = directory.path().join("candidate");
+    let consumer = directory.path().join("consumer");
+    owned_code_package(&library, "library");
+    owned_code_package(&candidate, "library");
+    let source = CODE_SOURCE.replace("module client", "module foreign").replace("value > 0", "value == 7");
+    std::fs::write(candidate.join("src/main.cell"), source).unwrap();
+    lock(&candidate);
+    consuming_package(&consumer, "library", "../library", &["left", "right"]);
+    (directory, library, candidate, consumer)
+}
+#[test]
+fn code_policy_binds_actual_all_member_receipts_and_selects_exact_or_compatible() {
+    use cellscript::package::frozen_interface::freeze_code_policy;
+    use cellscript_artifact_checker::open_handle_policy::AuthorizationSet;
+    let (_directory, library, candidate, consumer) = policy_fixture();
+    for opt in 0..=3 {
+        for exact in [false, true] {
+            let sources = policy_sources(&library, &candidate, &consumer, opt, 2);
+            let source_id = sources.identity().to_owned();
+            let (header, members) = policy_records(&sources, exact);
+            assert_ne!(members[0].artifact, members[1].artifact);
+            let policy = AuthorizationSet::new(header, &members).unwrap();
+            let root = policy.root();
+            let checked = freeze_code_policy(sources, policy).unwrap();
+            let record: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
+            assert_eq!(record["schema"], "cellscript-frozen-code-policy-bindings-v1");
+            assert_eq!(record["source_catalog"], source_id);
+            assert_eq!(record["policy_root"], cellscript_artifact_checker::hex_encode(&root));
+            let mut material = b"cellscript-frozen-code-policy-bindings-id-v1\0".to_vec();
+            material.extend_from_slice(&checked.canonical_bytes().unwrap());
+            assert_eq!(
+                checked.identity(),
+                cellscript_artifact_checker::hex_encode(&cellscript_artifact_checker::ckb_blake2b256(&material))
+            );
+            for (index, member) in members.iter().enumerate() {
+                let witness = checked.policy().selection(&member.receipt).unwrap();
+                let selection = checked.check_selection(&witness);
+                if exact && index == 1 {
+                    assert!(selection.unwrap_err().message.contains("ExactReceipt"));
+                } else {
+                    let selection = selection.unwrap();
+                    assert_eq!(selection.membership().root(), root);
+                    assert_eq!(policy_hash(selection.candidate().receipt().identity()), member.receipt);
+                    let candidate = selection.candidate();
+                    selection
+                        .check_unchanged_inputs(
+                            candidate.module().bundle(),
+                            candidate.raw_transaction(),
+                            candidate.origin().output_index(),
+                            candidate.selected_script(),
+                        )
+                        .unwrap();
+                    assert_eq!(record["candidate_indices"][selection.membership().index() as usize], index);
+                }
+            }
+        }
+    }
+}
+#[test]
+fn code_policy_rejects_rebound_headers_and_every_unselected_member_identity() {
+    use cellscript::package::frozen_interface::freeze_code_policy;
+    use cellscript_artifact_checker::open_handle_policy::*;
+    let (_directory, library, candidate, consumer) = policy_fixture();
+    for opt in 0..=3 {
+        for axis in 0..12 {
+            let sources = policy_sources(&library, &candidate, &consumer, opt, 2);
+            let (mut header, mut members) = policy_records(&sources, true);
+            // Reconstruct a valid low-level tree: rejection must come from
+            // actual host bindings rather than a stale outer Merkle root.
+            match axis {
+                0 => header.required_interface[0] ^= 1,
+                1 => header.network_genesis[0] ^= 1,
+                2 => header.target_profile[0] ^= 1,
+                3 => header.runtime_abi[0] ^= 1,
+                4 => header.role = ScriptRole::Lock,
+                5 => members[1].receipt[0] ^= 1,
+                6 => members[1].interface[0] ^= 1,
+                7 => {
+                    members[1].artifact[0] ^= 1;
+                    members[1].code_hash = members[1].artifact;
+                }
+                8 => members[1].script[0] ^= 1,
+                9 => members[1].code_tx_hash[0] ^= 1,
+                10 => members[1].code_output_index += 1,
+                11 => members[1].hash_type = CodeHashType::Data1,
+                _ => unreachable!(),
+            }
+            let wire_only = AuthorizationSet::new(header, &members).unwrap();
+            let error = freeze_code_policy(sources, wire_only).unwrap_err();
+            assert!(error.message.contains("code policy"), "axis {axis} O{opt}: {error}");
+        }
+    }
+}
+#[test]
+fn code_policy_checks_final_member_and_rejects_missing_or_substituted_members() {
+    use cellscript::package::frozen_interface::freeze_code_policy;
+    use cellscript_artifact_checker::open_handle_policy::*;
+    let (_directory, library, candidate, consumer) = policy_fixture();
+    let sources = policy_sources(&library, &candidate, &consumer, 0, 32);
+    let (header, members) = policy_records(&sources, false);
+    let checked = freeze_code_policy(sources, AuthorizationSet::new(header, &members).unwrap()).unwrap();
+    for member in &members {
+        let witness = checked.policy().selection(&member.receipt).unwrap();
+        let selected = checked.check_selection(&witness).unwrap();
+        assert_eq!(policy_hash(selected.candidate().receipt().identity()), member.receipt);
+    }
+    let sources = policy_sources(&library, &candidate, &consumer, 0, 32);
+    let (header, mut members) = policy_records(&sources, false);
+    members[31].script[0] ^= 1;
+    assert!(freeze_code_policy(sources, AuthorizationSet::new(header, &members).unwrap())
+        .unwrap_err()
+        .message
+        .contains("complete Script"));
+    for count in [1, 2] {
+        let sources = policy_sources(&library, &candidate, &consumer, 0, 2);
+        let (mut header, mut members) = policy_records(&sources, false);
+        if count == 1 {
+            members.pop();
+            header.member_count = 1;
+        } else {
+            members[1].receipt = [0x87; 32];
+        }
+        assert!(freeze_code_policy(sources, AuthorizationSet::new(header, &members).unwrap()).is_err());
+    }
+}
+#[test]
+fn code_policy_keeps_snapshot_status_floors_and_root_separate_from_host_byte_bindings() {
+    use cellscript::package::frozen_interface::freeze_code_policy;
+    use cellscript_artifact_checker::open_handle_policy::*;
+    let (_directory, library, candidate, consumer) = policy_fixture();
+    for opt in 0..=3 {
+        for yanked in [false, true] {
+            let sources = policy_sources(&library, &candidate, &consumer, opt, 2);
+            let (header, mut members) = policy_records(&sources, false);
+            if yanked {
+                members[1].status = MemberStatus::Yanked;
+            } else {
+                members[1].admission_sequence = 2;
+            }
+            let checked = freeze_code_policy(sources, AuthorizationSet::new(header, &members).unwrap()).unwrap();
+            let witness = checked.policy().selection(&members[1].receipt).unwrap();
+            let error = checked.check_selection(&witness).unwrap_err();
+            assert!(error.message.contains(if yanked { "Inactive" } else { "Sequence" }));
+            let mut good = checked.policy().selection(&members[0].receipt).unwrap();
+            good[8 + 28] ^= 1; // Change the header without authorizing a new root.
+            assert!(checked.check_selection(&good).is_err());
+            assert!(checked.check_selection(&good[..good.len() - 1]).is_err());
+        }
+    }
+}
+#[test]
+fn code_policy_detects_later_receipt_input_and_real_source_substitution() {
+    use cellscript::package::frozen_interface::freeze_code_policy;
+    use cellscript_artifact_checker::open_handle_policy::*;
+    let (_directory, library, candidate, consumer) = policy_fixture();
+    for opt in 0..=3 {
+        let original = CODE_SOURCE.replace("module client", "module foreign");
+        std::fs::write(library.join("src/main.cell"), &original).unwrap();
+        let sources = policy_sources(&library, &candidate, &consumer, opt, 2);
+        let (header, members) = policy_records(&sources, false);
+        let checked = freeze_code_policy(sources, AuthorizationSet::new(header, &members).unwrap()).unwrap();
+        let witness = checked.policy().selection(&members[0].receipt).unwrap();
+        let selection = checked.check_selection(&witness).unwrap();
+        let actual = selection.candidate();
+        let mut metadata = actual.module().bundle()[1].to_vec();
+        metadata.push(b'\n');
+        let mut bundle = actual.module().bundle();
+        bundle[1] = &metadata;
+        assert!(selection
+            .check_unchanged_inputs(bundle, actual.raw_transaction(), actual.origin().output_index(), actual.selected_script())
+            .is_err());
+        let mut raw = actual.raw_transaction().to_vec();
+        *raw.last_mut().unwrap() ^= 1;
+        assert!(selection
+            .check_unchanged_inputs(actual.module().bundle(), &raw, actual.origin().output_index(), actual.selected_script())
+            .is_err());
+        let mut script = actual.selected_script().to_vec();
+        *script.last_mut().unwrap() ^= 1;
+        assert!(selection
+            .check_unchanged_inputs(actual.module().bundle(), actual.raw_transaction(), actual.origin().output_index(), &script)
+            .is_err());
+        assert!(selection
+            .check_unchanged_inputs(
+                actual.module().bundle(),
+                actual.raw_transaction(),
+                actual.origin().output_index() + 1,
+                actual.selected_script()
+            )
+            .is_err());
+        std::fs::write(library.join("src/main.cell"), format!("{original}// changed after checking\n")).unwrap();
+        assert!(checked.check_selection(&witness).is_err());
+        assert!(selection
+            .check_unchanged_inputs(
+                actual.module().bundle(),
+                actual.raw_transaction(),
+                actual.origin().output_index(),
+                actual.selected_script()
+            )
+            .is_err());
+    }
+}
+
+#[test]
+fn code_policy_rejects_actual_type_hash_receipts_without_authenticated_history() {
+    use cellscript::package::frozen_interface::{
+        freeze_code_catalog, freeze_code_policy, freeze_package_sources, resolve_source_catalog, CodeCandidateInput,
+    };
+    use cellscript_artifact_checker::open_handle_policy::*;
+    use ckb_testtool::ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*};
+    let (_directory, library, _candidate, consumer) = policy_fixture();
+    for opt in 0..=3 {
+        let make_module = || {
+            compile_module(
+                Utf8Path::from_path(&library).unwrap(),
+                "dev",
+                CompileOptions { opt_level: opt, target_profile: Some("ckb-type-hash".into()), ..Default::default() },
+                EntrySelection::Artifact("code-policy".into()),
+            )
+            .unwrap()
+        };
+        let module = make_module();
+        let lock_script = packed::Script::new_builder().code_hash([9u8; 32].pack()).hash_type(2u8).args(Bytes::new().pack()).build();
+        let code_type =
+            packed::Script::new_builder().code_hash([8u8; 32].pack()).hash_type(1u8).args(Bytes::from(vec![4; 32]).pack()).build();
+        let selected = packed::Script::new_builder()
+            .code_hash(code_type.calc_script_hash())
+            .hash_type(1u8)
+            .args(Bytes::from(vec![1]).pack())
+            .build();
+        let tx = TransactionBuilder::default()
+            .input(
+                packed::CellInput::new_builder()
+                    .previous_output(packed::OutPoint::new_builder().tx_hash([7u8; 32].pack()).index(3u32).build())
+                    .build(),
+            )
+            .output(
+                packed::CellOutput::new_builder().capacity(1000000000000u64).lock(lock_script).type_(Some(code_type).pack()).build(),
+            )
+            .output_data(Bytes::from(module.bundle()[0].to_vec()).pack())
+            .build();
+        let catalog = freeze_code_catalog(
+            make_module(),
+            vec![CodeCandidateInput {
+                module,
+                raw_transaction: tx.data().raw().as_slice().to_vec(),
+                output_index: 0,
+                selected_script: selected.as_slice().to_vec(),
+            }],
+            &Default::default(),
+        )
+        .unwrap();
+        let sources =
+            resolve_source_catalog(freeze_package_sources(Utf8Path::from_path(&consumer).unwrap(), "dev").unwrap(), catalog).unwrap();
+        assert_eq!(sources.catalog().candidates()[0].origin().selected_hash_type(), 1);
+        let (header, mut members) = policy_records(&sources, false);
+        members[0].hash_type = CodeHashType::Type;
+        members[0].code_hash = policy_hash(sources.catalog().candidates()[0].origin().type_script_hash().unwrap());
+        members[0].deployment_sequence = 1;
+        members[0].deployment_line = [0x55; 32];
+        members[0].history_tip = [0x66; 32];
+        let wire_only = AuthorizationSet::new(header, &members).unwrap();
+        assert!(freeze_code_policy(sources, wire_only).unwrap_err().message.contains("Type-hash history"));
+    }
+}

@@ -1293,3 +1293,56 @@ only the business-corpus inventory SHA-256 to
 Read-only validation passes in `.cap/logs/1791490574-38344.log`; release readiness
 remains false and all release requirements remain pending. The exact staged
 receipt/catalog/documentation/archive state now freezes for full dev.
+
+## Finite receipt publication and all-member policy field binding
+
+Finite receipt/catalog v3 passed full dev in worktree
+`.cap/logs/1791490595-38964.log` (98,237 command-output bytes; 98,264 raw archived
+bytes). The staged diff SHA-256 was unchanged before/after:
+`14fb28246a6f880e9274f845f074d8fa0af0c436413edf9a93707c79c607b356`.
+It was G-signed as `e546d0f93dafc52a2e522f80b7422a7f88307a34`, fast-forwarded
+into clean root and pushed in `.cap/logs/1791491476-59406.log`.
+Independent `.cap/logs/1791491483-59727.log` lookup confirmed that exact public
+`0.32` head. These three logs are now archived; all eighteen raw/stored lengths
+and SHA-256 were verified. Clean full-backend/CCC evidence remains exactly
+`16e6b721`; no fresh machine/production claim is made for this host-only delta.
+
+The next native `FrozenCodePolicy` consumes actual `ResolvedSourceCatalog` and
+separately declared `AuthorizationSet` proofs. It checks Header/API/pinned
+genesis/runtime/target and every member's private receipt, candidate API, ELF,
+complete Script, hash type and actual creation OutPoint. It requires exactly all
+catalog members, including unselected/final/inactive members. The finite data2
+Type-policy boundary rejects Type-hash receipts lacking history evidence.
+Its record binds source-catalog identity, declared root and canonical wire-index
+mapping. Exported JSON cannot reconstruct either the private policy binding or
+its borrowed selection. Selection applies the existing wire rules and rechecks
+actual source ownership; exact receipt input rechecks catch later substitution.
+
+The declared root is not authorized by this result. Status/sequence/floors are
+application snapshot choices, not authenticated Registry or package-version
+facts. Original code creation input checks are not final transaction/CellDep
+checks. Full H1/H2, source handles, Type history, immutable root authority,
+ProtocolBundle/builders, #29 and #44–#46 remain required. Independent security
+review remains unassigned and unwaived; full CI remains deferred.
+
+The first five focused binding tests pass in `.cap/logs/1791491765-65657.log`
+(37.45 seconds). The expanded full frozen-interface suite passes all 30 tests in
+`.cap/logs/1791491875-68263.log`: O0–O3 exact/compatible implementations, all 32
+members, 12 rebound Header/unselected-Member axes under valid rebuilt trees,
+yank/floor/root selection, original input/source substitution and actual valid
+native Type-hash receipts rejected without authenticated history. Strict clippy
+and frozen full dev remain pending for this latest slice. See
+`docs/FROZEN_CODE_POLICY.md` for the exact finite host boundary.
+
+Final strict compiler/checker all-target clippy passes in
+`.cap/logs/1791491916-68022.log` (17.92 seconds). This host-only source state
+will refresh the authoritative business inventory before freezing for full dev.
+No emitter, machine ABI, historical wire, dependency, toolchain or runtime budget
+changed. No fresh clean full-backend/CCC or complete H1 claim is supplied.
+
+The authoritative business-corpus refresh in `.cap/logs/1791492045-72488.log`
+produced no tracked fixture diff; read-only validation passes in
+`.cap/logs/1791492048-72408.log` with existing inventory SHA-256
+`0xcc0bdea0ef4c4825eaf3046ff77d9e8fe5cdddf8aff53cc3891b560ce5405e37`.
+Release readiness stays false and all release requirements stay pending. The
+exact staged host binding/test/docs/archive state now freezes for full dev.

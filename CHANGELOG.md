@@ -2,6 +2,13 @@
 
 ## Unreleased — 0.32
 
+Bind every member of a declared finite policy snapshot to actual resolver-owned
+sources and private receipts. Check Header/API/network/runtime and complete
+candidate/deployment fields before returning host selection evidence; reject
+later source/input changes and Type-hash history without proof. This data2
+Type-policy binding does not authorize a root or complete H1/H2; see
+`docs/FROZEN_CODE_POLICY.md`.
+
 Compose independently checked finite Type-policy receipts from actual API,
 codec, code-origin and target proofs; bind every original bundle file and reject
 later input substitution. Require these private receipts for every frozen code

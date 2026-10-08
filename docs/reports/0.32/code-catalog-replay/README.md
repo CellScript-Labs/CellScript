@@ -19,7 +19,7 @@ implementation queue is ready; independent security review remains unassigned.
 Parsed-source capture passed staged dev and was G-signed/pushed as
 `3a15ed9a0a462c089845bff6eb08993dd9221deb`. The additional source dev/push
 logs retain that native-only provenance; they do not update the full backend
-or CCC source commit. All fifteen gzip files have raw/stored sizes and SHA-256
+or CCC source commit. All eighteen gzip files have raw/stored sizes and SHA-256
 in the manifest. No later containing commit replaces any evidence source commit.
 
 Target selection passed the refreshed staged dev and was G-signed/pushed as
@@ -27,3 +27,10 @@ Target selection passed the refreshed staged dev and was G-signed/pushed as
 native/checker provenance. The earlier stale-inventory dev failure is documented
 in the handoff and is not archived as a passing run. Clean backend/CCC provenance
 remains exactly `16e6b721`.
+
+Finite policy receipts passed the frozen staged dev, were G-signed as
+`e546d0f93dafc52a2e522f80b7422a7f88307a34` and pushed to public `0.32`.
+Their dev, push and independent remote-head lookup are archived separately.
+All eighteen raw/stored lengths and SHA-256 were verified. Clean full backend
+and CCC still bind exactly `16e6b721`; no later host-only delta substitutes its
+source identity into those earlier reports.

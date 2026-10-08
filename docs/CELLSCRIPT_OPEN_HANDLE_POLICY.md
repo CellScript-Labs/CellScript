@@ -188,3 +188,14 @@ history, network and final-transaction bindings; builder/ProtocolBundle/editor
 parity; measured worst-case resources and independent review. #29 additionally
 requires its participant ownership/claim matrix and complete peer execution.
 Neither issue can close on this codec alone.
+
+## Native finite field-binding prerequisite
+
+The [frozen code-policy binding](FROZEN_CODE_POLICY.md) now matches a separately
+declared wire snapshot to an actual resolver-owned source catalog and every
+private finite receipt. It recomputes Header bindings and checks every Member,
+including unselected/inactive entries, under a data2 Type-policy profile.
+Selections retain actual candidate evidence and detect later source/receipt input
+substitution. Type-hash history, root authorization and package/version/Registry
+facts are not established by that private host result. Full H1/H2 and
+ProtocolBundle/generated-builder integration remain outstanding.
