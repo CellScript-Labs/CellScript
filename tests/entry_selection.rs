@@ -13,7 +13,12 @@ use ckb_testtool::{
 mod ckb_script_runner;
 
 fn options(target: &str) -> CompileOptions {
-    CompileOptions { target: Some(target.to_string()), target_profile: Some("ckb".to_string()), ..CompileOptions::default() }
+    CompileOptions {
+        source_contracts: true,
+        target: Some(target.to_string()),
+        target_profile: Some("ckb".to_string()),
+        ..CompileOptions::default()
+    }
 }
 
 fn assert_contract(result: &CompileResult, kind: &str, name: &str) {
@@ -266,8 +271,12 @@ action selected(witness choice: Outer) { verification require true }
     let input = Utf8Path::from_path(directory.path()).unwrap().join("nested.cell");
     std::fs::write(&input, source).unwrap();
     for opt_level in 0..=3 {
-        let result =
-            compile_file_with_entry_action(&input, CompileOptions { opt_level, ..options("riscv64-elf") }, "selected").unwrap();
+        let result = compile_file_with_entry_action(
+            &input,
+            CompileOptions { source_contracts: true, opt_level, ..options("riscv64-elf") },
+            "selected",
+        )
+        .unwrap();
         assert_contract(&result, "action", "selected");
         let types = &result.verified_lowering_record.as_ref().unwrap().typed_semantics.types;
         for name in ["Inner", "Payload", "Outer"] {
@@ -308,8 +317,12 @@ public action selected(witness marker: Marker<(IdentityToken, IdentityToken)>, w
     let input = Utf8Path::from_path(directory.path()).unwrap().join("generic.cell");
     std::fs::write(&input, source).unwrap();
     for opt_level in 0..=3 {
-        let result =
-            compile_file_with_entry_action(&input, CompileOptions { opt_level, ..options("riscv64-elf") }, "selected").unwrap();
+        let result = compile_file_with_entry_action(
+            &input,
+            CompileOptions { source_contracts: true, opt_level, ..options("riscv64-elf") },
+            "selected",
+        )
+        .unwrap();
         let typed = &result.verified_lowering_record.as_ref().unwrap().typed_semantics;
         for name in ["IdentityToken", "Number", "Choice"] {
             assert!(typed.types.iter().any(|ty| ty.name == name), "missing identity-only {name} at O{opt_level}");
@@ -383,8 +396,12 @@ public action selected(witness pair: Duo<u64>, witness other: Other<u64>) {
     )
     .unwrap();
     for opt_level in 0..=3 {
-        let result =
-            compile_file_with_entry_action(&input, CompileOptions { opt_level, ..options("riscv64-elf") }, "selected").unwrap();
+        let result = compile_file_with_entry_action(
+            &input,
+            CompileOptions { source_contracts: true, opt_level, ..options("riscv64-elf") },
+            "selected",
+        )
+        .unwrap();
         let typed = &result.verified_lowering_record.as_ref().unwrap().typed_semantics;
         let pair = typed
             .instantiations

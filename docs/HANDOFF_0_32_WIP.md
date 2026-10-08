@@ -610,3 +610,33 @@ present without inventing an executable binding. The 44 focused interface and
 checker tests pass in worktree `.cap/logs/1791455910-23121.log`. This is API
 coherence only: whole H1 receipt/admission, H2 runtime handles, #29 and #44–#46
 remain unfinished. Full CI is still deferred until the queue is implemented.
+
+### Explicit source evidence and unchanged ordinary metadata budgets
+
+Backend replay on signed `4986c5bc` stopped at the existing entry metadata size
+budget (`amm_pool` 164,966 > 159,744 bytes); it is a failed gate, not a passing
+receipt. Source catalogs are now explicitly requested by native
+`CompileOptions::source_contracts` / `cellc build --source-contracts` and matching
+`build-plan --source-contracts`. Default builds omit the additional catalogs;
+module projection still rejects missing evidence. The original public API stays
+complete, including pruned public functions. All four bundled examples and their
+entries pass unchanged metadata/ELF budgets in root
+`.cap/logs/1791459143-10330.log`; no resource ceiling was raised.
+
+The 58 focused interface/entry/checker tests pass in
+`.cap/logs/1791459152-10520.log`. The new CLI test passes in
+`.cap/logs/1791459551-19006.log`, checking actual four-file bundles, identical ELF,
+mode-specific plan/cache identities, repeated cache hits and lock-bound mode
+switches. It also caught and fixed cache refresh using the caller's default
+edition rather than the package's mandatory edition. Cache v65 binds source
+contracts explicitly; browser programmatic requests reject unavailable evidence.
+
+Actual CKB-VM replay refreshes 24 current artifact identity tuples (72 sidecar
+hashes) and the canonical anchor ProtocolBundle hash. All source/scenario sets,
+exits, ELF/transaction hashes, resource measurements and ceilings match the
+previous committed fixtures exactly. Temporary replay instrumentation was
+removed byte-for-byte. All 32 current business/resource tests pass in
+`.cap/logs/1791459586-19729.log`. Historical archives are unchanged. The module
+projection commit is signed `b7ada744`, whose worktree dev passed in
+`.cap/logs/1791457344-68409.log`. A fresh full backend gate is still required.
+Whole H1/H2, #29 and #44–#46 remain unfinished, and whole-queue CI stays deferred.

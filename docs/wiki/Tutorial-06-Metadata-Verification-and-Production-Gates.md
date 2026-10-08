@@ -1,5 +1,13 @@
 # Tutorial 06: Metadata Verification and Production Gates
 
+Native package builds can explicitly request bounded source declaration evidence
+with `cellc build --target riscv64-elf --source-contracts`; the corresponding
+inspection command is `cellc build-plan --source-contracts`. Default builds
+retain ordinary metadata size budgets and omit the additional catalogs. Open
+module projection rejects missing evidence. The option does not establish
+compatibility, source equivalence, deployment identity or runtime admission. See
+the [interface receipt boundary](../CELLSCRIPT_OPEN_INTERFACE_RECEIPT.md).
+
 The experimental 0.32 exact ZK interface adds `runtime.zk_verifiers` to metadata.
 It records the profile, exact handle/VK commitments, transaction statement
 origins, witness placement and resource bounds. The independent checker

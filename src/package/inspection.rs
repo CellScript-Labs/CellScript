@@ -129,6 +129,8 @@ pub struct ResolveGraph {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct BuildPlanSelection {
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub source_contracts: bool,
     pub target: String,
     pub artifact_format: String,
     pub target_profile: String,
@@ -206,6 +208,7 @@ pub struct BuildPlan {
 
 #[derive(Debug, Clone, Default)]
 pub struct BuildPlanOptions {
+    pub source_contracts: bool,
     pub target: Option<String>,
     pub target_profile: Option<String>,
     pub release: bool,
@@ -495,6 +498,7 @@ pub fn build_plan(graph: &ResolveGraph, options: &BuildPlanOptions) -> Result<Bu
             );
         }
         let cache_options = CompileOptions {
+            source_contracts: options.source_contracts,
             edition: manifest.package.edition,
             opt_level: if options.release { 3 } else { 1 },
             output: None,
@@ -599,6 +603,7 @@ pub fn build_plan(graph: &ResolveGraph, options: &BuildPlanOptions) -> Result<Bu
     let artifact_format = common_unit_value(&units, |unit| &unit.artifact_format);
     let target_profile = common_unit_value(&units, |unit| &unit.target_profile);
     let selection = BuildPlanSelection {
+        source_contracts: options.source_contracts,
         target,
         artifact_format,
         target_profile,
@@ -807,7 +812,7 @@ fn build_unit_id(
     outputs: &BuildUnitOutputs,
     production_requirements: &[String],
 ) -> Result<String> {
-    let value = serde_json::json!({
+    let mut value = serde_json::json!({
         "schema": BUILD_PLAN_SCHEMA,
         "graph_digest": graph_digest,
         "root": root_id,
@@ -824,6 +829,9 @@ fn build_unit_id(
         "outputs": outputs,
         "production_requirements": production_requirements,
     });
+    if compile_options.source_contracts {
+        value["compile"]["source_contracts"] = true.into();
+    }
     let bytes = serde_json::to_vec(&value)?;
     Ok(format!("build-unit:{}", hex::encode(Sha256::digest(bytes))))
 }
@@ -869,4 +877,8 @@ fn resolution_digest(graph: &ResolveGraph) -> Result<String> {
         "edges": graph.edges,
         "build_order": graph.build_order,
     }))
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }

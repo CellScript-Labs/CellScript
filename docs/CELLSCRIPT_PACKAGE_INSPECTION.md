@@ -82,3 +82,13 @@ Checked-in v1 JSON fixtures are deserialized in integration tests. V1 rejects
 unknown fields, so adding or changing required fields needs a new negotiated
 schema version. Resolve/build schemas do not replace semantic metadata,
 ProofPlan, verified artifact metadata, deployment evidence, or ProtocolBundle.
+
+### Optional source declaration evidence
+
+`build --source-contracts` and `build-plan --source-contracts` select the same
+bounded native source-evidence mode. The v1 plan selection carries the optional
+`source_contracts: true` bit only when requested, and both build-unit identity and
+cache key bind it. Default plans preserve their serialized selection shape.
+This affects sidecar evidence, not source-language meaning or generated ELF.
+Ordinary artifacts remain inspectable, but open module projection requires the
+complete catalogs; requesting the mode cannot grant deployment admission.

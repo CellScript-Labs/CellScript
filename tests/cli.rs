@@ -13093,6 +13093,74 @@ fn cellc_update_plan_rejects_unknown_schema_and_precise_path_substitution() {
 // ── Incremental compilation e2e tests ────────────────────────────────────────
 
 #[test]
+fn cellc_source_contract_builds_and_plans_keep_separate_cache_entries() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir(root.join("src")).unwrap();
+    std::fs::write(root.join("Cell.toml"), "[package]\nedition = \"2027\"\nname = \"source_contract_cache\"\nversion = \"0.1.0\"\n")
+        .unwrap();
+    std::fs::write(root.join("src/main.cell"), "module source_contract_cache\npublic struct Value has copy, drop, store, fixed, serializable, non_linear { amount: u64 }\npublic fn unused(value: u64) -> u64 { value }\npublic action verify(witness value: Value) { verification require value.amount == 1 }\n").unwrap();
+    let mut elf = None;
+    let mut unit_ids = std::collections::BTreeMap::new();
+    let mut cache_keys = std::collections::BTreeMap::new();
+    // Switching evidence mode refreshes Cell.lock build metadata. The cache
+    // correctly binds that lock snapshot and requires a fresh switched build.
+    for (source_contracts, cache_hit) in [(false, false), (false, true), (true, false), (true, true), (false, false), (false, true)] {
+        let mut command = cellc_command();
+        command.current_dir(root).args(["build", "--target", "riscv64-elf", "--release", "--json"]);
+        if source_contracts {
+            command.arg("--source-contracts");
+        }
+        let output = command.output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(summary["cache_hit"], cache_hit, "source_contracts={source_contracts}");
+        let artifact = root.join(summary["artifact"].as_str().unwrap());
+        let metadata = std::fs::read(root.join(summary["metadata"].as_str().unwrap())).unwrap();
+        let parsed: cellscript::CompileMetadata = serde_json::from_slice(&metadata).unwrap();
+        assert_eq!(parsed.typed_semantics.nominal_declarations.is_some(), source_contracts);
+        assert!(parsed.public_interface.callables.iter().any(|callable| callable.name == "unused"));
+        let bytes = std::fs::read(&artifact).unwrap();
+        if let Some(previous) = &elf {
+            assert_eq!(previous, &bytes);
+        } else {
+            elf = Some(bytes.clone());
+        }
+        let artifact = camino::Utf8Path::from_path(&artifact).unwrap();
+        let inspection = cellscript_artifact_checker::interface::inspect_bundle(
+            &bytes,
+            &metadata,
+            &std::fs::read(cellscript::lowering_record_output_path_from_artifact(artifact)).unwrap(),
+            &std::fs::read(cellscript::source_map_output_path_from_artifact(artifact)).unwrap(),
+            &cellscript_artifact_checker::CheckerBudgets::default(),
+        )
+        .unwrap();
+        assert_eq!(inspection.project_module_contract().is_ok(), source_contracts);
+        let mut command = cellc_command();
+        command.current_dir(root).args(["build-plan", "--target", "riscv64-elf", "--release", "--json"]);
+        if source_contracts {
+            command.arg("--source-contracts");
+        }
+        let output = command.output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let plan: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(plan["selection"]["source_contracts"].as_bool().unwrap_or(false), source_contracts);
+        let id = plan["units"][0]["id"].clone();
+        assert_eq!(summary["build_unit_id"], id);
+        assert_eq!(plan["units"][0]["cache"]["status"], "up-to-date");
+        let cache_key = plan["units"][0]["cache"]["cache_key"].clone();
+        if let Some(previous) = unit_ids.insert(source_contracts, id.clone()) {
+            assert_eq!(previous, id);
+        }
+        if let Some(previous) = cache_keys.insert(source_contracts, cache_key.clone()) {
+            assert_eq!(previous, cache_key);
+        }
+    }
+    assert_ne!(unit_ids[&false], unit_ids[&true]);
+    assert_ne!(cache_keys[&false], cache_keys[&true]);
+}
+
+#[test]
 fn cellc_incremental_cache_hit_on_second_build() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();

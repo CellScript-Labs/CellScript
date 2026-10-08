@@ -153,6 +153,7 @@ pub enum Command {
 
 #[derive(Debug, Default)]
 pub struct BuildArgs {
+    pub source_contracts: bool,
     pub release: bool,
     pub target: Option<String>,
     pub target_profile: Option<String>,
@@ -345,6 +346,7 @@ pub struct ResolveGraphArgs {
 
 #[derive(Debug, Default)]
 pub struct BuildPlanArgs {
+    pub source_contracts: bool,
     pub input: Option<PathBuf>,
     pub package: Option<String>,
     pub scope: String,
@@ -1100,6 +1102,7 @@ impl CommandExecutor {
         let opt_level = if args.release { 3 } else { 1 };
         let input = Utf8Path::new(".");
         let options = CompileOptions {
+            source_contracts: args.source_contracts,
             edition: crate::CURRENT_EDITION,
             opt_level,
             output: None,
@@ -1290,6 +1293,7 @@ impl CommandExecutor {
             }
 
             let options = CompileOptions {
+                source_contracts: args.source_contracts,
                 edition: crate::CURRENT_EDITION,
                 opt_level,
                 output: None,
@@ -1495,6 +1499,7 @@ impl CommandExecutor {
             compile_path(
                 ".",
                 CompileOptions {
+                    source_contracts: false,
                     edition: crate::CURRENT_EDITION,
                     opt_level: 0,
                     output: None,
@@ -1550,6 +1555,7 @@ impl CommandExecutor {
             let result = compile_path_with_executable_surface_policy(
                 utf8,
                 CompileOptions {
+                    source_contracts: false,
                     edition: crate::CURRENT_EDITION,
                     opt_level: 0,
                     output: None,
@@ -1717,6 +1723,7 @@ impl CommandExecutor {
         let compile_result = compile_path(
             ".",
             CompileOptions {
+                source_contracts: false,
                 edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
@@ -2034,6 +2041,7 @@ impl CommandExecutor {
 
         for target in targets {
             let compile_options = CompileOptions {
+                source_contracts: false,
                 edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
@@ -2189,6 +2197,7 @@ impl CommandExecutor {
             let mut member_error = None;
             for target in targets.iter().copied() {
                 let compile_options = CompileOptions {
+                    source_contracts: false,
                     edition: crate::CURRENT_EDITION,
                     opt_level: 0,
                     output: None,
@@ -2321,6 +2330,7 @@ impl CommandExecutor {
         let input = Utf8Path::from_path(&input_path)
             .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
         let options = CompileOptions {
+            source_contracts: false,
             edition: crate::CURRENT_EDITION,
             opt_level: 0,
             output: None,
@@ -2383,6 +2393,7 @@ impl CommandExecutor {
         let plan = crate::package::inspection::build_plan(
             &graph,
             &crate::package::inspection::BuildPlanOptions {
+                source_contracts: args.source_contracts,
                 target: args.target,
                 target_profile: args.target_profile,
                 release: args.release,
@@ -2405,6 +2416,7 @@ impl CommandExecutor {
         let input = Utf8Path::from_path(&input_path)
             .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
         let options = CompileOptions {
+            source_contracts: false,
             edition: crate::CURRENT_EDITION,
             opt_level: 0,
             output: None,
@@ -2532,6 +2544,7 @@ impl CommandExecutor {
         let result = compile_path(
             input,
             CompileOptions {
+                source_contracts: false,
                 edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
@@ -2600,6 +2613,7 @@ impl CommandExecutor {
             compile_path_with_entry_action(
                 input,
                 CompileOptions {
+                    source_contracts: false,
                     edition: crate::CURRENT_EDITION,
                     opt_level: 0,
                     output: None,
@@ -2687,6 +2701,7 @@ impl CommandExecutor {
         let input = Utf8Path::from_path(&input_path)
             .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
         let options = CompileOptions {
+            source_contracts: false,
             edition: crate::CURRENT_EDITION,
             opt_level: 0,
             output: None,
@@ -2728,6 +2743,7 @@ impl CommandExecutor {
         let result = compile_path(
             input,
             CompileOptions {
+                source_contracts: false,
                 edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
@@ -2833,6 +2849,7 @@ impl CommandExecutor {
         let result = compile_path(
             input,
             CompileOptions {
+                source_contracts: false,
                 edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
@@ -3108,6 +3125,7 @@ impl CommandExecutor {
         let result = compile_path(
             input,
             CompileOptions {
+                source_contracts: false,
                 edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
@@ -3150,6 +3168,7 @@ impl CommandExecutor {
         let result = compile_cli_input(
             args.input.as_ref(),
             CompileOptions {
+                source_contracts: false,
                 edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
@@ -3209,6 +3228,7 @@ impl CommandExecutor {
         let result = compile_cli_input(
             args.input.as_ref(),
             CompileOptions {
+                source_contracts: false,
                 edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
@@ -3264,6 +3284,7 @@ impl CommandExecutor {
         let result = compile_cli_input(
             args.input.as_ref(),
             CompileOptions {
+                source_contracts: false,
                 edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
@@ -3309,6 +3330,7 @@ impl CommandExecutor {
         let result = compile_cli_input(
             args.input.as_ref(),
             CompileOptions {
+                source_contracts: false,
                 edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
@@ -3335,6 +3357,7 @@ impl CommandExecutor {
         let result = compile_cli_input(
             args.input.as_ref(),
             CompileOptions {
+                source_contracts: false,
                 edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
@@ -3368,6 +3391,7 @@ impl CommandExecutor {
         let result = compile_cli_input(
             args.input.as_ref(),
             CompileOptions {
+                source_contracts: false,
                 edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
@@ -3412,6 +3436,7 @@ impl CommandExecutor {
         let result = compile_path(
             input,
             CompileOptions {
+                source_contracts: false,
                 edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
@@ -3517,6 +3542,7 @@ impl CommandExecutor {
         let result = compile_path(
             input,
             CompileOptions {
+                source_contracts: false,
                 edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
@@ -3560,6 +3586,7 @@ impl CommandExecutor {
             let result = compile_path(
                 input,
                 CompileOptions {
+                    source_contracts: false,
                     edition: crate::CURRENT_EDITION,
                     opt_level,
                     output: None,
@@ -3718,6 +3745,7 @@ impl CommandExecutor {
         let result = compile_path(
             input,
             CompileOptions {
+                source_contracts: false,
                 edition: crate::CURRENT_EDITION,
                 opt_level: 1,
                 output: None,
@@ -3978,6 +4006,7 @@ impl CommandExecutor {
                 crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display()))
             })?;
             let options = CompileOptions {
+                source_contracts: false,
                 edition: crate::CURRENT_EDITION,
                 opt_level: 1,
                 output: None,
@@ -4068,6 +4097,7 @@ impl CommandExecutor {
         let result = compile_path(
             input,
             CompileOptions {
+                source_contracts: false,
                 edition: crate::CURRENT_EDITION,
                 opt_level: 0,
                 output: None,
@@ -4581,6 +4611,7 @@ impl CommandExecutor {
         let compile_result = compile_path(
             ".",
             CompileOptions {
+                source_contracts: false,
                 edition: crate::CURRENT_EDITION,
                 opt_level,
                 output: None,
@@ -13552,6 +13583,7 @@ fn inspect_build_plan_for_build(input: &Path, args: &BuildArgs) -> Result<crate:
     crate::package::inspection::build_plan(
         &graph,
         &crate::package::inspection::BuildPlanOptions {
+            source_contracts: args.source_contracts,
             target: args.target.clone(),
             target_profile: args.target_profile.clone(),
             release: args.release,
@@ -16268,6 +16300,7 @@ impl CliParser {
                 ClapCommand::new("build")
                     .display_order(10)
                     .about("Compile the current package")
+                    .arg(Arg::new("source-contracts").long("source-contracts").action(ArgAction::SetTrue).help("Emit bounded source declaration evidence for independent interface inspection"))
                     .arg(Arg::new("release").long("release").short('r').action(ArgAction::SetTrue).help("Build in release mode"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb or ckb-type-hash"))
@@ -16578,6 +16611,7 @@ impl CliParser {
                 ClapCommand::new("build-plan")
                     .display_order(32)
                     .about("Inspect versioned build units without compiling or changing locks")
+                    .arg(Arg::new("source-contracts").long("source-contracts").action(ArgAction::SetTrue).help("Plan a build with bounded source declaration evidence"))
                     .arg(Arg::new("input").value_name("INPUT").help("Package, workspace, Cell.toml, or source path"))
                     .arg(Arg::new("package").long("package").short('p').value_name("NAME").help("Select one workspace member and its transitive closure"))
                     .arg(Arg::new("scope").long("scope").value_name("SCOPE").default_value("runtime").value_parser(["runtime", "test"]).help("Dependency scope"))
@@ -18110,6 +18144,7 @@ impl CliParser {
     fn parse_matches(matches: clap::ArgMatches) -> Command {
         match matches.subcommand() {
             Some(("build", m)) => Command::Build(BuildArgs {
+                source_contracts: m.get_flag("source-contracts"),
                 release: m.get_flag("release"),
                 target: m.get_one::<String>("target").cloned(),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
@@ -18246,6 +18281,7 @@ impl CliParser {
                 json: json_output(m),
             }),
             Some(("build-plan", m)) => Command::BuildPlan(BuildPlanArgs {
+                source_contracts: m.get_flag("source-contracts"),
                 input: m.get_one::<String>("input").map(PathBuf::from),
                 package: m.get_one::<String>("package").cloned(),
                 scope: m.get_one::<String>("scope").cloned().unwrap_or_else(|| "runtime".to_string()),

@@ -31,7 +31,7 @@ fn oversized_uninstantiated_templates_keep_the_existing_declaration_only_languag
     let source = format!("module declaration_only\npublic struct Large<T: fixed_value> {{ {fields} }}\npublic action verify() {{ verification require true }}");
     let compiled = compile_with_executable_surface_policy(
         &source,
-        CompileOptions { target: Some("riscv64-elf".into()), ..CompileOptions::default() },
+        CompileOptions { source_contracts: true, target: Some("riscv64-elf".into()), ..CompileOptions::default() },
         ExecutableSurfacePolicy::DenyFailClosed,
     )
     .unwrap();
@@ -71,7 +71,7 @@ public action verify(witness choice: Choice<Hash>, witness pair: Pair<u64>, witn
     for opt_level in 0..=3 {
         let compiled = compile_with_executable_surface_policy(
             source,
-            CompileOptions { target: Some("riscv64-elf".into()), opt_level, ..CompileOptions::default() },
+            CompileOptions { source_contracts: true, target: Some("riscv64-elf".into()), opt_level, ..CompileOptions::default() },
             ExecutableSurfacePolicy::DenyFailClosed,
         )
         .unwrap();
@@ -106,7 +106,7 @@ public action verify(witness input: 箱<u64>, witness tag: αT) {
     for opt_level in 0..=3 {
         let compiled = compile_with_executable_surface_policy(
             source,
-            CompileOptions { target: Some("riscv64-elf".into()), opt_level, ..CompileOptions::default() },
+            CompileOptions { source_contracts: true, target: Some("riscv64-elf".into()), opt_level, ..CompileOptions::default() },
             ExecutableSurfacePolicy::DenyFailClosed,
         )
         .unwrap();
@@ -132,7 +132,7 @@ fn interface_inspection_preserves_declared_and_inferred_effects_separately() {
         "module inspected\naction verify() {\nverification\nlet amount = ckb::cell_capacity(source::input(0))\nrequire amount > 0\n}";
     let compiled = compile_with_executable_surface_policy(
         source,
-        CompileOptions { target: Some("riscv64-elf".into()), ..CompileOptions::default() },
+        CompileOptions { source_contracts: true, target: Some("riscv64-elf".into()), ..CompileOptions::default() },
         ExecutableSurfacePolicy::DenyFailClosed,
     )
     .unwrap();
@@ -172,7 +172,7 @@ public action verify() { verification require true }
 "#;
     let compiled = compile_with_executable_surface_policy(
         source,
-        CompileOptions { target: Some("riscv64-elf".into()), ..CompileOptions::default() },
+        CompileOptions { source_contracts: true, target: Some("riscv64-elf".into()), ..CompileOptions::default() },
         ExecutableSurfacePolicy::DenyFailClosed,
     )
     .unwrap();
@@ -199,7 +199,7 @@ public action verify() { verification require true }
 fn interface_inspection_keeps_concrete_enum_variants_and_payload_cardinalities() {
     let compiled = compile_with_executable_surface_policy(
         "module inspected_enum\npublic enum Choice { First(u64), Second(Hash) }\npublic action verify(witness choice: Choice) { verification require true }",
-        CompileOptions { target: Some("riscv64-elf".into()), ..CompileOptions::default() },
+        CompileOptions { source_contracts: true, target: Some("riscv64-elf".into()), ..CompileOptions::default() },
         ExecutableSurfacePolicy::DenyFailClosed,
     )
     .unwrap();
@@ -227,7 +227,7 @@ public struct Envelope { pairs: [Pair<Hash>; 2], count: u64 }
 public enum Choice { Nested(Envelope), Direct(Pair<Address>), Bytes([u8; 32]) }
 public action verify(witness choice: Choice) { verification require true }
 "#,
-        CompileOptions { target: Some("riscv64-elf".into()), ..CompileOptions::default() },
+        CompileOptions { source_contracts: true, target: Some("riscv64-elf".into()), ..CompileOptions::default() },
         ExecutableSurfacePolicy::DenyFailClosed,
     )
     .unwrap();
@@ -288,7 +288,7 @@ public action verify(witness pair: Pair<u64>) {
         for opt_level in 0..=3 {
             let compiled = compile_with_executable_surface_policy(
                 source,
-                CompileOptions { target: Some("riscv64-elf".into()), opt_level, ..CompileOptions::default() },
+                CompileOptions { source_contracts: true, target: Some("riscv64-elf".into()), opt_level, ..CompileOptions::default() },
                 ExecutableSurfacePolicy::DenyFailClosed,
             )
             .unwrap_or_else(|error| panic!("opt={opt_level}: {error}\n{source}"));

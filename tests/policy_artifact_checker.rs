@@ -75,7 +75,13 @@ impl Fixture {
         std::fs::write(&source, source_text).unwrap();
         let result = compile_path_with_executable_surface_policy(
             source.to_str().unwrap(),
-            CompileOptions { edition, opt_level, target: Some("riscv64-elf".to_string()), ..CompileOptions::default() },
+            CompileOptions {
+                source_contracts: true,
+                edition,
+                opt_level,
+                target: Some("riscv64-elf".to_string()),
+                ..CompileOptions::default()
+            },
             Some(CompileEntryScope::Artifact(declaration)),
             ExecutableSurfacePolicy::DenyFailClosed,
         )
@@ -280,7 +286,7 @@ action verify() {
         // helper-call admission separate from its typed constructor contract.
         let compiled = cellscript::compile_with_executable_surface_policy(
             source,
-            CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..CompileOptions::default() },
+            CompileOptions { source_contracts: true, opt_level, target: Some("riscv64-elf".into()), ..CompileOptions::default() },
             ExecutableSurfacePolicy::DenyFailClosed,
         )
         .unwrap();
@@ -441,7 +447,7 @@ action verify(witness pair: Pair<u64>, witness twin: Twin<u64>) {
 "#;
     let compiled = cellscript::compile_with_executable_surface_policy(
         source,
-        CompileOptions { opt_level: 0, target: Some("riscv64-elf".into()), ..CompileOptions::default() },
+        CompileOptions { source_contracts: true, opt_level: 0, target: Some("riscv64-elf".into()), ..CompileOptions::default() },
         ExecutableSurfacePolicy::DenyFailClosed,
     )
     .unwrap();
@@ -958,6 +964,7 @@ fn imported_nominal_layouts_reject_same_width_owner_and_alias_substitution() {
             &sources,
             "main.cell",
             CompileOptions {
+                source_contracts: true,
                 edition: CellScriptEdition::Edition2027,
                 opt_level,
                 target: Some("riscv64-elf".into()),
@@ -1647,7 +1654,7 @@ action verify(witness value: Pair, witness expected: Pair) {
 "#;
     let compiled = cellscript::compile_with_executable_surface_policy(
         source,
-        CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..CompileOptions::default() },
+        CompileOptions { source_contracts: true, opt_level, target: Some("riscv64-elf".into()), ..CompileOptions::default() },
         ExecutableSurfacePolicy::DenyFailClosed,
     )
     .unwrap();

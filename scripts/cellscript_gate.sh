@@ -650,6 +650,7 @@ run_dev_gate() {
     run cargo test --locked -p cellscript --test artifact_checker --test myelin_handoff \
         --test interface_inspection --test interface_projection --test entry_selection --test policy_artifact_checker --test value_return_abi \
         --test vec_constructor --test bounded_byte_context
+    run cargo test --locked -p cellscript --test cli cellc_source_contract_builds_and_plans_keep_separate_cache_entries -- --exact --test-threads=1
     run cargo test --locked -p cellscript deployment_line_handle --lib
     run cargo test --locked -p cellscript --test exact_script_handles
     run cargo check --locked -p cellscript-fiber-adapter --all-targets

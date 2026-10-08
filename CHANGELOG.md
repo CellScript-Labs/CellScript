@@ -2,6 +2,12 @@
 
 ## Unreleased — 0.32
 
+Make bounded source declaration catalogs explicit through native
+`CompileOptions::source_contracts` and `cellc build --source-contracts`.
+Ordinary builds retain existing metadata size budgets. Build plans and cache
+entries distinguish the evidence mode; absent catalogs still reject open module
+projection. The option grants no compatibility or deployment admission.
+
 Retain bounded source declaration catalogs before optimization, including absent
 public templates and pruned public functions. Bind ordinary imported layouts to
 their qualified declaration owners and independently reject inconsistent scopes,

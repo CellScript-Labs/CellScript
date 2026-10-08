@@ -115,7 +115,9 @@ Independent review remains a final stable-admission requirement.
 
 ## Implemented declaration prerequisite
 
-The native producer emits optional `cellscript-generic-declaration-catalog-v1`
+With native `CompileOptions::source_contracts = true` or package
+`cellc build --source-contracts`, the producer emits optional
+`cellscript-generic-declaration-catalog-v1`
 and `cellscript-nominal-declaration-catalog-v1` records inside typed semantics
 v9. These catalogs retain the pre-optimization API, declaration owners, import
 scopes, ordinary concrete layout bindings and absent templates. Source visibility
@@ -180,3 +182,21 @@ binding and whole-catalog admission remain required. Source constants retain
 types, not independently proven values. Runtime errors/unsupported paths and
 transitive helper behavior are not removed merely by projecting an entry. No
 source equivalence, successful peer execution or security review is inferred.
+
+## Explicit source evidence mode
+
+Ordinary builds omit these additional source catalogs and retain the existing
+metadata size budgets. Their declared public API still comes from the original
+source, including optimizer-pruned functions. Independent artifact inspection
+continues to support historical/default bundles; module projection requires the
+complete catalogs and rejects their absence. Requesting the catalogs changes
+sidecar identities, while preserving the ELF and declared API at O0–O3.
+
+`cellc build-plan --source-contracts` uses the same build-unit identity and cache
+mode as the corresponding build. The optional selection bit is serialized only
+when true; ordinary v1 plan serialization remains unchanged. Native cache keys
+include the bit and use `project-source-set-v65-0.32-optional-source-contracts`,
+so alternating default and source-evidence builds cannot reuse each other's
+metadata. The browser summary does not emit these catalogs and explicitly
+rejects a programmatic source-evidence request. This option only supplies
+independently checkable inputs; it cannot authorize a policy root or deployment.

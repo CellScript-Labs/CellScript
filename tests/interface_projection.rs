@@ -8,7 +8,7 @@ use cellscript_artifact_checker::{
 fn project(source: &str, opt_level: u8) -> CheckedModuleProjection {
     let compiled = compile_with_executable_surface_policy(
         source,
-        CompileOptions { target: Some("riscv64-elf".into()), opt_level, ..CompileOptions::default() },
+        CompileOptions { source_contracts: true, target: Some("riscv64-elf".into()), opt_level, ..CompileOptions::default() },
         ExecutableSurfacePolicy::DenyFailClosed,
     )
     .unwrap();
@@ -165,7 +165,7 @@ fn policy_dispatch_tags_are_required_but_unrelated_candidate_variants_are_allowe
         let compile = |actions: Vec<ArtifactAction>| {
             let compiled = compile_path_with_executable_surface_policy(
                 path.to_str().unwrap(),
-                CompileOptions { target: Some("riscv64-elf".into()), opt_level, ..CompileOptions::default() },
+                CompileOptions { source_contracts: true, target: Some("riscv64-elf".into()), opt_level, ..CompileOptions::default() },
                 Some(CompileEntryScope::Artifact(ArtifactDeclaration {
                     name: "token-policy".into(),
                     context: ArtifactContext::TypeGroup { resource: "Token".into() },
@@ -195,5 +195,37 @@ fn policy_dispatch_tags_are_required_but_unrelated_candidate_variants_are_allowe
         let mut extra = actions();
         extra.push(ArtifactAction { tag: 50, action: "extra".into() });
         required.check_required_contracts(&compile(extra)).unwrap();
+    }
+}
+
+#[test]
+fn source_contracts_are_explicit_evidence_and_do_not_change_machine_code() {
+    for opt_level in 0..=3 {
+        let mut bundles = Vec::new();
+        for source_contracts in [false, true] {
+            let compiled = compile_with_executable_surface_policy(
+                BASE,
+                CompileOptions { source_contracts, target: Some("riscv64-elf".into()), opt_level, ..CompileOptions::default() },
+                ExecutableSurfacePolicy::DenyFailClosed,
+            )
+            .unwrap();
+            let inspection = inspect_bundle(
+                &compiled.artifact_bytes,
+                &serde_json::to_vec(&compiled.metadata).unwrap(),
+                &serde_json::to_vec(compiled.verified_lowering_record.as_ref().unwrap()).unwrap(),
+                &serde_json::to_vec(compiled.source_artifact_map.as_ref().unwrap()).unwrap(),
+                &CheckerBudgets::default(),
+            )
+            .unwrap();
+            assert_eq!(inspection.effective().nominal_declarations.is_some(), source_contracts);
+            assert_eq!(inspection.effective().generic_declarations.is_some(), source_contracts);
+            assert_eq!(inspection.project_module_contract().is_ok(), source_contracts);
+            assert!(!inspection.report().semantic_equivalence_claimed);
+            bundles.push(compiled);
+        }
+        assert_eq!(bundles[0].artifact_bytes, bundles[1].artifact_bytes, "opt={opt_level}");
+        assert_eq!(bundles[0].metadata.public_interface, bundles[1].metadata.public_interface);
+        assert_eq!(bundles[0].metadata.interface_hash, bundles[1].metadata.interface_hash);
+        assert_ne!(bundles[0].metadata.typed_semantics_hash, bundles[1].metadata.typed_semantics_hash);
     }
 }

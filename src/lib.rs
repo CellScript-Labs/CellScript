@@ -96,6 +96,9 @@ pub struct CompileOptions {
     pub output: Option<String>,
     /// Whether to generate debug information
     pub debug: bool,
+    /// Emit bounded source declarations for independent interface projection.
+    /// This supplies evidence; it does not authorize compatibility or deployment.
+    pub source_contracts: bool,
     /// Target artifact
     pub target: Option<String>,
     /// Target chain/profile. Only CKB is supported.
@@ -134,6 +137,12 @@ impl CompileOptions {
 }
 
 fn validate_compile_options(options: &CompileOptions) -> Result<()> {
+    #[cfg(feature = "wasm")]
+    if options.source_contracts {
+        return Err(CompileError::without_span(
+            "source declaration contracts require the native compiler; the browser summary does not emit interface evidence",
+        ));
+    }
     if options.opt_level > 3 {
         return Err(CompileError::without_span(format!("optimization level must be between 0 and 3, got {}", options.opt_level)));
     }
@@ -237,7 +246,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
-const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v64-0.32-source-declaration-contracts";
+const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v65-0.32-optional-source-contracts";
 pub const METADATA_SCHEMA_VERSION: u32 = 72;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 2;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -7463,7 +7472,7 @@ pub fn compile_metadata(source: &str, edition: CellScriptEdition, target: Option
     let mut metadata = compile_metadata_from_ir(&ir, artifact_format, target_profile, edition, None);
     bind_public_interface(&mut metadata, &ast);
     apply_trusted_external_verifiers(&mut metadata, &ir, &[])?;
-    bind_typed_semantics(&mut metadata, &ir, &ast, None);
+    bind_typed_semantics(&mut metadata, &ir, &ast, None, false);
     bind_source_metadata(&mut metadata, vec![source_unit_from_bytes("<memory>", "memory", source.as_bytes())]);
     validate_compile_metadata(&metadata, artifact_format)?;
     Ok(metadata)
@@ -7541,7 +7550,7 @@ pub fn compile_metadata_with_diagnostics(
         diagnostics.push(error);
         return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
     }
-    bind_typed_semantics(&mut metadata, &ir, &ast, None);
+    bind_typed_semantics(&mut metadata, &ir, &ast, None, false);
     bind_source_metadata(&mut metadata, vec![source_unit_from_bytes("<memory>", "memory", source.as_bytes())]);
     if let Err(error) = validate_compile_metadata(&metadata, artifact_format) {
         diagnostics.push(error);
@@ -7591,7 +7600,7 @@ pub fn compile_sources_metadata_with_diagnostics(
         diagnostics.push(error);
         return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
     }
-    bind_typed_semantics(&mut metadata, &ir, &entry.ast, Some(&project.resolver));
+    bind_typed_semantics(&mut metadata, &ir, &entry.ast, Some(&project.resolver), options.source_contracts);
     let source_units = sources
         .iter()
         .map(|source| {
@@ -7710,7 +7719,7 @@ fn compile_file_metadata_with_diagnostics(
         diagnostics.push(error);
         return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
     }
-    bind_typed_semantics(&mut metadata, &ir, &entry.ast, Some(&project.resolver));
+    bind_typed_semantics(&mut metadata, &ir, &entry.ast, Some(&project.resolver), options.source_contracts);
     match collect_source_units_for_compile_file(path).and_then(|source_units| {
         bind_source_metadata(&mut metadata, source_units);
         if let Some(manifest) = manifest.as_ref() {
@@ -8164,7 +8173,7 @@ fn compile_ast_with_build(
     if let Some(ckb) = ckb_deploy {
         zk_package::validate(ir, ckb)?;
     }
-    bind_typed_semantics(&mut metadata, ir, ast, resolver.map(|(resolver, _)| resolver));
+    bind_typed_semantics(&mut metadata, ir, ast, resolver.map(|(resolver, _)| resolver), options.source_contracts);
     let target_policy_violations = target_profile_artifact_policy_violations(&metadata, target_profile);
     if !target_policy_violations.is_empty() {
         return Err(CompileError::without_span(format!(
@@ -8467,7 +8476,12 @@ pub(crate) fn refresh_incremental_cache_for_input<P: AsRef<Utf8Path>>(
     let resolved = resolve_input_path(input.as_ref())?;
     let source_units = collect_source_units_for_compile_file(&resolved)?;
     let cache_units = collect_cache_units_for_compile_file(&resolved, &source_units)?;
-    incremental_cache_store(&resolved, &cache_units, options, result);
+    // A package's mandatory edition overrides the caller's standalone default.
+    // Rebuilding Cell.lock must refresh the same cache key that compilation and
+    // build-plan use, including the source-evidence mode.
+    let mut resolved_options = options.clone();
+    resolved_options.edition = result.metadata.edition;
+    incremental_cache_store(&resolved, &cache_units, &resolved_options, result);
     Ok(())
 }
 
@@ -8786,6 +8800,7 @@ fn incremental_cache_key(cache_units: &[SourceUnitMetadata], options: &CompileOp
     let compatibility_profile = resolve_compatibility_profile(options.edition, target_profile, options.primitive_compat.as_deref());
     key_input.push_str(&format!("-compatibility-profile-{}", compatibility_profile.id));
     key_input.push_str(&format!("-debug{}", options.debug));
+    key_input.push_str(&format!("-source-contracts{}", options.source_contracts));
     key_input.push_str(&format!("-primitive-{}", options.primitive_compat.as_deref().unwrap_or("default")));
     hex_encode(&ckb_blake2b256(key_input.as_bytes()))
 }
@@ -9212,10 +9227,18 @@ pub fn visibility_migration_diagnostics(module: &ast::Module) -> Vec<CompileErro
 }
 
 #[cfg(not(feature = "wasm"))]
-fn bind_typed_semantics(metadata: &mut CompileMetadata, ir: &ir::IrModule, ast: &ast::Module, resolver: Option<&ModuleResolver>) {
+fn bind_typed_semantics(
+    metadata: &mut CompileMetadata,
+    ir: &ir::IrModule,
+    ast: &ast::Module,
+    resolver: Option<&ModuleResolver>,
+    source_contracts: bool,
+) {
     let mut typed = typed_semantics::build(ir, metadata);
-    typed.generic_declarations = typed_semantics::generic_catalog_for_context(ast, resolver);
-    typed.nominal_declarations = typed_semantics::nominal_catalog(ast, resolver, ir, &typed);
+    if source_contracts {
+        typed.generic_declarations = typed_semantics::generic_catalog_for_context(ast, resolver);
+        typed.nominal_declarations = typed_semantics::nominal_catalog(ast, resolver, ir, &typed);
+    }
     typed.interface_hash = metadata.interface_hash.clone();
     typed.canonicalize();
     metadata.typed_semantics_hash =
@@ -9227,7 +9250,13 @@ fn bind_typed_semantics(metadata: &mut CompileMetadata, ir: &ir::IrModule, ast: 
 }
 
 #[cfg(feature = "wasm")]
-fn bind_typed_semantics(metadata: &mut CompileMetadata, ir: &ir::IrModule, _ast: &ast::Module, _resolver: Option<&ModuleResolver>) {
+fn bind_typed_semantics(
+    metadata: &mut CompileMetadata,
+    ir: &ir::IrModule,
+    _ast: &ast::Module,
+    _resolver: Option<&ModuleResolver>,
+    _source_contracts: bool,
+) {
     metadata.runtime.zk_verifiers = zk_contract::browser_contracts(ir);
 }
 
@@ -22488,7 +22517,7 @@ mod tests {
         let mut metadata =
             crate::compile_metadata_from_ir(&ir, ArtifactFormat::RiscvAssembly, target_profile, crate::CURRENT_EDITION, None);
         crate::bind_public_interface(&mut metadata, &ast);
-        crate::bind_typed_semantics(&mut metadata, &ir, &ast, None);
+        crate::bind_typed_semantics(&mut metadata, &ir, &ast, None, false);
         crate::validate_compile_metadata(&metadata, ArtifactFormat::RiscvAssembly).unwrap();
         metadata
     }

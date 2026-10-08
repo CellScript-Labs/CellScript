@@ -1,5 +1,13 @@
 # CellScript Gate Policy
 
+Native package builds can explicitly request bounded source declaration evidence
+with `cellc build --target riscv64-elf --source-contracts`; the corresponding
+inspection command is `cellc build-plan --source-contracts`. Default builds
+retain ordinary metadata size budgets and omit the additional catalogs. Open
+module projection rejects missing evidence. The option does not establish
+compatibility, source equivalence, deployment identity or runtime admission. See
+the [interface receipt boundary](CELLSCRIPT_OPEN_INTERFACE_RECEIPT.md).
+
 CellScript uses one top-level gate entry point:
 
 ```bash
