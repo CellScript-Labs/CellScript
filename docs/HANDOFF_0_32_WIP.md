@@ -524,3 +524,12 @@ fixtures. The node harness additionally requires the pinned acceptance receipt
 to identify the current clean CellScript commit and exports that source
 provenance in its own report; a stale passing receipt cannot stand in for a
 fresh source-bound node run. Full CI remains deferred as requested.
+
+## Clean-source CCC replay after nominal-alias correction
+
+- Signed commit `bfb1910070d90a15e6268796a0e329e584806305` (`G`) is pushed to `public/0.32`. The dev gate passed in `.cap/logs/1791448444-1238.log`.
+- The complete clean-source backend gate passed with `CELLSCRIPT_COUNTER_CCC=1`; full log `.cap/logs/1791449427-24329.log`. This includes the compiler suite, checker, frozen cost corpus, complete strict audit/stateful pinned-CKB acceptance and the actual CCC node application/migration run. It is not a full CI run.
+- [The archived receipts](reports/0.32/resumed-ccc/README.md) retain that commit, clean-source status and raw/stored hashes. The node independently rejects an acceptance receipt from another commit or a dirty source.
+- #42 P1 now has the continuous old-key update → old-key-authorized migration → new-key successor update, confirmed with actual fee signatures. Both setup versions are public test fixtures. Immutable legacy Cells are not retroactively migratable. P2/P3/P4 remain #44/#45/#46.
+- Continue the ordered queue with #28 then #29, followed by #44/#45/#46. Full CI remains deferred until all implementations are complete. Independent security review for #28/#29 remains unassigned and has not been waived.
+- The attached `fixed-result-contract` worktree is based on `bfb19100` and contains an uncommitted H1 declaration-evidence prototype plus its design draft. The first generic-catalog slice passed 13 entry-selection, eight interface-inspection and 25 policy/checker tests. The subsequent nominal-scope extension is still under focused verification and is not admitted source syntax or a complete compatibility receipt. Preserve that work when continuing.

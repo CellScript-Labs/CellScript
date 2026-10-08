@@ -1,0 +1,85 @@
+{
+  "schema": "cellscript-032-ccc-replay-evidence-v1",
+  "source_commit": "bfb1910070d90a15e6268796a0e329e584806305",
+  "source_dirty": false,
+  "backend_status": "passed",
+  "dev_status": "passed",
+  "complete_ci_for_queue": "deferred-until-all-implementation-complete",
+  "release_admitted": false,
+  "production_setup_claimed": false,
+  "public_deployment_claimed": false,
+  "ckb_revision": "f7fa4436737756f97a24e254f22c13a36316ecea",
+  "setup_kind": "public-test-seed for both migration versions",
+  "node_scope": "disposable pinned local chain; ordinary pool admission, actual fee signatures and confirmed predecessor continuity",
+  "migration_rows": [
+    {
+      "case": "old-key-update",
+      "transaction_hash": "0x952346762c58daf68bb498190f423dad9590bd3dc4176aa7b3c860a1c53b3565",
+      "selected_version": 0,
+      "confirmed": true,
+      "fee_signature": true,
+      "cycles": 111666202,
+      "transaction_bytes": 1237
+    },
+    {
+      "case": "old-key-authorized-migration",
+      "transaction_hash": "0x299913a0ebdd68fcb8e668a182f6065fd12a0c141f12b43ff256bdaa47e5656e",
+      "selected_version": 0,
+      "confirmed": true,
+      "fee_signature": true,
+      "cycles": 111907727,
+      "transaction_bytes": 1632
+    },
+    {
+      "case": "new-key-successor-update",
+      "transaction_hash": "0xf9f1939302bf6036c32c6b1446308c4eb500eb5a43be13286d76ecd5ef88b4e1",
+      "selected_version": 1,
+      "confirmed": true,
+      "fee_signature": true,
+      "cycles": 111828719,
+      "transaction_bytes": 1237
+    }
+  ],
+  "files": [
+    {
+      "file": "clean-backend.log.gz",
+      "compression": "gzip",
+      "raw_bytes": 218592,
+      "raw_sha256": "12679e031d8463acd839a8efcbcaca9296994695a78800429bf566b09d609a25",
+      "stored_bytes": 42673,
+      "stored_sha256": "3d8e36904dc9ac2ac1dd6150b69fe1e1f914807dcbc0f3e39b380d67a833009b"
+    },
+    {
+      "file": "clean-ckb-acceptance.json.gz",
+      "compression": "gzip",
+      "raw_bytes": 750497,
+      "raw_sha256": "bf854cb0affded217911415551e571cb7dad9515b3315948ed5b85abb4a25601",
+      "stored_bytes": 63122,
+      "stored_sha256": "48c9403181c37f67d93efcc662204d6f328c20f5e1105f20dd84b85fdc350609"
+    },
+    {
+      "file": "counter-node.json.gz",
+      "compression": "gzip",
+      "raw_bytes": 23997,
+      "raw_sha256": "dc131e13874dcc731ab71241144beb96d052e247ae1287183b1ff52d528e998a",
+      "stored_bytes": 5210,
+      "stored_sha256": "7207f74c4db6d911a883dda7d4db8696b4d07780ce6f5b280f82379b104aac2f"
+    },
+    {
+      "file": "ccc-client.json",
+      "compression": "none",
+      "raw_bytes": 776,
+      "raw_sha256": "4a4b0f6b01a26cc6abc25a7510fbde35f136ea6364916654a396c4b25ee2d951",
+      "stored_bytes": 776,
+      "stored_sha256": "4a4b0f6b01a26cc6abc25a7510fbde35f136ea6364916654a396c4b25ee2d951"
+    },
+    {
+      "file": "ccc-migration.json",
+      "compression": "none",
+      "raw_bytes": 1382,
+      "raw_sha256": "127e9590eca43037ad595ef0cb2856762d8c43488e77dfe114754485fe308016",
+      "stored_bytes": 1382,
+      "stored_sha256": "127e9590eca43037ad595ef0cb2856762d8c43488e77dfe114754485fe308016"
+    }
+  ]
+}
