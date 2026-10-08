@@ -143,3 +143,40 @@ advances to `project-source-set-v64-0.32-source-declaration-contracts`.
 Full receipt projection, directional comparison, checked catalog admission,
 nominal resolver values and CKB enforcement are still required. These declaration
 checks do not complete H1, H2, #28 or #29, and independent review remains pending.
+
+## Checked module projection prerequisite
+
+`interface::project_bundle` applies a 4 MiB ceiling per actual artifact, metadata,
+lowering and source-map file, and 16 MiB per bundle before parsing. The private
+`CheckedModuleProjection` can also be constructed from an actual
+`InterfaceInspection`; its retained original byte lengths receive the same
+ceilings. A serialized projection cannot be deserialized into this checked
+value. Its artifact report retains the exact checked artifact/sidecar identities
+separately from its canonical module API identity.
+
+The projection requires both bounded source catalogs where applicable and the
+universal symbolic prerequisite. It follows root public type/signature/constant
+type references into qualified nested nominal declarations, preserving source
+field/variant order, binder constraints, capabilities and identity policies. It
+retains complete checked layouts for those nominal owners and independently
+checked instantiated arguments. Effective callable facts include actual inferred
+effects, ordered parameters, fixed Cell bindings, external dispatch tags and
+Script/witness placement ABI. Source callable declarations remain present when
+optimization prunes their runtime entry; retained helpers are explicitly distinct
+from external dispatch.
+
+`check_required_contracts` compares every required projected key against a
+candidate and allows additional candidate keys. It conservatively requires exact
+effect and binder-constraint agreement; it does not yet implement safe effect
+weakening or binder-constraint relaxation. Optimizer levels can retain different
+helper/layout evidence, so equality of projection identities across optimizer
+levels is not promised. Body predicates are outside this projection: two checked
+artifacts can have identical API projections and different behavior.
+
+This is a module coherence prerequisite, **not the H1 open receipt**. Frozen
+package/module ownership, complete builder requirements, independently checked
+codec and executable availability obligations, exact deployment/network/history
+binding and whole-catalog admission remain required. Source constants retain
+types, not independently proven values. Runtime errors/unsupported paths and
+transitive helper behavior are not removed merely by projecting an entry. No
+source equivalence, successful peer execution or security review is inferred.

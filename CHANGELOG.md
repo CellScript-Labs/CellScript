@@ -10,6 +10,13 @@ using parameter minima rather than observed instances. This is a prerequisite
 for compatible-open receipts; receipt admission and on-chain open handles remain
 pending. Historical bundles remain inspectable without granting open admission.
 
+Derive a bounded private checked module projection from actual bundle bytes.
+Preserve qualified nested nominal layouts, symbolic binders, declared versus
+inferred effects, fixed Cell bindings and external dispatch tags. Directional
+matching permits candidate additions while conservatively preserving required
+contracts. Artifact identities remain separate from API identities; source
+equivalence, codec, package and deployment admission are not inferred.
+
 Bind fixed ordinary-struct helper results to a feature-specific caller-owned
 buffer ABI checked independently from decoded RISC-V, including source pointer,
 hidden argument placement, bounded copy and frame teardown. Preserve nominal

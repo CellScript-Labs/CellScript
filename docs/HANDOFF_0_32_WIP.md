@@ -597,3 +597,16 @@ was removed before validation; all 32 focused tests pass in root
 `.cap/logs/1791456549-43289.log`. Historical evidence archives remain unchanged.
 This does not turn the failed backend replay into a passing receipt; a fresh
 clean backend gate is still required, and whole-queue CI remains deferred.
+
+### Independent module projection prototype
+
+The managed worktree adds `interface::project_bundle` and a private
+`CheckedModuleProjection`, with fixed byte/traversal ceilings and conservative
+directional matching. Actual compiled candidates exercise nested same-width
+owner substitution, field order, generic constraint, witness signature, inferred
+effect, public omission and dispatch-tag changes at O0–O3. Extra candidate types
+and dispatch variants are permitted; optimizer-pruned helper declarations remain
+present without inventing an executable binding. The 44 focused interface and
+checker tests pass in worktree `.cap/logs/1791455910-23121.log`. This is API
+coherence only: whole H1 receipt/admission, H2 runtime handles, #29 and #44–#46
+remain unfinished. Full CI is still deferred until the queue is implemented.

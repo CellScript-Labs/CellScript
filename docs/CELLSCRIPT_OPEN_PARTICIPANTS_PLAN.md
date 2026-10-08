@@ -119,6 +119,16 @@ that can be omitted after a working example is available.
 
 ### H1: independent receipt projection and mutation prototype (#28)
 
+The checked module projection prerequisite now derives nested nominal closure,
+retained layouts, source callable signatures, actual inferred effects, fixed
+Cell bindings and external dispatch tags from actual inspected bundles. A
+private checked value supports conservative directional required-contract
+matching with candidate additions. Different body predicates can preserve its
+API identity while changing the exact artifact. Frozen package ownership,
+complete codecs/builders/executable obligations, deployment and all-member
+admission remain pending; this prerequisite does not satisfy H1 acceptance.
+
+
 Use bounded actual artifact bundles as inputs. Recompute canonical interface,
 artifact, ABI/profile, deployment and receipt identities inside the standalone
 checker without depending on parser, resolver, type checker, IR or codegen.

@@ -10,7 +10,9 @@ use std::collections::BTreeMap;
 mod generics;
 mod layouts;
 mod nominals;
+mod projection;
 mod source_types;
+pub use projection::{project_bundle, CheckedModuleProjection};
 mod universal;
 pub(crate) use source_types::SourceType;
 pub(crate) fn parse_source_type(value: &str) -> Result<SourceType, crate::CheckerError> {
@@ -29,6 +31,7 @@ pub struct InterfaceInspection {
     declared: PackageInterface,
     effective: TypedSemanticRecord,
     report: CheckerReport,
+    bundle_bytes: [usize; 4],
 }
 
 impl InterfaceInspection {
@@ -45,6 +48,12 @@ impl InterfaceInspection {
 
     pub fn report(&self) -> &CheckerReport {
         &self.report
+    }
+
+    /// Project qualified source API and its retained effective bindings. This
+    /// is not package ownership, codec admission or deployment authorization.
+    pub fn project_module_contract(&self) -> Result<CheckedModuleProjection, CheckerError> {
+        projection::project(self)
     }
 
     /// Check universal type/ability guarantees, including absent templates.
@@ -109,7 +118,12 @@ pub fn inspect_bundle(
     }
     let effective = crate::parse_lowering_record(lowering_bytes, budgets)?.typed_semantics;
     check_declaration_bindings(&declared, &metadata, &effective)?;
-    Ok(InterfaceInspection { declared, effective, report })
+    Ok(InterfaceInspection {
+        declared,
+        effective,
+        report,
+        bundle_bytes: [artifact.len(), metadata_bytes.len(), lowering_bytes.len(), source_map_bytes.len()],
+    })
 }
 
 fn mismatch(message: &'static str) -> CheckerError {
