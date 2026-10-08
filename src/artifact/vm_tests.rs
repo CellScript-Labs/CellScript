@@ -260,6 +260,67 @@ fn certified_fixed_cell_read_gates_check_real_group_bytes_and_lengths_in_vm() {
 }
 
 #[test]
+fn certified_fixed_cell_scalar_fields_have_real_unsigned_byte_oracles() {
+    for (members, predicate, oracle) in [
+        ("amount: u64", "require before.amount == 7", &[7, 0, 0, 0, 0, 0, 0, 0][..]),
+        (
+            "a: u8, b: u16, c: u32, d: u64",
+            "require before.a == 42 require before.b == 513 require before.c == 67305985 require before.d == 123456789012345",
+            &[42, 1, 2, 1, 2, 3, 4, 121, 223, 13, 134, 72, 112, 0, 0][..],
+        ),
+    ] {
+        let source = format!("module unsigned_cell_fields\nresource Token has store, consume {{ {members} }}\naction burn(input before: Token) {{ verification {predicate} consume before }}\n");
+        for opt_level in 0..=3 {
+            let mut selected = declaration();
+            selected.actions.retain(|action| action.tag == BURN);
+            selected.common_checks.clear();
+            let compiled = compile_artifact(
+                &source,
+                CompileOptions { source_contracts: true, opt_level, ..options() },
+                selected,
+                ExecutableSurfacePolicy::DenyFailClosed,
+            )
+            .unwrap();
+            let evidence = cellscript_artifact_checker::fixed_cell_fields::check_fixed_cell_scalar_fields(
+                &compiled.artifact_bytes,
+                &serde_json::to_vec(&compiled.metadata).unwrap(),
+                &serde_json::to_vec(compiled.verified_lowering_record.as_ref().unwrap()).unwrap(),
+                &serde_json::to_vec(compiled.source_artifact_map.as_ref().unwrap()).unwrap(),
+                &cellscript_artifact_checker::CheckerBudgets::default(),
+            )
+            .unwrap();
+            assert!(!evidence.storage().reads().module_projection().artifact_report().semantic_equivalence_claimed);
+            for prepend in [false, true] {
+                let case = || {
+                    let mut case = Case::new(BURN, &[7], &[]);
+                    case.prepend_input = prepend;
+                    case
+                };
+                execute_with_cell_data(&compiled, case(), unchanged, |_| Bytes::copy_from_slice(oracle)).unwrap();
+                for index in 0..oracle.len() {
+                    let error = execute_with_cell_data(&compiled, case(), unchanged, |_| {
+                        let mut actual = oracle.to_vec();
+                        actual[index] ^= 0x80;
+                        Bytes::from(actual)
+                    })
+                    .unwrap_err();
+                    assert_exit(error, 5);
+                }
+                for length in [oracle.len() - 1, oracle.len() + 1, 512, 513] {
+                    let error = execute_with_cell_data(&compiled, case(), unchanged, |_| {
+                        let mut actual = oracle.to_vec();
+                        actual.resize(length, 0xA5);
+                        Bytes::from(actual)
+                    })
+                    .unwrap_err();
+                    assert_exit(error, 4);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn fixed_policy_parameter_decoder_certificate_has_real_vm_byte_oracles() {
     for opt_level in 0..=3 {
         let compiled = compile_artifact(

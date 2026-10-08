@@ -487,7 +487,7 @@ fn instruction_word(bytes: &[u8], index: usize) -> Result<u32, ElfParseError> {
     read_u32(bytes, offset)
 }
 
-fn opcode_writes_rd(opcode: u32) -> bool {
+pub(crate) fn opcode_writes_rd(opcode: u32) -> bool {
     matches!(opcode, 0x03 | 0x13 | 0x17 | 0x1b | 0x33 | 0x37 | 0x3b | 0x67 | 0x6f)
 }
 

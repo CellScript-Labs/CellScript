@@ -858,3 +858,75 @@ length register at that checked slot while retaining unique slots/registers
 and scalar-region bounds elsewhere. No fixture, ABI or resource limit changed.
 Updated strict compiler/checker all-target clippy passes in
 `.cap/logs/1791471497-94579.log`. Full dev is next; sources freeze during it.
+
+## Signed read/storage publication and direct field materializations
+
+Exact staged storage sources passed full dev in
+`.cap/logs/1791471606-97232.log` (94,311 bytes), then were signed as
+`f07b8a1cb7451ad33f2b14b9773b09f473fca2aa`, after signed `6aa93612`.
+Root fast-forwarded both commits and passed clean full backend/CCC in
+`.cap/logs/1791472481-18774.log` (226,047 bytes). Strict full audit is
+`target/cellscript-strict-backend-audit/strict-backend-audit-full-20261008-233206.json`;
+acceptance is
+`target/ckb-cellscript-acceptance/1791473738-production-55704/ckb-cellscript-acceptance-report.json`;
+node evidence is `target/counter-node/1791474025-88743/evidence.json`.
+Acceptance and node evidence bind `f07b8a1c` with `git_dirty=false` and
+tracked-source SHA-256
+`0xfb7c7e131d9afaf8f444ba6773643a369e8637196f7d4758716f58ff7039ff66`.
+All three CCC rows confirmed using actual fee signatures, with 111,742,208 /
+111,890,107 / 111,741,254 cycles and 1237 / 1632 / 1237 bytes. The two commits
+were pushed and `public/0.32` verified at the exact signed storage commit.
+The seven-file replay archive is `docs/reports/0.32/read-storage-replay/`;
+its source identity is separate from its containing archive commit. No
+production setup or general #45 admission follows from these local test seeds.
+
+While root backend sources stayed frozen, the isolated worktree added the next
+partial #28 field check. Direct unsigned fields bind actual pointer loads,
+bytewise or native materializations and checked layout offsets/widths.
+Receiver dominance, caller pointer/buffer/frame/return preservation and owned
+instruction coverage are independently checked. Unknown aliases, field forms
+and calls reject. The existing membership helper now has a finite checked
+96-byte private memory/return profile, separate from role authorization.
+The first no-call prototype rejected that real helper; the helper was proved
+from decoded bytes instead of permitting opaque calls.
+
+Three focused field tests pass in `.cap/logs/1791474688-2960.log`: 96 ordinary-
+accepted/storage-accepted field mutations, 24 helper mutations, alternate
+native-LD positives plus eight wrong native offsets/widths, and signed-field
+rejection. Nested Cell access initially failed fixture compilation with E2105;
+the test now verifies that production rejection rather than weakening it.
+The 64-variant/64-read boundary test passes in
+`.cap/logs/1791474868-6702.log`: 256 materializations accepted, 257 rejected.
+Real VM unsigned-byte oracles passed in `.cap/logs/1791473315-44619.log`
+(16 positive, 184 byte-change and 64 length negative cases). That run preceded
+the later return/frame hardening; the exact final sources still require
+updated strict clippy/dev, including the real VM test now wired into dev.
+The field evidence ends at decoded registers, not source assignments,
+predicates, output codecs, complete receipts or open admission. No emitter,
+metadata/lowering schema, cache, dependency or resource ceiling was changed.
+Full H1/H2, #29 and #44–#46 remain unfinished; independent security review
+remains required/unassigned. Full CI remains deferred until all queue work.
+
+Updated strict compiler/checker all-target clippy passes in
+`.cap/logs/1791475309-15801.log`. The replay archive's seven compressed/raw
+hashes and sizes are checked again before staging. Full dev is next for the
+exact field/archive source state; sources remain frozen during it.
+
+The first field/archive dev gate passed in `.cap/logs/1791475859-27741.log`
+(94,902 bytes). Subsequent review reproduced an owner syscall through a live
+Cell-pointer alias that the first field check accepted; its fully rebound
+reproducer passed in `.cap/logs/1791476868-49719.log`. Existing inline group-end
+capacity observations made a blanket syscall ban reject valid compiler output.
+They now have an independent frame-local capacity/hash memory profile, with
+field IDs verified against the pinned CKB source (0/3/5, not Script fields 2/4).
+
+The shared register-definition/constant analysis omitted RV64 word writes.
+Twelve actual rebound pointer substitutions passed before correction in
+`.cap/logs/1791477653-65849.log`. Destination-write recognition now shares the
+ELF opcode classifier; word constants truncate/sign-extend correctly, opaque
+calls invalidate caller-saved facts and syscall returns invalidate a0.
+Six focused field tests pass in `.cap/logs/1791477793-68808.log`, including
+32 added observation/alias/word negatives and 12 alternate observation/ADDIW
+positives. The exact updated sources still require strict clippy and fresh dev
+before their signed commit, and a clean backend gate before push. Whole CI
+remains deferred; complete H1/H2 and the remaining issue queue are not done.

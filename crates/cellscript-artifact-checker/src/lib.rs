@@ -3,6 +3,7 @@ mod checker;
 mod elf;
 pub mod entry_codec;
 mod failure;
+pub mod fixed_cell_fields;
 pub mod fixed_cell_reads;
 pub mod fixed_cell_storage;
 mod fixed_results;

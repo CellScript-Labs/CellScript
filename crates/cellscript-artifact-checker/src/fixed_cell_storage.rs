@@ -14,6 +14,9 @@ pub struct CheckedFixedCellParameterStorage {
     identity: String,
 }
 impl CheckedFixedCellParameterStorage {
+    pub(crate) fn cells(&self) -> &[Storage] {
+        &self.record.cells
+    }
     pub fn reads(&self) -> &CheckedFixedCellReads {
         &self.reads
     }
@@ -35,17 +38,17 @@ struct Record {
     cells: Vec<Storage>,
 }
 #[derive(Debug, Serialize)]
-struct Storage {
-    entry: String,
-    parameter: String,
-    local_id: u32,
+pub(crate) struct Storage {
+    pub(crate) entry: String,
+    pub(crate) parameter: String,
+    pub(crate) local_id: u32,
     source_id: u64,
     abi_register: u32,
-    pointer_offset: u32,
+    pub(crate) pointer_offset: u32,
     size_offset: u32,
-    buffer_offset: u32,
-    spill_address: u64,
-    receiver_start: u64,
+    pub(crate) buffer_offset: u32,
+    pub(crate) spill_address: u64,
+    pub(crate) receiver_start: u64,
     receiver_end: u64,
 }
 fn invalid(message: impl Into<String>) -> CheckerError {

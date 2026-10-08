@@ -654,6 +654,7 @@ run_dev_gate() {
     run cargo test --locked -p cellscript artifact::vm_tests::fixed_policy_parameter_decoder_certificate_has_real_vm_byte_oracles --lib -- --exact --test-threads=1
     run cargo test --locked -p cellscript artifact::vm_tests::certified_shared_fixed_decoders_preserve_signed_bytes_in_vm --lib -- --exact --test-threads=1
     run cargo test --locked -p cellscript artifact::vm_tests::certified_fixed_cell_read_gates_check_real_group_bytes_and_lengths_in_vm --lib -- --exact --test-threads=1
+    run cargo test --locked -p cellscript artifact::vm_tests::certified_fixed_cell_scalar_fields_have_real_unsigned_byte_oracles --lib -- --exact --test-threads=1
     run cargo test --locked -p cellscript deployment_line_handle --lib
     run cargo test --locked -p cellscript --test exact_script_handles
     run cargo check --locked -p cellscript-fiber-adapter --all-targets

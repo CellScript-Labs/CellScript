@@ -2,6 +2,14 @@
 
 ## Unreleased — 0.32
 
+Independently check direct unsigned Cell field materializations, receiver
+dominance, protected caller storage and the membership helper's private-frame
+memory boundary. Bound inline capacity/hash writes and fix missed RV64 word
+register writes and stale caller/syscall register facts. Rebound byte/offset/
+register changes and unsupported profiles reject. This optional evidence ends
+at decoded registers; full receipts and
+open admission remain pending. See `docs/FIXED_CELL_SCALAR_FIELDS.md`.
+
 Bind eligible fixed Cell source parameters to their actual ABI spills and
 post-read pointer receivers under a finite uncompressed scalar-slot profile.
 Reject rebound source IDs, overlapping argument spills and changed receivers.

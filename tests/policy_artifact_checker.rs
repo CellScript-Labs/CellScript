@@ -82,6 +82,383 @@ fn fixed_cell_storage(
     )
 }
 
+fn fixed_cell_fields(
+    fixture: &Fixture,
+) -> Result<cellscript_artifact_checker::fixed_cell_fields::CheckedFixedCellScalarFields, CheckerError> {
+    cellscript_artifact_checker::fixed_cell_fields::check_fixed_cell_scalar_fields(
+        &fixture.artifact,
+        &serde_json::to_vec(&fixture.metadata).unwrap(),
+        &serde_json::to_vec(&fixture.record).unwrap(),
+        &serde_json::to_vec(&fixture.source_map).unwrap(),
+        &CheckerBudgets::default(),
+    )
+}
+
+#[test]
+fn fixed_cell_fields_decode_direct_unsigned_layouts_and_reject_rebound_bytes() {
+    let mut coverage = Vec::new();
+    let mut mutations = 0;
+    for (members, predicate, widths) in [
+        ("amount: u64", "require token.amount > 0", vec![8]),
+        (
+            "a: u8, b: u16, c: u32, d: u64",
+            "require token.a == 42 require token.b == 513 require token.c == 67305985 require token.d == 123456789012345",
+            vec![1, 2, 4, 8],
+        ),
+    ] {
+        let source = SOURCE.replace("amount: u64 }", &format!("{members} }}"));
+        // The unselected mint is removed because its resource initializer belongs
+        // to the original amount layout, independent of field checker profiles.
+        let source = source.split("action mint(").next().unwrap().to_owned()
+            + &format!("action burn(input token: Token) {{ verification {predicate} consume token }}\n");
+        let mut selected = declaration();
+        selected.actions.retain(|action| action.action == "burn");
+        selected.common_checks.clear();
+        for opt in 0..=3 {
+            let fixture = Fixture::new_source_with(&source, CellScriptEdition::Edition2026, opt, selected.clone());
+            let checked = fixed_cell_fields(&fixture).unwrap();
+            let value: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
+            let fields = value["fields"].as_array().unwrap();
+            coverage.push(serde_json::json!({"opt":opt,"members":members,"sites":fields.len()}));
+            let actual = fields.iter().map(|field| field["width"].as_u64().unwrap()).collect::<std::collections::BTreeSet<_>>();
+            assert_eq!(actual, widths.iter().map(|width| *width as u64).collect());
+            let elf = parse_elf(&fixture.artifact, CheckerBudgets::default().instructions).unwrap();
+            for field in fields {
+                let start = field["pointer_load"].as_u64().unwrap();
+                let first = elf.instructions.iter().find(|instruction| instruction.address == start + 4).unwrap().word;
+                let source = if first & 0x7f == 0x03 { start + 4 } else { start + 8 };
+                let load = elf.instructions.iter().find(|instruction| instruction.address == source).unwrap().word;
+                for (mask, bits) in [(31 << 15, 28 << 15), (0xfff << 20, (((load >> 20) + 1) & 0xfff) << 20)] {
+                    let mut changed = fixture.clone();
+                    changed.replace_machine_word(source, (load & !mask) | bits);
+                    changed.check().unwrap();
+                    fixed_cell_storage(&changed).unwrap();
+                    assert_eq!(fixed_cell_fields(&changed).unwrap_err().code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                    mutations += 1;
+                }
+                if first & 0x7f != 0x03 {
+                    let mut locations = vec![(start + 4, 0xfff << 20, 1 << 20), (start + 12, 31 << 20, 6 << 20)];
+                    if field["width"].as_u64().unwrap() > 1 {
+                        locations.push((start + 20, 63 << 20, 16 << 20));
+                    }
+                    for (address, mask, bits) in locations {
+                        let original = elf.instructions.iter().find(|instruction| instruction.address == address).unwrap().word;
+                        let mut changed = fixture.clone();
+                        changed.replace_machine_word(address, (original & !mask) | bits);
+                        changed.check().unwrap();
+                        fixed_cell_storage(&changed).unwrap();
+                        assert_eq!(
+                            fixed_cell_fields(&changed).unwrap_err().code,
+                            CheckerRejectionCode::V2420TypedMachineBindingInvalid
+                        );
+                        mutations += 1;
+                    }
+                }
+            }
+        }
+    }
+    println!("{}", serde_json::json!({"field_coverage":coverage,"rebound_field_mutations":mutations}));
+}
+
+#[test]
+fn fixed_cell_fields_reject_membership_helper_memory_and_register_substitutions() {
+    let source = SOURCE.replace("verification consume token", "verification require token.amount > 0 consume token");
+    let mut selected = declaration();
+    selected.actions.retain(|action| action.action == "burn");
+    selected.common_checks.clear();
+    for opt in 0..=3 {
+        let fixture = Fixture::new_source_with(&source, CellScriptEdition::Edition2026, opt, selected.clone());
+        fixed_cell_fields(&fixture).unwrap();
+        let blocks = fixture
+            .record
+            .blocks
+            .iter()
+            .filter(|block| block.owner_entry == "runtime:__cellscript_require_cell_membership")
+            .collect::<Vec<_>>();
+        let elf = parse_elf(&fixture.artifact, CheckerBudgets::default().instructions).unwrap();
+        let syscall =
+            elf.syscall_addresses.iter().copied().find(|address| blocks.iter().any(|block| block.range.contains(*address))).unwrap();
+        let buffer = elf
+            .instructions
+            .iter()
+            .rev()
+            .find(|instruction| {
+                instruction.address < syscall
+                    && instruction.word & 0x7f == 0x13
+                    && ((instruction.word >> 7) & 31) == 10
+                    && ((instruction.word >> 15) & 31) == 2
+            })
+            .unwrap();
+        let store = elf
+            .instructions
+            .iter()
+            .rev()
+            .find(|instruction| {
+                instruction.address < buffer.address
+                    && instruction.word & 0x7f == 0x23
+                    && ((instruction.word >> 15) & 31) == 2
+                    && (((instruction.word >> 25) << 5) | ((instruction.word >> 7) & 31)) == 0
+            })
+            .unwrap();
+        let capacity = elf.instructions.iter().find(|instruction| instruction.address == store.address - 4).unwrap();
+        for (address, word) in [
+            (capacity.address, (capacity.word & !(0xfff << 20)) | (64 << 20)),
+            (capacity.address, (capacity.word & !(31 << 7)) | (29 << 7)),
+            (store.address, (store.word & !(31 << 15)) | (3 << 15)),
+            (store.address, store.word & !(7 << 12)),
+            (store.address, (store.word & !(31 << 7)) | (1 << 7)),
+            (buffer.address, (buffer.word & !(31 << 15)) | (3 << 15)),
+        ] {
+            let mut changed = fixture.clone();
+            changed.replace_machine_word(address, word);
+            changed.check().unwrap();
+            fixed_cell_storage(&changed).unwrap();
+            assert_eq!(fixed_cell_fields(&changed).unwrap_err().code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+        }
+    }
+}
+
+#[test]
+fn fixed_cell_fields_accept_rebound_native_u64_and_reject_unknown_field_profiles() {
+    let mut selected = declaration();
+    selected.actions.retain(|action| action.action == "burn");
+    selected.common_checks.clear();
+    let source = SOURCE.replace("verification consume token", "verification require token.amount == 7 consume token");
+    for opt in 0..=3 {
+        let mut fixture = Fixture::new_source_with(&source, CellScriptEdition::Edition2026, opt, selected.clone());
+        let bytes = fixed_cell_fields(&fixture).unwrap().canonical_bytes().unwrap();
+        let record: Value = serde_json::from_slice(&bytes).unwrap();
+        let field = &record["fields"][0];
+        let load = field["pointer_load"].as_u64().unwrap() + 4;
+        let end = field["decode_end"].as_u64().unwrap();
+        let register = field["register"].as_u64().unwrap() as u32;
+        // An alternate actual machine form, not a claim that this fixture's
+        // compiler emitted LD. Rebind every outer identity after padding out
+        // the original reconstruction, preserving addresses and its consumers.
+        fixture.replace_machine_word(load, (29 << 15) | (3 << 12) | (register << 7) | 0x03);
+        for address in (load + 4..end).step_by(4) {
+            fixture.replace_machine_word(address, 0x00000013);
+        }
+        fixture.check().unwrap();
+        let checked = fixed_cell_fields(&fixture).unwrap();
+        let record: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
+        assert_eq!(record["fields"][0]["native_load"], true);
+        assert!(!checked.storage().reads().module_projection().artifact_report().semantic_equivalence_claimed);
+        for replacement in
+            [(8 << 20) | (29 << 15) | (3 << 12) | (register << 7) | 0x03, (29 << 15) | (4 << 12) | (register << 7) | 0x03]
+        {
+            let mut changed = fixture.clone();
+            changed.replace_machine_word(load, replacement);
+            changed.check().unwrap();
+            fixed_cell_storage(&changed).unwrap();
+            assert_eq!(fixed_cell_fields(&changed).unwrap_err().code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+        }
+        let signed = "module signed_cell_fields\nresource Token has store, consume { signed: i32 }\naction burn(input token: Token, witness zero: i32) { verification require token.signed < zero consume token }";
+        let fixture = Fixture::new_source_with(signed, CellScriptEdition::Edition2026, opt, selected.clone());
+        fixed_cell_storage(&fixture).unwrap();
+        assert_eq!(fixed_cell_fields(&fixture).unwrap_err().code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+        // Nested Cell access remains outside the production executable surface;
+        // do not weaken that boundary to manufacture a checker-positive bundle.
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("nested.cell");
+        std::fs::write(&source, "module nested_cell_fields\nstruct Inner has copy, drop, store, fixed, serializable, non_linear { x: u64 }\nresource Token has store, consume { inner: Inner }\naction burn(input token: Token) { verification require token.inner.x > 0 consume token }").unwrap();
+        let error = compile_path_with_executable_surface_policy(
+            source.to_str().unwrap(),
+            CompileOptions {
+                source_contracts: true,
+                edition: CellScriptEdition::Edition2026,
+                opt_level: opt,
+                target: Some("riscv64-elf".into()),
+                ..CompileOptions::default()
+            },
+            Some(CompileEntryScope::Artifact(selected.clone())),
+            ExecutableSurfacePolicy::DenyFailClosed,
+        )
+        .unwrap_err();
+        assert_eq!(error.code.as_deref(), Some("E2105"));
+    }
+}
+
+#[test]
+fn fixed_cell_fields_check_inline_capacity_and_hash_observation_memory() {
+    let source = SOURCE.replace("verification consume token", "verification require token.amount == 7 consume token");
+    let mut selected = declaration();
+    selected.actions.retain(|action| action.action == "burn");
+    selected.common_checks.clear();
+    for opt in 0..=3 {
+        let fixture = Fixture::new_source_with(&source, CellScriptEdition::Edition2026, opt, selected.clone());
+        fixed_cell_fields(&fixture).unwrap();
+        let elf = parse_elf(&fixture.artifact, CheckerBudgets::default().instructions).unwrap();
+        let site = fixture
+            .record
+            .syscall_sites
+            .iter()
+            .find(|site| {
+                fixture.record.blocks.iter().any(|block| {
+                    block.id == site.block_id
+                        && block.owner_entry == "action:burn"
+                        && elf.instructions.iter().any(|instruction| {
+                            instruction.address < site.address
+                                && block.range.contains(instruction.address)
+                                && instruction.word == (15 << 7) | 0x13
+                        })
+                })
+            })
+            .unwrap();
+        let block = fixture.record.blocks.iter().find(|block| block.id == site.block_id).unwrap();
+        let definition = |register| {
+            elf.instructions
+                .iter()
+                .rev()
+                .find(|instruction| {
+                    instruction.address < site.address
+                        && block.range.contains(instruction.address)
+                        && instruction.word & 0x7f == 0x13
+                        && ((instruction.word >> 7) & 31) == register
+                })
+                .unwrap()
+        };
+        let buffer = definition(10);
+        let size = definition(11);
+        let field = definition(15);
+        let index = definition(13);
+        let capacity = elf
+            .instructions
+            .iter()
+            .rev()
+            .find(|instruction| {
+                instruction.address < buffer.address
+                    && block.range.contains(instruction.address)
+                    && instruction.word & 0x7f == 0x13
+                    && ((instruction.word >> 7) & 31) == 5
+            })
+            .unwrap();
+        let store = elf.instructions.iter().find(|instruction| instruction.address == capacity.address + 4).unwrap();
+        for (address, word) in [
+            (capacity.address, (capacity.word & !(0xfff << 20)) | (64 << 20)),
+            (store.address, store.word & !(7 << 12)),
+            (buffer.address, (buffer.word & !(31 << 15)) | (3 << 15)),
+            (size.address, (size.word & !(31 << 15)) | (3 << 15)),
+        ] {
+            let mut changed = fixture.clone();
+            changed.replace_machine_word(address, word);
+            changed.check().unwrap();
+            fixed_cell_storage(&changed).unwrap();
+            assert_eq!(fixed_cell_fields(&changed).unwrap_err().code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+        }
+        // Independently certify alternate actual 32-byte observation writes.
+        // This does not claim the original compiler emitted hash observations
+        // here, or certify their downstream source/count predicate meaning.
+        for hash_field in [3, 5] {
+            let mut changed = fixture.clone();
+            changed.replace_machine_word(capacity.address, (capacity.word & !(0xfff << 20)) | (32 << 20));
+            changed.replace_machine_word(field.address, (field.word & !(0xfff << 20)) | (hash_field << 20));
+            changed.check().unwrap();
+            fixed_cell_fields(&changed).unwrap();
+        }
+        let storage: Value = serde_json::from_slice(&fixed_cell_storage(&fixture).unwrap().canonical_bytes().unwrap()).unwrap();
+        let cell_buffer = storage["cells"][0]["buffer_offset"].as_i64().unwrap();
+        let delta = cell_buffer - i64::from((buffer.word as i32) >> 20);
+        assert!((-2048..=2047).contains(&delta));
+        for instruction in [
+            (((delta as u32) & 0xfff) << 20) | (10 << 15) | (10 << 7) | 0x1b,
+            (29 << 20) | (10 << 15) | (10 << 7) | 0x3b,
+            (0x20 << 25) | (29 << 20) | (10 << 15) | (10 << 7) | 0x3b,
+        ] {
+            let mut changed = fixture.clone();
+            changed.replace_machine_word(index.address, instruction);
+            changed.check().unwrap();
+            fixed_cell_storage(&changed).unwrap();
+            assert_eq!(fixed_cell_fields(&changed).unwrap_err().code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+        }
+        let number = elf.instructions.iter().find(|instruction| instruction.address == site.address - 4).unwrap();
+        assert_eq!(number.word & 0x7f, 0x13);
+        let mut changed = fixture.clone();
+        changed.replace_machine_word(number.address, (number.word & !0x7f) | 0x1b);
+        changed.check().unwrap();
+        fixed_cell_storage(&changed).unwrap();
+        fixed_cell_fields(&changed).unwrap();
+    }
+}
+
+#[test]
+fn fixed_cell_fields_reject_unproved_owner_syscalls_after_native_materialization() {
+    let source = SOURCE.replace("verification consume token", "verification require token.amount == 7 consume token");
+    let mut selected = declaration();
+    selected.actions.retain(|action| action.action == "burn");
+    selected.common_checks.clear();
+    for opt in 0..=3 {
+        let mut fixture = Fixture::new_source_with(&source, CellScriptEdition::Edition2026, opt, selected.clone());
+        let checked = fixed_cell_fields(&fixture).unwrap();
+        let fields: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
+        let storage: Value = serde_json::from_slice(&checked.storage().canonical_bytes().unwrap()).unwrap();
+        let load = fields["fields"][0]["pointer_load"].as_u64().unwrap() + 4;
+        let end = fields["fields"][0]["decode_end"].as_u64().unwrap();
+        let register = fields["fields"][0]["register"].as_u64().unwrap() as u32;
+        let size = storage["cells"][0]["size_offset"].as_u64().unwrap() as u32;
+        let elf = parse_elf(&fixture.artifact, CheckerBudgets::default().instructions).unwrap();
+        let helper = fixture
+            .record
+            .blocks
+            .iter()
+            .filter(|block| block.owner_entry == "runtime:__cellscript_require_cell_membership")
+            .collect::<Vec<_>>();
+        let syscall =
+            elf.syscall_addresses.iter().copied().find(|address| helper.iter().any(|block| block.range.contains(*address))).unwrap();
+        let word = |address| elf.instructions.iter().find(|instruction| instruction.address == address).unwrap().word;
+        fixture.replace_machine_word(load, (29 << 15) | (3 << 12) | (register << 7) | 0x03);
+        for address in (load + 4..end).step_by(4) {
+            fixture.replace_machine_word(address, 0x00000013);
+        }
+        for (index, instruction) in [
+            (29 << 15) | (10 << 7) | 0x13,
+            (size << 20) | (2 << 15) | (11 << 7) | 0x13,
+            word(syscall - 8),
+            word(syscall - 4),
+            0x00000073,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            fixture.replace_machine_word(load + 4 + 4 * index as u64, instruction);
+        }
+        let mut site = fixture.record.syscall_sites.iter().find(|site| site.address == syscall).unwrap().clone();
+        site.address = load + 20;
+        site.block_id = fixture.record.blocks.iter().find(|block| block.range.contains(site.address)).unwrap().id.clone();
+        fixture.record.syscall_sites.push(site);
+        fixture.record.syscall_sites.sort_by_key(|site| site.address);
+        fixture.rebind_sidecars();
+        fixture.check().unwrap();
+        fixed_cell_storage(&fixture).unwrap();
+        assert_eq!(fixed_cell_fields(&fixture).unwrap_err().code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+    }
+}
+
+#[test]
+fn fixed_cell_fields_enforce_256_sites_without_raising_variant_or_read_limits() {
+    for extra in [false, true] {
+        let mut source =
+            "module field_site_bounds\nresource Token has store, consume { a: u8, b: u16, c: u32, d: u64, e: u8 }\n".to_owned();
+        let mut selected = declaration();
+        selected.actions.clear();
+        selected.common_checks.clear();
+        for index in 0..64 {
+            let name = format!("burn{index}");
+            selected.actions.push(ArtifactAction { tag: index, action: name.clone() });
+            let tail = if extra && index == 0 { "require token.e == 17" } else { "" };
+            source.push_str(&format!("action {name}(input token: Token) {{ verification require token.a == 42 require token.b == 513 require token.c == 67305985 require token.d == 123456789012345 {tail} consume token }}\n"));
+        }
+        let fixture = Fixture::new_source_with(&source, CellScriptEdition::Edition2026, 0, selected);
+        fixed_cell_storage(&fixture).unwrap();
+        if extra {
+            assert_eq!(fixed_cell_fields(&fixture).unwrap_err().code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+        } else {
+            let record: Value = serde_json::from_slice(&fixed_cell_fields(&fixture).unwrap().canonical_bytes().unwrap()).unwrap();
+            assert_eq!(record["fields"].as_array().unwrap().len(), 256);
+        }
+    }
+}
+
 #[test]
 fn fixed_cell_parameter_storage_binds_source_ids_and_actual_pointer_reception() {
     for opt in 0..=3 {

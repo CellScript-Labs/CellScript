@@ -50,7 +50,7 @@ pub(crate) struct Read {
     pub(crate) size_offset: u32,
     pub(crate) buffer_offset: u32,
     pub(crate) setup_start: u64,
-    syscall_address: u64,
+    pub(crate) syscall_address: u64,
     pub(crate) guarded_end: u64,
     status_error: i32,
 }

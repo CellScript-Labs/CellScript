@@ -1,0 +1,101 @@
+{
+  "schema": "cellscript-032-read-storage-replay-evidence-v1",
+  "source_commit": "f07b8a1cb7451ad33f2b14b9773b09f473fca2aa",
+  "backend_source_dirty": false,
+  "dev_source_state": "exact staged sources later signed as source_commit",
+  "dev_status": "passed",
+  "backend_status": "passed",
+  "tracked_source_sha256": "0xfb7c7e131d9afaf8f444ba6773643a369e8637196f7d4758716f58ff7039ff66",
+  "ckb_revision": "f7fa4436737756f97a24e254f22c13a36316ecea",
+  "complete_ci_for_queue": "deferred-until-all-implementation-complete",
+  "release_admitted": false,
+  "production_setup_claimed": false,
+  "public_deployment_claimed": false,
+  "migration_rows": [
+    {
+      "case": "old-key-update",
+      "confirmed": true,
+      "cycles": 111742208,
+      "fee_signature": true,
+      "selected_version": 0,
+      "transaction_bytes": 1237,
+      "transaction_hash": "0x797c482c68d252bf4e54b0ae110bf2cd0f2ed5db8ee5af09b3905eaf18e2fd6b"
+    },
+    {
+      "case": "old-key-authorized-migration",
+      "confirmed": true,
+      "cycles": 111890107,
+      "fee_signature": true,
+      "selected_version": 0,
+      "transaction_bytes": 1632,
+      "transaction_hash": "0xb4dd106c3d80f0703b9fdc21975051945e466fa379420c8762f1eb014f7c2162"
+    },
+    {
+      "case": "new-key-successor-update",
+      "confirmed": true,
+      "cycles": 111741254,
+      "fee_signature": true,
+      "selected_version": 1,
+      "transaction_bytes": 1237,
+      "transaction_hash": "0xa599638950584f3b78bb1a806da8f764f67a1fb1736a27d730612c61ad6ea1ec"
+    }
+  ],
+  "files": [
+    {
+      "file": "staged-dev.log.gz",
+      "compression": "gzip",
+      "raw_bytes": 94338,
+      "raw_sha256": "8cbb0eb49edef388f2936f75623daa6ce35a73cdb3ba4e5e53b2096069475fff",
+      "stored_bytes": 15719,
+      "stored_sha256": "021a22ad4781f2b4b7e37d866fb63c19012d2b7be763748204a8868963fec816"
+    },
+    {
+      "file": "clean-backend.log.gz",
+      "compression": "gzip",
+      "raw_bytes": 226074,
+      "raw_sha256": "15d3232216faa1eae47bf2f573580e6e1d12b3be5ca2151b302ffd2d8bfbf52c",
+      "stored_bytes": 43992,
+      "stored_sha256": "0e4f966731a4aa5e8a6843a0b5398bfe1b772a2bac55ab167d97c488033dbfa2"
+    },
+    {
+      "file": "strict-backend-full.json.gz",
+      "compression": "gzip",
+      "raw_bytes": 157159,
+      "raw_sha256": "e6cf6609d1a97ab9d7f50f43eed528ad562b2c28f8d2a8c2b7670fb376282227",
+      "stored_bytes": 5376,
+      "stored_sha256": "8b2c583b851f4584c9b44bea328d616347abd84d9c1a9a4b1af17706b1a25ed2"
+    },
+    {
+      "file": "ckb-acceptance.json.gz",
+      "compression": "gzip",
+      "raw_bytes": 750673,
+      "raw_sha256": "e713a4ef661cd5302acec42551cc849b3cae673d8a201d2e5ff48e66c1a68083",
+      "stored_bytes": 63173,
+      "stored_sha256": "3123e8c569dd41c53751af2fff6f81633dc4da297f4139749bc1ec21797728f4"
+    },
+    {
+      "file": "counter-node.json.gz",
+      "compression": "gzip",
+      "raw_bytes": 24173,
+      "raw_sha256": "1e778aa82d880174767ad347f6f6e4a6b317f1c4c54394b901bbb5b9bee2ddde",
+      "stored_bytes": 5248,
+      "stored_sha256": "d71b26a796dcba86c15b5815e82286a1da3bb287719a57a53449a3cf7efda55e"
+    },
+    {
+      "file": "ccc-migration.json.gz",
+      "compression": "gzip",
+      "raw_bytes": 1382,
+      "raw_sha256": "4f150f0e35b0b7c8ef4be43889303f265a8002798c1d3be73e8b8221a3a52689",
+      "stored_bytes": 569,
+      "stored_sha256": "ac14142cf9ccc6c140a2a0a67e13700c10f783011b919f814a1377240eee0b7b"
+    },
+    {
+      "file": "public-push.log.gz",
+      "compression": "gzip",
+      "raw_bytes": 167,
+      "raw_sha256": "ce5074e41e3392c951520f4fea8e6b38f71963ef9e04af9778e9493a33ea61c0",
+      "stored_bytes": 130,
+      "stored_sha256": "13277f8799a1728bc94243929b62f053b7a0a31696ab9e0745f38f7a46cfcbdb"
+    }
+  ]
+}
