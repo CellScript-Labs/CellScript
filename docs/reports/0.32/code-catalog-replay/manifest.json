@@ -1,0 +1,107 @@
+{
+  "schema": "cellscript-032-code-catalog-replay-evidence-v1",
+  "backend_source_commit": "16e6b7215d85d3680704f1b180ddbb382f9c05a1",
+  "backend_git_dirty": false,
+  "owner_source_commit": "04a70f612587255b1aec1c422f004b155cde2b92",
+  "owner_scope": "native-source-ownership-only; no fresh backend claim",
+  "source_commits": {
+    "external": "baae1aad3f1a26c1f0a14a028c1ffddfeb318963",
+    "origin": "8ea6105ecbace5c392eab729ede232bdef801203",
+    "catalog": "16e6b7215d85d3680704f1b180ddbb382f9c05a1",
+    "owner": "04a70f612587255b1aec1c422f004b155cde2b92"
+  },
+  "dev_source_state": "exact staged source files later G-signed; not a clean-HEAD dev claim",
+  "ci": "deferred until complete implementation queue",
+  "production_admitted": false,
+  "public_deployment_admitted": false,
+  "files": [
+    {
+      "name": "external-staged-dev.log.gz",
+      "original_path": "/Users/arthur/.codex/worktrees/fixed-result-contract/CellScript/.cap/logs/1791480120-28254.log",
+      "raw_bytes": 95916,
+      "raw_sha256": "c60dcf76fb66dd4d2ae3e3e1fae6ab849dc0e82926e6a4714a73e4419501006f",
+      "stored_bytes": 16037,
+      "stored_sha256": "7b083450a67f5929b440566e3fda8ad19a8196eeaf7839364898df4fbf10260d"
+    },
+    {
+      "name": "origin-staged-dev.log.gz",
+      "original_path": "/Users/arthur/.codex/worktrees/fixed-result-contract/CellScript/.cap/logs/1791482265-4721.log",
+      "raw_bytes": 96294,
+      "raw_sha256": "cad079ab8b303a5a27c133fef54cf774b15bc2672ad594eaea1f98563802ae82",
+      "stored_bytes": 16078,
+      "stored_sha256": "c8a0a27bf3f1499dbb7164121995ef6eb517d349663851c9bffed29d4244edc1"
+    },
+    {
+      "name": "catalog-staged-dev.log.gz",
+      "original_path": "/Users/arthur/.codex/worktrees/fixed-result-contract/CellScript/.cap/logs/1791483288-27803.log",
+      "raw_bytes": 93159,
+      "raw_sha256": "a32abe55b295c69193372be0a8c31c75133f96c6115d1f53da46aa7a4f316553",
+      "stored_bytes": 16097,
+      "stored_sha256": "8385a63ac5ce334b9ca1c5268dce408a224792cc75ed2bdbb7f41565122f04b8"
+    },
+    {
+      "name": "clean-backend.log.gz",
+      "original_path": "/Users/arthur/RustroverProjects/CellScript/.cap/logs/1791484072-47744.log",
+      "raw_bytes": 227834,
+      "raw_sha256": "ec23d1c536212d1e50068eda7e98ed739e30c3f37e9c92b42c43c5f60160b28f",
+      "stored_bytes": 44428,
+      "stored_sha256": "650c83a4a0bccbe49edee28a8af443de6c7b8155af466fb126f1d24b91cad5c1"
+    },
+    {
+      "name": "strict-backend-full.json.gz",
+      "original_path": "/Users/arthur/RustroverProjects/CellScript/target/cellscript-strict-backend-audit/strict-backend-audit-full-20261009-024554.json",
+      "raw_bytes": 157161,
+      "raw_sha256": "4ffda355b0326fd5934b1934555977592a5c8131ea9ca628379a0dfdc487d0f4",
+      "stored_bytes": 5372,
+      "stored_sha256": "34100413dc6ff224a970bee7e7220d9328a0f95f193315cc91b101c1cc9b0a32"
+    },
+    {
+      "name": "ckb-acceptance.json.gz",
+      "original_path": "/Users/arthur/RustroverProjects/CellScript/target/ckb-cellscript-acceptance/1791485365-production-86000/ckb-cellscript-acceptance-report.json",
+      "raw_bytes": 750726,
+      "raw_sha256": "89b316a3998c4518787e0f132b1d6d362f3db596de8bc0986fb5e36df5426641",
+      "stored_bytes": 63155,
+      "stored_sha256": "2bafcd245eedd63956310b61b0b6f184fef75374e5c9852d332d91b1f37021d2"
+    },
+    {
+      "name": "counter-node.json.gz",
+      "original_path": "/Users/arthur/RustroverProjects/CellScript/target/counter-node/1791485669-19925/evidence.json",
+      "raw_bytes": 24226,
+      "raw_sha256": "b2b61be643901c62f2fc1eae194160d29975bd06cc5b52e4f3b893f276f99fac",
+      "stored_bytes": 5238,
+      "stored_sha256": "aad198a8ce3bdc3d4cae879763a2dd042efe5b5ded2dd1782463fb8218f5f69b"
+    },
+    {
+      "name": "ccc-migration.json.gz",
+      "original_path": "/Users/arthur/RustroverProjects/CellScript/target/counter-node/1791485669-19925/ccc-migration/ccc-migration-report.json",
+      "raw_bytes": 1382,
+      "raw_sha256": "16c47cfa337397d23d681130d42028b2618672eb297d19dd5317b8bc73f74d91",
+      "stored_bytes": 569,
+      "stored_sha256": "19efe70f447d03d022c07b359ed0772a9342070e0feb5b0c1d25a615f5313d78"
+    },
+    {
+      "name": "catalog-public-push.log.gz",
+      "original_path": "/Users/arthur/RustroverProjects/CellScript/.cap/logs/1791485889-23519.log",
+      "raw_bytes": 152,
+      "raw_sha256": "f6cf5f9de41eafabe42e514f3bf2f2b7562b880ec169330abd40c256cf565fa0",
+      "stored_bytes": 141,
+      "stored_sha256": "e0def7aba3b5f725e3d7d5c802a3b5e45b35d2c59bb1a22e53a9422714c3f404"
+    },
+    {
+      "name": "owner-staged-dev.log.gz",
+      "original_path": "/Users/arthur/.codex/worktrees/fixed-result-contract/CellScript/.cap/logs/1791485360-85467.log",
+      "raw_bytes": 93625,
+      "raw_sha256": "c9d208f4dcfdfd74ef6355cbab3f5796a3f0c9e8c95bb67a7d902d51005c9a78",
+      "stored_bytes": 16211,
+      "stored_sha256": "dba1f42fefb410ded259d8dae47e632f7f67212eda8e2bac43ce0b1952a7c35f"
+    },
+    {
+      "name": "owner-public-push.log.gz",
+      "original_path": "/Users/arthur/RustroverProjects/CellScript/.cap/logs/1791486319-35071.log",
+      "raw_bytes": 152,
+      "raw_sha256": "4f18783e7b1a00a6f3d19fd4bfea5f12bfdd4f7e3f1266bdacc34484b09d1743",
+      "stored_bytes": 142,
+      "stored_sha256": "ec9039feaf4c16f7c730c6f49dd2fbdae33f64ee7c49b4dd2e430b56f2bccb47"
+    }
+  ]
+}

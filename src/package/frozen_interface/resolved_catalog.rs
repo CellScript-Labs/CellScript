@@ -1,7 +1,7 @@
 //! Native resolver ownership for the defining baseline source snapshot.
 //! No raw owner label, exported context or same-width nominal can mint this
 //! value. Source-level generic handles and policy authorization remain separate.
-use super::{checker_error, invalid, FrozenCodeCatalog, FrozenPackageModule, Package, Source};
+use super::{checker_error, invalid, Context, FrozenCodeCatalog, FrozenPackageModule, Package, Source};
 use crate::error::Result;
 use cellscript_artifact_checker::{canonical_bytes, canonical_hash};
 use serde::Serialize;
@@ -16,7 +16,7 @@ pub struct ResolvedCodeCatalog {
     identity: String,
 }
 #[derive(Debug, Serialize)]
-struct Owner {
+pub(super) struct Owner {
     schema: &'static str,
     defining_package: String,
     defining_module: String,
@@ -96,16 +96,23 @@ pub fn resolve_code_catalog_source(consumer: FrozenPackageModule, catalog: Froze
         preflight(candidate.raw_transaction())?;
         preflight(candidate.selected_script())?;
     }
+    let owner = checked_source_owner(&consumer.context, &catalog)?;
+    let owner_id = canonical_hash("cellscript-resolver-interface-source-owner-id-v1", &owner).map_err(checker_error)?;
+    let mut checked = ResolvedCodeCatalog { consumer, catalog, owner, owner_id, identity: String::new() };
+    checked.identity = canonical_hash("cellscript-resolver-code-catalog-id-v1", &checked.binding()).map_err(checker_error)?;
+    Ok(checked)
+}
+
+pub(super) fn checked_source_owner(context: &Context, catalog: &FrozenCodeCatalog) -> Result<Owner> {
     let required = catalog.required();
-    if consumer.context.chain_id != required.context.chain_id || consumer.context.network_genesis != required.context.network_genesis {
+    if context.chain_id != required.context.chain_id || context.network_genesis != required.context.network_genesis {
         return Err(invalid("resolved code catalog has conflicting pinned chain identities"));
     }
     let module = &required.context.entry_module;
     let baseline = required.context.modules.get(module).ok_or_else(|| invalid("defining baseline module is absent"))?;
-    let selected =
-        consumer.context.modules.get(module).ok_or_else(|| invalid("consumer did not resolve the defining baseline module"))?;
+    let selected = context.modules.get(module).ok_or_else(|| invalid("consumer did not resolve the defining baseline module"))?;
     let baseline_package = &required.context.packages[&baseline.package];
-    let selected_package = &consumer.context.packages[&selected.package];
+    let selected_package = &context.packages[&selected.package];
     if !matches!(baseline_package.source, Source::RootSnapshot) || !same_snapshot(baseline_package, selected_package) {
         return Err(invalid("resolved defining package differs from the root-compiled baseline snapshot"));
     }
@@ -114,11 +121,8 @@ pub fn resolve_code_catalog_source(consumer: FrozenPackageModule, catalog: Froze
         if identity == &baseline.package {
             continue;
         }
-        let selected = consumer
-            .context
-            .packages
-            .get(identity)
-            .ok_or_else(|| invalid("consumer selected another transitive source origin or snapshot"))?;
+        let selected =
+            context.packages.get(identity).ok_or_else(|| invalid("consumer selected another transitive source origin or snapshot"))?;
         if !same_snapshot(package, selected) {
             return Err(invalid("consumer selected another transitive source snapshot"));
         }
@@ -127,7 +131,7 @@ pub fn resolve_code_catalog_source(consumer: FrozenPackageModule, catalog: Froze
         owners.insert(identity.clone(), identity.clone());
     }
     for (name, baseline_module) in &required.context.modules {
-        let selected_module = consumer.context.modules.get(name).ok_or_else(|| invalid("consumer lacks a baseline source module"))?;
+        let selected_module = context.modules.get(name).ok_or_else(|| invalid("consumer lacks a baseline source module"))?;
         if owners.get(&baseline_module.package) != Some(&selected_module.package)
             || baseline_module.relative_path != selected_module.relative_path
             || baseline_module.source_hash != selected_module.source_hash
@@ -137,7 +141,7 @@ pub fn resolve_code_catalog_source(consumer: FrozenPackageModule, catalog: Froze
         }
     }
     // No extra module may silently enter the same defining package snapshot.
-    for (name, selected_module) in &consumer.context.modules {
+    for (name, selected_module) in &context.modules {
         if selected_module.package == selected.package && !required.context.modules.contains_key(name) {
             return Err(invalid("consumer defining snapshot has an additional baseline module"));
         }
@@ -149,8 +153,5 @@ pub fn resolve_code_catalog_source(consumer: FrozenPackageModule, catalog: Froze
         required_module_contract: required.projection().identity().into(),
         source_closure_packages: owners.values().cloned().collect::<std::collections::BTreeSet<_>>().into_iter().collect(),
     };
-    let owner_id = canonical_hash("cellscript-resolver-interface-source-owner-id-v1", &owner).map_err(checker_error)?;
-    let mut checked = ResolvedCodeCatalog { consumer, catalog, owner, owner_id, identity: String::new() };
-    checked.identity = canonical_hash("cellscript-resolver-code-catalog-id-v1", &checked.binding()).map_err(checker_error)?;
-    Ok(checked)
+    Ok(owner)
 }

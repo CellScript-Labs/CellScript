@@ -748,3 +748,131 @@ fn resolved_code_catalog_counts_the_consumer_before_any_ownership_traversal() {
     let error = resolve_code_catalog_source(consumer, catalog).unwrap_err();
     assert!(error.message.contains("shared 16 MiB"), "{error:?}");
 }
+
+#[test]
+fn parsed_source_closure_matches_native_compilation_and_detects_repinning() {
+    use cellscript::package::frozen_interface::freeze_package_sources;
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    package(root, "client", SOURCE, "");
+    lock(root);
+    let pinned = std::fs::read(root.join("Cell.lock")).unwrap();
+    let parsed = freeze_package_sources(Utf8Path::from_path(root).unwrap(), "dev").unwrap();
+    for opt in 0..=3 {
+        let compiled = compile(root, opt);
+        assert_eq!(parsed.context_identity(), compiled.context_identity());
+        assert_eq!(parsed.context_bytes().unwrap(), compiled.context_bytes().unwrap());
+        parsed.check_unchanged().unwrap();
+        assert_eq!(std::fs::read(root.join("Cell.lock")).unwrap(), pinned);
+    }
+    std::fs::write(root.join("src/main.cell"), SOURCE.replace("value.amount > 0", "value.amount > 7")).unwrap();
+    assert!(parsed.check_unchanged().is_err());
+    lock(root);
+    let error = parsed.check_unchanged().unwrap_err();
+    assert!(error.message.contains("frozen source closure changed"));
+    let fresh = freeze_package_sources(Utf8Path::from_path(root).unwrap(), "dev").unwrap();
+    assert_ne!(parsed.context_identity(), fresh.context_identity());
+}
+
+#[test]
+fn source_catalog_binds_defining_owner_before_consumer_typechecking() {
+    use cellscript::package::frozen_interface::{freeze_package_sources, resolve_code_catalog_source, resolve_source_catalog};
+    let directory = tempfile::tempdir().unwrap();
+    let library = directory.path().join("library");
+    let consumer = directory.path().join("consumer");
+    owned_code_package(&library, "library");
+    consuming_package(&consumer, "library", "../library", &["left", "right"]);
+    let compiled = resolve_code_catalog_source(compile(&consumer, 0), one_code_catalog(&library, 0)).unwrap();
+    let root = Utf8Path::from_path(&consumer).unwrap();
+    let parsed = resolve_source_catalog(freeze_package_sources(root, "dev").unwrap(), one_code_catalog(&library, 0)).unwrap();
+    assert_eq!(parsed.source_owner_identity(), compiled.source_owner_identity());
+    assert_eq!(parsed.source_owner_bytes().unwrap(), compiled.source_owner_bytes().unwrap());
+    assert_eq!(parsed.sources().context_identity(), compiled.consumer().context_identity());
+    assert_ne!(parsed.identity(), compiled.identity());
+    let record: Value = serde_json::from_slice(&parsed.canonical_bytes().unwrap()).unwrap();
+    assert_eq!(record["schema"], "cellscript-resolver-source-catalog-v1");
+    assert_eq!(record["defining_owner"], parsed.source_owner_identity());
+    assert_eq!(record["code_catalog"], parsed.catalog().identity());
+    parsed.check_unchanged_sources().unwrap();
+    // Parsed source ownership must be available before unknown consumer types
+    // are resolved, and cannot itself cause those semantic types to be admitted.
+    let path = consumer.join("src/main.cell");
+    let source =
+        std::fs::read_to_string(&path).unwrap().replace("input token: Value", "input token: Value, witness deferred: FutureHandle");
+    std::fs::write(&path, source).unwrap();
+    lock(&consumer);
+    assert!(parsed.check_unchanged_sources().is_err());
+    let untyped = resolve_source_catalog(freeze_package_sources(root, "dev").unwrap(), one_code_catalog(&library, 0)).unwrap();
+    assert_eq!(untyped.source_owner_identity(), compiled.source_owner_identity());
+    let error = compile_module(root, "dev", CompileOptions::default(), EntrySelection::Action("verify".into())).unwrap_err();
+    assert!(
+        error.message.contains("FutureHandle") || error.related.iter().any(|diagnostic| diagnostic.message.contains("FutureHandle")),
+        "{error:?}"
+    );
+    untyped.check_unchanged_sources().unwrap();
+}
+
+#[test]
+fn source_catalog_rechecks_actual_files_before_ownership_binding() {
+    use cellscript::package::frozen_interface::{freeze_package_sources, resolve_source_catalog};
+    let directory = tempfile::tempdir().unwrap();
+    let library = directory.path().join("library");
+    let consumer = directory.path().join("consumer");
+    owned_code_package(&library, "library");
+    consuming_package(&consumer, "library", "../library", &["library"]);
+    let root = Utf8Path::from_path(&consumer).unwrap();
+    let sources = freeze_package_sources(root, "dev").unwrap();
+    let catalog = one_code_catalog(&library, 0);
+    std::fs::write(consumer.join("src/main.cell"), "module replaced\npublic action verify() { require true }\n").unwrap();
+    lock(&consumer);
+    let error = resolve_source_catalog(sources, catalog).unwrap_err();
+    assert!(error.message.contains("frozen source closure changed"));
+    let fresh = freeze_package_sources(root, "dev").unwrap();
+    assert!(resolve_source_catalog(fresh, one_code_catalog(&library, 0)).is_ok());
+    // Only source ownership is certified. A module need not execute a peer to
+    // have that actual dependency in its locked closure.
+}
+
+#[test]
+fn parsed_source_closure_rejects_unlocked_unpinned_large_and_malformed_inputs() {
+    use cellscript::package::frozen_interface::freeze_package_sources;
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    package(root, "client", SOURCE, "");
+    let path = Utf8Path::from_path(root).unwrap();
+    assert!(freeze_package_sources(path, "dev").is_err());
+    assert!(!root.join("Cell.lock").exists());
+    lock(root);
+    assert!(freeze_package_sources(path, "absent").is_err());
+    let pinned = std::fs::read(root.join("Cell.lock")).unwrap();
+    std::fs::write(root.join("src/main.cell"), "module client\npublic action bad(\n").unwrap();
+    // Explicit lock hashes the intentionally malformed source; source capture
+    // must then reject parsing rather than accepting a producer context label.
+    lock(root);
+    assert!(freeze_package_sources(path, "dev").is_err());
+    std::fs::write(root.join("Cell.lock"), pinned).unwrap();
+    std::fs::write(root.join("src/main.cell"), vec![b' '; 4 * 1024 * 1024 + 1]).unwrap();
+    let error = freeze_package_sources(path, "dev").unwrap_err();
+    assert!(error.message.contains("4 MiB/file"), "{error:?}");
+}
+
+#[test]
+fn parsed_source_closure_rejects_even_identical_planned_lock_overrides() {
+    use cellscript::package::frozen_interface::freeze_package_sources;
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    package(root, "client", SOURCE, "");
+    lock(root);
+    let path = Utf8Path::from_path(root).unwrap();
+    let parsed = freeze_package_sources(path, "dev").unwrap();
+    let pinned: cellscript::package::Lockfile = toml::from_str(&std::fs::read_to_string(root.join("Cell.lock")).unwrap()).unwrap();
+    cellscript::package::with_lockfile_override(root, pinned, || {
+        let error = freeze_package_sources(path, "dev").unwrap_err();
+        assert!(error.message.contains("planned lockfile override"));
+        let error = parsed.check_unchanged().unwrap_err();
+        assert!(error.message.contains("planned lockfile override"));
+        Ok(())
+    })
+    .unwrap();
+    parsed.check_unchanged().unwrap();
+}

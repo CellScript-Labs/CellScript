@@ -1136,3 +1136,56 @@ Keep root tracked files frozen until that run completes, verify its actual
 source commit and clean state, then push that tested commit before advancing
 root to any later worktree commit. Full CI remains deferred until the complete
 implementation queue is ready.
+
+## Clean catalog publication and pre-typing source capture
+
+Clean root full backend/CCC passed in `.cap/logs/1791484072-47744.log`
+(227,807 raw bytes), binding G-signed `16e6b721`. Strict full audit
+`target/cellscript-strict-backend-audit/strict-backend-audit-full-20261009-024554.json`
+passes. CKB acceptance
+`target/ckb-cellscript-acceptance/1791485365-production-86000/ckb-cellscript-acceptance-report.json`
+and Counter node `target/counter-node/1791485669-19925/evidence.json` pass, both
+with this exact source commit and `git_dirty = false`. Their tracked-source
+SHA-256 is `0xfd0ce2e706921c6af739a0c830bf10f76cf8e210f3d96f3423d9a23405b20927`.
+The CCC migration report contains three actual fee-signed/confirmed rows:
+old-key update 111,647,830 cycles / 1,237 bytes; old-key authorized migration
+111,915,349 / 1,632; new-key successor update 111,779,027 / 1,237.
+This is existing private local-network replay, not general #45 or #46 evidence.
+
+`16e6b721` was pushed to public `0.32` in
+`.cap/logs/1791485889-23519.log`. The later native source-owner slice passed dev
+in `.cap/logs/1791485360-85467.log` (93,598 raw bytes), was G-signed as
+`04a70f612587255b1aec1c422f004b155cde2b92`, and was fast-forwarded/pushed in
+`.cap/logs/1791486319-35071.log`. The remote head was independently verified as
+this exact commit. This ownership-only delta introduces no machine ABI/emitter
+change; no later clean full-backend claim was made. Eleven normalized raw replay
+files and their sizes/SHA-256 are archived under
+`docs/reports/0.32/code-catalog-replay/`, retaining the actual earlier provenance.
+
+The next native `FrozenPackageSources` / `ResolvedSourceCatalog` path captures
+real parsed/pinned source ownership before consumer type checking. A new type
+context cannot require an already compiled consumer that itself depends on that
+context. Source capture reuses existing 4 MiB/file, 16 MiB/source, 32-package,
+256-module and offline lock/environment rules. Binding rereads unchanged actual
+sources and reuses the compiled-owner matcher, extracted from G-signed
+`04a70f61` without rewriting its ownership comparisons. Both construction and
+recheck reject planned lock overrides, even for an identical graph. The source
+record stores hashes/context, not all file contents or a consumer ELF.
+
+The five existing owner tests pass after extraction in
+`.cap/logs/1791486421-37404.log`. Eleven source/ownership tests pass in
+`.cap/logs/1791486828-47390.log` (10.64 seconds): O0–O3 context parity, lock byte
+preservation, changed/repinned sources, unchanged-owner binding before typing,
+source mutation before binding, missing/unpinned/malformed/oversized input and
+planned override isolation. An unknown FutureHandle is source-bound but still
+rejected by semantic compilation; its diagnostic is retained in the related
+diagnostic list. No source handle syntax, consumer typing or execution is admitted.
+Strict clippy and full dev remain pending for this slice. Full CI stays deferred;
+whole H1/H2, #29 and #44–#46 remain incomplete and independent review unassigned.
+
+Final strict compiler/checker all-target clippy passes in
+`.cap/logs/1791486929-50100.log`. All eleven replay archive files were rechecked
+against their recorded raw/stored sizes and SHA-256. The exact staged parsed-source
+slice now freezes for dev before signing/publication. No emitter, machine ABI,
+dependency, historical wire, compiler/toolchain version or budget changed; no
+fresh full-backend claim is attached to this native-only delta.

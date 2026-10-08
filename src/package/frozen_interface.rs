@@ -22,6 +22,8 @@ mod code_catalog;
 pub use code_catalog::{freeze_code_catalog, CodeCandidateInput, FrozenCodeCandidate, FrozenCodeCatalog};
 mod resolved_catalog;
 pub use resolved_catalog::{resolve_code_catalog_source, ResolvedCodeCatalog};
+mod sources;
+pub use sources::{freeze_package_sources, resolve_source_catalog, FrozenPackageSources, ResolvedSourceCatalog};
 
 #[derive(Debug, Clone)]
 pub enum EntrySelection {

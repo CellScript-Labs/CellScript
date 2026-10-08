@@ -56,3 +56,7 @@ rejects. An already checked synthetic catalog just below 16 MiB exceeds the
 combined ceiling after adding the consumer, and rejects before looking up its
 deliberately absent defining module. Synthetic creation transactions remain
 host byte oracles, not consensus or authenticated deployment evidence.
+
+The [parsed-source binding](FROZEN_PACKAGE_SOURCES.md) reuses this owner matcher
+before consumer type checking. It has a distinct binding schema and does not
+claim the consumer has a checked ELF or that unknown source types are admitted.

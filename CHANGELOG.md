@@ -2,6 +2,12 @@
 
 ## Unreleased — 0.32
 
+Capture parsed, lock-pinned native package sources before consumer type checking
+and reuse the defining-owner matcher against actual checked code catalogs.
+Recheck unchanged real sources and reject upgrade-planning lock overrides;
+unknown consumer types remain rejected. This does not introduce generic handles
+or certify a consumer ELF; see `docs/FROZEN_PACKAGE_SOURCES.md`.
+
 Bind the finite frozen code catalog's baseline to its actual defining owner in
 a consumer's locked source closure. Dependency aliases preserve owner identity;
 different owners, changed snapshots/versions and transitive origins reject.
