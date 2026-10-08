@@ -1,0 +1,108 @@
+{
+  "schema": "cellscript-032-pool-snapshot-replay-evidence-v1",
+  "source_commit": "23822919ac1d4f8a710df04d536a48717ef8fed9",
+  "source_dirty": false,
+  "dev_status": "passed",
+  "backend_status": "passed",
+  "ckb_revision": "f7fa4436737756f97a24e254f22c13a36316ecea",
+  "complete_ci_for_queue": "deferred-until-all-implementation-complete",
+  "release_admitted": false,
+  "production_setup_claimed": false,
+  "public_deployment_claimed": false,
+  "node_scope": "disposable pinned local chain; normal pool admission, actual fee signatures, confirmed predecessor continuity",
+  "migration_rows": [
+    {
+      "case": "old-key-update",
+      "confirmed": true,
+      "cycles": 111709244,
+      "fee_signature": true,
+      "selected_version": 0,
+      "transaction_bytes": 1237,
+      "transaction_hash": "0x2c1cc6fb00cafd26ae585dd8a299c8283bc401988143ed762d761f664e1ff999"
+    },
+    {
+      "case": "old-key-authorized-migration",
+      "confirmed": true,
+      "cycles": 111880253,
+      "fee_signature": true,
+      "selected_version": 0,
+      "transaction_bytes": 1632,
+      "transaction_hash": "0xc1b43b114666b39ca63b10d10aaac7888777fb58f5d227e9f56c209a14efa590"
+    },
+    {
+      "case": "new-key-successor-update",
+      "confirmed": true,
+      "cycles": 111878191,
+      "fee_signature": true,
+      "selected_version": 1,
+      "transaction_bytes": 1237,
+      "transaction_hash": "0x845cb69e89d139fde7fc7d997a197414ddf0b1053bfdf7e58f8f20a910dadac8"
+    }
+  ],
+  "files": [
+    {
+      "file": "clean-dev.log.gz",
+      "compression": "gzip",
+      "raw_bytes": 87011,
+      "raw_sha256": "99ade1ba677682b0de5474984753260146099f465beb8409304b6db3fdb1af40",
+      "stored_bytes": 15118,
+      "stored_sha256": "1d8b81741861e9fdaffe63925b898d96c51ebc54abdaf3dfaf6c673ff642beec"
+    },
+    {
+      "file": "clean-backend.log.gz",
+      "compression": "gzip",
+      "raw_bytes": 220787,
+      "raw_sha256": "8f470b0b7924ad205cd866d37ae65fb15ed3ba1adc80e5102a472b16d23e3676",
+      "stored_bytes": 43314,
+      "stored_sha256": "f78b4a872ae36b62d89dadb68c2d89b74f1192f8df9f6b0d72956345bba95c5e"
+    },
+    {
+      "file": "strict-backend.json.gz",
+      "compression": "gzip",
+      "raw_bytes": 157276,
+      "raw_sha256": "ab70264abc427551cc85baa725747ff4a9e24d1c5bf42f7565843a622c2166cd",
+      "stored_bytes": 5401,
+      "stored_sha256": "d78062be4120231e2fbdfb3bdf9ea8d6729c6d6ef1db3664881749a4dec8c539"
+    },
+    {
+      "file": "clean-ckb-acceptance.json.gz",
+      "compression": "gzip",
+      "raw_bytes": 750623,
+      "raw_sha256": "42a2d9f5bfd313d854ad0d296e56e4da2eb0b57e48ac15672f86b871495696c4",
+      "stored_bytes": 63111,
+      "stored_sha256": "63268469a41e8cae9114d76a3808bfbae2180aa3e1fc2b7b53844000182397d1"
+    },
+    {
+      "file": "counter-node.json.gz",
+      "compression": "gzip",
+      "raw_bytes": 24124,
+      "raw_sha256": "e44bc804bae216c5745ec600964113ec4769d169b29abdc0cbb166112fa0af80",
+      "stored_bytes": 5235,
+      "stored_sha256": "196d1b6ec37ce51d7891c80698dec48eb05e850a7fa10b3a57ceaf59dbc7c457"
+    },
+    {
+      "file": "ccc-migration.json.gz",
+      "compression": "gzip",
+      "raw_bytes": 1382,
+      "raw_sha256": "96510b679b55b51ecd295f97f6d9c26e4393815078ec878109412fc51fb85eb4",
+      "stored_bytes": 569,
+      "stored_sha256": "f5fa2ade2f377dc447cff4ca53c88edc2f710501da3cd9efd3d884906e9f0a26"
+    },
+    {
+      "file": "failed-backend.log.gz",
+      "compression": "gzip",
+      "raw_bytes": 218667,
+      "raw_sha256": "64b1be1c06e62fad1de0bc2ddfd096caf84a603c5bf6417c2d6a9c11d7a44007",
+      "stored_bytes": 42816,
+      "stored_sha256": "fc2cec51b4fca80563c2c01af81011b5e3260f89119109a3ee94a97f1e5dca2c"
+    },
+    {
+      "file": "failed-funding-inspection.log.gz",
+      "compression": "gzip",
+      "raw_bytes": 193,
+      "raw_sha256": "f540f30bc37d73564f0e8ae4425cf4e9441fb9e5582de3685c502a8738bdb70a",
+      "stored_bytes": 147,
+      "stored_sha256": "a8ccd35901e142b2101639bcc7918424bd19ceb9487bab18729180a27b7daaaa"
+    }
+  ]
+}

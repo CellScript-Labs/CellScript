@@ -1,7 +1,7 @@
 #![cfg(all(feature = "cli", not(feature = "wasm")))]
 mod common;
 use camino::Utf8Path;
-use cellscript::package::frozen_interface::{compile_module, EntrySelection, FrozenPackageModule};
+use cellscript::package::frozen_interface::{compile_module, freeze_module_catalog, EntrySelection, FrozenPackageModule};
 use cellscript::CompileOptions;
 use serde_json::Value;
 use std::path::Path;
@@ -27,6 +27,67 @@ fn compile(root: &Path, opt_level: u8) -> FrozenPackageModule {
 }
 fn context(value: &FrozenPackageModule) -> Value {
     serde_json::from_slice(&value.context_bytes().unwrap()).unwrap()
+}
+
+#[test]
+fn native_catalog_owns_actual_source_snapshots_and_checked_bundles() {
+    let directory = tempfile::tempdir().unwrap();
+    let original = directory.path().join("original");
+    let candidate = directory.path().join("candidate");
+    package(&original, "client", SOURCE, "");
+    package(&candidate, "client", &format!("{SOURCE}public struct Extra has copy, drop, store {{ value: u8 }}\n"), "");
+    lock(&original);
+    lock(&candidate);
+    for opt in 0..=3 {
+        std::fs::write(original.join("src/main.cell"), SOURCE).unwrap();
+        let required = compile(&original, opt);
+        let required_context = required.context_identity().to_owned();
+        let candidates = vec![compile(&original, opt), compile(&candidate, opt)];
+        let source_contexts = candidates.iter().map(|candidate| candidate.context_identity().to_owned()).collect::<Vec<_>>();
+        // A snapshot remains exact evidence of its stored sources, not a promise
+        // about whichever bytes the path contains after compilation.
+        std::fs::write(original.join("src/main.cell"), "module changed\naction deny() { verification require false }\n").unwrap();
+        let catalog = freeze_module_catalog(required, candidates, &cellscript_artifact_checker::CheckerBudgets::default()).unwrap();
+        assert_eq!(catalog.required().context_identity(), required_context);
+        let record: Value = serde_json::from_slice(&catalog.canonical_bytes().unwrap()).unwrap();
+        assert_eq!(record["required_source_context"], required_context);
+        assert_eq!(record["candidate_source_contexts"], serde_json::to_value(source_contexts).unwrap());
+        assert_eq!(record["checked_catalog"], catalog.evidence().identity());
+        let bundles = catalog.candidates().iter().map(FrozenPackageModule::bundle).collect::<Vec<_>>();
+        catalog.evidence().check_unchanged_inputs(catalog.required().bundle(), &bundles).unwrap();
+        assert!(!catalog.required().projection().artifact_report().semantic_equivalence_claimed);
+    }
+}
+
+#[test]
+fn native_catalog_rejects_other_pinned_networks_missing_candidates_and_narrow_budgets() {
+    let directory = tempfile::tempdir().unwrap();
+    let original = directory.path().join("original");
+    package(&original, "client", SOURCE, "");
+    lock(&original);
+    for (chain, genesis) in [("other-chain", "11"), ("test-chain", "22")] {
+        let candidate = directory.path().join(format!("{chain}-{genesis}"));
+        package(&candidate, "client", SOURCE, "");
+        let manifest = candidate.join("Cell.toml");
+        let text =
+            std::fs::read_to_string(&manifest).unwrap().replace("test-chain", chain).replace(&"11".repeat(32), &genesis.repeat(32));
+        std::fs::write(manifest, text).unwrap();
+        lock(&candidate);
+        let error = freeze_module_catalog(
+            compile(&original, 0),
+            vec![compile(&candidate, 0)],
+            &cellscript_artifact_checker::CheckerBudgets::default(),
+        )
+        .unwrap_err();
+        assert!(error.message.contains("conflicting pinned chain identities"));
+    }
+    assert!(freeze_module_catalog(compile(&original, 0), Vec::new(), &cellscript_artifact_checker::CheckerBudgets::default()).is_err());
+    assert!(freeze_module_catalog(
+        compile(&original, 0),
+        vec![compile(&original, 0)],
+        &cellscript_artifact_checker::CheckerBudgets { instructions: 1, ..Default::default() }
+    )
+    .is_err());
 }
 
 #[test]

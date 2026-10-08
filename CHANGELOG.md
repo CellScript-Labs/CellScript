@@ -2,6 +2,14 @@
 
 ## Unreleased — 0.32
 
+Check required and all 1–32 candidate module bundles under a shared 16 MiB input
+ceiling before parsing; reject incompatible or invalid unselected candidates and
+freeze every exact four-file tuple. This is API coherence evidence, separate from
+complete codec, deployment receipt and compatible-open policy admission. Native
+catalogs own actual frozen source contexts and require matching pinned chain
+identities; declaration comparisons preserve semantic order while normalizing
+declaration identity order.
+
 Add optional independent machine evidence for bounded fixed policy parameter
 decoding, with exact length/magic, byte offsets, ABI registers and
 signed extension checks. Unsupported profiles reject without weakening ordinary

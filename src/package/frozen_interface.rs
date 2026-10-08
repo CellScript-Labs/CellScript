@@ -16,6 +16,9 @@ const MAX_INPUTS: usize = 16 * 1024 * 1024;
 const MAX_PACKAGES: usize = 32;
 const MAX_MODULES: usize = 256;
 
+mod catalog;
+pub use catalog::{freeze_module_catalog, FrozenModuleCatalog};
+
 #[derive(Debug, Clone)]
 pub enum EntrySelection {
     Default,
@@ -165,10 +168,17 @@ pub fn compile_module(
             scope.as_ref(),
         )?;
         let typed = &compiled.metadata.typed_semantics;
-        if typed.generic_declarations
-            != crate::typed_semantics::generic_catalog_for_context(&project.entry().ast, Some(&project.resolver))
-            || typed.nominal_declarations
-                != crate::typed_semantics::nominal_catalog(&project.entry().ast, Some(&project.resolver), &ir, typed)
+        // Wire records sort declaration identities, while source declarations
+        // retain source order. Compare the same canonical representation;
+        // field, parameter and binder order remain significant.
+        let mut declarations = cellscript_artifact_checker::TypedSemanticRecord {
+            generic_declarations: crate::typed_semantics::generic_catalog_for_context(&project.entry().ast, Some(&project.resolver)),
+            nominal_declarations: crate::typed_semantics::nominal_catalog(&project.entry().ast, Some(&project.resolver), &ir, typed),
+            ..Default::default()
+        };
+        declarations.canonicalize();
+        if typed.generic_declarations != declarations.generic_declarations
+            || typed.nominal_declarations != declarations.nominal_declarations
         {
             return Err(invalid("checked declaration owners differ from the frozen package sources"));
         }

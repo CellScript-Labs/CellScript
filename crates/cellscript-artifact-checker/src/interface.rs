@@ -7,11 +7,13 @@ use crate::generic_projection::checked_source_type;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+mod catalog;
 mod generics;
 mod layouts;
 mod nominals;
 mod projection;
 mod source_types;
+pub use catalog::{check_module_catalog, CheckedModuleCatalog, ModuleBundle};
 pub use projection::{project_bundle, CheckedModuleProjection};
 mod universal;
 pub(crate) use source_types::SourceType;

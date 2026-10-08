@@ -721,3 +721,54 @@ Full dev, fresh matching backend and signed commit remain required for this
 slice. Full H1/H2, #29 and #44–#46 remain unfinished. Independent security review
 is still unassigned, and full CI remains deferred until the whole queue is
 implemented.
+
+
+### All-bundle module catalog prerequisite and fresh replay archive
+
+The optional fixed decoder certificate is signed `3fec7445`; full worktree dev
+passed in `.cap/logs/1791464299-74345.log`. Native and checker clippy passed, with
+no emitter, metadata wire or resource ceiling changes. Root adopted the commit
+but it still needs fresh matching backend evidence before its own push.
+
+The complete clean root backend with CCC on `23822919` passed in
+`.cap/logs/1791463561-49750.log`; that commit and all seven pending signed
+commits were pushed to public `0.32`. Fresh source-bound acceptance and actual
+CCC migration evidence, the earlier failed backend and live-funding inspection
+are copied byte-for-byte under `docs/reports/0.32/pool-snapshot-replay/`, with
+normalized gzip storage and raw/stored hashes. This archive binds `23822919`,
+not the later containing archive commit. Full CI remains deferred.
+
+The next worktree prerequisite checks an actual required four-file bundle and
+all 1–32 candidate bundles. Per-file 4 MiB and total 16 MiB preflight happens
+before any parser, including unselected candidates and repeated code bundles.
+All candidates undergo independent module projection and directional checking;
+no partial token escapes on error. Its private checked object separately binds
+exact ELF, metadata, lowering and source-map bytes and rejects substitution,
+reordering, required-bundle changes or count changes. Reused code bytes can back
+distinct Script args; this layer does not classify deployment receipt duplicates.
+
+Four focused catalog tests pass in worktree `.cap/logs/1791465339-26996.log`.
+The exact aggregate limit tests, full dev and matching backend are still pending.
+This is all-bundle API coherence only: complete source/Cell-data codecs,
+package interface ownership, actual deployment/history admission, nominal source
+handles, H2 runtime enforcement, #29 and #44–#46 remain unfinished. Independent
+security review remains required and unassigned.
+
+
+The exact total-byte boundary tests pass in
+`.cap/logs/1791465514-30653.log`; strict compiler/checker clippy passes in
+`.cap/logs/1791465581-32114.log`. The native `freeze_module_catalog` companion
+owns actual frozen source snapshots, checks pinned chain identity agreement and
+binds all source-context identities to the checked catalog. Its two focused
+native tests pass in `.cap/logs/1791466005-40806.log`. Their multi-declaration
+fixture exposed a source-order versus canonical declaration-order comparison
+bug; reconstruction now canonicalizes declaration identities without changing
+field, parameter or binder order. Full updated clippy/dev and matching backend
+remain required. See `docs/CHECKED_MODULE_CATALOG.md` for the exact limits;
+none of this establishes a stable package family or full open admission.
+
+The expanded native snapshot tests cover O0–O3 and pass in
+`.cap/logs/1791466306-47169.log`; updated strict compiler/checker clippy passes
+in `.cap/logs/1791466403-49349.log`. The fresh replay archive's eight files
+were rechecked against all raw/stored sizes and SHA-256 digests. Full dev is
+now the next gate for the exact staged catalog source state.
