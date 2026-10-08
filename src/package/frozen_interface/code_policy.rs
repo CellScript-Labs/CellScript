@@ -1,9 +1,10 @@
 //! Bind a declared finite policy snapshot to every actual private code receipt.
 //! This is host binding evidence, not immutable root authorization or admission.
+use super::source_receipt::{source_package_version, SourcePackageVersion};
 use super::{checker_error, invalid, FrozenCodeCandidate, ResolvedSourceCatalog};
 use crate::error::Result;
 use cellscript_artifact_checker::open_handle_policy::{
-    verify_selection, AuthorizationSet, CodeHashType, HandleClass, Hash, PolicyMembership, ScriptRole,
+    verify_selection, AuthorizationSet, CodeHashType, HandleClass, Hash, MemberStatus, PolicyMembership, ScriptRole, SelectionMode,
 };
 use cellscript_artifact_checker::{canonical_bytes, canonical_hash, hex_encode};
 use serde::Serialize;
@@ -14,6 +15,7 @@ pub struct FrozenCodePolicy {
     policy: AuthorizationSet,
     candidate_indices: Vec<usize>,
     identity: String,
+    source_version_floor: Option<SourcePackageVersion>,
 }
 #[derive(Serialize)]
 struct Record<'a> {
@@ -21,6 +23,12 @@ struct Record<'a> {
     source_catalog: &'a str,
     policy_root: String,
     candidate_indices: &'a [usize],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_version_floor: Option<&'a SourcePackageVersion>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_receipts: Option<Vec<&'a str>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version_rule: Option<&'static str>,
 }
 /// A host selection under this declared snapshot, never an authorized root or
 /// source handle. The actual candidate and complete membership remain private.
@@ -81,10 +89,20 @@ impl FrozenCodePolicy {
     }
     fn record(&self) -> Record<'_> {
         Record {
-            schema: "cellscript-frozen-code-policy-bindings-v1",
+            schema: if self.source_version_floor.is_some() {
+                "cellscript-frozen-code-policy-bindings-v2"
+            } else {
+                "cellscript-frozen-code-policy-bindings-v1"
+            },
             source_catalog: self.sources.identity(),
             policy_root: hex_encode(&self.policy.root()),
             candidate_indices: &self.candidate_indices,
+            source_version_floor: self.source_version_floor.as_ref(),
+            source_receipts: self
+                .source_version_floor
+                .as_ref()
+                .map(|_| self.sources.catalog().candidates().iter().map(|candidate| candidate.source_receipt().identity()).collect()),
+            version_rule: self.source_version_floor.as_ref().map(|_| "source-coordinate-exact-floor-compatible-stable-major-v1"),
         }
     }
 }
@@ -112,6 +130,24 @@ fn hash32(text: &str) -> Result<Hash> {
 /// are supported: Type-hash history needs separate evidence and fails closed.
 /// This neither authorizes the resulting root nor completes H1/H2 admission.
 pub fn freeze_code_policy(sources: ResolvedSourceCatalog, policy: AuthorizationSet) -> Result<FrozenCodePolicy> {
+    freeze_policy(sources, policy, BindingProfile::Finite)
+}
+/// Bind native source receipts and resolver-owned required identity in addition
+/// to the existing finite artifact fields. Compatible selectable versions must
+/// be stable, on the baseline source coordinate/edition and major, and at or
+/// above its SemVer precedence. Exact mode pins the complete source receipt
+/// and also enforces the baseline precedence floor on that selected receipt.
+/// Source versions are manifest facts, not authenticated publisher releases.
+/// This remains host evidence; immutable root authority and H1/H2 are required.
+pub fn freeze_source_code_policy(sources: ResolvedSourceCatalog, policy: AuthorizationSet) -> Result<FrozenCodePolicy> {
+    freeze_policy(sources, policy, BindingProfile::SourceVersions)
+}
+#[derive(Clone, Copy)]
+enum BindingProfile {
+    Finite,
+    SourceVersions,
+}
+fn freeze_policy(sources: ResolvedSourceCatalog, policy: AuthorizationSet, profile: BindingProfile) -> Result<FrozenCodePolicy> {
     let candidates = sources.catalog().candidates();
     if policy.members().len() != candidates.len() {
         return Err(invalid("code policy must bind exactly every checked catalog candidate"));
@@ -127,7 +163,15 @@ pub fn freeze_code_policy(sources: ResolvedSourceCatalog, policy: AuthorizationS
     }
     let target = canonical_hash("cellscript-code-policy-target-id-v1", &runtime.target_profile).map_err(checker_error)?;
     let abi = canonical_hash("cellscript-code-policy-runtime-id-v1", runtime).map_err(checker_error)?;
-    if header.required_interface != hash32(required.projection().identity())?
+    let required_identity = match profile {
+        BindingProfile::Finite => required.projection().identity(),
+        BindingProfile::SourceVersions => sources.source_owner_identity(),
+    };
+    let source_floor = match profile {
+        BindingProfile::Finite => None,
+        BindingProfile::SourceVersions => Some(source_package_version(required)?),
+    };
+    if header.required_interface != hash32(required_identity)?
         || header.network_genesis != hash32(&required.context.network_genesis)?
         || header.target_profile != hash32(&target)?
         || header.runtime_abi != hash32(&abi)?
@@ -138,7 +182,13 @@ pub fn freeze_code_policy(sources: ResolvedSourceCatalog, policy: AuthorizationS
     for member in policy.members() {
         let index = candidates
             .iter()
-            .position(|candidate| hash32(candidate.receipt().identity()).is_ok_and(|identity| identity == member.receipt))
+            .position(|candidate| {
+                let receipt = match profile {
+                    BindingProfile::Finite => candidate.receipt().identity(),
+                    BindingProfile::SourceVersions => candidate.source_receipt().identity(),
+                };
+                hash32(receipt).is_ok_and(|identity| identity == member.receipt)
+            })
             .ok_or_else(|| invalid("code policy member has no actual checked catalog receipt"))?;
         if candidate_indices.contains(&index) {
             return Err(invalid("code policy repeats a checked catalog candidate"));
@@ -158,10 +208,44 @@ pub fn freeze_code_policy(sources: ResolvedSourceCatalog, policy: AuthorizationS
         {
             return Err(invalid("code policy member differs from its actual checked API, artifact, complete Script or deployment"));
         }
+        if let Some((floor, version)) = &source_floor {
+            let actual = candidate.source_receipt();
+            let package = actual.package();
+            if package.name != floor.name || package.namespace != floor.namespace || package.edition != floor.edition {
+                return Err(invalid(
+                    "source code policy candidate differs from the required source coordinate/edition; use a matching baseline",
+                ));
+            }
+            let selectable = member.status == MemberStatus::Active
+                && member.admission_sequence >= header.minimum_admission_sequence
+                && member.admission_sequence <= header.sequence
+                && (header.mode == SelectionMode::Compatible || member.receipt == header.exact_receipt);
+            if selectable && actual.package_version().cmp_precedence(version).is_lt() {
+                return Err(invalid("source code policy rejects a selectable version downgrade; use a receipt at or above the baseline or explicitly pin an older baseline"));
+            }
+            if header.mode == SelectionMode::Compatible
+                && selectable
+                && (!version.pre.is_empty()
+                    || !actual.package_version().pre.is_empty()
+                    || actual.package_version().major != version.major)
+            {
+                return Err(invalid("source code policy rejects a selectable prerelease or major change in compatible mode; pin an exact receipt or use a stable matching major"));
+            }
+        }
         candidate_indices.push(index);
     }
     sources.check_unchanged_sources()?;
-    let mut checked = FrozenCodePolicy { sources, policy, candidate_indices, identity: String::new() };
-    checked.identity = canonical_hash("cellscript-frozen-code-policy-bindings-id-v1", &checked.record()).map_err(checker_error)?;
+    let mut checked = FrozenCodePolicy {
+        sources,
+        policy,
+        candidate_indices,
+        identity: String::new(),
+        source_version_floor: source_floor.map(|(package, _)| package),
+    };
+    let domain = match profile {
+        BindingProfile::Finite => "cellscript-frozen-code-policy-bindings-id-v1",
+        BindingProfile::SourceVersions => "cellscript-frozen-code-policy-bindings-id-v2",
+    };
+    checked.identity = canonical_hash(domain, &checked.record()).map_err(checker_error)?;
     Ok(checked)
 }

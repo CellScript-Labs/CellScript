@@ -1346,3 +1346,81 @@ produced no tracked fixture diff; read-only validation passes in
 `0xcc0bdea0ef4c4825eaf3046ff77d9e8fe5cdddf8aff53cc3891b560ce5405e37`.
 Release readiness stays false and all release requirements stay pending. The
 exact staged host binding/test/docs/archive state now freezes for full dev.
+
+
+## All-member policy publication and source receipt/version binding
+
+The prior exact frozen host-policy diff passed full dev in worktree
+`.cap/logs/1791492108-73842.log` (95,118 command-output bytes; 95,145 raw log
+bytes). Its staged 65,380-byte diff retained SHA-256
+`084e46062ef1c0c99df28e7116aa40a3a6ce4f364f729873791e38707bc2d13d`
+before/after. It was G-signed as
+`f6ef9711ece01738794ff6e7c8288faa63a7fc29`, fast-forwarded into clean root
+and pushed in root `.cap/logs/1791492948-93324.log`. Independent
+`.cap/logs/1791492955-93640.log` confirmed the exact public `0.32` head; both
+checkouts were clean. These three logs are now archived; all twenty-one
+raw/stored lengths and SHA-256 were verified. Clean backend/CCC source remains
+exactly `16e6b721`; no later host delta replaces its provenance.
+
+The next private native source receipt binds each actual candidate source
+context, defining module, manifest coordinate/edition/full SemVer version and
+independently checked finite artifact receipt. Only the actual catalog factory
+constructs it; exported JSON/context labels cannot do so. Native catalog v4
+binds all source receipts and does not reinterpret historical v1–v3 records.
+Coordinate/module text limits apply before cloning/version parsing/hashing.
+
+The separately named `freeze_source_code_policy` binds the resolver-owned
+required owner identity and actual source receipt Member identities. Both exact
+and compatible selectable members enforce baseline SemVer precedence; compatible
+mode also requires stable baseline/candidate versions and the same major. Build
+metadata is committed but does not order precedence. Exact nonselected and
+inactive/below-floor history can remain in the tree with older versions;
+all their coordinates, API/codec and actual byte bindings still check and they
+cannot select. The artifact-only constructor keeps its v1 schema/domain and
+omits all source-profile fields; the new source profile uses native v2.
+
+Manifest versions are captured source facts, not authenticated publisher or
+Registry release/status facts. The wire root now commits those source receipts
+and the actual baseline owner, but remains application-declared and requires
+immutable authorization. No source-level `I`/handles, complete H1/H2, general
+codec, active chain/VM, authenticated Type history or final CellDep/transaction
+proof is supplied. #28/#29/#44–#46 remain unfinished and independent security
+review remains unassigned/unwaived. Full CI stays deferred until the complete
+implementation queue. No emitted ABI/machine, dependency, toolchain, historical
+wire or runtime budget changes in this native-only slice.
+
+
+The initial full 35-test regression in `.cap/logs/1791493758-11682.log`
+passed 33 tests and failed two new assertions. No production rule was weakened:
+the existing wire constructor already rejects admissions above the policy
+sequence; a private candidate snapshot remains historical evidence after its
+physical manifest changes. The corrected tests require the above-sequence wire
+to reject and newly captured candidate/version receipts to reject stale policy
+members, while retained original snapshots preserve their original versions.
+Selection still rechecks the consumer's actual pinned source closure. An initial
+test-only compile typo referenced edition on the runtime contract instead of
+the fixture's actual package edition and was corrected. A complete rerun and
+final clippy/dev are pending; the failed/quiet debugging runs are not passing
+validation evidence.
+
+The authoritative business-corpus refresh in `.cap/logs/1791493961-17112.log`
+produced no final tracked fixture diff. Read-only validation passes in
+`.cap/logs/1791493990-17880.log`, retaining inventory SHA-256
+`0xcc0bdea0ef4c4825eaf3046ff77d9e8fe5cdddf8aff53cc3891b560ce5405e37`.
+Release readiness remains false and all release requirements remain pending.
+
+
+The corrected complete frozen-interface regression passes all 35 tests in
+`.cap/logs/1791494035-18975.log` (230.63 seconds). Actual O0–O3 builds show
+manifest-only version edits leave all four artifact files and finite receipt
+unchanged while source receipt and wire root change. Tests cover both selection
+modes, SemVer build/pre/major/downgrade boundaries, all 32 members, source owner
+versus artifact-only identities, stale recaptured versions, immutable historical
+candidate facts and bounded version text. Artifact-only v1 records continue to
+omit all source-profile fields. Final strict compiler/checker all-target clippy
+passes in `.cap/logs/1791494073-20194.log` (0.40 seconds). The prior failure
+remains a failed run, not validation evidence.
+
+The exact staged native source receipt/version/test/docs/archive state now
+freezes for full dev before G-signing/publication. No fresh clean full backend,
+CCC, full CI, production admission or complete H1/H2 claim is made.

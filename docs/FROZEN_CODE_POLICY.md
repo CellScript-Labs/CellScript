@@ -1,4 +1,4 @@
-# Frozen finite code-policy field bindings
+# Frozen native code-policy field bindings
 
 Native `package::frozen_interface::freeze_code_policy` consumes an actual private
 `ResolvedSourceCatalog` and a separately declared low-level `AuthorizationSet`.
@@ -52,8 +52,9 @@ complete Script, plus the actual source closure. These are the original code
 creation inputs; they are not a final transaction or resolved CellDep proof.
 
 Status, policy/admission sequences and floors are application-declared immutable
-snapshot choices. This layer does not authenticate Registry freshness, package
-version floors/downgrades or deployment history. The expected root must later be
+snapshot choices. The finite artifact-only constructor does not enforce source package version
+floors. Neither constructor authenticates Registry freshness or deployment
+history. The expected root must later be
 bound to committed current-Script code/args or controlled state; a witness cannot
 authorize its own root. This result is not a nominal source handle or stable
 admission token. Active chain/VM context, Type history, complete general receipts,
@@ -68,3 +69,58 @@ including an unselected member. Selection tests cover declared yank/floor/root
 changes; later exact input and real source edits reject. An actual independently
 checked Type-hash native catalog fails closed instead of accepting supplied line
 and history hashes. These are host tests, with no new CKB-VM claim.
+
+## Source receipt and version profile
+
+`freeze_source_code_policy` consumes the same private actual source/catalog and
+wire snapshot through an explicit separate constructor. Its Header required
+interface is the resolver-owned source identity, including the actual baseline
+and selected defining package/dependency closure. Dependency alias spellings do
+not replace that owner. Each Member receipt is the candidate's private
+`CheckedSourceCodeReceipt` identity, so source context, defining module, package
+coordinate/edition/full version and finite artifact receipt enter the wire root.
+All prior API, codec, network, complete Script and creation input checks remain.
+An artifact-only receipt or required module-API identity cannot substitute for
+these source bindings, even under a freshly constructed valid Merkle root.
+
+All members, including unselectable history, must match the baseline source
+name, namespace and edition. A selectable member is Active, between the declared
+minimum admission sequence and policy sequence, and (in exact mode) has the
+exact selected receipt. Both modes require selectable source versions at or
+above the actual baseline's SemVer **precedence**. Build metadata does not affect
+ordering, but its full text remains committed by the source receipt. Compatible
+mode additionally requires a stable baseline and candidate and the same major.
+Exact mode can pin a prerelease or changed major at/above the baseline if all
+independently checked required contracts still hold; it cannot bypass a version
+downgrade. Intentionally selecting an older line requires explicitly pinning an
+older baseline in the consumer's source closure.
+
+Yanked, below-floor, or nonselected exact members may retain an
+older or incompatible-major source version. They remain fully byte/API/source
+checked and cannot be selected. Members above the policy sequence reject in the
+existing wire constructor before native policy construction. Status and admission sequences remain declared
+snapshot facts. Manifest versions remain source facts, with no publisher,
+authenticated Registry release, freshness or historical status claim.
+
+This source profile uses native schema/domain
+`cellscript-frozen-code-policy-bindings-v2` /
+`cellscript-frozen-code-policy-bindings-id-v2`. In addition to the v1 fields it
+records the actual baseline source package/version, ordered candidate source
+receipt IDs and rule `source-coordinate-exact-floor-compatible-stable-major-v1`.
+The separately named artifact-only constructor retains its v1 record/domain
+and omitted source-profile fields. Historical JSON cannot construct private
+proofs. The wire layout, 656-byte selection, tree depth and runtime budgets are
+unchanged. Both profiles return host evidence; immutable on-chain root
+authorization, complete H1/H2 and independent review remain pending.
+
+Five additional native tests cover actual source receipt fields and independent
+hash oracles, all O0–O3 version cases, exact/compatible selection, 32 members and
+oversized version text. A real manifest-only version edit produces identical
+four-file bundle/finite receipt bytes but a different source receipt and wire
+root. Rebuilt policies with stale source receipts or artifact-only bindings
+reject. Later consumer-closure edits reject selection. Candidate snapshots
+retain their actual historical source facts after physical source/manifest
+edits; using a newly captured candidate requires its new receipt, even when
+its artifact bytes are identical. Stable build-metadata
+variants share precedence while retaining distinct committed source identities.
+These tests supply no new CKB-VM or production claim.

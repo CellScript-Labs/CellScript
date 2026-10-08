@@ -2,6 +2,15 @@
 
 ## Unreleased — 0.32
 
+Bind each frozen code candidate's actual source context, defining module and
+manifest coordinate/edition/version to its finite artifact receipt. Add an
+explicit source-policy constructor with resolver-owned required identity and
+source receipt members: exact and compatible selections enforce the actual
+baseline SemVer precedence floor; compatible selections require stable versions
+and the same major. Preserve artifact-only policy v1 and advance the experimental
+native catalog to v4. Manifest facts do not authenticate Registry releases or
+authorize a root; full H1/H2 remains pending. See `docs/FROZEN_CODE_POLICY.md`.
+
 Bind every member of a declared finite policy snapshot to actual resolver-owned
 sources and private receipts. Check Header/API/network/runtime and complete
 candidate/deployment fields before returning host selection evidence; reject

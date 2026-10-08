@@ -266,3 +266,22 @@ yank/floor violations and later input/source changes. This data2 Type-policy
 path rejects Type-hash history without evidence. Snapshot status/sequence choices
 are not verified Registry/version facts. Root authority, full admission, nominal
 source handles and H2 remain required.
+
+
+## Native source receipt/version prerequisite
+
+The [native source-policy profile](FROZEN_CODE_POLICY.md) additionally commits
+actual captured defining module, source context and manifest coordinate/edition/
+version with each private finite artifact receipt. Its required interface is the
+actual resolver-owned baseline identity. Both modes enforce baseline SemVer
+precedence for selectable candidates; compatible mode also requires stable
+versions with the same major. Build metadata remains committed but does not
+order precedence. Nonselected exact, yanked and below-floor history remains
+checked and unselectable; above-policy sequence members reject at wire creation.
+
+These are manifest source facts, not authenticated Registry releases, publisher
+identity or freshness. Candidate source snapshots remain immutable historical
+facts; a newly captured candidate must bind its new source receipt. Selection
+rechecks the actual consumer's pinned closure. Immutable root authorization,
+complete H1/H2, general codec, source handles and independent review remain
+required; this native profile does not expand the wire or runtime budgets.

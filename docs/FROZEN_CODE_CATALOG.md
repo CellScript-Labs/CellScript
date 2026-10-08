@@ -7,7 +7,8 @@ RawTransaction bytes, the code output index and complete selected Script bytes.
 It accepts no caller receipt, compatibility boolean, source owner label or
 exported context JSON. The returned `FrozenCodeCatalog` privately owns every
 source snapshot, complete bundle, checked external codec, code byte/target
-origin, finite policy receipt and the original deployment/Script bytes. Its getters are immutable; serialized
+origin, finite policy receipt, private source receipt and the original
+deployment/Script bytes. Its getters are immutable; serialized
 records cannot reconstruct it.
 
 Every member must satisfy the required module's directional contract, the
@@ -20,12 +21,12 @@ any new catalog, codec or transaction parser. The earlier native source
 compilation remains a separate bounded operation. Empty and >32 candidate sets
 reject before inspecting members. A failure in any member returns no catalog.
 
-The record schema is `cellscript-frozen-code-catalog-v3`; identity uses canonical
-JSON with domain `cellscript-frozen-code-catalog-id-v3`. It binds the checked
+The record schema is `cellscript-frozen-code-catalog-v4`; identity uses canonical
+JSON with domain `cellscript-frozen-code-catalog-id-v4`. It binds the checked
 module-catalog identity, required source/codec identities and every ordered
-candidate source, byte-origin, target-origin and finite receipt identity. The
-experimental v3 record adds actual checked finite receipts; historical v1/v2
-records are not reinterpreted as receipt-checked catalogs. Each origin retains
+candidate source, byte-origin, target-origin, finite and source receipt identity.
+The experimental v4 record adds source receipts; historical v1–v3 records are
+not reinterpreted as source-receipt-checked catalogs. Each origin retains
 its exact RawTransaction hash, output index, ELF hash and complete selected
 Script hash. Duplicate
 (transaction hash, output index, complete Script hash) tuples reject. Two
@@ -34,7 +35,16 @@ either selection or introduce an args wildcard policy.
 
 Every member exposes its immutable [finite receipt](FIXED_POLICY_RECEIPT.md).
 Public constants reject because their values lack independent evidence in this
-profile; generic declarations remain explicitly non-executable.
+profile; generic declarations remain explicitly non-executable. Its private
+`CheckedSourceCodeReceipt` also binds the actual captured source context,
+defining module, manifest name/namespace/version/edition and finite artifact
+receipt. It has no public constructor, mutable fields or deserialization path.
+Coordinates are source facts, not authenticated publisher releases. Names and
+namespace/module identifiers are bounded to 512 bytes, version text to 128 bytes,
+before SemVer parsing, cloning or source-receipt hashing. The receipt schema/
+domain are `cellscript-frozen-source-code-receipt-v1` /
+`cellscript-frozen-source-code-receipt-id-v1`. See the separate
+[source policy profile](FROZEN_CODE_POLICY.md) for selectable version checks.
 
 This closes a **host-only source/API/byte-origin prerequisite** for #28. It does
 not prove source-to-machine or predicate equivalence. It does not authenticate

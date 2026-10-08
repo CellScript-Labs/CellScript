@@ -342,7 +342,7 @@ fn native_code_catalog_binds_every_source_codec_and_actual_deployment_byte_tuple
         assert_eq!(checked.candidates()[1].raw_transaction(), raw);
         assert_eq!(checked.candidates()[1].selected_script(), script);
         let record: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
-        assert_eq!(record["schema"], "cellscript-frozen-code-catalog-v3");
+        assert_eq!(record["schema"], "cellscript-frozen-code-catalog-v4");
         assert_eq!(record["candidate_source_contexts"], serde_json::to_value(source_ids).unwrap());
         assert_eq!(record["required_external_codec"], checked.required_codec().identity());
         assert_eq!(record["checked_modules"], checked.module_evidence().identity());
@@ -1067,6 +1067,9 @@ fn code_policy_binds_actual_all_member_receipts_and_selects_exact_or_compatible(
             let checked = freeze_code_policy(sources, policy).unwrap();
             let record: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
             assert_eq!(record["schema"], "cellscript-frozen-code-policy-bindings-v1");
+            for field in ["source_version_floor", "source_receipts", "version_rule"] {
+                assert!(record.get(field).is_none(), "artifact-only v1 unexpectedly contains {field}");
+            }
             assert_eq!(record["source_catalog"], source_id);
             assert_eq!(record["policy_root"], cellscript_artifact_checker::hex_encode(&root));
             let mut material = b"cellscript-frozen-code-policy-bindings-id-v1\0".to_vec();
@@ -1304,4 +1307,241 @@ fn code_policy_rejects_actual_type_hash_receipts_without_authenticated_history()
         let wire_only = AuthorizationSet::new(header, &members).unwrap();
         assert!(freeze_code_policy(sources, wire_only).unwrap_err().message.contains("Type-hash history"));
     }
+}
+
+fn source_policy_records(
+    sources: &cellscript::package::frozen_interface::ResolvedSourceCatalog,
+    exact: bool,
+    selected: usize,
+) -> (cellscript_artifact_checker::open_handle_policy::PolicyHeader, Vec<cellscript_artifact_checker::open_handle_policy::PolicyMember>)
+{
+    let (mut header, mut members) = policy_records(sources, exact);
+    header.required_interface = policy_hash(sources.source_owner_identity());
+    for (member, candidate) in members.iter_mut().zip(sources.catalog().candidates()) {
+        member.receipt = policy_hash(candidate.source_receipt().identity());
+    }
+    if exact {
+        header.exact_receipt = members[selected].receipt;
+    }
+    (header, members)
+}
+fn source_version(root: &Path, version: &str) {
+    let manager = cellscript::package::PackageManager::new(root);
+    let mut manifest = manager.read_manifest().unwrap();
+    manifest.package.version = version.into();
+    manager.write_manifest(&manifest).unwrap();
+    lock(root);
+}
+
+#[test]
+fn source_code_receipts_bind_actual_context_versions_and_change_wire_roots() {
+    use cellscript::package::frozen_interface::freeze_source_code_policy;
+    use cellscript_artifact_checker::open_handle_policy::AuthorizationSet;
+    let (_directory, library, candidate, consumer) = policy_fixture();
+    for opt in 0..=3 {
+        let mut previous = None;
+        for version in ["1.0.0", "1.0.1+source.a"] {
+            source_version(&candidate, version);
+            let sources = policy_sources(&library, &candidate, &consumer, opt, 2);
+            let actual = &sources.catalog().candidates()[1];
+            let receipt = actual.source_receipt();
+            assert_eq!(receipt.source_context_identity(), actual.module().context_identity());
+            assert_eq!(receipt.defining_module(), "foreign");
+            assert_eq!(receipt.package_name(), "library");
+            assert_eq!(receipt.package_namespace(), None);
+            assert_eq!(receipt.package_version().to_string(), version);
+            assert_eq!(receipt.edition(), &cellscript::CellScriptEdition::Edition2027);
+            assert_eq!(receipt.artifact_receipt_identity(), actual.receipt().identity());
+            let bytes = receipt.canonical_bytes().unwrap();
+            let record: Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(record["schema"], "cellscript-frozen-source-code-receipt-v1");
+            assert_eq!(record["package"]["version"], version);
+            let mut oracle = b"cellscript-frozen-source-code-receipt-id-v1\0".to_vec();
+            oracle.extend_from_slice(&bytes);
+            assert_eq!(
+                receipt.identity(),
+                cellscript_artifact_checker::hex_encode(&cellscript_artifact_checker::ckb_blake2b256(&oracle))
+            );
+            let catalog: Value = serde_json::from_slice(&sources.catalog().canonical_bytes().unwrap()).unwrap();
+            assert_eq!(catalog["schema"], "cellscript-frozen-code-catalog-v4");
+            for (index, candidate) in sources.catalog().candidates().iter().enumerate() {
+                assert_eq!(catalog["candidate_source_receipts"][index], candidate.source_receipt().identity());
+            }
+            let source_id = receipt.identity().to_owned();
+            let finite_id = actual.receipt().identity().to_owned();
+            let bundle = actual.module().bundle().map(<[u8]>::to_vec);
+            let (header, members) = source_policy_records(&sources, false, 1);
+            let checked = freeze_source_code_policy(sources, AuthorizationSet::new(header, &members).unwrap()).unwrap();
+            let root = checked.policy().root();
+            let policy_bytes = checked.canonical_bytes().unwrap();
+            let policy: Value = serde_json::from_slice(&policy_bytes).unwrap();
+            assert_eq!(policy["schema"], "cellscript-frozen-code-policy-bindings-v2");
+            assert_eq!(policy["source_version_floor"]["version"], "1.0.0");
+            assert!(policy["source_receipts"].as_array().unwrap().iter().any(|id| id == &source_id));
+            let mut oracle = b"cellscript-frozen-code-policy-bindings-id-v2\0".to_vec();
+            oracle.extend_from_slice(&policy_bytes);
+            assert_eq!(
+                checked.identity(),
+                cellscript_artifact_checker::hex_encode(&cellscript_artifact_checker::ckb_blake2b256(&oracle))
+            );
+            for member in &members {
+                let witness = checked.policy().selection(&member.receipt).unwrap();
+                let selection = checked.check_selection(&witness).unwrap();
+                assert_eq!(policy_hash(selection.candidate().source_receipt().identity()), member.receipt);
+            }
+            if let Some((old_source, old_finite, old_bundle, old_root)) = previous.take() {
+                assert_ne!(source_id, old_source);
+                assert_ne!(root, old_root);
+                // Real manifest-only edits leave these compiler/artifact bytes
+                // unchanged; the native source receipt closes that wire gap.
+                assert_eq!(bundle, old_bundle);
+                assert_eq!(finite_id, old_finite);
+            }
+            previous = Some((source_id, finite_id, bundle, root));
+        }
+    }
+}
+
+#[test]
+fn source_code_policy_enforces_semver_precedence_for_both_selection_modes() {
+    use cellscript::package::frozen_interface::freeze_source_code_policy;
+    use cellscript_artifact_checker::open_handle_policy::AuthorizationSet;
+    let (_directory, library, candidate, consumer) = policy_fixture();
+    source_version(&library, "1.0.0+z");
+    lock(&consumer);
+    for opt in 0..=3 {
+        for (version, compatible_ok, exact_ok) in [
+            ("0.9.9", false, false),
+            ("1.0.0-alpha", false, false),
+            ("1.0.0+a", true, true),
+            ("1.1.0", true, true),
+            ("1.1.0-alpha", false, true),
+            ("2.0.0", false, true),
+        ] {
+            source_version(&candidate, version);
+            for exact in [false, true] {
+                let sources = policy_sources(&library, &candidate, &consumer, opt, 2);
+                let (header, members) = source_policy_records(&sources, exact, 1);
+                let result = freeze_source_code_policy(sources, AuthorizationSet::new(header, &members).unwrap());
+                let expected = if exact { exact_ok } else { compatible_ok };
+                assert_eq!(result.is_ok(), expected, "O{opt}, {version}, exact={exact}: {result:?}");
+                if let Ok(checked) = result {
+                    let witness = checked.policy().selection(&members[1].receipt).unwrap();
+                    checked.check_selection(&witness).unwrap();
+                    if exact {
+                        let other = checked.policy().selection(&members[0].receipt).unwrap();
+                        assert!(checked.check_selection(&other).unwrap_err().message.contains("ExactReceipt"));
+                    }
+                }
+            }
+        }
+    }
+    source_version(&library, "1.0.0-alpha");
+    lock(&consumer);
+    source_version(&candidate, "1.0.0");
+    let sources = policy_sources(&library, &candidate, &consumer, 0, 2);
+    let (header, members) = source_policy_records(&sources, false, 1);
+    assert!(freeze_source_code_policy(sources, AuthorizationSet::new(header, &members).unwrap())
+        .unwrap_err()
+        .message
+        .contains("prerelease"));
+}
+
+#[test]
+fn source_code_policy_retains_unselectable_history_without_relaxing_coordinates() {
+    use cellscript::package::frozen_interface::freeze_source_code_policy;
+    use cellscript_artifact_checker::open_handle_policy::*;
+    let (_directory, library, candidate, consumer) = policy_fixture();
+    source_version(&candidate, "0.9.0");
+    for state in 0..4 {
+        let sources = policy_sources(&library, &candidate, &consumer, 0, 2);
+        let (header, mut members) = source_policy_records(&sources, state == 3, 0);
+        match state {
+            0 => members[1].status = MemberStatus::Yanked,
+            1 => members[1].admission_sequence = 2,
+            2 => members[1].admission_sequence = 6,
+            _ => {}
+        }
+        if state == 2 {
+            assert!(matches!(AuthorizationSet::new(header, &members), Err(PolicyError::Sequence)));
+            continue;
+        }
+        let checked = freeze_source_code_policy(sources, AuthorizationSet::new(header, &members).unwrap()).unwrap();
+        let historical = checked.policy().selection(&members[1].receipt).unwrap();
+        assert!(checked.check_selection(&historical).is_err());
+        let baseline = checked.policy().selection(&members[0].receipt).unwrap();
+        checked.check_selection(&baseline).unwrap();
+    }
+    for coordinate in ["name", "namespace"] {
+        let manager = cellscript::package::PackageManager::new(&candidate);
+        let mut manifest = manager.read_manifest().unwrap();
+        manifest.package.name = if coordinate == "name" { "other" } else { "library" }.into();
+        manifest.package.namespace = if coordinate == "namespace" { Some("other".into()) } else { None };
+        manager.write_manifest(&manifest).unwrap();
+        lock(&candidate);
+        let sources = policy_sources(&library, &candidate, &consumer, 0, 2);
+        let (header, mut members) = source_policy_records(&sources, true, 0);
+        members[1].status = MemberStatus::Yanked;
+        assert!(freeze_source_code_policy(sources, AuthorizationSet::new(header, &members).unwrap())
+            .unwrap_err()
+            .message
+            .contains("coordinate/edition"));
+    }
+}
+
+#[test]
+fn source_code_policy_rejects_artifact_only_bindings_and_stale_source_versions() {
+    use cellscript::package::frozen_interface::freeze_source_code_policy;
+    use cellscript_artifact_checker::open_handle_policy::AuthorizationSet;
+    let (_directory, library, candidate, consumer) = policy_fixture();
+    for axis in 0..3 {
+        let sources = policy_sources(&library, &candidate, &consumer, 0, 2);
+        let (mut header, mut members) = source_policy_records(&sources, true, 0);
+        match axis {
+            0 => header.required_interface = policy_hash(sources.catalog().required().projection().identity()),
+            1 => members[1].receipt = policy_hash(sources.catalog().candidates()[1].receipt().identity()),
+            _ => members[1].receipt[0] ^= 1,
+        }
+        assert!(freeze_source_code_policy(sources, AuthorizationSet::new(header, &members).unwrap()).is_err());
+    }
+    let sources = policy_sources(&library, &candidate, &consumer, 0, 2);
+    let (header, members) = source_policy_records(&sources, false, 0);
+    let checked = freeze_source_code_policy(sources, AuthorizationSet::new(header.clone(), &members).unwrap()).unwrap();
+    let witness = checked.policy().selection(&members[1].receipt).unwrap();
+    source_version(&candidate, "1.1.0");
+    // The private candidate is an immutable historical snapshot, not a live
+    // filesystem promise. Selection rechecks the consumer's pinned closure.
+    let retained = checked.check_selection(&witness).unwrap();
+    assert_eq!(retained.candidate().source_receipt().package_version().to_string(), "1.0.0");
+    let refreshed = policy_sources(&library, &candidate, &consumer, 0, 2);
+    // A newly constructed valid Merkle tree using old source identities still
+    // fails against actual newly captured candidate source facts.
+    assert!(freeze_source_code_policy(refreshed, AuthorizationSet::new(header, &members).unwrap())
+        .unwrap_err()
+        .message
+        .contains("receipt"));
+}
+
+#[test]
+fn source_code_policy_checks_all_32_source_receipts_and_bounds_version_text() {
+    use cellscript::package::frozen_interface::{freeze_code_catalog, freeze_source_code_policy};
+    use cellscript_artifact_checker::open_handle_policy::AuthorizationSet;
+    let (_directory, library, candidate, consumer) = policy_fixture();
+    let sources = policy_sources(&library, &candidate, &consumer, 0, 32);
+    let (header, members) = source_policy_records(&sources, false, 0);
+    let checked = freeze_source_code_policy(sources, AuthorizationSet::new(header, &members).unwrap()).unwrap();
+    for member in &members {
+        let witness = checked.policy().selection(&member.receipt).unwrap();
+        checked.check_selection(&witness).unwrap();
+    }
+    let sources = policy_sources(&library, &candidate, &consumer, 0, 32);
+    let (header, mut members) = source_policy_records(&sources, true, 0);
+    members[31].receipt[0] ^= 1;
+    assert!(freeze_source_code_policy(sources, AuthorizationSet::new(header, &members).unwrap()).is_err());
+    source_version(&candidate, &format!("1.0.0+{}", "a".repeat(129)));
+    let oversized = code_candidate(compile_code(&candidate, 0), vec![1]);
+    assert!(freeze_code_catalog(compile_code(&library, 0), vec![oversized], &Default::default())
+        .unwrap_err()
+        .message
+        .contains("text limits"));
 }

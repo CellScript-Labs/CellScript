@@ -1,6 +1,7 @@
 //! Bind all finite external codec/deployment byte origins to actual native
 //! frozen source snapshots. No immutable authorization, live deployment or
 //! resolver-owned source handle is introduced by this host prerequisite.
+use super::source_receipt::{bind_source_receipt, CheckedSourceCodeReceipt};
 use super::{checker_error, invalid, FrozenPackageModule};
 use crate::error::Result;
 use cellscript_artifact_checker::code_origin::{CheckedCodeCellOrigin, CheckedTargetCodeCellOrigin};
@@ -22,6 +23,7 @@ pub struct CodeCandidateInput {
 pub struct FrozenCodeCandidate {
     module: FrozenPackageModule,
     receipt: CheckedFixedPolicyReceipt,
+    source_receipt: CheckedSourceCodeReceipt,
     raw_transaction: Vec<u8>,
     selected_script: Vec<u8>,
 }
@@ -37,6 +39,9 @@ impl FrozenCodeCandidate {
     }
     pub fn receipt(&self) -> &CheckedFixedPolicyReceipt {
         &self.receipt
+    }
+    pub fn source_receipt(&self) -> &CheckedSourceCodeReceipt {
+        &self.source_receipt
     }
     pub fn raw_transaction(&self) -> &[u8] {
         &self.raw_transaction
@@ -64,6 +69,7 @@ struct Record {
     candidate_code_origins: Vec<String>,
     candidate_target_origins: Vec<String>,
     candidate_receipts: Vec<String>,
+    candidate_source_receipts: Vec<String>,
 }
 impl FrozenCodeCatalog {
     pub fn required(&self) -> &FrozenPackageModule {
@@ -148,15 +154,17 @@ pub fn freeze_code_catalog(
         {
             return Err(invalid("frozen code catalog has a duplicate concrete Script/code deployment"));
         }
+        let source_receipt = bind_source_receipt(&input.module, &receipt)?;
         candidates.push(FrozenCodeCandidate {
             module: input.module,
             receipt,
+            source_receipt,
             raw_transaction: input.raw_transaction,
             selected_script: input.selected_script,
         });
     }
     let record = Record {
-        schema: "cellscript-frozen-code-catalog-v3",
+        schema: "cellscript-frozen-code-catalog-v4",
         checked_modules: modules.identity().into(),
         required_source_context: required.context_identity().into(),
         required_external_codec: required_codec.identity().into(),
@@ -164,7 +172,8 @@ pub fn freeze_code_catalog(
         candidate_code_origins: candidates.iter().map(|candidate| candidate.origin().identity().into()).collect(),
         candidate_target_origins: candidates.iter().map(|candidate| candidate.target_origin().identity().into()).collect(),
         candidate_receipts: candidates.iter().map(|candidate| candidate.receipt().identity().into()).collect(),
+        candidate_source_receipts: candidates.iter().map(|candidate| candidate.source_receipt().identity().into()).collect(),
     };
-    let identity = canonical_hash("cellscript-frozen-code-catalog-id-v3", &record).map_err(checker_error)?;
+    let identity = canonical_hash("cellscript-frozen-code-catalog-id-v4", &record).map_err(checker_error)?;
     Ok(FrozenCodeCatalog { required, required_codec, candidates, modules, record, identity })
 }
