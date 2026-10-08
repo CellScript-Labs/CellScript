@@ -658,6 +658,7 @@ run_dev_gate() {
     run cargo check --locked -p cellscript-wasm --all-targets --features wasm
     run cargo check --locked -p cellscript-ckb-sdk-builder-example --all-targets
     run cargo check --locked -p cellscript-tools --all-targets
+    run cargo test --locked -p cellscript-tools ckb_devnet::tests -- --test-threads=1
     run cargo check --locked --manifest-path services/registry-verifier/Cargo.toml --all-targets
     run cargo check --locked --manifest-path services/registry-artifact-verifier/Cargo.toml --all-targets
     check_registry_artifact_verifier_dependency_boundary

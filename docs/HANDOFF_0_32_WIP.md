@@ -661,3 +661,31 @@ strict compiler clippy passed in `.cap/logs/1791461009-53316.log` and
 `.cap/logs/1791461034-53968.log`. The expanded source-preflight changes still need
 their own dev gate before commit. Whole H1/H2, #29 and #44–#46 remain unfinished,
 independent security review is unassigned, and full CI remains deferred.
+
+### Transaction-pool snapshot race in the clean backend replay
+
+The complete root backend on signed `34ce0fec` failed in the live stateful
+acceptance step; `.cap/logs/1791460969-52061.log` and
+`target/cellscript-strict-backend-audit/strict-backend-audit-full-20261008-201317.json`
+retain the failure. Compiler/checker/shape/resource tests passed, but the gate
+is not a pass. Deployment `nft.cell:create_listing` was rejected with
+`Resolve failed Unknown` for funding OutPoint
+`f03a7fa1c105d6cdb8c2c68fcaea273da3117a9768f8edcddb658fb26c241619:0`.
+Inspection of that stopped test node confirms this is its latest block's
+cellbase (block 165, transaction index zero) and remains live.
+
+Pinned CKB `f7fa4436` documents `tx_pool_info.tip_hash/tip_number` as the pool's
+associated chain snapshot; its reorg service updates that snapshot asynchronously.
+The harness previously observed core liveness before immediately submitting to
+the pool. It now waits for both pool hash and height to match the core tip before
+submission and after commitment, with 80 polls and 50 ms intervals. A rejected
+transaction is never retried; malformed identities or failure to catch up reject
+the run. This changes harness synchronization, not Script semantics, transaction encoding or
+VM/resource ceilings. Focused mocked-RPC tests cover lag, matching hash but wrong
+height, missing/malformed identities, bounded timeout and no transaction resend.
+Fresh dev and a new clean backend/CCC replay are required before pushing.
+
+Frozen-source prerequisite `53c36dc6` is signed. Its full worktree dev passed in
+`.cap/logs/1791461406-69970.log`; staging the new native sources and rerunning
+source policy also passed in `.cap/logs/1791462349-21846.log`. Whole H1/H2, #29
+and #44–#46 remain unfinished, review is unassigned, and full CI remains deferred.

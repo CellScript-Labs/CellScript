@@ -2,6 +2,11 @@
 
 ## Unreleased — 0.32
 
+Synchronize local CKB acceptance submissions with the transaction pool's actual
+chain snapshot before spending freshly generated funds and after commitment.
+Bounded waits fail closed on stale/malformed tips and do not retry rejected
+transactions. Script semantics and existing resource ceilings are unchanged.
+
 Make bounded source declaration catalogs explicit through native
 `CompileOptions::source_contracts` and `cellc build --source-contracts`.
 Ordinary builds retain existing metadata size budgets. Build plans and cache
