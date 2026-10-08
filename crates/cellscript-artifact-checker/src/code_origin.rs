@@ -5,7 +5,9 @@ use crate::external_codec::{check_fixed_external_codec, CheckedFixedExternalCode
 use crate::interface::ModuleBundle;
 use crate::{CheckerBudgets, CheckerError, CheckerRejectionCode};
 use serde::Serialize;
+mod dependency;
 mod molecule;
+pub use dependency::{check_direct_code_dependency, CheckedDirectCodeDependency, SuppliedDependencyCell};
 mod target;
 pub use target::{check_code_cell_target, CheckedTargetCodeCellOrigin};
 

@@ -76,7 +76,7 @@ pub(super) struct Cell<'a> {
     pub(super) lock: Script<'a>,
     pub(super) type_script: Option<Script<'a>>,
 }
-fn cell(bytes: &[u8]) -> Result<Cell<'_>, CheckerError> {
+pub(super) fn cell(bytes: &[u8]) -> Result<Cell<'_>, CheckerError> {
     let values = fields(bytes, 3)?;
     let capacity = u64::from_le_bytes(values[0].try_into().map_err(|_| invalid("CellOutput capacity width differs"))?);
     let lock = script(values[1])?;
@@ -87,6 +87,7 @@ pub(super) struct Transaction<'a> {
     pub(super) cells: Vec<Cell<'a>>,
     pub(super) data: Vec<&'a [u8]>,
     pub(super) inputs: &'a [u8],
+    pub(super) deps: &'a [u8],
 }
 pub(super) fn transaction(bytes: &[u8]) -> Result<Transaction<'_>, CheckerError> {
     let values = fields(bytes, 6)?;
@@ -116,5 +117,5 @@ pub(super) fn transaction(bytes: &[u8]) -> Result<Transaction<'_>, CheckerError>
     if cells.len() != data.len() {
         return Err(invalid("output and output-data cardinalities differ"));
     }
-    Ok(Transaction { cells, data, inputs })
+    Ok(Transaction { cells, data, inputs, deps })
 }

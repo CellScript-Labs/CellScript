@@ -23,7 +23,10 @@ pub use code_catalog::{freeze_code_catalog, CodeCandidateInput, FrozenCodeCandid
 mod source_receipt;
 pub use source_receipt::CheckedSourceCodeReceipt;
 mod code_policy;
-pub use code_policy::{freeze_code_policy, freeze_source_code_policy, FrozenCodePolicy, FrozenCodePolicySelection};
+pub use code_policy::{
+    freeze_code_policy, freeze_source_code_policy, FrozenCodePolicy, FrozenCodePolicySelection, FrozenSourceCodeDependency,
+    FrozenSourceCodePolicy, FrozenSourceCodePolicySelection,
+};
 mod resolved_catalog;
 pub use resolved_catalog::{resolve_code_catalog_source, ResolvedCodeCatalog};
 mod sources;

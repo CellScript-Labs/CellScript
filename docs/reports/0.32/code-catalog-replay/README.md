@@ -19,7 +19,7 @@ implementation queue is ready; independent security review remains unassigned.
 Parsed-source capture passed staged dev and was G-signed/pushed as
 `3a15ed9a0a462c089845bff6eb08993dd9221deb`. The additional source dev/push
 logs retain that native-only provenance; they do not update the full backend
-or CCC source commit. All twenty-one gzip files have raw/stored sizes and SHA-256
+or CCC source commit. All twenty-four gzip files have raw/stored sizes and SHA-256
 in the manifest. No later containing commit replaces any evidence source commit.
 
 Target selection passed the refreshed staged dev and was G-signed/pushed as
@@ -31,13 +31,21 @@ remains exactly `16e6b721`.
 Finite policy receipts passed the frozen staged dev, were G-signed as
 `e546d0f93dafc52a2e522f80b7422a7f88307a34` and pushed to public `0.32`.
 Their dev, push and independent remote-head lookup are archived separately.
-All twenty-one raw/stored lengths and SHA-256 were verified. Clean full backend
+All twenty-four raw/stored lengths and SHA-256 were verified. Clean full backend
 and CCC still bind exactly `16e6b721`; no later host-only delta substitutes its
 source identity into those earlier reports.
 
 All-member finite policy bindings passed frozen staged dev and were G-signed as
 `f6ef9711ece01738794ff6e7c8288faa63a7fc29`, pushed and independently confirmed
 at public `0.32`. Its dev/push/remote logs retain native host-only provenance.
-All twenty-one raw/stored lengths and SHA-256 were verified. The current source
+All twenty-four raw/stored lengths and SHA-256 were verified. The current source
 receipt/version work is a separate slice; these logs do not validate that later
 uncommitted source or replace clean backend/CCC source `16e6b721`.
+
+
+Source receipt/version policies passed frozen staged dev and were G-signed as
+`d424583ad7cff22dd4f11826fdfa5f0c015e5aa4`, pushed and independently confirmed
+at public `0.32`. Their dev/push/remote logs retain native host-only provenance.
+All twenty-four raw/stored lengths and SHA-256 were verified. The subsequent
+direct-dependency/typed-source-proof work is a separate slice, not validated by
+these earlier logs. Clean full backend/CCC still bind exactly `16e6b721`.

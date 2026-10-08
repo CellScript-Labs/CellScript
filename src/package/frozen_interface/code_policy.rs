@@ -8,6 +8,8 @@ use cellscript_artifact_checker::open_handle_policy::{
 };
 use cellscript_artifact_checker::{canonical_bytes, canonical_hash, hex_encode};
 use serde::Serialize;
+mod dependency;
+pub use dependency::FrozenSourceCodeDependency;
 
 #[derive(Debug)]
 pub struct FrozenCodePolicy {
@@ -139,8 +141,54 @@ pub fn freeze_code_policy(sources: ResolvedSourceCatalog, policy: AuthorizationS
 /// and also enforces the baseline precedence floor on that selected receipt.
 /// Source versions are manifest facts, not authenticated publisher releases.
 /// This remains host evidence; immutable root authority and H1/H2 are required.
-pub fn freeze_source_code_policy(sources: ResolvedSourceCatalog, policy: AuthorizationSet) -> Result<FrozenCodePolicy> {
-    freeze_policy(sources, policy, BindingProfile::SourceVersions)
+pub fn freeze_source_code_policy(sources: ResolvedSourceCatalog, policy: AuthorizationSet) -> Result<FrozenSourceCodePolicy> {
+    freeze_policy(sources, policy, BindingProfile::SourceVersions).map(|inner| FrozenSourceCodePolicy { inner })
+}
+/// A distinct native source/version proof. Artifact-only policies cannot be
+/// supplied where this proof is required; no public conversion or deserialize.
+/// This is still host evidence, not a nominal language handle or root authority.
+///
+/// ```compile_fail
+/// use cellscript::package::frozen_interface::{FrozenCodePolicy, FrozenSourceCodePolicy};
+/// fn needs_source(_: FrozenSourceCodePolicy) {}
+/// fn artifact_only(policy: FrozenCodePolicy) { needs_source(policy); }
+/// ```
+#[derive(Debug)]
+pub struct FrozenSourceCodePolicy {
+    inner: FrozenCodePolicy,
+}
+impl FrozenSourceCodePolicy {
+    pub fn sources(&self) -> &ResolvedSourceCatalog {
+        self.inner.sources()
+    }
+    pub fn policy(&self) -> &AuthorizationSet {
+        self.inner.policy()
+    }
+    pub fn identity(&self) -> &str {
+        self.inner.identity()
+    }
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>> {
+        self.inner.canonical_bytes()
+    }
+    pub fn check_selection(&self, bytes: &[u8]) -> Result<FrozenSourceCodePolicySelection<'_>> {
+        self.inner.check_selection(bytes).map(|inner| FrozenSourceCodePolicySelection { inner })
+    }
+}
+/// A source/version-checked selection, separately typed from finite selection.
+#[derive(Debug)]
+pub struct FrozenSourceCodePolicySelection<'a> {
+    inner: FrozenCodePolicySelection<'a>,
+}
+impl FrozenSourceCodePolicySelection<'_> {
+    pub fn membership(&self) -> &PolicyMembership {
+        self.inner.membership()
+    }
+    pub fn candidate(&self) -> &FrozenCodeCandidate {
+        self.inner.candidate()
+    }
+    pub fn check_unchanged_inputs(&self, bundle: [&[u8]; 4], raw: &[u8], index: u32, script: &[u8]) -> Result<()> {
+        self.inner.check_unchanged_inputs(bundle, raw, index, script)
+    }
 }
 #[derive(Clone, Copy)]
 enum BindingProfile {

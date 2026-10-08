@@ -1424,3 +1424,71 @@ remains a failed run, not validation evidence.
 The exact staged native source receipt/version/test/docs/archive state now
 freezes for full dev before G-signing/publication. No fresh clean full backend,
 CCC, full CI, production admission or complete H1/H2 claim is made.
+
+
+## Source version publication and direct dependency snapshot binding
+
+The exact frozen source-receipt/version slice passed full dev in worktree
+`.cap/logs/1791494327-26365.log` (98,414 command-output bytes; 98,441 raw log
+bytes). Its 76,996-byte staged diff retained SHA-256
+`c81ea0fc8419299d919901048a683a6e989761acc97a853f415240278fe8272a`
+before/after, with only ignored cache timestamps changed during dev. It was
+G-signed as `d424583ad7cff22dd4f11826fdfa5f0c015e5aa4`, fast-forwarded into
+clean root and pushed in root `.cap/logs/1791495204-49170.log`. Independent
+`.cap/logs/1791495216-49610.log` confirmed exact public `0.32`; both checkouts
+were clean. These three logs are now archived and all twenty-four raw/stored
+lengths and SHA-256 were verified. Full backend/CCC evidence still binds exactly
+`16e6b721`, without replacing its source provenance with later host deltas.
+
+The next pure checker binds an actual private target/byte-origin token to final
+canonical RawTransaction direct deps and every untrusted supplied Cell snapshot.
+Its initial profile is checked data2 with <=64 direct deps and exact supplied
+set coverage. It checks canonical outputs for unselected/final Cells, uniqueness
+of selected ELF data, exact creation OutPoint and creation capacity/Lock/Type.
+Dep groups and Type targets reject rather than assume expansion/history. Raw
+and supplied positions are matched separately; supplied position is not a
+proved VM/syscall resolved index. Every raw/OutPoint/output/data input respects
+4 MiB/file/caller and shared 16 MiB limits before parsing/hashing. No CKB SDK or
+compiler dependency enters this independent checker operation.
+
+Source/version policies and their selections now have distinct private native
+types, with no public conversion/deserialization from artifact-only proofs.
+Existing policy v1/v2 records/domains and wire remain unchanged. Consuming a
+source selection's `check_direct_dependency` binds its exact private candidate
+target origin to the pure dependency proof, then rechecks the actual consumer
+source closure. A private combined identity binds source policy, selected source
+receipt and dependency proof. Later rechecks compare complete final raw/supplied
+snapshots and current consumer sources. This remains host consistency evidence:
+supplied Cells are not consensus resolution/liveness, raw excludes witnesses,
+and no root authority, final group, signatures or peer execution is established.
+
+Two new native tests pass in `.cap/logs/1791495731-61025.log` (8.38 seconds).
+The first four pure tests pass in `.cap/logs/1791495744-61535.log`; expanded five
+pass in `.cap/logs/1791495910-65921.log` (2.49 seconds), covering O0–O3, twelve
+mutation axes, actual Type targets, preparse overflow and all 64 Cells including
+a malformed final snapshot. Full existing/new related suites pass 37 frozen
+interface and 63 policy artifact tests in `.cap/logs/1791495799-62928.log`.
+Two compile-fail doctests pass in `.cap/logs/1791495827-64155.log`, rejecting
+artifact-only policy/selection substitution into source/dependency paths.
+An initial test-only SDK builder move error was fixed by reading the Lock before
+consuming CellOutput; no validation rule was weakened. Strict clippy caught a
+useless test Vec and it was replaced with a fixed array. Final clippy/dev remain
+pending; earlier failed runs are not passing evidence.
+
+No emitter/ABI/machine, compiler metadata/cache, dependency/toolchain, historical
+wire or runtime budget changes. Complete H1/H2, nominal `I`/handles, general
+codec, authenticated Type history/actual resolution, immutable authorization,
+ProtocolBundle/generated builders, #29 and #44–#46 remain pending. Independent
+review is still unassigned/unwaived; full CI stays deferred until the complete
+implementation queue. See `docs/DIRECT_CODE_DEPENDENCY.md`.
+
+
+Final strict compiler/checker all-target clippy passes in
+`.cap/logs/1791496127-70914.log` (0.63 seconds). The authoritative business
+inventory refresh in `.cap/logs/1791496204-72995.log` changes only its SHA-256 to
+`0xf0b6f6993db1834d715e64282f8f6e217e73e9ae837b23a72d8adcf2d147bdd6`;
+read-only validation passes in `.cap/logs/1791496254-74188.log`. Release
+readiness stays false and all release requirements remain pending. The exact
+staged native/checker dependency/type/test/docs/archive/inventory slice now
+freezes for full dev before G-signing/publication. No new machine/ABI or fresh
+clean full-backend/CCC claim is attached; full CI remains deferred.

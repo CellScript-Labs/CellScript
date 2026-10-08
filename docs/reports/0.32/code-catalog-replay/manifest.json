@@ -12,7 +12,8 @@
     "sources": "3a15ed9a0a462c089845bff6eb08993dd9221deb",
     "target": "35a9565b260890e2b32f6082af51e5cfa36b3866",
     "receipt": "e546d0f93dafc52a2e522f80b7422a7f88307a34",
-    "policy": "f6ef9711ece01738794ff6e7c8288faa63a7fc29"
+    "policy": "f6ef9711ece01738794ff6e7c8288faa63a7fc29",
+    "source_versions": "d424583ad7cff22dd4f11826fdfa5f0c015e5aa4"
   },
   "dev_source_state": "exact staged source files later G-signed; not a clean-HEAD dev claim",
   "ci": "deferred until complete implementation queue",
@@ -186,10 +187,35 @@
       "raw_sha256": "a090f59c2c3554d7b80cbb06297c2ca24c38576d04c689687bb2c52b9b619445",
       "stored_bytes": 95,
       "stored_sha256": "7834c887c15a8ee1037cc3748f40446aa204efb134e24260222bb875a405c6c8"
+    },
+    {
+      "name": "source-versions-staged-dev.log.gz",
+      "original_path": "/Users/arthur/.codex/worktrees/fixed-result-contract/CellScript/.cap/logs/1791494327-26365.log",
+      "raw_bytes": 98441,
+      "raw_sha256": "9fbb5fd41c93be14d6d4641bad860d9cf950069d41029f16f82f283df8ea54b8",
+      "stored_bytes": 17818,
+      "stored_sha256": "3f50cf543f2723d588b04b4b0fc5f02c091e86cc70c0fcb23099553d9fa9c4a7"
+    },
+    {
+      "name": "source-versions-public-push.log.gz",
+      "original_path": "/Users/arthur/RustroverProjects/CellScript/.cap/logs/1791495204-49170.log",
+      "raw_bytes": 256,
+      "raw_sha256": "28ad2464c132e3352b89638f5e25ce9f502ee1be58377d7c13b325d839fafc0f",
+      "stored_bytes": 199,
+      "stored_sha256": "08f4cf77dee1e263e5b1e1f9dbd0655266cb928b20ddcbbc1dbd6b6d11157a14"
+    },
+    {
+      "name": "source-versions-public-head.log.gz",
+      "original_path": "/Users/arthur/RustroverProjects/CellScript/.cap/logs/1791495216-49610.log",
+      "raw_bytes": 84,
+      "raw_sha256": "d4103002ffa2d951d2f2273aa41cb241c9473960101b6e769c1e452b5c552aa4",
+      "stored_bytes": 94,
+      "stored_sha256": "19f1a6ebe927e4d2e98f0b72107f92602a5cb761202ea013cfff82cafc9a9702"
     }
   ],
   "sources_scope": "native parsed-source capture only; no fresh backend claim",
   "target_scope": "native/checker target selection only; no fresh clean backend claim",
   "receipt_scope": "native/checker finite receipts only; no fresh clean backend claim",
-  "policy_scope": "native all-member policy field bindings only; no fresh clean backend claim"
+  "policy_scope": "native all-member policy field bindings only; no fresh clean backend claim",
+  "source_versions_scope": "native source receipt/version selection only; no fresh clean backend claim"
 }

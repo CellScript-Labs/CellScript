@@ -1545,3 +1545,84 @@ fn source_code_policy_checks_all_32_source_receipts_and_bounds_version_text() {
         .message
         .contains("text limits"));
 }
+
+fn final_code_dependency(
+    candidate: &cellscript::package::frozen_interface::FrozenCodeCandidate,
+) -> (Vec<u8>, [u8; 36], Vec<u8>, Vec<u8>) {
+    use ckb_testtool::ckb_types::{core::TransactionBuilder, packed, prelude::*};
+    let creation = packed::RawTransaction::from_slice(candidate.raw_transaction()).unwrap();
+    let output = creation.outputs().get(candidate.origin().output_index() as usize).unwrap();
+    let point = packed::OutPoint::new_builder()
+        .tx_hash(policy_hash(candidate.origin().transaction_hash()).pack())
+        .index(candidate.origin().output_index())
+        .build();
+    let tx =
+        TransactionBuilder::default().cell_dep(packed::CellDep::new_builder().out_point(point.clone()).dep_type(0u8).build()).build();
+    (
+        tx.data().raw().as_slice().to_vec(),
+        point.as_slice().try_into().unwrap(),
+        output.as_slice().to_vec(),
+        candidate.module().bundle()[0].to_vec(),
+    )
+}
+#[test]
+fn source_dependency_binds_source_versions_membership_and_actual_final_raw_inputs() {
+    use cellscript::package::frozen_interface::{freeze_source_code_policy, FrozenSourceCodeDependency, FrozenSourceCodePolicy};
+    use cellscript_artifact_checker::{code_origin::SuppliedDependencyCell, open_handle_policy::AuthorizationSet};
+    let (_directory, library, candidate, consumer) = policy_fixture();
+    for opt in 0..=3 {
+        for exact in [false, true] {
+            let sources = policy_sources(&library, &candidate, &consumer, opt, 2);
+            let (header, members) = source_policy_records(&sources, exact, 1);
+            let policy: FrozenSourceCodePolicy =
+                freeze_source_code_policy(sources, AuthorizationSet::new(header, &members).unwrap()).unwrap();
+            let witness = policy.policy().selection(&members[1].receipt).unwrap();
+            let selection = policy.check_selection(&witness).unwrap();
+            let (raw, point, output, data) = final_code_dependency(selection.candidate());
+            let inputs = [SuppliedDependencyCell { out_point: point, output: &output, data: &data }];
+            let checked: FrozenSourceCodeDependency<'_> =
+                selection.check_direct_dependency(&raw, &inputs, &Default::default()).unwrap();
+            assert_eq!(policy_hash(checked.selection().candidate().source_receipt().identity()), members[1].receipt);
+            let bytes = checked.canonical_bytes().unwrap();
+            let record: Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(record["schema"], "cellscript-frozen-source-code-dependency-v1");
+            assert_eq!(record["source_policy"], policy.identity());
+            assert_eq!(record["checked_dependency"], checked.dependency().identity());
+            let mut material = b"cellscript-frozen-source-code-dependency-id-v1\0".to_vec();
+            material.extend_from_slice(&bytes);
+            assert_eq!(
+                checked.identity(),
+                cellscript_artifact_checker::hex_encode(&cellscript_artifact_checker::ckb_blake2b256(&material))
+            );
+            checked.check_unchanged_inputs(&raw, &inputs, &Default::default()).unwrap();
+            let mut changed = data.clone();
+            *changed.last_mut().unwrap() ^= 1;
+            let replaced = [SuppliedDependencyCell { out_point: point, output: &output, data: &changed }];
+            assert!(checked.check_unchanged_inputs(&raw, &replaced, &Default::default()).is_err());
+            assert!(policy.check_selection(&witness).unwrap().check_direct_dependency(&raw, &replaced, &Default::default()).is_err());
+            let mut substituted = raw.clone();
+            *substituted.last_mut().unwrap() ^= 1;
+            assert!(checked.check_unchanged_inputs(&substituted, &inputs, &Default::default()).is_err());
+        }
+    }
+}
+#[test]
+fn source_dependency_rechecks_consumer_sources_before_binding_and_later_materialization() {
+    use cellscript::package::frozen_interface::freeze_source_code_policy;
+    use cellscript_artifact_checker::{code_origin::SuppliedDependencyCell, open_handle_policy::AuthorizationSet};
+    let (_directory, library, candidate, consumer) = policy_fixture();
+    let sources = policy_sources(&library, &candidate, &consumer, 0, 2);
+    let (header, members) = source_policy_records(&sources, false, 0);
+    let policy = freeze_source_code_policy(sources, AuthorizationSet::new(header, &members).unwrap()).unwrap();
+    let witness = policy.policy().selection(&members[0].receipt).unwrap();
+    let selected = policy.check_selection(&witness).unwrap();
+    let (raw, point, output, data) = final_code_dependency(selected.candidate());
+    let inputs = [SuppliedDependencyCell { out_point: point, output: &output, data: &data }];
+    let checked = selected.check_direct_dependency(&raw, &inputs, &Default::default()).unwrap();
+    let later = policy.check_selection(&witness).unwrap();
+    let path = consumer.join("src/main.cell");
+    let source = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, format!("{source}// changed consumer after selection\n")).unwrap();
+    assert!(later.check_direct_dependency(&raw, &inputs, &Default::default()).is_err());
+    assert!(checked.check_unchanged_inputs(&raw, &inputs, &Default::default()).is_err());
+}

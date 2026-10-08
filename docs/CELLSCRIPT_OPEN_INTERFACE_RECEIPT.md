@@ -285,3 +285,16 @@ facts; a newly captured candidate must bind its new source receipt. Selection
 rechecks the actual consumer's pinned closure. Immutable root authorization,
 complete H1/H2, general codec, source handles and independent review remain
 required; this native profile does not expand the wire or runtime budgets.
+
+
+## Direct dependency consistency prerequisite
+
+A [separate bounded checker/native composition](DIRECT_CODE_DEPENDENCY.md) now
+binds the selected checked data2 creation OutPoint, code and complete CellOutput
+to canonical final raw direct deps and every supplied dependency Cell snapshot.
+It requires exact set coverage and unique selected data, checks all unselected
+Cells, and rejects dep groups/Type history outside its initial profile. Raw and
+supplied positions are separate; supplied position is not a proven syscall index.
+Distinct source/version proof types prevent artifact-only substitution. These
+are host byte/source facts, not authenticated resolution/liveness, root authority,
+witness/signature freezing, group execution or complete H1/H2 admission.

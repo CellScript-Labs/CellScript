@@ -2,6 +2,15 @@
 
 ## Unreleased — 0.32
 
+Bind checked data2 code creation identities to canonical final raw direct deps
+and every supplied Cell snapshot under finite preparse limits. Reject missing,
+extra, copied or duplicate code, changed selected outputs, malformed unselected
+Cells, dep groups and Type history without proof. Give source/version policies
+and selections distinct native types and compose both proofs with source
+rechecks. Supplied snapshots do not establish consensus resolution, root
+permission or final witness/signature freezing; whole #28 remains pending.
+See `docs/DIRECT_CODE_DEPENDENCY.md`.
+
 Bind each frozen code candidate's actual source context, defining module and
 manifest coordinate/edition/version to its finite artifact receipt. Add an
 explicit source-policy constructor with resolver-owned required identity and

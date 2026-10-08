@@ -73,7 +73,9 @@ and history hashes. These are host tests, with no new CKB-VM claim.
 ## Source receipt and version profile
 
 `freeze_source_code_policy` consumes the same private actual source/catalog and
-wire snapshot through an explicit separate constructor. Its Header required
+wire snapshot through an explicit separate constructor, returning the distinct
+private `FrozenSourceCodePolicy`. Its `FrozenSourceCodePolicySelection` is also
+separately typed. Artifact-only proofs cannot convert to either source proof. Its Header required
 interface is the resolver-owned source identity, including the actual baseline
 and selected defining package/dependency closure. Dependency alias spellings do
 not replace that owner. Each Member receipt is the candidate's private
@@ -124,3 +126,12 @@ edits; using a newly captured candidate requires its new receipt, even when
 its artifact bytes are identical. Stable build-metadata
 variants share precedence while retaining distinct committed source identities.
 These tests supply no new CKB-VM or production claim.
+
+
+The source/version selection can additionally consume itself into a private
+[direct code dependency binding](DIRECT_CODE_DEPENDENCY.md) for canonical final
+raw bytes and every supplied Cell snapshot. This finite data2/direct profile
+rechecks actual source closure and rejects wrong/missing/duplicate/copied code,
+malformed unselected Cells, dep groups and unproved Type history. It does not
+certify supplied snapshots as consensus/VM resolution or freeze witnesses and
+signatures. Source policy v2 record/domain and selection wire remain unchanged.
