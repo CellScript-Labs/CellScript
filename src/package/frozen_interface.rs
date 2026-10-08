@@ -18,6 +18,8 @@ const MAX_MODULES: usize = 256;
 
 mod catalog;
 pub use catalog::{freeze_module_catalog, FrozenModuleCatalog};
+mod code_catalog;
+pub use code_catalog::{freeze_code_catalog, CodeCandidateInput, FrozenCodeCandidate, FrozenCodeCatalog};
 
 #[derive(Debug, Clone)]
 pub enum EntrySelection {

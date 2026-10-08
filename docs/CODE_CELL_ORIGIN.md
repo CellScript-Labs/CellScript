@@ -43,3 +43,8 @@ H1/H2 admission. In particular, a Type Script hash alone cannot authorize a new
 ELF or a replacement history. The source nominal I, generic handles, #29 and
 #44–#46 are not completed by this API. No on-chain claim is attached to this
 host-only constructor.
+
+The native [frozen code catalog](FROZEN_CODE_CATALOG.md) joins this evidence to
+actual owned package source snapshots and directional all-member module checks.
+It preserves this byte-origin boundary; joining host evidence does not create
+deployment authorization or a live-code observation.

@@ -257,3 +257,211 @@ fn source_preflight_rejects_symlink_loops_and_linked_lockfiles() {
     assert!(error.message.contains("bounded Cell.lock"), "{error}");
     assert_eq!(std::fs::read(directory.path().join("actual.lock")).unwrap(), pinned);
 }
+// Native all-member source/API/byte-origin closure, not deployment admission.
+const CODE_SOURCE: &str = "module client\nresource Token has store, consume { amount: u64 }\npublic action burn(input token: Token, witness value: u64) { verification require token.amount > 0 require value > 0 consume token }\n";
+fn code_package(root: &Path, source: &str) {
+    use cellscript::artifact::{ArtifactAction, ArtifactContext, ArtifactDeclaration, ArtifactDispatch};
+    package(root, "client", source, "");
+    let manager = cellscript::package::PackageManager::new(root);
+    let mut manifest = manager.read_manifest().unwrap();
+    manifest.artifacts.push(ArtifactDeclaration {
+        name: "code-policy".into(),
+        context: ArtifactContext::TypeGroup { resource: "Token".into() },
+        dispatch: ArtifactDispatch::PolicyWitnessV1,
+        actions: vec![ArtifactAction { tag: 40, action: "burn".into() }],
+        common_checks: vec![],
+    });
+    manager.write_manifest(&manifest).unwrap();
+    lock(root);
+}
+fn compile_code(root: &Path, opt: u8) -> FrozenPackageModule {
+    compile_module(
+        Utf8Path::from_path(root).unwrap(),
+        "dev",
+        CompileOptions { opt_level: opt, ..Default::default() },
+        EntrySelection::Artifact("code-policy".into()),
+    )
+    .unwrap()
+}
+fn code_candidate(module: FrozenPackageModule, args: Vec<u8>) -> cellscript::package::frozen_interface::CodeCandidateInput {
+    use ckb_testtool::ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*};
+    let artifact = module.bundle()[0];
+    let lock = packed::Script::new_builder().code_hash([9u8; 32].pack()).hash_type(2u8).args(Bytes::new().pack()).build();
+    let selected =
+        lock.clone().as_builder().code_hash(packed::CellOutput::calc_data_hash(artifact)).args(Bytes::from(args).pack()).build();
+    let tx = TransactionBuilder::default()
+        .input(
+            packed::CellInput::new_builder()
+                .previous_output(packed::OutPoint::new_builder().tx_hash([7u8; 32].pack()).index(3u32).build())
+                .build(),
+        )
+        .output(packed::CellOutput::new_builder().capacity(1000000000000u64).lock(lock).build())
+        .output_data(Bytes::from(artifact.to_vec()).pack())
+        .build();
+    cellscript::package::frozen_interface::CodeCandidateInput {
+        module,
+        raw_transaction: tx.data().raw().as_slice().to_vec(),
+        output_index: 0,
+        selected_script: selected.as_slice().to_vec(),
+    }
+}
+
+#[test]
+fn native_code_catalog_binds_every_source_codec_and_actual_deployment_byte_tuple() {
+    use cellscript::package::frozen_interface::freeze_code_catalog;
+    use cellscript_artifact_checker::CheckerBudgets;
+    let directory = tempfile::tempdir().unwrap();
+    let original = directory.path().join("original");
+    let changed = directory.path().join("changed");
+    code_package(&original, CODE_SOURCE);
+    // Equal public contracts do not imply equal predicates or source bytes.
+    code_package(&changed, &CODE_SOURCE.replace("value > 0", "value == 7"));
+    for opt in 0..=3 {
+        std::fs::write(original.join("src/main.cell"), CODE_SOURCE).unwrap();
+        let required = compile_code(&original, opt);
+        let required_id = required.context_identity().to_owned();
+        let inputs = vec![code_candidate(compile_code(&original, opt), vec![1]), code_candidate(compile_code(&changed, opt), vec![2])];
+        let source_ids = inputs.iter().map(|input| input.module.context_identity().to_owned()).collect::<Vec<_>>();
+        let raw = inputs[1].raw_transaction.clone();
+        let script = inputs[1].selected_script.clone();
+        // Ownership survives later filesystem edits; it does not bless them.
+        std::fs::write(original.join("src/main.cell"), "module tampered\n").unwrap();
+        let checked = freeze_code_catalog(required, inputs, &CheckerBudgets::default()).unwrap();
+        assert_eq!(checked.required().context_identity(), required_id);
+        assert_eq!(checked.candidates()[1].raw_transaction(), raw);
+        assert_eq!(checked.candidates()[1].selected_script(), script);
+        let record: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
+        assert_eq!(record["schema"], "cellscript-frozen-code-catalog-v1");
+        assert_eq!(record["candidate_source_contexts"], serde_json::to_value(source_ids).unwrap());
+        assert_eq!(record["required_external_codec"], checked.required_codec().identity());
+        assert_eq!(record["checked_modules"], checked.module_evidence().identity());
+        for (index, candidate) in checked.candidates().iter().enumerate() {
+            assert_eq!(record["candidate_code_origins"][index], candidate.origin().identity());
+            let origin = cellscript_artifact_checker::code_origin::check_code_cell_origin(
+                candidate.module().bundle(),
+                candidate.raw_transaction(),
+                0,
+                candidate.selected_script(),
+                &CheckerBudgets::default(),
+            )
+            .unwrap();
+            assert_eq!(origin.identity(), candidate.origin().identity());
+            assert!(!candidate.module().projection().artifact_report().semantic_equivalence_claimed);
+        }
+        let bundles = checked.candidates().iter().map(|input| input.module().bundle()).collect::<Vec<_>>();
+        checked.module_evidence().check_unchanged_inputs(checked.required().bundle(), &bundles).unwrap();
+    }
+}
+
+#[test]
+fn native_code_catalog_rejects_unselected_bad_origins_interfaces_and_networks() {
+    use cellscript::package::frozen_interface::freeze_code_catalog;
+    use cellscript_artifact_checker::CheckerBudgets;
+    let directory = tempfile::tempdir().unwrap();
+    let original = directory.path().join("original");
+    let narrow = directory.path().join("narrow");
+    let other = directory.path().join("other");
+    let other_genesis = directory.path().join("other-genesis");
+    code_package(&original, CODE_SOURCE);
+    code_package(&narrow, &CODE_SOURCE.replace("amount: u64", "amount: u32"));
+    code_package(&other, CODE_SOURCE);
+    let manifest = other.join("Cell.toml");
+    std::fs::write(&manifest, std::fs::read_to_string(&manifest).unwrap().replace("test-chain", "other-chain")).unwrap();
+    lock(&other);
+    code_package(&other_genesis, CODE_SOURCE);
+    let manifest = other_genesis.join("Cell.toml");
+    std::fs::write(&manifest, std::fs::read_to_string(&manifest).unwrap().replace(&"11".repeat(32), &"22".repeat(32))).unwrap();
+    lock(&other_genesis);
+    for opt in 0..=3 {
+        for case in ["raw", "script", "output", "data", "interface", "network", "genesis"] {
+            let root = match case {
+                "interface" => &narrow,
+                "network" => &other,
+                "genesis" => &other_genesis,
+                _ => &original,
+            };
+            let mut bad = code_candidate(compile_code(root, opt), vec![2]);
+            match case {
+                "raw" => bad.raw_transaction.push(0),
+                "script" => bad.selected_script[16] ^= 1,
+                "output" => bad.output_index = 1,
+                "data" => *bad.raw_transaction.last_mut().unwrap() ^= 1,
+                _ => (),
+            }
+            let error = freeze_code_catalog(
+                compile_code(&original, opt),
+                vec![code_candidate(compile_code(&original, opt), vec![1]), bad],
+                &CheckerBudgets::default(),
+            )
+            .unwrap_err();
+            assert!(!error.message.is_empty(), "case {case}, O{opt}");
+            if matches!(case, "network" | "genesis") {
+                assert!(error.message.contains("conflicting pinned chain identities"));
+            }
+        }
+    }
+}
+
+#[test]
+fn native_code_catalog_bounds_all_inputs_before_parsing_and_returns_no_partial_catalog() {
+    use cellscript::package::frozen_interface::freeze_code_catalog;
+    use cellscript_artifact_checker::CheckerBudgets;
+    let directory = tempfile::tempdir().unwrap();
+    code_package(directory.path(), CODE_SOURCE);
+    let root = directory.path();
+    assert!(freeze_code_catalog(compile_code(root, 0), vec![], &CheckerBudgets::default()).unwrap_err().message.contains("1..=32"));
+    let too_many = (0..33).map(|index| code_candidate(compile_code(root, 0), vec![index])).collect();
+    assert!(freeze_code_catalog(compile_code(root, 0), too_many, &CheckerBudgets::default()).unwrap_err().message.contains("1..=32"));
+    for which in ["artifact", "record", "source-map", "large-raw", "large-script", "shared"] {
+        let mut budgets = CheckerBudgets::default();
+        let mut inputs = vec![code_candidate(compile_code(root, 0), vec![1])];
+        // Malformed first member must not obscure a later shared-budget error.
+        inputs[0].raw_transaction = vec![0];
+        match which {
+            "artifact" => budgets.artifact_bytes = 0,
+            "record" => budgets.record_bytes = 0,
+            "source-map" => budgets.source_map_bytes = 0,
+            "large-raw" => inputs[0].raw_transaction = vec![0; 4 * 1024 * 1024 + 1],
+            "large-script" => inputs[0].selected_script = vec![0; 4 * 1024 * 1024 + 1],
+            "shared" => {
+                for index in 2..=6 {
+                    let mut input = code_candidate(compile_code(root, 0), vec![index]);
+                    input.raw_transaction = vec![0; 4 * 1024 * 1024];
+                    inputs.push(input);
+                }
+            }
+            _ => unreachable!(),
+        }
+        let error = freeze_code_catalog(compile_code(root, 0), inputs, &budgets).unwrap_err();
+        assert!(error.message.contains("shared 16 MiB or per-file/caller byte budgets"), "{which}: {error:?}");
+    }
+}
+
+#[test]
+fn native_code_catalog_checks_all_32_members_and_distinguishes_complete_script_args() {
+    use cellscript::package::frozen_interface::freeze_code_catalog;
+    use cellscript_artifact_checker::CheckerBudgets;
+    let directory = tempfile::tempdir().unwrap();
+    code_package(directory.path(), CODE_SOURCE);
+    let root = directory.path();
+    let inputs = (0..32).map(|index| code_candidate(compile_code(root, 0), vec![index])).collect();
+    let checked = freeze_code_catalog(compile_code(root, 0), inputs, &CheckerBudgets::default()).unwrap();
+    assert_eq!(checked.candidates().len(), 32);
+    let first = checked.candidates()[0].origin();
+    let second = checked.candidates()[1].origin();
+    assert_eq!(first.transaction_hash(), second.transaction_hash());
+    assert_eq!(first.output_index(), second.output_index());
+    assert_ne!(first.selected_script_hash(), second.selected_script_hash());
+    assert_ne!(first.identity(), second.identity());
+    let mut inputs = (0..32).map(|index| code_candidate(compile_code(root, 0), vec![index])).collect::<Vec<_>>();
+    inputs[31].output_index = 1;
+    assert!(freeze_code_catalog(compile_code(root, 0), inputs, &CheckerBudgets::default())
+        .unwrap_err()
+        .message
+        .contains("code output index is absent"));
+    let duplicate = vec![code_candidate(compile_code(root, 0), vec![1]), code_candidate(compile_code(root, 0), vec![1])];
+    assert!(freeze_code_catalog(compile_code(root, 0), duplicate, &CheckerBudgets::default())
+        .unwrap_err()
+        .message
+        .contains("duplicate concrete Script/code deployment"));
+}

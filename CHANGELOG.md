@@ -2,6 +2,13 @@
 
 ## Unreleased — 0.32
 
+Freeze native required/candidate source snapshots together with every checked
+finite policy codec and actual code-output/Script byte origin. Check all 1–32
+members under shared preparse byte ceilings and pinned chain identity; reject
+duplicate concrete deployments and any invalid member. This host catalog does
+not authorize immutable roots, Type history or nominal open handles; see
+`docs/FROZEN_CODE_CATALOG.md`.
+
 Add optional code Cell byte-origin checking from actual canonical CKB raw
 transaction, selected output and complete Script bytes. Recompute transaction,
 Script and data/Type identities; reject changed ELF bytes, malformed/unselected

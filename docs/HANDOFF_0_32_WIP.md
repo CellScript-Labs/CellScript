@@ -1044,3 +1044,43 @@ version or resource ceiling changed. The exact staged source state now freezes
 for full dev. The two pending signed/checker slices will share the next clean
 backend/CCC replay before push. Full CI remains deferred; #28/H1/H2, #29 and
 #44–#46 remain incomplete and independent security review remains unassigned.
+
+## Native all-member code/source closure follow-up
+
+The exact staged code-origin state passed full dev in
+`.cap/logs/1791482265-4721.log` (96,267 raw bytes) and was G-signed as
+`8ea6105ecbace5c392eab729ede232bdef801203`. The earlier finite external-codec
+slice remains G-signed at `baae1aad`; both descend from public `588f6a28`.
+Remote `0.32` was fetched again and still equals `588f6a28`; no remote divergence
+needs merging. These two commits still require the batched clean backend/CCC
+replay before push. Full CI has not been started.
+
+The next native `freeze_code_catalog` constructor consumes actual privately
+compiled source snapshots and the raw creation-transaction/complete selected
+Script bytes. It checks every 1–32 candidate's directional module contract,
+finite public policy codec and exact deployment byte origin under one shared
+16 MiB input ceiling before new parsers. The required and candidate chain
+ID/genesis pins must agree. Concrete (code transaction hash, output index,
+complete Script hash) duplicates reject; different concrete args remain distinct
+without an authorization claim. No partially checked catalog escapes on error.
+Owned immutable getters retain source context, bundles and raw bytes for later
+materialization. The native source compilation was already separately bounded;
+the new shared preflight does not claim to occur before those earlier compiles.
+
+This is still a host-only prerequisite. It grants no nominal source I/handle,
+consumer authorization, consensus commitment, Type replacement history, liveness,
+ProtocolBundle or generated-builder parity. Whole H1/H2, #29 and #44–#46 remain
+unfinished, and independent security review is still unassigned. Focused tests,
+strict clippy and full dev for this new slice are pending; all three slices will
+share one clean backend/CCC replay before publication. See
+`docs/FROZEN_CODE_CATALOG.md` for the exact scope and limits.
+
+Final native code-catalog focused replay passes four tests in
+`.cap/logs/1791483210-26066.log` (36.95 seconds). The negatives now include
+independent chain/genesis conflicts and an invalid final member in a full
+32-member set, as well as per-file/shared/caller-budget preflight before
+malformed raw bytes. Strict compiler/checker all-target clippy passes in
+`.cap/logs/1791483233-26540.log`. The candidate directories remain local test
+snapshots and their code transactions are synthetic SDK-produced byte oracles;
+these results are not network deployment or consensus evidence. The exact
+staged source will now freeze for dev and then G-signed clean backend/CCC replay.
