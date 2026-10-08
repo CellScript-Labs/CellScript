@@ -689,6 +689,13 @@ impl CodeGenerator {
         self.collection_region_start = next_cell_slot;
         next_cell_slot += collection_count * collection_slot_size;
 
+        self.return_buffer_pointer_offset = self.current_return_buffer_bytes().map(|_| {
+            next_cell_slot = align_up(next_cell_slot, 8);
+            let offset = next_cell_slot;
+            next_cell_slot += 8;
+            offset
+        });
+
         self.frame_size = align_frame(next_cell_slot + RUNTIME_EXPR_TEMP_SIZE + RUNTIME_SCRATCH_SIZE + 16);
     }
 
@@ -961,6 +968,11 @@ impl CodeGenerator {
                 self.emit_spill_abi_arg(abi_index, self.scalar_slot_offset(param.binding.id));
                 abi_index += 1;
             }
+        }
+
+        if let Some(offset) = self.return_buffer_pointer_offset {
+            self.emit(format!("# cellscript abi: caller-owned struct return pointer={}", abi_arg_label(abi_index)));
+            self.emit_spill_abi_arg(abi_index, offset);
         }
 
         Ok(())

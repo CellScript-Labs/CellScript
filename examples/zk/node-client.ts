@@ -31,10 +31,12 @@ class LocalSecpSigner extends ccc.SignerCkbPrivateKey {
 }
 try {
   const signer = new LocalSecpSigner(owner.value, `0x${'45'.repeat(32)}`);
-  const prover = localProver(config.proverExecutable, config.setupPackage, config.ownerSecretFile, sdk);
+  const tool = { executable: config.proverExecutable, sha256: config.proverSha256 };
+  const prover = localProver(tool, config.setupPackage, config.ownerSecretFile, sdk);
   await assert.rejects(() => prepareIncrement(signer, config.counter, { ...config.deployment, genesisHash: `0x${'00'.repeat(32)}` }, sdk), /genesis mismatch/);
   await assert.rejects(() => prepareIncrement(signer, config.counter, { ...config.deployment, child: { ...config.deployment.child, dataHash: `0x${'00'.repeat(32)}` } }, sdk), /child: live data hash/);
   const prepared = await prepareIncrement(signer, config.counter, config.deployment, sdk);
+  await assert.rejects(() => prepared.prove(localProver({ ...tool, sha256: '00'.repeat(32) }, config.setupPackage, config.ownerSecretFile, sdk)), /SHA-256 mismatch/);
   const controller = new AbortController();
   const cancelled = prepared.prove(prover, { signal: controller.signal });
   controller.abort();
@@ -77,6 +79,7 @@ try {
     first: result.hash, second: secondResult.hash, confirmed: true, stale_input_rejected: true,
     mutated_transaction_rejected: true, substituted_proof_pre_sign_rejected: true,
     cancelled_proving_recovered: true,
+    prover_sha256: config.proverSha256, wrong_prover_pin_rejected: true,
     corrupt_proof_dry_run_rejected: true, corrupt_proof_parent_error: 79,
     wrong_genesis_rejected: true, wrong_child_rejected: true,
   }, null, 2));

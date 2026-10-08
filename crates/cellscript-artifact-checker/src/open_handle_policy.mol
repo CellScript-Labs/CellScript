@@ -1,0 +1,48 @@
+// Fixed Molecule records; tags, reserved bytes and hash rules are defined by
+// CELLSCRIPT_OPEN_HANDLE_POLICY.md. All integer arrays are little-endian.
+array OpenHandleHash [byte; 32];
+array OpenHandleMagic [byte; 8];
+array OpenHandleU64 [byte; 8];
+array OpenHandleU32 [byte; 4];
+array OpenHandleReserved6 [byte; 6];
+array OpenHandleReserved7 [byte; 7];
+array OpenHandleSiblings [OpenHandleHash; 5];
+struct OpenHandlePolicyHeader {
+    magic: OpenHandleMagic,
+    class: byte,
+    role: byte,
+    mode: byte,
+    member_count: byte,
+    sequence: OpenHandleU64,
+    minimum_admission_sequence: OpenHandleU64,
+    required_interface: OpenHandleHash,
+    exact_receipt: OpenHandleHash,
+    network_genesis: OpenHandleHash,
+    target_profile: OpenHandleHash,
+    runtime_abi: OpenHandleHash,
+}
+struct OpenHandlePolicyMember {
+    magic: OpenHandleMagic,
+    status: byte,
+    hash_type: byte,
+    reserved: OpenHandleReserved6,
+    admission_sequence: OpenHandleU64,
+    deployment_sequence: OpenHandleU64,
+    receipt: OpenHandleHash,
+    interface: OpenHandleHash,
+    artifact: OpenHandleHash,
+    script: OpenHandleHash,
+    code_hash: OpenHandleHash,
+    code_tx_hash: OpenHandleHash,
+    deployment_line: OpenHandleHash,
+    history_tip: OpenHandleHash,
+    code_output_index: OpenHandleU32,
+}
+struct OpenHandlePolicySelection {
+    magic: OpenHandleMagic,
+    header: OpenHandlePolicyHeader,
+    member: OpenHandlePolicyMember,
+    member_index: byte,
+    reserved: OpenHandleReserved7,
+    siblings: OpenHandleSiblings,
+}

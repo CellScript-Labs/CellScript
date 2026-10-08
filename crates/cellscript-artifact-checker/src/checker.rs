@@ -1585,7 +1585,7 @@ fn validate_public_interface_metadata(metadata: &Value, module: &str, expected_h
     Ok(())
 }
 
-fn canonical_json_value(value: &Value) -> Value {
+pub(crate) fn canonical_json_value(value: &Value) -> Value {
     match value {
         Value::Object(object) => {
             let mut keys = object.keys().collect::<Vec<_>>();
@@ -1632,8 +1632,8 @@ fn validate_public_type_parameters(value: Option<&Value>, label: &str, layout_ty
         let param = param.as_object().ok_or_else(|| metadata_binding_error(format!("{label} parameter must be an object")))?;
         let name = param.get("name").and_then(Value::as_str).unwrap_or("");
         let valid_name = !name.is_empty()
-            && name.chars().next().is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
-            && name.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_');
+            && name.chars().next().is_some_and(|ch| ch.is_alphabetic() || ch == '_')
+            && name.chars().all(|ch| ch.is_alphanumeric() || ch == '_');
         if !valid_name || !names.insert(name) {
             return Err(metadata_binding_error(format!("{label} has an invalid or duplicate parameter '{name}'")));
         }
@@ -1732,6 +1732,9 @@ fn validate_typed_semantics(record: &VerifiedLoweringRecord) -> Result<(), Check
             return typed_error(format!("generic instantiation '{}' has a non-canonical identity", instantiation.identity));
         }
     }
+    crate::value_abilities::verify(typed)?;
+    crate::generic_projection::verify(typed)?;
+    let nominal_aliases = crate::generic_projection::nominal_aliases(typed);
     for entry in &typed.entries {
         let Some(lowering) = lowering_entries.get(entry.id.as_str()) else {
             if entry.kind == "helper" && !called_targets.contains(entry.name.as_str()) {
@@ -1811,16 +1814,26 @@ fn validate_typed_semantics(record: &VerifiedLoweringRecord) -> Result<(), Check
                             .params
                             .iter()
                             .zip(&operation.operands)
-                            .any(|(param, operand)| !typed_call_operand_matches(entry, param, operand)))
+                            .any(|(param, operand)| !typed_call_operand_matches(entry, param, operand, &nominal_aliases)))
                 {
-                    return typed_error(format!("typed call '{}' has an invalid signature contract", call.target));
+                    return typed_error(format!(
+                        "typed call '{}' has an invalid signature contract: parameters {:?}, operands {:?}",
+                        call.target,
+                        call.params,
+                        operation.operands.iter().map(|operand| &operand.ty).collect::<Vec<_>>()
+                    ));
                 }
                 if let Some(call) = &operation.call {
                     match operation.destinations.as_slice() {
                         [] if call.return_type != "unit" => {
                             return typed_error(format!("typed call '{}' discards a non-unit return value", call.target));
                         }
-                        [destination] if locals.get(destination).is_none_or(|local| local.ty != call.return_type) => {
+                        [destination]
+                            if locals.get(destination).is_none_or(|local| {
+                                crate::generic_projection::checked_source_type(&local.ty, &nominal_aliases)
+                                    != crate::generic_projection::checked_source_type(&call.return_type, &nominal_aliases)
+                            }) =>
+                        {
                             return typed_error(format!("typed call '{}' return type differs from its destination", call.target));
                         }
                         destinations if destinations.len() > 1 => {
@@ -3485,16 +3498,22 @@ fn validate_unary_types(operator: &str, operand: Option<&str>, destination: Opti
     }
 }
 
-fn typed_call_operand_matches(entry: &TypedSemanticEntry, param: &str, operand: &TypedSemanticOperand) -> bool {
-    if canonical_abi_type(param) == canonical_abi_type(&operand.ty) {
+fn typed_call_operand_matches(
+    entry: &TypedSemanticEntry,
+    param: &str,
+    operand: &TypedSemanticOperand,
+    nominal_aliases: &BTreeMap<&str, String>,
+) -> bool {
+    let canonical = |ty: &str| crate::generic_projection::checked_source_type(ty, nominal_aliases);
+    if canonical(param) == canonical(&operand.ty) {
         return true;
     }
     let Some(local_id) = operand.local else { return false };
     let param_pointee = strip_reference(param);
     let operand_pointee = strip_reference(&operand.ty);
-    let coercion = if param_pointee != param && canonical_abi_type(param_pointee) == canonical_abi_type(&operand.ty) {
+    let coercion = if param_pointee != param && canonical(param_pointee) == canonical(&operand.ty) {
         "ref"
-    } else if operand_pointee != operand.ty && canonical_abi_type(param) == canonical_abi_type(operand_pointee) {
+    } else if operand_pointee != operand.ty && canonical(param) == canonical(operand_pointee) {
         "deref"
     } else {
         return false;
@@ -4054,7 +4073,7 @@ pub(crate) fn canonical_abi_type(ty: &str) -> String {
         identifier.clear();
     };
     for character in ty.chars() {
-        if character.is_ascii_alphanumeric() || character == '_' {
+        if character.is_alphanumeric() || character == '_' {
             identifier.push(character);
         } else {
             flush_identifier(&mut canonical, &mut identifier);
@@ -8146,6 +8165,67 @@ fn map_elf_error(error: ElfParseError) -> CheckerError {
 mod tests {
     use super::*;
 
+    #[test]
+    fn empty_field_canonicalization_preserves_overlap_rejection_and_nonfixed_order() {
+        let mut record = TypedSemanticRecord {
+            types: vec![TypedSemanticType {
+                name: "Mixed".into(),
+                kind: "struct".into(),
+                encoded_size: Some(8),
+                fields: vec![
+                    crate::TypedSemanticField { name: "z".into(), ty: "unit".into(), offset: 0, width_bytes: Some(0) },
+                    crate::TypedSemanticField { name: "a".into(), ty: "unit".into(), offset: 0, width_bytes: Some(0) },
+                    crate::TypedSemanticField { name: "value".into(), ty: "u64".into(), offset: 0, width_bytes: Some(8) },
+                    crate::TypedSemanticField { name: "tail".into(), ty: "unit".into(), offset: 8, width_bytes: Some(0) },
+                ],
+                identity_policy: "none".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let mut dynamic = record.clone();
+        dynamic.types[0].encoded_size = None;
+        dynamic.types[0].fields[2].width_bytes = None;
+        dynamic.canonicalize();
+        assert_eq!(dynamic.types[0].fields.iter().map(|field| field.name.as_str()).collect::<Vec<_>>(), ["a", "value", "z", "tail"]);
+
+        let rehash = |ty: &mut TypedSemanticType| {
+            ty.layout_hash = canonical_hash(
+                "cellscript-typed-layout-v2",
+                &(
+                    ty.kind.as_str(),
+                    ty.encoded_size,
+                    &ty.fields,
+                    ty.tag_width_bytes,
+                    &ty.variants,
+                    &ty.capabilities,
+                    &ty.identity_policy,
+                ),
+            )
+            .unwrap();
+        };
+        record.canonicalize();
+        assert_eq!(record.types[0].fields.iter().map(|field| field.name.as_str()).collect::<Vec<_>>(), ["a", "z", "value", "tail"]);
+        rehash(&mut record.types[0]);
+        validate_typed_type(&record.types[0]).unwrap();
+        for outside in [false, true] {
+            let mut changed = record.clone();
+            if outside {
+                changed.types[0].fields.iter_mut().find(|field| field.name == "tail").unwrap().offset = 9;
+            } else {
+                changed.types[0].fields.push(crate::TypedSemanticField {
+                    name: "overlap".into(),
+                    ty: "u64".into(),
+                    offset: 0,
+                    width_bytes: Some(8),
+                });
+            }
+            changed.canonicalize();
+            rehash(&mut changed.types[0]);
+            assert!(validate_typed_type(&changed.types[0]).is_err(), "outside={outside}");
+        }
+    }
+
     fn public_interface_hash(interface: &Value) -> String {
         let canonical = canonical_json_value(interface);
         hex_encode(&ckb_blake2b256(&serde_json::to_vec(&canonical).unwrap()))
@@ -8266,6 +8346,7 @@ mod tests {
         assert_ne!(canonical_abi_type("&[Hash; 4]"), canonical_abi_type("[hash; 4]"));
         assert_ne!(canonical_abi_type("Pair<u64>"), canonical_abi_type("Pair<u128>"));
         assert_ne!(canonical_abi_type("AddressBook"), canonical_abi_type("addressBook"));
+        assert_ne!(canonical_abi_type("αHash"), canonical_abi_type("αhash"));
     }
 
     #[test]

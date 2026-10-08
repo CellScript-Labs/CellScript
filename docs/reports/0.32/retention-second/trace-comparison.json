@@ -1,0 +1,338 @@
+{
+  "schema": "cellscript-retention-second-corpus-trace-comparison-v1",
+  "source": {
+    "cargo_lock_sha256": "643d60820b5ca8267149289e814f14dd15b39bce087eb0a0a680527bc6b8e11e",
+    "compiler_version": "0.31.0",
+    "measurement_fixture_sha256": {
+      "tests/business_corpus.rs": "5c832627c40934589fac4a6ba7c2bc0bae43b1c3f1675d2efc00abcbbfaa19fc",
+      "tests/cost_corpus.rs": "56d45e03402eb26c84a0029c8fc54639d48a012c151adea5991004bdffd6f1c0",
+      "tests/fixtures/capability_anchor_authorization.cell": "710f6d15afc0d7f85a7e714c57db94a140743928a6fbc4642f4054326242b2e3",
+      "tests/fixtures/capability_anchor_order.cell": "b3541a954b6b8a43c2b32a8d5cd8d6075e88bef96014085d515449b676f3e906",
+      "tests/fixtures/capability_anchor_policy.cell": "509b283a27208c6a8d8ca4890d7f8026cb82941ac75a09db75ecb62a95693858",
+      "tests/fixtures/capability_anchor_token.cell": "9b7019de49f86dcbe76de012dbc5afc1d7e956b472c378be8ba1a5b9c174f23d",
+      "tests/fixtures/cost_corpus/Cargo.toml": "fbcda0a45b3a0a0ba194b793812e351f00e9bbd54ddcd4b8905e82f95d387182",
+      "tests/fixtures/cost_corpus/expanded_budgets.json": "ecbb83bcac4d88438a95f014ee0d44c6912221367c63addcda745fe6b9ff97e9",
+      "tests/fixtures/cost_corpus/expanded_fixtures.json": "f926437a0c2439173d43d4a703ba881139cf9293be88a25aab2ac401228ffcd2",
+      "tests/fixtures/cost_corpus/growth_budgets.json": "68ccb8d6faa6eed2fbf94a1b757efc9d6045d85dc89dc973e9481d2b4766b160",
+      "tests/fixtures/cost_corpus/multi_script_budgets.json": "f6de8bc29396c48942813c3908a6ce9da6736b8010f66e63d5ddd7f86929ccd1",
+      "tests/fixtures/cost_corpus/nft_lock.cell": "eadffe28485199937e01d6051c00ce238b6d817f5657dcefe46a0669a619c1d0",
+      "tests/fixtures/cost_corpus/pool_merge.cell": "1f11906e1562c306bce400acb6128457ff28ba19ddda1b2e0bdb9b6d1013f521",
+      "tests/fixtures/cost_corpus/scalar_budgets.json": "49df193a48f3f66782b7d60f85ec37a979b0a991b1c37bb36ac81dc761d3afc6",
+      "tests/fixtures/cost_corpus/schema_roll.cell": "8d005226c687e0a8899a6d10cf4390952d8bad23b3b846ce54b0e93f4db3e0aa",
+      "tests/fixtures/cost_corpus/src/common.rs": "c8f2f8f704ec3f7a089c404ec8da184947b148a8d204169d586aad0235357622",
+      "tests/fixtures/cost_corpus/src/nft_lock.rs": "86a920f9935ec3aa6d72dcc27cdbfd2ab515185d1b4858d27964b0a99326e0cf",
+      "tests/fixtures/cost_corpus/src/pool_merge.rs": "df1ae134b07f56bdcdf9f349184488ab67e64e202ee8c6639337f07d08191b63",
+      "tests/fixtures/cost_corpus/src/schema_roll.rs": "68090359cbd094f6bb41c781b445fb03625bf2bcd069e3b753a2565f1d76eca0",
+      "tests/support/cost_growth.rs": "503cbee74c239241093da0c57be81db4352e0927f842b00c62b5add5deb104d8",
+      "tests/support/cost_measurement.rs": "030746e0603b1a5c63f952e8d5ad328d303a7f7c266dd8d7fc67190d2039d7b4",
+      "tests/support/cost_memory.rs": "7ff37bf1533b690addc57f4fcd25a2f574f88e01ff550df117dec4d6501c9d0d",
+      "tests/support/cost_scalar.rs": "d941145b410ef4ac893d3ba5286131ee204e412afbf108be0bee64fd3117f444",
+      "tests/support/cost_stack.rs": "8b0ec35c4c737e911fab8963f654d775806b40192998b7be6dadd75310cb0679"
+    },
+    "rust_toolchain": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.97.1\nLLVM version: 22.1.6",
+    "source_commit": "35bf983db30aae80281f97e30bbce08a878d7c58",
+    "source_dirty": true,
+    "tracked_diff_sha256": "3dcdd92cdcd701343cf287f14a3f7aa3f352ced7f947d7b746348a9906925c39",
+    "untracked_source_sha256": "80e472ff249e4eea79cf5d03d2e6ef5a567abe47446fd250fc4e487357dacc08"
+  },
+  "baseline_source": {
+    "cargo_lock_sha256": "643d60820b5ca8267149289e814f14dd15b39bce087eb0a0a680527bc6b8e11e",
+    "compiler_version": "0.31.0",
+    "measurement_fixture_sha256": {
+      "tests/business_corpus.rs": "5c832627c40934589fac4a6ba7c2bc0bae43b1c3f1675d2efc00abcbbfaa19fc",
+      "tests/cost_corpus.rs": "56d45e03402eb26c84a0029c8fc54639d48a012c151adea5991004bdffd6f1c0",
+      "tests/fixtures/capability_anchor_authorization.cell": "710f6d15afc0d7f85a7e714c57db94a140743928a6fbc4642f4054326242b2e3",
+      "tests/fixtures/capability_anchor_order.cell": "b3541a954b6b8a43c2b32a8d5cd8d6075e88bef96014085d515449b676f3e906",
+      "tests/fixtures/capability_anchor_policy.cell": "509b283a27208c6a8d8ca4890d7f8026cb82941ac75a09db75ecb62a95693858",
+      "tests/fixtures/capability_anchor_token.cell": "9b7019de49f86dcbe76de012dbc5afc1d7e956b472c378be8ba1a5b9c174f23d",
+      "tests/fixtures/cost_corpus/Cargo.toml": "fbcda0a45b3a0a0ba194b793812e351f00e9bbd54ddcd4b8905e82f95d387182",
+      "tests/fixtures/cost_corpus/expanded_budgets.json": "ecbb83bcac4d88438a95f014ee0d44c6912221367c63addcda745fe6b9ff97e9",
+      "tests/fixtures/cost_corpus/expanded_fixtures.json": "f926437a0c2439173d43d4a703ba881139cf9293be88a25aab2ac401228ffcd2",
+      "tests/fixtures/cost_corpus/growth_budgets.json": "68ccb8d6faa6eed2fbf94a1b757efc9d6045d85dc89dc973e9481d2b4766b160",
+      "tests/fixtures/cost_corpus/multi_script_budgets.json": "f6de8bc29396c48942813c3908a6ce9da6736b8010f66e63d5ddd7f86929ccd1",
+      "tests/fixtures/cost_corpus/nft_lock.cell": "eadffe28485199937e01d6051c00ce238b6d817f5657dcefe46a0669a619c1d0",
+      "tests/fixtures/cost_corpus/pool_merge.cell": "1f11906e1562c306bce400acb6128457ff28ba19ddda1b2e0bdb9b6d1013f521",
+      "tests/fixtures/cost_corpus/scalar_budgets.json": "49df193a48f3f66782b7d60f85ec37a979b0a991b1c37bb36ac81dc761d3afc6",
+      "tests/fixtures/cost_corpus/schema_roll.cell": "8d005226c687e0a8899a6d10cf4390952d8bad23b3b846ce54b0e93f4db3e0aa",
+      "tests/fixtures/cost_corpus/src/common.rs": "c8f2f8f704ec3f7a089c404ec8da184947b148a8d204169d586aad0235357622",
+      "tests/fixtures/cost_corpus/src/nft_lock.rs": "86a920f9935ec3aa6d72dcc27cdbfd2ab515185d1b4858d27964b0a99326e0cf",
+      "tests/fixtures/cost_corpus/src/pool_merge.rs": "df1ae134b07f56bdcdf9f349184488ab67e64e202ee8c6639337f07d08191b63",
+      "tests/fixtures/cost_corpus/src/schema_roll.rs": "68090359cbd094f6bb41c781b445fb03625bf2bcd069e3b753a2565f1d76eca0",
+      "tests/support/cost_growth.rs": "503cbee74c239241093da0c57be81db4352e0927f842b00c62b5add5deb104d8",
+      "tests/support/cost_measurement.rs": "030746e0603b1a5c63f952e8d5ad328d303a7f7c266dd8d7fc67190d2039d7b4",
+      "tests/support/cost_memory.rs": "7ff37bf1533b690addc57f4fcd25a2f574f88e01ff550df117dec4d6501c9d0d",
+      "tests/support/cost_scalar.rs": "d941145b410ef4ac893d3ba5286131ee204e412afbf108be0bee64fd3117f444",
+      "tests/support/cost_stack.rs": "8b0ec35c4c737e911fab8963f654d775806b40192998b7be6dadd75310cb0679"
+    },
+    "rust_toolchain": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.97.1\nLLVM version: 22.1.6",
+    "source_commit": "622c850550428bbe000017c1b55944a9248717cd",
+    "source_dirty": true,
+    "tracked_diff_sha256": "bff1470d30ce96e50ce7eeffbf4ce4b2e0ec68d2c08ffe2e131ff95a2f78dcc0",
+    "untracked_source_sha256": "138c2398fe821317ad54bb1d304ecc9ed58229bdc79e39f972f72f4f45dbde5f"
+  },
+  "rows": [
+    1707,
+    1707
+  ],
+  "candidate_raw_sha256": "052fb2e6a2d0dd445c97138d05fbb68987258cfa7e55948c62da2fb5f6315f65",
+  "cycles_lower": 4,
+  "cycles_equal": 1703,
+  "changes": [
+    {
+      "name": "scalar-overlap-64/valid-true",
+      "cycles": [
+        4435,
+        4434
+      ],
+      "elf_bytes": [
+        3560,
+        3560
+      ],
+      "before": [
+        {
+          "generation": 0,
+          "stack": 7088,
+          "instructions": {
+            "ADD": 180,
+            "ADDI": 162,
+            "BEQ": 39,
+            "BLTU": 8,
+            "BNE": 13,
+            "ECALL": 4,
+            "FAR_JUMP_REL": 2,
+            "JAL": 26,
+            "JALR_VERSION1": 2,
+            "LBU_VERSION1": 52,
+            "LD_VERSION1": 198,
+            "LUI": 11,
+            "OR": 19,
+            "SB": 24,
+            "SD": 135,
+            "SLLI": 22,
+            "SLTU": 27,
+            "SRLI": 4,
+            "SUB": 13
+          }
+        }
+      ],
+      "after": [
+        {
+          "generation": 0,
+          "stack": 7088,
+          "instructions": {
+            "ADD": 180,
+            "ADDI": 163,
+            "BEQ": 39,
+            "BLTU": 8,
+            "BNE": 13,
+            "ECALL": 4,
+            "FAR_JUMP_REL": 2,
+            "JAL": 26,
+            "JALR_VERSION1": 2,
+            "LBU_VERSION1": 52,
+            "LD_VERSION1": 197,
+            "LUI": 11,
+            "OR": 19,
+            "SB": 24,
+            "SD": 135,
+            "SLLI": 22,
+            "SLTU": 27,
+            "SRLI": 4,
+            "SUB": 13
+          }
+        }
+      ]
+    },
+    {
+      "name": "scalar-overlap-64/valid-false",
+      "cycles": [
+        4412,
+        4411
+      ],
+      "elf_bytes": [
+        3560,
+        3560
+      ],
+      "before": [
+        {
+          "generation": 0,
+          "stack": 7088,
+          "instructions": {
+            "ADD": 178,
+            "ADDI": 159,
+            "BEQ": 39,
+            "BLTU": 8,
+            "BNE": 13,
+            "ECALL": 4,
+            "FAR_JUMP_REL": 2,
+            "JAL": 25,
+            "LBU_VERSION1": 52,
+            "LD_VERSION1": 195,
+            "LUI": 8,
+            "OR": 19,
+            "SB": 24,
+            "SD": 135,
+            "SLLI": 22,
+            "SLTU": 27,
+            "SRLI": 4,
+            "SUB": 13
+          }
+        }
+      ],
+      "after": [
+        {
+          "generation": 0,
+          "stack": 7088,
+          "instructions": {
+            "ADD": 178,
+            "ADDI": 160,
+            "BEQ": 39,
+            "BLTU": 8,
+            "BNE": 13,
+            "ECALL": 4,
+            "FAR_JUMP_REL": 2,
+            "JAL": 25,
+            "LBU_VERSION1": 52,
+            "LD_VERSION1": 194,
+            "LUI": 8,
+            "OR": 19,
+            "SB": 24,
+            "SD": 135,
+            "SLLI": 22,
+            "SLTU": 27,
+            "SRLI": 4,
+            "SUB": 13
+          }
+        }
+      ]
+    },
+    {
+      "name": "scalar-overlap-260/valid-true",
+      "cycles": [
+        8645,
+        8644
+      ],
+      "elf_bytes": [
+        10024,
+        10024
+      ],
+      "before": [
+        {
+          "generation": 0,
+          "stack": 8656,
+          "instructions": {
+            "ADD": 589,
+            "ADDI": 372,
+            "BEQ": 39,
+            "BLTU": 8,
+            "BNE": 13,
+            "ECALL": 4,
+            "FAR_JUMP_REL": 2,
+            "JAL": 26,
+            "JALR_VERSION1": 2,
+            "LBU_VERSION1": 52,
+            "LD_VERSION1": 785,
+            "LUI": 28,
+            "OR": 19,
+            "SB": 24,
+            "SD": 527,
+            "SLLI": 22,
+            "SLTU": 27,
+            "SRLI": 4,
+            "SUB": 13
+          }
+        }
+      ],
+      "after": [
+        {
+          "generation": 0,
+          "stack": 8656,
+          "instructions": {
+            "ADD": 589,
+            "ADDI": 373,
+            "BEQ": 39,
+            "BLTU": 8,
+            "BNE": 13,
+            "ECALL": 4,
+            "FAR_JUMP_REL": 2,
+            "JAL": 26,
+            "JALR_VERSION1": 2,
+            "LBU_VERSION1": 52,
+            "LD_VERSION1": 784,
+            "LUI": 28,
+            "OR": 19,
+            "SB": 24,
+            "SD": 527,
+            "SLLI": 22,
+            "SLTU": 27,
+            "SRLI": 4,
+            "SUB": 13
+          }
+        }
+      ]
+    },
+    {
+      "name": "scalar-overlap-260/valid-false",
+      "cycles": [
+        8614,
+        8613
+      ],
+      "elf_bytes": [
+        10024,
+        10024
+      ],
+      "before": [
+        {
+          "generation": 0,
+          "stack": 8656,
+          "instructions": {
+            "ADD": 584,
+            "ADDI": 367,
+            "BEQ": 39,
+            "BLTU": 8,
+            "BNE": 13,
+            "ECALL": 4,
+            "FAR_JUMP_REL": 2,
+            "JAL": 25,
+            "LBU_VERSION1": 52,
+            "LD_VERSION1": 782,
+            "LUI": 22,
+            "OR": 19,
+            "SB": 24,
+            "SD": 527,
+            "SLLI": 22,
+            "SLTU": 27,
+            "SRLI": 4,
+            "SUB": 13
+          }
+        }
+      ],
+      "after": [
+        {
+          "generation": 0,
+          "stack": 8656,
+          "instructions": {
+            "ADD": 584,
+            "ADDI": 368,
+            "BEQ": 39,
+            "BLTU": 8,
+            "BNE": 13,
+            "ECALL": 4,
+            "FAR_JUMP_REL": 2,
+            "JAL": 25,
+            "LBU_VERSION1": 52,
+            "LD_VERSION1": 781,
+            "LUI": 22,
+            "OR": 19,
+            "SB": 24,
+            "SD": 527,
+            "SLLI": 22,
+            "SLTU": 27,
+            "SRLI": 4,
+            "SUB": 13
+          }
+        }
+      ]
+    }
+  ]
+}

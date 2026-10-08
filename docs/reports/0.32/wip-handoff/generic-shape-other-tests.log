@@ -1,0 +1,75 @@
+   Compiling cellscript v0.31.0 (/home/arthur/.codex/worktrees/post-032-followups/CellScript)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 12.97s
+     Running tests/interface_inspection.rs (target/debug/deps/interface_inspection-af0138200c0cffa3)
+
+running 8 tests
+test generic_projection_preserves_unicode_identifiers_and_parameter_boundaries ... ok
+test interface_callable_bindings_preserve_locks_borrows_outputs_and_generic_names ... ok
+test interface_generic_projection_checks_nested_structs_enums_and_functions ... ok
+test interface_inspection_keeps_concrete_enum_variants_and_payload_cardinalities ... ok
+test interface_inspection_matches_nested_fields_and_instantiated_source_type_names ... ok
+test interface_inspection_preserves_declared_and_inferred_effects_separately ... ok
+test interface_inspection_retains_public_generic_templates_without_runtime_instances ... ok
+test interface_metadata_budget_is_applied_before_parsing_untrusted_bytes ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.04s
+
+     Running tests/policy_artifact_checker.rs (target/debug/deps/policy_artifact_checker-3ff7ac7b3aa10265)
+
+running 21 tests
+test generic_call_alias_matching_rejects_same_width_distinct_nominal_values ... FAILED
+test instantiated_interface_templates_reject_rebound_layout_and_signature_substitution ... ok
+test interface_callable_signature_cannot_be_forged_after_outer_hash_rebinding ... ok
+test interface_cell_capabilities_cannot_be_forged_by_rebinding_outer_hashes ... ok
+test interface_inspection_recomputes_inner_digests_and_profile_bindings_after_rebinding ... ok
+test interface_inspection_rejects_unknown_fields_after_all_outer_hashes_are_rebound ... ok
+test interface_layout_cannot_be_forged_by_rebinding_its_inner_and_outer_hashes ... ok
+test interface_nested_type_arguments_cannot_be_forged_by_rebinding_layout_hashes ... ok
+test interface_variant_cardinality_cannot_be_forged_by_rebinding_layout_hashes ... ok
+test low_mask_policy_tags_reject_rebound_shift_and_seed_mutations ... ok
+test policy_dispatch_machine_contract_covers_editions_optimizers_tag_extremes_and_no_common_checks ... ok
+test private_generic_contracts_cannot_be_omitted_or_forged_after_rebinding ... ok
+test private_generic_shapes_reject_rebound_layout_signature_and_phantom_mutations ... ok
+test raw_builder_param_mutations_reject_despite_rebound_outer_identities ... ok
+test raw_policy_declaration_and_outer_abi_mutations_reject_after_rebinding ... ok
+test real_policy_bundle_and_unchanged_identity_rebinding_are_valid_in_both_editions ... ok
+test rebound_policy_machine_mutations_cannot_change_selector_dispatch_or_adapter_dataflow ... ok
+test shared_decoder_preserves_private_return_storage_with_outgoing_stack_arguments ... ok
+test typed_outgoing_stack_args_are_bound_to_the_policy_adapter_frame ... ok
+test typed_policy_counts_payload_identity_and_selector_require_concrete_evidence ... ok
+test typed_value_abilities_reject_field_contradictions_after_hash_rebinding ... ok
+
+failures:
+
+---- generic_call_alias_matching_rejects_same_width_distinct_nominal_values stdout ----
+
+thread 'generic_call_alias_matching_rejects_same_width_distinct_nominal_values' (167214) panicked at tests/policy_artifact_checker.rs:82:10:
+called `Result::unwrap()` on an `Err` value: CompileError { category: Compilation, inner: CompileErrorData { message: "policy-witness-v1 fixed Type Group boundary: callee 'copy_pair' has an aggregate, mutable, wide-value, or reference-return ABI outside the bounded scalar/data-view-parameter policy call contract", span: Span { start: 0, end: 0, line: 0, column: 0 }, file: None, code: Some("E2101"), severity: Error, related: RelatedDiagnostics(None), details: None, cause: None } }
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/core/src/panicking.rs:80:14
+   2: core::result::unwrap_failed
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/core/src/result.rs:1867:5
+   3: <core::result::Result<cellscript::CompileResult, cellscript::error::CompileError>>::unwrap
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/core/src/result.rs:1233:23
+   4: <policy_artifact_checker::Fixture>::new_source_with
+             at ./tests/policy_artifact_checker.rs:82:10
+   5: policy_artifact_checker::generic_call_alias_matching_rejects_same_width_distinct_nominal_values
+             at ./tests/policy_artifact_checker.rs:381:20
+   6: policy_artifact_checker::generic_call_alias_matching_rejects_same_width_distinct_nominal_values::{closure#0}
+             at ./tests/policy_artifact_checker.rs:377:76
+   7: <policy_artifact_checker::generic_call_alias_matching_rejects_same_width_distinct_nominal_values::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/core/src/ops/function.rs:250:5
+   8: <fn() -> core::result::Result<(), alloc::string::String> as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+
+
+failures:
+    generic_call_alias_matching_rejects_same_width_distinct_nominal_values
+
+test result: FAILED. 20 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 46.15s
+
+error: test failed, to rerun pass `-p cellscript --test policy_artifact_checker`

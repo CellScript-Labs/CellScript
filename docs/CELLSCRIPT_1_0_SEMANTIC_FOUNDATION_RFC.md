@@ -46,7 +46,7 @@ agenda; it does not mark any acceptance checkbox below as project-approved.
 
 Implemented:
 
-- `cellscript-typed-semantics-v8` embeds
+- `cellscript-typed-semantics-v9` embeds
   `cellscript-semantic-foundation-v3` and a bounded,
   hash-consed `cellscript-value-provenance-dag-v1`;
 - canonical transaction roles, complete Cell-envelope disposition records,

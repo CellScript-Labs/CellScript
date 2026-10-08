@@ -133,6 +133,9 @@ High-value active references include:
 - [CELLSCRIPT_EXACT_SCRIPT_HANDLES.md](CELLSCRIPT_EXACT_SCRIPT_HANDLES.md) for
   the fixed exact-artifact handle layout, source API, on-chain checks, and the
   boundary before generic compatible/open handles
+- [CELLSCRIPT_OPEN_HANDLE_POLICY.md](CELLSCRIPT_OPEN_HANDLE_POLICY.md) for the
+  experimental bounded authorization-set codec, independent wire vectors and
+  remaining compatible-handle admission/runtime requirements
 - [CELLSCRIPT_DEPLOYMENT_LINE_HANDLES.md](CELLSCRIPT_DEPLOYMENT_LINE_HANDLES.md)
   for the Type-hash upgrade receipt chain, six-dimensional compatibility
   policy, fixed line-handle encoding, and remaining unique admission-Cell and

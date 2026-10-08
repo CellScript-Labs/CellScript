@@ -1,4 +1,20 @@
 {
-  "compilerOptions": { "target": "ES2022", "module": "NodeNext", "strict": true, "allowImportingTsExtensions": true, "noEmit": true, "skipLibCheck": true },
-  "include": ["client.ts", "client.test.ts", "increment.ts", "node-client.ts"]
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "strict": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "client.ts",
+    "client.test.ts",
+    "increment.ts",
+    "node-client.ts",
+    "migration.ts",
+    "migration.test.ts",
+    "node-migration.ts",
+    "migration-cli.ts"
+  ]
 }

@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { ccc } from '@ckb-ccc/shell';
 import { readFileSync, mkdtempSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
@@ -125,7 +126,8 @@ test('local prover failure redacts captured private data and removes witness fil
     writeFileSync(secret, new Uint8Array(32).fill(123), { mode: 0o600 });
     writeFileSync(executable, '#!/bin/sh\ndirname "$4" > "$2/recorded"\ncat "$4" >&2\nexit 9\n', { mode: 0o700 });
     const prepared = prepare();
-    await assert.rejects(() => prepared.prove(localProver(executable, directory, secret, sdk)), (error: unknown) => {
+    const tool = { executable, sha256: createHash('sha256').update(readFileSync(executable)).digest('hex') };
+    await assert.rejects(() => prepared.prove(localProver(tool, directory, secret, sdk)), (error: unknown) => {
       assert.ok(error instanceof Error);
       assert.equal(error.message, 'local prover failed or timed out; no proof accepted');
       assert.equal(error.cause, undefined);
@@ -134,5 +136,41 @@ test('local prover failure redacts captured private data and removes witness fil
     });
     assert.equal(existsSync(readFileSync(join(directory, 'recorded'), 'utf8').trim()), false);
     assert.throws(() => prepared.checkSigned(tx, tx), /no completed proof/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+test('local prover rejects missing or substituted pins before reading a private witness', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'counter-prover-pin-test-'));
+  try {
+    const executable = join(directory, 'prover');
+    writeFileSync(executable, '#!/bin/sh\ntouch "$2/invoked"\n', { mode: 0o700 });
+    const tool = { executable, sha256: createHash('sha256').update(readFileSync(executable)).digest('hex') };
+    const callback = localProver(tool, directory, join(directory, 'deliberately-absent-secret'), sdk);
+    writeFileSync(executable, '#!/bin/sh\ntouch "$2/invoked"\nexit 9\n');
+    // Mutating the original configuration must not repin an existing callback.
+    tool.sha256 = createHash('sha256').update(readFileSync(executable)).digest('hex');
+    await assert.rejects(() => prepare().prove(callback), /SHA-256 mismatch; no private witness read/);
+    for (const digest of ['', 'not-a-digest', 'A'.repeat(64)]) {
+      await assert.rejects(() => prepare().prove(localProver({ executable, sha256: digest }, directory, 'absent', sdk)), /pin must be/);
+    }
+    assert.equal(existsSync(join(directory, 'invoked')), false);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+test('local prover executes the checked snapshot and rechecks its pin on retry', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'counter-prover-snapshot-test-'));
+  try {
+    const executable = join(directory, 'prover'), secret = join(directory, 'secret');
+    writeFileSync(secret, new Uint8Array(32), { mode: 0o600 });
+    writeFileSync(join(directory, 'proof-template'), bytes(bridge.proof));
+    writeFileSync(executable, '#!/bin/sh\nprintf "%s" "$0" > "$2/executed"\ncp "$2/proof-template" "$5"\n', { mode: 0o700 });
+    const tool = { executable, sha256: createHash('sha256').update(readFileSync(executable)).digest('hex') };
+    const callback = localProver(tool, directory, secret, sdk);
+    const prepared = prepare(), proved = await prepared.prove(callback);
+    prepared.checkSigned(proved, proved);
+    const snapshot = readFileSync(join(directory, 'executed'), 'utf8');
+    assert.notEqual(snapshot, executable);
+    assert.equal(existsSync(snapshot), false);
+    writeFileSync(executable, '#!/bin/sh\nexit 9\n');
+    await assert.rejects(() => prepared.prove(callback), /SHA-256 mismatch/);
+    assert.throws(() => prepared.checkSigned(proved, proved), /no completed proof/);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });

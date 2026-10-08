@@ -44,6 +44,15 @@ must not accept it as this instance. Code/VK availability remains a deployment
 responsibility; the test chain's disposable code Cells are not production
 custody arrangements.
 
+A separate [paired migration prototype](MIGRATION.md) adds two new Script
+binaries, `cellscript-counter-migratable-lifecycle` and
+`cellscript-counter-config`. It has continuous all-group CKB-VM tests for an
+old-proof-authorized switch between two pinned parents/VKs and an update of the
+actual migrated successor. The old lifecycle's ELF is unchanged, and a verified
+legacy instance still rejects a migration attempt. Client/manifest integration,
+node freshness evidence and final acceptance of the new profile remain pending;
+the existing application's admission does not admit these new Scripts.
+
 ## Build and use
 
 Run from the repository root with its pinned Rust 1.97.1 toolchain:

@@ -14,115 +14,12 @@ use std::collections::{BTreeMap, BTreeSet};
 pub const INTERFACE_SCHEMA: &str = "cellscript-package-interface-v3";
 pub const INTERFACE_SCHEMA_VERSION: u32 = 3;
 pub const COMPATIBILITY_SCHEMA: &str = "cellscript-interface-compatibility-v1";
-pub const TEMPORAL_INTERFACE_SCHEMA: &str = "cellscript-ckb-temporal-interface-v1";
+pub use cellscript_artifact_checker::interface::{temporal_contract, TEMPORAL_INTERFACE_SCHEMA};
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PackageInterface {
-    pub schema: String,
-    pub version: u32,
-    pub module: String,
-    pub module_identity: String,
-    pub edition: String,
-    pub visibility_default: String,
-    pub types: Vec<InterfaceType>,
-    pub constants: Vec<InterfaceConstant>,
-    pub callables: Vec<InterfaceCallable>,
-    pub runtime_contract: InterfaceRuntimeContract,
-    pub builder_contract_hash: String,
-    pub deployment_contract_hash: String,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct InterfaceType {
-    pub identity: String,
-    pub name: String,
-    pub kind: String,
-    pub visibility: String,
-    pub type_parameters: Vec<InterfaceTypeParameter>,
-    pub value_abilities: Vec<String>,
-    pub cell_capabilities: Vec<String>,
-    pub fields: Vec<InterfaceField>,
-    pub variants: Vec<InterfaceVariant>,
-    pub layout_identity: String,
-    pub type_identity: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct InterfaceTypeParameter {
-    pub name: String,
-    pub phantom: bool,
-    pub constraints: Vec<String>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct InterfaceField {
-    pub name: String,
-    pub r#type: String,
-    pub offset: Option<usize>,
-    pub encoded_size: Option<usize>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct InterfaceVariant {
-    pub name: String,
-    pub fields: Vec<String>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct InterfaceConstant {
-    pub identity: String,
-    pub name: String,
-    pub visibility: String,
-    pub r#type: String,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct InterfaceCallable {
-    pub identity: String,
-    pub name: String,
-    pub kind: String,
-    pub visibility: String,
-    pub type_parameters: Vec<InterfaceTypeParameter>,
-    pub params: Vec<InterfaceParam>,
-    pub return_type: Option<String>,
-    pub outputs: Vec<InterfaceParam>,
-    pub effect: String,
-    pub entry_witness_abi: Option<String>,
-    pub builder_contract_hash: String,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct InterfaceParam {
-    pub name: String,
-    pub r#type: String,
-    pub source: String,
-    pub mutable: bool,
-    pub reference: bool,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct InterfaceRuntimeContract {
-    pub target_profile: String,
-    pub vm_abi: String,
-    pub witness_abi: String,
-    pub lock_args_abi: String,
-    pub source_encoding: String,
-    pub spawn_ipc_abi: String,
-    pub compatibility_profile_id: String,
-    #[serde(default)]
-    pub temporal: InterfaceTemporalContract,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct InterfaceTemporalContract {
-    pub schema: String,
-    pub wire_representation: String,
-    pub since_abi: String,
-    pub constructors: Vec<String>,
-    pub decoder: String,
-    pub domains: Vec<String>,
-    pub migration: String,
-}
+pub use cellscript_artifact_checker::interface::{
+    InterfaceCallable, InterfaceConstant, InterfaceField, InterfaceParam, InterfaceRuntimeContract, InterfaceTemporalContract,
+    InterfaceType, InterfaceTypeParameter, InterfaceVariant, PackageInterface,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InterfaceCompatibilityReport {
@@ -364,39 +261,6 @@ pub fn build(ast: &ast::Module, metadata: &CompileMetadata) -> PackageInterface 
     }
 }
 
-pub fn temporal_contract(since_abi: &str) -> InterfaceTemporalContract {
-    InterfaceTemporalContract {
-        schema: TEMPORAL_INTERFACE_SCHEMA.to_string(),
-        wire_representation: "fixed-u64-register-and-little-endian-wire".to_string(),
-        since_abi: since_abi.to_string(),
-        constructors: vec![
-            "ckb::since_absolute_block(u64)->AbsoluteBlockSince".to_string(),
-            "ckb::since_absolute_epoch(u64,u64,u64)->AbsoluteEpochSince".to_string(),
-            "ckb::since_absolute_timestamp(u64-seconds)->AbsoluteTimestampSince".to_string(),
-            "ckb::since_relative_block(u64)->RelativeBlockSince".to_string(),
-            "ckb::since_relative_epoch(u64,u64,u64)->RelativeEpochSince".to_string(),
-            "ckb::since_relative_timestamp(u64-seconds)->RelativeTimestampSince".to_string(),
-        ],
-        decoder: "ckb::since_decode(EncodedSince)->DecodedSince;ckb::since_from_raw_checked(u64)->DecodedSince".to_string(),
-        domains: vec![
-            "EpochNumber".to_string(),
-            "EpochDuration".to_string(),
-            "BlockNumber".to_string(),
-            "EpochLength".to_string(),
-            "TimestampMillis".to_string(),
-            "EncodedSince".to_string(),
-            "DecodedSince".to_string(),
-            "AbsoluteBlockSince".to_string(),
-            "AbsoluteEpochSince".to_string(),
-            "AbsoluteTimestampSince".to_string(),
-            "RelativeBlockSince".to_string(),
-            "RelativeEpochSince".to_string(),
-            "RelativeTimestampSince".to_string(),
-        ],
-        migration: "legacy-raw-ckb-temporal-to-explicit-typed-v1".to_string(),
-    }
-}
-
 pub fn hash(interface: &PackageInterface) -> String {
     hash_serializable(interface)
 }
@@ -449,8 +313,8 @@ fn validate_interface_type_parameters(params: &[InterfaceTypeParameter], label: 
     let mut names = BTreeSet::new();
     for param in params {
         let valid_name = !param.name.is_empty()
-            && param.name.chars().next().is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
-            && param.name.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_');
+            && param.name.chars().next().is_some_and(|ch| ch.is_alphabetic() || ch == '_')
+            && param.name.chars().all(|ch| ch.is_alphanumeric() || ch == '_');
         if !valid_name || !names.insert(param.name.as_str()) {
             return Err(invalid_interface(format!("{label} has an invalid or duplicate parameter '{}'", param.name)));
         }

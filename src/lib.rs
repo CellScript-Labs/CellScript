@@ -237,7 +237,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
-const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v57-0.32-named-zk-package";
+const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v60-0.32-generic-shapes";
 pub const METADATA_SCHEMA_VERSION: u32 = 72;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 2;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -525,6 +525,9 @@ pub struct GenericInstantiationMetadata {
     pub concrete_name: String,
     pub identity: String,
     pub type_arguments: Vec<String>,
+    pub lowered_names: Vec<String>,
+    pub parameters: Vec<cellscript_artifact_checker::TypedSemanticGenericParameter>,
+    pub declaration: cellscript_artifact_checker::TypedSemanticGenericDeclaration,
     pub value_ability_registry_version: u32,
     pub constraints_verified: bool,
     pub fixed_layout_required: bool,
@@ -1392,8 +1395,8 @@ pub fn validate_compile_metadata(metadata: &CompileMetadata, artifact_format: Ar
         }
         let mut previous_generic_identity = None::<&str>;
         for instantiation in &metadata.generic_instantiations {
-            if instantiation.schema != "cellscript-generic-instantiation-v1"
-                || instantiation.version != 1
+            if instantiation.schema != "cellscript-generic-instantiation-v2"
+                || instantiation.version != 2
                 || instantiation.value_ability_registry_version != ast::ValueAbility::REGISTRY_VERSION
                 || !instantiation.constraints_verified
                 || instantiation.module.is_empty()
@@ -9085,26 +9088,38 @@ pub fn source_map_output_path_from_artifact(artifact_path: &Utf8Path) -> Utf8Pat
 #[cfg(not(feature = "wasm"))]
 fn generic_instantiation_metadata(ir: &ir::IrModule) -> Vec<GenericInstantiationMetadata> {
     let mut entries = BTreeMap::<String, GenericInstantiationMetadata>::new();
-    let mut insert = |kind: &str, concrete_name: &str, fixed_layout_required: bool| {
-        let Some((template, type_arguments)) = generics::decode_monomorph_name(concrete_name) else {
-            return;
-        };
-        let identity = format!("{}::{}<{}>", ir.name, template, type_arguments.join(","));
-        entries.entry(identity.clone()).or_insert_with(|| GenericInstantiationMetadata {
-            schema: "cellscript-generic-instantiation-v1".to_string(),
-            version: 1,
+    let mut insert = |kind: &str, lowered_name: &str, fixed_layout_required: bool| {
+        let Some(contract) = ir.generic_contracts.get(lowered_name) else { return };
+        let identity = format!("{}::{}<{}>", contract.module, contract.template, contract.arguments.join(","));
+        let entry = entries.entry(identity.clone()).or_insert_with(|| GenericInstantiationMetadata {
+            schema: "cellscript-generic-instantiation-v2".to_string(),
+            version: 2,
             kind: kind.to_string(),
-            module: ir.name.clone(),
-            template,
-            concrete_name: concrete_name.to_string(),
+            module: contract.module.clone(),
+            template: contract.template.clone(),
+            concrete_name: contract.concrete_name.clone(),
             identity,
-            type_arguments,
+            type_arguments: contract.arguments.clone(),
+            lowered_names: Vec::new(),
+            declaration: typed_semantics::generic_declaration(&contract.declaration),
+            parameters: contract
+                .parameters
+                .iter()
+                .map(|parameter| cellscript_artifact_checker::TypedSemanticGenericParameter {
+                    name: parameter.name.clone(),
+                    constraints: parameter.constraints.iter().map(|ability| ability.as_str().to_string()).collect(),
+                    phantom: parameter.phantom,
+                })
+                .collect(),
             value_ability_registry_version: ast::ValueAbility::REGISTRY_VERSION,
             constraints_verified: true,
             fixed_layout_required,
             cell_backed_layout_rejected: fixed_layout_required,
             identity_includes_phantom_arguments: true,
         });
+        entry.lowered_names.push(lowered_name.to_string());
+        entry.lowered_names.sort();
+        entry.lowered_names.dedup();
     };
     for item in &ir.items {
         match item {
@@ -9112,6 +9127,9 @@ fn generic_instantiation_metadata(ir: &ir::IrModule) -> Vec<GenericInstantiation
             ir::IrItem::PureFn(function) => insert("function", &function.name, false),
             _ => {}
         }
+    }
+    for definition in &ir.external_type_defs {
+        insert("struct", &definition.name, true);
     }
     for name in ir.enum_layouts.keys() {
         insert("enum", name, true);
@@ -9121,33 +9139,6 @@ fn generic_instantiation_metadata(ir: &ir::IrModule) -> Vec<GenericInstantiation
 
 #[cfg(not(feature = "wasm"))]
 fn bind_public_interface(metadata: &mut CompileMetadata, ast: &ast::Module) {
-    let mut linked_instantiations = HashMap::new();
-    for item in &ast.items {
-        let ast::Item::Use(imports) = item else { continue };
-        if imports.span != error::Span::default() {
-            continue;
-        }
-        let owner_module = imports.module_path.join("::");
-        for import in &imports.imports {
-            let Some((source_template, _)) = generics::decode_monomorph_name(&import.name) else {
-                continue;
-            };
-            linked_instantiations.insert(
-                import.alias.clone().unwrap_or_else(|| import.name.clone()),
-                (owner_module.clone(), source_template, import.name.clone()),
-            );
-        }
-    }
-    for instantiation in &mut metadata.generic_instantiations {
-        if let Some((owner_module, source_template, owner_concrete_name)) = linked_instantiations.get(&instantiation.concrete_name) {
-            instantiation.module = owner_module.clone();
-            instantiation.template = source_template.clone();
-            instantiation.concrete_name = owner_concrete_name.clone();
-            instantiation.identity = format!("{}::{}<{}>", owner_module, source_template, instantiation.type_arguments.join(","));
-        }
-    }
-    metadata.generic_instantiations.sort_by(|left, right| left.identity.cmp(&right.identity));
-    metadata.generic_instantiations.dedup_by(|left, right| left.identity == right.identity);
     for warning in visibility_migration_diagnostics(ast) {
         if !metadata.constraints.warnings.contains(&warning.message) {
             metadata.constraints.warnings.push(warning.message.clone());
@@ -10211,6 +10202,7 @@ fn scope_ir_to_fungible_type_group_v1(ir: &ir::IrModule, selected_type: Option<&
         name: ir.name.clone(),
         items,
         entry_selection: ir::IrEntrySelection::Action(FUNGIBLE_TYPE_GROUP_V1_ENTRY_ACTION.to_string()),
+        generic_contracts: ir.generic_contracts.clone(),
         external_type_defs: ir.external_type_defs.iter().filter(|type_def| type_def.name == candidate.type_name).cloned().collect(),
         external_callable_abis: Vec::new(),
         enum_fixed_sizes: HashMap::new(),
@@ -10291,6 +10283,7 @@ fn scope_ir_to_entry(ir: &ir::IrModule, scope: &CompileEntryScope) -> Result<ir:
             if !used_functions.insert(callable_name) {
                 continue;
             }
+            used_types.extend(generics::monomorph_type_dependencies(&function.name)?);
             collect_params_named_types(&function.params, &mut used_types);
             if let Some(return_type) = &function.return_type {
                 collect_ir_type_named_types(return_type, &mut used_types);
@@ -10316,7 +10309,28 @@ fn scope_ir_to_entry(ir: &ir::IrModule, scope: &CompileEntryScope) -> Result<ir:
     }
 
     let mut pending_types = used_types.iter().cloned().collect::<Vec<_>>();
+    let mut visited_types = BTreeSet::new();
     while let Some(type_name) = pending_types.pop() {
+        if !visited_types.insert(type_name.clone()) {
+            continue;
+        }
+        for dependency in generics::monomorph_type_dependencies(&type_name)? {
+            if used_types.insert(dependency.clone()) {
+                pending_types.push(dependency);
+            }
+        }
+        // Enum payloads participate in the same transitive layout closure as
+        // structural fields. A named payload can be needed solely by the entry
+        // witness decoder, without an expression mentioning its type directly.
+        if let Some(layout) = ir.enum_layouts.get(&type_name) {
+            for field in layout.variants.iter().flat_map(|variant| &variant.fields) {
+                let before = used_types.len();
+                collect_ir_type_named_types(&field.ty, &mut used_types);
+                if used_types.len() != before {
+                    pending_types.extend(used_types.iter().cloned());
+                }
+            }
+        }
         let Some(type_def) = type_by_name.get(type_name.as_str()) else {
             continue;
         };
@@ -10366,6 +10380,7 @@ fn scope_ir_to_entry(ir: &ir::IrModule, scope: &CompileEntryScope) -> Result<ir:
                 unreachable!("fungible entry scopes are handled before ordinary entry lookup")
             }
         },
+        generic_contracts: ir.generic_contracts.clone(),
         external_type_defs: ir.external_type_defs.iter().filter(|type_def| used_types.contains(&type_def.name)).cloned().collect(),
         external_callable_abis: ir
             .external_callable_abis

@@ -5,6 +5,8 @@ use crate::runtime_errors::CellScriptRuntimeError;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 mod bindings;
+mod generic_contract;
+pub use generic_contract::{IrGenericContract, IrGenericDeclaration, IrGenericKind, IrGenericParameter, IrGenericValueParameter};
 mod optimize;
 mod policy;
 pub use bindings::{IrCellBinding, IrCellBindingRole, IrCellMembership, IrCellSource};
@@ -72,6 +74,7 @@ pub struct IrModule {
     pub external_callable_abis: Vec<IrCallableAbi>,
     pub enum_fixed_sizes: HashMap<String, usize>,
     pub enum_layouts: HashMap<String, IrEnumLayout>,
+    pub generic_contracts: BTreeMap<String, IrGenericContract>,
 }
 
 /// Artifact-local entry choice, separate from the retained callable set.
@@ -205,6 +208,7 @@ impl IrModule {
 #[derive(Debug, Clone)]
 pub struct IrEnumLayout {
     pub name: String,
+    pub value_abilities: Vec<ValueAbility>,
     pub tag_width: usize,
     pub encoded_size: usize,
     pub variants: Vec<IrEnumVariantLayout>,
@@ -259,6 +263,7 @@ pub struct IrTypeDef {
     pub kind: IrTypeKind,
     pub fields: Vec<IrField>,
     pub capabilities: Vec<Capability>,
+    pub value_abilities: Vec<ValueAbility>,
     pub claim_output: Option<IrType>,
     pub flow_states: Option<Vec<String>>,
     pub flow_state_field: Option<String>,
@@ -1328,6 +1333,7 @@ impl IrGenerator {
                 external_callable_abis: Vec::new(),
                 enum_fixed_sizes: HashMap::new(),
                 enum_layouts: HashMap::new(),
+                generic_contracts: BTreeMap::new(),
             },
             var_counter: 0,
             block_counter: 0,
@@ -1582,6 +1588,21 @@ impl IrGenerator {
                 Item::Use(_) => {}
             }
         }
+        for item in &ast.items {
+            let (name, kind) = match item {
+                Item::Struct(def) => (&def.name, IrGenericKind::Struct),
+                Item::Enum(def) => (&def.name, IrGenericKind::Enum),
+                Item::Function(def) => (&def.name, IrGenericKind::Function),
+                _ => continue,
+            };
+            match IrGenericContract::from_ast(ast, name, kind) {
+                Ok(Some(contract)) => {
+                    self.module.generic_contracts.insert(name.clone(), contract);
+                }
+                Ok(None) => {}
+                Err(error) => self.errors.push(error),
+            }
+        }
         if self.errors.is_empty() {
             Ok(self.module)
         } else {
@@ -1688,6 +1709,7 @@ impl IrGenerator {
             kind: IrTypeKind::Resource,
             fields: self.layout_fields(&resource.fields),
             capabilities: resource.capabilities.clone(),
+            value_abilities: Vec::new(),
             claim_output: None,
             flow_states: self.flow_states.get(&resource.name).cloned(),
             flow_state_field: self.flow_state_fields.get(&resource.name).cloned(),
@@ -1714,6 +1736,7 @@ impl IrGenerator {
             kind: IrTypeKind::Shared,
             fields: self.layout_fields(&shared.fields),
             capabilities: shared.capabilities.clone(),
+            value_abilities: Vec::new(),
             claim_output: None,
             flow_states: self.flow_states.get(&shared.name).cloned(),
             flow_state_field: self.flow_state_fields.get(&shared.name).cloned(),
@@ -1740,6 +1763,7 @@ impl IrGenerator {
             kind: IrTypeKind::Receipt,
             fields: self.layout_fields(&receipt.fields),
             capabilities: receipt.capabilities.clone(),
+            value_abilities: Vec::new(),
             claim_output: receipt.claim_output.as_ref().map(Self::convert_type),
             flow_states: self.flow_states.get(&receipt.name).cloned(),
             flow_state_field: self.flow_state_fields.get(&receipt.name).cloned(),
@@ -1766,6 +1790,7 @@ impl IrGenerator {
             kind: IrTypeKind::Struct,
             fields: self.layout_fields(&struct_def.fields),
             capabilities: Vec::new(),
+            value_abilities: struct_def.abilities.clone(),
             claim_output: None,
             flow_states: self.flow_states.get(&struct_def.name).cloned(),
             flow_state_field: self.flow_state_fields.get(&struct_def.name).cloned(),
@@ -1955,6 +1980,7 @@ impl IrGenerator {
         visiting.remove(name);
         Some(IrEnumLayout {
             name: name.to_string(),
+            value_abilities: definition.abilities.clone(),
             tag_width: 1,
             encoded_size: 1usize.checked_add(max_payload_width)?,
             variants,
@@ -10097,6 +10123,7 @@ fn generate_with_resolver_diagnostics_inner(
     let mut external_callables = ExternalCallableContext::default();
 
     let mut resolved_external_types: Vec<(String, String, TypeDef)> = Vec::new();
+    let mut imported_generic_contracts = BTreeMap::new();
 
     for item in &ast.items {
         let Item::Use(use_stmt) = item else {
@@ -10105,6 +10132,20 @@ fn generate_with_resolver_diagnostics_inner(
 
         for import in &use_stmt.imports {
             let local_name = import.alias.clone().unwrap_or_else(|| import.name.clone());
+            if crate::generics::decode_monomorph_name(&import.name).is_some() {
+                let owner = use_stmt.module_path.join("::");
+                let owner_ast = resolver
+                    .module(&owner)
+                    .ok_or_else(|| vec![CompileError::without_span("generic declaration owner is unavailable")])?;
+                let kind = match resolver.resolve_type(module_name, &local_name) {
+                    Some(TypeDef::Struct(_)) => IrGenericKind::Struct,
+                    Some(TypeDef::Enum(_)) => IrGenericKind::Enum,
+                    _ => IrGenericKind::Function,
+                };
+                if let Some(contract) = IrGenericContract::from_ast(owner_ast, &import.name, kind).map_err(|error| vec![error])? {
+                    imported_generic_contracts.insert(local_name.clone(), contract);
+                }
+            }
             if let Some(type_def) = resolver.resolve_type(module_name, &local_name) {
                 if let Some(kind) = resolver_type_kind(&type_def) {
                     type_kinds.insert(local_name.clone(), kind);
@@ -10195,6 +10236,7 @@ fn generate_with_resolver_diagnostics_inner(
         },
     );
     let mut ir = generator.generate_diagnostics(ast)?;
+    ir.generic_contracts.extend(imported_generic_contracts);
     ir.external_type_defs = external_type_defs;
     ir.external_callable_abis = external_callable_abis;
     if include_external_callables {
@@ -10250,6 +10292,14 @@ fn append_external_callable_bodies(ir: &mut IrModule, ast: &Module, resolver: &M
         let external_ir = generate_with_resolver_inner(owner_ast, resolver, &owner_module, false)?;
         merge_external_type_defs(ir, &external_ir);
         merge_external_callable_abis(ir, &external_ir);
+        for (name, contract) in &external_ir.generic_contracts {
+            if contract.kind != IrGenericKind::Function {
+                ir.generic_contracts.entry(name.clone()).or_insert_with(|| contract.clone());
+            }
+        }
+        if let Some(contract) = external_ir.generic_contracts.get(&symbol) {
+            ir.generic_contracts.insert(label.clone(), contract.clone());
+        }
         for (name, size) in external_ir.enum_fixed_sizes {
             ir.enum_fixed_sizes.entry(name).or_insert(size);
         }
@@ -11109,6 +11159,7 @@ fn resolver_type_def_to_ir(
             kind: IrTypeKind::Resource,
             fields: layout_resolver_fields(&resource.fields, type_fields),
             capabilities: resource.capabilities.clone(),
+            value_abilities: Vec::new(),
             claim_output: None,
             flow_states: None,
             flow_state_field: None,
@@ -11129,6 +11180,7 @@ fn resolver_type_def_to_ir(
             kind: IrTypeKind::Shared,
             fields: layout_resolver_fields(&shared.fields, type_fields),
             capabilities: shared.capabilities.clone(),
+            value_abilities: Vec::new(),
             claim_output: None,
             flow_states: None,
             flow_state_field: None,
@@ -11149,6 +11201,7 @@ fn resolver_type_def_to_ir(
             kind: IrTypeKind::Receipt,
             fields: layout_resolver_fields(&receipt.fields, type_fields),
             capabilities: receipt.capabilities.clone(),
+            value_abilities: Vec::new(),
             claim_output: receipt.claim_output.as_ref().map(ast_type_to_ir_type),
             flow_states: None,
             flow_state_field: None,
@@ -11169,6 +11222,7 @@ fn resolver_type_def_to_ir(
             kind: IrTypeKind::Struct,
             fields: layout_resolver_fields(&struct_def.fields, type_fields),
             capabilities: Vec::new(),
+            value_abilities: struct_def.abilities.clone(),
             claim_output: None,
             flow_states: None,
             flow_state_field: None,

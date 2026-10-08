@@ -253,6 +253,184 @@ action selected(witness expected: u64) -> u64 {{
 }
 
 #[test]
+fn explicit_entry_keeps_transitive_enum_payload_layouts_without_retaining_unrelated_types() {
+    let source = r#"
+module nested_entry_scope
+enum Inner { Value(u64), Empty }
+struct Payload { inner: Inner }
+enum Outer { Wrapped(Payload), Empty }
+struct Unrelated { ignored: u64 }
+action selected(witness choice: Outer) { verification require true }
+"#;
+    let directory = tempfile::tempdir().unwrap();
+    let input = Utf8Path::from_path(directory.path()).unwrap().join("nested.cell");
+    std::fs::write(&input, source).unwrap();
+    for opt_level in 0..=3 {
+        let result =
+            compile_file_with_entry_action(&input, CompileOptions { opt_level, ..options("riscv64-elf") }, "selected").unwrap();
+        assert_contract(&result, "action", "selected");
+        let types = &result.verified_lowering_record.as_ref().unwrap().typed_semantics.types;
+        for name in ["Inner", "Payload", "Outer"] {
+            assert!(types.iter().any(|ty| ty.name == name), "missing {name} at optimization level {opt_level}");
+        }
+        assert!(!types.iter().any(|ty| ty.name == "Unrelated"));
+        // Outer::Wrapped(Payload { inner: Inner::Value(42) }): two u8 tags
+        // followed by the fixed little-endian u64 payload.
+        let mut value = vec![0, 0];
+        value.extend_from_slice(&42u64.to_le_bytes());
+        let action = result.metadata.actions.iter().find(|entry| entry.name == "selected").unwrap();
+        let payload = action.entry_witness_args(&[EntryWitnessArg::Bytes(value)]).unwrap();
+        let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
+        fixture.witnesses = vec![packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(payload)).pack()).build().as_bytes()];
+        let execution =
+            ckb_script_runner::execute_cellscript_script(cellscript::strip_vm_abi_trailer(&result.artifact_bytes), &fixture);
+        assert_eq!(execution.exit_code, 0, "nested witness at optimization level {opt_level}: {:?}", execution.captured_debug);
+    }
+}
+
+#[test]
+fn selected_entry_retains_identity_only_generic_type_evidence() {
+    let source = r#"
+module generic_identity_scope
+private resource IdentityToken has consume { amount: u64 }
+private struct Number has copy, drop, store, fixed, serializable, non_linear { value: u64 }
+private enum Choice { Value(Number), Empty }
+private struct Pair<T: fixed_value> { left: T, right: T }
+private struct Unrelated { ignored: u64 }
+public struct Marker<phantom T> has copy, drop, store, fixed, serializable, non_linear { value: u64 }
+public fn tag<T: fixed_value>() -> u64 { ckb::cell_capacity(source::input(0)) }
+public action selected(witness marker: Marker<(IdentityToken, IdentityToken)>, witness nested: Marker<(Choice, [Pair<u64>; 2])>) {
+    verification
+    require tag<Number>() > 0
+}
+"#;
+    let directory = tempfile::tempdir().unwrap();
+    let input = Utf8Path::from_path(directory.path()).unwrap().join("generic.cell");
+    std::fs::write(&input, source).unwrap();
+    for opt_level in 0..=3 {
+        let result =
+            compile_file_with_entry_action(&input, CompileOptions { opt_level, ..options("riscv64-elf") }, "selected").unwrap();
+        let typed = &result.verified_lowering_record.as_ref().unwrap().typed_semantics;
+        for name in ["IdentityToken", "Number", "Choice"] {
+            assert!(typed.types.iter().any(|ty| ty.name == name), "missing identity-only {name} at O{opt_level}");
+        }
+        assert!(typed.types.iter().any(|ty| ty.name.starts_with("Pair__mono__")));
+        assert!(!typed.types.iter().any(|ty| ty.name == "Unrelated"));
+        assert!(typed.foundation.roles.is_empty(), "phantom Cell identity does not create a runtime Cell role");
+        cellscript_artifact_checker::interface::inspect_bundle(
+            &result.artifact_bytes,
+            &serde_json::to_vec(&result.metadata).unwrap(),
+            &serde_json::to_vec(result.verified_lowering_record.as_ref().unwrap()).unwrap(),
+            &serde_json::to_vec(result.source_artifact_map.as_ref().unwrap()).unwrap(),
+            &cellscript_artifact_checker::CheckerBudgets::default(),
+        )
+        .unwrap();
+        let bytes = EntryWitnessArg::Bytes(42u64.to_le_bytes().to_vec());
+        let payload = result.metadata.actions[0].entry_witness_args(&[bytes.clone(), bytes]).unwrap();
+        let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
+        fixture.witnesses = vec![packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(payload)).pack()).build().as_bytes()];
+        let execution =
+            ckb_script_runner::execute_cellscript_script(cellscript::strip_vm_abi_trailer(&result.artifact_bytes), &fixture);
+        assert_eq!(execution.exit_code, 0, "phantom layout at O{opt_level}: {:?}", execution.captured_debug);
+    }
+}
+
+#[test]
+fn specialization_marker_is_reserved_by_the_source_generic_kernel() {
+    for declaration in [
+        "struct Note__mono__not_hex { value: u64 }",
+        "fn echo__mono__ff(value: u64) -> u64 { value }",
+        "fn forged__mono__753634(value: u64) -> u64 { value }",
+    ] {
+        let source = format!("module reserved_marker\n{declaration}\naction main() {{ verification require true }}");
+        let error = compile(&source, options("riscv64-elf")).unwrap_err();
+        assert_eq!(error.code.as_deref(), Some("E2110"));
+        assert!(error.message.contains("compiler-reserved monomorphization marker"), "{error}");
+    }
+}
+
+#[test]
+fn imported_generic_contracts_keep_owner_identity_and_lowered_aliases() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = Utf8Path::from_path(directory.path()).unwrap();
+    std::fs::write(root.join("other.cell"), "module imported_generic_other\npublic struct Pair<T: fixed_value> { value: T }").unwrap();
+    std::fs::write(
+        root.join("dep.cell"),
+        r#"
+module imported_generic_owner
+public struct Pair<T: fixed_value> { left: T, right: T }
+public fn first<T: fixed_value>(value: T) -> T { value }
+public fn swap<T: fixed_value>(pair: Pair<T>) -> Pair<T> { Pair<T> { left: pair.right, right: pair.left } }
+"#,
+    )
+    .unwrap();
+    let input = root.join("main.cell");
+    std::fs::write(
+        &input,
+        r#"
+module imported_generic_consumer
+use imported_generic_owner::Pair as Duo
+use imported_generic_owner::first as pick
+use imported_generic_owner::swap as flip
+use imported_generic_other::Pair as Other
+public action selected(witness pair: Duo<u64>, witness other: Other<u64>) {
+    verification
+    require pick<u64>(pair.left) == pair.left
+    let swapped: Duo<u64> = flip<u64>(pair)
+    require swapped.left == pair.right
+}
+"#,
+    )
+    .unwrap();
+    for opt_level in 0..=3 {
+        let result =
+            compile_file_with_entry_action(&input, CompileOptions { opt_level, ..options("riscv64-elf") }, "selected").unwrap();
+        let typed = &result.verified_lowering_record.as_ref().unwrap().typed_semantics;
+        let pair = typed
+            .instantiations
+            .iter()
+            .find(|instance| instance.template == "Pair" && instance.module == "imported_generic_owner")
+            .unwrap();
+        assert_eq!(pair.module, "imported_generic_owner");
+        assert!(pair.lowered_names.iter().any(|name| name.starts_with("Duo__mono__")));
+        assert_eq!(pair.parameters.len(), 1);
+        let other = typed
+            .instantiations
+            .iter()
+            .find(|instance| instance.template == "Pair" && instance.module == "imported_generic_other")
+            .unwrap();
+        assert!(other.lowered_names.iter().any(|name| name.starts_with("Other__mono__")));
+        assert_eq!(typed.types.iter().find(|ty| ty.name.starts_with("Duo__mono__")).unwrap().fields.len(), 2);
+        assert_eq!(typed.types.iter().find(|ty| ty.name.starts_with("Other__mono__")).unwrap().fields.len(), 1);
+        if opt_level == 0 {
+            let first = typed.instantiations.iter().find(|instance| instance.template == "first").unwrap();
+            assert_eq!(first.module, "imported_generic_owner");
+            assert!(first.lowered_names.iter().any(|name| name.starts_with("pick__mono__")));
+            let swap = typed.instantiations.iter().find(|instance| instance.template == "swap").unwrap();
+            assert_eq!(swap.module, "imported_generic_owner");
+            assert!(swap.lowered_names.iter().any(|name| name.starts_with("flip__mono__")));
+        }
+        cellscript_artifact_checker::interface::inspect_bundle(
+            &result.artifact_bytes,
+            &serde_json::to_vec(&result.metadata).unwrap(),
+            &serde_json::to_vec(result.verified_lowering_record.as_ref().unwrap()).unwrap(),
+            &serde_json::to_vec(result.source_artifact_map.as_ref().unwrap()).unwrap(),
+            &cellscript_artifact_checker::CheckerBudgets::default(),
+        )
+        .unwrap();
+        let pair_bytes = [11u64.to_le_bytes(), 23u64.to_le_bytes()].concat();
+        let payload = result.metadata.actions[0]
+            .entry_witness_args(&[EntryWitnessArg::Bytes(pair_bytes), EntryWitnessArg::Bytes(42u64.to_le_bytes().to_vec())])
+            .unwrap();
+        let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
+        fixture.witnesses = vec![packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(payload)).pack()).build().as_bytes()];
+        let execution =
+            ckb_script_runner::execute_cellscript_script(cellscript::strip_vm_abi_trailer(&result.artifact_bytes), &fixture);
+        assert_eq!(execution.exit_code, 0, "imported generic aggregate at O{opt_level}: {:?}", execution.captured_debug);
+    }
+}
+
+#[test]
 fn missing_or_ambiguous_explicit_ir_entries_fail_before_codegen() {
     let source = "module entry_selection\naction main() -> u64 { verification return 0 }";
     let ast = cellscript::frontend::parse(source, CURRENT_EDITION).unwrap();

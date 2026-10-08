@@ -634,7 +634,8 @@ run_dev_gate() {
     run cargo check --locked -p cellscript --all-targets
     run cargo check --locked -p cellscript-artifact-checker --all-targets
     run cargo test --locked -p cellscript-artifact-checker
-    run cargo test --locked -p cellscript --test artifact_checker --test myelin_handoff
+    run cargo test --locked -p cellscript --test artifact_checker --test myelin_handoff \
+        --test interface_inspection --test policy_artifact_checker
     run cargo test --locked -p cellscript deployment_line_handle --lib
     run cargo test --locked -p cellscript --test exact_script_handles
     run cargo check --locked -p cellscript-fiber-adapter --all-targets
@@ -725,6 +726,10 @@ run_ci_gate() {
     local zk_walkthrough_dir
     zk_walkthrough_dir="$(mktemp -d "$ROOT_DIR/target/zk-walkthrough.XXXXXX")"
     run bash examples/zk/run.sh "$zk_walkthrough_dir/run"
+    # Reuse the installed CCC pin for an independent generic wire-codec check.
+    # This does not couple open-handle authority to the ZK application.
+    run node crates/cellscript-artifact-checker/tests/fixtures/open_handle_policy_vectors.cjs \
+        examples/zk/package.json --check
     run cargo clippy --locked --manifest-path contracts/registry-type-script/Cargo.toml --tests -- -D warnings
     run ./scripts/cellscript_strict_backend_audit.sh ci
     run cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \

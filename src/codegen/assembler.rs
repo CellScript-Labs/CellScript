@@ -3343,6 +3343,7 @@ mod tests {
     fn generated_functions_use_shared_epilogue_tail() {
         let ir = IrModule {
             name: "shape_test".to_string(),
+            generic_contracts: Default::default(),
             entry_selection: crate::ir::IrEntrySelection::Legacy,
             items: vec![IrItem::Action(IrAction {
                 name: "shape".to_string(),

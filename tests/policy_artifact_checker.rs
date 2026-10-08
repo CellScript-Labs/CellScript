@@ -94,6 +94,17 @@ impl Fixture {
         check_bundle_values(&self.artifact, &self.metadata, &self.record, &self.source_map, &CheckerBudgets::default()).map(|_| ())
     }
 
+    fn assert_interface_inspection(&self) {
+        cellscript_artifact_checker::interface::inspect_bundle(
+            &self.artifact,
+            &serde_json::to_vec(&self.metadata).unwrap(),
+            &serde_json::to_vec(&self.record).unwrap(),
+            &serde_json::to_vec(&self.source_map).unwrap(),
+            &CheckerBudgets::default(),
+        )
+        .expect("unmutated compiler-produced interface must pass inspection");
+    }
+
     fn policy_mut(&mut self) -> &mut PolicyWitnessContract {
         let EntryDispatchContract::PolicyWitnessV1(policy) = &mut self.record.typed_semantics.foundation.entry_contract.dispatch
         else {
@@ -126,6 +137,16 @@ impl Fixture {
         self.metadata["verified_artifact"]["lowering_record_hash"] = record_hash.into();
         self.metadata["verified_artifact"]["source_map_hash"] = source_map_hash.into();
         self.metadata["verified_artifact"]["verified_bundle_id"] = verified_bundle_id.into();
+    }
+
+    fn rebind_interface_identity(&mut self) {
+        let canonical = cellscript::package::registry::canonical_json_value(&self.metadata["public_interface"]);
+        let hash = cellscript_artifact_checker::hex_encode(&cellscript_artifact_checker::ckb_blake2b256(
+            &serde_json::to_vec(&canonical).unwrap(),
+        ));
+        self.metadata["interface_hash"] = hash.clone().into();
+        self.record.typed_semantics.interface_hash = hash;
+        self.rebind_policy_identity();
     }
 
     fn bind_artifact_identity(&mut self) {
@@ -247,6 +268,517 @@ fn real_policy_bundle_and_unchanged_identity_rebinding_are_valid_in_both_edition
         fixture.rebind_policy_identity();
         assert_eq!(canonical_hash(LOWERING_RECORD_SCHEMA, &fixture.record).unwrap(), original_record);
         fixture.check().unwrap();
+    }
+}
+
+#[test]
+fn interface_inspection_rejects_unknown_fields_after_all_outer_hashes_are_rebound() {
+    let baseline = Fixture::new(CellScriptEdition::Edition2027);
+    let inspect = |fixture: &Fixture| {
+        cellscript_artifact_checker::interface::inspect_bundle(
+            &fixture.artifact,
+            &serde_json::to_vec(&fixture.metadata).unwrap(),
+            &serde_json::to_vec(&fixture.record).unwrap(),
+            &serde_json::to_vec(&fixture.source_map).unwrap(),
+            &CheckerBudgets::default(),
+        )
+    };
+    inspect(&baseline).unwrap();
+    for nested in [false, true] {
+        let mut changed = baseline.clone();
+        if nested {
+            changed.metadata["public_interface"]["types"][0]["fields"][0]["unrecognized"] = true.into();
+        } else {
+            changed.metadata["public_interface"]["unrecognized"] = true.into();
+        }
+        changed.rebind_interface_identity();
+        // Existing artifact binding accepts this otherwise consistent record.
+        // The new projection must reject losing the unknown declaration field.
+        changed.check().unwrap();
+        let error = inspect(&changed).unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2410MetadataBindingMismatch);
+        assert!(error.message.contains("discard unknown fields"));
+    }
+}
+
+#[test]
+fn interface_inspection_recomputes_inner_digests_and_profile_bindings_after_rebinding() {
+    let baseline = Fixture::new(CellScriptEdition::Edition2027);
+    for pointer in [
+        "/module_identity",
+        "/types/0/layout_identity",
+        "/types/0/fields/0/type",
+        "/callables/0/builder_contract_hash",
+        "/callables/0/entry_witness_abi",
+        "/builder_contract_hash",
+        "/deployment_contract_hash",
+        "/runtime_contract/vm_abi",
+        "/runtime_contract/source_encoding",
+        "/runtime_contract/compatibility_profile_id",
+        "/runtime_contract/temporal/migration",
+    ] {
+        let mut changed = baseline.clone();
+        *changed.metadata["public_interface"].pointer_mut(pointer).unwrap() = "substituted".into();
+        changed.rebind_interface_identity();
+        changed.check().unwrap();
+        let error = cellscript_artifact_checker::interface::inspect_bundle(
+            &changed.artifact,
+            &serde_json::to_vec(&changed.metadata).unwrap(),
+            &serde_json::to_vec(&changed.record).unwrap(),
+            &serde_json::to_vec(&changed.source_map).unwrap(),
+            &CheckerBudgets::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2410MetadataBindingMismatch, "{pointer}: {error}");
+    }
+}
+
+#[test]
+fn interface_layout_cannot_be_forged_by_rebinding_its_inner_and_outer_hashes() {
+    let baseline = Fixture::new(CellScriptEdition::Edition2027);
+    baseline.assert_interface_inspection();
+    for mutation in ["offset", "encoded_size", "omit", "duplicate", "rename", "kind", "same-width-type"] {
+        let mut changed = baseline.clone();
+        let ty = &mut changed.metadata["public_interface"]["types"][0];
+        match mutation {
+            "offset" | "encoded_size" => ty["fields"][0][mutation] = serde_json::json!(1024),
+            "omit" => ty["fields"] = serde_json::json!([]),
+            "duplicate" => {
+                let field = ty["fields"][0].clone();
+                ty["fields"].as_array_mut().unwrap().push(field);
+            }
+            "rename" => ty["fields"][0]["name"] = serde_json::json!("forged"),
+            "kind" => ty["kind"] = serde_json::json!("struct"),
+            "same-width-type" => ty["fields"][0]["type"] = serde_json::json!("[u8; 8]"),
+            _ => unreachable!(),
+        }
+        let layout = serde_json::json!([ty["kind"], ty["fields"], ty["variants"]]);
+        let canonical = cellscript::package::registry::canonical_json_value(&layout);
+        ty["layout_identity"] = cellscript_artifact_checker::hex_encode(&cellscript_artifact_checker::ckb_blake2b256(
+            &serde_json::to_vec(&canonical).unwrap(),
+        ))
+        .into();
+        changed.rebind_interface_identity();
+        changed.check().unwrap();
+        let error = cellscript_artifact_checker::interface::inspect_bundle(
+            &changed.artifact,
+            &serde_json::to_vec(&changed.metadata).unwrap(),
+            &serde_json::to_vec(&changed.record).unwrap(),
+            &serde_json::to_vec(&changed.source_map).unwrap(),
+            &CheckerBudgets::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2410MetadataBindingMismatch);
+        assert!(error.message.contains("checked concrete layout"));
+    }
+}
+
+#[test]
+fn generic_call_alias_matching_rejects_same_width_distinct_nominal_values() {
+    let source = r#"
+module nominal_call_contract
+private struct Pair<T: fixed_value> { left: T, right: T }
+private struct Twin<T: fixed_value> { left: T, right: T }
+private fn inspect_pair(value: Pair<u64>) -> u64 { value.left }
+action verify(witness pair: Pair<u64>, witness twin: Twin<u64>) {
+    verification
+    require inspect_pair(pair) == pair.left
+}
+"#;
+    let compiled = cellscript::compile_with_executable_surface_policy(
+        source,
+        CompileOptions { opt_level: 0, target: Some("riscv64-elf".into()), ..CompileOptions::default() },
+        ExecutableSurfacePolicy::DenyFailClosed,
+    )
+    .unwrap();
+    let baseline = Fixture {
+        artifact: compiled.artifact_bytes,
+        metadata: serde_json::to_value(compiled.metadata).unwrap(),
+        record: compiled.verified_lowering_record.unwrap(),
+        source_map: compiled.source_artifact_map.unwrap(),
+    };
+    baseline.check().unwrap();
+    let mut changed = baseline.clone();
+    let entry = changed.record.typed_semantics.entries.iter_mut().find(|entry| entry.name == "verify").unwrap();
+    let twin = entry.params.iter().find(|param| param.name == "twin").unwrap().clone();
+    let call = entry
+        .blocks
+        .iter_mut()
+        .flat_map(|block| &mut block.operations)
+        .find(|operation| operation.call.as_ref().is_some_and(|call| call.target == "inspect_pair"))
+        .unwrap();
+    call.operands[0].local = Some(twin.binding_id);
+    call.operands[0].ty = twin.ty;
+    changed.record.typed_semantics_hash = canonical_hash(TYPED_SEMANTICS_SCHEMA, &changed.record.typed_semantics).unwrap();
+    changed.metadata["typed_semantics"] = serde_json::to_value(&changed.record.typed_semantics).unwrap();
+    changed.metadata["typed_semantics_hash"] = changed.record.typed_semantics_hash.clone().into();
+    changed.rebind_sidecars();
+    let error = changed.check().unwrap_err();
+    assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid, "{error}");
+    assert!(error.message.contains("invalid signature contract"), "{error}");
+}
+
+#[test]
+fn private_generic_shapes_reject_rebound_layout_signature_and_phantom_mutations() {
+    use cellscript_artifact_checker::TypedSemanticGenericDeclaration as Shape;
+    let source = format!("{SOURCE}\nprivate struct Pair<T: fixed_value> {{ left: T, right: T }}\nprivate enum Choice<T: fixed_value> {{ First(Pair<T>), Second([T; 2]) }}\nprivate struct Marker<phantom T> {{ value: u64 }}\nprivate fn first<T: fixed_value>(value: T) -> T {{ value }}")
+        .replace("witness recipient: Address)", "witness recipient: Address, witness pair: Pair<u64>, witness choice: Choice<Hash>, witness marker: Marker<Hash>)")
+        .replace("require amount > 0", "require amount > 0\nrequire first<u64>(pair.left) == pair.left");
+    let baseline = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, 0, declaration());
+    baseline.assert_interface_inspection();
+    for mutation in [
+        "missing",
+        "field-type",
+        "field-name",
+        "field-order",
+        "phantom-used",
+        "nonphantom-unused",
+        "enum-order",
+        "enum-payload",
+        "return",
+        "reference",
+        "source",
+        "coherence",
+    ] {
+        let mut changed = baseline.clone();
+        let template = match mutation {
+            "enum-order" | "enum-payload" => "Choice",
+            "nonphantom-unused" => "Marker",
+            "return" | "reference" | "source" => "first",
+            _ => "Pair",
+        };
+        let instance =
+            changed.record.typed_semantics.instantiations.iter_mut().find(|instance| instance.template == template).unwrap();
+        match mutation {
+            "missing" => instance.declaration = Shape::Unavailable,
+            "phantom-used" => instance.parameters[0].phantom = true,
+            "nonphantom-unused" => instance.parameters[0].phantom = false,
+            "field-type" | "field-name" | "field-order" | "coherence" => {
+                let Shape::Struct { fields, .. } = &mut instance.declaration else { unreachable!() };
+                match mutation {
+                    "field-type" => fields[0].ty = "u32".into(),
+                    "field-name" => fields[0].name = "forged".into(),
+                    "field-order" => fields.reverse(),
+                    // Preserve this instance's concrete type, but disagree
+                    // with the declaration retained by its sibling instance.
+                    "coherence" => fields[0].ty = instance.type_arguments[0].clone(),
+                    _ => unreachable!(),
+                }
+            }
+            "enum-order" | "enum-payload" => {
+                let Shape::Enum { variants, .. } = &mut instance.declaration else { unreachable!() };
+                if mutation == "enum-order" {
+                    variants.reverse();
+                } else {
+                    variants[0].fields[0] = "u64".into();
+                }
+            }
+            "return" | "reference" | "source" => {
+                let Shape::Function { params, return_type } = &mut instance.declaration else { unreachable!() };
+                match mutation {
+                    "return" => *return_type = "Hash".into(),
+                    "reference" => params[0].reference = true,
+                    "source" => params[0].source = "input".into(),
+                    _ => unreachable!(),
+                }
+            }
+            _ => unreachable!(),
+        }
+        changed.rebind_policy_identity();
+        let error = changed.check().unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid, "{mutation}: {error}");
+        assert!(error.message.contains("generic"), "{mutation}: {error}");
+    }
+}
+
+#[test]
+fn private_generic_contracts_cannot_be_omitted_or_forged_after_rebinding() {
+    let source = format!("{SOURCE}\nprivate struct Pair<T: fixed_value> {{ left: T, right: T }}\nprivate fn first<T: fixed_value>(value: T) -> T {{ value }}")
+        .replace("witness recipient: Address)", "witness recipient: Address, witness pair: Pair<u64>)")
+        .replace("require amount > 0", "require amount > 0\nrequire first<u64>(pair.left) == pair.left");
+    let baseline = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, 0, declaration());
+    baseline.assert_interface_inspection();
+    assert!(baseline.metadata["public_interface"]["callables"].as_array().unwrap().iter().all(|entry| entry["name"] != "first"));
+    for mutation in
+        ["omit-instance", "omit-parameters", "constraint", "phantom-function", "omit-binding", "wrong-binding", "duplicate-binding"]
+    {
+        let mut changed = baseline.clone();
+        let instances = &mut changed.record.typed_semantics.instantiations;
+        let index = instances.iter().position(|instance| instance.template == "first").unwrap();
+        if mutation == "omit-instance" {
+            instances.remove(index);
+        } else {
+            let instance = &mut instances[index];
+            match mutation {
+                "omit-parameters" => instance.parameters.clear(),
+                "constraint" => instance.parameters[0].constraints = vec!["cell".into()],
+                "phantom-function" => instance.parameters[0].phantom = true,
+                "omit-binding" => instance.lowered_names.clear(),
+                "wrong-binding" => instance.lowered_names = vec!["Token".into()],
+                "duplicate-binding" => instance.lowered_names.push(instance.lowered_names[0].clone()),
+                _ => unreachable!(),
+            }
+        }
+        changed.rebind_policy_identity();
+        let error = changed.check().unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid, "{mutation}: {error}");
+        assert!(error.message.contains("generic"), "{mutation}: {error}");
+    }
+}
+
+#[test]
+fn typed_value_abilities_reject_field_contradictions_after_hash_rebinding() {
+    let source = format!("{SOURCE}\npublic struct Value has copy, drop, store, fixed, serializable, non_linear {{ amount: u64 }}")
+        .replace("witness recipient: Address)", "witness recipient: Address, witness value: Value)");
+    let baseline = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, 0, declaration());
+    baseline.assert_interface_inspection();
+    for mutation in ["cell-kind", "ordinary-cell", "missing-field-evidence"] {
+        let mut changed = baseline.clone();
+        let name = if mutation == "cell-kind" { "Token" } else { "Value" };
+        let ty = changed.record.typed_semantics.types.iter_mut().find(|ty| ty.name == name).unwrap();
+        match mutation {
+            "cell-kind" => ty.value_abilities = vec!["copy".into()],
+            "ordinary-cell" => ty.value_abilities = vec!["cell".into()],
+            "missing-field-evidence" => {
+                ty.fields[0].ty = "OmittedNominal".into();
+                ty.layout_hash = canonical_hash(
+                    "cellscript-typed-layout-v2",
+                    &(
+                        ty.kind.as_str(),
+                        ty.encoded_size,
+                        &ty.fields,
+                        ty.tag_width_bytes,
+                        &ty.variants,
+                        &ty.capabilities,
+                        &ty.identity_policy,
+                    ),
+                )
+                .unwrap();
+            }
+            _ => unreachable!(),
+        }
+        changed.rebind_policy_identity();
+        let error = changed.check().unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid, "{mutation}: {error}");
+        assert!(error.message.contains("abilit"), "{mutation}: {error}");
+    }
+    let mut serialized = serde_json::to_value(&baseline.record).unwrap();
+    serialized["typed_semantics"]["types"][0].as_object_mut().unwrap().remove("value_abilities");
+    assert!(serde_json::from_value::<VerifiedLoweringRecord>(serialized).is_err());
+}
+
+#[test]
+fn instantiated_interface_templates_reject_rebound_layout_and_signature_substitution() {
+    let source = format!(
+        "{SOURCE}\npublic struct Pair<T: fixed_value> {{ left: T, right: T }}\npublic enum Choice<T: fixed_value> {{ First(Pair<T>), Second([T; 2]) }}\npublic fn first<T: fixed_value>(value: T) -> T {{ value }}"
+    )
+    .replace("witness recipient: Address)", "witness recipient: Address, witness choice: Choice<Hash>, witness pair: Pair<u64>)")
+    .replace("require amount > 0", "require amount > 0\nrequire first<u64>(pair.left) == pair.left");
+    let baseline = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, 0, declaration());
+    baseline.assert_interface_inspection();
+    assert!(baseline.record.typed_semantics.entries.iter().any(|entry| entry.name.starts_with("first__mono__")));
+    for mutation in [
+        "field",
+        "field-order",
+        "field-name",
+        "enum-payload",
+        "enum-order",
+        "arity",
+        "return",
+        "parameter",
+        "constraint",
+        "ability",
+        "return-concrete",
+        "parameter-concrete",
+    ] {
+        let mut changed = baseline.clone();
+        if matches!(mutation, "return" | "parameter" | "constraint" | "return-concrete" | "parameter-concrete") {
+            let callable = changed.metadata["public_interface"]["callables"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|entry| entry["name"] == "first")
+                .unwrap();
+            if mutation == "constraint" {
+                callable["type_parameters"][0]["constraints"] = serde_json::json!(["cell"]);
+            } else if matches!(mutation, "return" | "return-concrete") {
+                callable["return_type"] = serde_json::json!(if mutation == "return" { "BlockNumber" } else { "u64" });
+            } else {
+                callable["params"][0]["type"] = serde_json::json!(if mutation == "parameter" { "BlockNumber" } else { "u64" });
+                // Generic templates have no source-name entry in the execution
+                // metadata; recompute their declaration builder digest as well.
+                let canonical = cellscript::package::registry::canonical_json_value(&callable["params"]);
+                callable["builder_contract_hash"] = cellscript_artifact_checker::hex_encode(
+                    &cellscript_artifact_checker::ckb_blake2b256(&serde_json::to_vec(&canonical).unwrap()),
+                )
+                .into();
+            }
+            let contracts = changed.metadata["public_interface"]["callables"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|entry| serde_json::json!([entry["identity"], entry["builder_contract_hash"]]))
+                .collect::<Vec<_>>();
+            let canonical = cellscript::package::registry::canonical_json_value(&serde_json::json!(contracts));
+            changed.metadata["public_interface"]["builder_contract_hash"] = cellscript_artifact_checker::hex_encode(
+                &cellscript_artifact_checker::ckb_blake2b256(&serde_json::to_vec(&canonical).unwrap()),
+            )
+            .into();
+        } else {
+            let name = if mutation.starts_with("enum") { "Choice" } else { "Pair" };
+            let ty = changed.metadata["public_interface"]["types"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|ty| ty["name"] == name)
+                .unwrap();
+            match mutation {
+                "field" => ty["fields"][0]["type"] = serde_json::json!("Address"),
+                "field-order" => ty["fields"].as_array_mut().unwrap().reverse(),
+                "field-name" => ty["fields"][0]["name"] = serde_json::json!("forged"),
+                "enum-payload" => ty["variants"][1]["fields"][0] = serde_json::json!("[Address; 2]"),
+                "enum-order" => ty["variants"].as_array_mut().unwrap().reverse(),
+                "arity" => ty["type_parameters"] = serde_json::json!([]),
+                "ability" => ty["value_abilities"] = serde_json::json!(["drop"]),
+                _ => unreachable!(),
+            }
+            let canonical =
+                cellscript::package::registry::canonical_json_value(&serde_json::json!([ty["kind"], ty["fields"], ty["variants"]]));
+            ty["layout_identity"] = cellscript_artifact_checker::hex_encode(&cellscript_artifact_checker::ckb_blake2b256(
+                &serde_json::to_vec(&canonical).unwrap(),
+            ))
+            .into();
+        }
+        changed.rebind_interface_identity();
+        changed.check().unwrap();
+        let error = cellscript_artifact_checker::interface::inspect_bundle(
+            &changed.artifact,
+            &serde_json::to_vec(&changed.metadata).unwrap(),
+            &serde_json::to_vec(&changed.record).unwrap(),
+            &serde_json::to_vec(&changed.source_map).unwrap(),
+            &CheckerBudgets::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2410MetadataBindingMismatch, "{mutation}: {error}");
+        assert!(error.message.contains("generic") || error.message.contains("checked entry"), "{mutation}: {error}");
+    }
+}
+
+#[test]
+fn interface_cell_capabilities_cannot_be_forged_by_rebinding_outer_hashes() {
+    let baseline = Fixture::new(CellScriptEdition::Edition2027);
+    baseline.assert_interface_inspection();
+    let mut reordered = baseline.clone();
+    reordered.metadata["public_interface"]["types"][0]["cell_capabilities"].as_array_mut().unwrap().reverse();
+    reordered.rebind_interface_identity();
+    reordered.assert_interface_inspection();
+
+    for capabilities in [
+        serde_json::json!([]),
+        serde_json::json!(["store"]),
+        serde_json::json!(["consume", "store", "copy"]),
+        serde_json::json!(["consume", "store", "store"]),
+    ] {
+        let mut changed = baseline.clone();
+        changed.metadata["public_interface"]["types"][0]["cell_capabilities"] = capabilities;
+        changed.rebind_interface_identity();
+        changed.check().unwrap();
+        let error = cellscript_artifact_checker::interface::inspect_bundle(
+            &changed.artifact,
+            &serde_json::to_vec(&changed.metadata).unwrap(),
+            &serde_json::to_vec(&changed.record).unwrap(),
+            &serde_json::to_vec(&changed.source_map).unwrap(),
+            &CheckerBudgets::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2410MetadataBindingMismatch);
+        assert_eq!(error.message, "interface Cell capabilities differ from checked concrete type");
+    }
+}
+
+#[test]
+fn interface_variant_cardinality_cannot_be_forged_by_rebinding_layout_hashes() {
+    let source = format!("{SOURCE}\npublic enum Choice {{ First(u64), Second(Hash) }}")
+        .replace("witness recipient: Address)", "witness recipient: Address, witness choice: Choice)");
+    let baseline = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, 0, declaration());
+    baseline.assert_interface_inspection();
+    assert!(baseline.record.typed_semantics.types.iter().any(|ty| ty.name == "Choice"));
+    for mutation in ["omit", "reorder", "rename", "payload", "same-width-type"] {
+        let mut changed = baseline.clone();
+        let ty = changed.metadata["public_interface"]["types"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|ty| ty["name"] == "Choice")
+            .unwrap();
+        match mutation {
+            "omit" => {
+                ty["variants"].as_array_mut().unwrap().pop();
+            }
+            "reorder" => ty["variants"].as_array_mut().unwrap().reverse(),
+            "rename" => ty["variants"][0]["name"] = serde_json::json!("forged"),
+            "payload" => ty["variants"][0]["fields"] = serde_json::json!([]),
+            "same-width-type" => ty["variants"][1]["fields"][0] = serde_json::json!("Address"),
+            _ => unreachable!(),
+        }
+        let layout = serde_json::json!([ty["kind"], ty["fields"], ty["variants"]]);
+        let canonical = cellscript::package::registry::canonical_json_value(&layout);
+        ty["layout_identity"] = cellscript_artifact_checker::hex_encode(&cellscript_artifact_checker::ckb_blake2b256(
+            &serde_json::to_vec(&canonical).unwrap(),
+        ))
+        .into();
+        changed.rebind_interface_identity();
+        changed.check().unwrap();
+        let error = cellscript_artifact_checker::interface::inspect_bundle(
+            &changed.artifact,
+            &serde_json::to_vec(&changed.metadata).unwrap(),
+            &serde_json::to_vec(&changed.record).unwrap(),
+            &serde_json::to_vec(&changed.source_map).unwrap(),
+            &CheckerBudgets::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2410MetadataBindingMismatch);
+        assert!(error.message.contains("variant set differs"), "{mutation}: {error}");
+    }
+}
+
+#[test]
+fn interface_nested_type_arguments_cannot_be_forged_by_rebinding_layout_hashes() {
+    let source = format!(
+        "{SOURCE}\npublic struct Pair<T: fixed_value> {{ left: T, right: T }}\npublic struct Envelope {{ pairs: [Pair<Hash>; 2] }}\npublic enum Choice {{ Nested(Envelope), Direct(Pair<Address>) }}"
+    )
+    .replace("witness recipient: Address)", "witness recipient: Address, witness choice: Choice)");
+    let baseline = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, 0, declaration());
+    baseline.assert_interface_inspection();
+    assert!(baseline.record.typed_semantics.types.iter().any(|ty| ty.name == "Envelope"));
+    assert!(baseline.record.typed_semantics.types.iter().any(|ty| ty.name == "Choice"));
+    for name in ["Envelope", "Choice"] {
+        let mut changed = baseline.clone();
+        let ty =
+            changed.metadata["public_interface"]["types"].as_array_mut().unwrap().iter_mut().find(|ty| ty["name"] == name).unwrap();
+        if name == "Envelope" {
+            ty["fields"][0]["type"] = serde_json::json!("[Pair<Address>; 2]");
+        } else {
+            ty["variants"][1]["fields"][0] = serde_json::json!("Pair<Hash>");
+        }
+        let layout = serde_json::json!([ty["kind"], ty["fields"], ty["variants"]]);
+        let canonical = cellscript::package::registry::canonical_json_value(&layout);
+        ty["layout_identity"] = cellscript_artifact_checker::hex_encode(&cellscript_artifact_checker::ckb_blake2b256(
+            &serde_json::to_vec(&canonical).unwrap(),
+        ))
+        .into();
+        changed.rebind_interface_identity();
+        changed.check().unwrap();
+        let error = cellscript_artifact_checker::interface::inspect_bundle(
+            &changed.artifact,
+            &serde_json::to_vec(&changed.metadata).unwrap(),
+            &serde_json::to_vec(&changed.record).unwrap(),
+            &serde_json::to_vec(&changed.source_map).unwrap(),
+            &CheckerBudgets::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2410MetadataBindingMismatch);
+        assert!(error.message.contains("checked concrete layout"), "{name}: {error}");
     }
 }
 
@@ -577,4 +1109,80 @@ fn typed_policy_counts_payload_identity_and_selector_require_concrete_evidence()
         let error = changed.check().unwrap_err();
         assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid, "{mutation}: {error}");
     }
+}
+
+#[test]
+fn interface_callable_signature_cannot_be_forged_after_outer_hash_rebinding() {
+    let source = SOURCE.replace("require amount > 0", "require echo(amount) > 0") + "\npublic fn echo(value: u64) -> u64 { value }\n";
+    let baseline = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, 0, declaration());
+    baseline.assert_interface_inspection();
+    assert!(baseline.record.typed_semantics.entries.iter().any(|entry| entry.name == "echo" && entry.kind == "helper"));
+    for mutation in
+        ["same-width-type", "name", "source", "mutable", "reference", "omit", "duplicate", "order", "output", "return", "kind"]
+    {
+        let mut changed = baseline.clone();
+        let callable = changed.metadata["public_interface"]["callables"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|entry| entry["name"] == "mint")
+            .unwrap();
+        match mutation {
+            "same-width-type" => callable["params"][1]["type"] = "Hash".into(),
+            "name" => callable["params"][1]["name"] = "substituted".into(),
+            "source" => callable["params"][1]["source"] = "default".into(),
+            "mutable" => callable["params"][1]["mutable"] = true.into(),
+            "reference" => callable["params"][1]["reference"] = true.into(),
+            "omit" => {
+                callable["params"].as_array_mut().unwrap().pop();
+            }
+            "duplicate" => {
+                let param = callable["params"][1].clone();
+                callable["params"].as_array_mut().unwrap().push(param);
+            }
+            "order" => callable["params"].as_array_mut().unwrap().reverse(),
+            "output" => {
+                callable["outputs"] = serde_json::json!([{
+                    "name": "forged", "type": "Token", "source": "output", "mutable": false, "reference": false
+                }])
+            }
+            "return" => callable["return_type"] = "u64".into(),
+            "kind" => callable["kind"] = "function".into(),
+            _ => unreachable!(),
+        }
+        changed.rebind_interface_identity();
+        changed.check().unwrap();
+        let error = cellscript_artifact_checker::interface::inspect_bundle(
+            &changed.artifact,
+            &serde_json::to_vec(&changed.metadata).unwrap(),
+            &serde_json::to_vec(&changed.record).unwrap(),
+            &serde_json::to_vec(&changed.source_map).unwrap(),
+            &CheckerBudgets::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2410MetadataBindingMismatch, "{mutation}: {error}");
+        assert!(
+            error.message.starts_with("interface callable ") && error.message.ends_with("differs from checked entry"),
+            "{mutation}: {error}"
+        );
+    }
+    let mut changed = baseline.clone();
+    let callable = changed.metadata["public_interface"]["callables"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|entry| entry["name"] == "echo")
+        .unwrap();
+    callable["return_type"] = "BlockNumber".into();
+    changed.rebind_interface_identity();
+    changed.check().unwrap();
+    let error = cellscript_artifact_checker::interface::inspect_bundle(
+        &changed.artifact,
+        &serde_json::to_vec(&changed.metadata).unwrap(),
+        &serde_json::to_vec(&changed.record).unwrap(),
+        &serde_json::to_vec(&changed.source_map).unwrap(),
+        &CheckerBudgets::default(),
+    )
+    .unwrap_err();
+    assert_eq!(error.message, "interface callable return type differs from checked entry");
 }

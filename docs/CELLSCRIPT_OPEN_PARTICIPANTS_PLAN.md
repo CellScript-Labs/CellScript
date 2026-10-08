@@ -25,11 +25,63 @@ The initial audit is against `35bf983db30aae80281f97e30bbce08a878d7c58`.
   selected generic/ability constraints. A new compatibility receipt must also
   project and check every field it claims against the independently checked
   typed/layout/ABI records. Hash consistency alone is insufficient.
+- The inspection prerequisite now binds concrete callable signatures to those
+  checked entries: kind, ordered parameters and appended outputs, names, types,
+  source domains, mutable/reference flags and return type. Rebound-hash
+  substitutions reject. This does not supply missing execution evidence for
+  pruned exports or uninstantiated templates, nor equate declared and inferred
+  effects; complete H1 receipt projection remains pending.
+- Locally instantiated public templates also project checked type arguments
+  onto structural fields, enum payloads and generic callable signatures.
+  Rebinding a template's layout and interface hashes cannot substitute its
+  present concrete instance. Universal template constraints, absent instances
+  and full directional compatibility still need their own receipt evidence.
+- Typed semantics v9 retains explicit value-ability declarations for ordinary
+  types, including private types. Independent field-derived validation and
+  argument-constraint checks reject unsupported claims after hashes are rebound.
+  Generic instantiation v2 retains ordered private/imported parameter contracts,
+  declaration origins and lowered aliases. The checker requires coverage for
+  every retained specialization, including when its public declaration is absent.
+  Entry scopes retain identity-only dependencies through tuples, arrays, nested
+  generic types and enum payloads; phantom Cell names do not create runtime roles.
+  Missing nominal evidence cannot grant `non_linear`. Private template structural
+  and phantom-use projection, universal templates and full directional receipts
+  remain pending; this prerequisite does not complete H1 or runtime admission.
 - Existing closed roles identify their exact providers at bundle construction.
   New participant selection must retain their lifecycle/observation distinction
   and preserve the transaction identity through signing.
 
+### Pinned dependency-resolution facts
+
+The dependency binding must account for the repository's CKB pin
+`f7fa4436737756f97a24e254f22c13a36316ecea`:
+
+- CellDep syscalls index the resolved dependency list; dep-group expansion
+  means that this need not equal the raw transaction's CellDep index.
+- Cell field syscalls expose data and Script identities, but no CellDep
+  OutPoint field. Input OutPoint loading is a different operation.
+- Data-hash lookup retains the last dependency with matching data. Type-hash
+  lookup accepts same-data duplicates and rejects different-data multiple
+  matches. Consensus does not reject every duplicate Type hash.
+
+These facts are checked in upstream [dependency expansion](https://github.com/nervosnetwork/ckb/blob/f7fa4436737756f97a24e254f22c13a36316ecea/util/types/src/core/cell.rs#L754),
+[CellDep indexing](https://github.com/nervosnetwork/ckb/blob/f7fa4436737756f97a24e254f22c13a36316ecea/script/src/syscalls/load_cell.rs#L45),
+[Cell field identifiers](https://github.com/nervosnetwork/ckb/blob/f7fa4436737756f97a24e254f22c13a36316ecea/script/src/syscalls/mod.rs#L112)
+and [Script lookup](https://github.com/nervosnetwork/ckb/blob/f7fa4436737756f97a24e254f22c13a36316ecea/script/src/types.rs#L828).
+Matching code bytes and selecting an exact deployment OutPoint remain separate
+claims. The runtime design must explicitly bind raw and resolved dependencies,
+or admit a justified restricted dependency profile, before claiming both.
+No such profile or new runtime helper is selected by this investigation.
+
 ## Required design decisions before executable admission
+
+The [authorization-set wire contract](CELLSCRIPT_OPEN_HANDLE_POLICY.md) now
+fixes the experimental bounded commitment/selection representation for the
+implementation: 1–32 canonically ordered members, a five-level tree and a
+656-byte selection. Host membership tests and independent CCC Molecule/hash
+vectors cover that boundary. This supplies part of decisions 2–5 below; it
+does not admit unchecked artifact receipts, resolve the nominal interface
+parameter, implement CKB enforcement or complete H1/H2.
 
 1. Define what the nominal interface parameter `I` denotes and how the resolver
    binds it to a checked package interface. Do not use a raw Script, arbitrary

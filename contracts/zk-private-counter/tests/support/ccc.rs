@@ -50,8 +50,11 @@ pub fn run(
     assert!(status.success());
     fs::write(directory.join("owner.bin"), [0x23; 32]).unwrap(); // Public fixture secret only.
     let code = |value: &Value| json!({"outPoint":{"txHash":value["cell_dep"]["out_point"]["tx_hash"], "index":value["cell_dep"]["out_point"]["index"]},"dataHash":value["data_hash"]});
+    // This local acceptance harness authorizes its freshly built fixture tool.
+    // Application configuration must obtain the digest from its trusted build.
+    let prover = root.join("contracts/zk-private-counter/target/release/cellscript-zk-private-counter");
     let configuration = json!({"rpcUrl":node.rpc_url,"sdkDirectory":directory.join("sdk"),
-        "proverExecutable":root.join("contracts/zk-private-counter/target/release/cellscript-zk-private-counter"),
+        "proverExecutable":prover, "proverSha256":package::sha256(&fs::read(&prover).unwrap()),
         "setupPackage":std::env::var("CELLSCRIPT_COUNTER_PACKAGE").expect("CCC test requires a setup package"),
         "ownerSecretFile":directory.join("owner.bin"), "counter":{"txHash":format!("0x{}",hex::encode(previous.tx_hash().as_slice())),"index":0},
         "secpCodeHash":format!("0x{}",hex::encode(secp_type.calc_script_hash().as_slice())),

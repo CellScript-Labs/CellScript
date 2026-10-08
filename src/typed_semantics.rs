@@ -19,6 +19,44 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod policy;
 
+pub(crate) fn generic_declaration(
+    declaration: &ir::IrGenericDeclaration,
+) -> cellscript_artifact_checker::TypedSemanticGenericDeclaration {
+    use cellscript_artifact_checker::{
+        TypedSemanticGenericDeclaration as Declaration, TypedSemanticGenericField, TypedSemanticGenericValueParameter,
+        TypedSemanticGenericVariant,
+    };
+    match declaration {
+        ir::IrGenericDeclaration::Struct { fields, abilities } => Declaration::Struct {
+            fields: fields.iter().map(|(name, ty)| TypedSemanticGenericField { name: name.clone(), ty: render_type(ty) }).collect(),
+            abilities: abilities.iter().map(|ability| ability.as_str().to_string()).collect(),
+        },
+        ir::IrGenericDeclaration::Enum { variants, abilities } => Declaration::Enum {
+            variants: variants
+                .iter()
+                .map(|(name, fields)| TypedSemanticGenericVariant {
+                    name: name.clone(),
+                    fields: fields.iter().map(render_type).collect(),
+                })
+                .collect(),
+            abilities: abilities.iter().map(|ability| ability.as_str().to_string()).collect(),
+        },
+        ir::IrGenericDeclaration::Function { params, return_type } => Declaration::Function {
+            params: params
+                .iter()
+                .map(|param| TypedSemanticGenericValueParameter {
+                    name: param.name.clone(),
+                    ty: render_type(&param.ty),
+                    source: format!("{:?}", param.source).to_ascii_lowercase(),
+                    mutable: param.mutable,
+                    reference: param.reference,
+                })
+                .collect(),
+            return_type: render_type(return_type),
+        },
+    }
+}
+
 pub(crate) fn build(module: &ir::IrModule, metadata: &CompileMetadata) -> TypedSemanticRecord {
     let mut types = module
         .external_type_defs
@@ -38,12 +76,23 @@ pub(crate) fn build(module: &ir::IrModule, metadata: &CompileMetadata) -> TypedS
                     width_bytes: field.fixed_size.and_then(|width| u32::try_from(width).ok()),
                 })
                 .collect::<Vec<_>>();
-            fields.sort_by(|left, right| left.offset.cmp(&right.offset).then(left.name.cmp(&right.name)));
             let encoded_size = definition
                 .fields
                 .iter()
                 .try_fold(0usize, |end, field| Some(end.max(field.offset.checked_add(field.fixed_size?)?)))
                 .and_then(|width| u32::try_from(width).ok());
+            let fixed_layout = encoded_size.is_some() && fields.iter().all(|field| field.width_bytes.is_some());
+            // Empty fields at an occupied field's starting offset precede it.
+            // Otherwise a name tie-break can place the empty range after a
+            // nonempty range and violate the checker's monotone layout walk.
+            // Match TypedSemanticRecord::canonicalize; non-fixed records keep
+            // their existing ordering contract.
+            fields.sort_by(|left, right| {
+                left.offset
+                    .cmp(&right.offset)
+                    .then_with(|| (fixed_layout && left.width_bytes != Some(0)).cmp(&(fixed_layout && right.width_bytes != Some(0))))
+                    .then(left.name.cmp(&right.name))
+            });
             let kind = match definition.kind {
                 ir::IrTypeKind::Resource => "resource",
                 ir::IrTypeKind::Shared => "shared",
@@ -54,6 +103,7 @@ pub(crate) fn build(module: &ir::IrModule, metadata: &CompileMetadata) -> TypedS
                 definition.capabilities.iter().map(|capability| capability.as_str().to_string()).collect::<Vec<_>>();
             capabilities.sort();
             capabilities.dedup();
+            let value_abilities = definition.value_abilities.iter().map(|ability| ability.as_str().to_string()).collect();
             let identity_policy = identity_policy_label(&definition.identity);
             let tag_width_bytes = None;
             let variants = Vec::<TypedSemanticVariant>::new();
@@ -70,6 +120,7 @@ pub(crate) fn build(module: &ir::IrModule, metadata: &CompileMetadata) -> TypedS
                 tag_width_bytes,
                 variants,
                 capabilities,
+                value_abilities,
                 identity_policy,
                 layout_hash,
             }
@@ -118,6 +169,7 @@ pub(crate) fn build(module: &ir::IrModule, metadata: &CompileMetadata) -> TypedS
             tag_width_bytes,
             variants,
             capabilities,
+            value_abilities: layout.value_abilities.iter().map(|ability| ability.as_str().to_string()).collect(),
             identity_policy,
             layout_hash,
         });
@@ -171,6 +223,9 @@ pub(crate) fn build(module: &ir::IrModule, metadata: &CompileMetadata) -> TypedS
             concrete_name: item.concrete_name.clone(),
             identity: item.identity.clone(),
             type_arguments: item.type_arguments.clone(),
+            lowered_names: item.lowered_names.clone(),
+            parameters: item.parameters.clone(),
+            declaration: item.declaration.clone(),
             value_ability_registry_version: item.value_ability_registry_version,
             constraints_verified: item.constraints_verified,
             fixed_layout_required: item.fixed_layout_required,

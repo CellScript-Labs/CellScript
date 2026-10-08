@@ -24,6 +24,7 @@ mod runtime;
 mod runtime_gather;
 mod scalar_slots;
 mod schema;
+mod value_returns;
 mod zk;
 #[cfg(not(feature = "wasm"))]
 pub(crate) use abi::{entry_param_abi_sources, EntryParamAbiSource};
@@ -1098,6 +1099,8 @@ struct CallableAbi {
     type_hash_param_indices: BTreeSet<usize>,
     runtime_bound_param_indices: BTreeSet<usize>,
     bounded_plan_param_indices: BTreeSet<usize>,
+    /// Fixed ordinary struct results are written into caller-owned storage.
+    return_buffer_bytes: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1286,6 +1289,8 @@ pub struct CodeGenerator {
     next_runtime_label: usize,
     /// Final stack-frame size for typed action/lock/helper entries.
     entry_frame_sizes: BTreeMap<String, u32>,
+    /// Saved hidden result pointer; owned by the current helper's frame.
+    return_buffer_pointer_offset: Option<usize>,
 }
 
 impl CodeGenerator {
@@ -1460,6 +1465,7 @@ impl CodeGenerator {
             needs_process_failure_helper: false,
             next_runtime_label: 0,
             entry_frame_sizes: BTreeMap::new(),
+            return_buffer_pointer_offset: None,
         }
     }
 
@@ -1779,6 +1785,10 @@ impl CodeGenerator {
                 IrItem::TypeDef(_) | IrItem::Invariant(_) => continue,
             };
             let param_indices = params.iter().enumerate().map(|(index, param)| (param.binding.id, index)).collect::<HashMap<_, _>>();
+            let return_buffer_bytes = match item {
+                IrItem::PureFn(function) => function.return_type.as_ref().and_then(|ty| self.fixed_struct_return_width(ty)),
+                _ => None,
+            };
             self.local_callable_names.insert(name.clone());
             let mut type_hash_param_indices = BTreeSet::new();
             let (runtime_bound_param_indices, bounded_plan_param_indices) =
@@ -1799,6 +1809,7 @@ impl CodeGenerator {
                     type_hash_param_indices,
                     runtime_bound_param_indices,
                     bounded_plan_param_indices,
+                    return_buffer_bytes,
                 },
             );
         }
@@ -1819,6 +1830,7 @@ impl CodeGenerator {
                     type_hash_param_indices: external.type_hash_param_indices.clone(),
                     runtime_bound_param_indices,
                     bounded_plan_param_indices: BTreeSet::new(),
+                    return_buffer_bytes: None,
                 },
             );
         }
@@ -3361,6 +3373,9 @@ impl CodeGenerator {
                 self.emit_epilogue();
             }
             IrTerminator::Return(Some(operand)) => {
+                if self.emit_value_return(operand)? {
+                    return Ok(());
+                }
                 if !self.current_lock_entry && self.operand_is_u128_like(operand) {
                     self.emit("# cellscript abi: return u128 via a0(low)/a1(high)");
                     if self.emit_u128_operand_limbs("a0", "a1", "t6", "t4", operand, "u128 return") {

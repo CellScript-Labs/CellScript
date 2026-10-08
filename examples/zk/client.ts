@@ -59,7 +59,7 @@ async function live(client: ccc.Client, outPoint: ccc.OutPointLike, label: strin
   return cell;
 }
 
-function verifyBinding(sdk: CounterSdk, deployment: CounterDeployment): void {
+export function verifyBinding(sdk: CounterSdk, deployment: CounterDeployment): void {
   const contracts = sdk.zkVerifierContracts.filter((contract) => contract.entry === 'action:increment');
   requireThat(contracts.length === 1, 'SDK must contain exactly one increment ZK contract');
   const contract = contracts[0];
@@ -125,6 +125,7 @@ export class PreparedCounter {
       const tx = this.#tx.clone();
       const previous = tx.getWitnessArgs(this.#witnessIndex);
       tx.setWitnessArgs(this.#witnessIndex, { ...previous, inputType: this.#sdk.encodeZkTransitionWitness('increment', result.proof, ccc.bytesFrom(this.#deployment.handle)) });
+      this.checkTransaction(tx);
       this.#proved = tx.clone();
       return tx;
     } finally {
@@ -133,6 +134,8 @@ export class PreparedCounter {
     }
   }
   checkSigned(proved: ccc.Transaction, signed: ccc.Transaction): void {
+    this.checkTransaction(proved);
+    this.checkTransaction(signed);
     requireThat(this.#proved && !this.#proving, 'no completed proof for this prepared transaction; run prove before signing');
     requireThat(proved.hash() === this.transactionHash && signed.hash() === this.transactionHash, 'ZK raw transaction changed after proving; finalize fees/dependencies and generate a new proof');
     this.#checkWitnesses(this.#proved, proved);
@@ -154,6 +157,11 @@ export class PreparedCounter {
       requireThat(equal(fresh.cellOutput.toBytes(), cell.cellOutput.toBytes()) && equal(fresh.outputData, cell.outputData), 'resolved input changed; re-prepare transaction');
     }
     const script = this.#cells[this.#witnessIndex].cellOutput.type!;
+    await this.verifyApplication(client, script);
+  }
+  /** Application-specific checks run inside the shared immutable proof/signing flow. */
+  protected checkTransaction(_tx: ccc.Transaction): void {}
+  protected async verifyApplication(client: ccc.Client, script: ccc.Script): Promise<void> {
     await verifyDeployment(client, this.#deployment, script);
   }
   async signAndSend(signer: ccc.Signer, proved: ccc.Transaction, options: { confirmations?: number; timeoutMs?: number } = {}) {

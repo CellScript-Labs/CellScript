@@ -24,4 +24,9 @@ node --experimental-strip-types examples/zk/accept-proof.ts "$output"
 npm --prefix examples/zk ci --ignore-scripts --no-audit --no-fund
 npm --prefix examples/zk run check
 CELLSCRIPT_ZK_WALKTHROUGH="$(cd "$output" && pwd)" npm --prefix examples/zk test
+if [[ $# -eq 2 ]]; then
+    CELLSCRIPT_COUNTER_PACKAGE="$2" bash examples/zk/run-migration.sh "$output/migration"
+else
+    bash examples/zk/run-migration.sh "$output/migration"
+fi
 printf '\nExamples passed. Read %s/walkthrough-report.json and typescript-report.json\n' "$output"

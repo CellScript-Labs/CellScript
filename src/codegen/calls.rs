@@ -576,7 +576,10 @@ impl CodeGenerator {
         }
 
         let abi = self.callable_abis.get(func).cloned();
-        let outgoing_stack_arg_bytes = align_stack_arg_bytes(call_abi_arg_count(abi.as_ref(), args).saturating_sub(8) * 8);
+        let return_buffer_bytes = abi.as_ref().and_then(|abi| abi.return_buffer_bytes);
+        let outgoing_stack_arg_bytes = align_stack_arg_bytes(
+            (call_abi_arg_count(abi.as_ref(), args) + usize::from(return_buffer_bytes.is_some())).saturating_sub(8) * 8,
+        );
         let mut abi_index = 0usize;
         for (arg_index, arg) in args.iter().enumerate() {
             if let Some(abi) = &abi
@@ -592,6 +595,28 @@ impl CodeGenerator {
                 return Ok(());
             }
         }
+
+        let return_buffer_offset = if let Some(width) = return_buffer_bytes {
+            let dest = dest.ok_or_else(|| CompileError::without_span("fixed struct call has no result storage"))?;
+            if self.fixed_struct_return_width(&dest.ty) != Some(width) {
+                return Err(CompileError::without_span("fixed struct call result layout differs from the callee ABI"));
+            }
+            let offset = self
+                .fixed_byte_local_offsets
+                .get(&dest.id)
+                .copied()
+                .ok_or_else(|| CompileError::without_span("fixed struct call result buffer is unavailable"))?;
+            let register = self.call_abi_register(abi_index);
+            self.emit(format!(
+                "# cellscript abi: call {func} caller-owned struct result size={width} pointer={}",
+                abi_arg_label(abi_index)
+            ));
+            self.emit_sp_addi(&register, offset);
+            self.emit_outgoing_call_stack_arg_store(&register, abi_index, outgoing_stack_arg_bytes);
+            Some(offset)
+        } else {
+            None
+        };
 
         if outgoing_stack_arg_bytes > 0 {
             self.emit(format!("# cellscript abi: reserve {} bytes for outgoing stack call arguments", outgoing_stack_arg_bytes));
@@ -630,6 +655,11 @@ impl CodeGenerator {
         }
 
         if let Some(d) = dest {
+            if let Some(offset) = return_buffer_offset {
+                self.emit_sp_addi("t0", offset);
+                self.emit_stack_store("t0", self.scalar_slot_offset(d.id));
+                return Ok(());
+            }
             let payload_enum = match &d.ty {
                 IrType::Named(name) => {
                     self.enum_layouts.get(name).filter(|layout| layout.has_payload()).map(|layout| (name.clone(), layout.clone()))

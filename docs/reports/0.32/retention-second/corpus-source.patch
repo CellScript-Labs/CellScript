@@ -1,0 +1,1859 @@
+diff --git a/contracts/zk-private-counter/tests/support/ccc.rs b/contracts/zk-private-counter/tests/support/ccc.rs
+index d95797e0..dd925c74 100644
+--- a/contracts/zk-private-counter/tests/support/ccc.rs
++++ b/contracts/zk-private-counter/tests/support/ccc.rs
+@@ -50,8 +50,11 @@ pub fn run(
+     assert!(status.success());
+     fs::write(directory.join("owner.bin"), [0x23; 32]).unwrap(); // Public fixture secret only.
+     let code = |value: &Value| json!({"outPoint":{"txHash":value["cell_dep"]["out_point"]["tx_hash"], "index":value["cell_dep"]["out_point"]["index"]},"dataHash":value["data_hash"]});
++    // This local acceptance harness authorizes its freshly built fixture tool.
++    // Application configuration must obtain the digest from its trusted build.
++    let prover = root.join("contracts/zk-private-counter/target/release/cellscript-zk-private-counter");
+     let configuration = json!({"rpcUrl":node.rpc_url,"sdkDirectory":directory.join("sdk"),
+-        "proverExecutable":root.join("contracts/zk-private-counter/target/release/cellscript-zk-private-counter"),
++        "proverExecutable":prover, "proverSha256":package::sha256(&fs::read(&prover).unwrap()),
+         "setupPackage":std::env::var("CELLSCRIPT_COUNTER_PACKAGE").expect("CCC test requires a setup package"),
+         "ownerSecretFile":directory.join("owner.bin"), "counter":{"txHash":format!("0x{}",hex::encode(previous.tx_hash().as_slice())),"index":0},
+         "secpCodeHash":format!("0x{}",hex::encode(secp_type.calc_script_hash().as_slice())),
+diff --git a/crates/cellscript-artifact-checker/src/checker.rs b/crates/cellscript-artifact-checker/src/checker.rs
+index 4696a7e1..fb14dafb 100644
+--- a/crates/cellscript-artifact-checker/src/checker.rs
++++ b/crates/cellscript-artifact-checker/src/checker.rs
+@@ -1585,7 +1585,7 @@ fn validate_public_interface_metadata(metadata: &Value, module: &str, expected_h
+     Ok(())
+ }
+ 
+-fn canonical_json_value(value: &Value) -> Value {
++pub(crate) fn canonical_json_value(value: &Value) -> Value {
+     match value {
+         Value::Object(object) => {
+             let mut keys = object.keys().collect::<Vec<_>>();
+diff --git a/crates/cellscript-artifact-checker/src/lib.rs b/crates/cellscript-artifact-checker/src/lib.rs
+index 4c2a9adc..7ffe0585 100644
+--- a/crates/cellscript-artifact-checker/src/lib.rs
++++ b/crates/cellscript-artifact-checker/src/lib.rs
+@@ -2,6 +2,7 @@ mod bindings;
+ mod checker;
+ mod elf;
+ mod failure;
++pub mod interface;
+ mod policy;
+ mod policy_machine;
+ mod schema;
+diff --git a/docs/CELLSCRIPT_VERIFIED_ARTIFACT_BOUNDARY.md b/docs/CELLSCRIPT_VERIFIED_ARTIFACT_BOUNDARY.md
+index 0094ad3a..2d445635 100644
+--- a/docs/CELLSCRIPT_VERIFIED_ARTIFACT_BOUNDARY.md
++++ b/docs/CELLSCRIPT_VERIFIED_ARTIFACT_BOUNDARY.md
+@@ -205,6 +205,36 @@ Declared unreachable machine blocks are not silently treated as reachable.
+ The record carries a `reachable` bit and the checker recomputes it from every
+ declared entry.
+ 
++### Public-interface inspection groundwork for #28
++
++On the 0.32 work branch, `cellscript_artifact_checker::interface::inspect_bundle`
++accepts actual ELF, metadata, lowering-record and source-map bytes. It requires
++all four checker evidence fields to be verified before returning an immutable
++inspection. The existing v3 public-interface wire models are shared from the
++standalone crate without importing the compiler front end or changing their
++serialized field order.
++
++Inspection retains source declarations and effective typed contracts separately.
++A declaration's default `Pure` effect can correspond to an inferred `ReadOnly`
++entry; equating the two would hide a real compatibility dimension. Uninstantiated
++public generic templates remain declarations without invented runtime entries.
++
++Additional checks reject unknown or synthesized interface fields, recompute
++module/type/builder/deployment digests, bind witness/runtime/temporal profiles,
++and compare concrete field sets, type kinds, offsets and widths with checked
++layouts. Concrete enum names, ordering and payload cardinalities must also
++match. Deleting or duplicating a field cannot hide behind a recomputed digest.
++Mutation tests rebind outer identities and, for layout mutations, the inner
++layout digest as well. Metadata is bounded before parsing; interface item counts
++are bounded before declaration checks.
++
++This API is an inspection prerequisite, not a compatible-open receipt or an
++authorization result. It does not yet recompute every source-level signature,
++generic-template or nested-layout compatibility axis, authorize an immutable
++implementation set, inspect a selected live CellDep, or establish peer Script
++execution. Those remain #28/#29 implementation work. Existing `check_bundle`
++acceptance and exact-handle contracts are unchanged.
++
+ ## Default Budgets
+ 
+ The default v1 policy caps each artifact, lowering record, and source map at
+diff --git a/examples/zk/README.md b/examples/zk/README.md
+index df3bbe19..52718df2 100644
+--- a/examples/zk/README.md
++++ b/examples/zk/README.md
+@@ -40,7 +40,7 @@ wallet/deployment plumbing do not repin the circuit's setup-bound `Cargo.lock`.
+ ```rust
+ let parent = client::parent(&deployment, &child_elf, &verification_key)?;
+ // Resolve inputs and complete dependencies, fee inputs and change first.
+-let prepared = client::PreparedIncrement::new(transaction, &resolved_inputs, &type_script)?;
++let mut prepared = client::PreparedIncrement::new(transaction, &resolved_inputs, &type_script)?;
+ let proof = counter::prove(&pk, CounterCircuit {
+     statement: prepared.statement().clone(), witness,
+ }, &mut OsRng)?;
+@@ -54,6 +54,10 @@ prepared.check_signed(&proved, &signed)?;
+ final raw transaction, checks the counter transition, verifies Groth16 locally,
+ and preserves an existing Lock witness while placing the metadata-encoded proof.
+ `check_signed` rejects raw transaction changes and changes to the counter proof.
++It checks against the privately retained result of `attach_proof`, so replacing
++both caller-supplied comparison arguments cannot authorize a different proof.
++An unsuccessful proof replacement invalidates the prior signing state; attach
++a valid proof again before signing.
+ The caller's chain provider remains responsible for current liveness and submission.
+ The executable walkthrough supplies concrete values for every application type;
+ the wallet call above is an integration point, not a bundled Rust wallet.
+@@ -94,6 +98,7 @@ Configuration paths resolve from the current working directory:
+   "rpcUrl": "http://127.0.0.1:8114",
+   "sdkDirectory": "/path/to/generated-sdk",
+   "proverExecutable": "/path/to/cellscript-zk-private-counter",
++  "proverSha256": "<64 lowercase hex digits from the trusted native build>",
+   "setupPackage": "/path/to/setup-package",
+   "ownerSecretFile": "/path/to/owner.bin",
+   "walletKeyFile": "/path/to/wallet.hex",
+@@ -115,6 +120,32 @@ wallet key is a separate 32-byte hex key. `localProver` uses a private temporary
+ directory, invokes the native prover without secret command-line arguments,
+ and removes its witness files on completion. Browser apps supply their own prover
+ callback; secrets should stay within their chosen prover trust boundary.
++The required `proverSha256` approves the executable bytes. Record that digest
++from a reviewed, pinned build; do not recompute it from an untrusted download
++at invocation time. Each invocation checks a bounded snapshot (at most 64 MiB)
++before reading the owner secret and executes those checked bytes from the
++private directory, so replacing the original path cannot switch the program
++after validation. A changed tool requires an explicit configuration update.
++The local-node test harness approves its freshly built public fixture tool and
++records its digest; that is not an external release attestation. This pin does
++not attest the host OS, dynamic libraries, Node runtime or a custom callback.
++The local process is asynchronous, has a 120-second timeout and bounded output,
++and its captured diagnostics are not included in thrown errors because a prover
++could print private witness data. To cancel, call
++`prepared.prove(prover, { signal: controller.signal })` with an `AbortController`.
++Custom callbacks receive that signal as their third argument and should stop
++their underlying work. Even if a callback ignores cancellation, a late result
++cannot become the accepted proof or replace a successful retry. Only one proof
++request per prepared transaction may be active at once.
++
++Cancelled or failed proving leaves the prepared transaction unsigned. Retry
++`prove` against the same finalized transaction if its inputs remain live;
++otherwise resolve the intended successor and prepare a new transaction and
++proof. The adapter checks live inputs and deployment before invoking the wallet
++and again before dry-run/submission. These checks cannot prevent another
++transaction spending an input immediately afterward. The adapter retains its
++own accepted proof witness and rejects caller-side proof substitution even when
++the supplied comparison arguments agree. Only Lock witness fields may change.
+ 
+ The CLI's default known scripts are testnet deployments. For a custom chain,
+ construct a CCC client with that chain's `scripts` configuration and call the API;
+@@ -167,6 +198,41 @@ with the local runner first.
+ 
+ ## Diagnostics and remaining DX limits
+ 
++### Privacy and transaction linkage
++
++The protected witness is the 32-byte owner secret. The owner commitment and
++counter are public Cell data; the input outpoint, successor, capacities, Locks,
++dependencies, fee inputs and final raw transaction are public as well. The
++statement binds the Script hash, old/new data hashes, consumed outpoint and raw
++transaction hash. Its public-input encoding does not hide those values.
++Successive states remain linkable through the consumed outpoint and instance
++Script, and funding/fee inputs can link the application to the signing wallet.
++Proof validity is therefore a secret-knowledge authorization claim, not an
++anonymity, hidden-balance or hidden-counter claim.
++
++The local prover process and its host see the secret. Temporary witness files
++are removed on success/failure; this is not verified secure erasure and does not
++remove the caller's original secret file. A remote/browser prover callback has
++its own trust and logging boundary. Default walkthrough setup and secrets are
++public fixtures. Circuit correctness, setup trust, proof validity and these
++privacy properties must be assessed separately.
++
++### Recovery boundaries
++
++Before calling `signAndSend`, retain `prepared.transactionHash` with the user
++intent. A dry-run error stops this attempt before submission; inspect its cause
++to distinguish execution rejection from an unavailable RPC result. An exception from
++submission or confirmation can leave the outcome unknown: reconcile that exact
++hash with the node before preparing a replacement increment. A timeout does not
++prove that the transaction failed. The adapter does not automatically retry a
++different transaction or authorize an additional increment.
++
++An already spent input must be resolved against the application's intended
++instance and expected counter before preparing again. The client deliberately
++does not discover an arbitrary successor or silently move the user's intent to
++another instance. Changing raw fields requires a fresh statement/proof; retrying
++interrupted proving against an unchanged, still-live transaction is supported.
++
+ | Failure | Client response |
+ | --- | --- |
+ | Wrong genesis, child or VK | Names the mismatched deployment before proving |
+@@ -175,6 +241,8 @@ with the local runner first.
+ | Wallet overwrites proof | Preserve `WitnessArgs.input_type`; sign Lock fields |
+ | Wrong owner, overflow or skipped count | Reject the application transition locally |
+ | Stale public inputs or short proof | Reject before witness insertion |
++| Cancelled/failed proving | Invalidate signing state; re-run proving before signing |
++| Uncertain submission/confirmation | Reconcile the saved transaction hash before a new increment |
+ | Cryptographic/node rejection | Preserve the node cause; parent 79 alone cannot identify why the child rejected |
+ 
+ The counter integration now has a reusable native library and a complete CCC
+diff --git a/examples/zk/client.test.ts b/examples/zk/client.test.ts
+index ae95638b..cff0ac47 100644
+--- a/examples/zk/client.test.ts
++++ b/examples/zk/client.test.ts
+@@ -1,9 +1,12 @@
+ import { test } from 'node:test';
+ import assert from 'node:assert/strict';
++import { createHash } from 'node:crypto';
+ import { ccc } from '@ckb-ccc/shell';
+-import { readFileSync } from 'node:fs';
++import { readFileSync, mkdtempSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+ import { resolve, join } from 'node:path';
+ import { pathToFileURL } from 'node:url';
++import { tmpdir } from 'node:os';
++import { localProver } from './increment.ts';
+ import { deriveStatement, PreparedCounter } from './client.ts';
+ import type { CounterDeployment, CounterSdk } from './client.ts';
+ 
+@@ -76,3 +79,98 @@ test('snapshot cannot be changed through input objects or statement bytes', () =
+   assert.equal(prepared.transactionHash, tx.hash());
+   assert.deepEqual(prepared.statementBytes, bytes(bridge.statement_bytes));
+ });
++test('caller cannot substitute both sides of the proof comparison or sign a placeholder', async () => {
++  const prepared = prepare();
++  assert.throws(() => prepared.checkSigned(tx, tx), /no completed proof/);
++  const proved = await prepared.prove(prover);
++  const changed = proved.clone();
++  const witness = ccc.bytesFrom(changed.getWitnessArgs(0)!.inputType!);
++  witness[witness.length - 1] ^= 1;
++  changed.setWitnessArgs(0, { ...changed.getWitnessArgs(0), inputType: witness });
++  assert.throws(() => prepared.checkSigned(changed, changed), /non-Lock witness/);
++  prepared.checkSigned(proved, proved);
++});
++test('cancelled and failed proving invalidate signing; late completion cannot overwrite a retry', async () => {
++  const prepared = prepare(), oldProof = await prepared.prove(prover);
++  const controller = new AbortController();
++  let finish!: (value: Awaited<ReturnType<typeof prover>>) => void;
++  const pending = prepared.prove(async (_statement, _counters, options) => {
++    assert.equal(options?.signal, controller.signal);
++    return new Promise((resolve) => { finish = resolve; });
++  }, { signal: controller.signal });
++  assert.throws(() => prepared.checkSigned(oldProof, oldProof), /no completed proof/);
++  await assert.rejects(() => prepared.prove(prover), /already in progress/);
++  controller.abort();
++  await assert.rejects(() => pending, /cancelled/);
++  assert.throws(() => prepared.checkSigned(oldProof, oldProof), /no completed proof/);
++  const retry = await prepared.prove(prover);
++  finish({ proof: new Uint8Array(127), publicInputs: new Uint8Array(0) });
++  await Promise.resolve();
++  prepared.checkSigned(retry, retry);
++  await assert.rejects(() => prepared.prove(async () => { throw new Error('prover interrupted'); }), /interrupted/);
++  assert.throws(() => prepared.checkSigned(retry, retry), /no completed proof/);
++  const recovered = await prepared.prove(prover);
++  prepared.checkSigned(recovered, recovered);
++});
++test('spent input fails before invoking the wallet', async () => {
++  const prepared = prepare(), proved = await prepared.prove(prover);
++  let signed = false;
++  const signer = { client: { getCellLive: async () => undefined }, signOnlyTransaction: async () => { signed = true; return proved; } } as unknown as ccc.Signer;
++  await assert.rejects(() => prepared.signAndSend(signer, proved), /spent, missing or inconsistent/);
++  assert.equal(signed, false);
++});
++test('local prover failure redacts captured private data and removes witness files', async () => {
++  const directory = mkdtempSync(join(tmpdir(), 'counter-prover-test-'));
++  try {
++    const executable = join(directory, 'prover'), secret = join(directory, 'secret.bin');
++    writeFileSync(secret, new Uint8Array(32).fill(123), { mode: 0o600 });
++    writeFileSync(executable, '#!/bin/sh\ndirname "$4" > "$2/recorded"\ncat "$4" >&2\nexit 9\n', { mode: 0o700 });
++    const prepared = prepare();
++    const tool = { executable, sha256: createHash('sha256').update(readFileSync(executable)).digest('hex') };
++    await assert.rejects(() => prepared.prove(localProver(tool, directory, secret, sdk)), (error: unknown) => {
++      assert.ok(error instanceof Error);
++      assert.equal(error.message, 'local prover failed or timed out; no proof accepted');
++      assert.equal(error.cause, undefined);
++      assert.ok(!String(error.stack).includes('123,123'));
++      return true;
++    });
++    assert.equal(existsSync(readFileSync(join(directory, 'recorded'), 'utf8').trim()), false);
++    assert.throws(() => prepared.checkSigned(tx, tx), /no completed proof/);
++  } finally { rmSync(directory, { recursive: true, force: true }); }
++});
++test('local prover rejects missing or substituted pins before reading a private witness', async () => {
++  const directory = mkdtempSync(join(tmpdir(), 'counter-prover-pin-test-'));
++  try {
++    const executable = join(directory, 'prover');
++    writeFileSync(executable, '#!/bin/sh\ntouch "$2/invoked"\n', { mode: 0o700 });
++    const tool = { executable, sha256: createHash('sha256').update(readFileSync(executable)).digest('hex') };
++    const callback = localProver(tool, directory, join(directory, 'deliberately-absent-secret'), sdk);
++    writeFileSync(executable, '#!/bin/sh\ntouch "$2/invoked"\nexit 9\n');
++    // Mutating the original configuration must not repin an existing callback.
++    tool.sha256 = createHash('sha256').update(readFileSync(executable)).digest('hex');
++    await assert.rejects(() => prepare().prove(callback), /SHA-256 mismatch; no private witness read/);
++    for (const digest of ['', 'not-a-digest', 'A'.repeat(64)]) {
++      await assert.rejects(() => prepare().prove(localProver({ executable, sha256: digest }, directory, 'absent', sdk)), /pin must be/);
++    }
++    assert.equal(existsSync(join(directory, 'invoked')), false);
++  } finally { rmSync(directory, { recursive: true, force: true }); }
++});
++test('local prover executes the checked snapshot and rechecks its pin on retry', async () => {
++  const directory = mkdtempSync(join(tmpdir(), 'counter-prover-snapshot-test-'));
++  try {
++    const executable = join(directory, 'prover'), secret = join(directory, 'secret');
++    writeFileSync(secret, new Uint8Array(32), { mode: 0o600 });
++    writeFileSync(join(directory, 'proof-template'), bytes(bridge.proof));
++    writeFileSync(executable, '#!/bin/sh\nprintf "%s" "$0" > "$2/executed"\ncp "$2/proof-template" "$5"\n', { mode: 0o700 });
++    const tool = { executable, sha256: createHash('sha256').update(readFileSync(executable)).digest('hex') };
++    const callback = localProver(tool, directory, secret, sdk);
++    const prepared = prepare(), proved = await prepared.prove(callback);
++    prepared.checkSigned(proved, proved);
++    const snapshot = readFileSync(join(directory, 'executed'), 'utf8');
++    assert.notEqual(snapshot, executable);
++    assert.equal(existsSync(snapshot), false);
++    writeFileSync(executable, '#!/bin/sh\nexit 9\n');
++    await assert.rejects(() => prepared.prove(callback), /SHA-256 mismatch/);
++    assert.throws(() => prepared.checkSigned(proved, proved), /no completed proof/);
++  } finally { rmSync(directory, { recursive: true, force: true }); }
++});
+diff --git a/examples/zk/client.ts b/examples/zk/client.ts
+index 98d7691b..9f156da9 100644
+--- a/examples/zk/client.ts
++++ b/examples/zk/client.ts
+@@ -24,7 +24,7 @@ export interface CounterDeployment {
+   handle: ccc.HexLike;
+   lockDeps?: ccc.CellDepLike[];
+ }
+-export type Prover = (statement: Uint8Array, counters: { oldCounter: bigint; newCounter: bigint }) => Promise<{
++export type Prover = (statement: Uint8Array, counters: { oldCounter: bigint; newCounter: bigint }, options?: { signal?: AbortSignal }) => Promise<{
+   proof: Uint8Array; publicInputs: Uint8Array;
+ }>;
+ const domain = ccc.bytesFrom(ccc.hashCkb(new TextEncoder().encode('cellscript-private-counter-v1/domain')));
+@@ -91,6 +91,8 @@ export class PreparedCounter {
+   #deployment: CounterDeployment;
+   #witnessIndex: number;
+   #oldCounter: bigint;
++  #proved?: ccc.Transaction;
++  #proving = false;
+   constructor(tx: ccc.Transaction, cells: ccc.Cell[], script: ccc.Script, sdk: CounterSdk, deployment: CounterDeployment) {
+     verifyBinding(sdk, deployment);
+     this.#tx = tx.clone(); this.#cells = cells.map((cell) => cell.clone());
+@@ -102,16 +104,42 @@ export class PreparedCounter {
+   }
+   get transactionHash(): ccc.Hex { return this.#tx.hash(); }
+   get statementBytes(): Uint8Array { return this.#sdk.encodeZkStatement(this.#statement); }
+-  async prove(prover: Prover): Promise<ccc.Transaction> {
+-    const result = await prover(this.statementBytes, { oldCounter: this.#oldCounter, newCounter: this.#oldCounter + 1n });
+-    this.#sdk.bindZkProverOutput(this.#statement, ccc.bytesFrom(this.#deployment.verificationKey.dataHash), result.proof, result.publicInputs);
+-    const tx = this.#tx.clone();
+-    const previous = tx.getWitnessArgs(this.#witnessIndex);
+-    tx.setWitnessArgs(this.#witnessIndex, { ...previous, inputType: this.#sdk.encodeZkTransitionWitness('increment', result.proof, ccc.bytesFrom(this.#deployment.handle)) });
+-    return tx;
++  async prove(prover: Prover, options: { signal?: AbortSignal } = {}): Promise<ccc.Transaction> {
++    requireThat(!this.#proving, 'proving already in progress for this prepared transaction');
++    this.#proved = undefined;
++    this.#proving = true;
++    const { signal } = options;
++    let abort: (() => void) | undefined;
++    try {
++      signal?.throwIfAborted();
++      const cancelled = new Promise<never>((_, reject) => {
++        abort = () => reject(new Error('ZK proving cancelled; run prove again before signing'));
++        signal?.addEventListener('abort', abort, { once: true });
++      });
++      const result = await Promise.race([
++        prover(this.statementBytes, { oldCounter: this.#oldCounter, newCounter: this.#oldCounter + 1n }, options),
++        cancelled,
++      ]);
++      signal?.throwIfAborted();
++      this.#sdk.bindZkProverOutput(this.#statement, ccc.bytesFrom(this.#deployment.verificationKey.dataHash), result.proof, result.publicInputs);
++      const tx = this.#tx.clone();
++      const previous = tx.getWitnessArgs(this.#witnessIndex);
++      tx.setWitnessArgs(this.#witnessIndex, { ...previous, inputType: this.#sdk.encodeZkTransitionWitness('increment', result.proof, ccc.bytesFrom(this.#deployment.handle)) });
++      this.#proved = tx.clone();
++      return tx;
++    } finally {
++      if (abort) signal?.removeEventListener('abort', abort);
++      this.#proving = false;
++    }
+   }
+   checkSigned(proved: ccc.Transaction, signed: ccc.Transaction): void {
++    requireThat(this.#proved && !this.#proving, 'no completed proof for this prepared transaction; run prove before signing');
+     requireThat(proved.hash() === this.transactionHash && signed.hash() === this.transactionHash, 'ZK raw transaction changed after proving; finalize fees/dependencies and generate a new proof');
++    this.#checkWitnesses(this.#proved, proved);
++    this.#checkWitnesses(proved, signed);
++    requireThat(signed.getWitnessArgs(this.#witnessIndex)?.inputType != null, 'counter proof witness missing');
++  }
++  #checkWitnesses(proved: ccc.Transaction, signed: ccc.Transaction): void {
+     // Preserve all non-Lock witness fields, including other script groups/extra witnesses.
+     requireThat(proved.witnesses.length === signed.witnesses.length, 'wallet changed witness count after proving');
+     proved.witnesses.forEach((witness, index) => {
+@@ -119,21 +147,27 @@ export class PreparedCounter {
+       const before = proved.getWitnessArgs(index), after = signed.getWitnessArgs(index);
+       requireThat(before && after && before.inputType === after.inputType && before.outputType === after.outputType, 'wallet changed a proof or non-Lock witness field');
+     });
+-    requireThat(signed.getWitnessArgs(this.#witnessIndex)?.inputType != null, 'counter proof witness missing');
+   }
+-  async signAndSend(signer: ccc.Signer, proved: ccc.Transaction, options: { confirmations?: number; timeoutMs?: number } = {}) {
+-    this.checkSigned(proved, proved);
+-    // Sign only: prepareTransaction belongs before proving because it can add deps.
+-    const signed = await signer.signOnlyTransaction(proved.clone());
+-    this.checkSigned(proved, signed);
++  async #checkLive(client: ccc.Client): Promise<void> {
+     for (const cell of this.#cells) {
+-      const fresh = await live(signer.client, cell.outPoint, 'input');
++      const fresh = await live(client, cell.outPoint, 'input');
+       requireThat(equal(fresh.cellOutput.toBytes(), cell.cellOutput.toBytes()) && equal(fresh.outputData, cell.outputData), 'resolved input changed; re-prepare transaction');
+     }
+     const script = this.#cells[this.#witnessIndex].cellOutput.type!;
+-    await verifyDeployment(signer.client, this.#deployment, script);
++    await verifyDeployment(client, this.#deployment, script);
++  }
++  async signAndSend(signer: ccc.Signer, proved: ccc.Transaction, options: { confirmations?: number; timeoutMs?: number } = {}) {
++    this.checkSigned(proved, proved);
++    // Snapshot before the first asynchronous call; caller mutation cannot alter it.
++    const toSign = proved.clone();
++    await this.#checkLive(signer.client);
++    this.checkSigned(toSign, toSign);
++    // Sign only: prepareTransaction belongs before proving because it can add deps.
++    const signed = (await signer.signOnlyTransaction(toSign.clone())).clone();
++    this.checkSigned(toSign, signed);
++    await this.#checkLive(signer.client);
+     try { await signer.client.sendTransactionDry(signed, 'passthrough'); }
+-    catch (error) { throw new Error('CKB dry-run rejected the signed transaction (parent 79 means child rejection; inspect the node error, VK and proof)', { cause: error }); }
++    catch (error) { throw new Error('CKB dry-run did not succeed; transaction was not submitted (inspect the cause to distinguish node rejection from an unavailable result; parent 79 means child rejection)', { cause: error }); }
+     const hash = await signer.client.sendTransaction(signed, 'passthrough');
+     requireThat(hash === this.transactionHash, 'node returned an unexpected transaction hash');
+     const receipt = await signer.client.waitTransaction(hash, options.confirmations ?? 1, options.timeoutMs ?? 120_000);
+diff --git a/examples/zk/increment.ts b/examples/zk/increment.ts
+index 0f93d546..5b3cf303 100644
+--- a/examples/zk/increment.ts
++++ b/examples/zk/increment.ts
+@@ -1,23 +1,62 @@
+ // Run a counter update with a CCC signer and the native local prover.
+ import { ccc } from '@ckb-ccc/shell';
+-import { execFileSync } from 'node:child_process';
+-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
++import { execFile } from 'node:child_process';
++import { createHash } from 'node:crypto';
++import { closeSync, fstatSync, mkdtempSync, openSync, readFileSync, readSync, writeFileSync, rmSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { resolve, join } from 'node:path';
+ import { pathToFileURL } from 'node:url';
++import { promisify } from 'node:util';
+ import { prepareIncrement } from './client.ts';
+ import type { CounterDeployment, CounterSdk, Prover } from './client.ts';
+ 
+-export function localProver(executable: string, setupPackage: string, secretFile: string, sdk: CounterSdk): Prover {
+-  return async (statement, counters) => {
++export interface PinnedProver { executable: string; sha256: string }
++
++// Read and hash a bounded snapshot, then execute that snapshot. Checking the
++// source path and later executing it would permit substitution between steps.
++function proverSnapshot(tool: PinnedProver): Buffer {
++  if (!/^[0-9a-f]{64}$/.test(tool.sha256)) throw new Error('local prover pin must be a lowercase SHA-256 digest');
++  const fd = openSync(tool.executable, 'r');
++  try {
++    const info = fstatSync(fd);
++    if (!info.isFile() || info.size === 0 || info.size > 64 * 1024 * 1024) throw new Error('local prover must be a regular file of 1–67108864 bytes');
++    const buffer = Buffer.alloc(info.size + 1);
++    let length = 0;
++    while (length < buffer.length) {
++      const read = readSync(fd, buffer, length, buffer.length - length, null);
++      if (read === 0) break;
++      length += read;
++    }
++    if (length !== info.size) throw new Error('local prover changed while reading');
++    const bytes = buffer.subarray(0, length);
++    if (createHash('sha256').update(bytes).digest('hex') !== tool.sha256) throw new Error('local prover SHA-256 mismatch; no private witness read');
++    return bytes;
++  } finally { closeSync(fd); }
++}
++
++export function localProver(tool: PinnedProver, setupPackage: string, secretFile: string, sdk: CounterSdk): Prover {
++  // Capture the caller-approved identity, not a mutable configuration object.
++  const pin = { ...tool };
++  return async (statement, counters, { signal } = {}) => {
++    signal?.throwIfAborted();
++    const executableBytes = proverSnapshot(pin);
+     const directory = mkdtempSync(join(tmpdir(), 'cellscript-counter-'));
+     try {
++      const executable = join(directory, 'prover');
++      writeFileSync(executable, executableBytes, { mode: 0o700, flag: 'wx' });
++      signal?.throwIfAborted();
+       const secret = readFileSync(secretFile);
+       if (secret.length !== 32) throw new Error('owner secret file must contain exactly 32 binary bytes');
+       writeFileSync(join(directory, 'statement.bin'), statement, { mode: 0o600 });
+       // Emit u64 as JSON integer tokens without conversion through JavaScript Number.
+       writeFileSync(join(directory, 'witness.json'), `{"secret":${JSON.stringify([...secret])},"old_counter":${counters.oldCounter},"new_counter":${counters.newCounter}}`, { mode: 0o600 });
+-      execFileSync(executable, ['prove', setupPackage, join(directory, 'statement.bin'), join(directory, 'witness.json'), join(directory, 'proof.bin')], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 120_000 });
++      try {
++        await promisify(execFile)(executable, ['prove', setupPackage, join(directory, 'statement.bin'), join(directory, 'witness.json'), join(directory, 'proof.bin')], { timeout: 120_000, maxBuffer: 64 * 1024, killSignal: 'SIGKILL', signal });
++      } catch {
++        signal?.throwIfAborted();
++        // Child diagnostics may contain the private witness; never expose them.
++        throw new Error('local prover failed or timed out; no proof accepted');
++      }
+       // Public inputs are canonical limbs of the exact statement sent to this prover.
+       const view = new DataView(statement.buffer, statement.byteOffset, statement.byteLength);
+       const publicInputs = sdk.encodeZkPublicInputs({ domain: statement.slice(0,32), action: statement.slice(32,64), scriptHash: statement.slice(64,96), oldDataHash: statement.slice(96,128), newDataHash: statement.slice(128,160), inputTransactionHash: statement.slice(160,192), inputOutputIndex: view.getUint32(192,true), transactionHash: statement.slice(196,228) });
+@@ -29,13 +68,13 @@ export function localProver(executable: string, setupPackage: string, secretFile
+ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+   const file = process.argv[2];
+   if (!file || process.argv.length !== 3) throw new Error('usage: node --experimental-strip-types examples/zk/increment.ts CONFIG_JSON');
+-  const config: { rpcUrl: string; sdkDirectory: string; proverExecutable: string; setupPackage: string; ownerSecretFile: string; walletKeyFile: string; counter: ccc.OutPointLike; deployment: CounterDeployment } = JSON.parse(readFileSync(file, 'utf8'));
++  const config: { rpcUrl: string; sdkDirectory: string; proverExecutable: string; proverSha256: string; setupPackage: string; ownerSecretFile: string; walletKeyFile: string; counter: ccc.OutPointLike; deployment: CounterDeployment } = JSON.parse(readFileSync(file, 'utf8'));
+   const sdk: CounterSdk = await import(pathToFileURL(resolve(config.sdkDirectory, 'src/index.ts')).href);
+   const client = ccc.ClientPublicTestnet.open({ urls: [config.rpcUrl] });
+   try {
+     const signer = new ccc.SignerCkbPrivateKey(client.value, readFileSync(config.walletKeyFile, 'utf8').trim() as ccc.Hex);
+     const prepared = await prepareIncrement(signer, config.counter, config.deployment, sdk);
+-    const proved = await prepared.prove(localProver(config.proverExecutable, config.setupPackage, config.ownerSecretFile, sdk));
++    const proved = await prepared.prove(localProver({ executable: config.proverExecutable, sha256: config.proverSha256 }, config.setupPackage, config.ownerSecretFile, sdk));
+     const result = await prepared.signAndSend(signer, proved);
+     console.log(JSON.stringify({ status: 'committed', transactionHash: result.hash }));
+   } finally { await client.dispose(); }
+diff --git a/examples/zk/node-client.ts b/examples/zk/node-client.ts
+index 71e4de67..f9b018f6 100644
+--- a/examples/zk/node-client.ts
++++ b/examples/zk/node-client.ts
+@@ -31,10 +31,16 @@ class LocalSecpSigner extends ccc.SignerCkbPrivateKey {
+ }
+ try {
+   const signer = new LocalSecpSigner(owner.value, `0x${'45'.repeat(32)}`);
+-  const prover = localProver(config.proverExecutable, config.setupPackage, config.ownerSecretFile, sdk);
++  const tool = { executable: config.proverExecutable, sha256: config.proverSha256 };
++  const prover = localProver(tool, config.setupPackage, config.ownerSecretFile, sdk);
+   await assert.rejects(() => prepareIncrement(signer, config.counter, { ...config.deployment, genesisHash: `0x${'00'.repeat(32)}` }, sdk), /genesis mismatch/);
+   await assert.rejects(() => prepareIncrement(signer, config.counter, { ...config.deployment, child: { ...config.deployment.child, dataHash: `0x${'00'.repeat(32)}` } }, sdk), /child: live data hash/);
+   const prepared = await prepareIncrement(signer, config.counter, config.deployment, sdk);
++  await assert.rejects(() => prepared.prove(localProver({ ...tool, sha256: '00'.repeat(32) }, config.setupPackage, config.ownerSecretFile, sdk)), /SHA-256 mismatch/);
++  const controller = new AbortController();
++  const cancelled = prepared.prove(prover, { signal: controller.signal });
++  controller.abort();
++  await assert.rejects(() => cancelled, /cancelled|abort/i);
+   const proved = await prepared.prove(prover);
+   const signed = await signer.signOnlyTransaction(proved.clone());
+   assert.ok(signed.witnesses.some((_, i) => ccc.bytesFrom(signed.getWitnessArgs(i)?.lock ?? '0x').length === 65), 'real secp signature missing');
+@@ -43,7 +49,24 @@ try {
+   assert.throws(() => prepared.checkSigned(proved, altered), /raw transaction changed/);
+   const corrupt = proved.clone(); const args = corrupt.getWitnessArgs(0)!; const inputType = ccc.bytesFrom(args.inputType!); inputType[8] ^= 1;
+   corrupt.setWitnessArgs(0, { ...args, inputType });
+-  await assert.rejects(() => prepared.signAndSend(signer, corrupt), /CKB dry-run rejected/);
++  await assert.rejects(() => prepared.signAndSend(signer, corrupt), /non-Lock witness/);
++  // TypeScript binds bytes/PI but does not perform Groth16 verification. Keep a
++  // separate prover-output corruption case which must reach the node dry-run.
++  const corruptPrepared = await prepareIncrement(signer, config.counter, config.deployment, sdk);
++  const corruptProved = await corruptPrepared.prove(async (statement, counters, options) => {
++    const result = await prover(statement, counters, options);
++    result.proof[0] ^= 1;
++    return result;
++  });
++  await assert.rejects(() => corruptPrepared.signAndSend(signer, corruptProved), (error: unknown) => {
++    assert.ok(error instanceof Error);
++    assert.match(error.message, /CKB dry-run did not succeed/);
++    assert.ok(error.cause instanceof ccc.ErrorClientVerification, 'expected Script validation failure, not an unavailable RPC result');
++    assert.equal(error.cause.source, 'inputType');
++    assert.equal(error.cause.sourceIndex, 0n);
++    assert.equal(error.cause.errorCode, 79, 'expected parent rejection of invalid child proof');
++    return true;
++  });
+   const result = await prepared.signAndSend(signer, proved, { confirmations: 1 });
+   const next = { txHash: result.hash, index: 0 };
+   const second = await prepareIncrement(signer, next, config.deployment, sdk);
+@@ -54,6 +77,10 @@ try {
+     status: 'passed', case: 'CCC live client', network: 'disposable pinned CKB node',
+     wallet: 'real secp256k1 fee-input signature; public fixture key',
+     first: result.hash, second: secondResult.hash, confirmed: true, stale_input_rejected: true,
+-    mutated_transaction_rejected: true, corrupt_proof_dry_run_rejected: true, wrong_genesis_rejected: true, wrong_child_rejected: true,
++    mutated_transaction_rejected: true, substituted_proof_pre_sign_rejected: true,
++    cancelled_proving_recovered: true,
++    prover_sha256: config.proverSha256, wrong_prover_pin_rejected: true,
++    corrupt_proof_dry_run_rejected: true, corrupt_proof_parent_error: 79,
++    wrong_genesis_rejected: true, wrong_child_rejected: true,
+   }, null, 2));
+ } finally { await owner.dispose(); }
+diff --git a/src/codegen/expr.rs b/src/codegen/expr.rs
+index 01512f91..0a59ad81 100644
+--- a/src/codegen/expr.rs
++++ b/src/codegen/expr.rs
+@@ -64,6 +64,20 @@ impl CodeGenerator {
+     }
+ 
+     pub(super) fn emit_binary(&mut self, dest: &IrVar, op: BinaryOp, left: &IrOperand, right: &IrOperand) -> Result<()> {
++        self.emit_binary_with_retained_t0(dest, op, left, right, None)
++    }
++
++    /// `retained_t0` is a scalar SSA value produced immediately before this
++    /// instruction by an explicitly classified emitter. All stack stores stay
++    /// intact; callers outside generate_block must use ordinary emit_binary.
++    pub(super) fn emit_binary_with_retained_t0(
++        &mut self,
++        dest: &IrVar,
++        op: BinaryOp,
++        left: &IrOperand,
++        right: &IrOperand,
++        retained_t0: Option<usize>,
++    ) -> Result<()> {
+         if self.emit_u128_add_sub_with_u64(dest, op, left, right) {
+             return Ok(());
+         }
+@@ -106,8 +120,30 @@ impl CodeGenerator {
+         // program point. Loading them directly avoids recursively rebuilding
+         // expression provenance (which is reserved for prelude checks) and
+         // avoids using the destination stack slot as a temporary.
+-        self.emit_operand_to_register("t0", left);
+-        self.emit_operand_to_register("t1", right);
++        let retained_left = matches!(left, IrOperand::Var(var) if Some(var.id) == retained_t0);
++        let retained_right = matches!(right, IrOperand::Var(var) if Some(var.id) == retained_t0);
++        if retained_right {
++            self.emit("# adjacent scalar: retain right operand from t0");
++            self.emit("mv t1, t0");
++            if !retained_left {
++                if let IrOperand::Var(var) = left {
++                    self.emit_stack_load_with_avoid("t0", self.scalar_slot_offset(var.id), &["t1"]);
++                } else {
++                    self.emit_operand_to_register("t0", left);
++                }
++            }
++        } else {
++            if retained_left {
++                self.emit("# adjacent scalar: retain left operand in t0");
++            } else {
++                self.emit_operand_to_register("t0", left);
++            }
++            if retained_left && let IrOperand::Var(var) = right {
++                self.emit_stack_load_with_avoid("t1", self.scalar_slot_offset(var.id), &["t0"]);
++            } else {
++                self.emit_operand_to_register("t1", right);
++            }
++        }
+ 
+         if matches!(op, BinaryOp::Div | BinaryOp::Mod) {
+             let divisor_ok = self.fresh_label("scalar_divisor_nonzero");
+diff --git a/src/codegen/mod.rs b/src/codegen/mod.rs
+index c1e23eb9..ba8c2f42 100644
+--- a/src/codegen/mod.rs
++++ b/src/codegen/mod.rs
+@@ -22,6 +22,8 @@ mod frame;
+ mod policy;
+ mod runtime;
+ mod runtime_gather;
++#[cfg(all(test, feature = "vm-runner"))]
++mod scalar_retention_tests;
+ mod scalar_slots;
+ mod schema;
+ mod zk;
+@@ -1129,6 +1131,8 @@ impl Default for CodegenOptions {
+ 
+ pub struct CodeGenerator {
+     options: CodegenOptions,
++    #[cfg(test)]
++    scalar_retention_enabled: bool,
+     assembly: Vec<String>,
+     current_function: Option<String>,
+     current_function_owns_exact_read_cache: bool,
+@@ -1380,6 +1384,8 @@ impl CodeGenerator {
+     pub fn new(options: CodegenOptions) -> Self {
+         Self {
+             options,
++            #[cfg(test)]
++            scalar_retention_enabled: true,
+             assembly: Vec::new(),
+             current_function: None,
+             current_function_owns_exact_read_cache: false,
+@@ -3143,8 +3149,18 @@ impl CodeGenerator {
+ 
+         let fused = block.instructions.last().is_some_and(|instruction| self.can_fuse_branch(instruction, &block.terminator));
+         let instruction_count = block.instructions.len().saturating_sub(usize::from(fused));
++        let retain_scalar = self.options.opt_level > 0 && !self.scalar_slot_offsets.is_empty() && self.scalar_retention_enabled();
++        let mut retained_t0 = None;
+         for instruction in &block.instructions[..instruction_count] {
+-            self.generate_instruction(instruction)?;
++            if retain_scalar
++                && scalar_slots::retention_consumer(instruction)
++                && let IrInstruction::Binary { dest, op, left, right } = instruction
++            {
++                self.emit_binary_with_retained_t0(dest, *op, left, right, retained_t0)?;
++            } else {
++                self.generate_instruction(instruction)?;
++            }
++            retained_t0 = retain_scalar.then(|| scalar_slots::retained_t0(instruction)).flatten();
+         }
+         if fused {
+             self.try_emit_fused_branch(
+@@ -3163,6 +3179,17 @@ impl CodeGenerator {
+         Ok(())
+     }
+ 
++    fn scalar_retention_enabled(&self) -> bool {
++        #[cfg(test)]
++        {
++            self.scalar_retention_enabled
++        }
++        #[cfg(not(test))]
++        {
++            true
++        }
++    }
++
+     fn can_fuse_branch(&self, instruction: &IrInstruction, terminator: &IrTerminator) -> bool {
+         if self.options.opt_level == 0 {
+             return false;
+diff --git a/src/codegen/scalar_slots.rs b/src/codegen/scalar_slots.rs
+index 3d3de77a..22f4a3eb 100644
+--- a/src/codegen/scalar_slots.rs
++++ b/src/codegen/scalar_slots.rs
+@@ -10,6 +10,34 @@ use super::*;
+ type Variables = BTreeSet<usize>;
+ type Effect = (Variables, Variables);
+ 
++/// These emitters finish with the stored scalar result in t0. The fact is
++/// valid only for the immediately following instruction in this basic block;
++/// neither stack-slot equality nor a call/helper return implies retention.
++pub(super) fn retained_t0(instruction: &IrInstruction) -> Option<usize> {
++    let dest = match instruction {
++        IrInstruction::LoadConst { dest, value } if scalar_constant(value) => dest,
++        IrInstruction::LoadVar { dest, .. } => dest,
++        IrInstruction::Binary { dest, left, right, .. } if scalar_operand(left) && scalar_operand(right) => dest,
++        _ => return None,
++    };
++    scalar(&dest.ty).then_some(dest.id)
++}
++
++pub(super) fn retention_consumer(instruction: &IrInstruction) -> bool {
++    matches!(instruction, IrInstruction::Binary { .. }) && retained_t0(instruction).is_some()
++}
++
++fn scalar_constant(value: &IrConst) -> bool {
++    matches!(value, IrConst::Bool(_) | IrConst::U8(_) | IrConst::U16(_) | IrConst::U32(_) | IrConst::U64(_))
++}
++
++fn scalar_operand(operand: &IrOperand) -> bool {
++    match operand {
++        IrOperand::Var(var) => scalar(&var.ty),
++        IrOperand::Const(value) => scalar_constant(value),
++    }
++}
++
+ pub(super) fn allocate(
+     body: &IrBody,
+     params: &[IrParam],
+diff --git a/src/interface.rs b/src/interface.rs
+index 3b602c6e..676bf836 100644
+--- a/src/interface.rs
++++ b/src/interface.rs
+@@ -14,115 +14,12 @@ use std::collections::{BTreeMap, BTreeSet};
+ pub const INTERFACE_SCHEMA: &str = "cellscript-package-interface-v3";
+ pub const INTERFACE_SCHEMA_VERSION: u32 = 3;
+ pub const COMPATIBILITY_SCHEMA: &str = "cellscript-interface-compatibility-v1";
+-pub const TEMPORAL_INTERFACE_SCHEMA: &str = "cellscript-ckb-temporal-interface-v1";
++pub use cellscript_artifact_checker::interface::{temporal_contract, TEMPORAL_INTERFACE_SCHEMA};
+ 
+-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+-pub struct PackageInterface {
+-    pub schema: String,
+-    pub version: u32,
+-    pub module: String,
+-    pub module_identity: String,
+-    pub edition: String,
+-    pub visibility_default: String,
+-    pub types: Vec<InterfaceType>,
+-    pub constants: Vec<InterfaceConstant>,
+-    pub callables: Vec<InterfaceCallable>,
+-    pub runtime_contract: InterfaceRuntimeContract,
+-    pub builder_contract_hash: String,
+-    pub deployment_contract_hash: String,
+-}
+-
+-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+-pub struct InterfaceType {
+-    pub identity: String,
+-    pub name: String,
+-    pub kind: String,
+-    pub visibility: String,
+-    pub type_parameters: Vec<InterfaceTypeParameter>,
+-    pub value_abilities: Vec<String>,
+-    pub cell_capabilities: Vec<String>,
+-    pub fields: Vec<InterfaceField>,
+-    pub variants: Vec<InterfaceVariant>,
+-    pub layout_identity: String,
+-    pub type_identity: Option<String>,
+-}
+-
+-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+-pub struct InterfaceTypeParameter {
+-    pub name: String,
+-    pub phantom: bool,
+-    pub constraints: Vec<String>,
+-}
+-
+-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+-pub struct InterfaceField {
+-    pub name: String,
+-    pub r#type: String,
+-    pub offset: Option<usize>,
+-    pub encoded_size: Option<usize>,
+-}
+-
+-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+-pub struct InterfaceVariant {
+-    pub name: String,
+-    pub fields: Vec<String>,
+-}
+-
+-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+-pub struct InterfaceConstant {
+-    pub identity: String,
+-    pub name: String,
+-    pub visibility: String,
+-    pub r#type: String,
+-}
+-
+-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+-pub struct InterfaceCallable {
+-    pub identity: String,
+-    pub name: String,
+-    pub kind: String,
+-    pub visibility: String,
+-    pub type_parameters: Vec<InterfaceTypeParameter>,
+-    pub params: Vec<InterfaceParam>,
+-    pub return_type: Option<String>,
+-    pub outputs: Vec<InterfaceParam>,
+-    pub effect: String,
+-    pub entry_witness_abi: Option<String>,
+-    pub builder_contract_hash: String,
+-}
+-
+-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+-pub struct InterfaceParam {
+-    pub name: String,
+-    pub r#type: String,
+-    pub source: String,
+-    pub mutable: bool,
+-    pub reference: bool,
+-}
+-
+-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+-pub struct InterfaceRuntimeContract {
+-    pub target_profile: String,
+-    pub vm_abi: String,
+-    pub witness_abi: String,
+-    pub lock_args_abi: String,
+-    pub source_encoding: String,
+-    pub spawn_ipc_abi: String,
+-    pub compatibility_profile_id: String,
+-    #[serde(default)]
+-    pub temporal: InterfaceTemporalContract,
+-}
+-
+-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+-pub struct InterfaceTemporalContract {
+-    pub schema: String,
+-    pub wire_representation: String,
+-    pub since_abi: String,
+-    pub constructors: Vec<String>,
+-    pub decoder: String,
+-    pub domains: Vec<String>,
+-    pub migration: String,
+-}
++pub use cellscript_artifact_checker::interface::{
++    InterfaceCallable, InterfaceConstant, InterfaceField, InterfaceParam, InterfaceRuntimeContract, InterfaceTemporalContract,
++    InterfaceType, InterfaceTypeParameter, InterfaceVariant, PackageInterface,
++};
+ 
+ #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+ pub struct InterfaceCompatibilityReport {
+@@ -364,39 +261,6 @@ pub fn build(ast: &ast::Module, metadata: &CompileMetadata) -> PackageInterface
+     }
+ }
+ 
+-pub fn temporal_contract(since_abi: &str) -> InterfaceTemporalContract {
+-    InterfaceTemporalContract {
+-        schema: TEMPORAL_INTERFACE_SCHEMA.to_string(),
+-        wire_representation: "fixed-u64-register-and-little-endian-wire".to_string(),
+-        since_abi: since_abi.to_string(),
+-        constructors: vec![
+-            "ckb::since_absolute_block(u64)->AbsoluteBlockSince".to_string(),
+-            "ckb::since_absolute_epoch(u64,u64,u64)->AbsoluteEpochSince".to_string(),
+-            "ckb::since_absolute_timestamp(u64-seconds)->AbsoluteTimestampSince".to_string(),
+-            "ckb::since_relative_block(u64)->RelativeBlockSince".to_string(),
+-            "ckb::since_relative_epoch(u64,u64,u64)->RelativeEpochSince".to_string(),
+-            "ckb::since_relative_timestamp(u64-seconds)->RelativeTimestampSince".to_string(),
+-        ],
+-        decoder: "ckb::since_decode(EncodedSince)->DecodedSince;ckb::since_from_raw_checked(u64)->DecodedSince".to_string(),
+-        domains: vec![
+-            "EpochNumber".to_string(),
+-            "EpochDuration".to_string(),
+-            "BlockNumber".to_string(),
+-            "EpochLength".to_string(),
+-            "TimestampMillis".to_string(),
+-            "EncodedSince".to_string(),
+-            "DecodedSince".to_string(),
+-            "AbsoluteBlockSince".to_string(),
+-            "AbsoluteEpochSince".to_string(),
+-            "AbsoluteTimestampSince".to_string(),
+-            "RelativeBlockSince".to_string(),
+-            "RelativeEpochSince".to_string(),
+-            "RelativeTimestampSince".to_string(),
+-        ],
+-        migration: "legacy-raw-ckb-temporal-to-explicit-typed-v1".to_string(),
+-    }
+-}
+-
+ pub fn hash(interface: &PackageInterface) -> String {
+     hash_serializable(interface)
+ }
+diff --git a/src/lib.rs b/src/lib.rs
+index 97178fe8..57dd5167 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -2,6 +2,10 @@
+ //! Currently the backend can output RISC-V assembly or ELF artifacts.
+ #![cfg_attr(feature = "wasm", allow(dead_code))]
+ 
++// Shared CKB test harnesses also compile inside backend unit tests.
++#[cfg(all(test, feature = "vm-runner"))]
++extern crate self as cellscript;
++
+ pub(crate) mod aggregate_lowering;
+ pub mod artifact;
+ pub mod assumptions;
+diff --git a/tests/policy_artifact_checker.rs b/tests/policy_artifact_checker.rs
+index 16e50131..f17db261 100644
+--- a/tests/policy_artifact_checker.rs
++++ b/tests/policy_artifact_checker.rs
+@@ -128,6 +128,16 @@ impl Fixture {
+         self.metadata["verified_artifact"]["verified_bundle_id"] = verified_bundle_id.into();
+     }
+ 
++    fn rebind_interface_identity(&mut self) {
++        let canonical = cellscript::package::registry::canonical_json_value(&self.metadata["public_interface"]);
++        let hash = cellscript_artifact_checker::hex_encode(&cellscript_artifact_checker::ckb_blake2b256(
++            &serde_json::to_vec(&canonical).unwrap(),
++        ));
++        self.metadata["interface_hash"] = hash.clone().into();
++        self.record.typed_semantics.interface_hash = hash;
++        self.rebind_policy_identity();
++    }
++
+     fn bind_artifact_identity(&mut self) {
+         let artifact_hash = cellscript_artifact_checker::hex_encode(&cellscript_artifact_checker::ckb_blake2b256(&self.artifact));
+         self.record.artifact_hash.clone_from(&artifact_hash);
+@@ -250,6 +260,150 @@ fn real_policy_bundle_and_unchanged_identity_rebinding_are_valid_in_both_edition
+     }
+ }
+ 
++#[test]
++fn interface_inspection_rejects_unknown_fields_after_all_outer_hashes_are_rebound() {
++    let baseline = Fixture::new(CellScriptEdition::Edition2027);
++    let inspect = |fixture: &Fixture| {
++        cellscript_artifact_checker::interface::inspect_bundle(
++            &fixture.artifact,
++            &serde_json::to_vec(&fixture.metadata).unwrap(),
++            &serde_json::to_vec(&fixture.record).unwrap(),
++            &serde_json::to_vec(&fixture.source_map).unwrap(),
++            &CheckerBudgets::default(),
++        )
++    };
++    inspect(&baseline).unwrap();
++    for nested in [false, true] {
++        let mut changed = baseline.clone();
++        if nested {
++            changed.metadata["public_interface"]["types"][0]["fields"][0]["unrecognized"] = true.into();
++        } else {
++            changed.metadata["public_interface"]["unrecognized"] = true.into();
++        }
++        changed.rebind_interface_identity();
++        // Existing artifact binding accepts this otherwise consistent record.
++        // The new projection must reject losing the unknown declaration field.
++        changed.check().unwrap();
++        let error = inspect(&changed).unwrap_err();
++        assert_eq!(error.code, CheckerRejectionCode::V2410MetadataBindingMismatch);
++        assert!(error.message.contains("discard unknown fields"));
++    }
++}
++
++#[test]
++fn interface_inspection_recomputes_inner_digests_and_profile_bindings_after_rebinding() {
++    let baseline = Fixture::new(CellScriptEdition::Edition2027);
++    for pointer in [
++        "/module_identity",
++        "/types/0/layout_identity",
++        "/types/0/fields/0/type",
++        "/callables/0/builder_contract_hash",
++        "/callables/0/entry_witness_abi",
++        "/builder_contract_hash",
++        "/deployment_contract_hash",
++        "/runtime_contract/vm_abi",
++        "/runtime_contract/source_encoding",
++        "/runtime_contract/compatibility_profile_id",
++        "/runtime_contract/temporal/migration",
++    ] {
++        let mut changed = baseline.clone();
++        *changed.metadata["public_interface"].pointer_mut(pointer).unwrap() = "substituted".into();
++        changed.rebind_interface_identity();
++        changed.check().unwrap();
++        let error = cellscript_artifact_checker::interface::inspect_bundle(
++            &changed.artifact,
++            &serde_json::to_vec(&changed.metadata).unwrap(),
++            &serde_json::to_vec(&changed.record).unwrap(),
++            &serde_json::to_vec(&changed.source_map).unwrap(),
++            &CheckerBudgets::default(),
++        )
++        .unwrap_err();
++        assert_eq!(error.code, CheckerRejectionCode::V2410MetadataBindingMismatch, "{pointer}: {error}");
++    }
++}
++
++#[test]
++fn interface_layout_cannot_be_forged_by_rebinding_its_inner_and_outer_hashes() {
++    let baseline = Fixture::new(CellScriptEdition::Edition2027);
++    for mutation in ["offset", "encoded_size", "omit", "duplicate", "rename", "kind"] {
++        let mut changed = baseline.clone();
++        let ty = &mut changed.metadata["public_interface"]["types"][0];
++        match mutation {
++            "offset" | "encoded_size" => ty["fields"][0][mutation] = serde_json::json!(1024),
++            "omit" => ty["fields"] = serde_json::json!([]),
++            "duplicate" => {
++                let field = ty["fields"][0].clone();
++                ty["fields"].as_array_mut().unwrap().push(field);
++            }
++            "rename" => ty["fields"][0]["name"] = serde_json::json!("forged"),
++            "kind" => ty["kind"] = serde_json::json!("struct"),
++            _ => unreachable!(),
++        }
++        let layout = serde_json::json!([ty["kind"], ty["fields"], ty["variants"]]);
++        let canonical = cellscript::package::registry::canonical_json_value(&layout);
++        ty["layout_identity"] = cellscript_artifact_checker::hex_encode(&cellscript_artifact_checker::ckb_blake2b256(
++            &serde_json::to_vec(&canonical).unwrap(),
++        ))
++        .into();
++        changed.rebind_interface_identity();
++        changed.check().unwrap();
++        let error = cellscript_artifact_checker::interface::inspect_bundle(
++            &changed.artifact,
++            &serde_json::to_vec(&changed.metadata).unwrap(),
++            &serde_json::to_vec(&changed.record).unwrap(),
++            &serde_json::to_vec(&changed.source_map).unwrap(),
++            &CheckerBudgets::default(),
++        )
++        .unwrap_err();
++        assert_eq!(error.code, CheckerRejectionCode::V2410MetadataBindingMismatch);
++        assert!(error.message.contains("checked concrete layout"));
++    }
++}
++
++#[test]
++fn interface_variant_cardinality_cannot_be_forged_by_rebinding_layout_hashes() {
++    let source = format!("{SOURCE}\npublic enum Choice {{ First(u64), Second(Hash) }}")
++        .replace("witness recipient: Address)", "witness recipient: Address, witness choice: Choice)");
++    let baseline = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, 0, declaration());
++    assert!(baseline.record.typed_semantics.types.iter().any(|ty| ty.name == "Choice"));
++    for mutation in ["omit", "reorder", "rename", "payload"] {
++        let mut changed = baseline.clone();
++        let ty = changed.metadata["public_interface"]["types"]
++            .as_array_mut()
++            .unwrap()
++            .iter_mut()
++            .find(|ty| ty["name"] == "Choice")
++            .unwrap();
++        match mutation {
++            "omit" => {
++                ty["variants"].as_array_mut().unwrap().pop();
++            }
++            "reorder" => ty["variants"].as_array_mut().unwrap().reverse(),
++            "rename" => ty["variants"][0]["name"] = serde_json::json!("forged"),
++            "payload" => ty["variants"][0]["fields"] = serde_json::json!([]),
++            _ => unreachable!(),
++        }
++        let layout = serde_json::json!([ty["kind"], ty["fields"], ty["variants"]]);
++        let canonical = cellscript::package::registry::canonical_json_value(&layout);
++        ty["layout_identity"] = cellscript_artifact_checker::hex_encode(&cellscript_artifact_checker::ckb_blake2b256(
++            &serde_json::to_vec(&canonical).unwrap(),
++        ))
++        .into();
++        changed.rebind_interface_identity();
++        changed.check().unwrap();
++        let error = cellscript_artifact_checker::interface::inspect_bundle(
++            &changed.artifact,
++            &serde_json::to_vec(&changed.metadata).unwrap(),
++            &serde_json::to_vec(&changed.record).unwrap(),
++            &serde_json::to_vec(&changed.source_map).unwrap(),
++            &CheckerBudgets::default(),
++        )
++        .unwrap_err();
++        assert_eq!(error.code, CheckerRejectionCode::V2410MetadataBindingMismatch);
++        assert!(error.message.contains("variant set differs"), "{mutation}: {error}");
++    }
++}
++
+ #[test]
+ fn policy_dispatch_machine_contract_covers_editions_optimizers_tag_extremes_and_no_common_checks() {
+     for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
+diff --git a/crates/cellscript-artifact-checker/src/interface.rs b/crates/cellscript-artifact-checker/src/interface.rs
+new file mode 100644
+--- /dev/null
++++ b/crates/cellscript-artifact-checker/src/interface.rs
+@@ -0,0 +1,365 @@
++//! Versioned public-interface wire models shared without compiler dependencies.
++//! Construction from source belongs to the compiler; checked projections belong
++//! to the independent artifact boundary. The field/serialization order is kept
++//! identical to the existing v3 package interface.
++
++use serde::{Deserialize, Serialize};
++
++use crate::{CheckerBudgets, CheckerError, CheckerRejectionCode, CheckerReport, EvidenceState, TypedSemanticRecord};
++
++/// A checked bundle's interface inputs. This is not a compatibility receipt or
++/// deployment authorization: declared source API and effective typed contracts
++/// deliberately remain separate. Only `inspect_bundle` constructs this value.
++#[derive(Debug)]
++pub struct InterfaceInspection {
++    declared: PackageInterface,
++    effective: TypedSemanticRecord,
++    report: CheckerReport,
++}
++
++impl InterfaceInspection {
++    pub fn declared(&self) -> &PackageInterface {
++        &self.declared
++    }
++
++    /// Includes inferred effects, concrete layouts, entry bindings and source
++    /// provenance checked against the lowering/machine boundary. In particular,
++    /// a source declaration's default effect need not equal its inferred effect.
++    pub fn effective(&self) -> &TypedSemanticRecord {
++        &self.effective
++    }
++
++    pub fn report(&self) -> &CheckerReport {
++        &self.report
++    }
++}
++
++/// Inspect actual, bounded bundle bytes before constructing receipt projections.
++///
++/// The declaration model must round-trip without dropping unknown fields or
++/// synthesizing absent defaults. This preserves its existing canonical hash.
++/// No claim of interface compatibility, source equivalence, peer execution,
++/// network availability or deployment authority is made by this operation.
++pub fn inspect_bundle(
++    artifact: &[u8],
++    metadata_bytes: &[u8],
++    lowering_bytes: &[u8],
++    source_map_bytes: &[u8],
++    budgets: &CheckerBudgets,
++) -> Result<InterfaceInspection, CheckerError> {
++    // The checker policy has no distinct metadata budget. This consumer applies
++    // its record-byte ceiling before parsing or cloning metadata.
++    if metadata_bytes.len() as u64 > budgets.record_bytes {
++        return Err(CheckerError::new(CheckerRejectionCode::V2400BudgetExceeded, "interface metadata exceeds record byte budget"));
++    }
++    let report = crate::check_bundle(artifact, metadata_bytes, lowering_bytes, source_map_bytes, budgets)?;
++    if [
++        report.binding_verification,
++        report.structural_verification,
++        report.lowering_record_verification,
++        report.typed_semantics_verification,
++    ]
++    .iter()
++    .any(|state| *state != EvidenceState::Verified)
++    {
++        return Err(CheckerError::new(
++            CheckerRejectionCode::V2410MetadataBindingMismatch,
++            "interface inspection requires complete checked artifact evidence",
++        ));
++    }
++    let metadata: serde_json::Value = serde_json::from_slice(metadata_bytes)
++        .map_err(|_| CheckerError::new(CheckerRejectionCode::V2401MalformedJson, "invalid interface metadata JSON"))?;
++    let raw = metadata.get("public_interface").ok_or_else(|| {
++        CheckerError::new(CheckerRejectionCode::V2410MetadataBindingMismatch, "checked metadata has no public interface")
++    })?;
++    let declared: PackageInterface = serde_json::from_value(raw.clone())
++        .map_err(|_| CheckerError::new(CheckerRejectionCode::V2410MetadataBindingMismatch, "invalid public interface wire model"))?;
++    let modeled = serde_json::to_value(&declared)
++        .map_err(|_| CheckerError::new(CheckerRejectionCode::V2401MalformedJson, "public interface serialization failed"))?;
++    if modeled != *raw {
++        return Err(CheckerError::new(
++            CheckerRejectionCode::V2410MetadataBindingMismatch,
++            "public interface model would discard unknown fields or synthesize missing fields",
++        ));
++    }
++    let item_count = declared.types.len().saturating_add(declared.constants.len()).saturating_add(declared.callables.len());
++    if item_count > budgets.entries as usize {
++        return Err(CheckerError::new(CheckerRejectionCode::V2400BudgetExceeded, "public interface exceeds item count budget"));
++    }
++    let effective = crate::parse_lowering_record(lowering_bytes, budgets)?.typed_semantics;
++    check_declaration_bindings(&declared, &metadata, &effective)?;
++    Ok(InterfaceInspection { declared, effective, report })
++}
++
++fn mismatch(message: &'static str) -> CheckerError {
++    CheckerError::new(CheckerRejectionCode::V2410MetadataBindingMismatch, message)
++}
++
++fn declaration_hash(value: &impl Serialize) -> Result<String, CheckerError> {
++    let value = serde_json::to_value(value).map_err(|_| mismatch("interface digest value cannot be serialized"))?;
++    let bytes = serde_json::to_vec(&crate::checker::canonical_json_value(&value))
++        .map_err(|_| mismatch("interface digest value cannot be canonicalized"))?;
++    Ok(crate::hex_encode(&crate::ckb_blake2b256(&bytes)))
++}
++
++/// Bind every existing declaration digest to its constituent fields. These
++/// checks do not equate source-declared effects with inferred execution effects;
++/// the latter remain in the separately checked typed semantic record.
++fn check_declaration_bindings(
++    interface: &PackageInterface,
++    metadata: &serde_json::Value,
++    effective: &TypedSemanticRecord,
++) -> Result<(), CheckerError> {
++    let mut module = b"cellscript-module-identity-v1\0".to_vec();
++    module.extend_from_slice(interface.module.as_bytes());
++    if interface.module_identity != format!("blake2b:{}", crate::hex_encode(&crate::ckb_blake2b256(&module))) {
++        return Err(mismatch("interface module identity does not match its module"));
++    }
++    for ty in &interface.types {
++        if ty.identity != format!("{}::{}", interface.module, ty.name)
++            || ty.layout_identity != declaration_hash(&(&ty.kind, &ty.fields, &ty.variants))?
++        {
++            return Err(mismatch("interface type identity or layout digest differs from its declaration"));
++        }
++        // Uninstantiated templates have no concrete layout. Concrete offsets
++        // and widths must instead agree with the independently checked record;
++        // recomputing a declaration's own layout digest is not sufficient.
++        let checked = effective.types.iter().find(|entry| entry.name == ty.name);
++        let mut names = ty.fields.iter().map(|field| field.name.as_str()).collect::<Vec<_>>();
++        names.sort_unstable();
++        if names.windows(2).any(|pair| pair[0] == pair[1]) {
++            return Err(mismatch("interface has duplicate fields in checked concrete layout"));
++        }
++        if let Some(checked) = checked {
++            let mut checked_names = checked.fields.iter().map(|field| field.name.as_str()).collect::<Vec<_>>();
++            checked_names.sort_unstable();
++            if ty.kind != checked.kind || names != checked_names {
++                return Err(mismatch("interface field set or kind differs from checked concrete layout"));
++            }
++            if ty.variants.len() != checked.variants.len()
++                || ty.variants.iter().zip(&checked.variants).enumerate().any(|(index, (declared, concrete))| {
++                    declared.name != concrete.name || concrete.tag as usize != index || declared.fields.len() != concrete.fields.len()
++                })
++            {
++                return Err(mismatch("interface variant set differs from checked concrete layout"));
++            }
++        }
++        for field in &ty.fields {
++            let layout = checked.and_then(|entry| entry.fields.iter().find(|candidate| candidate.name == field.name));
++            if field.offset != layout.map(|field| field.offset as usize)
++                || field.encoded_size != layout.and_then(|field| field.width_bytes.map(|width| width as usize))
++            {
++                return Err(mismatch("interface field layout differs from checked concrete layout"));
++            }
++        }
++    }
++    for constant in &interface.constants {
++        if constant.identity != format!("{}::{}", interface.module, constant.name) {
++            return Err(mismatch("interface constant identity differs from its declaration"));
++        }
++    }
++    for callable in &interface.callables {
++        if callable.identity != format!("{}::{}", interface.module, callable.name) {
++            return Err(mismatch("interface callable identity differs from its declaration"));
++        }
++        let family = match callable.kind.as_str() {
++            "action" => "actions",
++            "function" => "functions",
++            "lock" => "locks",
++            _ => return Err(mismatch("interface callable kind is not supported")),
++        };
++        let expected_witness = (callable.kind != "function").then_some(interface.runtime_contract.witness_abi.as_str());
++        if callable.entry_witness_abi.as_deref() != expected_witness {
++            return Err(mismatch("interface callable witness ABI differs from its runtime contract"));
++        }
++        let entries = metadata[family].as_array().ok_or_else(|| mismatch("interface callable metadata family is missing"))?;
++        let matching: Vec<_> = entries.iter().filter(|entry| entry["name"].as_str() == Some(&callable.name)).collect();
++        let expected = match matching.as_slice() {
++            [entry] => {
++                let params = entry.get("params").ok_or_else(|| mismatch("interface callable parameters are missing"))?;
++                let empty = serde_json::json!([]);
++                let requirements = entry.get("transaction_runtime_input_requirements").unwrap_or(&empty);
++                declaration_hash(&(params, requirements))?
++            }
++            [] if callable.kind == "action" => declaration_hash(&(&callable.params, &callable.outputs))?,
++            [] => declaration_hash(&callable.params)?,
++            _ => return Err(mismatch("interface callable metadata is ambiguous")),
++        };
++        if callable.builder_contract_hash != expected {
++            return Err(mismatch("interface callable builder digest differs from checked metadata"));
++        }
++    }
++    if interface.builder_contract_hash
++        != declaration_hash(&interface.callables.iter().map(|item| (&item.identity, &item.builder_contract_hash)).collect::<Vec<_>>())?
++    {
++        return Err(mismatch("interface builder digest differs from its callable digests"));
++    }
++    let runtime = &interface.runtime_contract;
++    for (key, value) in [
++        ("target_profile", &runtime.target_profile),
++        ("vm_abi", &runtime.vm_abi),
++        ("witness_abi", &runtime.witness_abi),
++        ("lock_args_abi", &runtime.lock_args_abi),
++        ("source_encoding", &runtime.source_encoding),
++        ("spawn_ipc_abi", &runtime.spawn_ipc_abi),
++    ] {
++        let metadata_key = if key == "target_profile" { "name" } else { key };
++        if metadata["target_profile"][metadata_key].as_str() != Some(value.as_str()) {
++            return Err(mismatch("interface runtime contract differs from checked target profile"));
++        }
++    }
++    if metadata["compatibility_profile"]["id"].as_str() != Some(runtime.compatibility_profile_id.as_str()) {
++        return Err(mismatch("interface compatibility profile differs from checked metadata"));
++    }
++    let since = metadata["target_profile"]["since_abi"].as_str().ok_or_else(|| mismatch("target temporal ABI is missing"))?;
++    if runtime.temporal != temporal_contract(since) {
++        return Err(mismatch("interface temporal contract differs from the versioned target ABI"));
++    }
++    if interface.deployment_contract_hash != declaration_hash(runtime)? {
++        return Err(mismatch("interface deployment digest differs from its runtime contract"));
++    }
++    Ok(())
++}
++
++#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
++pub struct PackageInterface {
++    pub schema: String,
++    pub version: u32,
++    pub module: String,
++    pub module_identity: String,
++    pub edition: String,
++    pub visibility_default: String,
++    pub types: Vec<InterfaceType>,
++    pub constants: Vec<InterfaceConstant>,
++    pub callables: Vec<InterfaceCallable>,
++    pub runtime_contract: InterfaceRuntimeContract,
++    pub builder_contract_hash: String,
++    pub deployment_contract_hash: String,
++}
++
++#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
++pub struct InterfaceType {
++    pub identity: String,
++    pub name: String,
++    pub kind: String,
++    pub visibility: String,
++    pub type_parameters: Vec<InterfaceTypeParameter>,
++    pub value_abilities: Vec<String>,
++    pub cell_capabilities: Vec<String>,
++    pub fields: Vec<InterfaceField>,
++    pub variants: Vec<InterfaceVariant>,
++    pub layout_identity: String,
++    pub type_identity: Option<String>,
++}
++
++#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
++pub struct InterfaceTypeParameter {
++    pub name: String,
++    pub phantom: bool,
++    pub constraints: Vec<String>,
++}
++
++#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
++pub struct InterfaceField {
++    pub name: String,
++    pub r#type: String,
++    pub offset: Option<usize>,
++    pub encoded_size: Option<usize>,
++}
++
++#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
++pub struct InterfaceVariant {
++    pub name: String,
++    pub fields: Vec<String>,
++}
++
++#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
++pub struct InterfaceConstant {
++    pub identity: String,
++    pub name: String,
++    pub visibility: String,
++    pub r#type: String,
++}
++
++#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
++pub struct InterfaceCallable {
++    pub identity: String,
++    pub name: String,
++    pub kind: String,
++    pub visibility: String,
++    pub type_parameters: Vec<InterfaceTypeParameter>,
++    pub params: Vec<InterfaceParam>,
++    pub return_type: Option<String>,
++    pub outputs: Vec<InterfaceParam>,
++    pub effect: String,
++    pub entry_witness_abi: Option<String>,
++    pub builder_contract_hash: String,
++}
++
++#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
++pub struct InterfaceParam {
++    pub name: String,
++    pub r#type: String,
++    pub source: String,
++    pub mutable: bool,
++    pub reference: bool,
++}
++
++#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
++pub struct InterfaceRuntimeContract {
++    pub target_profile: String,
++    pub vm_abi: String,
++    pub witness_abi: String,
++    pub lock_args_abi: String,
++    pub source_encoding: String,
++    pub spawn_ipc_abi: String,
++    pub compatibility_profile_id: String,
++    #[serde(default)]
++    pub temporal: InterfaceTemporalContract,
++}
++
++#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
++pub struct InterfaceTemporalContract {
++    pub schema: String,
++    pub wire_representation: String,
++    pub since_abi: String,
++    pub constructors: Vec<String>,
++    pub decoder: String,
++    pub domains: Vec<String>,
++    pub migration: String,
++}
++
++pub const TEMPORAL_INTERFACE_SCHEMA: &str = "cellscript-ckb-temporal-interface-v1";
++
++pub fn temporal_contract(since_abi: &str) -> InterfaceTemporalContract {
++    InterfaceTemporalContract {
++        schema: TEMPORAL_INTERFACE_SCHEMA.to_string(),
++        wire_representation: "fixed-u64-register-and-little-endian-wire".to_string(),
++        since_abi: since_abi.to_string(),
++        constructors: vec![
++            "ckb::since_absolute_block(u64)->AbsoluteBlockSince".to_string(),
++            "ckb::since_absolute_epoch(u64,u64,u64)->AbsoluteEpochSince".to_string(),
++            "ckb::since_absolute_timestamp(u64-seconds)->AbsoluteTimestampSince".to_string(),
++            "ckb::since_relative_block(u64)->RelativeBlockSince".to_string(),
++            "ckb::since_relative_epoch(u64,u64,u64)->RelativeEpochSince".to_string(),
++            "ckb::since_relative_timestamp(u64-seconds)->RelativeTimestampSince".to_string(),
++        ],
++        decoder: "ckb::since_decode(EncodedSince)->DecodedSince;ckb::since_from_raw_checked(u64)->DecodedSince".to_string(),
++        domains: vec![
++            "EpochNumber".to_string(),
++            "EpochDuration".to_string(),
++            "BlockNumber".to_string(),
++            "EpochLength".to_string(),
++            "TimestampMillis".to_string(),
++            "EncodedSince".to_string(),
++            "DecodedSince".to_string(),
++            "AbsoluteBlockSince".to_string(),
++            "AbsoluteEpochSince".to_string(),
++            "AbsoluteTimestampSince".to_string(),
++            "RelativeBlockSince".to_string(),
++            "RelativeEpochSince".to_string(),
++            "RelativeTimestampSince".to_string(),
++        ],
++        migration: "legacy-raw-ckb-temporal-to-explicit-typed-v1".to_string(),
++    }
++}
+diff --git a/docs/CELLSCRIPT_SCALAR_RETENTION_EXPERIMENT.md b/docs/CELLSCRIPT_SCALAR_RETENTION_EXPERIMENT.md
+new file mode 100644
+--- /dev/null
++++ b/docs/CELLSCRIPT_SCALAR_RETENTION_EXPERIMENT.md
+@@ -0,0 +1,58 @@
++# Adjacent scalar retention: second bounded experiment for #39
++
++Status: experimental implementation, not accepted optimization. The archived
++binary-left-only experiment remains a rejected historical result. This candidate
++tests a different opportunity: ordinary scalar loads and constants also leave
++their result in `t0`, and postorder expression lowering often consumes the most
++recent result as the right operand.
++
++Implementer: Codex. The maintainer's 2026-10-03 #39 review waiver applies;
++compiler/checker agreement, frozen budgets and backend/CI gates remain required.
++
++## Machine contract fixed before implementation
++
++- Enable only in functions already admitted by the conservative scalar-slot
++  allocator, at optimization levels above zero. Resource, borrow, address-exposed,
++  wide-value and unclassified-call exclusions stay unchanged.
++- Retain at most one `(SSA value ID, t0)` fact between immediately adjacent
++  instructions in one basic block. Eligible producers are scalar `LoadConst`,
++  `LoadVar` and ordinary scalar `Binary` operations. All other instructions
++  invalidate the fact. Do not infer value identity from a reused stack offset.
++- Each eligible producer still writes its normal stack slot. These emitters
++  finish with the stored scalar value in `t0`; stack-address materialization
++  must preserve its source register. No dead-store removal is part of this test.
++- A consumer is an ordinary scalar binary operation. When its left operand is
++  retained, skip that reload. When its right operand is retained, move `t0` to
++  `t1` before loading a different left operand. If both operands name the retained
++  SSA value, the same move supplies the right operand. Preserve operand order
++  for subtraction, division, remainder, shifts and comparisons.
++- Loading another operand uses stack helpers with the retained register in the
++  explicit avoid set. Scalar immediate materialization changes its destination
++  only. Existing division/shift guards, normalization and result stores remain.
++- Calls and helpers inherit no retained-value guarantee. Joins, backedges,
++  entry blocks, terminators and fused branch emission start from the established
++  stack contract. No fact crosses a block or function boundary; outgoing stack
++  arguments and caller buffers remain governed by their existing ABI.
++- Do not repurpose scratch storage, merge parameter spill slots, alter witness
++  ownership, change source/proof attribution, or change the instruction set.
++
++## Acceptance experiment
++
++Compile and execute probes that hit left, right and duplicate operands, with
++noncommutative operations, overlapping live values, joins/backedges, calls,
++large stack offsets, outgoing arguments and fixed-width values. Demonstrate
++fallbacks as well as candidate hits, preserving exact success and rejection.
++Compare against the same compiler without this transformation, not merely an
++unoptimized build that differs in other passes.
++
++Measure static and executed loads/stores, deployed ELF bytes, authoritative
++group cycles and static/observed stack separately. Retain the nine scalar,
++41 expanded-policy, matched Rust, growth and multi-Script baseline corpora and
++their frozen ceilings. Recompute the frontier instead of adding estimated
++savings to historical results. Actual checked bundle bytes and independently
++rebound machine mutations must retain their existing evidence boundaries.
++
++Adopt only if the measured benefit justifies this small emitter contract and
++the complete backend and CI gates pass. Otherwise archive the patch and exact
++measurements as a rejected experiment. Neither outcome admits a general
++register allocator or helper-scratch reuse.
+diff --git a/src/codegen/scalar_retention_tests.rs b/src/codegen/scalar_retention_tests.rs
+new file mode 100644
+--- /dev/null
++++ b/src/codegen/scalar_retention_tests.rs
+@@ -0,0 +1,235 @@
++//! Compare one emitter transformation on identical typed IR and options.
++//! These probes do not replace checked full-compiler corpus/backend evidence.
++
++use super::*;
++use ckb_testtool::{
++    ckb_script::ScriptGroupType,
++    ckb_types::{bytes::Bytes, packed, prelude::*},
++};
++use serde_json::{json, Value};
++
++#[path = "../../tests/support/ckb_script_runner.rs"]
++#[allow(dead_code)]
++mod ckb_script_runner;
++#[path = "../../tests/support/cost_measurement.rs"]
++#[allow(dead_code)]
++mod cost_measurement;
++#[path = "../../tests/support/cost_memory.rs"]
++mod cost_memory;
++#[path = "../../tests/support/cost_provenance.rs"]
++#[allow(dead_code)]
++mod cost_provenance;
++#[path = "../../tests/support/cost_trace.rs"]
++mod cost_trace;
++
++fn module(source: &str) -> IrModule {
++    let mut ast = crate::parser::parse(&crate::lexer::lex(source).unwrap()).unwrap();
++    crate::types::check(&ast).unwrap();
++    crate::optimize::optimize_module(&mut ast, 3).unwrap();
++    crate::ir::generate(&ast).unwrap()
++}
++
++fn generator(enabled: bool) -> CodeGenerator {
++    let mut generator = CodeGenerator::new(CodegenOptions { opt_level: 3, ..CodegenOptions::default() });
++    generator.scalar_retention_enabled = enabled;
++    generator
++}
++
++fn action(body: &str) -> String {
++    format!("module retained_probe\naction verify(witness a: u64, witness b: u64, witness expected: u64) {{ verification\n{body}\n}}")
++}
++
++fn probe(name: &str, source: &str, args: &[crate::EntryWitnessArg], valid: bool) -> Value {
++    let mut ir = module(source);
++    let ir_mutation = if name == "duplicate-ssa-operands" {
++        let mut changed = false;
++        for item in &mut ir.items {
++            if let IrItem::Action(action) = item {
++                for instruction in action.body.blocks.iter_mut().flat_map(|block| &mut block.instructions).rev() {
++                    if let IrInstruction::Binary { op: BinaryOp::Sub, left, right, .. } = instruction {
++                        assert!(matches!(right, IrOperand::Var(_)));
++                        *left = right.clone();
++                        changed = true;
++                        break;
++                    }
++                }
++            }
++        }
++        assert!(changed);
++        Some("set the last scalar subtraction's left operand to its right SSA value; expected result is zero")
++    } else {
++        None
++    };
++    let expected_call = match name {
++        "call-clobber" => Some(("perturb", 1)),
++        "outgoing-nine-arguments" => Some(("leaf", 9)),
++        _ => None,
++    };
++    if let Some((callee, argument_count)) = expected_call {
++        assert!(
++            ir.items.iter().any(|item| match item {
++                IrItem::Action(action) => action.body.blocks.iter().flat_map(|block| &block.instructions).any(|instruction| {
++                    matches!(instruction, IrInstruction::Call { func, args, .. } if func == callee && args.len() == argument_count)
++                }),
++                _ => false,
++            }),
++            "{name}: required call was optimized away"
++        );
++    }
++    let metadata = crate::compile_metadata_from_ir(&ir, ArtifactFormat::RiscvElf, TargetProfile::Ckb, crate::CURRENT_EDITION, None);
++    let action = metadata.actions.iter().find(|action| action.name == "verify").unwrap();
++    let payload = action.entry_witness_args(args).unwrap();
++    let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
++    fixture.witnesses = vec![packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(payload)).pack()).build().as_bytes()];
++    let mut variants = Vec::new();
++    for enabled in [false, true] {
++        let asm = String::from_utf8(generator(enabled).generate(&ir, ArtifactFormat::RiscvAssembly).unwrap()).unwrap();
++        let generated = generator(enabled).generate_with_evidence(&ir, ArtifactFormat::RiscvElf).unwrap();
++        let elf = crate::strip_vm_abi_trailer(&generated.bytes);
++        let (oracle, trace) = ckb_script_runner::execute_cellscript_script_with_observer(
++            elf,
++            &fixture,
++            |tx, _| tx,
++            |context, tx, script| cost_trace::measure(context, tx, script, ScriptGroupType::Type, 10_000_000),
++        );
++        assert_eq!(oracle.exit_code == 0, valid, "{name}, enabled={enabled}: {:?}", oracle.captured_debug);
++        assert_eq!(trace.status, "measured", "{name}: {:?}", trace.unavailable_reason);
++        variants.push(json!({
++            "retention":enabled,
++            "elf_hash":crate::hex_encode(&crate::ckb_blake2b256(elf)),
++            "elf_bytes":elf.len(),
++            "static_memory":cost_memory::measure(elf),
++            "entry_frame_sizes":generated.machine_layout.unwrap().entry_frame_sizes,
++            "retained_left_sites":asm.matches("# adjacent scalar: retain left").count(),
++            "retained_right_sites":asm.matches("# adjacent scalar: retain right").count(),
++            "exit":trace.exit_code,
++            "trace":trace,
++        }));
++    }
++    assert_eq!(variants[0]["exit"], variants[1]["exit"], "{name}: exact rejection must be preserved");
++    assert_eq!(variants[0]["entry_frame_sizes"], variants[1]["entry_frame_sizes"], "{name}: stack layout must be unchanged");
++    assert_eq!(
++        variants[0]["static_memory"]["store_instruction_count"], variants[1]["static_memory"]["store_instruction_count"],
++        "{name}: this experiment must retain all stack stores"
++    );
++    json!({"case":name,"source":source,"ir_mutation":ir_mutation,"valid":valid,"variants":variants})
++}
++
++#[test]
++fn adjacent_scalar_retention_preserves_operand_order_control_flow_and_calls() {
++    use crate::EntryWitnessArg::U64;
++    let mut rows = Vec::new();
++    for (name, expression, a, b, expected) in [
++        ("subtract", "a - (b + 1)", 17, 5, 11),
++        ("divide", "a / (b + 1)", 17, 5, 2),
++        ("remainder", "a % (b + 1)", 17, 5, 5),
++        ("shift", "a >> (b + 1)", 0x100, 3, 16),
++        ("nested-right", "a - (b * 3)", 17, 5, 2),
++        ("left-constant-right", "(a + b) & 255", 250, 10, 4),
++        ("overlapping", "(a + b) * (a - b)", 17, 5, 264),
++    ] {
++        for valid in [true, false] {
++            let source = action(&format!("let result = {expression}\nrequire result == expected"));
++            let row = probe(name, &source, &[U64(a), U64(b), U64(expected + u64::from(!valid))], valid);
++            assert!(
++                row["variants"][1]["retained_left_sites"].as_u64().unwrap()
++                    + row["variants"][1]["retained_right_sites"].as_u64().unwrap()
++                    > 0,
++                "{name}: the intended optimization was not exercised"
++            );
++            rows.push(row);
++        }
++    }
++    for expression in ["a / (b + 1)", "a % (b + 1)", "a << (b + 1)"] {
++        let source = action(&format!("let result = {expression}\nrequire result == expected"));
++        rows.push(probe(
++            expression,
++            &source,
++            &[U64(17), U64(if expression == "a << (b + 1)" { 63 } else { u64::MAX }), U64(0)],
++            false,
++        ));
++    }
++    for (name, expression, expected) in [("signed-divide", "a / (b + 1)", -3), ("signed-remainder", "a % (b + 1)", -2)] {
++        use crate::EntryWitnessArg::I32;
++        let source = action(&format!("let result = {expression}\nrequire result == expected")).replace(": u64", ": i32");
++        for valid in [true, false] {
++            rows.push(probe(name, &source, &[I32(-17), I32(4), I32(expected + i32::from(!valid))], valid));
++        }
++    }
++    let source = action("let result = (a + b) + b\nrequire result == expected").replace(": u64", ": u8");
++    for valid in [true, false] {
++        use crate::EntryWitnessArg::U8;
++        rows.push(probe("narrow-normalization", &source, &[U8(250), U8(10), U8(if valid { 14 } else { 15 })], valid));
++    }
++    let source = action("let mut total = a\nfor i in 0..8 { if i < 4 { total += b } else { total += 1 } }\nrequire total == expected");
++    for valid in [true, false] {
++        rows.push(probe("joins-backedges", &source, &[U64(1), U64(3), U64(if valid { 17 } else { 18 })], valid));
++    }
++    let source = action("let result = (a + b) - perturb(b)\nrequire result == expected")
++        .replace("action verify", "fn perturb(x: u64) -> u64 { let y = x + 11\nreturn y }\naction verify");
++    for valid in [true, false] {
++        rows.push(probe("call-clobber", &source, &[U64(17), U64(5), U64(if valid { 6 } else { 7 })], valid));
++    }
++    let source = action("let result = leaf(a,b,a,b,a,b,a,b,a)\nrequire result == expected").replace(
++        "action verify",
++        "fn leaf(a:u64,b:u64,c:u64,d:u64,e:u64,f:u64,g:u64,h:u64,i:u64)->u64 { let y = (a+b)-(h+i)\nreturn y }\naction verify",
++    );
++    for valid in [true, false] {
++        rows.push(probe("outgoing-nine-arguments", &source, &[U64(17), U64(5), U64(u64::from(!valid))], valid));
++    }
++    let source = action("let value = a - (b - 1)\nrequire value == expected");
++    for valid in [true, false] {
++        rows.push(probe("duplicate-ssa-operands", &source, &[U64(17), U64(5), U64(u64::from(!valid))], valid));
++    }
++    let source = action("let value = a - b\nrequire value == expected")
++        .replace("witness expected: u64", "witness expected: u64, witness marker: Hash");
++    for valid in [true, false] {
++        let row = probe(
++            "wide-parameter-fallback",
++            &source,
++            &[U64(17), U64(5), U64(if valid { 12 } else { 13 }), crate::EntryWitnessArg::Hash([0; 32])],
++            valid,
++        );
++        assert_eq!(row["variants"][0]["elf_hash"], row["variants"][1]["elf_hash"], "excluded function must stay byte-identical");
++        rows.push(row);
++    }
++    let mut body = String::new();
++    let mut level = Vec::new();
++    for index in 0..260 {
++        body.push_str(&format!("let v{index} = a + {index}\n"));
++        level.push(format!("v{index}"));
++    }
++    let mut depth = 0;
++    while level.len() > 1 {
++        level = level
++            .chunks(2)
++            .enumerate()
++            .map(|(index, pair)| {
++                if pair.len() == 1 {
++                    return pair[0].clone();
++                }
++                let name = format!("sum{depth}_{index}");
++                body.push_str(&format!("let {name} = {} + {}\n", pair[0], pair[1]));
++                name
++            })
++            .collect();
++        depth += 1;
++    }
++    body.push_str(&format!("require {} == expected", level[0]));
++    for valid in [true, false] {
++        let row = probe("large-overlapping-frame", &action(&body), &[U64(2), U64(0), U64(if valid { 34190 } else { 34191 })], valid);
++        assert!(row["variants"][0]["entry_frame_sizes"].as_object().unwrap().values().any(|size| size.as_u64().unwrap() > 2048));
++        rows.push(row);
++    }
++    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
++    let path = root.join("target/cellscript-cost/adjacent-scalar-retention-second.json");
++    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
++    std::fs::write(path, serde_json::to_vec_pretty(&json!({
++        "schema":"cellscript-adjacent-scalar-retention-experiment-v2",
++        "scope":"identical typed IR and codegen options; test-only emitter toggle; complete compiler/checker acceptance still required",
++        "source":cost_provenance::capture_source(root),
++        "vm_configuration":cost_provenance::vm_configuration(),
++        "static_stack_scope":"per-entry frame sizes, not a call-chain bound; observed per-VM peaks are in trace",
++        "rows":rows,
++    })).unwrap()).unwrap();
++}
+diff --git a/tests/interface_inspection.rs b/tests/interface_inspection.rs
+new file mode 100644
+--- /dev/null
++++ b/tests/interface_inspection.rs
+@@ -0,0 +1,90 @@
++//! Interface admission must consume checked bytes and retain effective contracts.
++use cellscript::{compile_with_executable_surface_policy, CompileOptions, ExecutableSurfacePolicy};
++use cellscript_artifact_checker::{interface::inspect_bundle, CheckerBudgets, CheckerRejectionCode};
++
++#[test]
++fn interface_inspection_preserves_declared_and_inferred_effects_separately() {
++    let source =
++        "module inspected\naction verify() {\nverification\nlet amount = ckb::cell_capacity(source::input(0))\nrequire amount > 0\n}";
++    let compiled = compile_with_executable_surface_policy(
++        source,
++        CompileOptions { target: Some("riscv64-elf".into()), ..CompileOptions::default() },
++        ExecutableSurfacePolicy::DenyFailClosed,
++    )
++    .unwrap();
++    let metadata = serde_json::to_vec(&compiled.metadata).unwrap();
++    let lowering = serde_json::to_vec(compiled.verified_lowering_record.as_ref().unwrap()).unwrap();
++    let source_map = serde_json::to_vec(compiled.source_artifact_map.as_ref().unwrap()).unwrap();
++    let inspect =
++        |artifact: &[u8], metadata: &[u8]| inspect_bundle(artifact, metadata, &lowering, &source_map, &CheckerBudgets::default());
++    let result = inspect(&compiled.artifact_bytes, &metadata).unwrap();
++    assert_eq!(result.declared(), &compiled.metadata.public_interface);
++    assert_eq!(result.declared().callables[0].effect, "Pure");
++    assert_eq!(result.effective().entries[0].effect, "ReadOnly");
++    assert_eq!(result.report().artifact_hash, compiled.metadata.artifact_hash.as_ref().unwrap().as_str());
++
++    let mut substituted = compiled.artifact_bytes.clone();
++    substituted[0] ^= 1;
++    assert!(inspect(&substituted, &metadata).is_err());
++    let mut changed = serde_json::to_value(&compiled.metadata).unwrap();
++    changed["public_interface"]["callables"][0]["effect"] = serde_json::json!("ReadOnly");
++    assert!(inspect(&compiled.artifact_bytes, &serde_json::to_vec(&changed).unwrap()).is_err());
++}
++
++#[test]
++fn interface_metadata_budget_is_applied_before_parsing_untrusted_bytes() {
++    let budgets = CheckerBudgets { record_bytes: 2, ..CheckerBudgets::default() };
++    let error = inspect_bundle(&[], b"not JSON", &[], &[], &budgets).unwrap_err();
++    assert_eq!(error.code, CheckerRejectionCode::V2400BudgetExceeded);
++}
++
++#[test]
++fn interface_inspection_retains_public_generic_templates_without_runtime_instances() {
++    let source = r#"
++module inspected_templates
++public struct Pair<T: fixed_value> { left: T, right: T }
++public fn first<T: fixed_value>(pair: Pair<T>) -> T { pair.left }
++public action verify() { verification require true }
++"#;
++    let compiled = compile_with_executable_surface_policy(
++        source,
++        CompileOptions { target: Some("riscv64-elf".into()), ..CompileOptions::default() },
++        ExecutableSurfacePolicy::DenyFailClosed,
++    )
++    .unwrap();
++    let inspected = inspect_bundle(
++        &compiled.artifact_bytes,
++        &serde_json::to_vec(&compiled.metadata).unwrap(),
++        &serde_json::to_vec(compiled.verified_lowering_record.as_ref().unwrap()).unwrap(),
++        &serde_json::to_vec(compiled.source_artifact_map.as_ref().unwrap()).unwrap(),
++        &CheckerBudgets::default(),
++    )
++    .unwrap();
++    assert_eq!(inspected.declared(), &compiled.metadata.public_interface);
++    let template = inspected.declared().callables.iter().find(|entry| entry.name == "first").unwrap();
++    assert_eq!(template.type_parameters.len(), 1);
++    assert_eq!(template.params[0].r#type, "Pair<T>");
++    assert!(!inspected.effective().entries.iter().any(|entry| entry.name == "first"));
++}
++
++#[test]
++fn interface_inspection_keeps_concrete_enum_variants_and_payload_cardinalities() {
++    let compiled = compile_with_executable_surface_policy(
++        "module inspected_enum\npublic enum Choice { First(u64), Second(Hash) }\npublic action verify(witness choice: Choice) { verification require true }",
++        CompileOptions { target: Some("riscv64-elf".into()), ..CompileOptions::default() },
++        ExecutableSurfacePolicy::DenyFailClosed,
++    )
++    .unwrap();
++    let inspected = inspect_bundle(
++        &compiled.artifact_bytes,
++        &serde_json::to_vec(&compiled.metadata).unwrap(),
++        &serde_json::to_vec(compiled.verified_lowering_record.as_ref().unwrap()).unwrap(),
++        &serde_json::to_vec(compiled.source_artifact_map.as_ref().unwrap()).unwrap(),
++        &CheckerBudgets::default(),
++    )
++    .unwrap();
++    let choice = inspected.declared().types.iter().find(|ty| ty.name == "Choice").unwrap();
++    assert!(inspected.effective().types.iter().any(|ty| ty.name == "Choice"));
++    assert_eq!(choice.variants.iter().map(|variant| variant.name.as_str()).collect::<Vec<_>>(), ["First", "Second"]);
++    assert!(choice.variants.iter().all(|variant| variant.fields.len() == 1));
++}

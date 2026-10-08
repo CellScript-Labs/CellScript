@@ -21,6 +21,8 @@ bash examples/zk/run.sh target/my-zk-app
 The runner builds the scripts, creates a public test setup, verifies creation and
 two increments in CKB-VM, generates a TypeScript SDK, then tests the CCC adapter.
 It rejects reused/corrupt proofs, changed transactions and overwritten witnesses.
+It also runs the paired migration's contract/native fixtures and generates both
+SDKs for CCC byte-parity and rejection tests in the output's `migration/` directory.
 Choose a new output directory for each run. Supply a matching setup package as a
 second argument to reuse it. Tutorial secrets and default setup are public test
 fixtures; their output is not production admission.
@@ -98,6 +100,7 @@ Configuration paths resolve from the current working directory:
   "rpcUrl": "http://127.0.0.1:8114",
   "sdkDirectory": "/path/to/generated-sdk",
   "proverExecutable": "/path/to/cellscript-zk-private-counter",
+  "proverSha256": "<64 lowercase hex digits from the trusted native build>",
   "setupPackage": "/path/to/setup-package",
   "ownerSecretFile": "/path/to/owner.bin",
   "walletKeyFile": "/path/to/wallet.hex",
@@ -119,6 +122,15 @@ wallet key is a separate 32-byte hex key. `localProver` uses a private temporary
 directory, invokes the native prover without secret command-line arguments,
 and removes its witness files on completion. Browser apps supply their own prover
 callback; secrets should stay within their chosen prover trust boundary.
+The required `proverSha256` approves the executable bytes. Record that digest
+from a reviewed, pinned build; do not recompute it from an untrusted download
+at invocation time. Each invocation checks a bounded snapshot (at most 64 MiB)
+before reading the owner secret and executes those checked bytes from the
+private directory, so replacing the original path cannot switch the program
+after validation. A changed tool requires an explicit configuration update.
+The local-node test harness approves its freshly built public fixture tool and
+records its digest; that is not an external release attestation. This pin does
+not attest the host OS, dynamic libraries, Node runtime or a custom callback.
 The local process is asynchronous, has a 120-second timeout and bounded output,
 and its captured diagnostics are not included in thrown errors because a prover
 could print private witness data. To cancel, call
@@ -142,6 +154,94 @@ construct a CCC client with that chain's `scripts` configuration and call the AP
 [`node-client.ts`](node-client.ts) demonstrates this with the local genesis secp
 script and DAO definition; its wallet limits address discovery to secp because
 the integration chain has no ACP deployment. No public deployment is included in the example.
+
+## One authorized migration
+
+This uses a separately created paired counter/configuration instance. The legacy
+immutable counter cannot migrate. The [migration contract](../../contracts/zk-private-counter/MIGRATION.md)
+defines the two pinned parents and the one allowed 0 -> 1 switch. The circuit
+still proves the owner's secret and one increment; migration also consumes and
+recreates the configuration in that same proof-bound transaction.
+
+The native `migration::CheckedDeployment` and CCC
+[`MigrationDeployment`](migration.ts) consume the same
+`cellscript-counter-migration-v1` manifest. It includes both setup records,
+code OutPoints/data hashes, network and COMPLETE instance Scripts. Pin the exact
+manifest bytes from the trusted application build; computing a new digest from
+an arbitrary download does not authenticate it. The two generated SDK modules
+and exact handles are trusted client code from the corresponding parent builds.
+Export each parent with the existing exporter, using its version's child and
+setup package, then generate its SDK. Changing the manifest's pins is a new
+application trust decision, not an automatic discovery operation.
+
+`prepareMigration(signer, counterOutPoint, configurationOutPoint, deployment,
+migrate, lockDeps)` checks both versions' live code/VK Cells before proving. It
+reserves the selected parent's proof witness, prepares the wallet and fees, and
+checks the complete final transaction. `migrate = false` uses a configuration
+dependency; `true` consumes selector 0 and produces selector 1, authorized by
+parent 0. The returned `selectedVersion` chooses the matching prover package.
+Counter output 0 and migration configuration output 1 are fixed by this builder;
+a wallet that changes that order must re-prepare. Other output/fee changes must
+finish before proving. The low-level constructor can validate the contract's
+other permitted layouts against the final transaction.
+
+Both state capacities and Locks are preserved. Separate wallet Cells pay fees;
+include any required state/configuration Lock dependencies explicitly. Before
+wallet invocation and again before dry-run, the client checks fresh inputs,
+configuration dependencies and both versions' artifacts. Node consensus remains
+authoritative if another transaction consumes a Cell after those observations.
+Cancellation, bounded pinned prover execution, private witness handling and
+proof/signature snapshots use the same flow as the original counter client.
+
+For a testnet client with a local prover and secp wallet:
+
+```bash
+node --experimental-strip-types examples/zk/migration-cli.ts /path/to/migration-config.json
+```
+
+The CLI configuration has these fields (paths resolve from the current directory):
+
+```json
+{
+  "rpcUrl": "http://127.0.0.1:8114",
+  "manifestFile": "/path/to/manifest.json",
+  "manifestDigest": "0x<trusted manifest CKB data hash>",
+  "sdkDirectories": ["/path/to/parent-0-sdk", "/path/to/parent-1-sdk"],
+  "handles": ["0x<parent-0 exact handle bytes>", "0x<parent-1 exact handle bytes>"],
+  "counter": { "txHash": "0x<live counter transaction hash>", "index": 0 },
+  "configuration": { "txHash": "0x<live configuration transaction hash>", "index": 1 },
+  "mode": "migrate",
+  "lockDeps": [],
+  "proverExecutable": "/path/to/cellscript-zk-private-counter",
+  "proverSha256": "<trusted native prover SHA-256>",
+  "setupPackages": ["/path/to/setup-0", "/path/to/setup-1"],
+  "ownerSecretFile": "/path/to/owner.bin",
+  "walletKeyFile": "/path/to/wallet.hex"
+}
+```
+
+Use observed, matching identities for every placeholder and supply the Locks'
+required dependencies. Select `update` explicitly for an ordinary increment.
+After confirmed migration, use the returned counter and configuration OutPoints
+and the new selected prover package for the next update. The prepared hash is
+printed to stderr before signing; reconcile it after an uncertain submission.
+A spent configuration or already-selected version 1 cannot trigger an automatic
+second migration. The CLI does not create or deploy an instance, change trust
+pins, or admit a setup. For a custom chain, use the API with its actual CCC script
+configuration as shown by [the node exercise](node-migration.ts).
+
+The standalone fixture runner accepts a new output directory:
+
+```bash
+bash examples/zk/run-migration.sh target/my-migration-check
+```
+
+It builds the scripts, generates contract fixtures and native manifest/parent
+exports, then checks the generated SDKs and CCC adapter. By default its setup
+parameters and owner secret are public test fixtures. To reuse matching setup
+packages, set `CELLSCRIPT_COUNTER_PACKAGE` and optionally
+`CELLSCRIPT_COUNTER_MIGRATION_PACKAGE`. This is runtime/byte-parity evidence;
+the node exercise below establishes commitment and stale-Cell rejection.
 
 ## Export the exact parent
 
@@ -180,6 +280,7 @@ cargo test --locked --release --manifest-path contracts/zk-private-counter/Cargo
 This starts a fresh disposable node, deploys code/VK, funds a real secp wallet fee
 Cell and calls the shipped CCC adapter. It checks two confirmed client updates,
 a corrupt proof's dry-run rejection and a spent input's preflight rejection.
+It additionally creates a paired instance and confirms old-key update, old-key-authorized migration and new-key successor update. Wrong-key proofs reach the node and reject at parent 79; spent configuration and second-migration attempts reject. The three signed transactions record cycles and byte sizes in `ccc-migration/ccc-migration-report.json`.
 The harness mines blocks; normal `send_transaction` and script verification remain
 active. `passthrough` refers only to CKB's output-policy validator. Results are in
 `target/counter-node/<run>/ccc/ccc-report.json`. Public fixture keys are used only
@@ -197,6 +298,7 @@ statement binds the Script hash, old/new data hashes, consumed outpoint and raw
 transaction hash. Its public-input encoding does not hide those values.
 Successive states remain linkable through the consumed outpoint and instance
 Script, and funding/fee inputs can link the application to the signing wallet.
+Migration additionally exposes both parent identities, the configuration selector, its consumed/successor OutPoints and the exact switch transaction. It does not break the existing instance or wallet linkage.
 Proof validity is therefore a secret-knowledge authorization claim, not an
 anonymity, hidden-balance or hidden-counter claim.
 
@@ -226,6 +328,7 @@ interrupted proving against an unchanged, still-live transaction is supported.
 | Failure | Client response |
 | --- | --- |
 | Wrong genesis, child or VK | Names the mismatched deployment before proving |
+| Missing/wrong prover SHA-256 | Reject before reading the owner secret; check the approved build/configuration |
 | Spent/missing input | Resolve a new live Cell before preparing |
 | Changed fee, output or dependency | Finalize again and generate a new proof |
 | Wallet overwrites proof | Preserve `WitnessArgs.input_type`; sign Lock fields |

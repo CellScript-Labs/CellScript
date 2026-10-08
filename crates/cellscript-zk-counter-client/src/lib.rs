@@ -4,6 +4,7 @@ use cellscript::zk_client::{compile_transition_parent, TransitionParent, Transit
 use cellscript_zk_private_counter::{self as counter, wire};
 use ckb_types::{bytes::Bytes, core::TransactionView, packed, prelude::*};
 use serde::{Deserialize, Serialize};
+pub mod migration;
 
 /// Supplied identities are checked against bytes here and against live Cells by the RPC client.
 #[derive(Clone, Debug, Serialize, Deserialize)]

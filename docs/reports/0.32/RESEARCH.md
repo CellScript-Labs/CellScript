@@ -51,7 +51,7 @@ matched-Rust, growth and multi-Script comparator.
 | Track | Evidence | Decision and remaining boundary |
 | --- | --- | --- |
 | Low-mask immediates, #41 | Archived clean before/after reports and 6,782 comparable metrics | Adopt the already implemented strict improvement; replay after integrating published 0.31 |
-| Local register retention, #39 | `experiments/adjacent-scalar-retention.patch` and JSON; all 1,707 runs and all summary rows unchanged | Reject this candidate: adjacent eligible binary-to-binary retention does not hit the relevant admitted shapes. It does not establish that retention across named loads/stores is useless |
+| Local register retention, #39 | First binary-left-only candidate: all 1,707 runs unchanged. [Second candidate](retention-second/README.md): 35 paired probes, full 6,782-metric comparison, and 1,707 paired traces; only four corpus executions save one cycle | Reject both candidates for the 0.32 default. The second candidate exercises right-operand reuse, but saves no ELF bytes, stores or stack and improves only two scalar fixtures. This does not establish that broader retention is useless |
 | Helper scratch ownership, #39 | `scalar_slots.rs` keeps address-exposed, resource, wide, borrowed and unknown-call values outside scalar reuse; parameters have distinct entry spill slots | Retain conservative ownership. Defer wider reuse until helpers expose clobber/live-register contracts and dead parameter spills are proved removable before interference is relaxed |
 | Balanced routing, #37 | `cost_experiments` sweeps 1/2/4/8/16/32/64 dense, sparse and high-u32 tags, every action and unknown tag | Retain linear routing. Late-action savings trade off first-action cycles and ELF growth; no universally dominating threshold measured |
 | Saved selector, #37 | Separate two-pass experiment with a caller-owned saved ordinal and clobbering common-check surrogate, including unknown-tag versus common-check failure | Retain current routing. Saving the selector introduces per-target code and early-path work. No production selector lifetime or checker pattern is changed |
@@ -154,11 +154,13 @@ fresh pinned-node acceptance. The final inventory/report correction also
 passes all 6,782 comparable metrics in [final-comparison.json](final-comparison.json).
 It does not change compiler code or claim a new optimization saving.
 
-Deferred wider outlining, general CSE, immediate/pool search and layout transformations retain their
-specific blockers above and remain owned by #40. Span/alias admission remains
-owned by #38 and wider retention/scratch admission by #39. This report does
-not silently turn unmeasured transformations into rejected experiments or
-close their owning issues.
+Deferred wider outlining, general CSE, immediate/pool search and layout
+transformations retain their specific blockers above. The #38/#39 evaluations
+record the span/alias and wider retention/scratch decisions without adopting
+those transformations. A subsequently selected implementation needs its own
+scoped issue, contract and acceptance evidence. Closing a finite evaluation does
+not turn an unmeasured transformation into a rejected experiment or an
+implemented feature.
 
 Reproduce the diagnostic companion with the existing Cargo test target:
 

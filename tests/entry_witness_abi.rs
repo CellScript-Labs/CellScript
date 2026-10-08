@@ -891,6 +891,41 @@ fn generic_struct_function_and_option_execute_in_ckb_vm() {
 }
 
 #[test]
+fn generic_empty_fields_around_a_scalar_preserve_witness_layout_in_ckb_vm() {
+    let source = r#"
+module generic_empty_fields
+struct Mixed<T: fixed_value> { z: T, a: T, value: u64, tail: T }
+action verify(witness mixed: Mixed<()>) -> u64 {
+    verification
+    require mixed.value == 42
+    return 0
+}
+"#;
+    for opt_level in 0..=3 {
+        let compiled = cellscript::compile_with_executable_surface_policy(
+            source,
+            cellscript::CompileOptions { target: Some("riscv64-elf".into()), opt_level, ..Default::default() },
+            cellscript::ExecutableSurfacePolicy::DenyFailClosed,
+        )
+        .unwrap();
+        let params = &compiled.metadata.actions.iter().find(|action| action.name == "verify").unwrap().params;
+        let elf = cellscript::strip_vm_abi_trailer(&compiled.artifact_bytes);
+        for (value, expected_exit) in [(42u64, 0), (43u64, 5)] {
+            let payload = cellscript::encode_entry_witness_args_for_params(
+                params,
+                &[cellscript::EntryWitnessArg::Bytes(value.to_le_bytes().to_vec())],
+            )
+            .unwrap();
+            let witness = canonical_multisig_v2_witness(Bytes::from(payload));
+            let mut fixture = build_simple_fixture(Bytes::default(), 1, 1);
+            fixture.witnesses = vec![witness.as_bytes()];
+            let result = execute_cellscript_script(elf, &fixture);
+            assert_eq!(result.exit_code, expected_exit, "opt={opt_level}, mixed unit/scalar layout: {:?}", result.captured_debug);
+        }
+    }
+}
+
+#[test]
 fn complete_value_patterns_execute_in_ckb_vm() {
     let elf = compile_cellscript_source_to_elf(COMPLETE_PATTERN_ENTRY, "verify", None);
     let fixture = build_simple_fixture(Bytes::default(), 1, 1);

@@ -11,6 +11,16 @@ name = "cellscript-counter-lifecycle"
 path = "src/main.rs"
 test = false
 bench = false
+[[bin]]
+name = "cellscript-counter-migratable-lifecycle"
+path = "src/migratable.rs"
+test = false
+bench = false
+[[bin]]
+name = "cellscript-counter-config"
+path = "src/config.rs"
+test = false
+bench = false
 [dependencies]
 ckb-std = { version = "=1.1.0", default-features = false, features = ["allocator", "ckb-types", "type-id"] }
 [profile.release]

@@ -1,10 +1,10 @@
 # CellScript Verified Artifact Boundary
 
 **Status**: semantic-foundation and bounded machine contracts implemented on
-the `0.31` development branch
+the `0.32` development branch
 
 **Schemas**: `cellscript-verified-lowering-record-v9`,
-`cellscript-typed-semantics-v8`,
+`cellscript-typed-semantics-v9`,
 `cellscript-semantic-foundation-v3`,
 `cellscript-value-provenance-dag-v1`,
 `cellscript-source-artifact-map-v2`, and
@@ -14,6 +14,22 @@ the `0.31` development branch
 **Metadata schema**: 72
 
 ## Purpose
+
+Typed semantics v9 requires an explicit `value_abilities` array for every type,
+including an empty declaration. The independent checker validates the declared
+abilities against field and enum payload types, preserves declared restrictions,
+and does not infer `non_linear` from missing nominal evidence. Cell lifecycle
+capabilities remain a separate contract. Generic instantiation metadata v2 and
+the typed record retain ordered parameter contracts and canonical lowered-name
+bindings, including private and imported declarations. The checker verifies
+argument abilities, arity, function/Cell constraints and binding coverage;
+deleting a specialization's entire contract does not bypass these checks.
+Public parameters must agree with the retained contract during inspection.
+Entry selection retains nominal type evidence referenced only by specialization
+identities, without granting runtime Cell roles to phantom parameters.
+Private template layout/phantom-use projection, universal template admission
+and full compatible-open receipts remain pending. The nested schema advances independently
+of metadata schema 72 and lowering record v9; v8 records are not silently upgraded.
 
 Every CKB RISC-V ELF build now emits two canonical sidecars in addition to the
 artifact and compile metadata:
@@ -37,8 +53,8 @@ explicit no-proof-of-internals flag. Lowering
 record v9 embeds that record and binds it to the final machine layout. It
 versions the private policy-adapter storage contract introduced in 0.31.
 The standalone checker rejects unsupported record versions; an old sidecar
-cannot certify rebuilt bytes. Typed semantics and the witness wire ABI keep
-their existing versions. Every
+cannot certify rebuilt bytes. Lowering v9 originally retained typed semantics v8;
+the current 0.32 prerequisite uses typed semantics v9 without changing the witness wire ABI. Every
 typed block is accounted for;
 optimized/elided typed blocks have an explicit empty machine-block list, while
 materialized blocks carry exact typed-block hashes. Source-map v2 binds source
@@ -204,6 +220,65 @@ The checker independently recomputes and validates:
 Declared unreachable machine blocks are not silently treated as reachable.
 The record carries a `reachable` bit and the checker recomputes it from every
 declared entry.
+
+### Public-interface inspection groundwork for #28
+
+On the 0.32 work branch, `cellscript_artifact_checker::interface::inspect_bundle`
+accepts actual ELF, metadata, lowering-record and source-map bytes. It requires
+all four checker evidence fields to be verified before returning an immutable
+inspection. The existing v3 public-interface wire models are shared from the
+standalone crate without importing the compiler front end or changing their
+serialized field order.
+
+Inspection retains source declarations and effective typed contracts separately.
+A declaration's default `Pure` effect can correspond to an inferred `ReadOnly`
+entry; equating the two would hide a real compatibility dimension. Uninstantiated
+public generic templates remain declarations without invented runtime entries.
+
+Additional checks reject unknown or synthesized interface fields, recompute
+module/type/builder/deployment digests, bind witness/runtime/temporal profiles,
+and compare concrete field sets, type kinds, offsets, widths and type identities
+with checked layouts. Concrete enum names, ordering, payload cardinalities and
+payload type identities must also match. Checked generic instantiation records
+restore source names for this comparison, including array and nested generic
+arguments. Equal widths do not equate `Hash` and `Address`. Deleting, duplicating
+or relabeling a field cannot hide behind a recomputed digest.
+Concrete Cell capabilities must match the checked type as a complete set;
+source ordering is irrelevant, but missing, added or duplicate capabilities
+reject even when the interface and all outer identities are recomputed.
+Entry scoping follows enum payload dependencies as well as structural fields,
+so a nested layout needed only by a witness is retained in the typed record.
+For callables present in that record, inspection also binds the entry kind,
+ordered parameters (including trailing declared outputs), names, canonical type
+identities, source domains, mutable/reference flags and return type. Lock-args
+spelling and checked generic instance names are normalized explicitly; equal
+wire widths do not make distinct nominal types interchangeable. Signature
+mutations reject after every outer interface/bundle identity is rebound.
+Lock, borrow, successor-output and concrete generic signatures are exercised
+at optimization levels 0 through 3. Pruned callables and uninstantiated
+templates remain source declarations, without invented executable evidence.
+For locally instantiated public templates, inspection substitutes checked type
+arguments into the declaration and compares structural field names/order and
+offsets, enum tags/payloads and generic callable signatures with the concrete
+record. Substitution replaces complete unqualified tokens once, with allocation
+bounded by the two input spellings. Equal-width nominal substitutions still
+reject. Zero-width fields are matched by name and expected offset rather than
+assuming the checked record preserves source order for equal offsets. The
+compiler emits empty fields before nonempty fields at a shared offset, so a
+name tie-break cannot produce a falsely overlapping typed layout; the
+independent overlap check is unchanged.
+This verifies individual present instantiations, not universal generic ability
+constraints or executable behavior of absent instantiations.
+Mutation tests rebind outer identities and, for layout mutations, the inner
+layout digest as well. Metadata is bounded before parsing; interface item counts
+are bounded before declaration checks.
+
+This API is an inspection prerequisite, not a compatible-open receipt or an
+authorization result. It does not yet recompute every source-level signature,
+generic-template or nested-layout compatibility axis, authorize an immutable
+implementation set, inspect a selected live CellDep, or establish peer Script
+execution. Those remain #28/#29 implementation work. Existing `check_bundle`
+acceptance and exact-handle contracts are unchanged.
 
 ## Default Budgets
 

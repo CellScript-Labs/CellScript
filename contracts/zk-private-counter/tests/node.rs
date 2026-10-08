@@ -2,6 +2,8 @@
 // Reuse the repository's maintained node lifecycle/RPC harness.
 #[path = "support/ccc.rs"]
 mod ccc;
+#[path = "support/ccc_migration.rs"]
+mod ccc_migration;
 #[allow(dead_code)]
 #[path = "../../../crates/cellscript-tools/src/ckb_devnet.rs"]
 mod devnet;
@@ -207,6 +209,7 @@ fn counter_node_acceptance() {
             &handle,
             &key,
         ));
+        rows.push(ccc_migration::run(&mut node, &root, &run, &genesis, &child_deploy, &vk_deploy, &parent_deploy, &compiled, &handle));
     }
     node.stop();
     let report = json!({"schema":"cellscript-counter-node-evidence-v1","status":"passed","circuit_sha256":manifest.circuit.r1cs_sha256,"verification_key_data_hash":manifest.verification_key_data_hash,

@@ -8,7 +8,7 @@
 
 use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 const MONO_MARKER: &str = "__mono__";
 pub(crate) const MAX_GENERIC_INSTANTIATIONS: usize = 256;
@@ -161,6 +161,52 @@ pub(crate) fn decode_monomorph_name(name: &str) -> Option<(String, Vec<String>)>
     }
     let canonical = String::from_utf8(bytes).ok()?;
     Some((base.to_string(), split_top_level(&canonical, ',')?))
+}
+
+/// Types used only by a specialization's identity still supply ability
+/// evidence. Keep both source and concrete spellings so scoped IR can retain
+/// instantiated nominal layouts as well as their transitive arguments.
+pub(crate) fn monomorph_type_dependencies(name: &str) -> Result<BTreeSet<String>> {
+    fn collect(ty: &Type, names: &mut BTreeSet<String>) -> Result<()> {
+        match ty {
+            Type::Named(name) => {
+                names.insert(name.clone());
+                if let Some((base, arguments)) = applied_type(name) {
+                    let arguments = arguments
+                        .iter()
+                        .map(|argument| {
+                            parse_type_repr(argument)
+                                .ok_or_else(|| CompileError::without_span("invalid generic argument in specialization identity"))
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    names.insert(monomorph_name(base, &arguments, Span::default())?);
+                    for argument in arguments {
+                        collect(&argument, names)?;
+                    }
+                }
+            }
+            Type::Array(inner, _) | Type::Ref(inner) | Type::MutRef(inner) => collect(inner, names)?,
+            Type::Tuple(items) => {
+                for item in items {
+                    collect(item, names)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+    let mut names = BTreeSet::new();
+    if let Some((_, arguments)) = decode_monomorph_name(name) {
+        for argument in arguments {
+            let ty =
+                parse_type_repr(&argument).ok_or_else(|| CompileError::without_span("invalid type in specialization identity"))?;
+            if type_nesting(&ty) > MAX_GENERIC_NESTING {
+                return Err(CompileError::without_span("specialization identity exceeds the generic nesting bound"));
+            }
+            collect(&ty, &mut names)?;
+        }
+    }
+    Ok(names)
 }
 
 /// Derive the abilities guaranteed by a generic value declaration's field
@@ -1831,7 +1877,7 @@ fn type_nesting(ty: &Type) -> usize {
     }
 }
 
-fn builtin_option_template() -> EnumDef {
+pub(crate) fn builtin_option_template() -> EnumDef {
     let span = Span::default();
     EnumDef {
         name: "Option".to_string(),

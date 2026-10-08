@@ -43,18 +43,47 @@ the missing #28/#29 contracts and their implementation/acceptance order.
 | #41 | Validated low-mask immediates | Implemented at `8017a7bd`; historical evidence retained; integrated clean replay passes 6,782 comparable metrics |
 | #36 | Versioned observed per-VM stack measurements | Implemented; historical gate archives verified and 13 focused tests replayed; [closed with evidence](https://github.com/CellScript-Labs/CellScript/issues/36#issuecomment-5980845985) |
 | #37 | Measured dispatch alternatives and explicit selection | 402 tree and 804 saved-selector cases measured; retain current routing; checker/experiment replay passed; [closed with evidence](https://github.com/CellScript-Labs/CellScript/issues/37#issuecomment-5980846593) |
-| #38 | Separately measured borrowing, word copies and staged loading | 18 borrowed-span, 96 word-copy and 24 staged-loader cases measured; default ownership/loading retained pending full equivalence and checker contracts |
-| #39 | Bounded register-retention experiment and scratch-ownership decision | Candidate patch archived and rejected after 1,707 unchanged runs; conservative scratch ownership retained |
+| #38 | Separately measured borrowing, word copies and staged loading | 18 borrowed-span, 96 word-copy and 24 staged-loader cases measured; retain current ownership/loading and record blockers to adopting alternatives; [evaluation closed with evidence](https://github.com/CellScript-Labs/CellScript/issues/38#issuecomment-5981846754) |
+| #39 | Bounded register-retention experiment and scratch-ownership decision | Two candidates measured and rejected: first has 1,707 unchanged runs; [second](reports/0.32/retention-second/README.md) saves one cycle in four runs without ELF/store/stack savings; conservative scratch ownership retained |
 | #40 | Cost attribution, experiment decisions, combined comparison and residual-cost report | Clean 1,707-run attribution, 6,782-metric replay, paired cost frontier and residual sites archived; wider transformations have explicit blockers; unified gates pass |
 | #22 | One exact typed ZK profile, real verifier execution and state binding | V2 composition plus private-counter application circuit, proving/VK package, lifecycle and explicit single-party setup admission implemented |
-| #28 | Independently verified compatible-open Script/verifier handle selection | Exact handles and deployment lines are foundations; the new compatible-set authority, receipt, source/runtime and checker closure remains pending |
+| #28 | Independently verified compatible-open Script/verifier handle selection | Bounded actual-bundle inspection binds concrete layouts and callable signatures to checked records. The [host policy codec](CELLSCRIPT_OPEN_HANDLE_POLICY.md) fixes 1–32 members and a 656-byte selection with independent CCC vectors. Complete receipt/admission, nominal interface resolution and CKB runtime enforcement remain pending |
 | #29 | Bounded runtime-selected cross-Script roles | Depends on #28; participant/claim attribution, builder materialization and current-Script enforcement remain pending |
-| #42 | Usable ZK application workflow and explicit disposition of remaining tracks | Native/CCC proof snapshot binding and cancellation/retry pass the walkthrough, nine TypeScript tests and pinned-node acceptance (two confirmed updates; corrupted proof rejects with parent error 79); migration and remaining-track acceptance are still open |
+| #42 | Usable ZK application workflow and explicit disposition of remaining tracks | Native/CCC proof snapshots, cancellation/retry and pinned executable snapshots pass the walkthrough, 11 TypeScript tests and pinned-node acceptance. The [paired migration prototype](../contracts/zk-private-counter/MIGRATION.md) executes creation, old-key update, old-proof-authorized migration and new-key successor update, including maximum-size all-group execution and separate stack replay. Native/CCC migration checks share the manifest and transaction vectors. Pinned-node execution confirms the three-step lineage with real fee signatures and rejects stale configuration/second migration; final acceptance remains pending; P2–P4 have scoped follow-ups below |
 
 #28 and #29 are now independent 0.32 deliverables; they remain unnecessary for
 the already implemented exact ZK profile. #42 no longer has a post-0.32 target.
 An experimental optimization can be rejected on measured evidence; an
 unimplemented or unmeasured experiment must not be described as complete.
+
+The duplicate check covered open and closed lifecycle, composition, upgrade,
+first-profile and cost issues. #42's remaining tracks have explicit 0.32 scopes:
+[P2 multi-Cell binding (#44)](https://github.com/CellScript-Labs/CellScript/issues/44),
+[P3 circuit/key/verifier lifecycle (#45)](https://github.com/CellScript-Labs/CellScript/issues/45),
+and [P4 application costs/profile decisions (#46)](https://github.com/CellScript-Labs/CellScript/issues/46).
+Each records its priority, blocker and acceptance criteria. Creating these
+follow-ups does not complete #42 P1 or claim their implementations have passed.
+The first authorized migration exercise remains mandatory in #42; #45 extends
+it across versions after that application contract exists.
+
+The migration prototype preserves the original immutable lifecycle rather than
+claiming to retrofit its existing Cells. It uses a separately guarded unique
+configuration, two pinned parent hashes and a single 0 -> 1 transition, which
+must be authorized by the old counter proof over the final raw transaction.
+Its initial all-group maximum case admits 64 inputs, outputs and dependencies
+and a 16,384-byte serialized transaction under the unchanged 250,000,000-cycle
+ceiling. The standalone replay measures each VM/EXEC generation separately.
+The native migration client now binds a trusted manifest digest, actual
+code/VK bytes, network and paired instance Scripts. It validates final creation
+coordinates and selects the old parent from the actual configuration, preserving
+the existing proof/signature snapshot checks. Its integration test reuses all
+three continuous application transactions and checks byte-identical proof
+attachment and all-group execution. The CCC adapter and CLI now share the same instance/manifest pins and proof
+snapshots; its separate pinned-node exercise confirms actual successor lineage
+and rejects stale configuration, new-key self-installation, old-key use after
+migration and a second switch. Testtool resource replay remains distinct from
+node commitment. Final gates, published source and profile acceptance remain
+pending; these fixture results do not admit a production setup or public deployment.
 
 ## Integration baseline
 

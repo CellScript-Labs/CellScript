@@ -53,6 +53,18 @@ secp256k1 fee-input signatures. These example records do
 not overwrite candidate admission evidence. The CLI suite executes a generated
 schema-free SDK and its own tests to catch package-import regressions.
 
+CI reuses the walkthrough's pinned CCC installation to independently reconstruct
+the [open-handle authorization-set wire vectors](CELLSCRIPT_OPEN_HANDLE_POLICY.md).
+The standalone checker's tests verify the same frozen vectors without Node.
+This checks the Molecule/hash boundary, not compatible-artifact admission or
+CKB runtime enforcement.
+
+The 0.32 typed-semantics v9 prerequisite retains explicit value abilities and
+checks their field support independently. Interface-inspection mutations also
+check present public generic constraints after outer hashes are rebound. These
+focused checks do not replace full gate validation or complete compatible-open
+admission. See the [artifact boundary](CELLSCRIPT_VERIFIED_ARTIFACT_BOUNDARY.md).
+
 | Mode | When to run | Evidence boundary |
 |---|---|---|
 | `dev` | Local development before pushing | Native source-policy enforcement; Rust formatting; canonical CellScript example formatting; all workspace-package Rust checks (including the standalone artifact checker and `cellscript-tools`); checker mutation/Myelin handoff tests; exact-handle CKB-VM/transaction-validation tests; deployment-line receipt/value tests; frozen 0.30 business-corpus inventory and same-transaction anchor; simulator package scenarios; frozen/offline canonical workspace-diamond plus resolve-graph/build-plan and transactional-upgrade schema checks, including byte-identical source locks; both Registry verifiers and their compiler-dependency boundaries; reproducible Registry Type Script build and CKB-VM tests; strict backend quick audit, syntax-combination quick audit, parity-gated skill-pack freshness, README-linked CellScript doc Status freshness, local markdown link check, whitespace diff check |

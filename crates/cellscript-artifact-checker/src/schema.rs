@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const LOWERING_RECORD_SCHEMA: &str = "cellscript-verified-lowering-record-v9";
-pub const TYPED_SEMANTICS_SCHEMA: &str = "cellscript-typed-semantics-v8";
+pub const TYPED_SEMANTICS_SCHEMA: &str = "cellscript-typed-semantics-v9";
 pub const SEMANTIC_FOUNDATION_SCHEMA: &str = "cellscript-semantic-foundation-v3";
 pub const PROVENANCE_GRAPH_SCHEMA: &str = "cellscript-value-provenance-dag-v1";
 pub const SOURCE_MAP_SCHEMA: &str = "cellscript-source-artifact-map-v2";
@@ -9,7 +9,7 @@ pub const VERIFIED_ARTIFACT_BOUNDARY_SCHEMA: &str = "cellscript-verified-artifac
 pub const CHECKER_POLICY_SCHEMA: &str = "cellscript-artifact-checker-policy-v1";
 pub const CHECKER_REPORT_SCHEMA: &str = "cellscript-artifact-checker-report-v1";
 pub const LOWERING_RECORD_VERSION: u32 = 9;
-pub const TYPED_SEMANTICS_VERSION: u32 = 8;
+pub const TYPED_SEMANTICS_VERSION: u32 = 9;
 pub const SEMANTIC_FOUNDATION_VERSION: u32 = 3;
 pub const PROVENANCE_GRAPH_VERSION: u32 = 1;
 pub const SOURCE_MAP_VERSION: u32 = 2;
@@ -157,7 +157,16 @@ impl TypedSemanticRecord {
     pub fn canonicalize(&mut self) {
         self.types.sort_by(|left, right| left.name.cmp(&right.name));
         for ty in &mut self.types {
-            ty.fields.sort_by(|left, right| left.offset.cmp(&right.offset).then(left.name.cmp(&right.name)));
+            // In fixed layouts, empty ranges precede occupied ranges at an
+            // equal offset so the monotone overlap check can validate both.
+            // Non-fixed records retain their existing name tie-break.
+            let fixed_layout = ty.encoded_size.is_some() && ty.fields.iter().all(|field| field.width_bytes.is_some());
+            ty.fields.sort_by(|left, right| {
+                left.offset
+                    .cmp(&right.offset)
+                    .then_with(|| (fixed_layout && left.width_bytes != Some(0)).cmp(&(fixed_layout && right.width_bytes != Some(0))))
+                    .then(left.name.cmp(&right.name))
+            });
             ty.variants.sort_by(|left, right| left.tag.cmp(&right.tag).then(left.name.cmp(&right.name)));
             for variant in &mut ty.variants {
                 variant.fields.sort_by_key(|field| field.index);
@@ -466,6 +475,10 @@ pub struct TypedSemanticType {
     pub tag_width_bytes: Option<u32>,
     pub variants: Vec<TypedSemanticVariant>,
     pub capabilities: Vec<String>,
+    /// Source value abilities, separate from Cell lifecycle capabilities.
+    /// V9 requires this field even for an empty declared set. Field-derived
+    /// validation belongs to the independent checker, not a producer flag.
+    pub value_abilities: Vec<String>,
     pub identity_policy: String,
     pub layout_hash: String,
 }
@@ -808,11 +821,65 @@ pub struct TypedSemanticInstantiation {
     pub concrete_name: String,
     pub identity: String,
     pub type_arguments: Vec<String>,
+    pub lowered_names: Vec<String>,
+    pub parameters: Vec<TypedSemanticGenericParameter>,
+    pub declaration: TypedSemanticGenericDeclaration,
     pub value_ability_registry_version: u32,
     pub constraints_verified: bool,
     pub fixed_layout_required: bool,
     pub cell_backed_layout_rejected: bool,
     pub identity_includes_phantom_arguments: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TypedSemanticGenericParameter {
+    pub name: String,
+    pub constraints: Vec<String>,
+    pub phantom: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum TypedSemanticGenericDeclaration {
+    #[default]
+    Unavailable,
+    Struct {
+        fields: Vec<TypedSemanticGenericField>,
+        abilities: Vec<String>,
+    },
+    Enum {
+        variants: Vec<TypedSemanticGenericVariant>,
+        abilities: Vec<String>,
+    },
+    Function {
+        params: Vec<TypedSemanticGenericValueParameter>,
+        return_type: String,
+    },
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TypedSemanticGenericField {
+    pub name: String,
+    pub ty: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TypedSemanticGenericVariant {
+    pub name: String,
+    pub fields: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TypedSemanticGenericValueParameter {
+    pub name: String,
+    pub ty: String,
+    pub source: String,
+    pub mutable: bool,
+    pub reference: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

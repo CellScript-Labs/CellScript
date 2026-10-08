@@ -158,7 +158,7 @@ deployment evidence, and chain commitment remain separate states.
 ## Typed Semantics Relationship
 
 The public interface answers “what can a dependency rely on?” The
-`cellscript-typed-semantics-v8` record answers “what typed operations and
+`cellscript-typed-semantics-v9` record answers “what typed operations and
 control-flow facts were lowered?” Its embedded
 `cellscript-semantic-foundation-v3` additionally answers where values came
 from, which transaction roles they bind, how Cells are disposed, where claims
@@ -170,6 +170,11 @@ An explicit policy's tagged export set and outer witness ABI are bound by its
 entry contract. The package interface hash does not by itself select or prove a
 particular deployed policy; deployment and builder consumers must retain the
 selected artifact contract as well.
+Generic instantiation v2 separately retains the declaration owner, ordered
+parameter constraints and lowered names. Public declarations are cross-checked
+against that contract; private and imported instances still undergo argument
+and binding checks. Those checks do not provide universal template equivalence
+or a compatible-open deployment receipt.
 Typed semantics v8 can also name an exact, manifest-declared external verifier
 under the `trusted-external` evidence tier. That record binds the selected
 CellDep data hash and delegation operation; it is not part of the package

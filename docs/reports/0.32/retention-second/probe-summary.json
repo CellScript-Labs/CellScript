@@ -1,0 +1,1619 @@
+{
+  "schema": "cellscript-adjacent-scalar-retention-probe-summary-v1",
+  "status": "focused-probe-only-not-admitted",
+  "source": {
+    "cargo_lock_sha256": "643d60820b5ca8267149289e814f14dd15b39bce087eb0a0a680527bc6b8e11e",
+    "compiler_version": "0.31.0",
+    "measurement_fixture_sha256": {
+      "tests/business_corpus.rs": "5c832627c40934589fac4a6ba7c2bc0bae43b1c3f1675d2efc00abcbbfaa19fc",
+      "tests/cost_corpus.rs": "56d45e03402eb26c84a0029c8fc54639d48a012c151adea5991004bdffd6f1c0",
+      "tests/fixtures/capability_anchor_authorization.cell": "710f6d15afc0d7f85a7e714c57db94a140743928a6fbc4642f4054326242b2e3",
+      "tests/fixtures/capability_anchor_order.cell": "b3541a954b6b8a43c2b32a8d5cd8d6075e88bef96014085d515449b676f3e906",
+      "tests/fixtures/capability_anchor_policy.cell": "509b283a27208c6a8d8ca4890d7f8026cb82941ac75a09db75ecb62a95693858",
+      "tests/fixtures/capability_anchor_token.cell": "9b7019de49f86dcbe76de012dbc5afc1d7e956b472c378be8ba1a5b9c174f23d",
+      "tests/fixtures/cost_corpus/Cargo.toml": "fbcda0a45b3a0a0ba194b793812e351f00e9bbd54ddcd4b8905e82f95d387182",
+      "tests/fixtures/cost_corpus/expanded_budgets.json": "ecbb83bcac4d88438a95f014ee0d44c6912221367c63addcda745fe6b9ff97e9",
+      "tests/fixtures/cost_corpus/expanded_fixtures.json": "f926437a0c2439173d43d4a703ba881139cf9293be88a25aab2ac401228ffcd2",
+      "tests/fixtures/cost_corpus/growth_budgets.json": "68ccb8d6faa6eed2fbf94a1b757efc9d6045d85dc89dc973e9481d2b4766b160",
+      "tests/fixtures/cost_corpus/multi_script_budgets.json": "f6de8bc29396c48942813c3908a6ce9da6736b8010f66e63d5ddd7f86929ccd1",
+      "tests/fixtures/cost_corpus/nft_lock.cell": "eadffe28485199937e01d6051c00ce238b6d817f5657dcefe46a0669a619c1d0",
+      "tests/fixtures/cost_corpus/pool_merge.cell": "1f11906e1562c306bce400acb6128457ff28ba19ddda1b2e0bdb9b6d1013f521",
+      "tests/fixtures/cost_corpus/scalar_budgets.json": "49df193a48f3f66782b7d60f85ec37a979b0a991b1c37bb36ac81dc761d3afc6",
+      "tests/fixtures/cost_corpus/schema_roll.cell": "8d005226c687e0a8899a6d10cf4390952d8bad23b3b846ce54b0e93f4db3e0aa",
+      "tests/fixtures/cost_corpus/src/common.rs": "c8f2f8f704ec3f7a089c404ec8da184947b148a8d204169d586aad0235357622",
+      "tests/fixtures/cost_corpus/src/nft_lock.rs": "86a920f9935ec3aa6d72dcc27cdbfd2ab515185d1b4858d27964b0a99326e0cf",
+      "tests/fixtures/cost_corpus/src/pool_merge.rs": "df1ae134b07f56bdcdf9f349184488ab67e64e202ee8c6639337f07d08191b63",
+      "tests/fixtures/cost_corpus/src/schema_roll.rs": "68090359cbd094f6bb41c781b445fb03625bf2bcd069e3b753a2565f1d76eca0",
+      "tests/support/cost_growth.rs": "503cbee74c239241093da0c57be81db4352e0927f842b00c62b5add5deb104d8",
+      "tests/support/cost_measurement.rs": "030746e0603b1a5c63f952e8d5ad328d303a7f7c266dd8d7fc67190d2039d7b4",
+      "tests/support/cost_memory.rs": "7ff37bf1533b690addc57f4fcd25a2f574f88e01ff550df117dec4d6501c9d0d",
+      "tests/support/cost_scalar.rs": "d941145b410ef4ac893d3ba5286131ee204e412afbf108be0bee64fd3117f444",
+      "tests/support/cost_stack.rs": "8b0ec35c4c737e911fab8963f654d775806b40192998b7be6dadd75310cb0679"
+    },
+    "rust_toolchain": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.97.1\nLLVM version: 22.1.6",
+    "source_commit": "35bf983db30aae80281f97e30bbce08a878d7c58",
+    "source_dirty": true,
+    "tracked_diff_sha256": "f84ddec4c0a88885b07c0d105c0b76b604d58462b7696e6d2ea1c86011027b68",
+    "untracked_source_sha256": "2b0c97df830b74570a491771a9962a3ce4006faa6c10c28c5a74caf6586c87b9"
+  },
+  "raw_sha256": "612044d684df70fb6fb1c5ac75cb8374e13091e4f0bfe53e4df62731b026f9b7",
+  "raw_bytes": 4999154,
+  "scope": "identical typed IR and codegen options; test-only emitter toggle; complete compiler/checker acceptance still required",
+  "rows": [
+    {
+      "case": "subtract",
+      "valid": true,
+      "exit": [
+        0,
+        0
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1680,
+        1680
+      ],
+      "cycles": [
+        3331,
+        3330
+      ],
+      "static_loads": [
+        53,
+        52
+      ],
+      "static_stores": [
+        14,
+        14
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 80,
+            "guest_store_attempts": 44
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 79,
+            "guest_store_attempts": 44
+          }
+        ]
+      ]
+    },
+    {
+      "case": "subtract",
+      "valid": false,
+      "exit": [
+        5,
+        5
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1680,
+        1680
+      ],
+      "cycles": [
+        3308,
+        3307
+      ],
+      "static_loads": [
+        53,
+        52
+      ],
+      "static_stores": [
+        14,
+        14
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 77,
+            "guest_store_attempts": 44
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 76,
+            "guest_store_attempts": 44
+          }
+        ]
+      ]
+    },
+    {
+      "case": "divide",
+      "valid": true,
+      "exit": [
+        0,
+        0
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1696,
+        1696
+      ],
+      "cycles": [
+        3369,
+        3368
+      ],
+      "static_loads": [
+        53,
+        52
+      ],
+      "static_stores": [
+        14,
+        14
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 80,
+            "guest_store_attempts": 44
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 79,
+            "guest_store_attempts": 44
+          }
+        ]
+      ]
+    },
+    {
+      "case": "divide",
+      "valid": false,
+      "exit": [
+        5,
+        5
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1696,
+        1696
+      ],
+      "cycles": [
+        3346,
+        3345
+      ],
+      "static_loads": [
+        53,
+        52
+      ],
+      "static_stores": [
+        14,
+        14
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 77,
+            "guest_store_attempts": 44
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 76,
+            "guest_store_attempts": 44
+          }
+        ]
+      ]
+    },
+    {
+      "case": "remainder",
+      "valid": true,
+      "exit": [
+        0,
+        0
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1696,
+        1696
+      ],
+      "cycles": [
+        3369,
+        3368
+      ],
+      "static_loads": [
+        53,
+        52
+      ],
+      "static_stores": [
+        14,
+        14
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 80,
+            "guest_store_attempts": 44
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 79,
+            "guest_store_attempts": 44
+          }
+        ]
+      ]
+    },
+    {
+      "case": "remainder",
+      "valid": false,
+      "exit": [
+        5,
+        5
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1696,
+        1696
+      ],
+      "cycles": [
+        3346,
+        3345
+      ],
+      "static_loads": [
+        53,
+        52
+      ],
+      "static_stores": [
+        14,
+        14
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 77,
+            "guest_store_attempts": 44
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 76,
+            "guest_store_attempts": 44
+          }
+        ]
+      ]
+    },
+    {
+      "case": "shift",
+      "valid": true,
+      "exit": [
+        0,
+        0
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1696,
+        1696
+      ],
+      "cycles": [
+        3339,
+        3338
+      ],
+      "static_loads": [
+        53,
+        52
+      ],
+      "static_stores": [
+        14,
+        14
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 80,
+            "guest_store_attempts": 44
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 79,
+            "guest_store_attempts": 44
+          }
+        ]
+      ]
+    },
+    {
+      "case": "shift",
+      "valid": false,
+      "exit": [
+        5,
+        5
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1696,
+        1696
+      ],
+      "cycles": [
+        3316,
+        3315
+      ],
+      "static_loads": [
+        53,
+        52
+      ],
+      "static_stores": [
+        14,
+        14
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 77,
+            "guest_store_attempts": 44
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 76,
+            "guest_store_attempts": 44
+          }
+        ]
+      ]
+    },
+    {
+      "case": "nested-right",
+      "valid": true,
+      "exit": [
+        0,
+        0
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1680,
+        1680
+      ],
+      "cycles": [
+        3335,
+        3334
+      ],
+      "static_loads": [
+        53,
+        52
+      ],
+      "static_stores": [
+        14,
+        14
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 80,
+            "guest_store_attempts": 44
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 79,
+            "guest_store_attempts": 44
+          }
+        ]
+      ]
+    },
+    {
+      "case": "nested-right",
+      "valid": false,
+      "exit": [
+        5,
+        5
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1680,
+        1680
+      ],
+      "cycles": [
+        3312,
+        3311
+      ],
+      "static_loads": [
+        53,
+        52
+      ],
+      "static_stores": [
+        14,
+        14
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 77,
+            "guest_store_attempts": 44
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 76,
+            "guest_store_attempts": 44
+          }
+        ]
+      ]
+    },
+    {
+      "case": "left-constant-right",
+      "valid": true,
+      "exit": [
+        0,
+        0
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1672,
+        1672
+      ],
+      "cycles": [
+        3327,
+        3327
+      ],
+      "static_loads": [
+        52,
+        52
+      ],
+      "static_stores": [
+        14,
+        14
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 79,
+            "guest_store_attempts": 44
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 79,
+            "guest_store_attempts": 44
+          }
+        ]
+      ]
+    },
+    {
+      "case": "left-constant-right",
+      "valid": false,
+      "exit": [
+        5,
+        5
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1672,
+        1672
+      ],
+      "cycles": [
+        3304,
+        3304
+      ],
+      "static_loads": [
+        52,
+        52
+      ],
+      "static_stores": [
+        14,
+        14
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 76,
+            "guest_store_attempts": 44
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 76,
+            "guest_store_attempts": 44
+          }
+        ]
+      ]
+    },
+    {
+      "case": "overlapping",
+      "valid": true,
+      "exit": [
+        0,
+        0
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1696,
+        1696
+      ],
+      "cycles": [
+        3347,
+        3346
+      ],
+      "static_loads": [
+        56,
+        55
+      ],
+      "static_stores": [
+        15,
+        15
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 83,
+            "guest_store_attempts": 45
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 82,
+            "guest_store_attempts": 45
+          }
+        ]
+      ]
+    },
+    {
+      "case": "overlapping",
+      "valid": false,
+      "exit": [
+        5,
+        5
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1696,
+        1696
+      ],
+      "cycles": [
+        3324,
+        3323
+      ],
+      "static_loads": [
+        56,
+        55
+      ],
+      "static_stores": [
+        15,
+        15
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 80,
+            "guest_store_attempts": 45
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 79,
+            "guest_store_attempts": 45
+          }
+        ]
+      ]
+    },
+    {
+      "case": "a / (b + 1)",
+      "valid": false,
+      "exit": [
+        20,
+        20
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1696,
+        1696
+      ],
+      "cycles": [
+        3310,
+        3309
+      ],
+      "static_loads": [
+        53,
+        52
+      ],
+      "static_stores": [
+        14,
+        14
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 76,
+            "guest_store_attempts": 43
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 75,
+            "guest_store_attempts": 43
+          }
+        ]
+      ]
+    },
+    {
+      "case": "a % (b + 1)",
+      "valid": false,
+      "exit": [
+        20,
+        20
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1696,
+        1696
+      ],
+      "cycles": [
+        3310,
+        3309
+      ],
+      "static_loads": [
+        53,
+        52
+      ],
+      "static_stores": [
+        14,
+        14
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 76,
+            "guest_store_attempts": 43
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 75,
+            "guest_store_attempts": 43
+          }
+        ]
+      ]
+    },
+    {
+      "case": "a << (b + 1)",
+      "valid": false,
+      "exit": [
+        65,
+        65
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1696,
+        1696
+      ],
+      "cycles": [
+        3311,
+        3310
+      ],
+      "static_loads": [
+        53,
+        52
+      ],
+      "static_stores": [
+        14,
+        14
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 76,
+            "guest_store_attempts": 43
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 75,
+            "guest_store_attempts": 43
+          }
+        ]
+      ]
+    },
+    {
+      "case": "signed-divide",
+      "valid": true,
+      "exit": [
+        0,
+        0
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1576,
+        1576
+      ],
+      "cycles": [
+        3090,
+        3089
+      ],
+      "static_loads": [
+        41,
+        40
+      ],
+      "static_stores": [
+        14,
+        14
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 56,
+            "guest_store_attempts": 32
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 55,
+            "guest_store_attempts": 32
+          }
+        ]
+      ]
+    },
+    {
+      "case": "signed-divide",
+      "valid": false,
+      "exit": [
+        5,
+        5
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1576,
+        1576
+      ],
+      "cycles": [
+        3067,
+        3066
+      ],
+      "static_loads": [
+        41,
+        40
+      ],
+      "static_stores": [
+        14,
+        14
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 53,
+            "guest_store_attempts": 32
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 52,
+            "guest_store_attempts": 32
+          }
+        ]
+      ]
+    },
+    {
+      "case": "signed-remainder",
+      "valid": true,
+      "exit": [
+        0,
+        0
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1576,
+        1576
+      ],
+      "cycles": [
+        3090,
+        3089
+      ],
+      "static_loads": [
+        41,
+        40
+      ],
+      "static_stores": [
+        14,
+        14
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 56,
+            "guest_store_attempts": 32
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 55,
+            "guest_store_attempts": 32
+          }
+        ]
+      ]
+    },
+    {
+      "case": "signed-remainder",
+      "valid": false,
+      "exit": [
+        5,
+        5
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1576,
+        1576
+      ],
+      "cycles": [
+        3067,
+        3066
+      ],
+      "static_loads": [
+        41,
+        40
+      ],
+      "static_stores": [
+        14,
+        14
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 53,
+            "guest_store_attempts": 32
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 52,
+            "guest_store_attempts": 32
+          }
+        ]
+      ]
+    },
+    {
+      "case": "narrow-normalization",
+      "valid": true,
+      "exit": [
+        0,
+        0
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1440,
+        1440
+      ],
+      "cycles": [
+        2828,
+        2828
+      ],
+      "static_loads": [
+        32,
+        32
+      ],
+      "static_stores": [
+        14,
+        14
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 38,
+            "guest_store_attempts": 23
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 38,
+            "guest_store_attempts": 23
+          }
+        ]
+      ]
+    },
+    {
+      "case": "narrow-normalization",
+      "valid": false,
+      "exit": [
+        5,
+        5
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1440,
+        1440
+      ],
+      "cycles": [
+        2805,
+        2805
+      ],
+      "static_loads": [
+        32,
+        32
+      ],
+      "static_stores": [
+        14,
+        14
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 35,
+            "guest_store_attempts": 23
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 35,
+            "guest_store_attempts": 23
+          }
+        ]
+      ]
+    },
+    {
+      "case": "joins-backedges",
+      "valid": true,
+      "exit": [
+        0,
+        0
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1776,
+        1776
+      ],
+      "cycles": [
+        3648,
+        3648
+      ],
+      "static_loads": [
+        59,
+        59
+      ],
+      "static_stores": [
+        21,
+        21
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6608,
+            "guest_load_attempts": 125,
+            "guest_store_attempts": 77
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6608,
+            "guest_load_attempts": 125,
+            "guest_store_attempts": 77
+          }
+        ]
+      ]
+    },
+    {
+      "case": "joins-backedges",
+      "valid": false,
+      "exit": [
+        5,
+        5
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1776,
+        1776
+      ],
+      "cycles": [
+        3622,
+        3622
+      ],
+      "static_loads": [
+        59,
+        59
+      ],
+      "static_stores": [
+        21,
+        21
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6608,
+            "guest_load_attempts": 122,
+            "guest_store_attempts": 77
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6608,
+            "guest_load_attempts": 122,
+            "guest_store_attempts": 77
+          }
+        ]
+      ]
+    },
+    {
+      "case": "call-clobber",
+      "valid": true,
+      "exit": [
+        0,
+        0
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1752,
+        1752
+      ],
+      "cycles": [
+        3383,
+        3383
+      ],
+      "static_loads": [
+        58,
+        58
+      ],
+      "static_stores": [
+        19,
+        19
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 7792,
+            "guest_load_attempts": 85,
+            "guest_store_attempts": 49
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 7792,
+            "guest_load_attempts": 85,
+            "guest_store_attempts": 49
+          }
+        ]
+      ]
+    },
+    {
+      "case": "call-clobber",
+      "valid": false,
+      "exit": [
+        5,
+        5
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1752,
+        1752
+      ],
+      "cycles": [
+        3360,
+        3360
+      ],
+      "static_loads": [
+        58,
+        58
+      ],
+      "static_stores": [
+        19,
+        19
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 7792,
+            "guest_load_attempts": 82,
+            "guest_store_attempts": 49
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 7792,
+            "guest_load_attempts": 82,
+            "guest_store_attempts": 49
+          }
+        ]
+      ]
+    },
+    {
+      "case": "outgoing-nine-arguments",
+      "valid": true,
+      "exit": [
+        0,
+        0
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1840,
+        1840
+      ],
+      "cycles": [
+        3445,
+        3444
+      ],
+      "static_loads": [
+        68,
+        67
+      ],
+      "static_stores": [
+        28,
+        28
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 7872,
+            "guest_load_attempts": 95,
+            "guest_store_attempts": 58
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 7872,
+            "guest_load_attempts": 94,
+            "guest_store_attempts": 58
+          }
+        ]
+      ]
+    },
+    {
+      "case": "outgoing-nine-arguments",
+      "valid": false,
+      "exit": [
+        5,
+        5
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1840,
+        1840
+      ],
+      "cycles": [
+        3422,
+        3421
+      ],
+      "static_loads": [
+        68,
+        67
+      ],
+      "static_stores": [
+        28,
+        28
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 7872,
+            "guest_load_attempts": 92,
+            "guest_store_attempts": 58
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 7872,
+            "guest_load_attempts": 91,
+            "guest_store_attempts": 58
+          }
+        ]
+      ]
+    },
+    {
+      "case": "duplicate-ssa-operands",
+      "valid": true,
+      "exit": [
+        0,
+        0
+      ],
+      "ir_mutation": "set the last scalar subtraction's left operand to its right SSA value; expected result is zero",
+      "elf_bytes": [
+        1672,
+        1672
+      ],
+      "cycles": [
+        3327,
+        3326
+      ],
+      "static_loads": [
+        52,
+        51
+      ],
+      "static_stores": [
+        14,
+        14
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 79,
+            "guest_store_attempts": 44
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 78,
+            "guest_store_attempts": 44
+          }
+        ]
+      ]
+    },
+    {
+      "case": "duplicate-ssa-operands",
+      "valid": false,
+      "exit": [
+        5,
+        5
+      ],
+      "ir_mutation": "set the last scalar subtraction's left operand to its right SSA value; expected result is zero",
+      "elf_bytes": [
+        1672,
+        1672
+      ],
+      "cycles": [
+        3304,
+        3303
+      ],
+      "static_loads": [
+        52,
+        51
+      ],
+      "static_stores": [
+        14,
+        14
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 76,
+            "guest_store_attempts": 44
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6592,
+            "guest_load_attempts": 75,
+            "guest_store_attempts": 44
+          }
+        ]
+      ]
+    },
+    {
+      "case": "wide-parameter-fallback",
+      "valid": true,
+      "exit": [
+        0,
+        0
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1680,
+        1680
+      ],
+      "cycles": [
+        3851,
+        3851
+      ],
+      "static_loads": [
+        52,
+        52
+      ],
+      "static_stores": [
+        15,
+        15
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6624,
+            "guest_load_attempts": 111,
+            "guest_store_attempts": 77
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6624,
+            "guest_load_attempts": 111,
+            "guest_store_attempts": 77
+          }
+        ]
+      ]
+    },
+    {
+      "case": "wide-parameter-fallback",
+      "valid": false,
+      "exit": [
+        5,
+        5
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        1680,
+        1680
+      ],
+      "cycles": [
+        3828,
+        3828
+      ],
+      "static_loads": [
+        52,
+        52
+      ],
+      "static_stores": [
+        15,
+        15
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6624,
+            "guest_load_attempts": 108,
+            "guest_store_attempts": 77
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 6624,
+            "guest_load_attempts": 108,
+            "guest_store_attempts": 77
+          }
+        ]
+      ]
+    },
+    {
+      "case": "large-overlapping-frame",
+      "valid": true,
+      "exit": [
+        0,
+        0
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        10120,
+        10120
+      ],
+      "cycles": [
+        8841,
+        8840
+      ],
+      "static_loads": [
+        826,
+        825
+      ],
+      "static_stores": [
+        530,
+        530
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 8656,
+            "guest_load_attempts": 853,
+            "guest_store_attempts": 560
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 8656,
+            "guest_load_attempts": 852,
+            "guest_store_attempts": 560
+          }
+        ]
+      ]
+    },
+    {
+      "case": "large-overlapping-frame",
+      "valid": false,
+      "exit": [
+        5,
+        5
+      ],
+      "ir_mutation": null,
+      "elf_bytes": [
+        10120,
+        10120
+      ],
+      "cycles": [
+        8810,
+        8809
+      ],
+      "static_loads": [
+        826,
+        825
+      ],
+      "static_stores": [
+        530,
+        530
+      ],
+      "per_vm": [
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 8656,
+            "guest_load_attempts": 850,
+            "guest_store_attempts": 560
+          }
+        ],
+        [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "observed_stack_bytes": 8656,
+            "guest_load_attempts": 849,
+            "guest_store_attempts": 560
+          }
+        ]
+      ]
+    }
+  ]
+}

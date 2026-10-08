@@ -8,6 +8,12 @@ for pass in a b; do
     CARGO_TARGET_DIR="$root/target/counter-repro/$pass" cargo build --locked \
         --manifest-path contracts/zk-private-counter/script/Cargo.toml --target riscv64imac-unknown-none-elf --release
 done
+for name in cellscript-counter-migratable-lifecycle cellscript-counter-config; do
+    cmp "$root/target/counter-repro/a/riscv64imac-unknown-none-elf/release/$name" \
+        "$root/target/counter-repro/b/riscv64imac-unknown-none-elf/release/$name"
+    cmp "$root/target/counter-repro/a/riscv64imac-unknown-none-elf/release/$name" \
+        "$root/contracts/zk-private-counter/script/target/riscv64imac-unknown-none-elf/release/$name"
+done
 report_dir="$(mktemp -d "$root/target/counter-repro/report.XXXXXX")"
 trap 'rm -rf "$report_dir"' EXIT
 cargo run --locked --release --manifest-path contracts/zk-private-counter/Cargo.toml -- \
