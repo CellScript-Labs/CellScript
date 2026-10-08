@@ -45,14 +45,14 @@ struct Variant {
     parameters: Vec<Parameter>,
 }
 #[derive(Debug, Serialize)]
-struct Parameter {
-    name: String,
+pub(crate) struct Parameter {
+    pub(crate) name: String,
     ty: String,
     source: String,
     transport: Transport,
     width_bytes: u32,
-    payload_offset: Option<u32>,
-    abi_index: u32,
+    pub(crate) payload_offset: Option<u32>,
+    pub(crate) abi_index: u32,
     abi_arguments: u32,
 }
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -120,7 +120,7 @@ fn width(ty: &SourceType) -> Result<u32, CheckerError> {
     }
     Ok(result)
 }
-fn parameters(entry: &TypedSemanticEntry, typed: &TypedSemanticRecord) -> Result<Vec<Parameter>, CheckerError> {
+pub(crate) fn parameters(entry: &TypedSemanticEntry, typed: &TypedSemanticRecord) -> Result<Vec<Parameter>, CheckerError> {
     let mut result = Vec::new();
     let mut cursor = 0u32;
     let mut abi = 0u32;

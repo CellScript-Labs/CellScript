@@ -224,6 +224,14 @@ fn certified_fixed_cell_read_gates_check_real_group_bytes_and_lengths_in_vm() {
             &cellscript_artifact_checker::CheckerBudgets::default(),
         )
         .unwrap();
+        cellscript_artifact_checker::fixed_cell_storage::check_fixed_cell_parameter_storage(
+            &compiled.artifact_bytes,
+            &serde_json::to_vec(&compiled.metadata).unwrap(),
+            &serde_json::to_vec(compiled.verified_lowering_record.as_ref().unwrap()).unwrap(),
+            &serde_json::to_vec(compiled.source_artifact_map.as_ref().unwrap()).unwrap(),
+            &cellscript_artifact_checker::CheckerBudgets::default(),
+        )
+        .unwrap();
         for (tag, inputs, outputs) in [(MINT, &[][..], &[7][..]), (BURN, &[7][..], &[][..])] {
             for prepend in [false, true] {
                 let case = || {

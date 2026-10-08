@@ -18,6 +18,9 @@ pub struct CheckedFixedCellReads {
     identity: String,
 }
 impl CheckedFixedCellReads {
+    pub(crate) fn reads(&self) -> &[Read] {
+        &self.record.reads
+    }
     pub fn module_projection(&self) -> &CheckedModuleProjection {
         &self.module
     }
@@ -36,19 +39,19 @@ struct Record {
     reads: Vec<Read>,
 }
 #[derive(Debug, Serialize)]
-struct Read {
-    entry: String,
-    binding: String,
+pub(crate) struct Read {
+    pub(crate) entry: String,
+    pub(crate) binding: String,
     ty: String,
-    source: CellBindingSource,
-    ordinal: u32,
+    pub(crate) source: CellBindingSource,
+    pub(crate) ordinal: u32,
     width_bytes: u32,
     capacity_bytes: u32,
-    size_offset: u32,
-    buffer_offset: u32,
-    setup_start: u64,
+    pub(crate) size_offset: u32,
+    pub(crate) buffer_offset: u32,
+    pub(crate) setup_start: u64,
     syscall_address: u64,
-    guarded_end: u64,
+    pub(crate) guarded_end: u64,
     status_error: i32,
 }
 fn invalid(message: impl Into<String>) -> CheckerError {

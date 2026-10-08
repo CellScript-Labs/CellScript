@@ -61,3 +61,7 @@ identity or Type-hash history. Full issue #28 still requires those applicable
 contracts plus complete receipts, nominal identities and bounded runtime
 handles. Independent security review remains required before stable admission.
 Full CI stays deferred until the entire requested queue is implemented.
+
+The separate [fixed Cell parameter storage check](FIXED_CELL_PARAMETER_STORAGE.md)
+adds direct source-parameter ABI spill and immediate pointer-receiver evidence.
+It does not expand this read-gate certificate into a field codec or full receipt.

@@ -2,6 +2,13 @@
 
 ## Unreleased — 0.32
 
+Bind eligible fixed Cell source parameters to their actual ABI spills and
+post-read pointer receivers under a finite uncompressed scalar-slot profile.
+Reject rebound source IDs, overlapping argument spills and changed receivers.
+This optional prerequisite ends at pointer reception; field decoding, full
+receipts and open admission remain pending. See
+`docs/FIXED_CELL_PARAMETER_STORAGE.md`.
+
 Add optional independent fixed Cell-data read gate evidence: actual source and
 index, 512-byte buffer setup, checked terminating status and exact length.
 Malformed machine gates and unsupported profiles reject. This partial evidence

@@ -70,6 +70,88 @@ fn fixed_cell_reads(fixture: &Fixture) -> Result<cellscript_artifact_checker::fi
     )
 }
 
+fn fixed_cell_storage(
+    fixture: &Fixture,
+) -> Result<cellscript_artifact_checker::fixed_cell_storage::CheckedFixedCellParameterStorage, CheckerError> {
+    cellscript_artifact_checker::fixed_cell_storage::check_fixed_cell_parameter_storage(
+        &fixture.artifact,
+        &serde_json::to_vec(&fixture.metadata).unwrap(),
+        &serde_json::to_vec(&fixture.record).unwrap(),
+        &serde_json::to_vec(&fixture.source_map).unwrap(),
+        &CheckerBudgets::default(),
+    )
+}
+
+#[test]
+fn fixed_cell_parameter_storage_binds_source_ids_and_actual_pointer_reception() {
+    for opt in 0..=3 {
+        let fixture = Fixture::new_with(CellScriptEdition::Edition2026, opt, declaration());
+        let checked = fixed_cell_storage(&fixture).unwrap();
+        let value: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
+        assert_eq!(value["cells"].as_array().unwrap().len(), 1);
+        assert_eq!(value["cells"][0]["parameter"], "token");
+        assert_eq!(value["cells"][0]["pointer_offset"], value["cells"][0]["source_id"].as_u64().unwrap() * 8);
+        assert_eq!(value["read_gates"], checked.reads().identity());
+        assert_eq!(value["parameter_decoder"], checked.parameters().identity());
+        let cell = &value["cells"][0];
+        let receiver = cell["receiver_start"].as_u64().unwrap();
+        let spill = cell["spill_address"].as_u64().unwrap();
+        let elf = parse_elf(&fixture.artifact, CheckerBudgets::default().instructions).unwrap();
+        for (address, mask, bits) in [
+            (receiver, 31 << 15, 3 << 15),
+            (receiver, 31 << 7, 6 << 7),
+            (receiver + 4, 31 << 15, 3 << 15),
+            (receiver + 4, 31 << 20, 6 << 20),
+            (spill, 31 << 20, 11 << 20),
+        ] {
+            let original = elf.instructions.iter().find(|instruction| instruction.address == address).unwrap().word;
+            let mut changed = fixture.clone();
+            changed.replace_machine_word(address, (original & !mask) | bits);
+            changed.check().unwrap();
+            fixed_cell_reads(&changed).expect("read gates alone do not attest parameter storage");
+            assert_eq!(fixed_cell_storage(&changed).unwrap_err().code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+        }
+        let mut changed = fixture.clone();
+        let entry = changed.record.typed_semantics.entries.iter_mut().find(|entry| entry.id == "action:burn").unwrap();
+        let local_id = entry.cell_bindings[0].local_id.unwrap();
+        entry.locals.iter_mut().find(|local| local.id == local_id).unwrap().source_id += 1;
+        changed.rebind_policy_identity();
+        changed.check().unwrap();
+        fixed_cell_reads(&changed).unwrap();
+        assert_eq!(fixed_cell_storage(&changed).unwrap_err().code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+    }
+}
+
+#[test]
+fn fixed_cell_parameter_storage_rejects_overlapping_argument_spills_and_output_only() {
+    let source = SOURCE.replace(
+        "action burn(input token: Token) { verification consume token }",
+        "action burn(input token: Token, witness n: u64) { verification require n > 0 consume token }",
+    );
+    for opt in 0..=3 {
+        let fixture = Fixture::new_source_with(&source, CellScriptEdition::Edition2026, opt, declaration());
+        let checked = fixed_cell_storage(&fixture).unwrap();
+        let value: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
+        let spill = value["cells"][0]["spill_address"].as_u64().unwrap();
+        let pointer = value["cells"][0]["pointer_offset"].as_u64().unwrap() as u32;
+        let elf = parse_elf(&fixture.artifact, CheckerBudgets::default().instructions).unwrap();
+        let second = elf.instructions.iter().find(|instruction| instruction.address == spill + 4).unwrap().word;
+        assert_eq!((second >> 20) & 31, 11);
+        let mut changed = fixture.clone();
+        changed
+            .replace_machine_word(spill + 4, (second & !((0x7f << 25) | (31 << 7))) | ((pointer >> 5) << 25) | ((pointer & 31) << 7));
+        changed.check().unwrap();
+        fixed_cell_reads(&changed).unwrap();
+        assert_eq!(fixed_cell_storage(&changed).unwrap_err().code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+
+        let mut output = declaration();
+        output.actions.retain(|action| action.action == "mint");
+        let fixture = Fixture::new_with(CellScriptEdition::Edition2026, opt, output);
+        fixed_cell_reads(&fixture).unwrap();
+        assert_eq!(fixed_cell_storage(&fixture).unwrap_err().code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+    }
+}
+
 #[test]
 fn fixed_cell_reads_check_actual_source_size_and_error_gates() {
     for opt in 0..=3 {

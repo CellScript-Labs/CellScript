@@ -809,3 +809,52 @@ public codec receipts, stable nominal ownership, actual deployment/args/deps,
 authorized Type history and H2 runtime enforcement are still required. #29
 and #44–#46 are not completed. Independent security review remains required
 and unassigned. Full CI runs only after the entire user queue is implemented.
+
+## Clean catalog replay, public push and parameter storage follow-up
+
+The root catalog/backend/CCC replay completed successfully on clean signed
+`76ad140efa158b99c450d4b0b79113b5d6c4f7b4`:
+`.cap/logs/1791467658-76374.log` (225,441 bytes). Strict full audit is
+`target/cellscript-strict-backend-audit/strict-backend-audit-full-20261008-221146.json`;
+acceptance is
+`target/ckb-cellscript-acceptance/1791468920-production-12484/ckb-cellscript-acceptance-report.json`;
+node evidence is `target/counter-node/1791469205-45779/evidence.json`.
+Acceptance and node evidence bind that commit with `git_dirty=false` and
+tracked-source SHA-256
+`0x0412aa1ff567f36c095c1690aaf8e6d4a5136aee1753aace564cbb551f0daaea`.
+The three CCC transition rows confirmed with 111,664,042 / 111,914,152 /
+111,830,878 cycles and 1237 / 1632 / 1237 bytes. Local public test seeds remain
+non-production; this does not complete general #45 lifecycle admission.
+Signed `3fec7445` and `76ad140e` were pushed to `public/0.32` and the remote
+head verified. The tracked replay archive still accurately binds earlier
+`23822919`, not this later replay.
+
+Fixed read gates passed updated strict clippy in
+`.cap/logs/1791468842-8789.log` and full worktree dev in
+`.cap/logs/1791469039-42175.log` (94,131 bytes), then were signed as
+`6aa93612`. They await a batched root backend replay with the following
+parameter-storage prerequisite before publication.
+
+The new optional parameter-storage checker combines private read and decoder
+objects, derives source-ID scalar slots, checks actual ABI spills and immediate
+post-guard buffer reception, rejects incoming interior flow, and bounds/disjoins
+the eligible storage. It adds no producer validity flag, emitter change,
+sidecar schema, dependency, cache or resource ceiling. Its evidence ends at
+pointer reception; later fields, lifetime, general alias freedom and helper
+closure remain unproven. See `FIXED_CELL_PARAMETER_STORAGE.md`.
+The initial 24 O0–O3 rebound pointer/spill/source-ID mutations pass ordinary
+inspection/read gates but reject storage checking in
+`.cap/logs/1791470782-79188.log`. The real VM fixture passes with all three
+checks in `.cap/logs/1791470982-83428.log` (16 positive, 64 negative cases).
+Additional spill-collision/output-only fixtures and full clippy/dev are the
+next checks for this exact source state. H1, #29 and #44–#46 remain unfinished;
+independent review remains unassigned and full CI stays deferred.
+
+The spill-collision/output-only follow-up passes at O0–O3 in
+`.cap/logs/1791471404-92360.log`. The first collision-check prototype wrongly
+excluded the actual ABI length spill at the checked Cell size slot and failed
+two positive fixtures. It was corrected to admit only the identified Cell's
+length register at that checked slot while retaining unique slots/registers
+and scalar-region bounds elsewhere. No fixture, ABI or resource limit changed.
+Updated strict compiler/checker all-target clippy passes in
+`.cap/logs/1791471497-94579.log`. Full dev is next; sources freeze during it.
