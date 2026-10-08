@@ -14,7 +14,13 @@ fn package(root: &Path, name: &str, source: &str, extra: &str) {
 }
 fn lock(root: &Path) {
     let output = common::cellc_command().current_dir(root).args(["lock", "--json"]).output().unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "lock {}: stdout={} stderr={}",
+        root.display(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 fn compile(root: &Path, opt_level: u8) -> FrozenPackageModule {
     compile_module(
@@ -464,4 +470,281 @@ fn native_code_catalog_checks_all_32_members_and_distinguishes_complete_script_a
         .unwrap_err()
         .message
         .contains("duplicate concrete Script/code deployment"));
+}
+
+fn owned_code_package(root: &Path, name: &str) {
+    code_package(root, &CODE_SOURCE.replace("module client", "module foreign"));
+    let manager = cellscript::package::PackageManager::new(root);
+    let mut manifest = manager.read_manifest().unwrap();
+    manifest.package.name = name.into();
+    manager.write_manifest(&manifest).unwrap();
+    lock(root);
+}
+fn consuming_package(root: &Path, library_name: &str, library_path: &str, aliases: &[&str]) {
+    let dependencies = aliases
+        .iter()
+        .map(|alias| format!("{alias} = {{ package = \"{library_name}\", path = \"{library_path}\" }}\n"))
+        .collect::<String>();
+    package(root,"client","module client\nuse foreign::Token as Value\npublic action verify(input token: Value) { verification require token.amount > 0 consume token }\n",&format!("[dependencies]\n{dependencies}"));
+    lock(root);
+}
+fn one_code_catalog(root: &Path, opt: u8) -> cellscript::package::frozen_interface::FrozenCodeCatalog {
+    cellscript::package::frozen_interface::freeze_code_catalog(
+        compile_code(root, opt),
+        vec![code_candidate(compile_code(root, opt), vec![1])],
+        &cellscript_artifact_checker::CheckerBudgets::default(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn resolved_code_catalog_uses_actual_locked_defining_owner_across_dependency_aliases() {
+    use cellscript::package::frozen_interface::resolve_code_catalog_source;
+    let directory = tempfile::tempdir().unwrap();
+    let library = directory.path().join("library");
+    let first = directory.path().join("first");
+    let second = directory.path().join("second");
+    owned_code_package(&library, "library");
+    consuming_package(&first, "library", "../library", &["left", "right"]);
+    consuming_package(&second, "library", "../library", &["renamed"]);
+    for opt in 0..=3 {
+        let first = resolve_code_catalog_source(compile(&first, opt), one_code_catalog(&library, opt)).unwrap();
+        let second = resolve_code_catalog_source(compile(&second, opt), one_code_catalog(&library, opt)).unwrap();
+        assert_eq!(first.source_owner_identity(), second.source_owner_identity());
+        assert_ne!(first.consumer().context_identity(), second.consumer().context_identity());
+        assert_ne!(first.identity(), second.identity());
+        let consumer = context(first.consumer());
+        let baseline = context(first.catalog().required());
+        let owner: Value = serde_json::from_slice(&first.source_owner_bytes().unwrap()).unwrap();
+        let actual = consumer["modules"]["foreign"]["package"].as_str().unwrap();
+        assert_eq!(owner["defining_package"], actual);
+        assert_eq!(consumer["packages"][actual]["source"]["kind"], "local-snapshot");
+        let root = baseline["modules"]["foreign"]["package"].as_str().unwrap();
+        assert_eq!(baseline["packages"][root]["source"]["kind"], "root-snapshot");
+        assert_ne!(actual, root);
+        assert_eq!(owner["required_module_contract"], first.catalog().required().projection().identity());
+        let record: Value = serde_json::from_slice(&first.canonical_bytes().unwrap()).unwrap();
+        assert_eq!(record["defining_owner"], first.source_owner_identity());
+        assert_eq!(record["code_catalog"], first.catalog().identity());
+        assert!(!first.consumer().projection().artifact_report().semantic_equivalence_claimed);
+    }
+}
+
+#[test]
+fn resolved_code_catalog_keeps_same_name_and_shape_from_different_owners_distinct() {
+    use cellscript::package::frozen_interface::resolve_code_catalog_source;
+    let directory = tempfile::tempdir().unwrap();
+    let left = directory.path().join("left");
+    let right = directory.path().join("right");
+    let app_left = directory.path().join("app-left");
+    let app_right = directory.path().join("app-right");
+    owned_code_package(&left, "library-left");
+    owned_code_package(&right, "library-right");
+    consuming_package(&app_left, "library-left", "../left", &["library"]);
+    consuming_package(&app_right, "library-right", "../right", &["library"]);
+    for opt in 0..=3 {
+        let left_bound = resolve_code_catalog_source(compile(&app_left, opt), one_code_catalog(&left, opt)).unwrap();
+        let right_bound = resolve_code_catalog_source(compile(&app_right, opt), one_code_catalog(&right, opt)).unwrap();
+        assert_eq!(left_bound.catalog().required().projection().identity(), right_bound.catalog().required().projection().identity());
+        assert_ne!(left_bound.source_owner_identity(), right_bound.source_owner_identity());
+        assert!(resolve_code_catalog_source(compile(&app_left, opt), one_code_catalog(&right, opt))
+            .unwrap_err()
+            .message
+            .contains("defining package differs"));
+        assert!(resolve_code_catalog_source(compile(&app_right, opt), one_code_catalog(&left, opt))
+            .unwrap_err()
+            .message
+            .contains("defining package differs"));
+    }
+}
+
+#[test]
+fn resolved_code_catalog_rejects_changed_definitions_versions_networks_and_absent_imports() {
+    use cellscript::package::frozen_interface::resolve_code_catalog_source;
+    for case in ["source", "version", "network", "genesis", "absent"] {
+        let directory = tempfile::tempdir().unwrap();
+        let library = directory.path().join("library");
+        let app = directory.path().join("app");
+        owned_code_package(&library, "library");
+        let baseline = one_code_catalog(&library, 0);
+        match case {
+            "source" => std::fs::write(
+                library.join("src/main.cell"),
+                CODE_SOURCE.replace("module client", "module foreign").replace("amount: u64", "amount: u32"),
+            )
+            .unwrap(),
+            "version" => {
+                let manager = cellscript::package::PackageManager::new(&library);
+                let mut manifest = manager.read_manifest().unwrap();
+                manifest.package.version = "2.0.0".into();
+                manager.write_manifest(&manifest).unwrap();
+            }
+            _ => (),
+        }
+        if case == "absent" {
+            package(&app, "client", SOURCE, "");
+            lock(&app);
+        } else {
+            consuming_package(&app, "library", "../library", &["library"]);
+        }
+        if matches!(case, "network" | "genesis") {
+            let path = app.join("Cell.toml");
+            let text = std::fs::read_to_string(&path).unwrap();
+            let text = if case == "network" {
+                text.replace("test-chain", "other-chain")
+            } else {
+                text.replace(&"11".repeat(32), &"22".repeat(32))
+            };
+            std::fs::write(path, text).unwrap();
+            lock(&app);
+        }
+        let consumer = compile(&app, 0);
+        let error = resolve_code_catalog_source(consumer, baseline).unwrap_err();
+        let expected = match case {
+            "source" | "version" => "defining package differs",
+            "network" | "genesis" => "conflicting pinned chain identities",
+            _ => "did not resolve the defining baseline module",
+        };
+        assert!(error.message.contains(expected), "{case}: {error:?}");
+    }
+}
+
+fn source_owner_git(root: &Path, arguments: &[&str]) -> String {
+    let output = std::process::Command::new("git")
+        .args(["-c", "user.name=CellScript Tests", "-c", "user.email=tests@cellscript.dev", "-c", "commit.gpgsign=false"])
+        .args(arguments)
+        .env("GIT_AUTHOR_DATE", "2026-01-01T00:00:00+00:00")
+        .env("GIT_COMMITTER_DATE", "2026-01-01T00:00:00+00:00")
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{arguments:?}: {}", String::from_utf8_lossy(&output.stderr));
+    String::from_utf8(output.stdout).unwrap().trim().to_owned()
+}
+
+#[test]
+fn resolved_code_catalog_preserves_transitive_git_pins_even_for_identical_source_bytes() {
+    use cellscript::package::frozen_interface::resolve_code_catalog_source;
+    let directory = tempfile::tempdir().unwrap();
+    let auxiliary = directory.path().join("auxiliary");
+    let library = directory.path().join("library");
+    let first = directory.path().join("first");
+    let second = directory.path().join("second");
+    package(&auxiliary, "auxiliary", "module auxiliary\npublic struct Payload has copy, drop, store { amount: u64 }\n", "");
+    source_owner_git(&auxiliary, &["init", "-b", "main"]);
+    source_owner_git(&auxiliary, &["add", "."]);
+    source_owner_git(&auxiliary, &["commit", "-m", "initial fixture"]);
+    let first_revision = source_owner_git(&auxiliary, &["rev-parse", "HEAD"]);
+    owned_code_package(&library, "library");
+    std::fs::write(
+        library.join("src/main.cell"),
+        CODE_SOURCE.replace("module client", "module foreign\nuse auxiliary::Payload as Marker"),
+    )
+    .unwrap();
+    let manager = cellscript::package::PackageManager::new(&library);
+    let mut manifest = manager.read_manifest().unwrap();
+    manifest.dependencies.insert(
+        "auxiliary".into(),
+        serde_json::from_value(serde_json::json!({"git": auxiliary.to_str().unwrap(), "branch": "main"})).unwrap(),
+    );
+    manager.write_manifest(&manifest).unwrap();
+    lock(&library);
+    consuming_package(&first, "library", "../library", &["library"]);
+    let baseline = one_code_catalog(&library, 0);
+    let checked = resolve_code_catalog_source(compile(&first, 0), one_code_catalog(&library, 0)).unwrap();
+    let first_context = context(checked.consumer());
+    let first_package = first_context["modules"]["auxiliary"]["package"].as_str().unwrap();
+    assert_eq!(first_context["packages"][first_package]["source"]["revision"], first_revision);
+    let owner: Value = serde_json::from_slice(&checked.source_owner_bytes().unwrap()).unwrap();
+    assert!(owner["source_closure_packages"].as_array().unwrap().iter().any(|identity| identity == first_package));
+    // Only Git history changes. Source and manifest bytes remain byte-identical.
+    source_owner_git(&auxiliary, &["commit", "--allow-empty", "-m", "second fixture pin"]);
+    let second_revision = source_owner_git(&auxiliary, &["rev-parse", "HEAD"]);
+    assert_ne!(first_revision, second_revision);
+    consuming_package(&second, "library", "../library", &["library"]);
+    let consumer = compile(&second, 0);
+    let second_context = context(&consumer);
+    let second_package = second_context["modules"]["auxiliary"]["package"].as_str().unwrap();
+    assert_eq!(second_context["packages"][second_package]["source"]["revision"], second_revision);
+    assert_eq!(first_context["packages"][first_package]["source_hash"], second_context["packages"][second_package]["source_hash"]);
+    assert_eq!(
+        first_context["packages"][first_package]["manifest_digest"],
+        second_context["packages"][second_package]["manifest_digest"]
+    );
+    assert_ne!(first_package, second_package);
+    let error = resolve_code_catalog_source(consumer, baseline).unwrap_err();
+    assert!(error.message.contains("another transitive source origin or snapshot"), "{error:?}");
+}
+
+fn padded_source_owner_candidate(
+    module: FrozenPackageModule,
+    args: Vec<u8>,
+    padding: usize,
+) -> cellscript::package::frozen_interface::CodeCandidateInput {
+    use ckb_testtool::ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*};
+    let mut input = code_candidate(module, args);
+    let lock = packed::Script::new_builder().code_hash([9u8; 32].pack()).hash_type(2u8).args(Bytes::new().pack()).build();
+    let cell = packed::CellOutput::new_builder().capacity(1000000000000u64).lock(lock).build();
+    let tx = TransactionBuilder::default()
+        .input(
+            packed::CellInput::new_builder()
+                .previous_output(packed::OutPoint::new_builder().tx_hash([7u8; 32].pack()).index(3u32).build())
+                .build(),
+        )
+        .output(cell.clone())
+        .output_data(Bytes::from(input.module.bundle()[0].to_vec()).pack())
+        .output(cell)
+        .output_data(Bytes::from(vec![0; padding]).pack())
+        .build();
+    input.raw_transaction = tx.data().raw().as_slice().to_vec();
+    input
+}
+
+#[test]
+fn resolved_code_catalog_counts_the_consumer_before_any_ownership_traversal() {
+    use cellscript::package::frozen_interface::{freeze_code_catalog, resolve_code_catalog_source};
+    use cellscript_artifact_checker::CheckerBudgets;
+    let directory = tempfile::tempdir().unwrap();
+    let library = directory.path().join("library");
+    let absent = directory.path().join("absent");
+    owned_code_package(&library, "library");
+    // Deliberately lacks the foreign defining module; budget error must win.
+    package(&absent, "client", SOURCE, "");
+    lock(&absent);
+    let consumer = compile(&absent, 0);
+    let consumer_bytes = consumer.bundle().iter().map(|bytes| bytes.len()).sum::<usize>();
+    let required = compile_code(&library, 0);
+    let mut inputs = (0..4).map(|index| padded_source_owner_candidate(compile_code(&library, 0), vec![index], 0)).collect::<Vec<_>>();
+    let base = required.bundle().iter().map(|bytes| bytes.len()).sum::<usize>()
+        + inputs
+            .iter()
+            .map(|input| {
+                input.module.bundle().iter().map(|bytes| bytes.len()).sum::<usize>()
+                    + input.raw_transaction.len()
+                    + input.selected_script.len()
+            })
+            .sum::<usize>();
+    let target = 16 * 1024 * 1024 - consumer_bytes / 2;
+    let padding = target.checked_sub(base).unwrap();
+    for (index, input) in inputs.iter_mut().enumerate() {
+        let size = padding / 4 + usize::from(index < padding % 4);
+        let replacement = padded_source_owner_candidate(compile_code(&library, 0), vec![index as u8], size);
+        assert!(replacement.raw_transaction.len() <= 4 * 1024 * 1024);
+        *input = replacement;
+    }
+    let catalog = freeze_code_catalog(required, inputs, &CheckerBudgets::default()).unwrap();
+    let catalog_bytes = catalog.required().bundle().iter().map(|bytes| bytes.len()).sum::<usize>()
+        + catalog
+            .candidates()
+            .iter()
+            .map(|candidate| {
+                candidate.module().bundle().iter().map(|bytes| bytes.len()).sum::<usize>()
+                    + candidate.raw_transaction().len()
+                    + candidate.selected_script().len()
+            })
+            .sum::<usize>();
+    assert_eq!(catalog_bytes, target);
+    assert!(catalog_bytes + consumer_bytes > 16 * 1024 * 1024);
+    let error = resolve_code_catalog_source(consumer, catalog).unwrap_err();
+    assert!(error.message.contains("shared 16 MiB"), "{error:?}");
 }

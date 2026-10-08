@@ -2,6 +2,13 @@
 
 ## Unreleased — 0.32
 
+Bind the finite frozen code catalog's baseline to its actual defining owner in
+a consumer's locked source closure. Dependency aliases preserve owner identity;
+different owners, changed snapshots/versions and transitive origins reject.
+Include the selected defining dependency closure in the owner hash. This host
+ownership evidence does not introduce generic source handles or authorization;
+see `docs/RESOLVED_CODE_CATALOG.md`.
+
 Freeze native required/candidate source snapshots together with every checked
 finite policy codec and actual code-output/Script byte origin. Check all 1–32
 members under shared preparse byte ceilings and pinned chain identity; reject

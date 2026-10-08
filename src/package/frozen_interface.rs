@@ -20,6 +20,8 @@ mod catalog;
 pub use catalog::{freeze_module_catalog, FrozenModuleCatalog};
 mod code_catalog;
 pub use code_catalog::{freeze_code_catalog, CodeCandidateInput, FrozenCodeCandidate, FrozenCodeCatalog};
+mod resolved_catalog;
+pub use resolved_catalog::{resolve_code_catalog_source, ResolvedCodeCatalog};
 
 #[derive(Debug, Clone)]
 pub enum EntrySelection {

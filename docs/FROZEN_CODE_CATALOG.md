@@ -37,6 +37,11 @@ replacement histories. Full H1/H2, nominal `I`, source handles, ProtocolBundle /
 generated-builder integration, #29 and #44–#46 remain unfinished. Independent
 security review remains required before stable admission.
 
+The native [resolver-bound source owner](RESOLVED_CODE_CATALOG.md) additionally
+links the defining baseline to its actual selected origin inside a consumer's
+locked source closure. It preserves this catalog's limited host evidence and
+does not authorize a policy root or admit a source-level handle.
+
 `tests/frozen_interface.rs` exercises all optimizer levels with independently
 compiled same-ABI/different-predicate implementations, owned bytes after source
 edits, malformed unselected member inputs, incompatible field widths and wrong

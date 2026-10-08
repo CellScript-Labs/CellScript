@@ -1084,3 +1084,55 @@ malformed raw bytes. Strict compiler/checker all-target clippy passes in
 snapshots and their code transactions are synthetic SDK-produced byte oracles;
 these results are not network deployment or consensus evidence. The exact
 staged source will now freeze for dev and then G-signed clean backend/CCC replay.
+
+## Resolver-owned baseline source follow-up
+
+Native all-member source/codec/code-origin closure passed dev in
+`.cap/logs/1791483288-27803.log` (93,132 raw bytes), then was G-signed as
+`16e6b7215d85d3680704f1b180ddbb382f9c05a1`. The clean root branch `0.32`
+fast-forwarded to this exact commit and started batched full backend/CCC replay
+in `.cap/logs/1791484072-47744` with the clean pinned CKB checkout
+`/tmp/cellscript-ckb-032`. Root tracked files remain frozen while that gate runs.
+The public branch still points to `588f6a28` until this replay passes; full CI
+has not been started or dispatched.
+
+In the managed worktree, the next native `resolve_code_catalog_source` slice
+binds the baseline to the consumer's actual defining source owner. It consumes
+private compiled/checked values, never caller labels or exported JSON. A root
+compilation's RootSnapshot label must not erase the selected dependency's real
+Git/Registry/local origin. Owner identity contains the actual defining package,
+module, required checked contract and all selected baseline-closure package IDs;
+the separate binding includes consumer context and code-catalog identities.
+Dependency alias changes therefore preserve owner identity, while different
+owners and changed transitive pins remain distinct. Baseline module owner,
+relative path, byte hash/length, package snapshot/version and every transitive
+origin must match; the consumer and all catalog inputs share 16 MiB before
+ownership traversal. No partial token escapes.
+
+Five focused tests pass in `.cap/logs/1791484953-74208.log` (20.00 seconds).
+Actual O0–O3 source compilation covers alias invariance and equal-shaped foreign
+definitions from different packages, including crossed baseline rejection.
+Changed source/version, chain/genesis and absent imports reject. A local Git
+fixture adds an empty commit: identical source/manifest bytes with another
+selected transitive revision still reject. A valid synthetic code catalog just
+below 16 MiB plus the additional consumer exceeds the shared budget and rejects
+before its deliberately absent defining module is visited. The initial Git
+fixture accidentally appended a duplicate manifest table; it was corrected to
+use the typed manifest API, and the final complete replay passes.
+
+Strict clippy and full dev remain pending for this worktree slice. It changes
+native package ownership evidence only, with no parser/type syntax, emitter,
+machine ABI, dependency, schema wire, compiler version or budget expansion.
+This does not complete source-level nominal I, H1/H2, immutable authorization,
+Type replacement history, ProtocolBundle/generated-builder parity, #29 or
+#44–#46. Independent review remains unassigned and mandatory for stable admission.
+See `docs/RESOLVED_CODE_CATALOG.md` for the supported host boundary.
+
+Final strict compiler/checker all-target clippy passes in
+`.cap/logs/1791485127-77943.log`. The source-owner slice is ready to freeze for
+dev. No fresh matching full-backend evidence is claimed for this later native
+ownership-only delta; the clean full-backend/CCC run binds exactly `16e6b721`.
+Keep root tracked files frozen until that run completes, verify its actual
+source commit and clean state, then push that tested commit before advancing
+root to any later worktree commit. Full CI remains deferred until the complete
+implementation queue is ready.
