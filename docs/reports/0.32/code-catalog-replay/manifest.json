@@ -8,7 +8,8 @@
     "external": "baae1aad3f1a26c1f0a14a028c1ffddfeb318963",
     "origin": "8ea6105ecbace5c392eab729ede232bdef801203",
     "catalog": "16e6b7215d85d3680704f1b180ddbb382f9c05a1",
-    "owner": "04a70f612587255b1aec1c422f004b155cde2b92"
+    "owner": "04a70f612587255b1aec1c422f004b155cde2b92",
+    "sources": "3a15ed9a0a462c089845bff6eb08993dd9221deb"
   },
   "dev_source_state": "exact staged source files later G-signed; not a clean-HEAD dev claim",
   "ci": "deferred until complete implementation queue",
@@ -102,6 +103,23 @@
       "raw_sha256": "4f18783e7b1a00a6f3d19fd4bfea5f12bfdd4f7e3f1266bdacc34484b09d1743",
       "stored_bytes": 142,
       "stored_sha256": "ec9039feaf4c16f7c730c6f49dd2fbdae33f64ee7c49b4dd2e430b56f2bccb47"
+    },
+    {
+      "name": "sources-staged-dev.log.gz",
+      "original_path": "/Users/arthur/.codex/worktrees/fixed-result-contract/CellScript/.cap/logs/1791487169-55472.log",
+      "raw_bytes": 94022,
+      "raw_sha256": "bdc6dbd2004f3e59cf20443edc22a2f157974db4f410f5530f1b5bcaf20a366d",
+      "stored_bytes": 16336,
+      "stored_sha256": "0aad7cac3f2e44ae6addf531dbb765f7a503dc6f5b295f793d3b50600dab8948"
+    },
+    {
+      "name": "sources-public-push.log.gz",
+      "original_path": "/Users/arthur/RustroverProjects/CellScript/.cap/logs/1791487942-73961.log",
+      "raw_bytes": 116,
+      "raw_sha256": "e57912ed3206e2630a43c118b074da0f9034781f27c73400e5419d5806722132",
+      "stored_bytes": 120,
+      "stored_sha256": "c7394f691cadd4203bbd64def0777b91c7c029dc8479db1b575a2049887be059"
     }
-  ]
+  ],
+  "sources_scope": "native parsed-source capture only; no fresh backend claim"
 }

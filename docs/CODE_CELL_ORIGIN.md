@@ -48,3 +48,34 @@ The native [frozen code catalog](FROZEN_CODE_CATALOG.md) joins this evidence to
 actual owned package source snapshots and directional all-member module checks.
 It preserves this byte-origin boundary; joining host evidence does not create
 deployment authorization or a live-code observation.
+
+## Checked target selection
+
+`code_origin::check_code_cell_target` consumes the actual private
+`CheckedCodeCellOrigin`. It reads the runtime contract from the independently
+checked codec/module projection and requires the profile's permitted deployment
+hash type: `ckb` uses `data2`, and `ckb-type-hash` uses `type`. The underlying
+artifact inspector already verifies VM2, `rv64imac_zbb` and the singleton
+metadata/constraints deployment rule. No additional untrusted record is parsed,
+and exported JSON cannot construct the private `CheckedTargetCodeCellOrigin`.
+The original byte-origin constructor and v1 identity remain unchanged.
+
+The separate `cellscript-code-cell-target-v1` record commits to that exact origin,
+complete checked runtime contract and deployment hash type; its identity domain
+is `cellscript-code-cell-target-id-v1`. A legal data/data1/Type selection can pass
+the byte-origin check while failing target selection for a `ckb` bundle. The
+native frozen code catalog now requires target checking for **every** candidate,
+including unselected members and the final member of a 32-member catalog.
+
+The pinned [CKB VM selection source](https://github.com/nervosnetwork/ckb/blob/f7fa4436737756f97a24e254f22c13a36316ecea/script/src/types.rs)
+selects VM0 for data, VM1 for activated data1 and VM2 for activated data2. Type
+uses the latest activated version. This profile check does not observe chain
+activation; a Type-hash token cannot certify VM2 execution before the required
+fork, authorized replacement history or live dependencies. Those remain
+separate admission/runtime obligations.
+
+SDK-built tests cover both actual compiler target profiles at O0–O3. All four
+hash types bind the same exact code Cell bytes; eight profile selections pass
+and 24 mismatches reject. Changing exact args still changes the target identity.
+Native tests reject otherwise byte-valid data/data1 unselected candidates and
+a data1 candidate in the final slot, without weakening byte-origin inspection.

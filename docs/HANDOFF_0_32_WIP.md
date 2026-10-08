@@ -1189,3 +1189,54 @@ against their recorded raw/stored sizes and SHA-256. The exact staged parsed-sou
 slice now freezes for dev before signing/publication. No emitter, machine ABI,
 dependency, historical wire, compiler/toolchain version or budget changed; no
 fresh full-backend claim is attached to this native-only delta.
+
+## Parsed-source publication and target-selection correction
+
+The exact staged parsed-source/archive slice passed full dev in worktree
+`.cap/logs/1791487169-55472.log` (93,995 command-output bytes), with unchanged
+staged files. It was G-signed as `3a15ed9a0a462c089845bff6eb08993dd9221deb`,
+fast-forwarded into clean root `0.32` and pushed in root
+`.cap/logs/1791487942-73961.log`. Independent remote lookup confirmed that exact
+head. This native-only delta carries no new clean full-backend/CCC claim;
+clean replay provenance remains `16e6b721` as archived above.
+
+The next correction closes an actual catalog selection gap: a selected Script
+could be byte-bound to the actual code Cell while using data1 for an ELF whose
+independently checked `ckb` profile requires data2/VM2. Source catalog fixtures
+previously inherited data1 from their unrelated deployment lock fixture. Their
+selected Script now explicitly uses data2. The original byte-origin v1 API
+remains byte-only and still accepts all four legal hash types.
+
+A separate private `CheckedTargetCodeCellOrigin` consumes actual origin/codec
+proofs and the independently recomputed runtime contract. It enforces the
+existing checked target mapping (`ckb` -> data2; `ckb-type-hash` -> type). Frozen
+native catalogs require this check for every member and advance their own
+experimental record/hash domain to v2, binding ordered target-origin identities.
+The checker dependency boundary and existing lowering/metadata/wire versions
+remain unchanged. Type chain activation/history and immutable authorization are
+not inferred; whole H1/H2 and #29/#44–#46 remain unfinished. Focused tests and
+dev for this next slice remain pending. Whole-queue CI remains deferred and
+independent security review remains unassigned.
+
+Final target-selection replay passes five code-origin/target tests in
+`.cap/logs/1791488110-77793.log` and all 23 frozen-interface tests in
+`.cap/logs/1791488178-80108.log` (16.86 seconds). The target matrix includes
+both compiler profiles at O0–O3, eight valid/24 mismatched hash-type selections,
+exact-args identity separation and independent hashing of canonical record bytes.
+Native otherwise byte-valid data/data1 members reject even when unselected or
+in slot 31. Two initial test assertions were corrected: hashing a generic JSON
+Value reordered record keys, and the existing native record assertion still
+expected v1. No producer/checker logic was changed to satisfy those assertions.
+Strict compiler/checker all-target clippy passes in
+`.cap/logs/1791488198-81214.log`. The earlier parsed-source dev/push logs are
+now archived with all thirteen raw/stored sizes and SHA-256 verified. This exact
+source state freezes for full dev before G-signing and public push.
+
+The first full target-selection dev run in
+`.cap/logs/1791488244-82258.log` reached the final business-corpus freshness
+check and rejected a stale inventory digest. All preceding tests, reproducible
+builds, quick backend audit and 139 syntax combinations passed. The authoritative
+`check-business-corpus --write` command in `.cap/logs/1791489102-2087.log`
+changed only `tests/fixtures/business_corpus.json`'s inventory SHA-256; all release
+requirements remain pending. The exact refreshed source state now reruns full
+dev. The failed gate is not presented as a passing dev or full-CI result.

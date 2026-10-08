@@ -640,7 +640,7 @@ fn validate_ckb_vm2_target_contract(metadata: &Value) -> Result<(), CheckerError
     Ok(())
 }
 
-fn ckb_deployment_hash_type(target_profile: &str) -> Option<&'static str> {
+pub(crate) fn ckb_deployment_hash_type(target_profile: &str) -> Option<&'static str> {
     match target_profile {
         "ckb" => Some("data2"),
         "ckb-type-hash" => Some("type"),

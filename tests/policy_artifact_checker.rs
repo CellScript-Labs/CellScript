@@ -300,6 +300,71 @@ fn code_cell_origin_recomputes_sdk_transaction_script_and_code_identities() {
     }
 }
 #[test]
+fn code_cell_target_requires_the_actual_checked_profile_even_for_valid_byte_origins() {
+    use cellscript_artifact_checker::code_origin::check_code_cell_target;
+    use ckb_testtool::ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*};
+    for opt in 0..=3 {
+        for (target, accepted) in [("ckb", 4u8), ("ckb-type-hash", 1u8)] {
+            let mut declaration = declaration();
+            declaration.actions.retain(|action| action.action == "burn");
+            declaration.common_checks.clear();
+            let fixture = Fixture::new_source_with_target(EXTERNAL_SOURCE, CellScriptEdition::Edition2026, opt, declaration, target);
+            let lock = packed::Script::new_builder().code_hash([9u8; 32].pack()).hash_type(2u8).args(Bytes::new().pack()).build();
+            let type_script =
+                packed::Script::new_builder().code_hash([8u8; 32].pack()).hash_type(1u8).args(Bytes::from(vec![4; 32]).pack()).build();
+            let tx = TransactionBuilder::default()
+                .output(
+                    packed::CellOutput::new_builder()
+                        .capacity(1000000000000u64)
+                        .lock(lock)
+                        .type_(Some(type_script.clone()).pack())
+                        .build(),
+                )
+                .output_data(Bytes::from(fixture.artifact.clone()).pack())
+                .build();
+            for hash_type in [0u8, 1, 2, 4] {
+                let code_hash = if hash_type == 1 {
+                    type_script.calc_script_hash()
+                } else {
+                    packed::CellOutput::calc_data_hash(&fixture.artifact)
+                };
+                let selected = packed::Script::new_builder()
+                    .code_hash(code_hash)
+                    .hash_type(hash_type)
+                    .args(Bytes::from(vec![31, 32, 33]).pack())
+                    .build();
+                // All four are byte-bound to this exact SDK-built code Cell.
+                let origin = code_origin(&fixture, tx.data().raw().as_slice(), 0, selected.as_slice()).unwrap();
+                let origin_id = origin.identity().to_owned();
+                let result = check_code_cell_target(origin);
+                if hash_type == accepted {
+                    let checked = result.unwrap();
+                    assert_eq!(checked.origin().identity(), origin_id);
+                    assert_eq!(checked.runtime_contract().target_profile, target);
+                    let record: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
+                    assert_eq!(record["code_origin"], origin_id);
+                    assert_eq!(record["runtime"], fixture.metadata["public_interface"]["runtime_contract"]);
+                    assert_eq!(record["deployment_hash_type"], if accepted == 4 { "data2" } else { "type" });
+                    let mut material = b"cellscript-code-cell-target-id-v1\0".to_vec();
+                    material.extend_from_slice(&checked.canonical_bytes().unwrap());
+                    assert_eq!(checked.identity(), code_origin_hex(&cellscript_artifact_checker::ckb_blake2b256(&material)));
+                    // Exact args remain bound after profile checking.
+                    let changed = selected.as_builder().args(Bytes::from(vec![31, 32, 34]).pack()).build();
+                    let other =
+                        check_code_cell_target(code_origin(&fixture, tx.data().raw().as_slice(), 0, changed.as_slice()).unwrap())
+                            .unwrap();
+                    assert_ne!(checked.identity(), other.identity());
+                } else {
+                    let error = result.unwrap_err();
+                    assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                    assert!(error.message.contains("selected Script hash type differs"), "{error:?}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn code_cell_origin_rejects_noncanonical_and_unselected_transaction_structures() {
     use ckb_testtool::ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*};
     let fixture = external_fixture(EXTERNAL_SOURCE, 3);
@@ -1234,6 +1299,16 @@ impl Fixture {
     }
 
     fn new_source_with(source_text: &str, edition: CellScriptEdition, opt_level: u8, declaration: ArtifactDeclaration) -> Self {
+        Self::new_source_with_target(source_text, edition, opt_level, declaration, "ckb")
+    }
+
+    fn new_source_with_target(
+        source_text: &str,
+        edition: CellScriptEdition,
+        opt_level: u8,
+        declaration: ArtifactDeclaration,
+        target: &str,
+    ) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let source = directory.path().join("main.cell");
         std::fs::write(&source, source_text).unwrap();
@@ -1241,6 +1316,7 @@ impl Fixture {
             source.to_str().unwrap(),
             CompileOptions {
                 source_contracts: true,
+                target_profile: Some(target.into()),
                 edition,
                 opt_level,
                 target: Some("riscv64-elf".to_string()),

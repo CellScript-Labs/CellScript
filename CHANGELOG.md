@@ -2,6 +2,12 @@
 
 ## Unreleased — 0.32
 
+Require every frozen code-catalog candidate's selected Script hash type to match
+its independently checked target profile. Legal byte-bound data/data1 selections
+reject for the VM2 `ckb` profile; preserve the separate byte-origin API and bind
+actual target evidence in the experimental native catalog v2. This does not
+prove chain activation or authorize Type replacements; see `docs/CODE_CELL_ORIGIN.md`.
+
 Capture parsed, lock-pinned native package sources before consumer type checking
 and reuse the defining-owner matcher against actual checked code catalogs.
 Recheck unchanged real sources and reject upgrade-planning lock overrides;

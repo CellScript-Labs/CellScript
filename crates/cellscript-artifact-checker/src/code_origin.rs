@@ -6,6 +6,8 @@ use crate::interface::ModuleBundle;
 use crate::{CheckerBudgets, CheckerError, CheckerRejectionCode};
 use serde::Serialize;
 mod molecule;
+mod target;
+pub use target::{check_code_cell_target, CheckedTargetCodeCellOrigin};
 
 #[derive(Debug)]
 pub struct CheckedCodeCellOrigin {

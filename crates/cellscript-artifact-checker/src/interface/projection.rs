@@ -39,6 +39,11 @@ impl CheckedModuleProjection {
         &self.identity
     }
 
+    /// Runtime axes derived from the independently inspected actual bundle.
+    pub fn runtime_contract(&self) -> &super::InterfaceRuntimeContract {
+        &self.record.runtime
+    }
+
     /// The bound artifact identities remain separate from the API identity.
     pub fn artifact_report(&self) -> &CheckerReport {
         &self.report

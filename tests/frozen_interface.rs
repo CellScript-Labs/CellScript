@@ -293,8 +293,13 @@ fn code_candidate(module: FrozenPackageModule, args: Vec<u8>) -> cellscript::pac
     use ckb_testtool::ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*};
     let artifact = module.bundle()[0];
     let lock = packed::Script::new_builder().code_hash([9u8; 32].pack()).hash_type(2u8).args(Bytes::new().pack()).build();
-    let selected =
-        lock.clone().as_builder().code_hash(packed::CellOutput::calc_data_hash(artifact)).args(Bytes::from(args).pack()).build();
+    let selected = lock
+        .clone()
+        .as_builder()
+        .code_hash(packed::CellOutput::calc_data_hash(artifact))
+        .hash_type(4u8)
+        .args(Bytes::from(args).pack())
+        .build();
     let tx = TransactionBuilder::default()
         .input(
             packed::CellInput::new_builder()
@@ -337,12 +342,14 @@ fn native_code_catalog_binds_every_source_codec_and_actual_deployment_byte_tuple
         assert_eq!(checked.candidates()[1].raw_transaction(), raw);
         assert_eq!(checked.candidates()[1].selected_script(), script);
         let record: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
-        assert_eq!(record["schema"], "cellscript-frozen-code-catalog-v1");
+        assert_eq!(record["schema"], "cellscript-frozen-code-catalog-v2");
         assert_eq!(record["candidate_source_contexts"], serde_json::to_value(source_ids).unwrap());
         assert_eq!(record["required_external_codec"], checked.required_codec().identity());
         assert_eq!(record["checked_modules"], checked.module_evidence().identity());
         for (index, candidate) in checked.candidates().iter().enumerate() {
             assert_eq!(record["candidate_code_origins"][index], candidate.origin().identity());
+            assert_eq!(record["candidate_target_origins"][index], candidate.target_origin().identity());
+            assert_eq!(candidate.origin().selected_hash_type(), 4);
             let origin = cellscript_artifact_checker::code_origin::check_code_cell_origin(
                 candidate.module().bundle(),
                 candidate.raw_transaction(),
@@ -406,6 +413,51 @@ fn native_code_catalog_rejects_unselected_bad_origins_interfaces_and_networks() 
             }
         }
     }
+}
+
+#[test]
+fn native_code_catalog_rejects_wrong_vm_hash_types_in_unselected_members() {
+    use cellscript::package::frozen_interface::freeze_code_catalog;
+    use cellscript_artifact_checker::{code_origin::check_code_cell_origin, CheckerBudgets};
+    use ckb_testtool::ckb_types::{packed, prelude::*};
+    let directory = tempfile::tempdir().unwrap();
+    code_package(directory.path(), CODE_SOURCE);
+    let root = directory.path();
+    for opt in 0..=3 {
+        for hash_type in [0u8, 2] {
+            let mut bad = code_candidate(compile_code(root, opt), vec![2]);
+            bad.selected_script = packed::Script::from_slice(&bad.selected_script)
+                .unwrap()
+                .as_builder()
+                .hash_type(hash_type)
+                .build()
+                .as_slice()
+                .to_vec();
+            // Historical byte-origin evidence is valid; target selection is not.
+            assert!(check_code_cell_origin(
+                bad.module.bundle(),
+                &bad.raw_transaction,
+                bad.output_index,
+                &bad.selected_script,
+                &CheckerBudgets::default()
+            )
+            .is_ok());
+            let error = freeze_code_catalog(
+                compile_code(root, opt),
+                vec![code_candidate(compile_code(root, opt), vec![1]), bad],
+                &CheckerBudgets::default(),
+            )
+            .unwrap_err();
+            assert!(error.message.contains("selected Script hash type differs"), "O{opt}, hash_type={hash_type}: {error:?}");
+        }
+    }
+    let mut inputs = (0..32).map(|index| code_candidate(compile_code(root, 0), vec![index])).collect::<Vec<_>>();
+    inputs[31].selected_script =
+        packed::Script::from_slice(&inputs[31].selected_script).unwrap().as_builder().hash_type(2u8).build().as_slice().to_vec();
+    assert!(freeze_code_catalog(compile_code(root, 0), inputs, &CheckerBudgets::default())
+        .unwrap_err()
+        .message
+        .contains("selected Script hash type differs"));
 }
 
 #[test]
