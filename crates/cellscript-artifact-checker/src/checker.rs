@@ -269,6 +269,7 @@ pub fn check_bundle_values(
     validate_machine_terminators(record, &elf)?;
     let terminal_sink = crate::failure::validate_verifier_failures(record, &elf)?;
     validate_stack_discipline(record, &elf, terminal_sink)?;
+    crate::fixed_results::validate(record, &elf)?;
     validate_syscalls(record, &elf)?;
     validate_script_hash_machine_contract(record, &elf)?;
     zk::validate(record, &elf)?;
@@ -5183,7 +5184,7 @@ fn validate_one_commitment_commit_machine_contract(
     Ok(())
 }
 
-fn committed_state_type_width(ty: &str, types: &[TypedSemanticType]) -> Option<u64> {
+pub(crate) fn committed_state_type_width(ty: &str, types: &[TypedSemanticType]) -> Option<u64> {
     let ty = canonical_abi_type(ty);
     let primitive = match ty.as_str() {
         "bool" | "u8" => Some(1),

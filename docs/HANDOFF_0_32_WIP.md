@@ -396,3 +396,113 @@ independently reviewable:
 
 H1/H2, open participants and independent security review remain unfinished;
 no issue has been closed or externally commented on by this slice.
+
+## Continued queue and checked result ABI — 2026-10-08
+
+The first slice is signed commit `6dba1768`, fast-forwarded onto the actual
+`0.32` branch and pushed to `public/0.32`. The serial CI completed before the
+user's later instruction to defer further complete CI runs. The clean backend
+gate on that commit passed, including production stateful CKB acceptance and
+counter-node acceptance (`.cap/logs/1791440802-82352.log`). The pinned CKB
+checkout was isolated at `/tmp/cellscript-ckb-032`; the user's dirty sibling CKB
+checkout was preserved. These results belong to `6dba1768`, not later changes.
+
+The next slice replaces the prototype's missing dedicated checker contract with
+`cellscript-fixed-struct-result-abi-v1`. Lowering v9 retains its scalar-only JSON
+shape; aggregate helpers and their callers require feature-specific extensions.
+Old deny-unknown-fields checkers reject these extensions. The independent
+checker derives fixed nominal widths and expanded hidden argument placement,
+then checks decoded save/source/copy/receive ranges, separate buffer extents,
+outgoing stack ownership, zero-width behavior and frame/RA/FP teardown. Source
+pointer loads bind to typed return locals and fixed field offsets. Arbitrary
+pointer dataflow and source-to-machine equivalence remain outside this claim.
+The source-map remains v2, and the cache marker advances to v63.
+
+A nested outgoing-stack call regression exposed lost exact-width provenance
+when a helper result was stored in a named local and passed to another helper.
+Propagate widths only when every store has matching proven nominal storage;
+borrowed/schema runtime lengths are not inferred from their declared types.
+The checker distinguishes decoded owned-frame size from the existing
+conservative frame peak, which includes outgoing argument reservations.
+
+Focused tests passed seven value-return cases (108 O0–O3 CKB-VM executions),
+including nested calls, nonzero field offsets, wide fields and empty nominal
+values, plus rebound machine/source-pointer mutations. All four artifact files
+are checked for every positive runtime fixture. Required gates for this new
+slice remain to be recorded after the final source freeze; the earlier clean
+receipt is not a substitute.
+
+The user-directed execution queue is:
+
+1. WIP blockers (including this return ABI boundary).
+2. #50: contextual Vec constructor typing and recovering diagnostics.
+3. #51: exact 52-byte context, Rust byte oracle, parent/child CKB-VM and costs.
+4. #39/#40: finite retention decision and source-bound replay publication.
+5. #42: exact ZKP1 SDK/reference lifecycle closure.
+6. #28, then #29: compatible handles and open participants.
+7. #44, then #45, then #46: bounded multi-Cell statements, cross-version
+   impact classification, and controlled proving/runtime resource evidence.
+
+Run focused tests and applicable dev/backend gates while advancing the queue.
+Run complete CI only after all implementation work in this queue is finished,
+as explicitly requested by the user. #50/#51 do not wait for heap collections
+or dynamic codec work. The 0.33 order remains #49 fixed-layout selection /
+correspondence, #48 dynamic codec, then #49 variable payload; #47 follows actual
+collection requirements. H1/H2 and open-participant security review remain
+required and unassigned; the independent cost review waiver does not waive
+that security review. No issue closure or external issue comment is authorized
+by this document.
+
+The contextual Vec slice (#50) now passes normal constructor validation before
+propagating the declared element type. IR emits the same typed CollectionNew,
+so metadata and backend storage provenance agree. Recovering type checks retain
+valid owned annotated Vec locals after a fatal initializer diagnostic; CLI and
+LSP tests reject the primary error without undefined-local cascades. Thirty-two
+O0–O3 CKB-VM cases cover new/with_capacity, u8/u64/Hash/fixed named elements,
+empty length, actual fixed capacity, push and length. Incompatible pushes,
+invalid capacity/arity and dynamic/nested element layouts remain rejected.
+Three syntax seeds and the collections support matrix carry the same boundary.
+
+The bounded 52-byte slice (#51) composes existing loops, shifts and byte reads;
+no new generic helper is necessary. A vendored, hash-bound AgoraSeal context
+child from the issue's fixed upstream commit parses the real hex argv and checks
+raw CellDeps plus committed header coordinates. The independent Rust oracle
+checks every byte, including an all-distinct 52-byte runtime vector. O0–O3
+execute 48 positive matched encoder-only/parent-child cases and 40 rejection
+cases with real scheduler replay. Zero/max/non-palindromic heights, truncated
+ballots, out-of-range reads, backing overflow, wrong length/oracle/OutPoint/dep/
+code hash, false heights and missing headers are covered. The example's
+upstream vote template and generated source both use the checked loops and
+compile strictly at all four levels; whole voting-protocol runtime equivalence
+is not claimed. The separate AgoraSeal working tree remains untouched.
+
+The new fixture budget freezes only these explicit vectors and leaves the
+existing cost corpus budgets unchanged. At O3, the looped parent-child fixture
+uses 5,040 ELF bytes and at most 203,626 group cycles versus 11,240 and 204,068
+for the unrolled fixture. Parent observed stack is 9,072 versus 10,256 bytes;
+the same Rust child observes 66,704 bytes. Parent instruction cost increases
+while ELF loading cost decreases, so do not describe all submetrics as wins.
+Source-bound raw observations are regenerated under target/byte-context, and
+the gate rebuilds the child twice and compares it with the pinned source/lock/
+ELF fixture. The v63 cache generation includes the constructor-context change.
+Complete CI remains deferred until the entire user-directed queue is finished.
+
+The first dev attempt for this combined ABI/Vec/context slice passed its runtime,
+checker, reproducibility, strict-backend quick and 139-case syntax checks, then
+failed at a stale business-corpus inventory digest
+(`.cap/logs/1791444891-2681.log`). Refresh the inventory through the native
+`check-business-corpus --write` consumer; preserve the fixture budgets. A complete
+passing dev run is still required before committing this slice.
+
+For #39/#40, all twenty stored/raw archive hashes and sizes match the published
+retention archive, and the native comparator replay passes 6,782 metrics.
+[Resumed evidence](reports/0.32/resumed/README.md) preserves the clean `6dba1768`
+backend and pinned CKB receipt without relabeling the original candidate runs.
+Both retention candidates remain rejected; wider scratch ownership is deferred.
+
+The clean backend's default counter node report covers creation and two updates,
+not the optional CCC migration sequence. Fresh CCC migration node acceptance
+remains pending. The node harness now keeps its fallback public-test setup alive
+and explicitly passes its package path to both CCC workflows, so setting
+`CELLSCRIPT_COUNTER_CCC=1` does not require a separately generated setup package.
+No process-global environment mutation or production setup admission is added.

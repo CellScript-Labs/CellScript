@@ -72,12 +72,18 @@ fn counter_node_acceptance() {
     let version = Command::new(&bin).arg("--version").output().unwrap();
     assert!(version.status.success());
     assert!(String::from_utf8_lossy(&version.stdout).contains(&format!("{} ({}", pin["version"].as_str().unwrap(), &revision[..7])));
-    let (manifest, pk) = if let Some(dir) = std::env::var_os("CELLSCRIPT_COUNTER_PACKAGE") {
-        package::load_package(std::path::Path::new(&dir)).unwrap()
+    // Keep the fallback package alive for both native proving and CCC child
+    // processes. Passing its path explicitly avoids making test fixture setup
+    // depend on a process-global environment mutation.
+    let fallback_package = tempfile::tempdir().unwrap();
+    let package_directory = std::env::var_os("CELLSCRIPT_COUNTER_PACKAGE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| fallback_package.path().join("test-setup"));
+    let (manifest, pk) = if std::env::var_os("CELLSCRIPT_COUNTER_PACKAGE").is_some() {
+        package::load_package(&package_directory).unwrap()
     } else {
         let (pk, _) = counter::setup(&mut StdRng::seed_from_u64(0x43534b43544e)).unwrap();
-        let tmp = tempfile::tempdir().unwrap();
-        let manifest = package::write_package(&tmp.path().join("test-setup"), &pk, package::SetupKind::PublicTestSeed).unwrap();
+        let manifest = package::write_package(&package_directory, &pk, package::SetupKind::PublicTestSeed).unwrap();
         (manifest, pk)
     };
     let key = counter::serialize(&pk.vk).unwrap();
@@ -208,8 +214,20 @@ fn counter_node_acceptance() {
             &compiled,
             &handle,
             &key,
+            &package_directory,
         ));
-        rows.push(ccc_migration::run(&mut node, &root, &run, &genesis, &child_deploy, &vk_deploy, &parent_deploy, &compiled, &handle));
+        rows.push(ccc_migration::run(
+            &mut node,
+            &root,
+            &run,
+            &genesis,
+            &child_deploy,
+            &vk_deploy,
+            &parent_deploy,
+            &compiled,
+            &handle,
+            &package_directory,
+        ));
     }
     node.stop();
     let report = json!({"schema":"cellscript-counter-node-evidence-v1","status":"passed","circuit_sha256":manifest.circuit.r1cs_sha256,"verification_key_data_hash":manifest.verification_key_data_hash,

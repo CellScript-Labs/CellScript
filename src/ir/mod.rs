@@ -3756,6 +3756,31 @@ impl IrGenerator {
         }
     }
 
+    fn lower_vec_constructor_expr(
+        &mut self,
+        call: &CallExpr,
+        collection_type: &str,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> LoweredExpr {
+        let (active, capacity) = if let Some(expr) = call.args.first() {
+            let lowered = self.lower_expr(expr, current, blocks, vars);
+            let Some(active) = lowered.current else { return lowered };
+            (active, Some(lowered.operand))
+        } else {
+            (current, None)
+        };
+        let name = if capacity.is_some() { "vec_with_capacity_tmp" } else { "vec_new_tmp" };
+        let dest = self.new_var(name, IrType::Named(collection_type.to_string()));
+        self.block_mut(blocks, active).instructions.push(IrInstruction::CollectionNew {
+            dest: dest.clone(),
+            ty: collection_type.to_string(),
+            capacity,
+        });
+        LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) }
+    }
+
     fn lower_tail_block_value(
         &mut self,
         stmts: &[Stmt],
@@ -5708,6 +5733,13 @@ impl IrGenerator {
         vars: &mut HashMap<String, IrVar>,
     ) -> LoweredExpr {
         match expr {
+            Expr::Call(call)
+                if collection_item_ir_type(expected_ty).is_some()
+                    && matches!(call.func.as_ref(), Expr::Identifier(name) if matches!(name.as_str(), "Vec::new" | "Vec::with_capacity")) =>
+            {
+                let IrType::Named(name) = expected_ty else { unreachable!("Vec type is named") };
+                self.lower_vec_constructor_expr(call, name, current, blocks, vars)
+            }
             Expr::Integer(value) => {
                 if let Some(value) = Self::integer_const_for_expected_type(*value, expected_ty) {
                     LoweredExpr { operand: IrOperand::Const(value), current: Some(current) }
@@ -8119,25 +8151,9 @@ impl IrGenerator {
                     });
                     Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
                 }
-                "Vec::new" if call.args.is_empty() => {
-                    let dest = self.new_var("vec_new_tmp", IrType::Named("Vec".to_string()));
-                    self.block_mut(blocks, current).instructions.push(IrInstruction::CollectionNew {
-                        dest: dest.clone(),
-                        ty: "Vec".to_string(),
-                        capacity: None,
-                    });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(current) })
-                }
+                "Vec::new" if call.args.is_empty() => Some(self.lower_vec_constructor_expr(call, "Vec", current, blocks, vars)),
                 "Vec::with_capacity" if call.args.len() == 1 => {
-                    let lowered_capacity = self.lower_expr(&call.args[0], current, blocks, vars);
-                    let active = lowered_capacity.current?;
-                    let dest = self.new_var("vec_with_capacity_tmp", IrType::Named("Vec".to_string()));
-                    self.block_mut(blocks, active).instructions.push(IrInstruction::CollectionNew {
-                        dest: dest.clone(),
-                        ty: "Vec".to_string(),
-                        capacity: Some(lowered_capacity.operand),
-                    });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
+                    Some(self.lower_vec_constructor_expr(call, "Vec", current, blocks, vars))
                 }
                 _ => None,
             },

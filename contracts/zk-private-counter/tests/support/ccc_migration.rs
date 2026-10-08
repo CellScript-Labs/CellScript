@@ -17,11 +17,11 @@ pub fn run(
     old_parent_deploy: &Value,
     old_compiled: &cellscript::CompileResult,
     old_handle: &[u8],
+    old_package: &Path,
 ) -> Value {
     let directory = run.join("ccc-migration");
     fs::create_dir(&directory).unwrap();
-    let old_package = std::env::var("CELLSCRIPT_COUNTER_PACKAGE").expect("CCC migration requires the first setup package");
-    let (old_setup, _) = package::load_package(Path::new(&old_package)).unwrap();
+    let (old_setup, _) = package::load_package(old_package).unwrap();
     let (new_package, new_setup, key) = if let Some(path) = std::env::var_os("CELLSCRIPT_COUNTER_MIGRATION_PACKAGE") {
         let path = std::path::PathBuf::from(path);
         let (manifest, key) = package::load_package(&path).unwrap();

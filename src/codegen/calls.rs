@@ -596,6 +596,7 @@ impl CodeGenerator {
             }
         }
 
+        let mut result_marker = None;
         let return_buffer_offset = if let Some(width) = return_buffer_bytes {
             let dest = dest.ok_or_else(|| CompileError::without_span("fixed struct call has no result storage"))?;
             if self.fixed_struct_return_width(&dest.ty) != Some(width) {
@@ -607,6 +608,17 @@ impl CodeGenerator {
                 .copied()
                 .ok_or_else(|| CompileError::without_span("fixed struct call result buffer is unavailable"))?;
             let register = self.call_abi_register(abi_index);
+            let marker = self.fresh_label(&format!(
+                "result_v1_call_{}_{}_{}_{}_{}_{}",
+                dest.id,
+                offset,
+                width,
+                abi_index,
+                outgoing_stack_arg_bytes,
+                self.scalar_slot_offset(dest.id)
+            ));
+            self.emit_label(&marker);
+            result_marker = Some(marker);
             self.emit(format!(
                 "# cellscript abi: call {func} caller-owned struct result size={width} pointer={}",
                 abi_arg_label(abi_index)
@@ -633,6 +645,9 @@ impl CodeGenerator {
         if outgoing_stack_arg_bytes > 0 {
             self.emit_large_addi("sp", "sp", outgoing_stack_arg_bytes as i64);
         }
+        if let Some(marker) = &result_marker {
+            self.emit_label(&format!("{marker}_end"));
+        }
 
         // Exact cached reads terminate inside their shared runtime helper on
         // any invalid source or syscall failure. Successful calls therefore
@@ -656,8 +671,11 @@ impl CodeGenerator {
 
         if let Some(d) = dest {
             if let Some(offset) = return_buffer_offset {
+                let marker = result_marker.as_ref().expect("fixed result call has a machine marker");
+                self.emit_label(&format!("{marker}_receive"));
                 self.emit_sp_addi("t0", offset);
                 self.emit_stack_store("t0", self.scalar_slot_offset(d.id));
+                self.emit_label(&format!("{marker}_received"));
                 return Ok(());
             }
             let payload_enum = match &d.ty {

@@ -91,6 +91,40 @@ those typed records. The current lowering record's
 nested typed and foundation versions must match exactly. Older records are not
 accepted under the new versions by relabelling them.
 
+### Fixed ordinary-struct helper results
+
+The 0.32 working branch uses `cellscript-fixed-struct-result-abi-v1` for fixed
+ordinary-struct helper results. The caller owns the result buffer. A hidden
+pointer follows the complete expansion of ordinary machine arguments,
+including pointer/length and required type-hash pairs. The callee saves that
+pointer in its frame, copies the declared byte width while the source remains
+live, then tears down its frame. The caller reconstructs its own buffer pointer;
+a pointer into the callee frame is never accepted as the result. Empty structs
+retain an explicit zero-width contract and require no memory dereference.
+
+Lowering v9 entries add `fixed_result_abi` only for these helpers and
+`fixed_result_calls` only for their callers. Each extension declares its own
+schema. Existing scalar-only v9 JSON remains unchanged. Earlier checkers use
+unknown-field rejection and cannot certify bundles containing either extension;
+the current checker also rejects a missing extension when typed declarations or
+decoded calls require one. This is a feature-specific compatibility boundary,
+not permission to relabel an old unchecked return bundle. Source-map v2 retains
+its hash-bound machine ranges and its incomplete-coverage claim. Cache generation
+`project-source-set-v63-0.32-checked-results-vec-context` invalidates earlier cached
+artifacts; package and toolchain versions remain unchanged.
+
+The standalone checker independently derives the nominal result layout and
+expanded hidden argument index. It checks saved-pointer placement, caller-buffer
+and pointer-slot separation, outgoing stack ownership, exact copy width and
+target, the typed return local's source-pointer slot and fixed field offset,
+live source register preservation, zero-width behavior, result receive,
+return coverage, and RA/FP/frame teardown against decoded RISC-V bytes. Direct
+caller stores and recognized syscall/copy destinations cannot overlap result
+storage or overwrite the saved destination. These bounded ABI checks do not
+prove arbitrary source-to-machine equivalence or arbitrary pointer dataflow.
+Cell, enum and dynamic results retain their separate admission rules. The
+policy-witness aggregate-helper boundary is unchanged.
+
 ### Fatal verifier failures
 
 Typed semantics v8 declares `failure_semantics = current-vm-process-exit-v1`.

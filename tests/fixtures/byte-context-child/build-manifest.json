@@ -1,0 +1,21 @@
+{
+  "schema": "cellscript-byte-context-child-build-v1",
+  "upstream_repository": "https://github.com/CellScript-Labs/AgoraSeal",
+  "upstream_commit": "5b6106a7b86d51b736a7df772ded548fba4c9a4e",
+  "upstream_path": "verifiers/ckb-context",
+  "rust_toolchain": "1.97.1",
+  "target": "riscv64imac-unknown-none-elf",
+  "artifact_bytes": 15440,
+  "artifact_sha256": "4804d87e6cc5328c6fdfa2537a07c420f15460a8b7f576bf95fcf712efa242aa",
+  "source_sha256": {
+    "src/main.rs": "e8109a315908776204248719b5cc49bab91a7ea0d2b14430c40dc1f83b75873d",
+    "Cargo.toml": "c886d062200bb396e27ce8ad68df826f02bcb6ebdc2a7f7b65279587ea2f6300",
+    "Cargo.lock": "49a0da569d828d1e8b8b427287207158de2544f05e1313ab0bbc57390b026fe4"
+  },
+  "upstream_source_sha256": {
+    "src/main.rs": "b6bd320564701aabbde58cd4c6f38fb81b17904b7e4c2dff269e5592e2b349a8",
+    "Cargo.toml": "c886d062200bb396e27ce8ad68df826f02bcb6ebdc2a7f7b65279587ea2f6300",
+    "Cargo.lock": "49a0da569d828d1e8b8b427287207158de2544f05e1313ab0bbc57390b026fe4"
+  },
+  "source_change": "Rustfmt normalization only; no executable logic changes"
+}

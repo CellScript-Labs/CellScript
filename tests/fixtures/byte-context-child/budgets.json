@@ -1,0 +1,164 @@
+{
+  "schema": "cellscript-bounded-byte-context-budgets-v1",
+  "scope": "three frozen fixture vectors only; separate from the 0.31/0.32 cost corpus budgets",
+  "vectors": [
+    [
+      "0000000000000000",
+      "0000000000000000"
+    ],
+    [
+      "ffffffffffffffff",
+      "ffffffffffffffff"
+    ],
+    [
+      "333231302f2e2d2c",
+      "3b3a393837363534"
+    ]
+  ],
+  "ceilings": [
+    {
+      "opt_level": 0,
+      "looped": false,
+      "delegated": false,
+      "elf_bytes": 10624,
+      "group_cycles": 17672,
+      "parent_stack_bytes": 9664,
+      "child_stack_bytes": 0
+    },
+    {
+      "opt_level": 0,
+      "looped": false,
+      "delegated": true,
+      "elf_bytes": 12280,
+      "group_cycles": 205441,
+      "parent_stack_bytes": 10256,
+      "child_stack_bytes": 66704
+    },
+    {
+      "opt_level": 0,
+      "looped": true,
+      "delegated": false,
+      "elf_bytes": 3880,
+      "group_cycles": 17550,
+      "parent_stack_bytes": 8496,
+      "child_stack_bytes": 0
+    },
+    {
+      "opt_level": 0,
+      "looped": true,
+      "delegated": true,
+      "elf_bytes": 5232,
+      "group_cycles": 205166,
+      "parent_stack_bytes": 9072,
+      "child_stack_bytes": 66704
+    },
+    {
+      "opt_level": 1,
+      "looped": false,
+      "delegated": false,
+      "elf_bytes": 9584,
+      "group_cycles": 16299,
+      "parent_stack_bytes": 9664,
+      "child_stack_bytes": 0
+    },
+    {
+      "opt_level": 1,
+      "looped": false,
+      "delegated": true,
+      "elf_bytes": 11240,
+      "group_cycles": 204068,
+      "parent_stack_bytes": 10256,
+      "child_stack_bytes": 66704
+    },
+    {
+      "opt_level": 1,
+      "looped": true,
+      "delegated": false,
+      "elf_bytes": 3696,
+      "group_cycles": 16012,
+      "parent_stack_bytes": 8496,
+      "child_stack_bytes": 0
+    },
+    {
+      "opt_level": 1,
+      "looped": true,
+      "delegated": true,
+      "elf_bytes": 5040,
+      "group_cycles": 203626,
+      "parent_stack_bytes": 9072,
+      "child_stack_bytes": 66704
+    },
+    {
+      "opt_level": 2,
+      "looped": false,
+      "delegated": false,
+      "elf_bytes": 9584,
+      "group_cycles": 16299,
+      "parent_stack_bytes": 9664,
+      "child_stack_bytes": 0
+    },
+    {
+      "opt_level": 2,
+      "looped": false,
+      "delegated": true,
+      "elf_bytes": 11240,
+      "group_cycles": 204068,
+      "parent_stack_bytes": 10256,
+      "child_stack_bytes": 66704
+    },
+    {
+      "opt_level": 2,
+      "looped": true,
+      "delegated": false,
+      "elf_bytes": 3696,
+      "group_cycles": 16012,
+      "parent_stack_bytes": 8496,
+      "child_stack_bytes": 0
+    },
+    {
+      "opt_level": 2,
+      "looped": true,
+      "delegated": true,
+      "elf_bytes": 5040,
+      "group_cycles": 203626,
+      "parent_stack_bytes": 9072,
+      "child_stack_bytes": 66704
+    },
+    {
+      "opt_level": 3,
+      "looped": false,
+      "delegated": false,
+      "elf_bytes": 9584,
+      "group_cycles": 16299,
+      "parent_stack_bytes": 9664,
+      "child_stack_bytes": 0
+    },
+    {
+      "opt_level": 3,
+      "looped": false,
+      "delegated": true,
+      "elf_bytes": 11240,
+      "group_cycles": 204068,
+      "parent_stack_bytes": 10256,
+      "child_stack_bytes": 66704
+    },
+    {
+      "opt_level": 3,
+      "looped": true,
+      "delegated": false,
+      "elf_bytes": 3696,
+      "group_cycles": 16012,
+      "parent_stack_bytes": 8496,
+      "child_stack_bytes": 0
+    },
+    {
+      "opt_level": 3,
+      "looped": true,
+      "delegated": true,
+      "elf_bytes": 5040,
+      "group_cycles": 203626,
+      "parent_stack_bytes": 9072,
+      "child_stack_bytes": 66704
+    }
+  ]
+}

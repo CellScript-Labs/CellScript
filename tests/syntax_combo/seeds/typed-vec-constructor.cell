@@ -1,0 +1,11 @@
+module cellscript::audit::seed_typed_vec_constructor
+
+action verify() -> u64 {
+    verification
+    let mut context: Vec<u8> = Vec::with_capacity(52)
+    for i in 0..36 { context.push(i as u8) }
+    let mut empty: Vec<u8> = Vec::new()
+    empty.push(7 as u8)
+    require empty.len() == 1
+    return context.len()
+}

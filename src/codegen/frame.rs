@@ -302,7 +302,14 @@ impl CodeGenerator {
             {
                 self.local_schema_value_widths.insert(dest.id, width);
             }
+            if let IrInstruction::Call { dest: Some(dest), func, .. } = instruction
+                && let Some(width) = self.callable_abis.get(func).and_then(|abi| abi.return_buffer_bytes)
+                && self.fixed_struct_return_width(&dest.ty) == Some(width)
+            {
+                self.local_schema_value_widths.insert(dest.id, width);
+            }
         }
+        self.set_fixed_struct_local_widths(body);
 
         let schema_param_ids = params
             .iter()
@@ -324,10 +331,26 @@ impl CodeGenerator {
         let mut next_cell_slot = locals_size;
         let mut fixed_byte_locals = fixed_byte_locals.into_iter().collect::<Vec<_>>();
         fixed_byte_locals.sort_unstable_by_key(|(var_id, _)| *var_id);
+        let mut buffers = Vec::new();
         for (var_id, width) in fixed_byte_locals {
             next_cell_slot = align_up(next_cell_slot, 8);
             self.fixed_byte_local_offsets.insert(var_id, next_cell_slot);
+            buffers.push(cellscript_artifact_checker::FixedResultBuffer {
+                source_local: var_id as u64,
+                offset: next_cell_slot as u32,
+                width_bytes: width as u32,
+            });
             next_cell_slot += align_up(width, 8);
+        }
+        if let Some(name) = &self.current_function {
+            self.fixed_result_frames.insert(
+                name.clone(),
+                FixedResultFrameEvidence {
+                    scalar_region_bytes: locals_size as u32,
+                    buffer_region_end: next_cell_slot as u32,
+                    buffers,
+                },
+            );
         }
         for name in named_vars {
             next_cell_slot = align_up(next_cell_slot, 8);
@@ -971,8 +994,12 @@ impl CodeGenerator {
         }
 
         if let Some(offset) = self.return_buffer_pointer_offset {
+            let width = self.current_return_buffer_bytes().expect("saved result pointer has a fixed result ABI");
+            let marker = self.fresh_label(&format!("result_v1_save_{abi_index}_{offset}_{width}"));
+            self.emit_label(&marker);
             self.emit(format!("# cellscript abi: caller-owned struct return pointer={}", abi_arg_label(abi_index)));
             self.emit_spill_abi_arg(abi_index, offset);
+            self.emit_label(&format!("{marker}_end"));
         }
 
         Ok(())

@@ -12,6 +12,8 @@ use cellscript_artifact_checker::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
+mod fixed_results;
+
 #[derive(Debug, Clone)]
 pub(crate) struct VerifiedArtifactDraft {
     pub machine_layout: MachineLayoutEvidence,
@@ -241,6 +243,7 @@ pub(crate) fn build_verified_artifact_boundary(
         .collect::<Result<Vec<_>>>()?;
     let runtime_error_exits = runtime_error_exits(&draft.machine_layout, &blocks);
     let verifier_failure_exits = verifier_failure_exits(&draft.machine_layout, &blocks)?;
+    fixed_results::bind(&mut entries, &blocks, metadata, &draft.machine_layout)?;
 
     let mut record = VerifiedLoweringRecord {
         schema: LOWERING_RECORD_SCHEMA.to_string(),
@@ -474,6 +477,8 @@ fn build_entries(metadata: &CompileMetadata, frame_sizes: &BTreeMap<String, u32>
             frame_size_bytes,
             outgoing_argument_bytes: outgoing_argument_bytes.min(frame_size_bytes),
             typed_blocks: Vec::new(),
+            fixed_result_abi: None,
+            fixed_result_calls: Vec::new(),
         });
     }
     entries.sort_by(|a, b| a.id.cmp(&b.id));

@@ -1,0 +1,62 @@
+module agoraseal::vote
+
+// The external adapter binds CKB coordinates only. All voting decisions below
+// are executable CellScript. See the exact declaration in Cell.toml.
+action cast(
+    witness deposit_height: u64,
+    witness proposal_height: u64,
+) -> u64 {
+    verification
+        let outputs = ckb::cell_count(source::group_output(0))
+        // Input Locks authorize reclamation; the tally interprets its effect.
+        if outputs == 0 { return 0 }
+        require outputs == 1
+        let ballot = source::group_output(0)
+        let dao = source::cell_dep(0)
+        let proposal = source::cell_dep(1)
+        let inputs = ckb::cell_count(source::input(0))
+        require inputs > 0 && inputs <= 128
+        require ckb::cell_count(source::output(0)) <= 128
+
+        require ckb::cell_data_size(proposal) == 188
+        require ckb::cell_data_u64_le(proposal, 0) == 3544421208354211649
+        require ckb::cell_data_u32_le(proposal, 72) > 0
+        require ckb::cell_data_u64_le(proposal, 76) > 0
+        require ckb::cell_data_u64_le(proposal, 84) > 0
+        ckb::require_cell_type_hash(proposal, ckb::cell_type_args32(ballot))
+        require ckb::cell_type_hash_type(ballot) == 4
+        require hash_blake2b(ckb::cell_type_code_hash(ballot)) == ckb::cell_data_blake2b_span(proposal, 40, 32)
+        require hash_blake2b(ckb::cell_type_hash(dao)) == ckb::cell_data_blake2b_span(proposal, 156, 32)
+        require ckb::cell_data_size(dao) == 8
+        require ckb::cell_data_u64_le(dao, 0) == 0
+        require deposit_height < proposal_height
+
+        require ckb::cell_data_size(ballot) == 53
+        require ckb::cell_data_u64_le(ballot, 0) == 3544409135151204161
+        require ckb::cell_data_u8(ballot, 52) <= 1
+        require ckb::cell_data_u64_le(ballot, 44) == ckb::cell_capacity(dao)
+        require ckb::cell_capacity(dao) > 0
+        let owner = ckb::cell_lock_hash(dao)
+        ckb::require_cell_lock_hash(ballot, owner)
+        let deposit_tx_digest = ckb::cell_data_blake2b_span(ballot, 8, 32)
+        let deposit_index = ckb::cell_data_u32_le(ballot, 40)
+        let mut authorized = false
+        for i in 0..inputs {
+            let input = source::input(i)
+            if ckb::cell_lock_hash(input) == owner { authorized = true }
+            if hash_blake2b(ckb::input_out_point_tx_hash(input)) == deposit_tx_digest {
+                require ckb::input_out_point_index(input) as u64 != deposit_index
+            }
+        }
+        require authorized
+
+        let mut context: Vec<u8> = Vec::with_capacity(52)
+        // Exact OutPoint (36), then two claimed u64 heights in little endian.
+        for i in 8..44 { context.push(ckb::cell_data_u8(ballot, i) as u8) }
+        for i in 0..8 { context.push(((deposit_height >> (i * 8)) & 255) as u8) }
+        for i in 0..8 { context.push(((proposal_height >> (i * 8)) & 255) as u8) }
+        ckb::trusted_spawn_wait_cell_dep_hex4(
+            2, Hash::from_bytes(b"@CONTEXT_HASH_BYTES@"), context, 36, 8, 8, 0
+        )
+        return 0
+}

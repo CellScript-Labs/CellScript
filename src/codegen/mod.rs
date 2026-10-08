@@ -32,8 +32,8 @@ pub use assembler::BackendShapeMetrics;
 use assembler::*;
 use cell_ops::{CellFieldHashCheck, CellFieldHashLocation};
 pub use runtime::{
-    generate, generate_with_evidence, GeneratedArtifact, MachineBlockEvidence, MachineEdgeEvidence, MachineEdgeKindEvidence,
-    MachineLayoutEvidence, MachineTerminatorEvidence,
+    generate, generate_with_evidence, FixedResultFrameEvidence, GeneratedArtifact, MachineBlockEvidence, MachineEdgeEvidence,
+    MachineEdgeKindEvidence, MachineLayoutEvidence, MachineTerminatorEvidence,
 };
 
 const CKB_LOAD_HEADER_SYSCALL_NUMBER: u64 = ckb_abi::syscall::LOAD_HEADER;
@@ -1289,6 +1289,7 @@ pub struct CodeGenerator {
     next_runtime_label: usize,
     /// Final stack-frame size for typed action/lock/helper entries.
     entry_frame_sizes: BTreeMap<String, u32>,
+    fixed_result_frames: BTreeMap<String, FixedResultFrameEvidence>,
     /// Saved hidden result pointer; owned by the current helper's frame.
     return_buffer_pointer_offset: Option<usize>,
 }
@@ -1465,6 +1466,7 @@ impl CodeGenerator {
             needs_process_failure_helper: false,
             next_runtime_label: 0,
             entry_frame_sizes: BTreeMap::new(),
+            fixed_result_frames: BTreeMap::new(),
             return_buffer_pointer_offset: None,
         }
     }
@@ -1596,8 +1598,9 @@ impl CodeGenerator {
         let generated = match format {
             ArtifactFormat::RiscvAssembly => GeneratedArtifact { bytes: self.assembly.join("\n").into_bytes(), machine_layout: None },
             ArtifactFormat::RiscvElf => {
-                let machine_layout = machine_layout_evidence(&self.assembly, &self.entry_frame_sizes, ir)
+                let mut machine_layout = machine_layout_evidence(&self.assembly, &self.entry_frame_sizes, ir)
                     .map_err(|error| with_codegen_code(error, "E2201"))?;
+                machine_layout.fixed_result_frames = self.fixed_result_frames.clone();
                 let bytes = assemble_generated_elf(&self.assembly).map_err(|error| with_codegen_code(error, "E2300"))?;
                 GeneratedArtifact { bytes, machine_layout: Some(machine_layout) }
             }

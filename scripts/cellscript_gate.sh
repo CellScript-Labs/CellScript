@@ -620,6 +620,18 @@ check_novaseal_rust_tooling() {
     run cargo check --locked --manifest-path proposals/novaseal/agreement-profile-v0/harness/ckb_vm/Cargo.toml --all-targets
 }
 
+run_byte_context_child_build() {
+    local fixture_dir="$ROOT_DIR/tests/fixtures/byte-context-child"
+    local build_root="$ROOT_DIR/target/byte-context-child"
+    run cargo fmt --manifest-path "$fixture_dir/Cargo.toml" --check
+    run env CARGO_TARGET_DIR="$build_root/a" "$fixture_dir/build_reproducible.sh"
+    run env CARGO_TARGET_DIR="$build_root/b" "$fixture_dir/build_reproducible.sh"
+    export CELLSCRIPT_BYTE_CONTEXT_CHILD_ELF="$build_root/a/riscv64imac-unknown-none-elf/release/agoraseal-ckb-context"
+    run cmp "$CELLSCRIPT_BYTE_CONTEXT_CHILD_ELF" "$build_root/b/riscv64imac-unknown-none-elf/release/agoraseal-ckb-context"
+    # The Rust runtime tests additionally compare the fresh ELF with child.hex
+    # and bind source/manifest/lock hashes to the checked build manifest.
+}
+
 run_dev_gate() {
     if (($# != 0)); then
         printf 'usage: %s dev\n' "$0" >&2
@@ -629,13 +641,15 @@ run_dev_gate() {
     require_cmd rg
 
     cargo_fmt_workspace
+    run_byte_context_child_build
     run cargo fmt --manifest-path services/registry-verifier/Cargo.toml
     run cargo fmt --manifest-path services/registry-artifact-verifier/Cargo.toml
     run cargo check --locked -p cellscript --all-targets
     run cargo check --locked -p cellscript-artifact-checker --all-targets
     run cargo test --locked -p cellscript-artifact-checker
     run cargo test --locked -p cellscript --test artifact_checker --test myelin_handoff \
-        --test interface_inspection --test policy_artifact_checker
+        --test interface_inspection --test policy_artifact_checker --test value_return_abi \
+        --test vec_constructor --test bounded_byte_context
     run cargo test --locked -p cellscript deployment_line_handle --lib
     run cargo test --locked -p cellscript --test exact_script_handles
     run cargo check --locked -p cellscript-fiber-adapter --all-targets
@@ -696,6 +710,7 @@ run_ci_gate() {
     require_cmd npm
     require_node_22
 
+    run_byte_context_child_build
     prepare_cost_evidence
 
     printf '{"status":"not-generated","reason":"test suite did not reach backend shape report generation"}\n' >"$CELLSCRIPT_BACKEND_SHAPE_REPORT"
@@ -762,6 +777,7 @@ run_backend_gate() {
     check_source_policy
     check_business_corpus
 
+    run_byte_context_child_build
     prepare_cost_evidence
     cargo_fmt_workspace --check
     run cargo check --locked -p cellscript --all-targets

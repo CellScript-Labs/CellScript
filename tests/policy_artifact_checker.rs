@@ -273,6 +273,7 @@ action verify() {
     let value: Payload = build()
     require value.tail == 37
 }
+
 "#;
     for opt_level in 0..=3 {
         // This prototype belongs to the single-entry ABI. Keep policy-witness
@@ -1238,4 +1239,124 @@ fn interface_callable_signature_cannot_be_forged_after_outer_hash_rebinding() {
     )
     .unwrap_err();
     assert_eq!(error.message, "interface callable return type differs from checked entry");
+}
+
+fn fixed_result_fixture(opt_level: u8) -> Fixture {
+    let source = r#"
+module checked_result
+struct Pair { left: u64, right: u64 }
+fn build(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64, g: u64, h: u64, value: Pair) -> Pair {
+    Pair { left: value.right + a + b + c + d, right: value.left + e + f + g + h }
+}
+action verify(witness value: Pair, witness expected: Pair) {
+    verification
+    let result = build(1, 2, 3, 4, 5, 6, 7, 8, value)
+    require result.left == expected.left
+    require result.right == expected.right
+}
+"#;
+    let compiled = cellscript::compile_with_executable_surface_policy(
+        source,
+        CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..CompileOptions::default() },
+        ExecutableSurfacePolicy::DenyFailClosed,
+    )
+    .unwrap();
+    let fixture = Fixture {
+        artifact: compiled.artifact_bytes,
+        metadata: serde_json::to_value(compiled.metadata).unwrap(),
+        record: compiled.verified_lowering_record.unwrap(),
+        source_map: compiled.source_artifact_map.unwrap(),
+    };
+    fixture.check().unwrap();
+    fixture
+}
+
+#[test]
+fn fixed_result_contracts_reject_rebound_placement_extent_and_coverage_mutations() {
+    for opt_level in 0..=3 {
+        let valid = fixed_result_fixture(opt_level);
+        for mutation in 0..19 {
+            let mut changed = valid.clone();
+            let helper = changed.record.entries.iter().position(|entry| entry.name == "build").unwrap();
+            let caller = changed.record.entries.iter().position(|entry| entry.name == "verify").unwrap();
+            match mutation {
+                0 => changed.record.entries[helper].fixed_result_abi = None,
+                1 => changed.record.entries[helper].fixed_result_abi.as_mut().unwrap().hidden_argument_index -= 1,
+                2 => changed.record.entries[helper].fixed_result_abi.as_mut().unwrap().width_bytes -= 1,
+                3 => changed.record.entries[helper].fixed_result_abi.as_mut().unwrap().saved_pointer_offset += 8,
+                4 => changed.record.entries[helper].fixed_result_abi.as_mut().unwrap().type_name = "u64".into(),
+                5 => changed.record.entries[helper].fixed_result_abi.as_mut().unwrap().copy_ranges.clear(),
+                6 => changed.record.entries[caller].fixed_result_calls.clear(),
+                7 => changed.record.entries[caller].fixed_result_calls[0].hidden_argument_index += 1,
+                8 => changed.record.entries[caller].fixed_result_calls[0].outgoing_stack_bytes += 16,
+                9 => changed.record.entries[caller].fixed_result_calls[0].buffer_offset = 0,
+                10 => {
+                    changed.record.entries[caller].fixed_result_calls[0].buffer_offset =
+                        changed.record.entries[caller].frame_size_bytes
+                }
+                11 => changed.record.entries[caller].fixed_result_calls[0].buffers[0].width_bytes = u32::MAX,
+                12 => changed.record.entries[caller].fixed_result_calls[0].receive_range.end = u64::MAX - 3,
+                13 => changed.record.entries[helper].fixed_result_abi.as_mut().unwrap().schema = "unknown-result-abi".into(),
+                14 => {
+                    changed.record.entries[caller].fixed_result_calls[0].pointer_slot_offset =
+                        changed.record.entries[caller].fixed_result_calls[0].buffer_offset
+                }
+                15 => changed.record.entries[helper].fixed_result_abi.as_mut().unwrap().copy_sources.clear(),
+                16 => changed.record.entries[helper].fixed_result_abi.as_mut().unwrap().copy_sources[0].base_local = u64::MAX,
+                17 => changed.record.entries[helper].fixed_result_abi.as_mut().unwrap().copy_sources[0].field_offset = 8,
+                18 => changed.record.entries[helper].fixed_result_abi.as_mut().unwrap().copy_sources[0].source_local = u64::MAX,
+                _ => unreachable!(),
+            }
+            changed.rebind_sidecars();
+            let error = changed.check().expect_err("rebound fixed result contract must fail independently");
+            assert_eq!(error.code, CheckerRejectionCode::V2407AbiOrStackInvalid, "O{opt_level}, mutation {mutation}: {error}");
+            assert!(error.message.contains("fixed struct result ABI"), "{error}");
+        }
+    }
+}
+
+#[test]
+fn fixed_result_machine_mutations_reject_after_elf_and_sidecars_are_rebound() {
+    for opt_level in 0..=3 {
+        let valid = fixed_result_fixture(opt_level);
+        let helper = valid.record.entries.iter().find(|entry| entry.name == "build").unwrap();
+        let abi = helper.fixed_result_abi.as_ref().unwrap();
+        let call = &valid.record.entries.iter().find(|entry| entry.name == "verify").unwrap().fixed_result_calls[0];
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let word_in = |range: cellscript_artifact_checker::MachineRange, opcode: u32, rd: Option<u32>| {
+            *elf.instructions
+                .iter()
+                .find(|instruction| {
+                    range.contains(instruction.address)
+                        && instruction.word & 0x7f == opcode
+                        && rd.is_none_or(|rd| (instruction.word >> 7) & 31 == rd)
+                })
+                .unwrap()
+        };
+        let save_load = word_in(abi.save_range, 0x03, Some(5));
+        let save_store = word_in(abi.save_range, 0x23, None);
+        let copy_load = word_in(abi.copy_ranges[0], 0x03, Some(11));
+        let source_load = word_in(abi.copy_sources[0].range, 0x03, Some(10));
+        let copy_length = word_in(abi.copy_ranges[0], 0x13, Some(12));
+        let outgoing_store = word_in(call.setup_range, 0x23, None);
+        let receive_pointer = word_in(call.receive_range, 0x13, Some(5));
+        let cases = [
+            (source_load.address, source_load.word ^ (8 << 20)),
+            (source_load.address, (source_load.word & !(31 << 7)) | (11 << 7)),
+            (save_load.address, save_load.word ^ (8 << 20)),
+            (save_store.address, save_store.word ^ (8 << 7)),
+            (copy_load.address, copy_load.word ^ (8 << 20)),
+            (copy_load.address, (copy_load.word & !(31 << 7)) | (10 << 7)),
+            (copy_length.address, copy_length.word ^ (1 << 20)),
+            (outgoing_store.address, outgoing_store.word ^ (8 << 7)),
+            (receive_pointer.address, (receive_pointer.word & !(31 << 15)) | (10 << 15)),
+        ];
+        for (address, word) in cases {
+            let mut changed = valid.clone();
+            changed.replace_machine_word(address, word);
+            let error = changed.check().expect_err("machine ABI mutation must fail after complete hash rebinding");
+            assert_eq!(error.code, CheckerRejectionCode::V2407AbiOrStackInvalid, "O{opt_level}, address {address:#x}: {error}");
+            assert!(error.message.contains("fixed struct result ABI"), "{error}");
+        }
+    }
 }

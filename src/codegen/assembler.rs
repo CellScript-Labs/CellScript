@@ -664,6 +664,7 @@ pub(super) fn machine_layout_evidence(
         symbols,
         globals: plan.parsed.globals.clone(),
         entry_frame_sizes: entry_frame_sizes.clone(),
+        fixed_result_frames: BTreeMap::new(),
     })
 }
 

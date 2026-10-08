@@ -70,6 +70,14 @@ impl VerifiedLoweringRecord {
         self.entries.sort_by(|a, b| a.id.cmp(&b.id));
         self.typed_semantics.canonicalize();
         for entry in &mut self.entries {
+            if let Some(abi) = &mut entry.fixed_result_abi {
+                abi.copy_ranges.sort_by_key(|range| (range.start, range.end));
+                abi.copy_sources.sort_by_key(|source| (source.range.start, source.range.end));
+            }
+            entry.fixed_result_calls.sort_by_key(|call| (call.setup_range.start, call.setup_range.end));
+            for call in &mut entry.fixed_result_calls {
+                call.buffers.sort_by_key(|buffer| (buffer.offset, buffer.source_local));
+            }
             entry.params.sort_by_key(|param| param.index);
             entry.proof_ids.sort();
             entry.proof_ids.dedup();
@@ -897,6 +905,64 @@ pub struct LoweringEntry {
     pub frame_size_bytes: u32,
     pub outgoing_argument_bytes: u32,
     pub typed_blocks: Vec<TypedBlockBinding>,
+    /// Feature-specific extension: older deny-unknown-fields checkers reject
+    /// bundles using this ABI, while scalar-only v9 records stay byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixed_result_abi: Option<FixedResultAbi>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fixed_result_calls: Vec<FixedResultCall>,
+}
+
+pub const FIXED_RESULT_ABI_SCHEMA: &str = "cellscript-fixed-struct-result-abi-v1";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FixedResultAbi {
+    pub schema: String,
+    pub type_name: String,
+    pub width_bytes: u32,
+    pub owned_frame_bytes: u32,
+    pub hidden_argument_index: u32,
+    pub saved_pointer_offset: u32,
+    pub save_range: MachineRange,
+    pub copy_ranges: Vec<MachineRange>,
+    pub copy_sources: Vec<FixedResultSource>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FixedResultSource {
+    pub source_local: u64,
+    pub base_local: u64,
+    pub field_offset: u32,
+    pub range: MachineRange,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FixedResultCall {
+    pub schema: String,
+    pub callee: String,
+    pub destination_local: u32,
+    pub buffer_offset: u32,
+    pub width_bytes: u32,
+    pub owned_frame_bytes: u32,
+    pub hidden_argument_index: u32,
+    pub outgoing_stack_bytes: u32,
+    pub pointer_slot_offset: u32,
+    pub setup_range: MachineRange,
+    pub receive_range: MachineRange,
+    pub scalar_region_bytes: u32,
+    pub buffer_region_end: u32,
+    pub buffers: Vec<FixedResultBuffer>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FixedResultBuffer {
+    pub source_local: u64,
+    pub offset: u32,
+    pub width_bytes: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

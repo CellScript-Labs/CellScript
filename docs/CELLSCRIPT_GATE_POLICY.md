@@ -12,6 +12,14 @@ deciding whether a change is ready.
 
 ## Gate Modes
 
+The 0.32 dev, backend and CI paths also rebuild the pinned fixed byte-context
+child twice with Rust 1.97.1 and `riscv64imac-unknown-none-elf`. Runtime tests
+compare the fresh ELF with its source/lock-bound fixture and require scheduler
+replay parity for the byte oracle and real parent/child acceptance scene. These
+fixture ceilings are separate from the frozen general cost corpus. See the
+[encoding example](../examples/bounded-byte-context/README.md) and
+[child build boundary](../tests/fixtures/byte-context-child/README.md).
+
 The 0.31 candidate reuses the bounded business portfolio, with fresh release
 acceptance tracked in [the readiness record](releases/CELLSCRIPT_0_31_RELEASE_READINESS.md).
 Its capability ledger must identify the current package major/minor version.

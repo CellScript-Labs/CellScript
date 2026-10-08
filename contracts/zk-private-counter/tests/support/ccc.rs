@@ -17,6 +17,7 @@ pub fn run(
     compiled: &cellscript::CompileResult,
     handle: &[u8],
     key: &[u8],
+    package_directory: &Path,
 ) -> Value {
     let directory = run.join("ccc");
     fs::create_dir(&directory).unwrap();
@@ -55,7 +56,7 @@ pub fn run(
     let prover = root.join("contracts/zk-private-counter/target/release/cellscript-zk-private-counter");
     let configuration = json!({"rpcUrl":node.rpc_url,"sdkDirectory":directory.join("sdk"),
         "proverExecutable":prover, "proverSha256":package::sha256(&fs::read(&prover).unwrap()),
-        "setupPackage":std::env::var("CELLSCRIPT_COUNTER_PACKAGE").expect("CCC test requires a setup package"),
+        "setupPackage":package_directory,
         "ownerSecretFile":directory.join("owner.bin"), "counter":{"txHash":format!("0x{}",hex::encode(previous.tx_hash().as_slice())),"index":0},
         "secpCodeHash":format!("0x{}",hex::encode(secp_type.calc_script_hash().as_slice())),
         "secpDep":{"outPoint":{"txHash":genesis["transactions"][1]["hash"],"index":0},"depType":"depGroup"},

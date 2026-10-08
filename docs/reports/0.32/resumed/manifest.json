@@ -1,0 +1,46 @@
+{
+  "schema": "cellscript-032-resumed-evidence-v1",
+  "source_commit": "6dba17681e755720081c678015324cdd0cf46bb9",
+  "source_dirty": false,
+  "backend_status": "passed",
+  "complete_ci_for_later_queue": "deferred-until-all-implementation-complete",
+  "production_resource_identity_claim": false,
+  "release_admitted": false,
+  "public_deployment_claimed": false,
+  "counter_scope": "disposable pinned local chain; public test setup; default single-state node cases only",
+  "cost_archive_validation": {
+    "archive": "../retention-second/manifest.json",
+    "archive_manifest_sha256": "bf381806e7d4a33882cce3ee97e7878dd76d05dd0635d0fff6a074d18f1aaffd",
+    "validated_stored_and_raw_files": 20,
+    "native_comparator_replay": "6782 comparable metrics passed; static memory counts reported separately",
+    "decision": "reject-candidate-retain-default",
+    "candidate_full_gate_claimed": false
+  },
+  "files": [
+    {
+      "file": "clean-backend.log.gz",
+      "compression": "gzip",
+      "raw_bytes": 219343,
+      "raw_sha256": "6e5d13a24864d0a194a4745f151be202147b80b68d6b844782179e87ae9b55db",
+      "stored_bytes": 42187,
+      "stored_sha256": "f1518e91fe016e3db40a426bcd81d519c214a9adbdc3e4bf9d95d1c29b34fd8e"
+    },
+    {
+      "file": "clean-ckb-acceptance.json.gz",
+      "compression": "gzip",
+      "raw_bytes": 750130,
+      "raw_sha256": "9b18f51bf04420a8f67be71b8a08bef0cf3c1f8881beda93c4e4d12361a6940a",
+      "stored_bytes": 61774,
+      "stored_sha256": "8b6d5a5b3897d43fdff44f43fe25f2e1a0e53c6b5b8ab05c74574a0a85c00ad7"
+    },
+    {
+      "file": "counter-node.json",
+      "compression": "none",
+      "raw_bytes": 7931,
+      "raw_sha256": "a11112643a2186c9ab2febbc44291cc199b8e2ebf72ae065b72d0f6282ea0427",
+      "stored_bytes": 7931,
+      "stored_sha256": "a11112643a2186c9ab2febbc44291cc199b8e2ebf72ae065b72d0f6282ea0427"
+    }
+  ],
+  "migration_node_acceptance": "historical evidence exists; fresh CELLSCRIPT_COUNTER_CCC=1 clean-source replay pending"
+}

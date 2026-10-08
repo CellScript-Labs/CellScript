@@ -2,6 +2,7 @@ mod bindings;
 mod checker;
 mod elf;
 mod failure;
+mod fixed_results;
 mod generic_projection;
 pub mod interface;
 pub mod open_handle_policy;

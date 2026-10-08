@@ -3092,6 +3092,23 @@ impl<'a> TypeChecker<'a> {
 
     fn check_stmt_diagnostics(&mut self, env: &mut TypeEnv, stmt: &Stmt, diagnostics: &mut Vec<CompileError>) {
         match stmt {
+            Stmt::Let(let_stmt) => {
+                if let Err(error) = self.check_stmt(env, stmt) {
+                    diagnostics.push(error);
+                    // Recovery only: compilation already has a fatal diagnostic.
+                    // A valid owned Vec annotation still defines a local for
+                    // checking later statements; never invent linear ownership.
+                    if let (Some(ty @ Type::Named(vector)), BindingPattern::Name(name)) = (&let_stmt.ty, &let_stmt.pattern)
+                        && self.parse_named_collection_item_type(vector).is_some()
+                        && self.validate_type(ty).is_ok()
+                        && !self.is_linear_type(ty)
+                        && !self.type_contains_reference(ty)
+                        && env.lookup(name).is_none()
+                    {
+                        let _ = self.bind_pattern(env, &let_stmt.pattern, ty, let_stmt.is_mut, let_stmt.span);
+                    }
+                }
+            }
             Stmt::If(if_stmt) => {
                 let condition_ok = match self.infer_expr(env, &if_stmt.condition) {
                     Ok(cond_ty) if self.is_bool_type(&cond_ty) => true,
@@ -3737,6 +3754,29 @@ impl<'a> TypeChecker<'a> {
 
     fn infer_expr_with_expected_type(&mut self, env: &mut TypeEnv, expr: &Expr, expected_ty: &Type, span: Span) -> Result<Type> {
         match expr {
+            Expr::Call(call) if matches!(call.func.as_ref(), Expr::Identifier(name) if matches!(name.as_str(), "Vec::new" | "Vec::with_capacity")) =>
+            {
+                // Infer normally first so context cannot hide bad arity,
+                // capacity types, or argument diagnostics.
+                let actual = self.infer_expr(env, expr)?;
+                let Type::Named(name) = expected_ty else { return Ok(actual) };
+                let Some(item) = self.parse_named_collection_item_type(name) else { return Ok(actual) };
+                self.validate_type(expected_ty)?;
+                if self.type_contains_reference(&item)
+                    || self.is_linear_type(&item)
+                    || !self.bounded_list_element_is_fixed_width(&item, &mut HashSet::new())
+                    || !self.payload_type_runtime_width(&item, &mut HashSet::new()).is_some_and(|width| (1..=256).contains(&width))
+                {
+                    return Err(CompileError::new(
+                        format!(
+                            "local Vec constructor requires an owned fixed-width element of 1..=256 bytes, found {}",
+                            type_repr(&item)
+                        ),
+                        span,
+                    ));
+                }
+                Ok(expected_ty.clone())
+            }
             Expr::Integer(value) => {
                 if let Some(ty) = Self::integer_literal_type_for_expected(*value, expected_ty, span)? {
                     Ok(ty)

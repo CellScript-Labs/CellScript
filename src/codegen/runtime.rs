@@ -10575,6 +10575,14 @@ pub struct MachineLayoutEvidence {
     pub symbols: BTreeMap<String, u64>,
     pub globals: BTreeSet<String>,
     pub entry_frame_sizes: BTreeMap<String, u32>,
+    pub fixed_result_frames: BTreeMap<String, FixedResultFrameEvidence>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FixedResultFrameEvidence {
+    pub scalar_region_bytes: u32,
+    pub buffer_region_end: u32,
+    pub buffers: Vec<cellscript_artifact_checker::FixedResultBuffer>,
 }
 
 #[derive(Debug, Clone)]

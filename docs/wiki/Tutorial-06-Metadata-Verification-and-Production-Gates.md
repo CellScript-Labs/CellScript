@@ -622,6 +622,13 @@ Both release modes first require a clean checkout and an accepted bounded
 business corpus through `check-business-corpus --release`. A development corpus
 check cannot authorize publication; publication constraints remain separate.
 
+The 0.32 paths also rebuild the pinned 52-byte context child twice. Its
+source/lock/ELF fixture is checked alongside byte-oracle and real parent/child
+CKB-VM tests. Replay must agree with the ordinary verifier, and parent and child
+stack observations remain separate. The fixture resource ceilings do not
+replace general cost budgets or a full application assurance review. See the
+[fixed encoding example](../../examples/bounded-byte-context/README.md).
+
 In `dev` and `ci`, the wrapper also checks that
 `examples/language/core/canonical_style.cell` is already formatter-clean and that
 the checked atomic-swap, NFT, timelock, and multi-phase-DAO example pairs use

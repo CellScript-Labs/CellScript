@@ -403,6 +403,23 @@ where
     F: FnOnce(TransactionView, packed::Script) -> TransactionView,
     O: FnOnce(&Context, &TransactionView, &packed::Script) -> T,
 {
+    execute_cellscript_script_with_context_setup_and_observer(elf_bytes, fixture, transform, |_, _, _| (), observe)
+}
+
+/// Attach explicit fixture context (such as dependency/header provenance)
+/// before both ordinary verification and the independent observer replay.
+pub fn execute_cellscript_script_with_context_setup_and_observer<F, S, O, T>(
+    elf_bytes: &[u8],
+    fixture: &CkbVmFixture,
+    transform: F,
+    setup: S,
+    observe: O,
+) -> (CkbScriptExecutionResult, T)
+where
+    F: FnOnce(TransactionView, packed::Script) -> TransactionView,
+    S: FnOnce(&mut Context, &TransactionView, &packed::Script),
+    O: FnOnce(&Context, &TransactionView, &packed::Script) -> T,
+{
     let mut context = Context::new_with_deterministic_rng();
     context.set_capture_debug(true);
 
@@ -537,6 +554,8 @@ where
     let dependency_bytes = fixture.cell_deps.iter().map(|cell| cell.data.len()).sum();
     let raw_transaction_hash = format!("0x{}", hex::encode(tx.hash().as_slice()));
     let serialized_transaction_hash = format!("0x{}", hex::encode(blake2b_256(tx.data().as_slice())));
+
+    setup(&mut context, &tx, &type_script);
 
     // Execute via ckb-script ScriptVerify with full CKB syscall context.
     let verify_result = context.verify_tx(&tx, MAX_CYCLES);

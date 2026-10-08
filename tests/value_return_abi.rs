@@ -6,6 +6,27 @@ use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
 #[allow(dead_code)]
 mod ckb_script_runner;
 
+#[test]
+fn fixed_result_source_field_uses_its_declared_offset() {
+    let source = r#"
+module field_result
+struct Pair { left: u64, right: u64 }
+struct Envelope { prefix: u64, value: Pair }
+fn select(value: Envelope) -> Pair { value.value }
+action verify(witness value: Envelope, witness expected: Pair) {
+    verification
+    let result = select(value)
+    require result.left == expected.left
+    require result.right == expected.right
+}
+"#;
+    for opt_level in 0..=3 {
+        let value = [99u64.to_le_bytes(), 11u64.to_le_bytes(), 23u64.to_le_bytes()].concat();
+        let expected = [11u64.to_le_bytes(), 23u64.to_le_bytes()].concat();
+        execute(source, opt_level, &[EntryWitnessArg::Bytes(value), EntryWitnessArg::Bytes(expected)], 0);
+    }
+}
+
 fn execute(source: &str, opt_level: u8, args: &[EntryWitnessArg], expected: i64) {
     let compiled = compile_with_executable_surface_policy(
         source,
@@ -106,6 +127,34 @@ action verify() { verification let value = relay() require true }
 "#;
     for opt_level in 0..=3 {
         execute(source, opt_level, &[], 0);
+    }
+}
+
+#[test]
+fn fixed_result_helper_restores_its_frame_after_nested_outgoing_stack_calls() {
+    let source = r#"
+module nested_stack_result
+struct Pair { left: u64, right: u64 }
+fn calculate(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64, g: u64, h: u64, value: Pair) -> Pair {
+    Pair { left: value.right + a + b + c + d, right: value.left + e + f + g + h }
+}
+fn relay(value: Pair) -> Pair {
+    let first = calculate(1, 2, 3, 4, 5, 6, 7, 8, value)
+    calculate(8, 7, 6, 5, 4, 3, 2, 1, first)
+}
+action verify(witness value: Pair, witness expected: Pair) {
+    verification
+    let result = relay(value)
+    require result.left == expected.left
+    require result.right == expected.right
+}
+"#;
+    let args = [
+        EntryWitnessArg::Bytes([11u64.to_le_bytes(), 23u64.to_le_bytes()].concat()),
+        EntryWitnessArg::Bytes([63u64.to_le_bytes(), 43u64.to_le_bytes()].concat()),
+    ];
+    for opt_level in 0..=3 {
+        execute(source, opt_level, &args, 0);
     }
 }
 

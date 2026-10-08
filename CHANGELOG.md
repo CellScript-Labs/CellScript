@@ -2,6 +2,17 @@
 
 ## Unreleased — 0.32
 
+Bind fixed ordinary-struct helper results to a feature-specific caller-owned
+buffer ABI checked independently from decoded RISC-V, including source pointer,
+hidden argument placement, bounded copy and frame teardown. Preserve nominal
+types and declaration field order through nested calls and zero-width fields.
+Propagate typed local Vec constructor context through typing and IR, and retain
+valid annotations during diagnostic recovery. Add the
+[52-byte encoding example](examples/bounded-byte-context/README.md) with a pinned
+real Rust child, byte oracle, O0–O3 CKB-VM replay and separate resource ceilings.
+Cell, enum/dynamic helper results and allocation-backed collections retain
+their existing boundaries.
+
 Add the experimental `zk::require_valid` exact Groth16 transition interface,
 nominal proof/VK types, transaction-derived v2 statements and bounded parent/child
 transport. Bind metadata, ProofPlan and machine checks to the same exact handle,

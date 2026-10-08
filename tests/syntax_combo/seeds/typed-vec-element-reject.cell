@@ -1,0 +1,9 @@
+// audit: phase=reject_compile
+// audit: contains=Vec.push type mismatch
+module cellscript::audit::seed_typed_vec_element_reject
+
+action verify() {
+    verification
+    let mut context: Vec<u8> = Vec::with_capacity(52)
+    context.push(false)
+}

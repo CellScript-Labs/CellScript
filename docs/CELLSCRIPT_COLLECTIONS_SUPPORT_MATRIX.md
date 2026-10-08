@@ -37,6 +37,14 @@ indexing, first, last, contains, set, remove, pop, insert, reverse, truncate,
 swap, clear
 ```
 
+Type annotations such as `let mut bytes: Vec<u8> = Vec::with_capacity(52)` or
+`Vec::new()` propagate the expected element type into the constructor. Arity
+and capacity-type checks still apply. Constructor context accepts owned fixed
+elements of 1–256 bytes; references, Cell resources and dynamic/nested vectors
+remain rejected. A failed annotated initializer retains its valid owned local
+binding only for subsequent diagnostics, so later uses do not become undefined
+binding errors. Any initializer error still prevents compilation.
+
 `Vec::capacity()` reports the fixed stack backing capacity
 (`256 / element_width`), not the requested `Vec::with_capacity(n)` argument.
 `cellc explain generics` exposes each checked instantiation, including element
