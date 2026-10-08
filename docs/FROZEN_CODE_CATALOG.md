@@ -6,29 +6,35 @@ contains an actual independently compiled frozen package module, canonical
 RawTransaction bytes, the code output index and complete selected Script bytes.
 It accepts no caller receipt, compatibility boolean, source owner label or
 exported context JSON. The returned `FrozenCodeCatalog` privately owns every
-source snapshot, complete bundle, checked external codec, code byte/target origin and
-the original deployment/Script bytes. Its getters are immutable; serialized
+source snapshot, complete bundle, checked external codec, code byte/target
+origin, finite policy receipt and the original deployment/Script bytes. Its getters are immutable; serialized
 records cannot reconstruct it.
 
 Every member must satisfy the required module's directional contract, the
 current finite public-policy external-codec profile, the exact code-output byte
-binding, the checked target deployment hash type and the required pinned chain ID/genesis. All required/candidate
+binding, the checked target deployment hash type, a private finite Type-policy
+receipt and the required pinned chain ID/genesis. All required/candidate
 four-file bundles and all raw transaction/Script inputs share **16 MiB** and
 respect the **4 MiB/file** and caller artifact/record/source-map ceilings before
 any new catalog, codec or transaction parser. The earlier native source
 compilation remains a separate bounded operation. Empty and >32 candidate sets
 reject before inspecting members. A failure in any member returns no catalog.
 
-The record schema is `cellscript-frozen-code-catalog-v2`; identity uses canonical
-JSON with domain `cellscript-frozen-code-catalog-id-v2`. It binds the checked
+The record schema is `cellscript-frozen-code-catalog-v3`; identity uses canonical
+JSON with domain `cellscript-frozen-code-catalog-id-v3`. It binds the checked
 module-catalog identity, required source/codec identities and every ordered
-candidate source, byte-origin and target-origin identity. The experimental v2
-record adds actual checked target selections; historical v1 records are not
-reinterpreted as target-checked catalogs. Each origin retains its exact RawTransaction
-hash, output index, ELF hash and complete selected Script hash. Duplicate
+candidate source, byte-origin, target-origin and finite receipt identity. The
+experimental v3 record adds actual checked finite receipts; historical v1/v2
+records are not reinterpreted as receipt-checked catalogs. Each origin retains
+its exact RawTransaction hash, output index, ELF hash and complete selected
+Script hash. Duplicate
 (transaction hash, output index, complete Script hash) tuples reject. Two
 different args at the same code OutPoint remain distinct; that does not authorize
 either selection or introduce an args wildcard policy.
+
+Every member exposes its immutable [finite receipt](FIXED_POLICY_RECEIPT.md).
+Public constants reject because their values lack independent evidence in this
+profile; generic declarations remain explicitly non-executable.
 
 This closes a **host-only source/API/byte-origin prerequisite** for #28. It does
 not prove source-to-machine or predicate equivalence. It does not authenticate

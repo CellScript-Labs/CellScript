@@ -342,13 +342,18 @@ fn native_code_catalog_binds_every_source_codec_and_actual_deployment_byte_tuple
         assert_eq!(checked.candidates()[1].raw_transaction(), raw);
         assert_eq!(checked.candidates()[1].selected_script(), script);
         let record: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
-        assert_eq!(record["schema"], "cellscript-frozen-code-catalog-v2");
+        assert_eq!(record["schema"], "cellscript-frozen-code-catalog-v3");
         assert_eq!(record["candidate_source_contexts"], serde_json::to_value(source_ids).unwrap());
         assert_eq!(record["required_external_codec"], checked.required_codec().identity());
         assert_eq!(record["checked_modules"], checked.module_evidence().identity());
         for (index, candidate) in checked.candidates().iter().enumerate() {
             assert_eq!(record["candidate_code_origins"][index], candidate.origin().identity());
             assert_eq!(record["candidate_target_origins"][index], candidate.target_origin().identity());
+            assert_eq!(record["candidate_receipts"][index], candidate.receipt().identity());
+            candidate
+                .receipt()
+                .check_unchanged_inputs(candidate.module().bundle(), candidate.raw_transaction(), 0, candidate.selected_script())
+                .unwrap();
             assert_eq!(candidate.origin().selected_hash_type(), 4);
             let origin = cellscript_artifact_checker::code_origin::check_code_cell_origin(
                 candidate.module().bundle(),
@@ -413,6 +418,45 @@ fn native_code_catalog_rejects_unselected_bad_origins_interfaces_and_networks() 
             }
         }
     }
+}
+
+#[test]
+fn native_code_catalog_requires_finite_receipts_for_unselected_and_final_members() {
+    use cellscript::package::frozen_interface::freeze_code_catalog;
+    use cellscript_artifact_checker::{
+        code_origin::{check_code_cell_origin, check_code_cell_target},
+        CheckerBudgets,
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let original = directory.path().join("original");
+    let constant = directory.path().join("constant");
+    code_package(&original, CODE_SOURCE);
+    code_package(&constant, &format!("{CODE_SOURCE}\npublic const LIMIT: u64 = 7"));
+    for opt in 0..=3 {
+        let invalid = code_candidate(compile_code(&constant, opt), vec![2]);
+        let origin = check_code_cell_origin(
+            invalid.module.bundle(),
+            &invalid.raw_transaction,
+            0,
+            &invalid.selected_script,
+            &CheckerBudgets::default(),
+        )
+        .unwrap();
+        assert!(check_code_cell_target(origin).is_ok());
+        let error = freeze_code_catalog(
+            compile_code(&original, opt),
+            vec![code_candidate(compile_code(&original, opt), vec![1]), invalid],
+            &CheckerBudgets::default(),
+        )
+        .unwrap_err();
+        assert!(error.message.contains("public constant values"), "{error:?}");
+    }
+    let mut inputs = (0..31).map(|index| code_candidate(compile_code(&original, 0), vec![index])).collect::<Vec<_>>();
+    inputs.push(code_candidate(compile_code(&constant, 0), vec![31]));
+    assert!(freeze_code_catalog(compile_code(&original, 0), inputs, &CheckerBudgets::default())
+        .unwrap_err()
+        .message
+        .contains("public constant values"));
 }
 
 #[test]

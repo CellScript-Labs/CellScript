@@ -8,6 +8,7 @@ mod failure;
 pub mod fixed_cell_fields;
 pub mod fixed_cell_reads;
 pub mod fixed_cell_storage;
+pub mod fixed_policy_receipt;
 mod fixed_results;
 mod generic_projection;
 pub mod interface;

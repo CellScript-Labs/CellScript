@@ -1240,3 +1240,56 @@ builds, quick backend audit and 139 syntax combinations passed. The authoritativ
 changed only `tests/fixtures/business_corpus.json`'s inventory SHA-256; all release
 requirements remain pending. The exact refreshed source state now reruns full
 dev. The failed gate is not presented as a passing dev or full-CI result.
+
+## Target publication and finite receipt construction
+
+The refreshed target-selection state passed full staged dev in
+`.cap/logs/1791489149-3091.log` (92,932 command-output bytes), was G-signed as
+`35a9565b260890e2b32f6082af51e5cfa36b3866` and pushed to public `0.32` in
+root `.cap/logs/1791489620-16694.log`. Independent remote lookup confirmed this
+exact head; root and worktree were clean. The passing dev/push logs are now
+archived alongside thirteen previous files; all fifteen raw/stored lengths and
+SHA-256 were verified. The earlier stale-inventory failure remains a failed run.
+No later clean full-backend/CCC evidence replaces the actual `16e6b721` source.
+
+The next private `CheckedFixedPolicyReceipt` composes actual independent
+API/codec/origin/target proofs with the checked declaration and entry contract,
+exact bundle hashes/lengths and the artifact report. The finite profile remains
+Type-policy/unit/scalar/flat-unsigned-Cell. Public constants explicitly reject:
+existing projection checks their types but not their values. Uninstantiated
+generic declarations remain declaration-only. Exact input rechecks apply fixed
+six-input ceilings before hashing and reject any bundle, transaction, index or
+complete Script substitution. Directional matching uses actual private module
+proofs; predicate differences are not behavioral-equivalence evidence.
+
+Native frozen catalog v3 owns and binds each candidate's actual finite receipt,
+including unselected and final members. Historical v1/v2 catalog records are not
+reinterpreted. Source/chain ownership checks retain their prior boundary. This
+slice changes native/checker evidence only, with no emitted machine/ABI,
+dependency, toolchain, wire or runtime budget expansion.
+
+Five focused receipt tests pass in `.cap/logs/1791490432-34228.log` (4.35 seconds),
+covering O0–O3 and both targets, actual fields/hash reconstruction, args,
+directional extension/incompatibility, templates/constants, substitution and
+preparse limits. All 24 frozen-interface tests pass in
+`.cap/logs/1791490438-34428.log`. One initial test oracle wrongly expected
+`not-provided` for CKB-VM evidence; the checker correctly reports `not-executed`
+and chain evidence `not-provided`. Only that assertion was corrected.
+Strict clippy and full dev remain pending for this new slice. Whole H1/H2,
+source handles, immutable authorization, version/status/floors and authenticated
+Type history remain required; #28/#29/#44–#46 are unfinished. Independent review
+is unassigned and unwaived. Full CI stays deferred until the implementation queue
+is complete. See `docs/FIXED_POLICY_RECEIPT.md` for the exact finite boundary.
+
+Final strict compiler/checker all-target clippy passes in
+`.cap/logs/1791490460-34013.log` (21.53 seconds). This source state will refresh
+the authoritative business-corpus inventory and then freeze for full dev before
+G-signing/publication. No fresh clean full-backend/CCC claim is attached to this
+native/checker-only delta.
+
+The authoritative inventory refresh in `.cap/logs/1791490544-37501.log` changed
+only the business-corpus inventory SHA-256 to
+`0xcc0bdea0ef4c4825eaf3046ff77d9e8fe5cdddf8aff53cc3891b560ce5405e37`.
+Read-only validation passes in `.cap/logs/1791490574-38344.log`; release readiness
+remains false and all release requirements remain pending. The exact staged
+receipt/catalog/documentation/archive state now freezes for full dev.

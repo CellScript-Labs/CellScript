@@ -2,6 +2,14 @@
 
 ## Unreleased — 0.32
 
+Compose independently checked finite Type-policy receipts from actual API,
+codec, code-origin and target proofs; bind every original bundle file and reject
+later input substitution. Require these private receipts for every frozen code
+catalog member and advance the experimental native catalog to v3. Public
+constants reject where values lack proof; generic declarations remain
+non-executable. Whole H1/H2 and authorization remain pending; see
+`docs/FIXED_POLICY_RECEIPT.md`.
+
 Require every frozen code-catalog candidate's selected Script hash type to match
 its independently checked target profile. Legal byte-bound data/data1 selections
 reject for the VM2 `ckb` profile; preserve the separate byte-origin API and bind

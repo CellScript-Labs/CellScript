@@ -6,7 +6,7 @@ signatures and confirmations. The later G-signed `04a70f61` delta changes native
 source ownership only; its own staged dev and push logs are archived separately,
 without claiming a fresh full backend on that later commit.
 
-The four dev logs bind exact staged source files later signed at the manifest's
+The archived dev logs bind exact staged source files later signed at the manifest's
 listed source commits; they are not described as clean-HEAD dev runs. Each gzip
 file records raw/stored lengths and SHA-256 and uses a normalized zero timestamp.
 The containing archive commit does not replace the recorded source provenance.
@@ -19,5 +19,11 @@ implementation queue is ready; independent security review remains unassigned.
 Parsed-source capture passed staged dev and was G-signed/pushed as
 `3a15ed9a0a462c089845bff6eb08993dd9221deb`. The additional source dev/push
 logs retain that native-only provenance; they do not update the full backend
-or CCC source commit. All thirteen gzip files have raw/stored sizes and SHA-256
+or CCC source commit. All fifteen gzip files have raw/stored sizes and SHA-256
 in the manifest. No later containing commit replaces any evidence source commit.
+
+Target selection passed the refreshed staged dev and was G-signed/pushed as
+`35a9565b260890e2b32f6082af51e5cfa36b3866`. Its own dev/push logs retain this
+native/checker provenance. The earlier stale-inventory dev failure is documented
+in the handoff and is not archived as a passing run. Clean backend/CCC provenance
+remains exactly `16e6b721`.

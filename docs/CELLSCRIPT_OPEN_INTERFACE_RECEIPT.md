@@ -236,3 +236,21 @@ dependencies, missing/stale locks and environments, invalid entry/target request
 oversized files, excessive module count/depth and Unix symlink loops. Whole H1
 codec/executable availability, stable package/interface identity, deployment
 history, all-member admission, H2 runtime handles and #29 remain outstanding.
+
+## Finite Type-policy receipt prerequisite
+
+The [finite checked policy receipt](FIXED_POLICY_RECEIPT.md) now composes actual
+private module/codec/code-origin/target proofs with the checked declared API,
+entry contract, original four-file byte hashes/lengths and artifact report.
+Native code-catalog v3 requires it for every candidate. It covers only the
+unit/scalar/flat-unsigned-Cell Type-policy profile; public constants reject and
+generic declarations remain non-executable. Its separate finite receipt schema
+is not the complete `cellscript-open-interface-receipt-v1` proposed above.
+
+Exact input rechecks detect bundle, transaction, selected-index and complete
+Script substitution after construction. Directional required/candidate matching
+uses actual privately checked module proofs and permits only their supported
+conservative relation. Source publisher authority, version/status/floors,
+authenticated Type history, active chain context, immutable authorization,
+complete general public codecs and H2 remain required. No full H1, source handle,
+behavioral equivalence, peer execution or stable admission is claimed.

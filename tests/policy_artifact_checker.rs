@@ -214,6 +214,216 @@ fn fixed_external_codec_binds_machine_bytes_without_claiming_predicate_equivalen
     }
 }
 
+fn receipt_bundle(fixture: &Fixture) -> [Vec<u8>; 4] {
+    [
+        fixture.artifact.clone(),
+        serde_json::to_vec(&fixture.metadata).unwrap(),
+        serde_json::to_vec(&fixture.record).unwrap(),
+        serde_json::to_vec(&fixture.source_map).unwrap(),
+    ]
+}
+fn receipt_deployment(fixture: &Fixture, args: Vec<u8>) -> (Vec<u8>, Vec<u8>) {
+    use ckb_testtool::ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*};
+    let lock = packed::Script::new_builder().code_hash([9u8; 32].pack()).hash_type(2u8).args(Bytes::new().pack()).build();
+    let type_script =
+        packed::Script::new_builder().code_hash([8u8; 32].pack()).hash_type(1u8).args(Bytes::from(vec![4; 32]).pack()).build();
+    let tx = TransactionBuilder::default()
+        .input(
+            packed::CellInput::new_builder()
+                .previous_output(packed::OutPoint::new_builder().tx_hash([7u8; 32].pack()).index(3u32).build())
+                .build(),
+        )
+        .output(
+            packed::CellOutput::new_builder().capacity(1000000000000u64).lock(lock).type_(Some(type_script.clone()).pack()).build(),
+        )
+        .output_data(Bytes::from(fixture.artifact.clone()).pack())
+        .build();
+    let type_hash = fixture.metadata["target_profile"]["name"] == "ckb-type-hash";
+    let selected = packed::Script::new_builder()
+        .code_hash(if type_hash { type_script.calc_script_hash() } else { packed::CellOutput::calc_data_hash(&fixture.artifact) })
+        .hash_type(if type_hash { 1u8 } else { 4u8 })
+        .args(Bytes::from(args).pack())
+        .build();
+    (tx.data().raw().as_slice().to_vec(), selected.as_slice().to_vec())
+}
+fn fixed_policy_receipt(
+    fixture: &Fixture,
+    args: Vec<u8>,
+) -> Result<cellscript_artifact_checker::fixed_policy_receipt::CheckedFixedPolicyReceipt, CheckerError> {
+    let bytes = receipt_bundle(fixture);
+    let (raw, script) = receipt_deployment(fixture, args);
+    cellscript_artifact_checker::fixed_policy_receipt::check_fixed_policy_receipt(
+        bytes.each_ref().map(Vec::as_slice),
+        &raw,
+        0,
+        &script,
+        &CheckerBudgets::default(),
+    )
+}
+#[test]
+fn fixed_policy_receipt_recomputes_complete_finite_fields_from_actual_inputs() {
+    for opt in 0..=3 {
+        for target in ["ckb", "ckb-type-hash"] {
+            let mut declaration = declaration();
+            declaration.actions.retain(|action| action.action == "burn");
+            declaration.common_checks.clear();
+            let fixture = Fixture::new_source_with_target(EXTERNAL_SOURCE, CellScriptEdition::Edition2026, opt, declaration, target);
+            let bytes = receipt_bundle(&fixture);
+            let (raw, script) = receipt_deployment(&fixture, vec![1, 2, 3]);
+            let checked = fixed_policy_receipt(&fixture, vec![1, 2, 3]).unwrap();
+            checked.check_unchanged_inputs(bytes.each_ref().map(Vec::as_slice), &raw, 0, &script).unwrap();
+            let record: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
+            assert_eq!(record["schema"], "cellscript-fixed-policy-interface-receipt-v1");
+            assert_eq!(record["declared_interface"], fixture.metadata["public_interface"]);
+            assert_eq!(
+                record["entry_contract"],
+                serde_json::to_value(&fixture.record.typed_semantics.foundation.entry_contract).unwrap()
+            );
+            assert_eq!(record["entry_contract"]["script_role"], "type");
+            let origin = checked.target_origin().origin();
+            assert_eq!(record["module_contract"], origin.codec().parameters().module_projection().identity());
+            assert_eq!(record["external_codec"], origin.codec().identity());
+            assert_eq!(record["code_origin"], origin.identity());
+            assert_eq!(record["target_selection"], checked.target_origin().identity());
+            for (index, input) in bytes.iter().enumerate() {
+                assert_eq!(record["bundle_byte_lengths"][index], input.len());
+                assert_eq!(record["bundle_byte_hashes"][index], code_origin_hex(&cellscript_artifact_checker::ckb_blake2b256(input)));
+            }
+            assert_eq!(record["artifact_report"], serde_json::to_value(checked.artifact_report()).unwrap());
+            assert!(!checked.artifact_report().semantic_equivalence_claimed);
+            assert_eq!(checked.artifact_report().chain_evidence, cellscript_artifact_checker::EvidenceState::NotProvided);
+            assert_eq!(checked.artifact_report().ckb_vm_evidence, cellscript_artifact_checker::EvidenceState::NotExecuted);
+            let mut material = b"cellscript-fixed-policy-interface-receipt-id-v1\0".to_vec();
+            material.extend_from_slice(&checked.canonical_bytes().unwrap());
+            assert_eq!(checked.identity(), code_origin_hex(&cellscript_artifact_checker::ckb_blake2b256(&material)));
+            assert_eq!(checked.identity(), fixed_policy_receipt(&fixture, vec![1, 2, 3]).unwrap().identity());
+            assert_ne!(checked.identity(), fixed_policy_receipt(&fixture, vec![1, 2, 4]).unwrap().identity());
+        }
+    }
+}
+#[test]
+fn fixed_policy_receipts_compare_directionally_without_predicate_or_deployment_equivalence() {
+    for opt in 0..=3 {
+        let required = fixed_policy_receipt(&external_fixture(EXTERNAL_SOURCE, opt), vec![1]).unwrap();
+        let other =
+            fixed_policy_receipt(&external_fixture(&EXTERNAL_SOURCE.replace("token.amount > 0", "token.amount == 7"), opt), vec![2])
+                .unwrap();
+        required.check_required_contracts(&other).unwrap();
+        assert_ne!(required.identity(), other.identity());
+        assert_ne!(required.target_origin().origin().artifact_hash(), other.target_origin().origin().artifact_hash());
+        for source in [
+            EXTERNAL_SOURCE.replace("amount: u64", "amount: u32"),
+            EXTERNAL_SOURCE.replace("witness value: u64", "witness value: u32"),
+        ] {
+            let narrowed = fixed_policy_receipt(&external_fixture(&source, opt), vec![1]).unwrap();
+            assert!(required.check_required_contracts(&narrowed).is_err());
+        }
+        let source = format!("{EXTERNAL_SOURCE}\naction audit(input token: Token, witness value: u64) {{ verification require token.amount > 0 require value > 0 consume token }}");
+        let mut declaration = declaration();
+        declaration.actions.retain(|action| action.action == "burn");
+        declaration.actions.push(ArtifactAction { tag: 55, action: "audit".into() });
+        declaration.common_checks.clear();
+        let extension =
+            fixed_policy_receipt(&Fixture::new_source_with(&source, CellScriptEdition::Edition2026, opt, declaration), vec![3])
+                .unwrap();
+        required.check_required_contracts(&extension).unwrap();
+        assert!(extension.check_required_contracts(&required).is_err());
+    }
+}
+#[test]
+fn fixed_policy_receipt_rejects_unproven_constants_and_preserves_declaration_only_templates() {
+    for opt in 0..=3 {
+        let fixture = external_fixture(&format!("{EXTERNAL_SOURCE}\npublic const LIMIT: u64 = 7"), opt);
+        assert!(fixed_external_codec(&fixture).is_ok());
+        let error = fixed_policy_receipt(&fixture, vec![1]).unwrap_err();
+        assert!(error.message.contains("public constant values"), "{error:?}");
+        let fixture = external_fixture(&format!("{EXTERNAL_SOURCE}\npublic struct Pair<T: fixed_value> {{ value: T }}\npublic fn first<T: fixed_value>(value: T) -> T {{ value }}"), opt);
+        let checked = fixed_policy_receipt(&fixture, vec![1]).unwrap();
+        let record: Value = serde_json::from_slice(&checked.target_origin().origin().codec().canonical_bytes().unwrap()).unwrap();
+        assert!(record["callables"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["availability"] == "declaration-only" && entry["entry"].is_null()));
+        assert!(record["public_layouts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["availability"] == "declaration-only" && entry["width"].is_null()));
+    }
+}
+#[test]
+fn fixed_policy_receipt_detects_postcheck_substitution_of_every_exact_input() {
+    use cellscript_artifact_checker::fixed_policy_receipt::check_fixed_policy_receipt;
+    for opt in 0..=3 {
+        let fixture = external_fixture(EXTERNAL_SOURCE, opt);
+        let checked = fixed_policy_receipt(&fixture, vec![1]).unwrap();
+        let original = receipt_bundle(&fixture);
+        let (raw, script) = receipt_deployment(&fixture, vec![1]);
+        for index in 0..4 {
+            let mut changed = original.clone();
+            changed[index].push(b'\n');
+            assert!(checked
+                .check_unchanged_inputs(changed.each_ref().map(Vec::as_slice), &raw, 0, &script)
+                .unwrap_err()
+                .message
+                .contains("changed"));
+        }
+        let mut altered_raw = raw.clone();
+        *altered_raw.last_mut().unwrap() ^= 1;
+        assert!(checked.check_unchanged_inputs(original.each_ref().map(Vec::as_slice), &altered_raw, 0, &script).is_err());
+        assert!(checked.check_unchanged_inputs(original.each_ref().map(Vec::as_slice), &raw, 1, &script).is_err());
+        let (_, other_script) = receipt_deployment(&fixture, vec![2]);
+        assert!(checked.check_unchanged_inputs(original.each_ref().map(Vec::as_slice), &raw, 0, &other_script).is_err());
+        // A semantically identical valid metadata encoding is a distinct frozen tuple.
+        let mut pretty = original.clone();
+        pretty[1] = serde_json::to_vec_pretty(&fixture.metadata).unwrap();
+        let other =
+            check_fixed_policy_receipt(pretty.each_ref().map(Vec::as_slice), &raw, 0, &script, &CheckerBudgets::default()).unwrap();
+        checked.check_required_contracts(&other).unwrap();
+        assert_ne!(checked.identity(), other.identity());
+    }
+}
+#[test]
+fn fixed_policy_receipt_bounds_creation_and_substitution_checks_before_any_parser_or_hash() {
+    use cellscript_artifact_checker::fixed_policy_receipt::check_fixed_policy_receipt;
+    let fixture = external_fixture(EXTERNAL_SOURCE, 0);
+    let checked = fixed_policy_receipt(&fixture, vec![1]).unwrap();
+    let original = receipt_bundle(&fixture);
+    let (raw, script) = receipt_deployment(&fixture, vec![1]);
+    for field in ["artifact", "record", "source-map"] {
+        let mut budgets = CheckerBudgets::default();
+        match field {
+            "artifact" => budgets.artifact_bytes = 0,
+            "record" => budgets.record_bytes = 0,
+            _ => budgets.source_map_bytes = 0,
+        }
+        assert_eq!(
+            check_fixed_policy_receipt(original.each_ref().map(Vec::as_slice), &raw, 0, &script, &budgets).unwrap_err().code,
+            CheckerRejectionCode::V2400BudgetExceeded
+        );
+    }
+    let oversized = vec![0; 4 * 1024 * 1024 + 1];
+    assert_eq!(
+        check_fixed_policy_receipt([&oversized, &[], &[], &[]], &[], 0, &[], &CheckerBudgets::default()).unwrap_err().code,
+        CheckerRejectionCode::V2400BudgetExceeded
+    );
+    assert_eq!(
+        checked.check_unchanged_inputs([&oversized, &[], &[], &[]], &[], 0, &[]).unwrap_err().code,
+        CheckerRejectionCode::V2400BudgetExceeded
+    );
+    let limit = vec![0; 4 * 1024 * 1024];
+    for constructor in [true, false] {
+        let bundle = [limit.as_slice(); 4];
+        let error = if constructor {
+            check_fixed_policy_receipt(bundle, &[0], 0, &[], &CheckerBudgets::default()).unwrap_err()
+        } else {
+            checked.check_unchanged_inputs(bundle, &[0], 0, &[]).unwrap_err()
+        };
+        assert_eq!(error.code, CheckerRejectionCode::V2400BudgetExceeded);
+    }
+}
+
 fn code_origin_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
