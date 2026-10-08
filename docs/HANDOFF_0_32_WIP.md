@@ -930,3 +930,55 @@ Six focused field tests pass in `.cap/logs/1791477793-68808.log`, including
 positives. The exact updated sources still require strict clippy and fresh dev
 before their signed commit, and a clean backend gate before push. Whole CI
 remains deferred; complete H1/H2 and the remaining issue queue are not done.
+
+
+## Field/register closure and finite external availability follow-up
+
+The exact staged field, shared register and syscall source state passed full
+worktree dev in `.cap/logs/1791478438-82279.log` (95,361 bytes), then was
+G-signed as `588f6a2821a00ab561ced676ad522a6d874f5ca6`. Clean root adopted
+that commit and is running the matching pinned backend with CCC before push.
+Its all-field focused tests reject 160 fully rebound counterexamples; actual
+unsigned byte oracles remain in the dev gate. Full CI remains deferred.
+
+The next #28 slice combines actual public policy dispatch availability, flat
+unsigned public layouts, fixed witness decoding, Cell field/storage evidence
+and the actual external scalar source-slot reception. See
+`docs/FIXED_EXTERNAL_CODEC.md` for its deliberately finite profile. Pruned
+public functions and retained helpers without external dispatch reject;
+uninstantiated generic declarations remain non-executable. It does not supply
+full H1/H2, general outputs/helpers, verifier-specific ABI, nominal I, actual
+deployment/history/authorization, #29 or #44–#46. Tests and formal gates for
+this new slice are pending. Independent security review remains unassigned.
+
+
+The four focused external-codec tests pass in
+`.cap/logs/1791479803-21936.log`: 20 O0–O3 typed scalar fixtures and 40
+fully rebound scalar-spill changes that ordinary/Cell field checking accepts
+but the stronger external reception check rejects; 24 unsupported/pruned/output/
+multi-Cell cases; absent public generic declarations and actual retained type/
+function instances. Optimization can erase an inlined function instance; tests
+then require declaration-only availability and no retained function entry.
+The implementation matches actual `struct`/`enum` kinds, not a fictitious
+`type` instance kind. No generic executable ABI is inferred from source calls.
+
+Four focused real VM certificate tests pass in
+`.cap/logs/1791479853-23160.log`. The new scalar-witness test includes 40
+positive runs, 80 truncated/appended negatives (exit 25), 128 byte/signed-value
+negatives (exit 5) and literal byte oracles; the existing unsigned Cell-field
+oracle now additionally requires the external certificate. Final resource
+output, formatting, strict clippy, inventory, full dev and matching backend
+for this slice remain pending. It does not complete H1/H2 or change CI deferral.
+
+
+Updated strict compiler/checker clippy passes in
+`.cap/logs/1791479926-24843.log`. Final focused scalar VM resource output
+passes in `.cap/logs/1791479977-25830.log`; all 40 rows and the normalized
+raw log are archived under `docs/reports/0.32/external-codec/`, with staged
+source SHA-256 bindings and honest dirty-checkout provenance. These fixtures
+measure 9,081–9,390
+CKB-VM cycles, 3,528–3,664
+ELF bytes and 9–16 inner argument bytes. They are not general #46 host/prover
+benchmarks or full transaction/deployment evidence. The 30M runner ceiling is
+unchanged. Inventory refresh passes in `.cap/logs/1791479987-25947.log`.
+The staged source state is now frozen for full dev before signing.

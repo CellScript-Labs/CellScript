@@ -2,6 +2,7 @@ mod bindings;
 mod checker;
 mod elf;
 pub mod entry_codec;
+pub mod external_codec;
 mod failure;
 pub mod fixed_cell_fields;
 pub mod fixed_cell_reads;

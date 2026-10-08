@@ -1,0 +1,393 @@
+{
+  "claims": {
+    "behavioral_equivalence": false,
+    "full_h1": false,
+    "full_h2": false,
+    "independent_security_review": false,
+    "production_admission": false
+  },
+  "compiler_checkout_base_commit": "588f6a2821a00ab561ced676ad522a6d874f5ca6",
+  "compiler_checkout_dirty": true,
+  "focused_test": "artifact::vm_tests::certified_external_scalar_reception_has_real_vm_witness_oracles",
+  "profile": "policy-unit-scalars-flat-unsigned-cell-v1",
+  "raw_log": {
+    "path": "scalar-vm.log.gz",
+    "raw_bytes": 8055,
+    "raw_sha256": "a1232f5c1e2f2988f7b9858d6f9e9ddda23db77caf593666e0d69e2241ee046a",
+    "stored_bytes": 1170,
+    "stored_sha256": "7975e373451ddebd2cfb3c67ea20985aefd31de6818d263144b67050adbec343"
+  },
+  "scalar_vm_resources": [
+    {
+      "codec_identity": "a01b240dc4ffb75dcdb7d3ebc71201a67f2c5de795e1541679a101ae10add03c",
+      "cycles": 9104,
+      "elf_bytes": 3560,
+      "inner_args_bytes": 9,
+      "opt_level": 0,
+      "prepend_input": false,
+      "type": "u8"
+    },
+    {
+      "codec_identity": "a01b240dc4ffb75dcdb7d3ebc71201a67f2c5de795e1541679a101ae10add03c",
+      "cycles": 9104,
+      "elf_bytes": 3560,
+      "inner_args_bytes": 9,
+      "opt_level": 0,
+      "prepend_input": true,
+      "type": "u8"
+    },
+    {
+      "codec_identity": "e4d550cf1b60b9654fc0bddd89bd057475f132caa713f0b8d368bd04d7df9cec",
+      "cycles": 9081,
+      "elf_bytes": 3528,
+      "inner_args_bytes": 9,
+      "opt_level": 1,
+      "prepend_input": false,
+      "type": "u8"
+    },
+    {
+      "codec_identity": "e4d550cf1b60b9654fc0bddd89bd057475f132caa713f0b8d368bd04d7df9cec",
+      "cycles": 9081,
+      "elf_bytes": 3528,
+      "inner_args_bytes": 9,
+      "opt_level": 1,
+      "prepend_input": true,
+      "type": "u8"
+    },
+    {
+      "codec_identity": "e4d550cf1b60b9654fc0bddd89bd057475f132caa713f0b8d368bd04d7df9cec",
+      "cycles": 9081,
+      "elf_bytes": 3528,
+      "inner_args_bytes": 9,
+      "opt_level": 2,
+      "prepend_input": false,
+      "type": "u8"
+    },
+    {
+      "codec_identity": "e4d550cf1b60b9654fc0bddd89bd057475f132caa713f0b8d368bd04d7df9cec",
+      "cycles": 9081,
+      "elf_bytes": 3528,
+      "inner_args_bytes": 9,
+      "opt_level": 2,
+      "prepend_input": true,
+      "type": "u8"
+    },
+    {
+      "codec_identity": "e4d550cf1b60b9654fc0bddd89bd057475f132caa713f0b8d368bd04d7df9cec",
+      "cycles": 9081,
+      "elf_bytes": 3528,
+      "inner_args_bytes": 9,
+      "opt_level": 3,
+      "prepend_input": false,
+      "type": "u8"
+    },
+    {
+      "codec_identity": "e4d550cf1b60b9654fc0bddd89bd057475f132caa713f0b8d368bd04d7df9cec",
+      "cycles": 9081,
+      "elf_bytes": 3528,
+      "inner_args_bytes": 9,
+      "opt_level": 3,
+      "prepend_input": true,
+      "type": "u8"
+    },
+    {
+      "codec_identity": "006e59b43e10412d2b99faa8af376a40b22285dace111d140f8a93d85c09c255",
+      "cycles": 9144,
+      "elf_bytes": 3576,
+      "inner_args_bytes": 10,
+      "opt_level": 0,
+      "prepend_input": false,
+      "type": "u16"
+    },
+    {
+      "codec_identity": "006e59b43e10412d2b99faa8af376a40b22285dace111d140f8a93d85c09c255",
+      "cycles": 9144,
+      "elf_bytes": 3576,
+      "inner_args_bytes": 10,
+      "opt_level": 0,
+      "prepend_input": true,
+      "type": "u16"
+    },
+    {
+      "codec_identity": "d80338a70c822c237e417f901b47485e4b5e2044ea3e8d1cc82300faef387747",
+      "cycles": 9119,
+      "elf_bytes": 3536,
+      "inner_args_bytes": 10,
+      "opt_level": 1,
+      "prepend_input": false,
+      "type": "u16"
+    },
+    {
+      "codec_identity": "d80338a70c822c237e417f901b47485e4b5e2044ea3e8d1cc82300faef387747",
+      "cycles": 9119,
+      "elf_bytes": 3536,
+      "inner_args_bytes": 10,
+      "opt_level": 1,
+      "prepend_input": true,
+      "type": "u16"
+    },
+    {
+      "codec_identity": "d80338a70c822c237e417f901b47485e4b5e2044ea3e8d1cc82300faef387747",
+      "cycles": 9119,
+      "elf_bytes": 3536,
+      "inner_args_bytes": 10,
+      "opt_level": 2,
+      "prepend_input": false,
+      "type": "u16"
+    },
+    {
+      "codec_identity": "d80338a70c822c237e417f901b47485e4b5e2044ea3e8d1cc82300faef387747",
+      "cycles": 9119,
+      "elf_bytes": 3536,
+      "inner_args_bytes": 10,
+      "opt_level": 2,
+      "prepend_input": true,
+      "type": "u16"
+    },
+    {
+      "codec_identity": "d80338a70c822c237e417f901b47485e4b5e2044ea3e8d1cc82300faef387747",
+      "cycles": 9119,
+      "elf_bytes": 3536,
+      "inner_args_bytes": 10,
+      "opt_level": 3,
+      "prepend_input": false,
+      "type": "u16"
+    },
+    {
+      "codec_identity": "d80338a70c822c237e417f901b47485e4b5e2044ea3e8d1cc82300faef387747",
+      "cycles": 9119,
+      "elf_bytes": 3536,
+      "inner_args_bytes": 10,
+      "opt_level": 3,
+      "prepend_input": true,
+      "type": "u16"
+    },
+    {
+      "codec_identity": "344c7402597355a69c5c7e63fd1cf498bdb963d40bafb07268b3ff4d2be5420d",
+      "cycles": 9224,
+      "elf_bytes": 3600,
+      "inner_args_bytes": 12,
+      "opt_level": 0,
+      "prepend_input": false,
+      "type": "u32"
+    },
+    {
+      "codec_identity": "344c7402597355a69c5c7e63fd1cf498bdb963d40bafb07268b3ff4d2be5420d",
+      "cycles": 9224,
+      "elf_bytes": 3600,
+      "inner_args_bytes": 12,
+      "opt_level": 0,
+      "prepend_input": true,
+      "type": "u32"
+    },
+    {
+      "codec_identity": "047c0901f69ced42a6ca75a278a2456aae6e312a3e1eb6985efd525a70a7f595",
+      "cycles": 9201,
+      "elf_bytes": 3568,
+      "inner_args_bytes": 12,
+      "opt_level": 1,
+      "prepend_input": false,
+      "type": "u32"
+    },
+    {
+      "codec_identity": "047c0901f69ced42a6ca75a278a2456aae6e312a3e1eb6985efd525a70a7f595",
+      "cycles": 9201,
+      "elf_bytes": 3568,
+      "inner_args_bytes": 12,
+      "opt_level": 1,
+      "prepend_input": true,
+      "type": "u32"
+    },
+    {
+      "codec_identity": "047c0901f69ced42a6ca75a278a2456aae6e312a3e1eb6985efd525a70a7f595",
+      "cycles": 9201,
+      "elf_bytes": 3568,
+      "inner_args_bytes": 12,
+      "opt_level": 2,
+      "prepend_input": false,
+      "type": "u32"
+    },
+    {
+      "codec_identity": "047c0901f69ced42a6ca75a278a2456aae6e312a3e1eb6985efd525a70a7f595",
+      "cycles": 9201,
+      "elf_bytes": 3568,
+      "inner_args_bytes": 12,
+      "opt_level": 2,
+      "prepend_input": true,
+      "type": "u32"
+    },
+    {
+      "codec_identity": "047c0901f69ced42a6ca75a278a2456aae6e312a3e1eb6985efd525a70a7f595",
+      "cycles": 9201,
+      "elf_bytes": 3568,
+      "inner_args_bytes": 12,
+      "opt_level": 3,
+      "prepend_input": false,
+      "type": "u32"
+    },
+    {
+      "codec_identity": "047c0901f69ced42a6ca75a278a2456aae6e312a3e1eb6985efd525a70a7f595",
+      "cycles": 9201,
+      "elf_bytes": 3568,
+      "inner_args_bytes": 12,
+      "opt_level": 3,
+      "prepend_input": true,
+      "type": "u32"
+    },
+    {
+      "codec_identity": "7b7d10711edc12474bc767827c397982d76125bc7ecfc2ba37e2369b13289eb9",
+      "cycles": 9389,
+      "elf_bytes": 3664,
+      "inner_args_bytes": 16,
+      "opt_level": 0,
+      "prepend_input": false,
+      "type": "u64"
+    },
+    {
+      "codec_identity": "7b7d10711edc12474bc767827c397982d76125bc7ecfc2ba37e2369b13289eb9",
+      "cycles": 9389,
+      "elf_bytes": 3664,
+      "inner_args_bytes": 16,
+      "opt_level": 0,
+      "prepend_input": true,
+      "type": "u64"
+    },
+    {
+      "codec_identity": "c2d194d06c1f1687042e438276616b2a4e8908aecd6c8c9341646d047e7d2271",
+      "cycles": 9366,
+      "elf_bytes": 3632,
+      "inner_args_bytes": 16,
+      "opt_level": 1,
+      "prepend_input": false,
+      "type": "u64"
+    },
+    {
+      "codec_identity": "c2d194d06c1f1687042e438276616b2a4e8908aecd6c8c9341646d047e7d2271",
+      "cycles": 9366,
+      "elf_bytes": 3632,
+      "inner_args_bytes": 16,
+      "opt_level": 1,
+      "prepend_input": true,
+      "type": "u64"
+    },
+    {
+      "codec_identity": "c2d194d06c1f1687042e438276616b2a4e8908aecd6c8c9341646d047e7d2271",
+      "cycles": 9366,
+      "elf_bytes": 3632,
+      "inner_args_bytes": 16,
+      "opt_level": 2,
+      "prepend_input": false,
+      "type": "u64"
+    },
+    {
+      "codec_identity": "c2d194d06c1f1687042e438276616b2a4e8908aecd6c8c9341646d047e7d2271",
+      "cycles": 9366,
+      "elf_bytes": 3632,
+      "inner_args_bytes": 16,
+      "opt_level": 2,
+      "prepend_input": true,
+      "type": "u64"
+    },
+    {
+      "codec_identity": "c2d194d06c1f1687042e438276616b2a4e8908aecd6c8c9341646d047e7d2271",
+      "cycles": 9366,
+      "elf_bytes": 3632,
+      "inner_args_bytes": 16,
+      "opt_level": 3,
+      "prepend_input": false,
+      "type": "u64"
+    },
+    {
+      "codec_identity": "c2d194d06c1f1687042e438276616b2a4e8908aecd6c8c9341646d047e7d2271",
+      "cycles": 9366,
+      "elf_bytes": 3632,
+      "inner_args_bytes": 16,
+      "opt_level": 3,
+      "prepend_input": true,
+      "type": "u64"
+    },
+    {
+      "codec_identity": "7259c225de398a36823eab2637db4afac57d3b1fe9471d9dcd18b4b2acae0c5d",
+      "cycles": 9390,
+      "elf_bytes": 3664,
+      "inner_args_bytes": 16,
+      "opt_level": 0,
+      "prepend_input": false,
+      "type": "i32"
+    },
+    {
+      "codec_identity": "7259c225de398a36823eab2637db4afac57d3b1fe9471d9dcd18b4b2acae0c5d",
+      "cycles": 9390,
+      "elf_bytes": 3664,
+      "inner_args_bytes": 16,
+      "opt_level": 0,
+      "prepend_input": true,
+      "type": "i32"
+    },
+    {
+      "codec_identity": "31227bac77e146fb4a3034cf23fe76b4e6767d7dfbb58228a36384fd1e6f2ad7",
+      "cycles": 9368,
+      "elf_bytes": 3632,
+      "inner_args_bytes": 16,
+      "opt_level": 1,
+      "prepend_input": false,
+      "type": "i32"
+    },
+    {
+      "codec_identity": "31227bac77e146fb4a3034cf23fe76b4e6767d7dfbb58228a36384fd1e6f2ad7",
+      "cycles": 9368,
+      "elf_bytes": 3632,
+      "inner_args_bytes": 16,
+      "opt_level": 1,
+      "prepend_input": true,
+      "type": "i32"
+    },
+    {
+      "codec_identity": "31227bac77e146fb4a3034cf23fe76b4e6767d7dfbb58228a36384fd1e6f2ad7",
+      "cycles": 9368,
+      "elf_bytes": 3632,
+      "inner_args_bytes": 16,
+      "opt_level": 2,
+      "prepend_input": false,
+      "type": "i32"
+    },
+    {
+      "codec_identity": "31227bac77e146fb4a3034cf23fe76b4e6767d7dfbb58228a36384fd1e6f2ad7",
+      "cycles": 9368,
+      "elf_bytes": 3632,
+      "inner_args_bytes": 16,
+      "opt_level": 2,
+      "prepend_input": true,
+      "type": "i32"
+    },
+    {
+      "codec_identity": "31227bac77e146fb4a3034cf23fe76b4e6767d7dfbb58228a36384fd1e6f2ad7",
+      "cycles": 9368,
+      "elf_bytes": 3632,
+      "inner_args_bytes": 16,
+      "opt_level": 3,
+      "prepend_input": false,
+      "type": "i32"
+    },
+    {
+      "codec_identity": "31227bac77e146fb4a3034cf23fe76b4e6767d7dfbb58228a36384fd1e6f2ad7",
+      "cycles": 9368,
+      "elf_bytes": 3632,
+      "inner_args_bytes": 16,
+      "opt_level": 3,
+      "prepend_input": true,
+      "type": "i32"
+    }
+  ],
+  "schema": "cellscript-fixed-external-codec-vm-evidence-v1",
+  "scope": "literal byte oracles in ckb-testtool; runtime only; no deployment or production admission",
+  "source_sha256": {
+    "crates/cellscript-artifact-checker/src/entry_codec.rs": "6e1061217c9b3d515923e0c0f8bb48b2996f9e1ac258e5082585182cb3ad1db5",
+    "crates/cellscript-artifact-checker/src/external_codec.rs": "0c25065fcb286e8f8a60845c3942b055b5afc6e17486b67679a3e7c718fd3876",
+    "crates/cellscript-artifact-checker/src/external_codec/prologue.rs": "db5435cc9651e4feced078a91e88cb980148f0dc4e4908c03896c4453e1a73ce",
+    "crates/cellscript-artifact-checker/src/fixed_cell_storage.rs": "7f0e7f6db5ea867d5c2203a57567447e7d6e23935152e3ad72ded6772c01c227",
+    "crates/cellscript-artifact-checker/src/lib.rs": "ff1f42cc6d945de1e47497e7ba810897583fd641d99306262502c7be0905c576",
+    "src/artifact/vm_tests.rs": "4e7f1075f2cec2079b5befa65cb9da030aaf42f02f9dc006c99690f3ed490a7a"
+  },
+  "vm_cycle_ceiling": 30000000
+}

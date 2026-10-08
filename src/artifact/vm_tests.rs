@@ -289,6 +289,17 @@ fn certified_fixed_cell_scalar_fields_have_real_unsigned_byte_oracles() {
                 &cellscript_artifact_checker::CheckerBudgets::default(),
             )
             .unwrap();
+            let external = cellscript_artifact_checker::external_codec::check_fixed_external_codec(
+                [
+                    &compiled.artifact_bytes,
+                    &serde_json::to_vec(&compiled.metadata).unwrap(),
+                    &serde_json::to_vec(compiled.verified_lowering_record.as_ref().unwrap()).unwrap(),
+                    &serde_json::to_vec(compiled.source_artifact_map.as_ref().unwrap()).unwrap(),
+                ],
+                &cellscript_artifact_checker::CheckerBudgets::default(),
+            )
+            .unwrap();
+            assert_eq!(external.fields().unwrap().identity(), evidence.identity());
             assert!(!evidence.storage().reads().module_projection().artifact_report().semantic_equivalence_claimed);
             for prepend in [false, true] {
                 let case = || {
@@ -318,6 +329,91 @@ fn certified_fixed_cell_scalar_fields_have_real_unsigned_byte_oracles() {
             }
         }
     }
+}
+
+#[test]
+fn certified_external_scalar_reception_has_real_vm_witness_oracles() {
+    let mut resources = Vec::new();
+    for ty in ["u8", "u16", "u32", "u64", "i32"] {
+        let (parameters, predicate, values, oracle) = match ty {
+            "u8" => ("witness value: u8", "require value == 129", vec![EntryWitnessArg::U8(129)], vec![129]),
+            "u16" => ("witness value: u16", "require value == 513", vec![EntryWitnessArg::U16(513)], vec![1, 2]),
+            "u32" => ("witness value: u32", "require value == 67305985", vec![EntryWitnessArg::U32(67305985)], vec![1, 2, 3, 4]),
+            "u64" => (
+                "witness value: u64",
+                "require value == 123456789012345",
+                vec![EntryWitnessArg::U64(123456789012345)],
+                vec![121, 223, 13, 134, 72, 112, 0, 0],
+            ),
+            _ => (
+                "witness value: i32, witness zero: i32",
+                "require value < zero",
+                vec![EntryWitnessArg::I32(-1), EntryWitnessArg::I32(0)],
+                vec![255, 255, 255, 255, 0, 0, 0, 0],
+            ),
+        };
+        let source = format!("module external_scalar_vm\nresource Token has store, consume {{ amount: u64 }}\naction burn(input before: Token, {parameters}) {{ verification require before.amount == 7 {predicate} consume before }}\n");
+        for opt_level in 0..=3 {
+            let mut selected = declaration();
+            selected.actions.retain(|action| action.tag == BURN);
+            selected.common_checks.clear();
+            let compiled = compile_artifact(
+                &source,
+                CompileOptions { source_contracts: true, opt_level, ..options() },
+                selected,
+                ExecutableSurfacePolicy::DenyFailClosed,
+            )
+            .unwrap();
+            let checked = cellscript_artifact_checker::external_codec::check_fixed_external_codec(
+                [
+                    &compiled.artifact_bytes,
+                    &serde_json::to_vec(&compiled.metadata).unwrap(),
+                    &serde_json::to_vec(compiled.verified_lowering_record.as_ref().unwrap()).unwrap(),
+                    &serde_json::to_vec(compiled.source_artifact_map.as_ref().unwrap()).unwrap(),
+                ],
+                &cellscript_artifact_checker::CheckerBudgets::default(),
+            )
+            .unwrap();
+            assert!(!checked.parameters().module_projection().artifact_report().semantic_equivalence_claimed);
+            let action = compiled.metadata.actions.iter().find(|action| action.name == "burn").unwrap();
+            let args = action.entry_witness_args(&values).unwrap();
+            assert_eq!(&args[..crate::ENTRY_WITNESS_ABI_MAGIC.len()], crate::ENTRY_WITNESS_ABI_MAGIC);
+            assert_eq!(&args[crate::ENTRY_WITNESS_ABI_MAGIC.len()..], oracle.as_slice());
+            for prepend in [false, true] {
+                let case = || {
+                    let mut case = Case::new(BURN, &[7], &[]);
+                    case.prepend_input = prepend;
+                    case
+                };
+                let run = |args: Vec<u8>| {
+                    execute(&compiled, case(), |_, script, _| encode_policy_witness_bundle(&[record(script, BURN, args)]).unwrap())
+                };
+                let cycles = run(args.clone()).unwrap();
+                resources.push(serde_json::json!({"type":ty,"opt_level":opt_level,"prepend_input":prepend,"cycles":cycles,"elf_bytes":compiled.artifact_bytes.len(),"inner_args_bytes":args.len(),"codec_identity":checked.identity()}));
+                for extend in [false, true] {
+                    let mut malformed = args.clone();
+                    if extend {
+                        malformed.push(0);
+                    } else {
+                        malformed.pop();
+                    }
+                    assert_exit(run(malformed).unwrap_err(), 25);
+                }
+                if ty == "i32" {
+                    let mut invalid = args.clone();
+                    invalid[crate::ENTRY_WITNESS_ABI_MAGIC.len() + 3] = 127;
+                    assert_exit(run(invalid).unwrap_err(), 5);
+                } else {
+                    for index in 0..oracle.len() {
+                        let mut invalid = args.clone();
+                        invalid[crate::ENTRY_WITNESS_ABI_MAGIC.len() + index] ^= 128;
+                        assert_exit(run(invalid).unwrap_err(), 5);
+                    }
+                }
+            }
+        }
+    }
+    println!("{}", serde_json::json!({"profile":"policy-unit-scalars-flat-unsigned-cell-v1","scalar_vm_resources":resources}));
 }
 
 #[test]

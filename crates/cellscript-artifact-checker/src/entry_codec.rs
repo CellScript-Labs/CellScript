@@ -53,7 +53,7 @@ pub(crate) struct Parameter {
     width_bytes: u32,
     pub(crate) payload_offset: Option<u32>,
     pub(crate) abi_index: u32,
-    abi_arguments: u32,
+    pub(crate) abi_arguments: u32,
 }
 #[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]

@@ -2,6 +2,14 @@
 
 ## Unreleased — 0.32
 
+Combine optional checked fixed policy codecs with actual public external
+availability and scalar ABI reception. Reject pruned or helper-only public
+callables, unsupported public layouts, changed witness-register spills and
+retained generic instances without an external profile. Uninstantiated generic
+declarations remain non-executable. This finite unit-result/flat-unsigned-Cell
+profile grants no full receipt or open admission; see
+`docs/FIXED_EXTERNAL_CODEC.md`.
+
 Independently check direct unsigned Cell field materializations, receiver
 dominance, protected caller storage and the membership helper's private-frame
 memory boundary. Bound inline capacity/hash writes and fix missed RV64 word

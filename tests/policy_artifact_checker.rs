@@ -60,6 +60,160 @@ struct Fixture {
     source_map: SourceArtifactMap,
 }
 
+fn fixed_external_codec(
+    fixture: &Fixture,
+) -> Result<cellscript_artifact_checker::external_codec::CheckedFixedExternalCodec, CheckerError> {
+    cellscript_artifact_checker::external_codec::check_fixed_external_codec(
+        [
+            &fixture.artifact,
+            &serde_json::to_vec(&fixture.metadata).unwrap(),
+            &serde_json::to_vec(&fixture.record).unwrap(),
+            &serde_json::to_vec(&fixture.source_map).unwrap(),
+        ],
+        &CheckerBudgets::default(),
+    )
+}
+fn external_fixture(source: &str, opt: u8) -> Fixture {
+    let mut selected = declaration();
+    selected.actions.retain(|action| action.action == "burn");
+    selected.common_checks.clear();
+    Fixture::new_source_with(source, CellScriptEdition::Edition2026, opt, selected)
+}
+const EXTERNAL_SOURCE: &str = r#"
+module external_codec
+resource Token has store, consume { amount: u64 }
+action burn(input token: Token, witness value: u64) {
+    verification require token.amount > 0 require value > 0 consume token
+}
+"#;
+#[test]
+fn fixed_external_codec_checks_complete_available_public_scalar_profile() {
+    for opt in 0..=3 {
+        for ty in ["u8", "u16", "u32", "u64", "i32"] {
+            let source = if ty == "i32" {
+                EXTERNAL_SOURCE
+                    .replace("witness value: u64", "witness value: i32, witness zero: i32")
+                    .replace("value > 0", "value > zero")
+            } else {
+                EXTERNAL_SOURCE.replace("witness value: u64", &format!("witness value: {ty}"))
+            };
+            let fixture = external_fixture(&source, opt);
+            let checked = fixed_external_codec(&fixture).unwrap();
+            let record: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
+            assert_eq!(record["callables"][0]["availability"], "external-policy-entry");
+            assert_eq!(record["public_layouts"][0]["width"], 8);
+            assert!(checked.fields().is_some());
+            let elf = parse_elf(&fixture.artifact, CheckerBudgets::default().instructions).unwrap();
+            let entry = fixture.record.entries.iter().find(|entry| entry.name == "burn").unwrap();
+            let address = fixture.record.blocks.iter().find(|block| block.id == entry.entry_block).unwrap().range.start + 24;
+            let original = elf.instructions.iter().find(|instruction| instruction.address == address).unwrap().word;
+            assert_eq!((original >> 20) & 31, 12);
+            for (mask, bits) in [(31 << 20, 17 << 20), (0x1f << 7, (original.wrapping_add(16 << 7)) & (0x1f << 7))] {
+                let mut changed = fixture.clone();
+                changed.replace_machine_word(address, (original & !mask) | bits);
+                changed.check().unwrap();
+                fixed_cell_fields(&changed).unwrap();
+                assert_eq!(fixed_external_codec(&changed).unwrap_err().code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+            }
+        }
+    }
+}
+#[test]
+fn fixed_external_codec_does_not_grant_pruned_helpers_outputs_or_unsupported_layouts() {
+    for opt in 0..=3 {
+        for extra in [
+            "public fn extra() { }",
+            "public struct Extra { value: bool }",
+            "public struct Extra { values: [u64; 2] }",
+            "public enum Extra { A, B }",
+        ] {
+            let fixture = external_fixture(&format!("{EXTERNAL_SOURCE}\n{extra}"), opt);
+            fixture.check().unwrap();
+            assert_eq!(fixed_external_codec(&fixture).unwrap_err().code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+        }
+        for source in [
+            "module output_external\nresource Token has store, consume { amount: u64 }\naction burn(witness recipient: Address) { verification create Token { amount: 7 } with_lock(recipient) }",
+            "module multiple_external\nresource Token has store, consume { amount: u64 }\naction burn(input left: Token, input right: Token) { verification require left.amount > 0 require right.amount > 0 consume left consume right }",
+        ] {
+            let fixture = external_fixture(source, opt);
+            assert_eq!(fixed_external_codec(&fixture).unwrap_err().code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+        }
+        let fixture = external_fixture(&format!("{EXTERNAL_SOURCE}\npublic fn first<T: fixed_value>(value: T) -> T {{ value }}"), opt);
+        let checked = fixed_external_codec(&fixture).unwrap();
+        let record: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
+        assert!(record["callables"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|callable| callable["availability"] == "declaration-only" && callable["entry"].is_null()));
+    }
+}
+#[test]
+fn fixed_external_codec_generic_instances_are_not_declaration_only() {
+    for opt in 0..=3 {
+        let declaration = "public struct Pair<T: fixed_value> { value: T }";
+        let absent = external_fixture(&format!("{EXTERNAL_SOURCE}\n{declaration}"), opt);
+        let checked = fixed_external_codec(&absent).unwrap();
+        let record: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
+        assert!(record["public_layouts"].as_array().unwrap().iter().any(|layout| layout["availability"] == "declaration-only"));
+        let instantiated =
+            EXTERNAL_SOURCE.replace("require value > 0", "let pair: Pair<u64> = Pair<u64> { value: value } require pair.value > 0");
+        let fixture = external_fixture(&format!("{instantiated}\n{declaration}"), opt);
+        assert!(fixture
+            .record
+            .typed_semantics
+            .instantiations
+            .iter()
+            .any(|instance| instance.kind == "struct" && instance.template == "Pair"));
+        let error = fixed_external_codec(&fixture).unwrap_err();
+        assert!(error.message.contains("generic concrete layout"), "{error:?}");
+        let instantiated = EXTERNAL_SOURCE.replace("require value > 0", "require first<u64>(value) > 0");
+        let fixture = external_fixture(&format!("{instantiated}\npublic fn first<T: fixed_value>(value: T) -> T {{ value }}"), opt);
+        if fixture
+            .record
+            .typed_semantics
+            .instantiations
+            .iter()
+            .any(|instance| instance.kind == "function" && instance.template == "first")
+        {
+            let error = fixed_external_codec(&fixture).unwrap_err();
+            assert!(error.message.contains("generic concrete instance"), "{error:?}");
+        } else {
+            // Inlining may erase the concrete helper and its instance record.
+            // That leaves a symbolic declaration, never an external entry.
+            assert!(fixture.record.typed_semantics.entries.iter().all(|entry| entry.kind != "function"));
+            let checked = fixed_external_codec(&fixture).unwrap();
+            let record: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
+            assert!(record["callables"].as_array().unwrap().iter().any(|callable| callable["declaration"] == "external_codec::first"
+                && callable["availability"] == "declaration-only"
+                && callable["entry"].is_null()));
+        }
+    }
+}
+
+#[test]
+fn fixed_external_codec_binds_machine_bytes_without_claiming_predicate_equivalence() {
+    for opt in 0..=3 {
+        let required = external_fixture(EXTERNAL_SOURCE, opt);
+        let other = external_fixture(&EXTERNAL_SOURCE.replace("token.amount > 0", "token.amount == 7"), opt);
+        let required_checked = fixed_external_codec(&required).unwrap();
+        let other_checked = fixed_external_codec(&other).unwrap();
+        required_checked
+            .parameters()
+            .module_projection()
+            .check_required_contracts(other_checked.parameters().module_projection())
+            .unwrap();
+        assert_ne!(required_checked.identity(), other_checked.identity());
+        let narrowed = external_fixture(&EXTERNAL_SOURCE.replace("amount: u64", "amount: u32"), opt);
+        let narrowed_checked = fixed_external_codec(&narrowed).unwrap();
+        assert!(required_checked
+            .parameters()
+            .module_projection()
+            .check_required_contracts(narrowed_checked.parameters().module_projection())
+            .is_err());
+    }
+}
+
 fn fixed_cell_reads(fixture: &Fixture) -> Result<cellscript_artifact_checker::fixed_cell_reads::CheckedFixedCellReads, CheckerError> {
     cellscript_artifact_checker::fixed_cell_reads::check_fixed_cell_reads(
         &fixture.artifact,

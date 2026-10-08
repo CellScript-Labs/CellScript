@@ -45,7 +45,7 @@ pub(crate) struct Storage {
     source_id: u64,
     abi_register: u32,
     pub(crate) pointer_offset: u32,
-    size_offset: u32,
+    pub(crate) size_offset: u32,
     pub(crate) buffer_offset: u32,
     pub(crate) spill_address: u64,
     pub(crate) receiver_start: u64,
