@@ -648,7 +648,7 @@ run_dev_gate() {
     run cargo check --locked -p cellscript-artifact-checker --all-targets
     run cargo test --locked -p cellscript-artifact-checker
     run cargo test --locked -p cellscript --test artifact_checker --test myelin_handoff \
-        --test interface_inspection --test policy_artifact_checker --test value_return_abi \
+        --test interface_inspection --test entry_selection --test policy_artifact_checker --test value_return_abi \
         --test vec_constructor --test bounded_byte_context
     run cargo test --locked -p cellscript deployment_line_handle --lib
     run cargo test --locked -p cellscript --test exact_script_handles

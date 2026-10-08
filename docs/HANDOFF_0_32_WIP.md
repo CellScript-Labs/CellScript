@@ -506,3 +506,21 @@ remains pending. The node harness now keeps its fallback public-test setup alive
 and explicitly passes its package path to both CCC workflows, so setting
 `CELLSCRIPT_COUNTER_CCC=1` does not require a separately generated setup package.
 No process-global environment mutation or production setup admission is added.
+
+The combined slice passed complete dev at `.cap/logs/1791445936-28775.log`,
+was signed as `670953c2`, and was pushed to `public/0.32`. Its clean backend
+attempt (`.cap/logs/1791446419-43116.log`) failed the imported-generic return
+regression before reaching node acceptance. The dedicated result checker compared
+callee/caller alias spellings directly instead of using the already checked
+generic instantiation's nominal alias set. Normalize source/caller field types
+only through that set, preserving declaration owner and type arguments; equal
+layout width never supplies identity. The existing 13 entry-selection, 24 policy
+mutation and seven return-ABI tests pass after correction. Add entry-selection
+coverage to dev so this imported return boundary is not omitted again.
+
+The full serial compiler suite then passed
+(`.cap/logs/1791447596-75012.log`), including the frozen costs and business
+fixtures. The node harness additionally requires the pinned acceptance receipt
+to identify the current clean CellScript commit and exports that source
+provenance in its own report; a stale passing receipt cannot stand in for a
+fresh source-bound node run. Full CI remains deferred as requested.

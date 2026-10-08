@@ -18,6 +18,10 @@ fn require(condition: bool, message: &str) -> Result<(), CheckerError> {
     }
 }
 
+fn same_nominal_type(left: &str, right: &str, aliases: &BTreeMap<&str, String>) -> bool {
+    crate::generic_projection::checked_source_type(left, aliases) == crate::generic_projection::checked_source_type(right, aliases)
+}
+
 fn result_width<'a>(record: &'a VerifiedLoweringRecord, entry: &TypedSemanticEntry) -> Option<(&'a str, u32)> {
     let ty = record.typed_semantics.types.iter().find(|ty| canonical_abi_type(&ty.name) == canonical_abi_type(&entry.return_type))?;
     (ty.kind == "struct").then_some((ty.name.as_str(), ty.encoded_size?))
@@ -77,6 +81,10 @@ fn argument_count(record: &VerifiedLoweringRecord, entry: &TypedSemanticEntry) -
 }
 
 pub(crate) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result<(), CheckerError> {
+    // Generic projection and value-ability validation ran before this boundary.
+    // Only aliases owned by the same checked instantiation may be substituted;
+    // equal widths or unqualified template names do not establish equivalence.
+    let aliases = crate::generic_projection::nominal_aliases(&record.typed_semantics);
     let mut checked_calls = BTreeSet::new();
     let mut uses_copy = false;
     for entry in &record.entries {
@@ -149,7 +157,7 @@ pub(crate) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Resu
                             .iter()
                             .find(|source| source.range.end == range.start)
                             .ok_or_else(|| error("copy lacks its adjacent source pointer range"))?;
-                        validate_source(record, elf, entry, typed, abi, source)?;
+                        validate_source(record, elf, entry, typed, abi, source, &aliases)?;
                         machine.registers[10] = Atom::Source;
                     }
                     machine.saved = Some(i64::from(abi.saved_pointer_offset));
@@ -171,7 +179,7 @@ pub(crate) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Resu
         if !entry.fixed_result_calls.is_empty() {
             let typed = typed.ok_or_else(|| error("result caller has no typed entry"))?;
             for call in &entry.fixed_result_calls {
-                validate_call(record, elf, entry, typed, call, &mut checked_calls)?;
+                validate_call(record, elf, entry, typed, call, &mut checked_calls, &aliases)?;
             }
         }
         validate_protected_stack_regions(record, elf, entry)?;
@@ -209,6 +217,7 @@ fn validate_source(
     typed: &TypedSemanticEntry,
     abi: &FixedResultAbi,
     source: &FixedResultSource,
+    aliases: &BTreeMap<&str, String>,
 ) -> Result<(), CheckerError> {
     owned_range(record, &entry.id, source.range)?;
     let local = typed
@@ -222,7 +231,7 @@ fn validate_source(
         .find(|local| local.source_id == source.base_local)
         .ok_or_else(|| error("source pointer lacks a typed base local"))?;
     require(
-        canonical_abi_type(&local.ty) == canonical_abi_type(&abi.type_name)
+        same_nominal_type(&local.ty, &abi.type_name, aliases)
             && typed.blocks.iter().any(|block| {
                 block.operations.iter().any(|operation| {
                     operation.opcode == "return" && operation.operands.iter().any(|operand| operand.local == Some(local.id))
@@ -249,7 +258,7 @@ fn validate_source(
                             &field.name == name
                                 && field.offset == source.field_offset
                                 && field.width_bytes == Some(abi.width_bytes)
-                                && canonical_abi_type(&field.ty) == canonical_abi_type(&local.ty)
+                                && same_nominal_type(&field.ty, &local.ty, aliases)
                         })
                 }),
             "source field differs from its typed layout",
@@ -319,6 +328,7 @@ fn validate_call(
     typed: &TypedSemanticEntry,
     call: &FixedResultCall,
     checked: &mut BTreeSet<u64>,
+    aliases: &BTreeMap<&str, String>,
 ) -> Result<(), CheckerError> {
     validate_owned_frame(record, elf, owner, call.owned_frame_bytes)?;
     let callee = record.entries.iter().find(|entry| entry.id == call.callee).ok_or_else(|| error("missing result callee"))?;
@@ -341,7 +351,7 @@ fn validate_call(
         .find(|local| local.id == call.destination_local)
         .ok_or_else(|| error("missing typed result destination"))?;
     require(
-        canonical_abi_type(&local.ty) == canonical_abi_type(&abi.type_name)
+        same_nominal_type(&local.ty, &abi.type_name, aliases)
             && typed.blocks.iter().flat_map(|block| &block.operations).any(|operation| {
                 operation.destinations.contains(&local.id)
                     && operation.call.as_ref().is_some_and(|target| format!("helper:{}", target.target) == callee.id)

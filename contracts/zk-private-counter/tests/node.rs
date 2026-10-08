@@ -52,6 +52,14 @@ fn counter_node_acceptance() {
     let report_bytes = std::fs::read(acceptance_root.join(relative)).unwrap();
     assert_eq!(package::sha256(&report_bytes), index["report"]["sha256"]);
     let acceptance: Value = serde_json::from_slice(&report_bytes).unwrap();
+    let source_provenance = &acceptance["source_provenance"];
+    let source_head = Command::new("git").arg("-C").arg(&root).args(["rev-parse", "HEAD"]).output().unwrap();
+    assert!(source_head.status.success(), "CellScript source identity is unavailable");
+    assert_eq!(source_provenance["repo_commit"], String::from_utf8(source_head.stdout).unwrap().trim());
+    assert_eq!(source_provenance["git_dirty"], false, "node acceptance requires a clean-source acceptance receipt");
+    let source_status =
+        Command::new("git").arg("-C").arg(&root).args(["status", "--porcelain", "--untracked-files=no"]).output().unwrap();
+    assert!(source_status.status.success() && source_status.stdout.is_empty(), "CellScript source changed after acceptance");
     let provenance = &acceptance["ckb_runtime_provenance"];
     let bin = std::env::var_os("CELLSCRIPT_COUNTER_CKB_BIN")
         .map(PathBuf::from)
@@ -231,7 +239,7 @@ fn counter_node_acceptance() {
     }
     node.stop();
     let report = json!({"schema":"cellscript-counter-node-evidence-v1","status":"passed","circuit_sha256":manifest.circuit.r1cs_sha256,"verification_key_data_hash":manifest.verification_key_data_hash,
-        "setup_kind":manifest.setup_kind,"ckb_revision":revision,"ckb_version":String::from_utf8_lossy(&version.stdout).trim(),"ckb_binary_sha256":package::sha256(&std::fs::read(bin).unwrap()),
+        "setup_kind":manifest.setup_kind,"source_provenance":source_provenance,"ckb_revision":revision,"ckb_version":String::from_utf8_lossy(&version.stdout).trim(),"ckb_binary_sha256":package::sha256(&std::fs::read(bin).unwrap()),
         "admission":"send_transaction with passthrough outputs validator; consensus and pool verification enabled","production_admitted":false,"network":"local integration chain","rows":rows,
         "deployments":[child_deploy,vk_deploy,parent_deploy,lifecycle_deploy]});
     std::fs::write(run.join("evidence.json"), serde_json::to_vec_pretty(&report).unwrap()).unwrap();
