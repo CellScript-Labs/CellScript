@@ -569,3 +569,16 @@ this slice is frozen. Whole CI remains deferred until the entire user-ordered
 queue is implemented. Full H1 receipt projection/directional admission, H2
 nominal values/runtime, #29 and #44/#45/#46 remain outstanding. Independent
 security reviewer for #28/#29 is still unassigned and has not been waived.
+
+### Current declaration-record business replay
+
+The first full backend replay of signed `40e24d51` stopped at stale current
+business anchor sidecar identities after its 992 library tests passed. The actual
+four-artifact transaction and persistent-policy partial-fill/settle/cancel
+transactions were replayed. Their ELF hashes, transaction hashes and every
+recorded resource measurement remain unchanged. Only the current lowering,
+source-map, verified-bundle identities and ProtocolBundle hash are refreshed;
+historical reports and all resource ceilings remain unchanged. All seven
+`business_corpus` tests pass in `.cap/logs/1791455346-12833.log`. This focused
+replay does not replace the next clean full backend gate. Whole-queue CI remains
+deferred until the requested implementation queue is complete.
