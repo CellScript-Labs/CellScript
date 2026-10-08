@@ -1,5 +1,6 @@
 mod bindings;
 mod checker;
+pub mod code_origin;
 mod elf;
 pub mod entry_codec;
 pub mod external_codec;

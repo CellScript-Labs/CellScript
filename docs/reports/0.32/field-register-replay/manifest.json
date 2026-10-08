@@ -1,0 +1,93 @@
+{
+  "backend": "passed",
+  "backend_git_dirty": false,
+  "ccc_transition_rows": [
+    {
+      "case": "old-key-update",
+      "confirmed": true,
+      "cycles": 111675752,
+      "fee_signature": true,
+      "selected_version": 0,
+      "transaction_bytes": 1237,
+      "transaction_hash": "0x952346762c58daf68bb498190f423dad9590bd3dc4176aa7b3c860a1c53b3565"
+    },
+    {
+      "case": "old-key-authorized-migration",
+      "confirmed": true,
+      "cycles": 111909903,
+      "fee_signature": true,
+      "selected_version": 0,
+      "transaction_bytes": 1632,
+      "transaction_hash": "0x299913a0ebdd68fcb8e668a182f6065fd12a0c141f12b43ff256bdaa47e5656e"
+    },
+    {
+      "case": "new-key-successor-update",
+      "confirmed": true,
+      "cycles": 111836422,
+      "fee_signature": true,
+      "selected_version": 1,
+      "transaction_bytes": 1237,
+      "transaction_hash": "0xf9f1939302bf6036c32c6b1446308c4eb500eb5a43be13286d76ecd5ef88b4e1"
+    }
+  ],
+  "ci": "deferred-until-whole-queue-implemented",
+  "ckb_revision": "f7fa4436737756f97a24e254f22c13a36316ecea",
+  "dev": "passed",
+  "dev_source_state": "exact staged sources later signed as source_commit",
+  "files": [
+    {
+      "path": "staged-dev.log.gz",
+      "raw_bytes": 95388,
+      "raw_sha256": "14f01a9b098dae269472fc8762b6cee59f6d79586f25b67a0cca1f082927629b",
+      "stored_bytes": 15882,
+      "stored_sha256": "14b3409dc47f727c948c29415890bdc348fd941dfb2bbd9c94876ad90c1618e8"
+    },
+    {
+      "path": "clean-backend.log.gz",
+      "raw_bytes": 226749,
+      "raw_sha256": "e90ee0719564e174d44c3386da8ad604d680ecdb9faec4a648187ae360255ad3",
+      "stored_bytes": 44165,
+      "stored_sha256": "63c5906596f8304e556b0cb00163727af401f58dfd609bf06fc42274b50aa234"
+    },
+    {
+      "path": "strict-backend-full.json.gz",
+      "raw_bytes": 157161,
+      "raw_sha256": "417d1e07fc0e0035fb2a7b49df160c123ad520b0a597e4441c2d3cf33fb89708",
+      "stored_bytes": 5364,
+      "stored_sha256": "2b681fc82d0cebfccc25a1f2c1088d508797867b7741e86eb091a6a722089963"
+    },
+    {
+      "path": "ckb-acceptance.json.gz",
+      "raw_bytes": 750674,
+      "raw_sha256": "9f69dae8c149565316dadb783ccb3afd200f6bbd16a0e169ac6a3f1fbbf92e18",
+      "stored_bytes": 63195,
+      "stored_sha256": "fceff7ec9fea7dfa8cb8ad05fd58c4cb9e49d96aa67be9f501d505b3ab3f97f2"
+    },
+    {
+      "path": "counter-node.json.gz",
+      "raw_bytes": 24173,
+      "raw_sha256": "88a8ed7956bdb2348500875688729bbf3c60e8a42cae6ae8dd59e32d6e2b3025",
+      "stored_bytes": 5240,
+      "stored_sha256": "327847f564f38e6936aaff7a13a03339186342cd0cc90c955569740b30c54aec"
+    },
+    {
+      "path": "ccc-migration.json.gz",
+      "raw_bytes": 1382,
+      "raw_sha256": "736d06c558ef8e42311588c96c4415e6808b22212997b3b0db767e3d4b58cb79",
+      "stored_bytes": 568,
+      "stored_sha256": "695b9962276a12bb12192cad23455d4cfc4b3dd95398964d21963d8a78af2447"
+    },
+    {
+      "path": "public-push.log.gz",
+      "raw_bytes": 116,
+      "raw_sha256": "ef4c606a4767e6ab64f69e88c6e315971d84d4ac49837a4d17420f3936887af4",
+      "stored_bytes": 120,
+      "stored_sha256": "a48891e18567c4d0714742bbba48b9b4b3313270f478641e89ad224796b9e727"
+    }
+  ],
+  "production_admitted": false,
+  "public_deployment": false,
+  "schema": "cellscript-032-field-register-replay-evidence-v1",
+  "source_commit": "588f6a2821a00ab561ced676ad522a6d874f5ca6",
+  "tracked_source_sha256": "0x01eb765851b48c0aea059b5fffe42c4f9b8f54234232155bc07553061f00cc5e"
+}

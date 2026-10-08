@@ -982,3 +982,65 @@ ELF bytes and 9–16 inner argument bytes. They are not general #46 host/prover
 benchmarks or full transaction/deployment evidence. The 30M runner ceiling is
 unchanged. Inventory refresh passes in `.cap/logs/1791479987-25947.log`.
 The staged source state is now frozen for full dev before signing.
+
+
+## Clean field replay and deployment-byte binding follow-up
+
+Signed `588f6a2821a00ab561ced676ad522a6d874f5ca6` passed the complete clean
+root backend with CCC in `.cap/logs/1791479308-2595.log` (226,722 bytes).
+Strict full report: `strict-backend-audit-full-20261009-012610.json`;
+acceptance: `target/ckb-cellscript-acceptance/1791480596-production-39471/ckb-cellscript-acceptance-report.json`;
+node: `target/counter-node/1791480907-72893/evidence.json`. Both source-bound
+reports have `git_dirty=false`, exact commit `588f6a28` and tracked-source
+SHA-256 `0x01eb765851b48c0aea059b5fffe42c4f9b8f54234232155bc07553061f00cc5e`.
+CCC's three fee-signed, confirmed transition rows measure 111,675,752 /
+111,909,903 / 111,836,422 cycles and 1237 / 1632 / 1237 bytes. Setup is still
+local/public-test-seed, with no production admission or general #45 claim.
+Public push is in progress; no full CI has run.
+
+The finite external availability/codec source state passed full worktree dev
+in `.cap/logs/1791480120-28254.log` (95,889 bytes), then was G-signed as
+`baae1aad3f1a26c1f0a14a028c1ffddfeb318963`. It still needs the matching
+batched backend with the following origin-byte prerequisite before push.
+
+The next #28 slice computes an exact code Cell OutPoint from canonical CKB
+RawTransaction bytes, verifies every output Script/data structure including
+unselected outputs, and compares the selected code output bytes with the checked
+ELF. Data modes bind the selected code hash to those bytes; Type mode binds it
+to the actual output Type Script. Full selected Script args remain in its exact
+hash/identity. This is byte-origin evidence, not history authorization,
+network observation, on-chain liveness, full H1/H2 or stable admission.
+Tests and docs for this new slice remain pending.
+
+
+Public `0.32` now exactly matches signed `588f6a28`; push passed in root
+`.cap/logs/1791481104-78875.log`, and the remote head was independently checked.
+Seven raw field/register dev/backend/strict/acceptance/node/CCC/push files are
+archived with raw/stored SHA-256 and byte counts under
+`docs/reports/0.32/field-register-replay/`. They bind `588f6a28`, not their
+later containing commit. The external scalar archive's six staged-source
+SHA-256 entries were checked against signed `baae1aad` before recording that
+source commit; its original dirty pre-commit provenance stays explicit.
+
+Four focused code-origin tests pass in `.cap/logs/1791481578-89238.log`.
+SDK-produced raw transaction/Script/data hashes agree across O0–O3 and all four
+supported hash-type bytes. Mutated ELF/selected code identity, absent/wrong output,
+corrupted tables, truncation/trailing bytes, unselected invalid Script tags and
+output/data-count mismatch reject. Exact 256/257 Cell and input, 64/65 raw/header
+dep and 4096/4097 Script-byte boundaries are exercised, as are duplicates,
+unknown dep tags, missing Type Scripts and preparse aggregate/per-file budgets.
+A follow-up applies every caller byte budget before any parser; final focused
+replay, strict clippy, full dev and batched backend remain required. This is
+host byte-origin only. See `docs/CODE_CELL_ORIGIN.md` for its unsupported claims.
+
+
+The final code-origin focused tests pass in
+`.cap/logs/1791482071-433.log`; all artifact/record/source-map byte budgets
+are now checked before malformed raw transaction bytes could reach a parser.
+Strict compiler/checker clippy passes in `.cap/logs/1791482194-3035.log`.
+All seven field/register archive files were rechecked against their manifest's
+raw/stored sizes and SHA-256. No emitter, dependency, metadata wire, compiler
+version or resource ceiling changed. The exact staged source state now freezes
+for full dev. The two pending signed/checker slices will share the next clean
+backend/CCC replay before push. Full CI remains deferred; #28/H1/H2, #29 and
+#44–#46 remain incomplete and independent security review remains unassigned.

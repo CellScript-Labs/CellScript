@@ -381,6 +381,7 @@
   ],
   "schema": "cellscript-fixed-external-codec-vm-evidence-v1",
   "scope": "literal byte oracles in ckb-testtool; runtime only; no deployment or production admission",
+  "source_commit": "baae1aad3f1a26c1f0a14a028c1ffddfeb318963",
   "source_sha256": {
     "crates/cellscript-artifact-checker/src/entry_codec.rs": "6e1061217c9b3d515923e0c0f8bb48b2996f9e1ac258e5082585182cb3ad1db5",
     "crates/cellscript-artifact-checker/src/external_codec.rs": "0c25065fcb286e8f8a60845c3942b055b5afc6e17486b67679a3e7c718fd3876",
@@ -389,5 +390,6 @@
     "crates/cellscript-artifact-checker/src/lib.rs": "ff1f42cc6d945de1e47497e7ba810897583fd641d99306262502c7be0905c576",
     "src/artifact/vm_tests.rs": "4e7f1075f2cec2079b5befa65cb9da030aaf42f02f9dc006c99690f3ed490a7a"
   },
+  "source_state": "exact staged source files later signed as source_commit",
   "vm_cycle_ceiling": 30000000
 }

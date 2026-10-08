@@ -214,6 +214,266 @@ fn fixed_external_codec_binds_machine_bytes_without_claiming_predicate_equivalen
     }
 }
 
+fn code_origin_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn code_origin(
+    fixture: &Fixture,
+    raw: &[u8],
+    index: u32,
+    script: &[u8],
+) -> Result<cellscript_artifact_checker::code_origin::CheckedCodeCellOrigin, CheckerError> {
+    cellscript_artifact_checker::code_origin::check_code_cell_origin(
+        [
+            &fixture.artifact,
+            &serde_json::to_vec(&fixture.metadata).unwrap(),
+            &serde_json::to_vec(&fixture.record).unwrap(),
+            &serde_json::to_vec(&fixture.source_map).unwrap(),
+        ],
+        raw,
+        index,
+        script,
+        &CheckerBudgets::default(),
+    )
+}
+#[test]
+fn code_cell_origin_recomputes_sdk_transaction_script_and_code_identities() {
+    use ckb_testtool::ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*};
+    for opt in 0..=3 {
+        let fixture = external_fixture(EXTERNAL_SOURCE, opt);
+        let lock =
+            packed::Script::new_builder().code_hash([9u8; 32].pack()).hash_type(2u8).args(Bytes::from(vec![1, 2, 3]).pack()).build();
+        let type_script =
+            packed::Script::new_builder().code_hash([8u8; 32].pack()).hash_type(1u8).args(Bytes::from(vec![4; 32]).pack()).build();
+        let input = packed::CellInput::new_builder()
+            .previous_output(packed::OutPoint::new_builder().tx_hash([7u8; 32].pack()).index(3u32).build())
+            .build();
+        let code = packed::CellOutput::new_builder()
+            .capacity(1000000000000u64)
+            .lock(lock.clone())
+            .type_(Some(type_script.clone()).pack())
+            .build();
+        let other = packed::CellOutput::new_builder().capacity(100000000000u64).lock(lock.clone()).build();
+        let tx = TransactionBuilder::default()
+            .input(input.clone())
+            .output(code.clone())
+            .output_data(Bytes::from(fixture.artifact.clone()).pack())
+            .output(other.clone())
+            .output_data(Bytes::from(vec![1, 2, 3]).pack())
+            .build();
+        let raw = tx.data().raw();
+        for hash_type in [0u8, 1, 2, 4] {
+            let code_hash =
+                if hash_type == 1 { type_script.calc_script_hash() } else { packed::CellOutput::calc_data_hash(&fixture.artifact) };
+            let selected = packed::Script::new_builder()
+                .code_hash(code_hash.clone())
+                .hash_type(hash_type)
+                .args(Bytes::from(vec![31, 32, 33]).pack())
+                .build();
+            let checked = code_origin(&fixture, raw.as_slice(), 0, selected.as_slice()).unwrap();
+            assert_eq!(checked.transaction_hash(), code_origin_hex(tx.hash().as_slice()));
+            assert_eq!(checked.artifact_hash(), code_origin_hex(packed::CellOutput::calc_data_hash(&fixture.artifact).as_slice()));
+            assert_eq!(checked.type_script_hash(), Some(code_origin_hex(type_script.calc_script_hash().as_slice()).as_str()));
+            assert_eq!(checked.selected_script_hash(), code_origin_hex(selected.calc_script_hash().as_slice()));
+            assert_eq!(checked.output_index(), 0);
+            assert_eq!(checked.selected_hash_type(), hash_type);
+            let other_args = selected.clone().as_builder().args(Bytes::from(vec![31, 32, 34]).pack()).build();
+            let changed = code_origin(&fixture, raw.as_slice(), 0, other_args.as_slice()).unwrap();
+            assert_eq!(checked.transaction_hash(), changed.transaction_hash());
+            assert_ne!(checked.selected_script_hash(), changed.selected_script_hash());
+            assert_ne!(checked.identity(), changed.identity());
+            let wrong = selected.clone().as_builder().code_hash([0u8; 32].pack()).build();
+            assert!(code_origin(&fixture, raw.as_slice(), 0, wrong.as_slice()).is_err());
+            assert!(code_origin(&fixture, raw.as_slice(), 1, selected.as_slice()).is_err());
+            assert!(code_origin(&fixture, raw.as_slice(), 2, selected.as_slice()).is_err());
+            let mut altered = fixture.artifact.clone();
+            let last = altered.len() - 1;
+            altered[last] ^= 1;
+            let bad_code = TransactionBuilder::default()
+                .input(input.clone())
+                .output(code.clone())
+                .output_data(Bytes::from(altered).pack())
+                .build();
+            assert!(code_origin(&fixture, bad_code.data().raw().as_slice(), 0, selected.as_slice()).is_err());
+        }
+    }
+}
+#[test]
+fn code_cell_origin_rejects_noncanonical_and_unselected_transaction_structures() {
+    use ckb_testtool::ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*};
+    let fixture = external_fixture(EXTERNAL_SOURCE, 3);
+    let lock = packed::Script::new_builder().code_hash([9u8; 32].pack()).hash_type(2u8).args(Bytes::new().pack()).build();
+    let code = packed::CellOutput::new_builder().capacity(1000000000000u64).lock(lock.clone()).build();
+    let tx = TransactionBuilder::default()
+        .output(code.clone())
+        .output_data(Bytes::from(fixture.artifact.clone()).pack())
+        .output(code.clone())
+        .output_data(Bytes::new().pack())
+        .build();
+    let raw = tx.data().raw();
+    let selected = lock.clone().as_builder().code_hash(packed::CellOutput::calc_data_hash(&fixture.artifact)).build();
+    code_origin(&fixture, raw.as_slice(), 0, selected.as_slice()).unwrap();
+    for index in [0usize, 4, 8, 12, 16, 20, 24] {
+        let mut malformed = raw.as_slice().to_vec();
+        malformed[index] ^= 1;
+        assert!(code_origin(&fixture, &malformed, 0, selected.as_slice()).is_err());
+    }
+    for length in [0, 1, 3, 4, 7, 27, raw.as_slice().len() - 1] {
+        assert!(code_origin(&fixture, &raw.as_slice()[..length], 0, selected.as_slice()).is_err());
+    }
+    let mut trailing = raw.as_slice().to_vec();
+    trailing.push(0);
+    assert!(code_origin(&fixture, &trailing, 0, selected.as_slice()).is_err());
+    let broken_lock = lock.as_builder().hash_type(3u8).build();
+    let unselected = code.as_builder().lock(broken_lock).build();
+    let bad = TransactionBuilder::default()
+        .output(tx.outputs().get(0).unwrap())
+        .output_data(Bytes::from(fixture.artifact.clone()).pack())
+        .output(unselected)
+        .output_data(Bytes::new().pack())
+        .build();
+    assert!(code_origin(&fixture, bad.data().raw().as_slice(), 0, selected.as_slice()).is_err());
+    let wrong_cardinality = TransactionBuilder::default().output(tx.outputs().get(0).unwrap()).build();
+    assert!(code_origin(&fixture, wrong_cardinality.data().raw().as_slice(), 0, selected.as_slice()).is_err());
+}
+
+#[test]
+fn code_cell_origin_has_exact_script_count_and_preparse_byte_bounds() {
+    use ckb_testtool::ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*};
+    let fixture = external_fixture(EXTERNAL_SOURCE, 3);
+    let lock = packed::Script::new_builder().code_hash([9u8; 32].pack()).hash_type(2u8).args(Bytes::new().pack()).build();
+    let code = packed::CellOutput::new_builder().capacity(1000000000000u64).lock(lock.clone()).build();
+    let code_hash = packed::CellOutput::calc_data_hash(&fixture.artifact);
+    let script = lock.clone().as_builder().code_hash(code_hash.clone()).args(Bytes::from(vec![0xCC; 4043]).pack()).build();
+    assert_eq!(script.as_slice().len(), 4096);
+    for count in [256, 257] {
+        let mut tx = TransactionBuilder::default().output(code.clone()).output_data(Bytes::from(fixture.artifact.clone()).pack());
+        for _ in 1..count {
+            tx = tx.output(code.clone()).output_data(Bytes::new().pack());
+        }
+        let tx = tx.build();
+        let result = code_origin(&fixture, tx.data().raw().as_slice(), 0, script.as_slice());
+        if count == 256 {
+            result.unwrap();
+        } else {
+            assert!(result.unwrap_err().message.contains("dynvec count"));
+        }
+    }
+    let tx = TransactionBuilder::default().output(code.clone()).output_data(Bytes::from(fixture.artifact.clone()).pack()).build();
+    let too_long = script.as_builder().args(Bytes::from(vec![0xCC; 4044]).pack()).build();
+    assert_eq!(too_long.as_slice().len(), 4097);
+    assert!(code_origin(&fixture, tx.data().raw().as_slice(), 0, too_long.as_slice()).unwrap_err().message.contains("Script exceeds"));
+    let selected = lock.as_builder().code_hash(code_hash).build();
+    let budgets = CheckerBudgets { record_bytes: 1, ..CheckerBudgets::default() };
+    let error = cellscript_artifact_checker::code_origin::check_code_cell_origin(
+        [
+            &fixture.artifact,
+            &serde_json::to_vec(&fixture.metadata).unwrap(),
+            &serde_json::to_vec(&fixture.record).unwrap(),
+            &serde_json::to_vec(&fixture.source_map).unwrap(),
+        ],
+        tx.data().raw().as_slice(),
+        0,
+        selected.as_slice(),
+        &budgets,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, CheckerRejectionCode::V2400BudgetExceeded);
+    for budgets in [
+        CheckerBudgets { artifact_bytes: 0, ..CheckerBudgets::default() },
+        CheckerBudgets { record_bytes: 0, ..CheckerBudgets::default() },
+        CheckerBudgets { source_map_bytes: 0, ..CheckerBudgets::default() },
+    ] {
+        // Malformed raw bytes must never reach a parser with an over-budget
+        // source file, even when that file would be parsed in a later phase.
+        let error = cellscript_artifact_checker::code_origin::check_code_cell_origin(
+            [
+                &fixture.artifact,
+                &serde_json::to_vec(&fixture.metadata).unwrap(),
+                &serde_json::to_vec(&fixture.record).unwrap(),
+                &serde_json::to_vec(&fixture.source_map).unwrap(),
+            ],
+            &[0],
+            0,
+            &[],
+            &budgets,
+        )
+        .unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2400BudgetExceeded);
+    }
+    let exactly = vec![b'?'; 4 * 1024 * 1024];
+    let error = cellscript_artifact_checker::code_origin::check_code_cell_origin(
+        [exactly.as_slice(); 4],
+        &[1],
+        0,
+        &[],
+        &CheckerBudgets::default(),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, CheckerRejectionCode::V2400BudgetExceeded);
+    let oversized = vec![b'?'; 4 * 1024 * 1024 + 1];
+    let error = cellscript_artifact_checker::code_origin::check_code_cell_origin(
+        [oversized.as_slice(), &[], &[], &[]],
+        &[],
+        0,
+        &[],
+        &CheckerBudgets::default(),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, CheckerRejectionCode::V2400BudgetExceeded);
+}
+
+#[test]
+fn code_cell_origin_rejects_duplicate_and_overbound_dependency_input_sets() {
+    use ckb_testtool::ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*};
+    let fixture = external_fixture(EXTERNAL_SOURCE, 3);
+    let lock = packed::Script::new_builder().code_hash([9u8; 32].pack()).hash_type(2u8).args(Bytes::new().pack()).build();
+    let code = packed::CellOutput::new_builder().capacity(1000000000000u64).lock(lock.clone()).build();
+    let selected = lock.as_builder().code_hash(packed::CellOutput::calc_data_hash(&fixture.artifact)).build();
+    let base = || TransactionBuilder::default().output(code.clone()).output_data(Bytes::from(fixture.artifact.clone()).pack());
+    for (kind, maximum) in [("headers", 64usize), ("deps", 64), ("inputs", 256)] {
+        for count in [maximum, maximum + 1] {
+            let mut tx = base();
+            for index in 0..count {
+                let mut bytes = [7u8; 32];
+                bytes[..4].copy_from_slice(&(index as u32).to_le_bytes());
+                let point = packed::OutPoint::new_builder().tx_hash(bytes.pack()).index(3u32).build();
+                tx = match kind {
+                    "headers" => tx.header_dep(bytes.pack()),
+                    "deps" => tx.cell_dep(packed::CellDep::new_builder().out_point(point).dep_type((index % 2) as u8).build()),
+                    _ => tx.input(packed::CellInput::new_builder().previous_output(point).build()),
+                };
+            }
+            let tx = tx.build();
+            let result = code_origin(&fixture, tx.data().raw().as_slice(), 0, selected.as_slice());
+            if count == maximum {
+                result.unwrap();
+            } else {
+                assert!(result.unwrap_err().message.contains("fixvec count/width"));
+            }
+        }
+    }
+    let point = packed::OutPoint::new_builder().tx_hash([8u8; 32].pack()).index(3u32).build();
+    let dep = packed::CellDep::new_builder().out_point(point.clone()).dep_type(0u8).build();
+    let input = packed::CellInput::new_builder().previous_output(point.clone()).build();
+    let cases = [
+        (base().cell_dep(dep.clone()).cell_dep(dep).build(), "duplicate or unsupported raw CellDep"),
+        (base().input(input.clone()).input(input).build(), "duplicate input OutPoint"),
+        (base().header_dep([8u8; 32].pack()).header_dep([8u8; 32].pack()).build(), "duplicate header dependency"),
+        (base().cell_dep(packed::CellDep::new_builder().out_point(point).dep_type(2u8).build()).build(), "unsupported raw CellDep"),
+    ];
+    for (tx, message) in cases {
+        assert!(code_origin(&fixture, tx.data().raw().as_slice(), 0, selected.as_slice()).unwrap_err().message.contains(message));
+    }
+    let selected = selected.as_builder().hash_type(1u8).build();
+    let tx = base().build();
+    assert!(code_origin(&fixture, tx.data().raw().as_slice(), 0, selected.as_slice())
+        .unwrap_err()
+        .message
+        .contains("no actual code Cell Type Script"));
+}
+
 fn fixed_cell_reads(fixture: &Fixture) -> Result<cellscript_artifact_checker::fixed_cell_reads::CheckedFixedCellReads, CheckerError> {
     cellscript_artifact_checker::fixed_cell_reads::check_fixed_cell_reads(
         &fixture.artifact,

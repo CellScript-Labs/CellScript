@@ -2,6 +2,13 @@
 
 ## Unreleased — 0.32
 
+Add optional code Cell byte-origin checking from actual canonical CKB raw
+transaction, selected output and complete Script bytes. Recompute transaction,
+Script and data/Type identities; reject changed ELF bytes, malformed/unselected
+outputs and bounded-set violations before constructing private evidence. This
+does not authorize deployment/history or prove liveness/open admission; see
+`docs/CODE_CELL_ORIGIN.md`.
+
 Combine optional checked fixed policy codecs with actual public external
 availability and scalar ABI reception. Reject pruned or helper-only public
 callables, unsupported public layouts, changed witness-register spills and
