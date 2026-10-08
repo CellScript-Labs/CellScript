@@ -6509,7 +6509,12 @@ fn validate_bounded_hash_syscall_result(
     Ok(())
 }
 
-fn last_register_definition_before(elf: &ParsedElf, block: &LoweringBlock, address: u64, register: u32) -> Option<(u64, u32)> {
+pub(crate) fn last_register_definition_before(
+    elf: &ParsedElf,
+    block: &LoweringBlock,
+    address: u64,
+    register: u32,
+) -> Option<(u64, u32)> {
     elf.instructions
         .iter()
         .filter(|instruction| block.range.start <= instruction.address && instruction.address < address)
@@ -6522,7 +6527,7 @@ fn instruction_writes_register(word: u32, register: u32) -> bool {
     matches!(word & 0x7f, 0x03 | 0x13 | 0x17 | 0x33 | 0x37 | 0x67 | 0x6f) && (word >> 7) & 0x1f == register
 }
 
-fn stack_address_offset(word: u32, register: u32) -> Option<i32> {
+pub(crate) fn stack_address_offset(word: u32, register: u32) -> Option<i32> {
     (word & 0x7f == 0x13 && (word >> 12) & 0x7 == 0 && (word >> 7) & 0x1f == register && (word >> 15) & 0x1f == 2)
         .then_some((word as i32) >> 20)
 }
@@ -6558,7 +6563,7 @@ fn instructions_from_bounded(elf: &ParsedElf, address: u64, count: usize) -> Res
         .ok_or_else(|| bounded_group_input_machine_error(format!("truncated instruction range at {address:#x}")))
 }
 
-fn jump_targets_runtime_error(record: &VerifiedLoweringRecord, elf: &ParsedElf, address: u64, code: i32) -> bool {
+pub(crate) fn jump_targets_runtime_error(record: &VerifiedLoweringRecord, elf: &ParsedElf, address: u64, code: i32) -> bool {
     let Some(target_address) = elf.control_flow.iter().find(|edge| edge.address == address).map(|edge| edge.target) else {
         return false;
     };
@@ -6688,7 +6693,7 @@ pub(crate) fn flow_targets(elf: &ParsedElf, address: u64, target: u64) -> bool {
     elf.control_flow.iter().any(|edge| edge.address == address && edge.target == target)
 }
 
-fn block_for_address(record: &VerifiedLoweringRecord, address: u64) -> Option<&LoweringBlock> {
+pub(crate) fn block_for_address(record: &VerifiedLoweringRecord, address: u64) -> Option<&LoweringBlock> {
     record.blocks.iter().find(|block| block.range.contains(address))
 }
 
@@ -7577,7 +7582,7 @@ fn split_large_immediate(value: i32) -> Option<(u32, i32)> {
     Some((upper as u32 & 0xffff_f000, lower))
 }
 
-fn register_constant_before(elf: &ParsedElf, block: &LoweringBlock, address: u64, register: usize) -> Option<u64> {
+pub(crate) fn register_constant_before(elf: &ParsedElf, block: &LoweringBlock, address: u64, register: usize) -> Option<u64> {
     let mut values = [None; 32];
     values[0] = Some(0);
     for instruction in

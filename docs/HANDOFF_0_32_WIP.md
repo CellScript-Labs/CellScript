@@ -772,3 +772,40 @@ The expanded native snapshot tests cover O0–O3 and pass in
 in `.cap/logs/1791466403-49349.log`. The fresh replay archive's eight files
 were rechecked against all raw/stored sizes and SHA-256 digests. Full dev is
 now the next gate for the exact staged catalog source state.
+
+
+The exact staged catalog/native/archive source state passed the full worktree
+`dev` gate in `.cap/logs/1791466560-52668.log` (92,977 bytes). It was signed as
+`76ad140e` and fast-forwarded into root `0.32`, after signed `3fec7445`. Root
+is running the matching clean backend with the pinned CKB checkout and CCC;
+these two commits are not yet pushed. Full CI remains deferred.
+
+The next partial #28 prerequisite independently checks actual fixed Cell-data
+read setup and immediate success/exact-length gates. It binds all four raw
+bundle hashes and actual ELF addresses. Each typed fixed Cell location must
+have exactly one checked read; source/index ambiguity, missing reads, dynamic
+indexes, unknown/unsupported syscalls, noncompact frames, changed capacity,
+status gates, length gates or incoming interior flow reject. The initial
+profile uses the existing 512-byte buffer and excludes saved FP/RA from its
+bounds. It adds no emitter, sidecar schema, cache, dependency or resource
+ceiling changes. Runtime helpers, field decoding and general alias/provenance
+closure remain outside this evidence; it grants no full receipt or admission.
+
+The optional branch-relaxation view now captures a logical-to-actual address
+map when explicitly requested; existing callers avoid the extra map. Read
+records restore real instruction addresses before hashing. The 64-read test
+checks all restored syscall addresses against the actual ELF; a real
+65-read/64-variant artifact fails the finite read-site ceiling without raising
+the existing 64-variant limit. Four focused tests pass in worktree
+`.cap/logs/1791468707-4587.log`, including 52 O0–O3 fully rebound mutations
+accepted by ordinary inspection but rejected by this stronger check. The new
+real VM test passes in `.cap/logs/1791468509-1251.log`: 16 valid mint/burn
+cases at zero/nonzero absolute group positions and 64 short, trailing and
+512/513-byte negative cases with stable error 4. The fixture byte oracle
+checks literal little-endian bytes. Full updated clippy/dev remain pending.
+
+The issue #28 required contract was re-read from GitHub this turn. Complete
+public codec receipts, stable nominal ownership, actual deployment/args/deps,
+authorized Type history and H2 runtime enforcement are still required. #29
+and #44–#46 are not completed. Independent security review remains required
+and unassigned. Full CI runs only after the entire user queue is implemented.

@@ -153,6 +153,15 @@ fn execute(
     case: Case<'_>,
     mutate: impl FnOnce(Vec<u8>, &packed::Script, &packed::Script) -> Vec<u8>,
 ) -> std::result::Result<u64, String> {
+    execute_with_cell_data(compiled, case, mutate, |bytes| bytes)
+}
+
+fn execute_with_cell_data(
+    compiled: &CompileResult,
+    case: Case<'_>,
+    mutate: impl FnOnce(Vec<u8>, &packed::Script, &packed::Script) -> Vec<u8>,
+    cell_data: impl Fn(Bytes) -> Bytes,
+) -> std::result::Result<u64, String> {
     let mut context = Context::new_with_deterministic_rng();
     let foreign = deploy(&mut context, foreign(), &[]);
     let script = deploy(&mut context, compiled, &[0x71]);
@@ -167,14 +176,14 @@ fn execute(
         transaction = transaction.input(packed::CellInput::new_builder().previous_output(out_point).build());
     }
     for amount in case.inputs {
-        let out_point = context.create_cell(policy_cell.clone(), data(*amount));
+        let out_point = context.create_cell(policy_cell.clone(), cell_data(data(*amount)));
         transaction = transaction.input(packed::CellInput::new_builder().previous_output(out_point).build());
     }
     if case.prepend_output {
         transaction = transaction.output(cell(&foreign, None)).output_data(data(99).pack());
     }
     for amount in case.outputs {
-        transaction = transaction.output(policy_cell.clone()).output_data(data(*amount).pack());
+        transaction = transaction.output(policy_cell.clone()).output_data(cell_data(data(*amount)).pack());
     }
     let bundle = encode_policy_witness_bundle(&[record(&script, case.tag, args(compiled, case.tag, &foreign))]).unwrap();
     let bundle = mutate(bundle, &script, &foreign);
@@ -193,6 +202,53 @@ fn execute(
 
 fn unchanged(bundle: Vec<u8>, _: &packed::Script, _: &packed::Script) -> Vec<u8> {
     bundle
+}
+
+#[test]
+fn certified_fixed_cell_read_gates_check_real_group_bytes_and_lengths_in_vm() {
+    for opt_level in 0..=3 {
+        let mut selected = declaration();
+        selected.actions.retain(|action| matches!(action.tag, MINT | BURN));
+        let compiled = compile_artifact(
+            SOURCE,
+            CompileOptions { source_contracts: true, opt_level, ..options() },
+            selected,
+            ExecutableSurfacePolicy::DenyFailClosed,
+        )
+        .unwrap();
+        cellscript_artifact_checker::fixed_cell_reads::check_fixed_cell_reads(
+            &compiled.artifact_bytes,
+            &serde_json::to_vec(&compiled.metadata).unwrap(),
+            &serde_json::to_vec(compiled.verified_lowering_record.as_ref().unwrap()).unwrap(),
+            &serde_json::to_vec(compiled.source_artifact_map.as_ref().unwrap()).unwrap(),
+            &cellscript_artifact_checker::CheckerBudgets::default(),
+        )
+        .unwrap();
+        for (tag, inputs, outputs) in [(MINT, &[][..], &[7][..]), (BURN, &[7][..], &[][..])] {
+            for prepend in [false, true] {
+                let case = || {
+                    let mut case = Case::new(tag, inputs, outputs);
+                    case.prepend_input = prepend;
+                    case.prepend_output = prepend;
+                    case
+                };
+                execute_with_cell_data(&compiled, case(), unchanged, |bytes| {
+                    assert_eq!(bytes.as_ref(), &[7, 0, 0, 0, 0, 0, 0, 0]);
+                    bytes
+                })
+                .unwrap();
+                for length in [7, 9, 512, 513] {
+                    let error = execute_with_cell_data(&compiled, case(), unchanged, |bytes| {
+                        let mut actual = bytes.to_vec();
+                        actual.resize(length, 0xA5);
+                        Bytes::from(actual)
+                    })
+                    .unwrap_err();
+                    assert_exit(error, 4);
+                }
+            }
+        }
+    }
 }
 
 #[test]

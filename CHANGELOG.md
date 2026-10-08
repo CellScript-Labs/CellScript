@@ -2,6 +2,12 @@
 
 ## Unreleased — 0.32
 
+Add optional independent fixed Cell-data read gate evidence: actual source and
+index, 512-byte buffer setup, checked terminating status and exact length.
+Malformed machine gates and unsupported profiles reject. This partial evidence
+does not certify field decoding, helper closure or compatible-open admission;
+see `docs/FIXED_CELL_READ_GATES.md`.
+
 Check required and all 1–32 candidate module bundles under a shared 16 MiB input
 ceiling before parsing; reject incompatible or invalid unselected candidates and
 freeze every exact four-file tuple. This is API coherence evidence, separate from

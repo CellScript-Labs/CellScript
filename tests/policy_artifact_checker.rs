@@ -60,6 +60,122 @@ struct Fixture {
     source_map: SourceArtifactMap,
 }
 
+fn fixed_cell_reads(fixture: &Fixture) -> Result<cellscript_artifact_checker::fixed_cell_reads::CheckedFixedCellReads, CheckerError> {
+    cellscript_artifact_checker::fixed_cell_reads::check_fixed_cell_reads(
+        &fixture.artifact,
+        &serde_json::to_vec(&fixture.metadata).unwrap(),
+        &serde_json::to_vec(&fixture.record).unwrap(),
+        &serde_json::to_vec(&fixture.source_map).unwrap(),
+        &CheckerBudgets::default(),
+    )
+}
+
+#[test]
+fn fixed_cell_reads_check_actual_source_size_and_error_gates() {
+    for opt in 0..=3 {
+        let fixture = Fixture::new_with(CellScriptEdition::Edition2026, opt, declaration());
+        let checked = fixed_cell_reads(&fixture).unwrap();
+        let value: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
+        assert!(!value["reads"].as_array().unwrap().is_empty());
+        assert_eq!(value["reads"][0]["width_bytes"], 8);
+        assert_eq!(value["reads"][0]["capacity_bytes"], 512);
+        assert_eq!(
+            value["bundle_hashes"][0],
+            cellscript_artifact_checker::hex_encode(&cellscript_artifact_checker::ckb_blake2b256(&fixture.artifact))
+        );
+        assert!(!checked.module_projection().artifact_report().semantic_equivalence_claimed);
+    }
+}
+
+#[test]
+fn fixed_cell_reads_reject_rebound_machine_setup_and_length_mutations() {
+    for opt in 0..=3 {
+        let fixture = Fixture::new_with(CellScriptEdition::Edition2026, opt, declaration());
+        let value: Value = serde_json::from_slice(&fixed_cell_reads(&fixture).unwrap().canonical_bytes().unwrap()).unwrap();
+        let read = &value["reads"][0];
+        let start = read["setup_start"].as_u64().unwrap();
+        let syscall = read["syscall_address"].as_u64().unwrap();
+        let elf = parse_elf(&fixture.artifact, CheckerBudgets::default().instructions).unwrap();
+        for (address, mask, bits) in [
+            (start, 0xfff0_0000, 513 << 20),                                          // capacity
+            (start + 4, 31 << 15, 3 << 15),                                           // size initializer base
+            (start + 8, 31 << 15, 3 << 15),                                           // buffer base
+            (start + 12, 31 << 15, 3 << 15),                                          // length pointer base
+            (start + 16, 0xfff0_0000, 1 << 20),                                       // nonzero data byte offset
+            (start + 20, 0xfff0_0000, 1 << 20),                                       // other output ordinal
+            (syscall - 12, 0xfff0_0000, 3 << 20),                                     // other Cell source
+            (syscall - 4, 0xfff0_0000, ((2093u32.wrapping_sub(4096)) & 0xfff) << 20), // another syscall
+            (syscall + 4, 7 << 12, 1 << 12),                                          // inverted status test
+            (syscall + 12, 31 << 15, 3 << 15),                                        // length guard reads another pointer
+            (syscall + 16, 0xfff0_0000, 9 << 20),                                     // wrong exact length
+            (syscall + 20, 31 << 20, 12 << 20),                                       // comparison with wrong register
+            (syscall + 24, 7 << 12, 1 << 12),                                         // inverted length test
+        ] {
+            let original = elf.instructions.iter().find(|instruction| instruction.address == address).unwrap().word;
+            let mut changed = fixture.clone();
+            changed.replace_machine_word(address, (original & !mask) | bits);
+            changed.check().expect("ordinary inspection does not certify these Cell read arguments");
+            let error = fixed_cell_reads(&changed).unwrap_err();
+            assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+        }
+    }
+}
+
+#[test]
+fn fixed_cell_reads_reject_missing_source_contracts_and_noncanonical_boolean_layouts() {
+    let source = "module bool_read\nresource Token has store, consume { amount: bool }\naction mint(witness recipient: Address) { verification create Token { amount: true } with_lock(recipient) }\n";
+    let mut selected = declaration();
+    selected.actions.retain(|action| action.action == "mint");
+    selected.common_checks.clear();
+    let fixture = Fixture::new_source_with(source, CellScriptEdition::Edition2026, 0, selected);
+    assert!(fixed_cell_reads(&fixture).unwrap_err().message.contains("boolean canonicality"));
+    let mut missing = Fixture::new(CellScriptEdition::Edition2026);
+    missing.record.typed_semantics.nominal_declarations = None;
+    missing.rebind_policy_identity();
+    assert!(fixed_cell_reads(&missing).is_err());
+}
+
+#[test]
+fn fixed_cell_reads_have_real_read_count_and_instruction_budget_limits() {
+    for count in [64, 65] {
+        let mut source = "module read_count\nresource Token has store, consume { amount: u64 }\n".to_string();
+        for index in 0..64 {
+            let input = if count == 65 && index == 0 { "input before: Token, " } else { "" };
+            let consume = if input.is_empty() { "" } else { "require before.amount == 7\nconsume before\n" };
+            source.push_str(&format!("action read_{index}({input}witness recipient: Address) {{ verification\n{consume}create Token {{ amount: 7 }} with_lock(recipient) }}\n"));
+        }
+        let selected = ArtifactDeclaration {
+            name: "ReadCount".into(),
+            context: ArtifactContext::TypeGroup { resource: "Token".into() },
+            dispatch: ArtifactDispatch::PolicyWitnessV1,
+            actions: (0..64).map(|index| ArtifactAction { tag: index, action: format!("read_{index}") }).collect(),
+            common_checks: Vec::new(),
+        };
+        let fixture = Fixture::new_source_with(&source, CellScriptEdition::Edition2026, 3, selected);
+        if count == 64 {
+            let checked = fixed_cell_reads(&fixture).unwrap();
+            let value: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
+            assert_eq!(value["reads"].as_array().unwrap().len(), 64);
+            let elf = parse_elf(&fixture.artifact, CheckerBudgets::default().instructions).unwrap();
+            for read in value["reads"].as_array().unwrap() {
+                assert!(elf.syscall_addresses.contains(&read["syscall_address"].as_u64().unwrap()));
+            }
+        } else {
+            assert!(fixed_cell_reads(&fixture).unwrap_err().message.contains("more than 64"));
+        }
+    }
+    let fixture = Fixture::new(CellScriptEdition::Edition2026);
+    let error = cellscript_artifact_checker::fixed_cell_reads::check_fixed_cell_reads(
+        &fixture.artifact,
+        &serde_json::to_vec(&fixture.metadata).unwrap(),
+        &serde_json::to_vec(&fixture.record).unwrap(),
+        &serde_json::to_vec(&fixture.source_map).unwrap(),
+        &CheckerBudgets { instructions: 1, ..Default::default() },
+    )
+    .unwrap_err();
+    assert_eq!(error.code, CheckerRejectionCode::V2400BudgetExceeded);
+}
+
 #[test]
 fn fixed_policy_parameter_decoders_bind_actual_offsets_and_source_contracts() {
     let mut identity = None;

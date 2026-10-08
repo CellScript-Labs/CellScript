@@ -12,6 +12,32 @@ pub(crate) fn normalize_relaxed_branches(
     record: &VerifiedLoweringRecord,
     elf: &ParsedElf,
 ) -> Result<Option<(VerifiedLoweringRecord, ParsedElf)>, String> {
+    normalize(record, elf, None)
+}
+
+pub(crate) struct AddressedLogicalMachine {
+    pub record: VerifiedLoweringRecord,
+    pub elf: ParsedElf,
+    pub actual_addresses: BTreeMap<u64, u64>,
+}
+
+pub(crate) fn normalize_relaxed_branches_with_addresses(
+    record: &VerifiedLoweringRecord,
+    elf: &ParsedElf,
+) -> Result<Option<AddressedLogicalMachine>, String> {
+    let mut addresses = BTreeMap::new();
+    Ok(normalize(record, elf, Some(&mut addresses))?.map(|(record, elf)| AddressedLogicalMachine {
+        record,
+        elf,
+        actual_addresses: addresses,
+    }))
+}
+
+fn normalize(
+    record: &VerifiedLoweringRecord,
+    elf: &ParsedElf,
+    mut addresses: Option<&mut BTreeMap<u64, u64>>,
+) -> Result<Option<(VerifiedLoweringRecord, ParsedElf)>, String> {
     let targets: BTreeMap<_, _> = elf.control_flow.iter().map(|flow| (flow.address, flow.target)).collect();
     let mut replacements = BTreeMap::new();
     let mut removed = BTreeSet::new();
@@ -53,7 +79,11 @@ pub(crate) fn normalize_relaxed_branches(
             // BEQ/BNE, BLT/BGE and BLTU/BGEU differ in funct3's low bit.
             instruction.word ^= 1 << 12;
         }
-        instruction.address = relocate(instruction.address)?;
+        let logical = relocate(instruction.address)?;
+        if let Some(addresses) = addresses.as_deref_mut() {
+            addresses.insert(logical, instruction.address);
+        }
+        instruction.address = logical;
     }
     logical_elf.control_flow.retain(|flow| !removed.contains(&flow.address));
     for flow in &mut logical_elf.control_flow {
