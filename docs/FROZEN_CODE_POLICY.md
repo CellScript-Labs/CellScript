@@ -135,3 +135,10 @@ rechecks actual source closure and rejects wrong/missing/duplicate/copied code,
 malformed unselected Cells, dep groups and unproved Type history. It does not
 certify supplied snapshots as consensus/VM resolution or freeze witnesses and
 signatures. Source policy v2 record/domain and selection wire remain unchanged.
+
+That private dependency proof can consume itself into the separate
+[Type-group snapshot](DIRECT_TYPE_GROUP.md), binding complete transaction and
+witness bytes, all supplied input Cells and derived group indices to its exact
+candidate receipt. Consumer source rechecks remain required. It does not verify
+signatures, authenticate supplied Cells or authorize a policy root; all existing
+source policy and dependency records/domains remain unchanged.

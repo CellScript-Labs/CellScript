@@ -60,6 +60,12 @@ all original bytes/identities, including unselected Cells and supplied order.
 Changed raw fields or snapshots require a new proof. RawTransaction excludes
 witnesses/signatures; this is not a signed-transaction freeze token.
 
+The separate [Type-group snapshot](DIRECT_TYPE_GROUP.md) consumes this private
+dependency proof and a matching private finite receipt to bind full Transaction/witness
+bytes and derived Type-group indices from every supplied input/output. It
+detects complete witness substitutions but does not authenticate supplied Cells,
+verify signatures or authorize a policy root.
+
 ## Native source/version composition
 
 `freeze_source_code_policy` now returns a distinct `FrozenSourceCodePolicy`, and

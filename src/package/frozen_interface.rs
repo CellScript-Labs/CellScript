@@ -25,7 +25,7 @@ pub use source_receipt::CheckedSourceCodeReceipt;
 mod code_policy;
 pub use code_policy::{
     freeze_code_policy, freeze_source_code_policy, FrozenCodePolicy, FrozenCodePolicySelection, FrozenSourceCodeDependency,
-    FrozenSourceCodePolicy, FrozenSourceCodePolicySelection,
+    FrozenSourceCodePolicy, FrozenSourceCodePolicySelection, FrozenSourceCodeTypeGroup,
 };
 mod resolved_catalog;
 pub use resolved_catalog::{resolve_code_catalog_source, ResolvedCodeCatalog};

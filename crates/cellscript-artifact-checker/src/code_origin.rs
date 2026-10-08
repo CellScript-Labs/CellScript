@@ -8,6 +8,8 @@ use serde::Serialize;
 mod dependency;
 mod molecule;
 pub use dependency::{check_direct_code_dependency, CheckedDirectCodeDependency, SuppliedDependencyCell};
+mod type_group;
+pub use type_group::{check_direct_type_group, CheckedDirectTypeGroup, SuppliedInputCell, SuppliedTypeGroupTransaction};
 mod target;
 pub use target::{check_code_cell_target, CheckedTargetCodeCellOrigin};
 

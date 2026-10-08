@@ -10,6 +10,8 @@ use cellscript_artifact_checker::{canonical_bytes, canonical_hash, hex_encode};
 use serde::Serialize;
 mod dependency;
 pub use dependency::FrozenSourceCodeDependency;
+mod type_group;
+pub use type_group::FrozenSourceCodeTypeGroup;
 
 #[derive(Debug)]
 pub struct FrozenCodePolicy {

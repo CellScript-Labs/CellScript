@@ -13,7 +13,8 @@
     "target": "35a9565b260890e2b32f6082af51e5cfa36b3866",
     "receipt": "e546d0f93dafc52a2e522f80b7422a7f88307a34",
     "policy": "f6ef9711ece01738794ff6e7c8288faa63a7fc29",
-    "source_versions": "d424583ad7cff22dd4f11826fdfa5f0c015e5aa4"
+    "source_versions": "d424583ad7cff22dd4f11826fdfa5f0c015e5aa4",
+    "direct_dependency": "0b187a7f3045c02cf1faca43b0aead7439965d7b"
   },
   "dev_source_state": "exact staged source files later G-signed; not a clean-HEAD dev claim",
   "ci": "deferred until complete implementation queue",
@@ -211,11 +212,36 @@
       "raw_sha256": "d4103002ffa2d951d2f2273aa41cb241c9473960101b6e769c1e452b5c552aa4",
       "stored_bytes": 94,
       "stored_sha256": "19f1a6ebe927e4d2e98f0b72107f92602a5cb761202ea013cfff82cafc9a9702"
+    },
+    {
+      "name": "direct-dependency-staged-dev.log.gz",
+      "original_path": "/Users/arthur/.codex/worktrees/fixed-result-contract/CellScript/.cap/logs/1791496335-75821.log",
+      "raw_bytes": 102992,
+      "raw_sha256": "885d6f71d3d53d1de931bf922f048f43ab96a340d0c015cdaa105e1fb4bb310c",
+      "stored_bytes": 18056,
+      "stored_sha256": "0e4f3630862b32e5a0343794b601dd7894b7063dbfb15e26ab3f7639ebc28b33"
+    },
+    {
+      "name": "direct-dependency-public-push.log.gz",
+      "original_path": "/Users/arthur/RustroverProjects/CellScript/.cap/logs/1791497296-97627.log",
+      "raw_bytes": 256,
+      "raw_sha256": "0c9548b540586c083488f928775b41c653580240ecb40b4ae223032ef2dcd117",
+      "stored_bytes": 200,
+      "stored_sha256": "e5e99df49a27c0184119a1fa6a66eb840263789cae6774338e1be97b67e91ff1"
+    },
+    {
+      "name": "direct-dependency-public-head.log.gz",
+      "original_path": "/Users/arthur/RustroverProjects/CellScript/.cap/logs/1791497309-98054.log",
+      "raw_bytes": 84,
+      "raw_sha256": "63935dfeb1e8bbcf2e61be4b7181f7106b6d00159b1b6e99301523c687cf2569",
+      "stored_bytes": 96,
+      "stored_sha256": "dbaff800f62821e96154a3cdc9e7724ae653b91fcab214e0f4ff20516eb2d00f"
     }
   ],
   "sources_scope": "native parsed-source capture only; no fresh backend claim",
   "target_scope": "native/checker target selection only; no fresh clean backend claim",
   "receipt_scope": "native/checker finite receipts only; no fresh clean backend claim",
   "policy_scope": "native all-member policy field bindings only; no fresh clean backend claim",
-  "source_versions_scope": "native source receipt/version selection only; no fresh clean backend claim"
+  "source_versions_scope": "native source receipt/version selection only; no fresh clean backend claim",
+  "direct_dependency_scope": "native/checker direct snapshot and typed source composition only; no fresh clean backend claim"
 }

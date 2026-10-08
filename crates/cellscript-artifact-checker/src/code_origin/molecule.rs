@@ -16,7 +16,7 @@ fn u32_at(bytes: &[u8], offset: usize) -> Result<usize, CheckerError> {
         .map_err(|_| invalid("Molecule integer width"))?;
     Ok(u32::from_le_bytes(word) as usize)
 }
-fn fields(bytes: &[u8], count: usize) -> Result<Vec<&[u8]>, CheckerError> {
+pub(super) fn fields(bytes: &[u8], count: usize) -> Result<Vec<&[u8]>, CheckerError> {
     let header = count.checked_add(1).and_then(|n| n.checked_mul(4)).ok_or_else(|| invalid("Molecule header overflow"))?;
     if bytes.len() < header || u32_at(bytes, 0)? != bytes.len() || u32_at(bytes, 4)? != header {
         return Err(invalid("Molecule table/dynvec total or first offset differs"));
@@ -34,7 +34,7 @@ fn fields(bytes: &[u8], count: usize) -> Result<Vec<&[u8]>, CheckerError> {
     }
     Ok(result)
 }
-fn dynamic(bytes: &[u8], maximum: usize) -> Result<Vec<&[u8]>, CheckerError> {
+pub(super) fn dynamic(bytes: &[u8], maximum: usize) -> Result<Vec<&[u8]>, CheckerError> {
     if bytes.len() == 4 && u32_at(bytes, 0)? == 4 {
         return Ok(Vec::new());
     }
@@ -48,7 +48,7 @@ fn dynamic(bytes: &[u8], maximum: usize) -> Result<Vec<&[u8]>, CheckerError> {
     }
     fields(bytes, count)
 }
-fn fixed(bytes: &[u8], width: usize, maximum: usize) -> Result<&[u8], CheckerError> {
+pub(super) fn fixed(bytes: &[u8], width: usize, maximum: usize) -> Result<&[u8], CheckerError> {
     let count = u32_at(bytes, 0)?;
     if count > maximum || count.checked_mul(width).and_then(|n| n.checked_add(4)) != Some(bytes.len()) {
         return Err(invalid("Molecule fixvec count/width differs or exceeds profile"));

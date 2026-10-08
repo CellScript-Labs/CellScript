@@ -1492,3 +1492,122 @@ readiness stays false and all release requirements remain pending. The exact
 staged native/checker dependency/type/test/docs/archive/inventory slice now
 freezes for full dev before G-signing/publication. No new machine/ABI or fresh
 clean full-backend/CCC claim is attached; full CI remains deferred.
+
+
+## Direct dependency publication and complete Type-group snapshot
+
+The exact frozen direct-dependency/type-separation slice passed full dev in
+worktree `.cap/logs/1791496335-75821.log` (102,965 command-output bytes;
+102,992 raw log bytes; SHA-256
+`885d6f71d3d53d1de931bf922f048f43ab96a340d0c015cdaa105e1fb4bb310c`).
+Its 84,695-byte staged binary diff retained SHA-256
+`8c92ae3409d6b9772bfeccc143fd11cfae01c55bbfec63e7a16fd4213fdb5bc1`
+before/after, with only 19 ignored cache timestamps changed. It was G-signed as
+`0b187a7f3045c02cf1faca43b0aead7439965d7b`, fast-forwarded into clean root
+and pushed in root `.cap/logs/1791497296-97627.log`. Independent
+`.cap/logs/1791497309-98054.log` confirmed exact public `0.32`; both checkouts
+were clean. Those three logs are now archived, with all twenty-seven normalized
+raw/stored lengths and SHA-256 verified. Full backend/CCC evidence still binds
+exactly `16e6b721`, without promoting later host source into its provenance.
+
+The next standalone checker consumes that actual private dependency proof and
+a privately checked finite Type-policy receipt with the same target identity.
+The new group record separately commits the complete fixed receipt identity;
+native composition always uses the source selection's exact candidate receipt.
+It parses canonical full
+Transaction/raw/all witness Bytes, matches every supplied input Cell by actual
+OutPoint, and derives Type groups from complete Script hashes in raw input and
+output order. A supplied list position, code hash, changed args or matching Lock
+occurrence cannot replace this group. Selected witness lookup uses the first
+group input, or first output when no matching group input exists. Selected
+WitnessArgs/CSPOL records, including all unselected records, are canonical and
+strictly role/hash ordered without duplicates. The selected Type/current-Script
+request must match actual checked tag, input/output cardinality and fixed scalar
+magic/width; payload-free actions need exactly empty args. Output-only appearance
+still rejects for this input-consuming receipt's cardinality.
+
+The private Type-group record binds complete transaction/witness bytes, receipt
+and dependency identities, every supplied input fingerprint, actual group and
+witness positions, selected tag and complete policy bundle identity. Later
+checks preflight and compare complete witnesses, including opaque Lock signature
+placeholders, foreign and extra witnesses, plus every input/dependency snapshot.
+All inputs use 4 MiB/file/caller and shared 16 MiB preparse bounds, <=256 input
+snapshots/witnesses and 1..=64 dependencies; existing raw/Script bounds remain.
+A witness-only edit retains the raw transaction hash but invalidates this proof.
+Rechecking new opaque signature bytes constructs a different host snapshot and
+never claims signature verification. Input data is fingerprinted, not admitted
+as valid application state, and other policy records grant no peer execution.
+
+The consuming native `FrozenSourceCodeDependency::check_type_group` returns
+privately constructed `FrozenSourceCodeTypeGroup`, with source policy, selected
+source receipt and independent group identities. It rechecks actual pinned
+consumer sources at construction and later byte rechecks. Artifact-only proof
+substitution remains rejected by distinct types. Historical policy, dependency,
+source and codec record/domain identities are unchanged; no emitted machine/ABI,
+metadata/cache, dependencies, toolchain or default runtime budgets change.
+
+Early pure tests passed four then five cases. Initial native runs in
+`.cap/logs/1791497747-8424.log`, `.cap/logs/1791497820-10369.log` and
+`.cap/logs/1791497871-11582.log` correctly rejected modified consumer sources but
+failed diagnostic text assertions. Actual offline lock verification fails first
+with E2610 because the source hash differs from Cell.lock. The corrected test
+compares the propagated error to the existing source check's actual result; no
+source or byte validation rule was relaxed. Corrected native O0–O3/exact and
+compatible cases pass in `.cap/logs/1791497922-12857.log` (6.33 seconds).
+
+Complete related regressions pass 38 native frozen-interface tests (54.02
+seconds) and 70 policy artifact tests (19.60 seconds) in
+`.cap/logs/1791498018-15040.log`. Three compile-fail doctests pass in
+`.cap/logs/1791498146-18145.log`. Strict clippy initially rejected a test-only
+OR pattern in `.cap/logs/1791498019-15107.log`; it was changed to a range with
+no lint allowance. Final all-target compiler/checker strict clippy passes in
+`.cap/logs/1791498252-20774.log`. Expanded final six independent tests pass in
+`.cap/logs/1791498250-20681.log` (8.32 seconds), covering O0–O3, 256 inputs/eight
+records, all input/dependency/record/witness ceilings, output fallback position,
+scalar/empty args, signature/extra witness substitution and shared preparse limits.
+
+This remains host evidence, not authenticated resolution/liveness, signature
+validity, immutable authorization, application predicates or peer execution.
+Nominal I/handles, full H1/H2, Type history, ProtocolBundle/generated-builder
+signing parity, #29 and #44–#46 remain unfinished. Independent #28/#29 security
+review is unassigned/unwaived; full CI stays deferred until the complete issue
+queue. See `docs/DIRECT_TYPE_GROUP.md`. Full dev on the exact final staged slice
+remains pending; no fresh clean backend/CCC or stable admission claim is supplied.
+
+
+The final authoritative inventory refresh passes in
+`.cap/logs/1791498437-24863.log`, changing only the business inventory digest to
+`0x501694fff5597db5ed9544af483b16aaa8f1651b0981d42b41dd4fffbdc3c2d7`.
+Read-only validation passes in `.cap/logs/1791498456-25352.log`. Release readiness
+remains false and every release requirement remains pending. The exact final
+staged native/checker/transaction/test/docs/archive/inventory slice now freezes
+for dev before G-signing/publication. No emitted machine/ABI change, fresh clean
+backend/CCC, full CI, complete H1/H2 or stable admission claim is made.
+
+
+The first staged dev in `.cap/logs/1791498503-26596.log` was deliberately
+stopped before completion to clarify target-versus-receipt binding language.
+It has no final dev pass marker and is not passing gate evidence. The standalone
+operation compares actual checked target identities and separately commits the
+actual fixed-receipt identity; native composition always takes its exact source
+selection candidate's receipt. No validation or proof-construction rule changed.
+A new receipt-byte test initially assumed JSON whitespace preserved target
+identity and failed in `.cap/logs/1791498799-33627.log`. Actual private machine
+provenance includes these input bytes: changed metadata whitespace preserves
+ELF/entry contracts but changes target and complete receipt identity. The
+corrected negative requires old dependency proof to reject that actual new
+receipt. All seven final independent tests pass in
+`.cap/logs/1791498923-36319.log` (8.68 seconds). Full final staged dev will be
+restarted after final lint/inventory checks; the superseded run is not reported
+as a complete gate or archived as passing evidence.
+
+
+Final strict compiler/checker all-target clippy passes in
+`.cap/logs/1791498923-36320.log` (48.85 seconds, including Cargo lock waits).
+The final authoritative inventory refresh in `.cap/logs/1791499003-38160.log`
+changes only the digest to
+`0x96e06cf6529eec91398737671d4284a3d4c1be3eaea44071acd052c5c92207bb`;
+read-only validation passes in `.cap/logs/1791499026-38743.log`. Release readiness
+is still false, with all release requirements pending. All tracked files now
+freeze again for the fresh complete dev gate before G-signing and public push.
+Full CI remains deferred; no whole-issue completion or fresh backend/CCC claim.

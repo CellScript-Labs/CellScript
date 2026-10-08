@@ -40,6 +40,9 @@ struct CellFingerprint {
     data_bytes: usize,
 }
 impl CheckedDirectCodeDependency {
+    pub(super) fn target_identity(&self) -> &str {
+        &self.record.target_origin
+    }
     pub fn identity(&self) -> &str {
         &self.identity
     }

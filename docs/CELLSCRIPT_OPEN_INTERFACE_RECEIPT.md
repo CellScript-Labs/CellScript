@@ -289,6 +289,13 @@ required; this native profile does not expand the wire or runtime budgets.
 
 ## Direct dependency consistency prerequisite
 
+The later [Type-group transaction snapshot](DIRECT_TYPE_GROUP.md) additionally
+binds complete witnesses and all supplied input Cells, derives actual Type-group
+indices, and checks the selected policy tag/cardinality/fixed scalar args. Its
+private native composition retains source/version selection. This remains host
+consistency evidence without authenticated resolution, signatures, immutable
+authorization or peer execution; full H1/H2 remains incomplete.
+
 A [separate bounded checker/native composition](DIRECT_CODE_DEPENDENCY.md) now
 binds the selected checked data2 creation OutPoint, code and complete CellOutput
 to canonical final raw direct deps and every supplied dependency Cell snapshot.

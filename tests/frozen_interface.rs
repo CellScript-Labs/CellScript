@@ -1626,3 +1626,99 @@ fn source_dependency_rechecks_consumer_sources_before_binding_and_later_material
     assert!(later.check_direct_dependency(&raw, &inputs, &Default::default()).is_err());
     assert!(checked.check_unchanged_inputs(&raw, &inputs, &Default::default()).is_err());
 }
+
+#[test]
+fn source_type_group_binds_final_witnesses_and_rechecks_consumer_sources() {
+    use cellscript::package::frozen_interface::{freeze_source_code_policy, FrozenSourceCodeTypeGroup};
+    use cellscript::policy_witness::{encode_policy_witness_bundle, PolicyScriptRole, PolicyWitnessRecord};
+    use cellscript_artifact_checker::{
+        code_origin::{SuppliedDependencyCell, SuppliedInputCell, SuppliedTypeGroupTransaction},
+        open_handle_policy::AuthorizationSet,
+    };
+    use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
+    let (_directory, library, candidate, consumer) = policy_fixture();
+    for opt in 0..=3 {
+        for exact in [false, true] {
+            let sources = policy_sources(&library, &candidate, &consumer, opt, 2);
+            let (header, members) = source_policy_records(&sources, exact, 1);
+            let policy = freeze_source_code_policy(sources, AuthorizationSet::new(header, &members).unwrap()).unwrap();
+            let membership = policy.policy().selection(&members[1].receipt).unwrap();
+            let selection = policy.check_selection(&membership).unwrap();
+            let (raw, point, code_output, data) = final_code_dependency(selection.candidate());
+            let selected = packed::Script::from_slice(selection.candidate().selected_script()).unwrap();
+            let input_point = packed::OutPoint::new_builder().tx_hash([91u8; 32].pack()).index(2u32).build();
+            let lock_script = packed::CellOutput::from_slice(&code_output).unwrap().lock();
+            let input_output = packed::CellOutput::new_builder()
+                .capacity(200000000000u64)
+                .lock(lock_script)
+                .type_(Some(selected.clone()).pack())
+                .build();
+            let mut args = b"CSARGv1\0".to_vec();
+            args.extend_from_slice(&7u64.to_le_bytes());
+            let bundle = encode_policy_witness_bundle(&[PolicyWitnessRecord {
+                role: PolicyScriptRole::Type,
+                script_hash: selected.calc_script_hash().as_slice().try_into().unwrap(),
+                tag: 40,
+                args,
+            }])
+            .unwrap();
+            let witness = packed::WitnessArgs::new_builder()
+                .lock(Some(Bytes::from(vec![0; 65])).pack())
+                .input_type(Some(Bytes::from(bundle)).pack())
+                .build();
+            let raw = packed::RawTransaction::from_slice(&raw)
+                .unwrap()
+                .as_builder()
+                .inputs(vec![packed::CellInput::new_builder().previous_output(input_point.clone()).build()].pack())
+                .build();
+            let tx = packed::Transaction::new_builder().raw(raw.clone()).witnesses(vec![witness.as_bytes().pack()].pack()).build();
+            let deps = [SuppliedDependencyCell { out_point: point, output: &code_output, data: &data }];
+            let input_data = 1u64.to_le_bytes();
+            let inputs = [SuppliedInputCell {
+                out_point: input_point.as_slice().try_into().unwrap(),
+                output: input_output.as_slice(),
+                data: &input_data,
+            }];
+            let supplied = SuppliedTypeGroupTransaction { full_transaction: tx.as_slice(), dependencies: &deps, inputs: &inputs };
+            let dependency = selection.check_direct_dependency(raw.as_slice(), &deps, &Default::default()).unwrap();
+            let group: FrozenSourceCodeTypeGroup<'_> = dependency.check_type_group(&supplied, &Default::default()).unwrap();
+            assert_eq!(group.group().group_inputs(), &[0]);
+            assert_eq!(
+                group.selection().candidate().source_receipt().identity(),
+                policy.sources().catalog().candidates()[1].source_receipt().identity()
+            );
+            let bytes = group.canonical_bytes().unwrap();
+            let record: Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(record["source_policy"], policy.identity());
+            assert_eq!(record["checked_type_group"], group.group().identity());
+            let mut material = b"cellscript-frozen-source-code-type-group-id-v1\0".to_vec();
+            material.extend_from_slice(&bytes);
+            assert_eq!(
+                group.identity(),
+                cellscript_artifact_checker::hex_encode(&cellscript_artifact_checker::ckb_blake2b256(&material))
+            );
+            group.check_unchanged_inputs(&supplied, &Default::default()).unwrap();
+            let changed = tx.clone().as_builder().witnesses(vec![Bytes::from(vec![0]).pack()].pack()).build();
+            assert!(group
+                .check_unchanged_inputs(
+                    &SuppliedTypeGroupTransaction { full_transaction: changed.as_slice(), dependencies: &deps, inputs: &inputs },
+                    &Default::default()
+                )
+                .is_err());
+            let source_path = consumer.join("src/main.cell");
+            let original = std::fs::read_to_string(&source_path).unwrap();
+            let later = policy
+                .check_selection(&membership)
+                .unwrap()
+                .check_direct_dependency(raw.as_slice(), &deps, &Default::default())
+                .unwrap();
+            std::fs::write(&source_path, format!("{original}\n// changed consumer\n")).unwrap();
+            let source_error = policy.sources().check_unchanged_sources().unwrap_err();
+            let changed_group = later.check_type_group(&supplied, &Default::default()).unwrap_err();
+            let changed_recheck = group.check_unchanged_inputs(&supplied, &Default::default()).unwrap_err();
+            assert_eq!(changed_group.message, source_error.message);
+            assert_eq!(changed_recheck.message, source_error.message);
+            std::fs::write(&source_path, original).unwrap();
+        }
+    }
+}

@@ -2,6 +2,14 @@
 
 ## Unreleased — 0.32
 
+Bind a checked direct data2 dependency and finite Type-policy receipt to complete
+canonical transaction/witness bytes and every supplied input Cell. Derive Type
+group indices from complete Scripts, validate all policy records and the
+selected tag/cardinality/fixed args, and reject later witness/input substitution.
+Compose private source/version proofs with this host snapshot. Resolution,
+signature validity, root authority and full #28 remain pending; see
+`docs/DIRECT_TYPE_GROUP.md`.
+
 Bind checked data2 code creation identities to canonical final raw direct deps
 and every supplied Cell snapshot under finite preparse limits. Reject missing,
 extra, copied or duplicate code, changed selected outputs, malformed unselected

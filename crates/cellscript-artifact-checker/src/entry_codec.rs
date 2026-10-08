@@ -23,6 +23,22 @@ pub struct CheckedFixedPolicyParameterDecoders {
     identity: String,
 }
 impl CheckedFixedPolicyParameterDecoders {
+    /// Check bytes against this privately verified positional decoder. The
+    /// finite external profile separately restricts transported witness types.
+    pub(crate) fn check_payload(&self, tag: u32, bytes: &[u8]) -> Result<(), CheckerError> {
+        let variant = self.record.variants.get(&tag).ok_or_else(|| invalid("unknown checked payload tag"))?;
+        let width = variant.parameters.iter().filter_map(|p| p.payload_offset.map(|offset| offset + p.width_bytes)).max().unwrap_or(0);
+        if width == 0 {
+            if !bytes.is_empty() {
+                return Err(invalid("payload-free action requires empty args"));
+            }
+        } else if bytes.len() != width as usize + 8 || !bytes.starts_with(b"CSARGv1\0") {
+            return Err(invalid(
+                "policy args differ from checked fixed magic/length; encode the selected action's exact scalar payload",
+            ));
+        }
+        Ok(())
+    }
     pub fn module_projection(&self) -> &CheckedModuleProjection {
         &self.module
     }

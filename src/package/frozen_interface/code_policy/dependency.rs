@@ -9,8 +9,8 @@ use serde::Serialize;
 
 #[derive(Debug)]
 pub struct FrozenSourceCodeDependency<'a> {
-    selection: FrozenSourceCodePolicySelection<'a>,
-    dependency: CheckedDirectCodeDependency,
+    pub(super) selection: FrozenSourceCodePolicySelection<'a>,
+    pub(super) dependency: CheckedDirectCodeDependency,
     identity: String,
 }
 #[derive(Serialize)]
