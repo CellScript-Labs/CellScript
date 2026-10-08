@@ -9,6 +9,8 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+#[cfg(all(feature = "cli", not(feature = "wasm")))]
+pub mod frozen_interface;
 pub mod inspection;
 pub mod registry;
 #[cfg(feature = "cli")]

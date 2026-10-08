@@ -200,3 +200,39 @@ so alternating default and source-evidence builds cannot reuse each other's
 metadata. The browser summary does not emit these catalogs and explicitly
 rejects a programmatic source-evidence request. This option only supplies
 independently checkable inputs; it cannot authorize a policy root or deployment.
+
+## Native frozen-source prerequisite
+
+`package::frozen_interface::compile_module` constructs a private
+`FrozenPackageModule` from an actual package directory, existing version-5
+`Cell.lock`, selected pinned environment and real source entry/artifact. It
+forces offline runtime resolution, ELF and source catalogs, rejects a planned
+lock override, and does not repin or write the lock. Before and after native
+compilation it compares the actual root/dependency manifests, source hashes,
+module ownership, paths and lock bytes. Parsed declarations are rebuilt and
+compared with the emitted source catalogs before independent four-file checking.
+Exported context JSON cannot reconstruct the private checked value.
+
+The versioned context binds exact package sources, compiler release, chain
+identity, defining module owners and package-relative source paths. Registry/Git
+sources retain their pinned origin/revision. Local source snapshots exclude
+physical directory names; dependency aliases share the actual selected defining
+package. Context identity describes this exact source closure, not a publisher
+authority, stable `I` family, upgrade line or behavioral equivalence. The stored
+bundle is immutable through this API.
+
+The static native preflight limits files to 4 MiB, total input bytes to 16 MiB,
+packages to 32, source modules to 256, directory entries to 4,096 and directory
+depth to 16. Source roots/entries must remain inside their package; source
+symlinks and nonregular input files reject. This preflight runs before the
+ordinary resolver hashes the selected package trees. The native filesystem is
+not sandboxed: snapshot comparison detects source changes, but upstream native
+re-reads do not provide allocation guarantees against concurrent hostile file
+replacement. These are source-input limits, separate from receipt wire limits.
+
+Focused tests cover optimization-independent context identity, actual bundle
+checks, portable local snapshots, defining dependency aliases, changed
+dependencies, missing/stale locks and environments, invalid entry/target requests,
+oversized files, excessive module count/depth and Unix symlink loops. Whole H1
+codec/executable availability, stable package/interface identity, deployment
+history, all-member admission, H2 runtime handles and #29 remain outstanding.

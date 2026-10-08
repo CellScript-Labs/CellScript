@@ -23,6 +23,12 @@ matching permits candidate additions while conservatively preserving required
 contracts. Artifact identities remain separate from API identities; source
 equivalence, codec, package and deployment admission are not inferred.
 
+Construct a private native frozen-source context from actual locked package
+sources, module owners and pinned chain identity, then independently inspect the
+immutable bundle. Reject missing/stale locks and statically oversized or linked
+source trees without repinning. This prerequisite supplies source provenance;
+complete compatible receipts and open runtime admission remain pending.
+
 Bind fixed ordinary-struct helper results to a feature-specific caller-owned
 buffer ABI checked independently from decoded RISC-V, including source pointer,
 hidden argument placement, bounded copy and frame teardown. Preserve nominal

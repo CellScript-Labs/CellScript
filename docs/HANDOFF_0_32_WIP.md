@@ -640,3 +640,24 @@ removed byte-for-byte. All 32 current business/resource tests pass in
 projection commit is signed `b7ada744`, whose worktree dev passed in
 `.cap/logs/1791457344-68409.log`. A fresh full backend gate is still required.
 Whole H1/H2, #29 and #44–#46 remain unfinished, and whole-queue CI stays deferred.
+
+### Frozen source closure prerequisite
+
+Signed `34ce0fec` makes source evidence explicit without raising metadata/ELF
+budgets; root dev passed in `.cap/logs/1791459781-24010.log`. Its clean backend
+with `CELLSCRIPT_COUNTER_CCC=1` is being replayed separately. The worktree native
+`frozen_interface` prerequisite consumes actual locked packages, pinned chain
+identity, entry selection and sources, compares before/after closures and actual
+source declarations, and independently checks the stored four-file bundle.
+It never repins, accepts planned locks or reconstructs a checked object from
+raw JSON. Physical local directory paths are excluded from exported identities.
+
+Static preflight rejects >4 MiB files, >16 MiB aggregate input, >32 packages,
+>256 modules, >4,096 directory entries, depth >16, escaped roots and source
+symlinks/nonregular files before ordinary source hashing. Concurrent hostile
+filesystem allocation bounds are not claimed. Six focused native tests pass in
+worktree `.cap/logs/1791461213-61749.log`; the earlier four-test precursor and
+strict compiler clippy passed in `.cap/logs/1791461009-53316.log` and
+`.cap/logs/1791461034-53968.log`. The expanded source-preflight changes still need
+their own dev gate before commit. Whole H1/H2, #29 and #44–#46 remain unfinished,
+independent security review is unassigned, and full CI remains deferred.
