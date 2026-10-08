@@ -582,3 +582,18 @@ historical reports and all resource ceilings remain unchanged. All seven
 `business_corpus` tests pass in `.cap/logs/1791455346-12833.log`. This focused
 replay does not replace the next clean full backend gate. Whole-queue CI remains
 deferred until the requested implementation queue is complete.
+
+### Remaining current fixture identities after declaration catalogs
+
+The next backend replay on signed `77737444` passed the refreshed business
+anchor and stopped at committed-state fixtures with old sidecar identities.
+Actual CKB-VM replay then covered committed-state, Order/AMM, external verifier,
+temporal, fungible/authorization/NFT and typed runtime-view fixtures together.
+Their source/scenario sets, expected exits, all ELF and transaction identities,
+all measured resources and all budgets are unchanged. Nineteen recorded
+artifact identity tuples across nine current fixture files receive only their
+new lowering/source-map/verified-bundle hashes. Temporary replay instrumentation
+was removed before validation; all 32 focused tests pass in root
+`.cap/logs/1791456549-43289.log`. Historical evidence archives remain unchanged.
+This does not turn the failed backend replay into a passing receipt; a fresh
+clean backend gate is still required, and whole-queue CI remains deferred.
