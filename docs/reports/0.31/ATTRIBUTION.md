@@ -42,9 +42,9 @@ reproduction stage remains the unchanged baseline. Both controls start at
   `c161108a92dae72adead02a48848870685570f738ee352cacffb359e40cd5165`.
 
 Both reports declare the empty untracked-source digest. Their exact provenance
-and artifact identities are in [immediate.json](immediate.json),
-[immediate-multi.json](immediate-multi.json), [unshared.json](unshared.json) and
-[unshared-multi.json](unshared-multi.json). The native
+and artifact identities are in [immediate.json](https://github.com/CellScript-Labs/CellScript/blob/fe953b19a0a0311942691cb478d8ecf6f0574085/docs/reports/0.31/immediate.json),
+[immediate-multi.json](https://github.com/CellScript-Labs/CellScript/blob/fe953b19a0a0311942691cb478d8ecf6f0574085/docs/reports/0.31/immediate-multi.json), [unshared.json](https://github.com/CellScript-Labs/CellScript/blob/fe953b19a0a0311942691cb478d8ecf6f0574085/docs/reports/0.31/unshared.json) and
+[unshared-multi.json](https://github.com/CellScript-Labs/CellScript/blob/fe953b19a0a0311942691cb478d8ecf6f0574085/docs/reports/0.31/unshared-multi.json). The native
 [D2 comparison](immediate-comparison.json) and
 [D3 comparison](sharing-comparison.json) each pass **6,782** comparable metrics
 with no regression. Checksums are in [ATTRIBUTION_SHA256SUMS](ATTRIBUTION_SHA256SUMS).

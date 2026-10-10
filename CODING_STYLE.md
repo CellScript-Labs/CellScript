@@ -186,6 +186,12 @@ implicit backend contracts more implicit.
 
 ## Documentation And Release Notes
 
+- Write routine test, benchmark and intermediate replay reports under `target/`.
+  Commit report payloads only for intentional final acceptance evidence or a
+  necessary reproduction baseline; keep concise decisions and comparisons in docs.
+- When removing historical report payloads, retain exact Git snapshot links and
+  stored-byte hashes, update local links and checksum inventories, and document
+  which historical manifests require restoring archived files before validation.
 - Do not describe a feature as implemented unless parser, type checking,
   lowering, metadata, LSP/editor behavior, tests, examples, and docs agree on
   the same boundary.

@@ -1,5 +1,11 @@
 # Resumed 0.32 evidence
 
+Storage note (2026-10-10): this historical replay's JSON payloads are retained
+in the [pinned Git archive](../README.md#historical-json-storage). The original
+manifest and logs remain here; restore archived payloads before verifying the
+complete manifest. The following results retain their original source scope.
+
+
 This archive preserves the clean `6dba17681e755720081c678015324cdd0cf46bb9`
 backend run from 2026-10-08. [manifest.json](manifest.json) binds the stored and
 uncompressed bytes. It includes the complete backend log, the pinned CKB

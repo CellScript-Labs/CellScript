@@ -1,5 +1,11 @@
 # Clean-source CCC application and migration replay
 
+Storage note (2026-10-10): this historical replay's JSON payloads are retained
+in the [pinned Git archive](../README.md#historical-json-storage). The original
+manifest and logs remain here; restore archived payloads before verifying the
+complete manifest. The following results retain their original source scope.
+
+
 The complete `backend` gate passed on signed commit
 `bfb1910070d90a15e6268796a0e329e584806305`, with
 `CELLSCRIPT_COUNTER_CCC=1` and the pinned CKB checkout at
@@ -17,7 +23,7 @@ default-node-only scope.
 The ordinary CCC workflow confirms two consecutive updates, rejects transaction,
 proof, dependency, network and pinned-prover substitutions, and exercises
 interrupted-proving recovery and stale-input rejection. The
-[migration report](ccc-migration.json) confirms this exact continuous lineage:
+[migration report](https://github.com/CellScript-Labs/CellScript/blob/fe953b19a0a0311942691cb478d8ecf6f0574085/docs/reports/0.32/resumed-ccc/ccc-migration.json) confirms this exact continuous lineage:
 
 | Transaction | Selected version | CKB cycles | Full transaction bytes |
 | --- | --- | ---: | ---: |

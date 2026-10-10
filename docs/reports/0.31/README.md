@@ -1,5 +1,9 @@
 # 0.31 cost evidence and reproduction
 
+Storage: the main baseline/candidate pair remains local. Intermediate attribution
+payloads are in the [pinned historical archive](#historical-json-storage), with
+exact recovery instructions and checksums below.
+
 This package closes the reproducibility and static memory-count reporting work
 for issues #34 and #35. It does not constitute independent boundary review or
 authorize a release. The compiler's source editions and witness formats remain
@@ -178,3 +182,39 @@ self-check is not an independent review and the 0.30 waiver does not transfer.
 A release requires the named review result, fresh downstream bundles and a full
 clean-source release gate. Existing 0.30 deployment records identify their
 original artifacts and cannot establish deployment of new 0.31 bytes.
+
+## Historical JSON storage
+
+Intermediate report payloads listed below were removed from the current tree on
+2026-10-10. They remain byte-for-byte recoverable at Git commit
+`fe953b19a0a0311942691cb478d8ecf6f0574085`; each filename links to that exact snapshot.
+This is a storage cleanup, not a new validation run or a change to any measured
+result. Current summaries, comparisons, reproduction patches, final acceptance
+records and the retained baseline keep their original evidence boundaries.
+
+Historical manifests and raw-artifact fields may name these archived files.
+Resolve those paths in the pinned snapshot before checking a complete historical
+manifest; missing local payloads do not count as verified evidence. Current
+checksum lists cover retained files; the table preserves the stored-byte hashes
+of removed payloads. For gzip files these hashes cover the compressed bytes.
+
+From the repository root, recover one report into an ignored directory:
+
+```bash
+mkdir -p target/report-archive
+git show fe953b19a0a0311942691cb478d8ecf6f0574085:docs/reports/0.31/immediate-multi.json > target/report-archive/immediate-multi.json
+sha256sum target/report-archive/immediate-multi.json
+```
+
+For a complete historical checksum/manifest replay, use a separate checkout at
+the pinned commit so its original documentation and report paths are restored
+together. Ordinary report generation belongs under `target/`; promote only
+intentional final evidence or a necessary reproduction baseline into `docs/reports/`.
+Deleting current-tree files does not shrink existing Git history.
+
+| Historical payload | Stored bytes | SHA-256 |
+| --- | ---: | --- |
+| [immediate-multi.json](https://github.com/CellScript-Labs/CellScript/blob/fe953b19a0a0311942691cb478d8ecf6f0574085/docs/reports/0.31/immediate-multi.json) | 28763 | `c8ee3cf6db0a6a0750eb6df76fa4a66cecf6eaafecd49cab8a059e5b308cd0de` |
+| [immediate.json](https://github.com/CellScript-Labs/CellScript/blob/fe953b19a0a0311942691cb478d8ecf6f0574085/docs/reports/0.31/immediate.json) | 8701413 | `ad787efebf9f5f082809e6863cc4369e47f3bc47b80f7b38ba76100c41c23b5c` |
+| [unshared-multi.json](https://github.com/CellScript-Labs/CellScript/blob/fe953b19a0a0311942691cb478d8ecf6f0574085/docs/reports/0.31/unshared-multi.json) | 28757 | `6abde8171ac54425065f8c8508bbc2cd4f70e93cb3a778028d140ce2e9b2a12c` |
+| [unshared.json](https://github.com/CellScript-Labs/CellScript/blob/fe953b19a0a0311942691cb478d8ecf6f0574085/docs/reports/0.31/unshared.json) | 8700226 | `8b3993a022c422052785b89308936be38e738c250b8a6450054aae2f6f3d515c` |

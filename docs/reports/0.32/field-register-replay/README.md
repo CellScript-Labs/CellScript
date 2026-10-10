@@ -1,5 +1,11 @@
 # Fixed Cell field/register replay
 
+Storage note (2026-10-10): this historical replay's JSON payloads are retained
+in the [pinned Git archive](../README.md#historical-json-storage). The original
+manifest and logs remain here; restore archived payloads before verifying the
+complete manifest. The following results retain their original source scope.
+
+
 These raw reports bind clean signed `588f6a28`, which is public on `0.32`.
 The dev run used the exact staged sources later signed as that commit; it was
 not a clean-HEAD replay. The backend, acceptance and node reports bind clean

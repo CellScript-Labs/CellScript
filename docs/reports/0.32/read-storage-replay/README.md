@@ -1,5 +1,11 @@
 # Clean fixed read/storage replay
 
+Storage note (2026-10-10): this historical replay's JSON payloads are retained
+in the [pinned Git archive](../README.md#historical-json-storage). The original
+manifest and logs remain here; restore archived payloads before verifying the
+complete manifest. The following results retain their original source scope.
+
+
 The manifest binds signed source commit
 `f07b8a1cb7451ad33f2b14b9773b09f473fca2aa`, its clean root backend/CCC replay
 and its earlier exact staged dev state. It preserves seven gzip files with

@@ -1,5 +1,11 @@
 # Transaction-pool snapshot and clean-source replay
 
+Storage note (2026-10-10): this historical replay's JSON payloads are retained
+in the [pinned Git archive](../README.md#historical-json-storage). The original
+manifest and logs remain here; restore archived payloads before verifying the
+complete manifest. The following results retain their original source scope.
+
+
 The complete dev and backend gates passed for signed source
 `23822919ac1d4f8a710df04d536a48717ef8fed9`; backend used
 `CELLSCRIPT_COUNTER_CCC=1` and pinned CKB `f7fa4436737756f97a24e254f22c13a36316ecea`.

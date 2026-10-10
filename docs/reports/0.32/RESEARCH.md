@@ -135,8 +135,8 @@ proved merely because a site is hot or repeated.
 
 The fresh integrated baseline is commit
 `4e1047980bce94d8ad0317b132a6f4c15a45df08`. Its clean-source main and
-multi-Script reports are [integrated-main.json](integrated-main.json) and
-[integrated-multi.json](integrated-multi.json). The compressed full attribution
+multi-Script reports are [integrated-main.json](https://github.com/CellScript-Labs/CellScript/blob/fe953b19a0a0311942691cb478d8ecf6f0574085/docs/reports/0.32/integrated-main.json) and
+[integrated-multi.json](https://github.com/CellScript-Labs/CellScript/blob/fe953b19a0a0311942691cb478d8ecf6f0574085/docs/reports/0.32/integrated-multi.json). The compressed full attribution
 report and its summary now identify that same clean commit. The historical
 before/after #41 evidence retains its original identities and is not relabeled
 as a new optimization result.
