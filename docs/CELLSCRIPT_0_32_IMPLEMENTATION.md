@@ -85,6 +85,28 @@ migration and a second switch. Testtool resource replay remains distinct from
 node commitment. Final gates, published source and profile acceptance remain
 pending; these fixture results do not admit a production setup or public deployment.
 
+## Follow-up reference map
+
+The current #28 host prerequisites are documented by contract rather than by
+the superseded session handoff:
+
+- [Checked module catalogs](CHECKED_MODULE_CATALOG.md),
+  [frozen code catalogs](FROZEN_CODE_CATALOG.md),
+  [resolver-owned catalogs](RESOLVED_CODE_CATALOG.md), and
+  [pre-typing source capture](FROZEN_PACKAGE_SOURCES.md) define source ownership.
+- [Finite receipts](FIXED_POLICY_RECEIPT.md) and
+  [source policies](FROZEN_CODE_POLICY.md) define bounded selection evidence.
+- [Direct dependencies](DIRECT_CODE_DEPENDENCY.md) and
+  [complete Type-group snapshots](DIRECT_TYPE_GROUP.md) define host transaction
+  bindings; they do not establish execution, signature validity or liveness.
+
+The [catalog replay archive](reports/0.32/code-catalog-replay/README.md) retains
+each validation's exact source identity. Its full backend/CCC evidence binds
+`16e6b721`; later staged dev records do not extend that provenance. The
+[historical WIP logs](reports/0.32/wip-handoff/README.md) retain their original
+failure context. Full H1/H2, #29 and #44–#46 remain unfinished, and independent
+security review for #28/#29 remains required before stable admission.
+
 ## Integration baseline
 
 Integrated the published 0.31 history through

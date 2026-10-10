@@ -24,8 +24,8 @@ in the manifest. No later containing commit replaces any evidence source commit.
 
 Target selection passed the refreshed staged dev and was G-signed/pushed as
 `35a9565b260890e2b32f6082af51e5cfa36b3866`. Its own dev/push logs retain this
-native/checker provenance. The earlier stale-inventory dev failure is documented
-in the handoff and is not archived as a passing run. Clean backend/CCC provenance
+native/checker provenance. The earlier stale-inventory dev failure is not
+archived as a passing run. Clean backend/CCC provenance
 remains exactly `16e6b721`.
 
 Finite policy receipts passed the frozen staged dev, were G-signed as
