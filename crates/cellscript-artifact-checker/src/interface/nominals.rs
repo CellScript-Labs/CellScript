@@ -109,6 +109,11 @@ pub(crate) fn verify_catalog(record: &TypedSemanticRecord) -> Result<(), Checker
     }
     let mut names = BTreeSet::new();
     for declaration in &catalog.declarations {
+        // Reserved compatible-open handle class names (#28 H2): no user
+        // declaration may manufacture the surface before it ships.
+        if matches!(declaration.name.as_str(), "ScriptHandle" | "VerifierHandle") {
+            return Err(invalid("nominal declaration uses a reserved open-handle class name"));
+        }
         if !module(&declaration.module)
             || !identifier(&declaration.name)
             || !visibility(&declaration.visibility)

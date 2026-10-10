@@ -8541,6 +8541,19 @@ impl<'a> TypeChecker<'a> {
             _ => {}
         }
 
+        if matches!(
+            base_name,
+            crate::script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE | crate::script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
+        ) {
+            return Err(CompileError::new(
+                format!(
+                    "type '{}' is reserved for the compatible-open handle surface (#28 H2) and is not admitted in this release",
+                    name
+                ),
+                Span::default(),
+            ));
+        }
+
         if let Some(inner) = crate::commitment_contract::commitment_inner_type(name) {
             return self.validate_committed_value_type(&self.parse_named_type_repr(inner), Span::default());
         }

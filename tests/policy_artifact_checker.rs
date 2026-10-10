@@ -4287,3 +4287,29 @@ fn constant_value_catalog_rejects_rebound_mutations() {
         }
     }
 }
+
+#[test]
+fn nominal_catalog_rejects_reserved_open_handle_class_names() {
+    for opt_level in 0..=3 {
+        let baseline = Fixture::new_source_with(
+            &format!("{SOURCE}\npublic struct Snapshot {{ z: u64 }}"),
+            CellScriptEdition::Edition2027,
+            opt_level,
+            declaration(),
+        );
+        baseline.assert_interface_inspection();
+        let mut changed = baseline.clone();
+        let catalog = changed.record.typed_semantics.nominal_declarations.as_mut().unwrap();
+        catalog.declarations.iter_mut().find(|declaration| declaration.name == "Snapshot").unwrap().name = "ScriptHandle".into();
+        changed.rebind_policy_identity();
+        let error = cellscript_artifact_checker::interface::inspect_bundle(
+            &changed.artifact,
+            &serde_json::to_vec(&changed.metadata).unwrap(),
+            &serde_json::to_vec(&changed.record).unwrap(),
+            &serde_json::to_vec(&changed.source_map).unwrap(),
+            &CheckerBudgets::default(),
+        )
+        .unwrap_err();
+        assert!(error.message.contains("reserved open-handle class name"), "opt={opt_level}: {error}");
+    }
+}

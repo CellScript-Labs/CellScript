@@ -127,3 +127,38 @@ does not cover this contract.
   [DIRECT_TYPE_GROUP.md](DIRECT_TYPE_GROUP.md).
 - H1 host limits and receipt projection prerequisites:
   [CELLSCRIPT_OPEN_INTERFACE_RECEIPT.md](CELLSCRIPT_OPEN_INTERFACE_RECEIPT.md).
+
+## H2 first-slice decisions (frozen before source-syntax admission)
+
+The plan requires the interface-parameter mapping to be frozen before any
+`ScriptHandle<I>`/`VerifierHandle<I>` source syntax is admitted. These
+decisions bind the implementation order that follows; the two class spellings
+are reserved and fail closed at type validation, declaration registration and
+independent nominal-catalog verification until each slice below ships.
+
+1. **Interface parameter `I`** denotes the resolver-owned checked defining
+   module interface identity (defining package/module, pinned source closure,
+   effective checked projection digest) — the same identity the receipt
+   contract already fixes. In source it will be spelled only through an
+   explicit resolver-bound marker introduced with the parser slice: an
+   imported module interface designation, not a local struct, raw `Script`,
+   package display name, producer flag or boolean. Ambiguous unqualified
+   markers never manufacture an interface.
+2. **Bounded encoding**: a runtime handle value carries at most the existing
+   656-byte selection witness and 32-member authorization-set identity from
+   the frozen wire. No new runtime budgets, no witness expansion, no proving
+   key or network lookup enters ordinary compilation.
+3. **Class and role separation**: `ScriptHandle` and `VerifierHandle` are
+   distinct nominal classes; the Lock/Type/spawned-verifier role belongs to
+   the policy header, not the type. No coercion or retyping move from
+   `Script`, `Hash`, `ScriptHash`, bytes or any other nominal exists or will
+   be added; construction is only through versioned builtin helpers that
+   consume the checked admission boundary, mirroring the exact-handle
+   operand-flow jail.
+4. **Runtime enforcement**: the expected authorization root comes from
+   committed current-Script code/args or an explicitly controlled state
+   transition, never from the same witness that carries the membership proof.
+   Membership and selected-dependency checks execute on CKB-VM before any
+   on-chain claim; a compiler-only compatibility check is not runtime
+   evidence. Expected-root binding, helper admission and measured
+   cycle/stack/witness budgets land with the runtime slices.

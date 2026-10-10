@@ -326,6 +326,17 @@ impl Monomorphizer {
                     item_span(item),
                 ));
             }
+            if let Some(name) = item_decl_name(item).filter(|name| {
+                matches!(
+                    *name,
+                    crate::script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE | crate::script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
+                )
+            }) {
+                return Err(generic_declaration_error(
+                    format!("top-level name '{}' is reserved for the compatible-open handle surface (#28 H2)", name),
+                    item_span(item),
+                ));
+            }
             match item {
                 Item::Resource(def) => {
                     this.cell_types.insert(def.name.clone());

@@ -44,3 +44,10 @@ pub const DEPLOYMENT_LINE_HANDLE_EXACT_HANDLE_OFFSET: usize = 184;
 pub const DEPLOYMENT_LINE_HANDLE_STATUS_ACTIVE: u8 = 0;
 pub const DEPLOYMENT_LINE_HANDLE_STATUS_YANKED: u8 = 1;
 pub const DEPLOYMENT_LINE_COMMITMENT_MAGIC: &[u8; 7] = b"CSREGv1";
+
+/// Reserved nominal class names for the #28 compatible-open handle surface
+/// (H2). The source syntax is not admitted yet: both spellings fail closed at
+/// type validation and declaration registration until the frozen
+/// interface-parameter binding ships with its runtime enforcement.
+pub const OPEN_SCRIPT_HANDLE_TYPE: &str = "ScriptHandle";
+pub const OPEN_VERIFIER_HANDLE_TYPE: &str = "VerifierHandle";

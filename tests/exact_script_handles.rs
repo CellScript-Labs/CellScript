@@ -391,3 +391,31 @@ action verify(
         "a Script args substitution must fail the complete Script hash binding"
     );
 }
+
+#[test]
+fn compatible_open_handle_spellings_stay_reserved() {
+    use cellscript::{compile_with_executable_surface_policy, CompileOptions, ExecutableSurfacePolicy};
+    let cases = [
+        ("reference-applied", "module reserved\npublic struct Marker { tag: u64 }\npublic struct Envelope { handle: ScriptHandle<Marker> }\npublic action verify() { verification require true }"),
+        ("reference-bare", "module reserved\npublic action verify(witness handle: VerifierHandle) { verification require true }"),
+        (
+            "declaration",
+            "module reserved\npublic struct ScriptHandle { value: u64 }\npublic action verify() { verification require true }",
+        ),
+        (
+            "template-declaration",
+            "module reserved\npublic struct VerifierHandle<T: fixed_value> { value: T }\npublic action verify() { verification require true }",
+        ),
+    ];
+    for (label, source) in cases {
+        for opt in 0..=3 {
+            let error = compile_with_executable_surface_policy(
+                source,
+                CompileOptions { opt_level: opt, ..CompileOptions::default() },
+                ExecutableSurfacePolicy::DenyFailClosed,
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("reserved for the compatible-open handle surface"), "{label} opt={opt}: {error}");
+        }
+    }
+}
