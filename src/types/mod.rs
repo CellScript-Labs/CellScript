@@ -1438,6 +1438,17 @@ impl<'a> TypeChecker<'a> {
     /// only as generic application arguments (phantom identity use). A field,
     /// parameter or nested value position would need the runtime encoding
     /// slice, so it fails closed here.
+    fn is_open_handle_type(&self, ty: &Type) -> bool {
+        matches!(
+            ty,
+            Type::Named(name)
+                if matches!(
+                    name.split('<').next().unwrap_or(name),
+                    crate::script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE | crate::script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
+                )
+        )
+    }
+
     fn reject_open_handle_value_type(&self, ty: &Type, position: &str, span: crate::error::Span) -> Result<()> {
         match ty {
             Type::Named(name) => {
@@ -2773,11 +2784,18 @@ impl<'a> TypeChecker<'a> {
                 ));
             }
             self.validate_type(&param.ty)?;
-            self.reject_open_handle_value_type(
-                &param.ty,
-                &format!("{} '{}' parameter '{}'", callable_kind, callable_name, param.name),
-                param.span,
-            )?;
+            // Action witness parameters are the entry-ABI position for the
+            // bounded 656-byte handle encoding; every other parameter kind
+            // and callable class stays identity-only.
+            let witness_admitted =
+                matches!(param.source, ParamSource::Witness) && callable_kind == "action" && self.is_open_handle_type(&param.ty);
+            if !witness_admitted {
+                self.reject_open_handle_value_type(
+                    &param.ty,
+                    &format!("{} '{}' parameter '{}'", callable_kind, callable_name, param.name),
+                    param.span,
+                )?;
+            }
             if callable_kind != "function" && self.enum_type_contains_linear_payload(&param.ty, &mut HashSet::new()) {
                 return Err(CompileError::new(
                     format!(

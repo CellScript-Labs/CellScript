@@ -6533,6 +6533,16 @@ pub(crate) fn entry_witness_static_type_len(ty: &str) -> Option<usize> {
         other if other == script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE => {
             return Some(script_handle_contract::EXACT_SCRIPT_HANDLE_BYTES)
         }
+        // The compatible-open handle runtime value is the frozen 656-byte
+        // selection witness; its width never depends on the designation.
+        other
+            if matches!(
+                other.split('<').next().unwrap_or(other),
+                script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE | script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
+            ) =>
+        {
+            return Some(656)
+        }
         other if other == script_handle_contract::DEPLOYMENT_LINE_HANDLE_TYPE => {
             return Some(script_handle_contract::DEPLOYMENT_LINE_HANDLE_BYTES)
         }
@@ -18579,6 +18589,14 @@ fn metadata_fixed_byte_width(ty: &ir::IrType, fixed_size: Option<usize>) -> Opti
         {
             Some(size)
         }
+        (ir::IrType::Named(name), Some(656))
+            if matches!(
+                name.split('<').next().unwrap_or(name),
+                script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE | script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
+            ) =>
+        {
+            Some(656)
+        }
         (ir::IrType::Named(name), Some(32)) if ir::is_ckb_fixed_hash_domain_name(name) => Some(32),
         (ir::IrType::Named(name), Some(32)) if commitment_contract::commitment_inner_type(name).is_some() => Some(32),
         (ir::IrType::Ref(inner) | ir::IrType::MutRef(inner), _) => metadata_fixed_byte_width(inner, type_static_length(inner)),
@@ -21844,6 +21862,14 @@ fn operand_fixed_byte_width(operand: &ir::IrOperand) -> Option<usize> {
             ir::IrType::Named(name) if name == script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE => {
                 Some(script_handle_contract::EXACT_SCRIPT_HANDLE_BYTES)
             }
+            ir::IrType::Named(name)
+                if matches!(
+                    name.split('<').next().unwrap_or(name),
+                    script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE | script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
+                ) =>
+            {
+                Some(656)
+            }
             ir::IrType::Named(name) if name == script_handle_contract::DEPLOYMENT_LINE_HANDLE_TYPE => {
                 Some(script_handle_contract::DEPLOYMENT_LINE_HANDLE_BYTES)
             }
@@ -21879,6 +21905,14 @@ fn type_static_length(ty: &ir::IrType) -> Option<usize> {
         }
         ir::IrType::Named(name) if name == script_handle_contract::DEPLOYMENT_LINE_HANDLE_TYPE => {
             Some(script_handle_contract::DEPLOYMENT_LINE_HANDLE_BYTES)
+        }
+        ir::IrType::Named(name)
+            if matches!(
+                name.split('<').next().unwrap_or(name),
+                script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE | script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
+            ) =>
+        {
+            Some(656)
         }
         ir::IrType::Named(_) => None,
     }
@@ -21939,6 +21973,10 @@ fn param_metadata(
             && zk_contract::fixed_width(name).is_none()
             && name != script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE
             && name != script_handle_contract::DEPLOYMENT_LINE_HANDLE_TYPE
+            && !matches!(
+                name.split('<').next().unwrap_or(name),
+                script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE | script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
+            )
     }) && enum_fixed_len.is_none();
     let fixed_byte_len = enum_fixed_len.or_else(|| {
         metadata_fixed_byte_width(&param.ty, type_static_length(&param.ty))

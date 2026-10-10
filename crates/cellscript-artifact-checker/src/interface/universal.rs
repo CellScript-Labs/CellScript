@@ -70,6 +70,16 @@ impl Contracts<'_> {
                 if name == "string" && arguments.is_empty() {
                     return Ok(PLAIN & !FIXED);
                 }
+                // Compatible-open handle leaves carry their designation as a
+                // module path argument: identity-only copy/drop values whose
+                // defining module the value-ability layer already validated.
+                if matches!(name.as_str(), "ScriptHandle" | "VerifierHandle") {
+                    return if arguments.len() == 1 {
+                        Ok(COPY | DROP)
+                    } else {
+                        Err(invalid("universal open handle leaf lacks its single module designation"))
+                    };
+                }
                 if name == "Vec" {
                     if let [SourceArgument::Type(inner)] = arguments.as_slice() {
                         let bits = self.ty(inner, parameters, depth + 1)?;

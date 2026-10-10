@@ -652,3 +652,92 @@ fn handle_designation_mutations_reject_after_rebinding() {
         );
     }
 }
+
+const WITNESS_HANDLE_MAIN: &str = r#"
+module qual::main
+use qual::types::Token
+
+public action verify(input token: Token, witness handle: ScriptHandle<qual::types>, witness value: u64) {
+    verification
+    consume token
+    require value > 0
+}
+"#;
+
+/// The bounded handle encoding crosses the action witness ABI: the value is
+/// fixed-width 656 bytes, the designation validates against the closure, and
+/// body use fails closed until the versioned runtime helper exists.
+#[test]
+fn open_handle_witness_parameters_carry_the_bounded_encoding() {
+    for opt_level in 0..=3 {
+        let sources = [("src/main.cell", WITNESS_HANDLE_MAIN), ("src/types.cell", TEMPLATE_TOKEN)]
+            .into_iter()
+            .map(|(path, source)| InMemorySource { path: path.into(), source: source.into(), role: None })
+            .collect::<Vec<_>>();
+        let compiled = compile_sources_artifact(
+            &sources,
+            "src/main.cell",
+            CompileOptions {
+                edition: CellScriptEdition::Edition2027,
+                opt_level,
+                target: Some("riscv64-elf".into()),
+                target_profile: Some("ckb".into()),
+                source_contracts: true,
+                ..Default::default()
+            },
+            template_declaration(),
+            ExecutableSurfacePolicy::DenyFailClosed,
+        )
+        .unwrap();
+        let metadata = serde_json::to_value(&compiled.metadata).unwrap();
+        let params = metadata["actions"].as_array().unwrap()[0]["params"].as_array().unwrap();
+        let handle_param =
+            params.iter().find(|param| param["name"] == "handle").cloned().unwrap_or_else(|| panic!("params: {params:?}"));
+        assert!(
+            handle_param.as_object().is_some_and(|object| object.values().any(|value| value == "ScriptHandle<qual::types>")),
+            "opt={opt_level} handle param: {handle_param:?}"
+        );
+        assert!(
+            handle_param.get("fixed_byte_len").and_then(|value| value.as_u64()) == Some(656)
+                || handle_param.get("fixed_width").and_then(|value| value.as_u64()) == Some(656)
+                || handle_param.get("width").and_then(|value| value.as_u64()) == Some(656),
+            "opt={opt_level} handle param: {handle_param}"
+        );
+        let inspection = cellscript_artifact_checker::interface::inspect_bundle(
+            &compiled.artifact_bytes,
+            &serde_json::to_vec(&compiled.metadata).unwrap(),
+            &serde_json::to_vec(compiled.verified_lowering_record.as_ref().unwrap()).unwrap(),
+            &serde_json::to_vec(compiled.source_artifact_map.as_ref().unwrap()).unwrap(),
+            &cellscript_artifact_checker::CheckerBudgets::default(),
+        )
+        .unwrap();
+        inspection.validate_symbolic_declarations().unwrap();
+        // Non-witness parameter kinds and function/lock callables stay
+        // identity-only; body use of the value rejects at the operand jail.
+        let illegal =
+            WITNESS_HANDLE_MAIN.replace("witness handle: ScriptHandle<qual::types>", "input handle: ScriptHandle<qual::types>");
+        let sources = [("src/main.cell", illegal.leak() as &'static str), ("src/types.cell", TEMPLATE_TOKEN as &'static str)]
+            .into_iter()
+            .map(|(path, source)| InMemorySource { path: path.into(), source: source.into(), role: None })
+            .collect::<Vec<_>>();
+        let error = compile_sources_artifact(
+            &sources,
+            "src/main.cell",
+            CompileOptions {
+                edition: CellScriptEdition::Edition2027,
+                opt_level,
+                target: Some("riscv64-elf".into()),
+                target_profile: Some("ckb".into()),
+                ..Default::default()
+            },
+            template_declaration(),
+            ExecutableSurfacePolicy::DenyFailClosed,
+        )
+        .unwrap_err();
+        let message = format!("{error:?}");
+        assert!(
+            message.contains("identity-only") || message.contains("input") || message.contains("Cell"),
+            "opt={opt_level}: {message}"
+        );
+    }
+}

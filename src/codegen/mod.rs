@@ -642,6 +642,14 @@ fn fixed_byte_width(ty: &IrType, fixed_size: Option<usize>) -> Option<usize> {
         {
             Some(size)
         }
+        (IrType::Named(name), Some(656))
+            if matches!(
+                name.split('<').next().unwrap_or(name),
+                crate::script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE | crate::script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
+            ) =>
+        {
+            Some(656)
+        }
         (IrType::Named(name), Some(32)) if is_ckb_fixed_hash_domain_name(name) => Some(32),
         (IrType::Named(name), Some(32)) if crate::commitment_contract::commitment_inner_type(name).is_some() => Some(32),
         (IrType::Ref(inner) | IrType::MutRef(inner), _) => fixed_byte_width(inner, type_static_length(inner)),
@@ -721,6 +729,17 @@ fn type_static_length(ty: &IrType) -> Option<usize> {
         }
         IrType::Named(name) if name == crate::script_handle_contract::DEPLOYMENT_LINE_HANDLE_TYPE => {
             Some(crate::script_handle_contract::DEPLOYMENT_LINE_HANDLE_BYTES)
+        }
+        // The compatible-open handle value is the frozen 656-byte selection
+        // witness; keep this IR-side table in lockstep with the string-based
+        // entry_witness_static_type_len table and the independent checker.
+        IrType::Named(name)
+            if matches!(
+                name.split('<').next().unwrap_or(name),
+                crate::script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE | crate::script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
+            ) =>
+        {
+            Some(656)
         }
         IrType::Named(_) => None,
     }

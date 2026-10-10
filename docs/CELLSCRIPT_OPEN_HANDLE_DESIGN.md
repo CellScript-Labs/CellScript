@@ -173,3 +173,15 @@ layout parameter, and reject in value positions (fields, callable parameters)
 until the runtime encoding slice; identity use as a generic application
 argument is admitted and projected. Bare spellings and user declarations of
 the two class names keep their reserved-surface rejection.
+
+The bounded encoding slice landed next: an action `witness` parameter of
+handle type is the entry-ABI position for the frozen 656-byte selection
+witness. The width is carried consistently through the producer's string and
+IR width tables, the witness payload layout (fixed-byte pointer/length ABI,
+compact adapter frame), the action parameter metadata, and the independent
+checker's policy-ABI projection and adapter-frame expectation — the producer
+and checker now derive the same compact adapter frame for a 656-byte handle
+parameter. Every other parameter kind and callable class stays identity-only.
+No versioned helper consumes the value yet, so the checker's operand-flow jail
+holds: any operation touching a handle operand fails closed until the runtime
+helper ships with its membership and selected-dependency enforcement.

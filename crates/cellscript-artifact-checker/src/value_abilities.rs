@@ -258,6 +258,20 @@ pub(crate) fn verify(record: &TypedSemanticRecord) -> Result<AbilityFacts, Check
             }
         }
     }
+    // Entry parameters carry the bounded handle encoding at action witness
+    // positions; their designations validate like every other handle leaf.
+    for entry in &record.entries {
+        for param in &entry.params {
+            let parsed = ValueType::parse(&crate::checker::canonical_abi_type(&param.ty), 0)?;
+            let mut leaves = BTreeSet::new();
+            parsed.leaves(&mut leaves);
+            for leaf in leaves {
+                if open_handle_leaf(leaf).is_some() {
+                    register_open_handle_leaf(&mut facts, record_scope, &record.module, leaf)?;
+                }
+            }
+        }
+    }
     // Generic arguments are the identity position for handle designations;
     // register their evidence before the worklist so every consumer of the
     // returned facts resolves them.

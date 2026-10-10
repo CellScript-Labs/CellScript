@@ -3067,6 +3067,15 @@ fn validate_typed_operation(
             if operation.operands.iter().any(|operand| operand.ty == "DeploymentLineHandle") && !is_deployment_line_handle_call {
                 return typed_error("DeploymentLineHandle operand is passed to an unrecognized runtime helper".to_string());
             }
+            // Compatible-open handle values (#28 H2): the bounded 656-byte
+            // encoding is admitted at action witness parameters, but no
+            // versioned helper consumes it yet, so every operand flow fails
+            // closed until that helper ships with its runtime enforcement.
+            if operation.operands.iter().any(|operand| {
+                matches!(operand.ty.split('<').next().unwrap_or(operand.ty.as_str()), "ScriptHandle" | "VerifierHandle")
+            }) {
+                return typed_error("compatible-open handle operand awaits its versioned runtime helper".to_string());
+            }
             let committed_inner = call.return_type.strip_prefix("Commitment<").and_then(|value| value.strip_suffix('>'));
             if call.target == "__ckb_hash_blake2b_packed"
                 && let Some(inner) = committed_inner

@@ -199,7 +199,9 @@ pub(crate) fn builder_parameter_projection(
         .filter(|schema| schema.kind == "enum" && schema.variants.iter().any(|variant| !variant.fields.is_empty()))
         .and_then(|schema| schema.encoded_size)
         .map(u64::from);
-    let schema_pointer = shape.named().is_some() && enum_fixed.is_none();
+    let schema_pointer = shape.named().is_some()
+        && enum_fixed.is_none()
+        && !matches!(shape.named().unwrap_or_default().split('<').next().unwrap_or_default(), "ScriptHandle" | "VerifierHandle");
     let fixed_byte_len = enum_fixed.or_else(|| shape.fixed_byte_width().filter(|width| *width > 8)).or_else(|| {
         matches!(shape, PolicyAbiType::Array(_, _) | PolicyAbiType::Tuple(_))
             .then(|| shape.static_width())
@@ -287,6 +289,9 @@ impl PolicyAbiType {
             Self::Scalar { name, width } if name != "unit" => Some(*width),
             Self::Array(inner, length) if matches!(inner.as_ref(), Self::Scalar { name, .. } if name == "u8") => Some(*length),
             Self::Ref { inner, .. } => inner.fixed_byte_width(),
+            // The compatible-open handle value is the frozen 656-byte
+            // selection witness regardless of its designation.
+            Self::Named(name) if matches!(name.split('<').next().unwrap_or(name), "ScriptHandle" | "VerifierHandle") => Some(656),
             _ => None,
         }
     }
