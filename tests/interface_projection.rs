@@ -39,6 +39,65 @@ public action verify(witness value: Envelope, witness box: Box<u64>) {
 }
 "#;
 
+const PHANTOM_IDENTITIES: &str = r#"
+module identity
+private struct Marker has copy, drop, store, fixed, serializable, non_linear { tag: u64 }
+private struct Tagged<T: fixed_value, phantom M: copy> has copy, drop, store, fixed, serializable, non_linear { value: T }
+public struct Envelope has copy, drop, store, fixed, serializable, non_linear { count: u64 }
+public action verify(witness value: Envelope) {
+    verification
+    let tagged: Tagged<u64, Marker> = Tagged<u64, Marker> { value: value.count }
+    require tagged.value > 0
+}
+"#;
+
+/// Retained instances are identity dependencies of the checked module even
+/// when no public spelling names them. A nominal referenced only through a
+/// phantom argument must still project its template, concrete layout and the
+/// argument nominal itself, so a candidate cannot silently swap them.
+#[test]
+fn retained_private_instances_project_phantom_identity_dependencies() {
+    for opt in 0..=3 {
+        let required = project(PHANTOM_IDENTITIES, opt);
+        let wire: serde_json::Value = serde_json::from_slice(&required.canonical_bytes().unwrap()).unwrap();
+        for key in [
+            "nominal:identity::Tagged",
+            "layout:identity::Tagged<u64,identity::Marker>",
+            "nominal:identity::Marker",
+            "layout:identity::Marker",
+        ] {
+            assert!(wire["contracts"].get(key).is_some(), "opt={opt} missing {key}");
+        }
+        // An implementation adding internal identity dependencies stays a
+        // valid candidate; the reverse direction keeps requiring them.
+        let added = project(
+            &PHANTOM_IDENTITIES
+                .replace(
+                    "public action verify",
+                    "private struct Extra<phantom X: copy> has copy, drop, store, fixed, serializable, non_linear { count: u64 }\npublic action verify",
+                )
+                .replace(
+                    "require tagged.value > 0",
+                    "let extra: Extra<Marker> = Extra<Marker> { count: 1 }\nrequire tagged.value > extra.count",
+                ),
+            opt,
+        );
+        required.check_required_contracts(&added).unwrap();
+        assert!(added.check_required_contracts(&required).is_err());
+        // Swapping the phantom-only nominal, the non-phantom argument or the
+        // phantom nominal's own layout changes required identity contracts;
+        // directional matching rejects each.
+        for mutation in [
+            PHANTOM_IDENTITIES.replace("struct Marker has", "struct Marker2 has").replace("Marker>", "Marker2>"),
+            PHANTOM_IDENTITIES.replace("Tagged<u64, Marker>", "Tagged<u32, Marker>").replace("{ value: value.count }", "{ value: 1 }"),
+            PHANTOM_IDENTITIES.replace("{ tag: u64 }", "{ tag: u32 }"),
+        ] {
+            let candidate = project(&mutation, opt);
+            assert!(required.check_required_contracts(&candidate).is_err(), "opt={opt}");
+        }
+    }
+}
+
 #[test]
 fn directional_projection_preserves_required_contracts_and_allows_candidate_additions() {
     for opt in 0..=3 {

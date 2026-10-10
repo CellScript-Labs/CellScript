@@ -164,7 +164,15 @@ universal symbolic prerequisite. It follows root public type/signature/constant
 type references into qualified nested nominal declarations, preserving source
 field/variant order, binder constraints, capabilities and identity policies. It
 retains complete checked layouts for those nominal owners and independently
-checked instantiated arguments. Effective callable facts include actual inferred
+checked instantiated arguments. Every retained concrete struct/enum
+instantiation is also an identity dependency of the checked module: its
+template and fully qualified type arguments — including a nominal referenced
+only through a phantom argument, which no public spelling names — join the
+nominal closure and project their symbolic, layout and argument-nominal
+contracts. Unrelated types were already pruned from the retained bundle before
+projection; directional matching still permits candidate-only additions, so an
+implementation that adds internal identity dependencies remains a candidate
+while one that swaps a required phantom or non-phantom argument rejects. Effective callable facts include actual inferred
 effects, ordered parameters, fixed Cell bindings, external dispatch tags and
 Script/witness placement ABI. Source callable declarations remain present when
 optimization prunes their runtime entry; retained helpers are explicitly distinct

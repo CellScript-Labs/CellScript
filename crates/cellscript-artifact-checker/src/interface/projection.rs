@@ -329,6 +329,21 @@ pub(super) fn project(inspection: &InterfaceInspection) -> Result<CheckedModuleP
     for ty in &inspection.declared.types {
         projector.pending.push_back(ty.identity.clone());
     }
+    // Every retained concrete instance is an identity dependency of the
+    // checked module even when no public spelling names it, for example a
+    // nominal referenced only through a phantom type argument or a private
+    // template instantiated by an internal helper. Its template and qualified
+    // arguments therefore join the nominal closure; unrelated types were
+    // already pruned from the retained bundle before this projection runs.
+    for instance in inspection.effective.instantiations.iter().filter(|instance| matches!(instance.kind.as_str(), "struct" | "enum")) {
+        let catalog = inspection.effective.nominal_declarations.as_ref().expect("checked prerequisite");
+        let scope = nominals::scope(catalog, &inspection.effective.module)?;
+        projector.pending.push_back(format!("{}::{}", instance.module, instance.template));
+        for argument in &instance.type_arguments {
+            let qualified = super::qualified_source_type(argument, scope)?;
+            projector.references(&super::parse_source_type(&qualified)?, &[])?;
+        }
+    }
     for constant in &inspection.declared.constants {
         let ty = projector.qualify(&constant.r#type, &inspection.declared.module, &[])?;
         projector.contracts.insert(format!("constant:{}", constant.identity), json!({"visibility":constant.visibility,"type":ty}));
