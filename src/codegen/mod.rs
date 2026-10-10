@@ -369,6 +369,8 @@ fn is_v014_runtime_helper(func: &str) -> bool {
             | "__ckb_require_cell_lock_exact_handle"
             | "__ckb_require_cell_type_exact_handle"
             | "__ckb_require_cell_dep_exact_verifier_handle"
+            | "__ckb_require_cell_dep_open_script_handle"
+            | "__ckb_require_cell_dep_open_verifier_handle"
             | "__ckb_require_cell_lock_deployment_line_handle"
             | "__ckb_require_cell_type_deployment_line_handle"
             | "__ckb_require_cell_dep_deployment_line_verifier_handle"

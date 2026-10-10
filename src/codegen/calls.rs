@@ -495,6 +495,9 @@ impl CodeGenerator {
         if self.emit_runtime_exact_script_handle_requirement_call(func, args)? {
             return Ok(());
         }
+        if self.emit_runtime_open_handle_requirement_call(func, args)? {
+            return Ok(());
+        }
         if self.emit_runtime_fixed_hash_requirement_call(func, args)? {
             return Ok(());
         }
@@ -1215,6 +1218,42 @@ impl CodeGenerator {
         self.emit(format!("li a4, {}", crate::script_handle_contract::EXACT_SCRIPT_HANDLE_HASH_BYTES));
         self.emit(format!("call {func}"));
         let ok = self.fresh_label("exact_script_handle_requirement_ok");
+        self.emit(format!("beqz a0, {ok}"));
+        self.emit_process_failure_status();
+        self.emit_label(&ok);
+        Ok(true)
+    }
+
+    fn emit_runtime_open_handle_requirement_call(&mut self, func: &str, args: &[IrOperand]) -> Result<bool> {
+        if !matches!(func, "__ckb_require_cell_dep_open_script_handle" | "__ckb_require_cell_dep_open_verifier_handle") {
+            return Ok(false);
+        }
+        if args.len() != 3 {
+            return Ok(false);
+        }
+        let Some(handle) = self.expected_fixed_byte_source(&args[1], 656) else {
+            self.emit_fail(CellScriptRuntimeError::OpenHandleInvalid);
+            return Ok(true);
+        };
+        let Some(expected_root) = self.expected_fixed_byte_source(&args[2], 32) else {
+            self.emit_fail(CellScriptRuntimeError::OpenHandleInvalid);
+            return Ok(true);
+        };
+        self.emit_prepare_fixed_byte_source(&handle, 656, "compatible-open handle selection");
+        self.emit_prepare_fixed_byte_source(&expected_root, 32, "compatible-open expected authorization root");
+        self.emit_operand_to_register("a0", &args[0]);
+        if !self.emit_fixed_byte_source_pointer_or_const_to("a1", &handle) {
+            self.emit_fail(CellScriptRuntimeError::OpenHandleInvalid);
+            return Ok(true);
+        }
+        self.emit("li a2, 656");
+        if !self.emit_fixed_byte_source_pointer_or_const_to("a3", &expected_root) {
+            self.emit_fail(CellScriptRuntimeError::OpenHandleInvalid);
+            return Ok(true);
+        }
+        self.emit("li a4, 32");
+        self.emit(format!("call {func}"));
+        let ok = self.fresh_label("open_handle_requirement_ok");
         self.emit(format!("beqz a0, {ok}"));
         self.emit_process_failure_status();
         self.emit_label(&ok);

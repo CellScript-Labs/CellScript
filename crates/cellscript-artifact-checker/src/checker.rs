@@ -3068,13 +3068,45 @@ fn validate_typed_operation(
                 return typed_error("DeploymentLineHandle operand is passed to an unrecognized runtime helper".to_string());
             }
             // Compatible-open handle values (#28 H2): the bounded 656-byte
-            // encoding is admitted at action witness parameters, but no
-            // versioned helper consumes it yet, so every operand flow fails
-            // closed until that helper ships with its runtime enforcement.
-            if operation.operands.iter().any(|operand| {
-                matches!(operand.ty.split('<').next().unwrap_or(operand.ty.as_str()), "ScriptHandle" | "VerifierHandle")
-            }) {
-                return typed_error("compatible-open handle operand awaits its versioned runtime helper".to_string());
+            // encoding flows only into the versioned requirement helpers,
+            // whose signatures the check below pins.
+            let is_open_handle_call = matches!(
+                call.target.as_str(),
+                "__ckb_require_cell_dep_open_script_handle" | "__ckb_require_cell_dep_open_verifier_handle"
+            );
+            if !is_open_handle_call
+                && operation.operands.iter().any(|operand| {
+                    matches!(operand.ty.split('<').next().unwrap_or(operand.ty.as_str()), "ScriptHandle" | "VerifierHandle")
+                })
+            {
+                return typed_error("compatible-open handle operand is passed to an unrecognized runtime helper".to_string());
+            }
+            if is_open_handle_call {
+                let class = if call.target.ends_with("open_script_handle") { "ScriptHandle" } else { "VerifierHandle" };
+                let handle_operand = operation
+                    .operands
+                    .get(1)
+                    .map(|operand| operand.ty.split('<').next().unwrap_or(operand.ty.as_str()).to_string())
+                    .unwrap_or_default();
+                let source_type_valid = operation.operands.first().is_some_and(|operand| operand.ty.as_str() == "CellDepView");
+                let root_is_constant = matches!(
+                    operation.operands.get(2).and_then(|operand| operand.constant.as_ref()),
+                    Some(TypedSemanticConstant::Hash(_))
+                );
+                if operation.operands.len() != 3
+                    || !source_type_valid
+                    || handle_operand != class
+                    || call.contract != "versioned-runtime-helper"
+                    || call.effect != "runtime-contract"
+                    || call.return_type != "unit"
+                    || !operation.destinations.is_empty()
+                    || !root_is_constant
+                {
+                    return typed_error(
+                        "compatible-open handle call does not declare its canonical expected-root commitment and runtime contract"
+                            .to_string(),
+                    );
+                }
             }
             let committed_inner = call.return_type.strip_prefix("Commitment<").and_then(|value| value.strip_suffix('>'));
             if call.target == "__ckb_hash_blake2b_packed"

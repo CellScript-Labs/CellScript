@@ -51,3 +51,33 @@ pub const DEPLOYMENT_LINE_COMMITMENT_MAGIC: &[u8; 7] = b"CSREGv1";
 /// interface-parameter binding ships with its runtime enforcement.
 pub const OPEN_SCRIPT_HANDLE_TYPE: &str = "ScriptHandle";
 pub const OPEN_VERIFIER_HANDLE_TYPE: &str = "VerifierHandle";
+
+/// Bounded runtime layout of the 656-byte compatible-open selection witness
+/// (`CSOHWv1\0`), shared by the on-chain requirement helpers and the tests.
+pub const OPEN_HANDLE_SELECTION_BYTES: usize = 656;
+pub const OPEN_HANDLE_SELECTION_MAGIC: &[u8; 8] = b"CSOHWv1\0";
+pub const OPEN_HANDLE_SELECTION_HEADER_OFFSET: usize = 8;
+pub const OPEN_HANDLE_HEADER_CLASS_OFFSET: usize = 8;
+pub const OPEN_HANDLE_HEADER_ROLE_OFFSET: usize = 9;
+#[allow(dead_code)]
+pub const OPEN_HANDLE_HEADER_MODE_OFFSET: usize = 10;
+pub const OPEN_HANDLE_HEADER_MEMBER_COUNT_OFFSET: usize = 11;
+pub const OPEN_HANDLE_MEMBER_OFFSET: usize = 196;
+pub const OPEN_HANDLE_MEMBER_STATUS_OFFSET: usize = 196;
+pub const OPEN_HANDLE_MEMBER_COMPLETE_SCRIPT_OFFSET: usize = 324;
+pub const OPEN_HANDLE_INDEX_OFFSET: usize = 488;
+pub const OPEN_HANDLE_SIBLING_OFFSET: usize = 496;
+pub const OPEN_HANDLE_TREE_DEPTH: usize = 5;
+pub const OPEN_HANDLE_MEMBER_DOMAIN: &[u8] = b"cellscript-open-handle-member-v1\0";
+pub const OPEN_HANDLE_NODE_DOMAIN: &[u8] = b"cellscript-open-handle-node-v1\0";
+pub const OPEN_HANDLE_POLICY_DOMAIN: &[u8] = b"cellscript-open-handle-policy-v1\0";
+/// The mode byte accepts exact (0) and compatible (1); the header role byte
+/// selects the Script binding (Lock or Type) or the spawned verifier class.
+/// These document the runtime checks; the assembler compares them inline.
+pub const OPEN_HANDLE_CLASS_SCRIPT: u8 = 0;
+pub const OPEN_HANDLE_CLASS_VERIFIER: u8 = 1;
+#[allow(dead_code)]
+pub const OPEN_HANDLE_ROLE_LOCK: u8 = 0;
+#[allow(dead_code)]
+pub const OPEN_HANDLE_ROLE_TYPE: u8 = 1;
+pub const OPEN_HANDLE_ROLE_SPAWNED_VERIFIER: u8 = 2;

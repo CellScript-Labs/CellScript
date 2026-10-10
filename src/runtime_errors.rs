@@ -79,6 +79,7 @@ pub enum CellScriptRuntimeError {
     ZkCloseFailed = 78,
     ZkChildRejected = 79,
     ZkCycleBoundExceeded = 84,
+    OpenHandleInvalid = 85,
 }
 
 impl CellScriptRuntimeError {
@@ -161,6 +162,7 @@ impl CellScriptRuntimeError {
             Self::ZkCloseFailed => "zk-close-failed",
             Self::ZkChildRejected => "zk-child-rejected",
             Self::ZkCycleBoundExceeded => "zk-cycle-bound-exceeded",
+            Self::OpenHandleInvalid => "open-handle-invalid",
         }
     }
 
@@ -173,6 +175,7 @@ impl CellScriptRuntimeError {
             Self::ZkCloseFailed => "The ZK request writer could not be closed.",
             Self::ZkChildRejected => "The verifier child rejected the proof or Wait failed.",
             Self::ZkCycleBoundExceeded => "The exact verifier call exceeded its declared cycle budget.",
+            Self::OpenHandleInvalid => "A compatible-open handle selection failed its structural, membership or selected-dependency check.",
             Self::SyscallFailed => "A target VM syscall returned a non-zero status while loading transaction context.",
             Self::BoundsCheckFailed => "Loaded bytes were smaller than the verifier-required minimum.",
             Self::CellLoadFailed => "Cell data or field loading failed or returned an unusable result.",
@@ -279,6 +282,7 @@ impl CellScriptRuntimeError {
             Self::ZkCloseFailed => "Check the exact ZK profile, transaction-derived statement, verifier/VK CellDeps and bounded Spawn/IPC evidence.",
             Self::ZkChildRejected => "Check the exact ZK profile, transaction-derived statement, verifier/VK CellDeps and bounded Spawn/IPC evidence.",
             Self::ZkCycleBoundExceeded => "Check the exact ZK profile, transaction-derived statement, verifier/VK CellDeps and bounded Spawn/IPC evidence.",
+            Self::OpenHandleInvalid => "Check the 656-byte selection witness, the expected authorization root and the selected CellDep.",
             Self::SyscallFailed => {
                 "Check transaction input/output/cell_dep indexes, source flags, and target-profile syscall compatibility."
             }

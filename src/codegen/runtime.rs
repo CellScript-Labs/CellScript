@@ -633,6 +633,14 @@ impl CodeGenerator {
                 "CSHDLv1 full-value commitment plus exact CellDep artifact data-hash binding check",
             ),
             (
+                "__ckb_require_cell_dep_open_script_handle",
+                "CSOHWv1 structural, membership and selected Script CellDep binding check",
+            ),
+            (
+                "__ckb_require_cell_dep_open_verifier_handle",
+                "CSOHWv1 structural, membership and selected verifier CellDep binding check",
+            ),
+            (
                 "__ckb_require_cell_lock_deployment_line_handle",
                 "active CSLINv1 admission plus exact Lock Script and Type-hash code CellDep binding check",
             ),
@@ -884,6 +892,12 @@ impl CodeGenerator {
                     crate::script_handle_contract::EXACT_SCRIPT_HANDLE_ARTIFACT_HASH_OFFSET,
                     enabled,
                 ),
+                "__ckb_require_cell_dep_open_script_handle" => {
+                    self.emit_runtime_open_handle_requirement_helper(name, detail, true, enabled)
+                }
+                "__ckb_require_cell_dep_open_verifier_handle" => {
+                    self.emit_runtime_open_handle_requirement_helper(name, detail, false, enabled)
+                }
                 "__ckb_require_cell_lock_deployment_line_handle" => self.emit_runtime_deployment_line_handle_requirement_helper(
                     name,
                     detail,
@@ -1114,6 +1128,8 @@ impl CodeGenerator {
                     | "__ckb_require_cell_lock_exact_handle"
                     | "__ckb_require_cell_type_exact_handle"
                     | "__ckb_require_cell_dep_exact_verifier_handle"
+                    | "__ckb_require_cell_dep_open_script_handle"
+                    | "__ckb_require_cell_dep_open_verifier_handle"
                     | "__ckb_require_cell_lock_deployment_line_handle"
                     | "__ckb_require_cell_type_deployment_line_handle"
                     | "__ckb_require_cell_dep_deployment_line_verifier_handle"
@@ -1150,6 +1166,8 @@ impl CodeGenerator {
             || referenced_helpers.contains("__ckb_require_cell_lock_exact_handle")
             || referenced_helpers.contains("__ckb_require_cell_type_exact_handle")
             || referenced_helpers.contains("__ckb_require_cell_dep_exact_verifier_handle")
+            || referenced_helpers.contains("__ckb_require_cell_dep_open_script_handle")
+            || referenced_helpers.contains("__ckb_require_cell_dep_open_verifier_handle")
             || referenced_helpers.contains("__ckb_require_cell_lock_deployment_line_handle")
             || referenced_helpers.contains("__ckb_require_cell_type_deployment_line_handle")
             || referenced_helpers.contains("__ckb_require_cell_dep_deployment_line_verifier_handle")
@@ -6573,6 +6591,268 @@ impl CodeGenerator {
         self.emit("ret");
     }
 
+    /// Conditional branches reach at most +-2048 bytes and the assembler
+    /// performs no relaxation; route every far conditional through a local
+    /// trampoline so long helpers never wrap a branch immediate.
+    fn emit_near_cond(&mut self, branch: &str, far: &str) {
+        let fail = self.fresh_label("near_cond_fail");
+        let skip = self.fresh_label("near_cond_skip");
+        self.emit(format!("{branch},{fail}"));
+        self.emit(format!("j {skip}"));
+        self.emit_label(&fail);
+        self.emit(format!("j {far}"));
+        self.emit_label(&skip);
+    }
+
+    /// Compatible-open handle requirement helper (#28 H2): validates the
+    /// 656-byte selection witness structurally, recomputes the five-level
+    /// authorization-tree membership with the frozen domain strings and
+    /// compares the reconstructed policy root against the caller-supplied
+    /// expected root, then binds the member's complete Script hash to the
+    /// selected CellDep's Lock/Type (or data) hash. Every mismatch fails
+    /// closed with OpenHandleInvalid.
+    #[allow(clippy::too_many_lines)]
+    fn emit_runtime_open_handle_requirement_helper(&mut self, symbol: &str, detail: &str, script_variant: bool, enabled: bool) {
+        use crate::script_handle_contract::{
+            OPEN_HANDLE_CLASS_SCRIPT, OPEN_HANDLE_CLASS_VERIFIER, OPEN_HANDLE_HEADER_CLASS_OFFSET,
+            OPEN_HANDLE_HEADER_MEMBER_COUNT_OFFSET, OPEN_HANDLE_HEADER_ROLE_OFFSET, OPEN_HANDLE_INDEX_OFFSET,
+            OPEN_HANDLE_MEMBER_DOMAIN, OPEN_HANDLE_MEMBER_OFFSET, OPEN_HANDLE_MEMBER_STATUS_OFFSET, OPEN_HANDLE_NODE_DOMAIN,
+            OPEN_HANDLE_POLICY_DOMAIN, OPEN_HANDLE_SELECTION_BYTES, OPEN_HANDLE_SELECTION_HEADER_OFFSET, OPEN_HANDLE_SELECTION_MAGIC,
+            OPEN_HANDLE_SIBLING_OFFSET, OPEN_HANDLE_TREE_DEPTH,
+        };
+
+        const HANDLE_PTR: usize = 0;
+        const ROOT_PTR: usize = 8;
+        const VIEW: usize = 16;
+        const INDEX: usize = 24;
+        const SOURCE: usize = 32;
+        const SIZE: usize = 40;
+        const IDENTITY_HASH: usize = 48;
+        const CURRENT_HASH: usize = 80;
+        const RA: usize = 112;
+        const LEAF_STAGING: usize = 128;
+        const LEAF_INPUT: usize = OPEN_HANDLE_MEMBER_DOMAIN.len() + 1 + 292;
+        const NODE_STAGING: usize = LEAF_STAGING + 336;
+        const NODE_INPUT: usize = OPEN_HANDLE_NODE_DOMAIN.len() + 64;
+        const POLICY_STAGING: usize = NODE_STAGING + 97;
+        const POLICY_INPUT: usize = OPEN_HANDLE_POLICY_DOMAIN.len() + 188 + 32;
+        const FRAME: usize = (POLICY_STAGING + POLICY_INPUT).div_ceil(16) * 16 + 16;
+
+        let invalid = self.fresh_label("open_handle_invalid");
+        let hash_failed = self.fresh_label("open_handle_hash_failed");
+        let invalid_source = self.fresh_label("open_handle_source_invalid");
+        let load_failed = self.fresh_label("open_handle_load_failed");
+        let done = self.fresh_label("open_handle_done");
+        let abi = self.runtime_abi();
+
+        self.emit_global(symbol);
+        self.emit_label(symbol);
+        self.emit(format!("# cellscript abi: compatible-open handle requirement ({detail})"));
+        self.emit("# cellscript abi: args a0=CellDepView, a1=selection_ptr, a2=selection_len, a3=root_ptr, a4=root_len");
+        if !enabled {
+            self.emit(format!("li a0, {}", CellScriptRuntimeError::OpenHandleInvalid.code()));
+            self.emit("ret");
+            return;
+        }
+        self.emit(format!("addi sp, sp, -{FRAME}"));
+        self.emit(format!("sd ra, {RA}(sp)"));
+        self.emit(format!("sd a1, {HANDLE_PTR}(sp)"));
+        self.emit(format!("sd a3, {ROOT_PTR}(sp)"));
+        self.emit(format!("sd a0, {VIEW}(sp)"));
+
+        // Structural checks: null pointers, exact lengths, magic, class, role,
+        // active status and the canonical index below the declared count.
+        self.emit_near_cond("beqz a1", &invalid);
+        self.emit_near_cond("beqz a3", &invalid);
+        self.emit(format!("li t0, {OPEN_HANDLE_SELECTION_BYTES}"));
+        self.emit("sub t1, a2, t0");
+        self.emit_near_cond("bnez t1", &invalid);
+        self.emit("li t0, 32");
+        self.emit("sub t1, a4, t0");
+        self.emit_near_cond("bnez t1", &invalid);
+        self.emit(format!("ld t3, {HANDLE_PTR}(sp)"));
+        for (offset, byte) in OPEN_HANDLE_SELECTION_MAGIC.iter().enumerate() {
+            self.emit(format!("lbu t0, {offset}(t3)"));
+            self.emit(format!("li t1, {byte}"));
+            self.emit_near_cond("bne t0,t1", &invalid);
+        }
+        self.emit(format!("lbu t0, {OPEN_HANDLE_HEADER_CLASS_OFFSET}(t3)"));
+        let expected_class = if script_variant { OPEN_HANDLE_CLASS_SCRIPT } else { OPEN_HANDLE_CLASS_VERIFIER };
+        self.emit(format!("li t1, {expected_class}"));
+        self.emit_near_cond("bne t0,t1", &invalid);
+        self.emit(format!("lbu t0, {OPEN_HANDLE_HEADER_ROLE_OFFSET}(t3)"));
+        if script_variant {
+            // Script-class selections accept the Lock or Type role.
+            self.emit("li t2, 2");
+            self.emit_near_cond("bgeu t0,t2", &invalid);
+        } else {
+            self.emit(format!("li t1, {}", crate::script_handle_contract::OPEN_HANDLE_ROLE_SPAWNED_VERIFIER));
+            self.emit_near_cond("bne t0,t1", &invalid);
+        }
+        self.emit(format!("lbu t0, {OPEN_HANDLE_MEMBER_STATUS_OFFSET}(t3)"));
+        self.emit_near_cond("bnez t0", &invalid);
+        self.emit(format!("lbu t0, {OPEN_HANDLE_INDEX_OFFSET}(t3)"));
+        self.emit("li t2, 0");
+        self.emit("add t0, t2, t0");
+        self.emit(format!("sd t0, {INDEX}(sp)"));
+        self.emit(format!("lbu t1, {OPEN_HANDLE_HEADER_MEMBER_COUNT_OFFSET}(t3)"));
+        self.emit_near_cond("bgeu t0,t1", &invalid);
+
+        self.emit(format!("addi t3, sp, {LEAF_STAGING}"));
+        for (offset, byte) in OPEN_HANDLE_MEMBER_DOMAIN.iter().enumerate() {
+            self.emit(format!("li t0, {byte}"));
+            self.emit(format!("sb t0, {offset}(t3)"));
+        }
+        self.emit(format!("ld t0, {INDEX}(sp)"));
+        self.emit(format!("sb t0, {}(t3)", OPEN_HANDLE_MEMBER_DOMAIN.len()));
+        self.emit(format!("addi a0, sp, {LEAF_STAGING}"));
+        self.emit(format!("addi a0, a0, {}", OPEN_HANDLE_MEMBER_DOMAIN.len() + 1));
+        self.emit(format!("ld a1, {HANDLE_PTR}(sp)"));
+        self.emit(format!("addi a1, a1, {OPEN_HANDLE_MEMBER_OFFSET}"));
+        self.emit("li a2, 292");
+        self.emit("call __cellscript_memcpy_fixed");
+        self.emit(format!("addi a0, sp, {LEAF_STAGING}"));
+        self.emit(format!("li a1, {LEAF_INPUT}"));
+        self.emit(format!("addi a2, sp, {CURRENT_HASH}"));
+        self.emit("call __ckb_hash_blake2b_var");
+        self.emit_near_cond("bnez a0", &hash_failed);
+
+        self.emit(format!("addi t3, sp, {NODE_STAGING}"));
+        for (offset, byte) in OPEN_HANDLE_NODE_DOMAIN.iter().enumerate() {
+            self.emit(format!("li t0, {byte}"));
+            self.emit(format!("sb t0, {offset}(t3)"));
+        }
+        for depth in 0..OPEN_HANDLE_TREE_DEPTH {
+            let sibling_left = self.fresh_label("open_handle_sibling_left");
+            let joined = self.fresh_label("open_handle_level_joined");
+            self.emit(format!("ld t0, {INDEX}(sp)"));
+            self.emit(format!("li t1, {}", 1u64 << depth));
+            self.emit("and t0, t0, t1");
+            self.emit(format!("beqz t0, {sibling_left}"));
+            // Index bit set: the sibling is the left child, the current
+            // hash the right one.
+            self.emit(format!("addi a0, sp, {NODE_STAGING}"));
+            self.emit(format!("addi a0, a0, {}", OPEN_HANDLE_NODE_DOMAIN.len()));
+            self.emit(format!("ld a1, {HANDLE_PTR}(sp)"));
+            self.emit(format!("addi a1, a1, {}", OPEN_HANDLE_SIBLING_OFFSET + depth * 32));
+            self.emit("li a2, 32");
+            self.emit("call __cellscript_memcpy_fixed");
+            self.emit(format!("addi a0, sp, {NODE_STAGING}"));
+            self.emit(format!("addi a0, a0, {}", OPEN_HANDLE_NODE_DOMAIN.len() + 32));
+            self.emit(format!("addi a1, sp, {CURRENT_HASH}"));
+            self.emit("li a2, 32");
+            self.emit("call __cellscript_memcpy_fixed");
+            self.emit(format!("j {joined}"));
+            // Index bit clear: the current hash is the left child.
+            self.emit_label(&sibling_left);
+            self.emit(format!("addi a0, sp, {NODE_STAGING}"));
+            self.emit(format!("addi a0, a0, {}", OPEN_HANDLE_NODE_DOMAIN.len()));
+            self.emit(format!("addi a1, sp, {CURRENT_HASH}"));
+            self.emit("li a2, 32");
+            self.emit("call __cellscript_memcpy_fixed");
+            self.emit(format!("addi a0, sp, {NODE_STAGING}"));
+            self.emit(format!("addi a0, a0, {}", OPEN_HANDLE_NODE_DOMAIN.len() + 32));
+            self.emit(format!("ld a1, {HANDLE_PTR}(sp)"));
+            self.emit(format!("addi a1, a1, {}", OPEN_HANDLE_SIBLING_OFFSET + depth * 32));
+            self.emit("li a2, 32");
+            self.emit("call __cellscript_memcpy_fixed");
+            self.emit_label(&joined);
+            self.emit(format!("addi a0, sp, {NODE_STAGING}"));
+            self.emit(format!("li a1, {NODE_INPUT}"));
+            self.emit(format!("addi a2, sp, {CURRENT_HASH}"));
+            self.emit("call __ckb_hash_blake2b_var");
+            self.emit_near_cond("bnez a0", &hash_failed);
+        }
+
+        self.emit(format!("addi t3, sp, {POLICY_STAGING}"));
+        for (offset, byte) in OPEN_HANDLE_POLICY_DOMAIN.iter().enumerate() {
+            self.emit(format!("li t0, {byte}"));
+            self.emit(format!("sb t0, {offset}(t3)"));
+        }
+        self.emit(format!("addi a0, sp, {POLICY_STAGING}"));
+        self.emit(format!("addi a0, a0, {}", OPEN_HANDLE_POLICY_DOMAIN.len()));
+        self.emit(format!("ld a1, {HANDLE_PTR}(sp)"));
+        self.emit(format!("addi a1, a1, {OPEN_HANDLE_SELECTION_HEADER_OFFSET}"));
+        self.emit("li a2, 188");
+        self.emit("call __cellscript_memcpy_fixed");
+        self.emit(format!("addi a0, sp, {POLICY_STAGING}"));
+        self.emit(format!("addi a0, a0, {}", OPEN_HANDLE_POLICY_DOMAIN.len() + 188));
+        self.emit(format!("addi a1, sp, {CURRENT_HASH}"));
+        self.emit("li a2, 32");
+        self.emit("call __cellscript_memcpy_fixed");
+        self.emit(format!("addi a0, sp, {POLICY_STAGING}"));
+        self.emit(format!("li a1, {POLICY_INPUT}"));
+        self.emit(format!("addi a2, sp, {IDENTITY_HASH}"));
+        self.emit("call __ckb_hash_blake2b_var");
+        self.emit_near_cond("bnez a0", &hash_failed);
+        self.emit(format!("addi a0, sp, {IDENTITY_HASH}"));
+        self.emit(format!("ld a1, {ROOT_PTR}(sp)"));
+        self.emit("li a2, 32");
+        self.emit("call __cellscript_memcmp_fixed");
+        self.emit(format!("bnez a0, {invalid}"));
+
+        // Selected dependency: the member's complete Script hash equals the
+        // dep's Lock/Type (script variant, by the header role) or data hash
+        // (verifier variant).
+        self.emit(format!("ld a0, {VIEW}(sp)"));
+        self.emit_decode_source_view_to_t1_t2(&invalid_source);
+        self.emit(format!("sd t1, {INDEX}(sp)"));
+        self.emit(format!("sd t2, {SOURCE}(sp)"));
+        self.emit("li t0, 32");
+        self.emit(format!("sd t0, {SIZE}(sp)"));
+        if script_variant {
+            let role_type = self.fresh_label("open_handle_role_type");
+            let role_bound = self.fresh_label("open_handle_role_bound");
+            self.emit(format!("ld t3, {HANDLE_PTR}(sp)"));
+            self.emit(format!("lbu t0, {OPEN_HANDLE_HEADER_ROLE_OFFSET}(t3)"));
+            self.emit(format!("bnez t0, {role_type}"));
+            self.emit(format!("li t6, {}", CKB_CELL_FIELD_LOCK_HASH));
+            self.emit(format!("j {role_bound}"));
+            self.emit_label(&role_type);
+            self.emit(format!("li t6, {}", CKB_CELL_FIELD_TYPE_HASH));
+            self.emit_label(&role_bound);
+        } else {
+            self.emit(format!("li t6, {}", CKB_CELL_FIELD_DATA_HASH));
+        }
+        self.emit(format!("addi a0, sp, {IDENTITY_HASH}"));
+        self.emit(format!("addi a1, sp, {SIZE}"));
+        self.emit("li a2, 0");
+        self.emit(format!("ld a3, {INDEX}(sp)"));
+        self.emit(format!("ld a4, {SOURCE}(sp)"));
+        self.emit("add a5, x0, t6");
+        self.emit(format!("li a7, {}", abi.load_cell_by_field));
+        self.emit("ecall");
+        self.emit_near_cond("bnez a0", &load_failed);
+        self.emit(format!("ld t0, {SIZE}(sp)"));
+        self.emit("li t1, 32");
+        self.emit("sub t2, t0, t1");
+        self.emit_near_cond("bnez t2", &invalid);
+        self.emit(format!("addi a0, sp, {IDENTITY_HASH}"));
+        self.emit(format!("ld a1, {HANDLE_PTR}(sp)"));
+        self.emit(format!("addi a1, a1, {}", crate::script_handle_contract::OPEN_HANDLE_MEMBER_COMPLETE_SCRIPT_OFFSET));
+        self.emit("li a2, 32");
+        self.emit("call __cellscript_memcmp_fixed");
+        self.emit(format!("bnez a0, {invalid}"));
+        self.emit("li a0, 0");
+        self.emit(format!("j {done}"));
+
+        self.emit_label(&invalid_source);
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::CkbSourceViewInvalid.code()));
+        self.emit(format!("j {done}"));
+        self.emit_label(&load_failed);
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::CkbSourceViewInvalid.code()));
+        self.emit(format!("j {done}"));
+        self.emit_label(&hash_failed);
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::OpenHandleInvalid.code()));
+        self.emit(format!("j {done}"));
+        self.emit_label(&invalid);
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::OpenHandleInvalid.code()));
+        self.emit_label(&done);
+        self.emit(format!("ld ra, {RA}(sp)"));
+        self.emit(format!("addi sp, sp, {FRAME}"));
+        self.emit("ret");
+    }
+
     fn emit_runtime_deployment_line_handle_requirement_helper(
         &mut self,
         symbol: &str,
@@ -6661,7 +6941,7 @@ impl CodeGenerator {
         for (offset, byte) in DEPLOYMENT_LINE_HANDLE_MAGIC.iter().enumerate() {
             self.emit(format!("lbu t0, {offset}(t3)"));
             self.emit(format!("li t1, {byte}"));
-            self.emit(format!("bne t0, t1, {invalid}"));
+            self.emit_near_cond("bne t0,t1", &invalid);
         }
         self.emit(format!("lbu t0, {DEPLOYMENT_LINE_HANDLE_CLASS_OFFSET}(t3)"));
         self.emit(format!("li t1, {expected_class}"));

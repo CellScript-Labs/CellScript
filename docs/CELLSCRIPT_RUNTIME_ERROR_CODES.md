@@ -128,6 +128,7 @@ for the independent check's exact scope.
 | 78 | `zk-close-failed` | The ZK request writer could not be closed. | Check parent descriptor ownership and transport state. |
 | 79 | `zk-child-rejected` | The child rejected the proof or Wait failed. | Check the exact VK, proof, finalized transaction statement and child exit. |
 | 84 | `zk-cycle-bound-exceeded` | The exact verifier call exceeded its declared cycle budget. | Check the exact child artifact and the profile's 250,000,000-cycle ceiling. |
+| 85 | `open-handle-invalid` | A compatible-open handle selection failed its structural, membership or selected-dependency check. | Check the 656-byte selection witness, the expected authorization root and the selected CellDep. |
 
 ## Stability
 
