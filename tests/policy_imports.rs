@@ -261,3 +261,153 @@ fn imported_policy_resolution_and_declaration_errors_agree_across_compile_modes(
         }
     }
 }
+
+const TEMPLATE_A: &str = r#"
+module qual::a
+public struct Pair<T: fixed_value> has copy, drop, store, fixed, serializable, non_linear { left: T, right: T }
+"#;
+
+const TEMPLATE_A_DERIVED: &str = r#"
+module qual::a
+public struct Pair<T: fixed_value> { left: T, right: T }
+"#;
+
+const TEMPLATE_B: &str = r#"
+module qual::b
+public struct Pair<T: fixed_value> { amount: T }
+"#;
+
+const TEMPLATE_TOKEN: &str = r#"
+module qual::types
+resource Token has store, consume { amount: u64 }
+"#;
+
+const HOLDER_MAIN: &str = r#"
+module qual::main
+use qual::a::Pair
+use qual::types::Token
+
+public struct Holder<T: fixed_value> { first: T }
+action verify(input token: Token, witness value: u64) {
+    verification
+    consume token
+    let held: Holder<Pair<u64>> = Holder<Pair<u64>> { first: Pair<u64> { left: value, right: value } }
+    require value > 0
+}
+"#;
+
+const AMBIGUOUS_MAIN: &str = r#"
+module qual::main
+use qual::a::Pair
+use qual::b::Pair as OtherPair
+use qual::types::Token
+
+public struct Holder<T: fixed_value> { first: T }
+action verify(input token: Token, witness value: u64) {
+    verification
+    consume token
+    let first: Holder<Pair<u64>> = Holder<Pair<u64>> { first: Pair<u64> { left: value, right: value } }
+    let second: Holder<OtherPair<u64>> = Holder<OtherPair<u64>> { first: OtherPair<u64> { amount: value } }
+    require value > 0
+}
+"#;
+
+fn template_declaration() -> ArtifactDeclaration {
+    ArtifactDeclaration {
+        name: "qual-policy".into(),
+        context: ArtifactContext::TypeGroup { resource: "Token".into() },
+        dispatch: ArtifactDispatch::PolicyWitnessV1,
+        actions: vec![ArtifactAction { tag: 10, action: "verify".into() }],
+        common_checks: Vec::new(),
+    }
+}
+
+fn compile_template_case(main: &'static str, a: &'static str, b: Option<&'static str>, opt: u8) -> cellscript::CompileResult {
+    let mut sources = vec![InMemorySource { path: "src/main.cell".into(), source: main.into(), role: None }];
+    if let Some(b_source) = b {
+        sources.push(InMemorySource { path: "src/b.cell".into(), source: b_source.into(), role: None });
+    }
+    sources.push(InMemorySource { path: "src/a.cell".into(), source: a.into(), role: None });
+    sources.push(InMemorySource { path: "src/types.cell".into(), source: TEMPLATE_TOKEN.into(), role: None });
+    compile_sources_artifact(
+        &sources,
+        "src/main.cell",
+        CompileOptions {
+            edition: CellScriptEdition::Edition2027,
+            opt_level: opt,
+            target: Some("riscv64-elf".into()),
+            target_profile: Some("ckb".into()),
+            source_contracts: true,
+            ..Default::default()
+        },
+        template_declaration(),
+        ExecutableSurfacePolicy::DenyFailClosed,
+    )
+    .unwrap()
+}
+
+fn project_template_case(compiled: &cellscript::CompileResult) -> cellscript_artifact_checker::interface::CheckedModuleProjection {
+    cellscript_artifact_checker::interface::inspect_bundle(
+        &compiled.artifact_bytes,
+        &serde_json::to_vec(&compiled.metadata).unwrap(),
+        &serde_json::to_vec(compiled.verified_lowering_record.as_ref().unwrap()).unwrap(),
+        &serde_json::to_vec(compiled.source_artifact_map.as_ref().unwrap()).unwrap(),
+        &cellscript_artifact_checker::CheckerBudgets::default(),
+    )
+    .unwrap()
+    .project_module_contract()
+    .unwrap()
+}
+
+/// An imported template application can serve as a generic argument: its
+/// value-ability evidence derives from the owner's template definition, with
+/// or without an explicit `has` clause, and the consumer's checks resolve it.
+#[test]
+fn imported_template_arguments_carry_value_ability_evidence() {
+    for opt_level in 0..=3 {
+        for a in [TEMPLATE_A, TEMPLATE_A_DERIVED] {
+            let compiled = compile_template_case(HOLDER_MAIN, a, None, opt_level);
+            let typed = &compiled.metadata.typed_semantics;
+            assert!(typed.instantiations.iter().any(|instance| instance.module == "qual::a" && instance.template == "Pair"));
+            assert!(typed
+                .instantiations
+                .iter()
+                .any(|instance| instance.template == "Holder" && instance.type_arguments == ["Pair<u64>"]));
+            project_template_case(&compiled);
+        }
+    }
+}
+
+/// Two owners may export the same template name. Their instantiations keep
+/// distinct qualified identities in the checked projection, so a candidate
+/// cannot silently swap which owner supplies an argument.
+#[test]
+fn same_named_imported_templates_resolve_through_qualified_identities() {
+    for opt_level in 0..=3 {
+        let compiled = compile_template_case(AMBIGUOUS_MAIN, TEMPLATE_A_DERIVED, Some(TEMPLATE_B), opt_level);
+        let typed = &compiled.metadata.typed_semantics;
+        assert_eq!(
+            typed
+                .instantiations
+                .iter()
+                .filter(|instance| instance.template == "Pair")
+                .map(|instance| instance.module.as_str())
+                .collect::<Vec<_>>(),
+            ["qual::a", "qual::b"]
+        );
+        let projection = project_template_case(&compiled);
+        let wire: serde_json::Value = serde_json::from_slice(&projection.canonical_bytes().unwrap()).unwrap();
+        assert!(wire["contracts"].get("layout:qual::a::Pair<u64>").is_some());
+        assert!(wire["contracts"].get("layout:qual::b::Pair<u64>").is_some());
+        // Rebinding the local alias to the other owner keeps the retained
+        // instance set but points each holder layout at the other owner's
+        // qualified identity; directional matching rejects the substitution.
+        let rebound = AMBIGUOUS_MAIN
+            .replace("use qual::a::Pair", "use qual::a::Pair as OtherPair")
+            .replace("use qual::b::Pair as OtherPair", "use qual::b::Pair")
+            .replace("Pair<u64> { left: value, right: value }", "Pair<u64> { amount: value }")
+            .replace("OtherPair<u64> { amount: value }", "OtherPair<u64> { left: value, right: value }");
+        let candidate = compile_template_case(rebound.leak(), TEMPLATE_A_DERIVED, Some(TEMPLATE_B), opt_level);
+        assert!(projection.check_required_contracts(&project_template_case(&candidate)).is_err(), "opt={opt_level}");
+    }
+}

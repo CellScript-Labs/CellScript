@@ -144,6 +144,19 @@ unknown or unbounded graphs, stronger nested generic demands and missing catalog
 it does not prove generic function behavior. Its result cannot authorize a
 policy root, deployment or open runtime value.
 
+Value-ability evidence for imported template applications resolves through
+scope-qualified identities: when the declaration catalogs exist, the alias
+table registers each instance under its defining owner plus record-scope
+qualified arguments, concrete type evidence answers both raw and qualified
+spellings, and argument-constraint checks qualify unqualified names through the
+record module's scope first. Two owners exporting one template name therefore
+carry distinct qualified evidence — a candidate cannot silently rebind a local
+alias to the other owner — while the unqualified ambiguous spelling and any
+catalog-free bundle stay fail-closed. An imported template instantiated under
+another imported template's arguments still fails closed at the owner seed
+boundary; admitting that doubly-external nesting needs its own orchestrator
+contract before any qualification claim covers it.
+
 Oversized optional catalogs, ambiguous merged lowered owners and missing source
 origins preserve the historical compilation/inspection boundary without new
 catalog evidence. Such bundles cannot pass the symbolic open-interface

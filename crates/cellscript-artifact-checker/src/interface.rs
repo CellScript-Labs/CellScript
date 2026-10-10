@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 mod catalog;
 mod generics;
 mod layouts;
-mod nominals;
+pub(crate) mod nominals;
 mod projection;
 mod source_types;
 pub use catalog::{check_module_catalog, CheckedModuleCatalog, ModuleBundle};

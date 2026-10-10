@@ -61,7 +61,7 @@ pub fn qualified_source_type_with_parameters(
     super::source_types::qualify(value, scope, parameters)
 }
 
-pub(super) fn scope<'a>(catalog: &'a NominalDeclarationCatalog, name: &str) -> Result<&'a NominalDeclarationScope, CheckerError> {
+pub(crate) fn scope<'a>(catalog: &'a NominalDeclarationCatalog, name: &str) -> Result<&'a NominalDeclarationScope, CheckerError> {
     catalog.scopes.iter().find(|scope| scope.module == name).ok_or_else(|| invalid("nominal declaration has no owner scope"))
 }
 

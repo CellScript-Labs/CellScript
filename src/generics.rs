@@ -384,7 +384,16 @@ impl Monomorphizer {
                         .insert(external.local_name.clone(), def.fields.iter().map(|field| field.ty.clone()).collect());
                 }
                 Item::Struct(def) => {
-                    self.structs.insert(external.local_name.clone(), def.clone());
+                    let mut def = def.clone();
+                    // Derive omitted template abilities exactly as the local
+                    // declaration path does: the owner module derives the same
+                    // set from the same definition, so a consumer validating a
+                    // template application or using one as a generic argument
+                    // finds the same evidence through its base-name fallback.
+                    if def.abilities.is_empty() {
+                        def.abilities = derive_template_value_abilities(&def.type_params, def.fields.iter().map(|field| &field.ty));
+                    }
+                    self.structs.insert(external.local_name.clone(), def);
                     self.external_origins.insert(
                         external.local_name.clone(),
                         ExternalOrigin {
@@ -402,7 +411,14 @@ impl Monomorphizer {
                     );
                 }
                 Item::Enum(def) => {
-                    self.enums.insert(external.local_name.clone(), def.clone());
+                    let mut def = def.clone();
+                    if def.abilities.is_empty() {
+                        def.abilities = derive_template_value_abilities(
+                            &def.type_params,
+                            def.variants.iter().flat_map(|variant| variant.fields.iter()),
+                        );
+                    }
+                    self.enums.insert(external.local_name.clone(), def);
                     self.external_origins.insert(
                         external.local_name.clone(),
                         ExternalOrigin {

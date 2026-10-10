@@ -186,23 +186,61 @@ pub(crate) fn verify(record: &TypedSemanticRecord) -> Result<AbilityFacts, Check
     }
     let mut facts = AbilityFacts { types: BTreeMap::new(), aliases: BTreeMap::new() };
     let mut ambiguous_aliases = BTreeSet::new();
+    // Qualify alias keys and argument spellings through the record module's
+    // nominal scope when the declaration catalogs exist. Two owners may export
+    // the same template name; their unqualified spellings collide and stay
+    // fail-closed, while qualified identities remain distinct evidence.
+    let record_scope = record
+        .nominal_declarations
+        .as_ref()
+        .map(|catalog| Ok::<_, CheckerError>((catalog, crate::interface::nominals::scope(catalog, &record.module)?)))
+        .transpose()?;
+    let insert_alias = |facts: &mut AbilityFacts, ambiguous: &mut BTreeSet<String>, alias: String, target: &str| {
+        if ambiguous.contains(&alias) {
+            return;
+        }
+        if let Some(previous) = facts.aliases.insert(alias.clone(), target.to_string())
+            && previous != target
+        {
+            // Two declaration owners may export the same template name.
+            // Keep their distinct lowered aliases; an unqualified ambiguous
+            // spelling supplies no evidence for an argument constraint.
+            facts.aliases.remove(&alias);
+            ambiguous.insert(alias);
+        }
+    };
     for instance in record.instantiations.iter().filter(|instance| matches!(instance.kind.as_str(), "struct" | "enum")) {
         let target = instance.lowered_names.first().ok_or_else(|| invalid("generic instance lacks a lowered binding"))?;
+        let qualified_arguments = record_scope
+            .as_ref()
+            .map(|(_, scope)| {
+                instance
+                    .type_arguments
+                    .iter()
+                    .map(|argument| crate::interface::nominals::qualified_source_type(argument, scope))
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?;
         for base in std::iter::once(instance.template.as_str())
             .chain(instance.lowered_names.iter().filter_map(|name| name.split_once("__mono__").map(|(base, _)| base)))
         {
             let alias = crate::checker::canonical_abi_type(&format!("{}<{}>", base, instance.type_arguments.join(",")));
-            if ambiguous_aliases.contains(&alias) {
-                continue;
-            }
-            if let Some(previous) = facts.aliases.insert(alias.clone(), target.clone())
-                && previous != *target
-            {
-                // Two declaration owners may export the same template name.
-                // Keep their distinct lowered aliases; an unqualified ambiguous
-                // spelling supplies no evidence for an argument constraint.
-                facts.aliases.remove(&alias);
-                ambiguous_aliases.insert(alias);
+            insert_alias(&mut facts, &mut ambiguous_aliases, alias, target);
+            if let Some((_, scope)) = record_scope.as_ref() {
+                let owner = if base == instance.template {
+                    format!("{}::{}", instance.module, instance.template)
+                } else {
+                    match crate::interface::nominals::qualified_source_type(base, scope) {
+                        Ok(qualified) => qualified,
+                        Err(_) => continue,
+                    }
+                };
+                let key = crate::checker::canonical_abi_type(&format!(
+                    "{}<{}>",
+                    owner,
+                    qualified_arguments.as_deref().unwrap_or(&instance.type_arguments).join(",")
+                ));
+                insert_alias(&mut facts, &mut ambiguous_aliases, key, target);
             }
         }
     }
@@ -282,6 +320,16 @@ pub(crate) fn verify(record: &TypedSemanticRecord) -> Result<AbilityFacts, Check
             }
         };
         facts.types.insert(crate::checker::canonical_abi_type(&ty.name), bits);
+        // A concrete type's evidence must also answer its scope-qualified
+        // spelling, because argument checks qualify unqualified names before
+        // lookup. Unknown or lowered spellings qualify to themselves.
+        if let Some((_, scope)) = record_scope.as_ref() {
+            let qualified = crate::interface::nominals::qualified_source_type(&ty.name, scope)?;
+            let qualified = crate::checker::canonical_abi_type(&qualified);
+            if qualified != crate::checker::canonical_abi_type(&ty.name) {
+                facts.types.insert(qualified, bits);
+            }
+        }
         completed += 1;
         for dependent in &dependents[index] {
             incoming[*dependent] -= 1;
@@ -298,6 +346,8 @@ pub(crate) fn verify(record: &TypedSemanticRecord) -> Result<AbilityFacts, Check
 }
 
 fn verify_instantiations(record: &TypedSemanticRecord, facts: &AbilityFacts) -> Result<(), CheckerError> {
+    let record_scope =
+        record.nominal_declarations.as_ref().map(|catalog| crate::interface::nominals::scope(catalog, &record.module)).transpose()?;
     let mut bindings = BTreeSet::new();
     for instance in &record.instantiations {
         let layout = matches!(instance.kind.as_str(), "struct" | "enum");
@@ -322,7 +372,15 @@ fn verify_instantiations(record: &TypedSemanticRecord, facts: &AbilityFacts) -> 
                 return Err(invalid("generic parameter names or phantom declaration are invalid"));
             }
             let required = declared(&parameter.constraints)?;
-            let actual = facts.for_type(argument)?;
+            // An unqualified argument resolves through the record module's
+            // scope first; without the declaration catalogs the raw spelling
+            // stays fail-closed under cross-owner ambiguity.
+            let checked_argument = record_scope
+                .as_ref()
+                .map(|scope| crate::interface::nominals::qualified_source_type(argument, scope))
+                .transpose()?
+                .unwrap_or_else(|| argument.clone());
+            let actual = facts.for_type(&checked_argument)?;
             let fixed_value = FIXED | SERIALIZABLE | NON_LINEAR;
             if required & !actual != 0
                 || (layout && !parameter.phantom && (actual & CELL != 0 || actual & fixed_value != fixed_value))

@@ -32,6 +32,19 @@ pub(super) fn check(
     instances: &BTreeMap<&str, String>,
 ) -> Result<(), CheckerError> {
     let abilities = crate::value_abilities::verify(effective)?;
+    // Constraint checks resolve unqualified arguments through the record
+    // module's nominal scope when the declaration catalogs exist; two owners
+    // exporting one template name otherwise stay fail-closed.
+    let record_scope =
+        effective.nominal_declarations.as_ref().map(|catalog| super::nominals::scope(catalog, &effective.module)).transpose()?;
+    let qualified_arguments = |instance: &crate::TypedSemanticInstantiation| -> Result<Vec<String>, CheckerError> {
+        match &record_scope {
+            Some(scope) => {
+                instance.type_arguments.iter().map(|argument| super::nominals::qualified_source_type(argument, scope)).collect()
+            }
+            None => Ok(instance.type_arguments.clone()),
+        }
+    };
     if let Some(catalog) = &effective.generic_declarations {
         for declared in interface.types.iter().filter(|ty| !ty.type_parameters.is_empty()) {
             let contract = catalog
@@ -68,7 +81,7 @@ pub(super) fn check(
             check_parameter_binding(&declared.type_parameters, &instance.parameters)?;
             check_function_declaration(declared, &instance.declaration)?;
             let substitutions = substitutions(&declared.type_parameters, &instance.type_arguments)?;
-            check_constraints(&declared.type_parameters, &instance.type_arguments, false, &abilities)?;
+            check_constraints(&declared.type_parameters, &qualified_arguments(instance)?, false, &abilities)?;
             let mut entries = effective.entries.iter().filter(|entry| instance.lowered_names.contains(&entry.name));
             if let Some(entry) = entries.next() {
                 if entries.next().is_some() || declared.kind != "function" {
@@ -82,7 +95,7 @@ pub(super) fn check(
         check_parameter_binding(&declared.type_parameters, &instance.parameters)?;
         check_type_declaration(declared, &instance.declaration)?;
         let substitutions = substitutions(&declared.type_parameters, &instance.type_arguments)?;
-        check_constraints(&declared.type_parameters, &instance.type_arguments, true, &abilities)?;
+        check_constraints(&declared.type_parameters, &qualified_arguments(instance)?, true, &abilities)?;
         if declared.kind != instance.kind {
             return Err(mismatch("interface generic kind differs from checked instantiation"));
         }

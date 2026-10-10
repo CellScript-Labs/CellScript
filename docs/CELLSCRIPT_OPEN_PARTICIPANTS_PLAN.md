@@ -50,10 +50,17 @@ The initial audit is against `35bf983db30aae80281f97e30bbce08a878d7c58`.
   structural use and phantom-only identity dependencies now project through the
   checked module closure, and symbolic universal verification sweeps every
   retained template declaration including private and never-instantiated
-  entries with resolvable function-template signatures; complete nominal
-  qualification for ambiguous unqualified instantiation arguments and full
-  directional receipts remain pending; this prerequisite does not complete H1
-  or runtime admission.
+  entries with resolvable function-template signatures. Imported template
+  applications now serve as generic arguments: the producer derives their
+  value-ability evidence from the owner's template definition (explicitly or by
+  field derivation), and the checker registers scope-qualified alias evidence
+  plus qualified concrete-type keys, so two owners exporting one template name
+  keep distinct qualified identities while their raw ambiguous spelling stays
+  fail-closed without the declaration catalogs. An imported template
+  instantiated under another imported template's arguments — the doubly-external
+  nested case — still fails closed at the owner seed boundary and needs its own
+  orchestrator contract. Full directional receipts remain pending; this
+  prerequisite does not complete H1 or runtime admission.
 - Existing closed roles identify their exact providers at bundle construction.
   New participant selection must retain their lifecycle/observation distinction
   and preserve the transaction identity through signing.
