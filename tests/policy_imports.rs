@@ -411,3 +411,60 @@ fn same_named_imported_templates_resolve_through_qualified_identities() {
         assert!(projection.check_required_contracts(&project_template_case(&candidate)).is_err(), "opt={opt_level}");
     }
 }
+
+const X_HOLDER: &str = r#"
+module qual::x
+public struct Holder<T: fixed_value> { first: T }
+"#;
+
+const NESTED_MAIN: &str = r#"
+module qual::main
+use qual::a::Pair
+use qual::x::Holder
+use qual::types::Token
+
+action verify(input token: Token, witness value: u64) {
+    verification
+    consume token
+    let held: Holder<Pair<u64>> = Holder<Pair<u64>> { first: Pair<u64> { left: value, right: value } }
+    require value > 0
+}
+"#;
+
+/// An imported template instantiated with another imported template's
+/// application materializes across three modules: the argument's owner keeps
+/// its concrete, the outer owner materializes the holder specialization with
+/// forwarded argument evidence, and the consumer references both.
+#[test]
+fn imported_template_nested_under_imported_template_materializes_across_owners() {
+    for opt_level in 0..=3 {
+        let sources = [
+            ("src/main.cell", NESTED_MAIN),
+            ("src/a.cell", TEMPLATE_A_DERIVED),
+            ("src/x.cell", X_HOLDER),
+            ("src/types.cell", TEMPLATE_TOKEN),
+        ]
+        .into_iter()
+        .map(|(path, source)| InMemorySource { path: path.into(), source: source.into(), role: None })
+        .collect::<Vec<_>>();
+        let compiled = compile_sources_artifact(
+            &sources,
+            "src/main.cell",
+            CompileOptions {
+                edition: CellScriptEdition::Edition2027,
+                opt_level,
+                target: Some("riscv64-elf".into()),
+                target_profile: Some("ckb".into()),
+                source_contracts: true,
+                ..Default::default()
+            },
+            template_declaration(),
+            ExecutableSurfacePolicy::DenyFailClosed,
+        )
+        .unwrap();
+        let typed = &compiled.metadata.typed_semantics;
+        assert!(typed.instantiations.iter().any(|instance| instance.module == "qual::a" && instance.template == "Pair"));
+        assert!(typed.instantiations.iter().any(|instance| instance.module == "qual::x" && instance.template == "Holder"));
+        project_template_case(&compiled);
+    }
+}

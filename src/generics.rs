@@ -43,6 +43,20 @@ pub(crate) struct SeedInstantiation {
     pub(crate) base: String,
     pub(crate) args: Vec<Type>,
     pub(crate) span: Span,
+    /// Argument types materialized in yet another module: the owner of this
+    /// seed cannot resolve them locally, so the requester forwards the
+    /// derived ability evidence plus the defining owner and concrete name.
+    /// The independent artifact checker re-derives every ability claim from
+    /// the emitted bundle; this annotation only unblocks the producer pass.
+    pub(crate) foreign_arguments: Vec<ForeignSeedArgument>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ForeignSeedArgument {
+    pub(crate) local_name: String,
+    pub(crate) owner_module: String,
+    pub(crate) owner_concrete_name: String,
+    pub(crate) abilities: Vec<ValueAbility>,
 }
 
 #[derive(Debug, Clone)]
@@ -58,6 +72,9 @@ pub(crate) struct ExternalInstantiationRequest {
 pub(crate) struct MonomorphizeOutput {
     pub(crate) module: Module,
     pub(crate) external_requests: Vec<ExternalInstantiationRequest>,
+    /// Cross-owner concrete names this module's emitted items reference. The
+    /// orchestrator turns each into a use-import so later phases resolve it.
+    pub(crate) foreign_imports: Vec<ForeignSeedArgument>,
 }
 
 #[derive(Debug, Clone)]
@@ -120,6 +137,7 @@ struct Monomorphizer {
     emitted: HashSet<String>,
     external_origins: HashMap<String, ExternalOrigin>,
     external_requests: BTreeMap<String, ExternalInstantiationRequest>,
+    foreign_imports: Vec<ForeignSeedArgument>,
 }
 
 /// Replace every reachable generic template in one module with deterministic
@@ -145,7 +163,11 @@ pub(crate) fn monomorphize_with_project_context(
     monomorphizer.register_external_items(external_items)?;
     monomorphizer.seed(seeds)?;
     let module = monomorphizer.run(module)?;
-    Ok(MonomorphizeOutput { module, external_requests: monomorphizer.external_requests.into_values().collect() })
+    Ok(MonomorphizeOutput {
+        module,
+        external_requests: monomorphizer.external_requests.into_values().collect(),
+        foreign_imports: monomorphizer.foreign_imports,
+    })
 }
 
 /// Decode the stable internal specialization name into its source template and
@@ -289,6 +311,7 @@ impl Monomorphizer {
             emitted: HashSet::new(),
             external_origins: HashMap::new(),
             external_requests: BTreeMap::new(),
+            foreign_imports: Vec::new(),
         };
         let option = builtin_option_template();
         this.enums.insert(option.name.clone(), option);
@@ -447,6 +470,19 @@ impl Monomorphizer {
 
     fn seed(&mut self, seeds: &[SeedInstantiation]) -> Result<()> {
         for seed in seeds {
+            // Arguments materialized in a third module: register their
+            // forwarded evidence before validation runs, and remember the
+            // defining owner so the orchestrator can emit a use-import for
+            // the concrete name this module's emitted items reference.
+            for foreign in &seed.foreign_arguments {
+                if !self.concrete_struct_abilities.contains_key(&foreign.local_name)
+                    && !self.concrete_enum_abilities.contains_key(&foreign.local_name)
+                    && !self.foreign_imports.iter().any(|import| import.local_name == foreign.local_name)
+                {
+                    self.concrete_struct_abilities.insert(foreign.local_name.clone(), foreign.abilities.clone());
+                    self.foreign_imports.push(foreign.clone());
+                }
+            }
             let kind = if self.structs.contains_key(&seed.base) {
                 TemplateKind::Struct
             } else if self.enums.contains_key(&seed.base) {
@@ -923,6 +959,54 @@ impl Monomorphizer {
         Vec::new()
     }
 
+    /// Arguments of an external seed that were already materialized in
+    /// another module: the seed's owner cannot resolve their names locally.
+    /// Forward the ability evidence derived here (the owner re-checks nothing
+    /// user-controlled; the independent artifact checker re-derives every
+    /// claim from the emitted bundle) plus the defining owner identity.
+    fn foreign_seed_arguments(&self, args: &[Type], span: Span) -> Result<Vec<ForeignSeedArgument>> {
+        let mut foreign = Vec::new();
+        for argument in args {
+            let Type::Named(local_name) = argument else { continue };
+            let Some((base, _)) = decode_monomorph_name(local_name) else { continue };
+            // A concrete name that materializes in another module needs the
+            // annotation even when this module can resolve its evidence
+            // locally: the seed's owner has no record of either.
+            if self.concrete_struct_abilities.contains_key(local_name) || self.concrete_enum_abilities.contains_key(local_name) {
+                continue;
+            }
+            let Some(origin) = self.external_origins.get(&base) else { continue };
+            let owner_concrete_name = decode_monomorph_name(local_name)
+                .and_then(|(_, arguments)| {
+                    // The identity encoding is the hex of the canonical
+                    // comma-joined arguments, exactly as monomorph_name
+                    // produces it for the defining spelling.
+                    let canonical = arguments.join(",");
+                    let encoded = canonical.as_bytes().iter().map(|byte| format!("{:02x}", byte)).collect::<String>();
+                    let name = format!("{}{}{}", origin.source_name, MONO_MARKER, encoded);
+                    (name.len() <= MAX_MONOMORPH_NAME_BYTES).then_some(name)
+                })
+                .ok_or_else(|| {
+                    generic_budget_error(
+                        format!("cross-module specialization identity for '{}' exceeds its byte budget", local_name),
+                        span,
+                    )
+                })?;
+            let mut abilities = self.abilities_for_type(argument, &mut HashSet::new()).into_iter().collect::<Vec<_>>();
+            if abilities.is_empty() {
+                continue;
+            }
+            abilities.sort();
+            foreign.push(ForeignSeedArgument {
+                local_name: local_name.clone(),
+                owner_module: origin.owner_module.clone(),
+                owner_concrete_name,
+                abilities,
+            });
+        }
+        Ok(foreign)
+    }
+
     fn enqueue(&mut self, kind: TemplateKind, base: &str, args: Vec<Type>, span: Span) -> Result<String> {
         let name = monomorph_name(base, &args, span)?;
         if let Some(origin) = self.external_origins.get(base).filter(|origin| origin.kind == kind).cloned() {
@@ -934,12 +1018,13 @@ impl Monomorphizer {
             self.validate_instantiation(params, &args, kind, span)?;
             let owner_concrete_name = monomorph_name(&origin.source_name, &args, span)?;
             let key = format!("{}:{}:{}", origin.owner_module, kind_key(kind), owner_concrete_name);
+            let foreign_arguments = self.foreign_seed_arguments(&args, span)?;
             self.external_requests.entry(key).or_insert_with(|| ExternalInstantiationRequest {
                 owner_module: origin.owner_module,
                 source_name: origin.source_name.clone(),
                 local_concrete_name: name.clone(),
                 owner_concrete_name,
-                seed: SeedInstantiation { base: origin.source_name, args, span },
+                seed: SeedInstantiation { base: origin.source_name, args, span, foreign_arguments },
             });
             if self.external_requests.len() + self.pending.len() + self.emitted.len() > MAX_GENERIC_INSTANTIATIONS {
                 return Err(generic_budget_error(

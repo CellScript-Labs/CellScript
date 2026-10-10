@@ -56,10 +56,15 @@ The initial audit is against `35bf983db30aae80281f97e30bbce08a878d7c58`.
   field derivation), and the checker registers scope-qualified alias evidence
   plus qualified concrete-type keys, so two owners exporting one template name
   keep distinct qualified identities while their raw ambiguous spelling stays
-  fail-closed without the declaration catalogs. An imported template
-  instantiated under another imported template's arguments — the doubly-external
-  nested case — still fails closed at the owner seed boundary and needs its own
-  orchestrator contract. Directional receipt comparison now implements the
+  fail-closed without the declaration catalogs. The doubly-external nested
+  case — an imported template instantiated under another imported template's
+  application — now materializes across its three owners: the requester
+  forwards each foreign argument's derived ability evidence and defining
+  owner/concrete name with the seed, the outer owner pre-registers that
+  evidence before validation and emits a use-import binding the requesting
+  spelling to the argument owner's public concrete, and the independent
+  artifact checker re-derives every ability claim from the emitted bundle.
+  Directional receipt comparison now implements the
   enumerated effect-weakening relation and binder-constraint relaxation with
   exact binder identities, abilities and codecs; the complete H1 open receipt
   still needs its general codec/builder obligations. This prerequisite does

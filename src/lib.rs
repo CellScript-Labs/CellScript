@@ -7308,6 +7308,23 @@ fn monomorphize_loaded_project_diagnostics(
                 span: error::Span::default(),
             }));
         }
+        // Emitted specializations may reference concrete names materialized in
+        // a third module (an imported template instantiated with another
+        // imported template's application). Import them under the requesting
+        // spelling so later phases resolve the reference.
+        for foreign in &output.foreign_imports {
+            if let Some(&owner_index) = module_indices.get(&foreign.owner_module) {
+                linked_exports[owner_index].insert(foreign.owner_concrete_name.clone());
+                output.module.items.push(ast::Item::Use(ast::UseStmt {
+                    module_path: foreign.owner_module.split("::").map(str::to_string).collect(),
+                    imports: vec![ast::UseImport {
+                        name: foreign.owner_concrete_name.clone(),
+                        alias: (foreign.local_name != foreign.owner_concrete_name).then(|| foreign.local_name.clone()),
+                    }],
+                    span: error::Span::default(),
+                }));
+            }
+        }
     }
     for (index, output) in final_outputs {
         let mut module = output.module;

@@ -152,10 +152,14 @@ spellings, and argument-constraint checks qualify unqualified names through the
 record module's scope first. Two owners exporting one template name therefore
 carry distinct qualified evidence — a candidate cannot silently rebind a local
 alias to the other owner — while the unqualified ambiguous spelling and any
-catalog-free bundle stay fail-closed. An imported template instantiated under
-another imported template's arguments still fails closed at the owner seed
-boundary; admitting that doubly-external nesting needs its own orchestrator
-contract before any qualification claim covers it.
+catalog-free bundle stay fail-closed. An imported template instantiated under another imported
+template's arguments now materializes across owners through the seeded
+orchestrator contract: the requester forwards each foreign argument's derived
+ability evidence plus its defining owner and concrete name, the outer owner
+pre-registers that evidence before validating the seed and imports the
+argument owner's public concrete under the requesting spelling, and the
+independent checker re-derives every claim from the emitted bundle rather
+than trusting the forwarded producer values.
 
 Oversized optional catalogs, ambiguous merged lowered owners and missing source
 origins preserve the historical compilation/inspection boundary without new
