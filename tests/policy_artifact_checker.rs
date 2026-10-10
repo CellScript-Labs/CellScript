@@ -4150,3 +4150,32 @@ fn direct_type_group_rejects_actual_receipt_bundle_byte_substitution() {
     assert!(error.message.contains("different actual target"));
     check_type_group(&f).unwrap();
 }
+
+#[test]
+fn nested_public_layouts_stay_pending_entry_body_certification() {
+    const NESTED_SOURCE: &str = r#"
+module nested_codec
+resource Token has store, consume { amount: u64 }
+public struct Inner { first: u32, second: u32 }
+public struct Outer { meta: Inner, count: u64 }
+action burn(input token: Token, witness value: u64) {
+    verification
+    let outer: Outer = Outer { meta: Inner { first: 1, second: 2 }, count: 3 }
+    require token.amount > 0
+    require outer.count > 0
+    require value > 0
+    consume token
+}
+"#;
+    // Retaining a nested public layout currently requires body usage, and the
+    // struct-literal helper frame is outside the certified entry-body shapes:
+    // the finite Cell-field certification fails closed. The declaration-level
+    // codec obligations for nested unsigned layouts are unit-checked in the
+    // checker crate; admitting them end to end needs the nested
+    // field-materialization certification, which stays a recorded boundary.
+    for opt in 0..=3 {
+        let fixture = external_fixture(NESTED_SOURCE, opt);
+        let error = fixed_external_codec(&fixture).unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "opt={opt}: {error}");
+    }
+}

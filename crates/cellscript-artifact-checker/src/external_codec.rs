@@ -63,9 +63,32 @@ struct PublicLayout {
     width: Option<u32>,
     availability: &'static str,
 }
-fn unsigned_layout(layout: &crate::TypedSemanticType) -> Result<u32, CheckerError> {
+fn unsigned_layout(layout: &crate::TypedSemanticType, typed: &crate::TypedSemanticRecord) -> Result<u32, CheckerError> {
+    unsigned_layout_at(layout, typed, true, 0)
+}
+
+/// Entry-bound Cell layouts stay flat: their ELF-level field materialization
+/// evidence (`fixed_cell_fields`) is certified per direct scalar field, so a
+/// nested Cell field keeps failing closed under this profile.
+fn unsigned_layout_flat(layout: &crate::TypedSemanticType, typed: &crate::TypedSemanticRecord) -> Result<u32, CheckerError> {
+    unsigned_layout_at(layout, typed, false, 0)
+}
+
+/// Public layouts may compose nested ordinary struct layouts: every nested
+/// member must itself resolve to exactly one retained concrete struct layout
+/// and recursively satisfy the same unsigned obligations. Depth is bounded so
+/// hostile nesting cannot amplify the traversal; total width stays ≤ 512.
+fn unsigned_layout_at(
+    layout: &crate::TypedSemanticType,
+    typed: &crate::TypedSemanticRecord,
+    nested_allowed: bool,
+    depth: usize,
+) -> Result<u32, CheckerError> {
     if !layout.variants.is_empty() || layout.fields.len() > 64 || layout.fields.is_empty() {
         return Err(invalid("tagged, empty or oversized public layout lacks this profile"));
+    }
+    if depth > 8 {
+        return Err(invalid("nested public layout exceeds its depth bound"));
     }
     let mut width = 0u32;
     for field in &layout.fields {
@@ -74,7 +97,16 @@ fn unsigned_layout(layout: &crate::TypedSemanticType) -> Result<u32, CheckerErro
             "u16" => 2,
             "u32" => 4,
             "u64" => 8,
-            _ => return Err(invalid("public layout requires flat unsigned bitpattern fields")),
+            _ => {
+                if !nested_allowed {
+                    return Err(invalid("public layout requires flat unsigned bitpattern fields"));
+                }
+                let members = typed.types.iter().filter(|ty| ty.name == field.ty).collect::<Vec<_>>();
+                if members.len() != 1 || members[0].kind != "struct" {
+                    return Err(invalid("nested public member lacks its unique ordinary struct layout"));
+                }
+                unsigned_layout_at(members[0], typed, true, depth + 1)?
+            }
         };
         if field.offset != width || field.width_bytes != Some(bytes) {
             return Err(invalid("public layout offsets or unsigned widths differ"));
@@ -181,7 +213,7 @@ pub fn check_fixed_external_codec(
             .iter()
             .find(|layout| layout.name == bindings[0].lowered_name)
             .ok_or_else(|| invalid("concrete public layout is absent"))?;
-        let width = unsigned_layout(layout)?;
+        let width = unsigned_layout(layout, typed)?;
         public_layouts.push(PublicLayout {
             declaration: declaration.identity.clone(),
             lowered: Some(layout.name.clone()),
@@ -214,7 +246,7 @@ pub fn check_fixed_external_codec(
                 .iter()
                 .find(|layout| layout.name == parameter.ty)
                 .ok_or_else(|| invalid("missing independently checked Cell layout"))?;
-            let width = unsigned_layout(layout)?;
+            let width = unsigned_layout_flat(layout, typed)?;
             cells.push(Cell { entry: entry.id.clone(), parameter: parameter.name.clone(), ty: parameter.ty.clone(), width });
         }
     }
@@ -232,7 +264,7 @@ pub fn check_fixed_external_codec(
     }
     let record = Record {
         schema: "cellscript-fixed-external-codec-v1",
-        profile: "policy-unit-scalars-flat-unsigned-cell-v1",
+        profile: "policy-unit-scalars-nested-unsigned-cell-v1",
         module_contract: parameters.module_projection().identity().into(),
         parameter_decoder: parameters.identity().into(),
         cell_fields: fields.as_ref().map(|fields| fields.identity().into()),
@@ -242,4 +274,94 @@ pub fn check_fixed_external_codec(
     };
     let identity = crate::canonical_hash("cellscript-fixed-external-codec-id-v1", &record)?;
     Ok(CheckedFixedExternalCodec { parameters, fields, record, identity })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{TypedSemanticField, TypedSemanticType};
+
+    fn layout(name: &str, fields: &[(&str, &str, u32, u32)]) -> TypedSemanticType {
+        TypedSemanticType {
+            name: name.into(),
+            kind: "struct".into(),
+            encoded_size: Some(fields.iter().map(|(_, _, _, width)| width).sum()),
+            fields: fields
+                .iter()
+                .map(|(name, ty, offset, width)| TypedSemanticField {
+                    name: (*name).into(),
+                    ty: (*ty).into(),
+                    offset: *offset,
+                    width_bytes: Some(*width),
+                })
+                .collect(),
+            ..TypedSemanticType::default()
+        }
+    }
+
+    fn record(types: Vec<TypedSemanticType>) -> crate::TypedSemanticRecord {
+        crate::TypedSemanticRecord { types, ..crate::TypedSemanticRecord::default() }
+    }
+
+    /// Nested public layouts compose: a member naming another retained
+    /// ordinary struct contributes its aggregate width at a contiguous
+    /// offset, recursively, under the depth bound.
+    #[test]
+    fn nested_unsigned_layouts_compose_contiguously() {
+        let typed = record(vec![
+            layout("Leaf", &[("first", "u32", 0, 4), ("second", "u32", 4, 4)]),
+            layout("Middle", &[("leaf", "Leaf", 0, 8), ("count", "u64", 8, 8)]),
+            layout("Outer", &[("middle", "Middle", 0, 16), ("tag", "u16", 16, 2)]),
+        ]);
+        assert_eq!(unsigned_layout(&typed.types[2], &typed).unwrap(), 18);
+        assert_eq!(unsigned_layout(&typed.types[1], &typed).unwrap(), 16);
+        // The Cell-parameter path stays flat under the same record.
+        assert!(unsigned_layout_flat(&typed.types[1], &typed).is_err());
+    }
+
+    #[test]
+    fn nested_unsigned_layouts_reject_mutations_and_foreign_members() {
+        let base = record(vec![
+            layout("Leaf", &[("first", "u32", 0, 4), ("second", "u32", 4, 4)]),
+            layout("Outer", &[("leaf", "Leaf", 0, 8), ("count", "u64", 8, 8)]),
+        ]);
+        assert_eq!(unsigned_layout(&base.types[1], &base).unwrap(), 16);
+        // Width mutation inside the nested aggregate.
+        let mut changed = base.clone();
+        changed.types[1].fields[0].width_bytes = Some(4);
+        assert!(unsigned_layout(&changed.types[1], &changed).is_err());
+        // Offset drift across the nesting boundary.
+        let mut changed = base.clone();
+        changed.types[1].fields[1].offset = 12;
+        assert!(unsigned_layout(&changed.types[1], &changed).is_err());
+        // A nested member without its unique ordinary struct layout.
+        let mut changed = base;
+        changed.types.remove(0);
+        assert!(unsigned_layout(&changed.types[0], &changed).is_err());
+        // Depth bound: nine chained single-field layouts reject.
+        let mut chain = Vec::new();
+        for index in 0..10 {
+            let spelled: Vec<(&str, &str, u32, u32)> =
+                if index == 9 { vec![("value", "u64", 0, 8)] } else { vec![("inner", "placeholder", 0, 8)] };
+            let spelled: Vec<(&str, String, u32, u32)> = if index == 9 {
+                spelled.into_iter().map(|(name, ty, offset, width)| (name, ty.to_string(), offset, width)).collect()
+            } else {
+                vec![("inner", format!("N{}", index + 1), 0, 8)]
+            };
+            let fields: Vec<(&str, &str, u32, u32)> =
+                spelled.iter().map(|(name, ty, offset, width)| (*name, ty.as_str(), *offset, *width)).collect();
+            chain.push(layout(&format!("N{index}"), &fields));
+        }
+        let deep = record(chain);
+        assert!(unsigned_layout(&deep.types[0], &deep).is_err());
+        // Equal-width nominal substitution inside the nested member set is
+        // structural for the codec check itself; declaration identities keep
+        // owners distinct at the module-contract layer.
+        let swapped = record(vec![
+            layout("Leaf", &[("first", "u32", 0, 4), ("second", "u32", 4, 4)]),
+            layout("Substitute", &[("first", "u32", 0, 4), ("second", "u32", 4, 4)]),
+            layout("Outer", &[("leaf", "Substitute", 0, 8), ("count", "u64", 8, 8)]),
+        ]);
+        assert_eq!(unsigned_layout(&swapped.types[2], &swapped).unwrap(), 16);
+    }
 }

@@ -10,11 +10,21 @@ selection proofs; exported JSON cannot reconstruct it.
 Construction applies the existing six-input preflight before parsing: 4 MiB per
 file, 16 MiB shared, and caller artifact/record/source-map ceilings. It requires
 the independently checked Type-policy role and the finite
-`policy-unit-scalars-flat-unsigned-cell-v1` external profile: unit results,
-bounded scalar parameters and flat unsigned Cell layouts. Public constants
-reject because the current projection proves their types but not their values.
-Uninstantiated generic declarations remain declaration-only; they cannot claim
-an executable external codec. Broader bundle inspection remains unchanged.
+`policy-unit-scalars-nested-unsigned-cell-v1` external profile: unit results,
+bounded scalar parameters and unsigned Cell layouts. Public layout declarations
+may compose nested ordinary struct layouts — each nested member must resolve to
+exactly one retained concrete struct layout and recursively satisfy the same
+unsigned obligations (contiguous offsets, matched widths, depth ≤ 8, total
+≤ 512 bytes); these declaration-level obligations are unit-checked in the
+checker. Entry-bound Cell layouts stay flat: retaining a nested public layout
+currently requires entry-body usage, and the struct-literal helper frame is
+outside the certified entry-body shapes, so end-to-end admission of nested
+layouts stays fail-closed at the Cell-field certification until nested
+field-materialization certification exists. Public constants reject because the
+current projection proves their types but not their values; an independent
+constant-value proof needs its own evaluation contract. Uninstantiated generic
+declarations remain declaration-only; they cannot claim an executable external
+codec. Broader bundle inspection remains unchanged.
 
 The record schema is `cellscript-fixed-policy-interface-receipt-v1`; its identity
 uses domain `cellscript-fixed-policy-interface-receipt-id-v1` over canonical

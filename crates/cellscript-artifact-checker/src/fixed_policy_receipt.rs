@@ -117,7 +117,7 @@ pub fn check_fixed_policy_receipt(
     let codec = target.origin().codec();
     let record = Record {
         schema: "cellscript-fixed-policy-interface-receipt-v1",
-        profile: "policy-unit-scalars-flat-unsigned-cell-v1",
+        profile: "policy-unit-scalars-nested-unsigned-cell-v1",
         declared_interface: inspection.declared().clone(),
         entry_contract: entry_contract.clone(),
         module_contract: codec.parameters().module_projection().identity().into(),
