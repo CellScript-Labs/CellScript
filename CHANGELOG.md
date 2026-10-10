@@ -2,6 +2,11 @@
 
 ## Unreleased — 0.32
 
+Separate ordinary commit checks from integration and release acceptance. The
+default `commit` gate checks source/docs hygiene, changed shell syntax and
+affected Rust package formatting/host compilation. `dev` remains a broader
+integration checkpoint; CI, backend and release validation retain their scope.
+
 Bind a checked direct data2 dependency and finite Type-policy receipt to complete
 canonical transaction/witness bytes and every supplied input Cell. Derive Type
 group indices from complete Scripts, validate all policy records and the

@@ -615,6 +615,7 @@ For repository work, use the unified gate wrapper instead of hand-picking
 component scripts:
 
 ```bash
+./scripts/cellscript_gate.sh commit
 ./scripts/cellscript_gate.sh dev
 ./scripts/cellscript_gate.sh ci
 ./scripts/cellscript_gate.sh backend
@@ -622,8 +623,13 @@ component scripts:
 ./scripts/cellscript_gate.sh release-quick
 ```
 
-`dev` is the local fast path. `ci` is the pull-request gate. `backend` is for
-IR/codegen/RISC-V changes. `release` is the production CKB evidence gate.
+`commit` is the default lightweight gate for ordinary commits and pushes; add
+focused tests for changed behavior. It checks source/docs hygiene, changed shell
+syntax, and formatting/host compilation for affected Rust packages, without VM
+execution or reproducible ELF builds. `dev` is a local integration checkpoint,
+not a per-commit requirement. `ci` establishes pull-request/merge readiness.
+`backend` validates integrated IR/codegen/RISC-V changes. `release` is the
+production CKB evidence gate.
 `release-quick` is a compile-only release preflight, not external live/devnet
 evidence. See `docs/CELLSCRIPT_GATE_POLICY.md` for the exact command contract.
 Both release modes first require a clean checkout and an accepted bounded
@@ -687,11 +693,11 @@ root:
 ./scripts/cellscript_gate.sh release
 ```
 
-For pre-push checks, the development gate runs the compiler checks, strict
-backend quick audit, syntax-combination quick audit, and diff checks:
+For ordinary commits and pushes, run lightweight checks and focused regressions
+for the changed behavior. Use `dev` for a broader integration checkpoint:
 
 ```bash
-./scripts/cellscript_gate.sh dev
+./scripts/cellscript_gate.sh commit
 ```
 
 If you specifically need the old compile-only production acceptance pass,

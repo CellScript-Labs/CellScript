@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MODE="${1:-dev}"
+MODE="${1:-commit}"
 if [[ $# -gt 0 ]]; then
     shift
 fi
@@ -632,6 +632,82 @@ run_byte_context_child_build() {
     # and bind source/manifest/lock hashes to the checked build manifest.
 }
 
+run_commit_gate() {
+    if (($# != 0)); then
+        printf 'usage: %s commit\n' "$0" >&2
+        exit 2
+    fi
+    require_cmd git
+    require_cmd cargo
+
+    # Check both layers: a clean worktree diff can hide bad staged whitespace.
+    run git diff --check
+    run git diff --cached --check
+    check_source_policy
+    check_cellscript_doc_status_freshness
+    check_markdown_local_links
+
+    local changed_paths
+    mkdir -p "$ROOT_DIR/target"
+    changed_paths="$(mktemp "$ROOT_DIR/target/commit-paths.XXXXXX")"
+    git diff --cached --name-only --no-renames -z -- >"$changed_paths"
+    git diff --name-only --no-renames -z -- >>"$changed_paths"
+    git ls-files --others --exclude-standard -z >>"$changed_paths"
+
+    local manifests=()
+    local changed_path candidate directory manifest existing duplicate
+    while IFS= read -r -d '' changed_path; do
+        case "$changed_path" in
+            *.sh)
+                if [[ -f "$changed_path" ]]; then
+                    run bash -n "$changed_path"
+                fi
+                ;;
+        esac
+        case "$changed_path" in
+            Cargo.toml|Cargo.lock|rust-toolchain.toml|.cargo/*)
+                # Shared dependency/toolchain edits affect every workspace package.
+                manifests+=(Cargo.toml crates/cellscript-artifact-checker/Cargo.toml
+                    crates/cellscript-ckb-adapter/Cargo.toml crates/cellscript-fiber-adapter/Cargo.toml
+                    crates/cellscript-tools/Cargo.toml crates/cellscript-wasm/Cargo.toml
+                    examples/ckb-sdk-builder/Cargo.toml)
+                ;;
+            *.rs|*/Cargo.toml|*/Cargo.lock)
+                directory="$(dirname "$changed_path")"
+                while [[ "$directory" != . && ! -f "$directory/Cargo.toml" ]]; do
+                    directory="$(dirname "$directory")"
+                done
+                candidate="$directory/Cargo.toml"
+                manifests+=("${candidate#./}")
+                ;;
+        esac
+    done <"$changed_paths"
+    rm -f "$changed_paths"
+
+    local checked_manifests=()
+    for manifest in "${manifests[@]}"; do
+        duplicate=false
+        for existing in "${checked_manifests[@]}"; do
+            if [[ "$existing" == "$manifest" ]]; then
+                duplicate=true
+                break
+            fi
+        done
+        if [[ "$duplicate" == true ]]; then
+            continue
+        fi
+        checked_manifests+=("$manifest")
+        run cargo fmt --manifest-path "$manifest" --check
+        if [[ "$manifest" == crates/cellscript-wasm/Cargo.toml ]]; then
+            run cargo check --locked --manifest-path "$manifest" --all-targets --features wasm
+        else
+            run cargo check --locked --manifest-path "$manifest" --all-targets
+        fi
+    done
+    printf '\nCommit hygiene passed; run focused checks for changed behavior before committing.\n'
+    printf 'Use dev for integration checkpoints, ci/backend for merge readiness, and release for publication.\n'
+}
+
 run_dev_gate() {
     if (($# != 0)); then
         printf 'usage: %s dev\n' "$0" >&2
@@ -640,6 +716,7 @@ run_dev_gate() {
     require_cmd cargo
     require_cmd rg
 
+    run cargo test --locked -p cellscript-tools --test commit_gate
     cargo_fmt_workspace
     run_byte_context_child_build
     run cargo fmt --manifest-path services/registry-verifier/Cargo.toml
@@ -854,6 +931,9 @@ run_release_gate() {
 }
 
 case "$MODE" in
+    commit)
+        run_commit_gate "$@"
+        ;;
     dev)
         run_dev_gate "$@"
         ;;
@@ -870,7 +950,7 @@ case "$MODE" in
         run_release_quick_gate "$@"
         ;;
     *)
-        printf 'usage: %s [dev|ci|backend|release|release-quick]\n' "$0" >&2
+        printf 'usage: %s [commit|dev|ci|backend|release|release-quick]\n' "$0" >&2
         exit 2
         ;;
 esac

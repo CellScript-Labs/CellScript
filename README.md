@@ -361,7 +361,10 @@ for integration fixtures, editor, and website work:
 git submodule update --init
 cargo build --locked -p cellscript --bin cellc
 
-# Local validation before committing or pushing
+# Lightweight checks before ordinary commits or pushes (also the default mode)
+./scripts/cellscript_gate.sh commit
+
+# Broader local integration checkpoint
 ./scripts/cellscript_gate.sh dev
 
 # CI parity before claiming merge readiness

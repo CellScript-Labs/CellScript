@@ -11,7 +11,7 @@ the [interface receipt boundary](CELLSCRIPT_OPEN_INTERFACE_RECEIPT.md).
 CellScript uses one top-level gate entry point:
 
 ```bash
-./scripts/cellscript_gate.sh <dev|ci|backend|release|release-quick>
+./scripts/cellscript_gate.sh <commit|dev|ci|backend|release|release-quick>
 ```
 
 The lower-level audit scripts remain available for focused debugging, but they
@@ -19,6 +19,44 @@ are implementation details of the gate policy. Prefer the unified gate when
 deciding whether a change is ready.
 
 ## Gate Modes
+
+`commit` is the default when no mode is supplied. Choose checks by the decision
+being made: an ordinary commit, an integration checkpoint, merge readiness, or
+publication. Do not run a full integration or release gate solely because a new
+commit is being created.
+
+### Ordinary commits and pushes
+
+`commit` checks staged and unstaged diff whitespace, native source policy,
+documentation status and local Markdown links. It syntax-checks changed shell
+scripts. For changed Rust sources or Cargo manifests/locks, it checks formatting
+and runs locked host `cargo check --all-targets` for the nearest package manifest.
+Root Cargo/lock/toolchain/config changes select all workspace packages; the WASM
+package keeps its explicit `wasm` feature. This gate does not execute test suites,
+build reproducible RISC-V children, start nodes, require Docker/Node.js or generate
+release evidence. Native documentation/source checks still use `cellscript-tools`
+and may compile that tool on first use.
+
+Change selection is the union of staged, unstaged and non-ignored untracked paths
+in the current repository. Checks inspect working-tree files; this is not an
+isolated validation of the staged Git tree. Finish edits before running it, and
+rerun affected checks after changing the proposed commit. Submodule contents need
+their own applicable checks; a parent gitlink does not run those checks for them.
+
+Add focused regressions for behavior changes: compiler/DSL tests for the changed
+semantics, the relevant service/editor tests for their consumers, and targeted
+machine/VM mutations when changing backend contracts. Documentation or archived
+report cleanup needs links, checksums and relevant source-policy checks, not VM
+rebuilds. No automatic path classifier establishes semantic test coverage.
+
+Use `dev` at local integration checkpoints, `ci` before merge-readiness claims,
+and `backend` before accepting backend changes as integrated. An unrelated
+existing failure in a heavier gate must be reported but does not block an
+ordinary commit whose applicable checks pass. Failures in the changed behavior
+remain blockers for claims that it works. Publication and production acceptance
+still require `release`; `release-quick` remains a heavy compile-only preflight.
+
+### Integration and release evidence
 
 The 0.32 dev, backend and CI paths also rebuild the pinned fixed byte-context
 child twice with Rust 1.97.1 and `riscv64imac-unknown-none-elf`. Runtime tests
@@ -83,9 +121,10 @@ admission. See the [artifact boundary](CELLSCRIPT_VERIFIED_ARTIFACT_BOUNDARY.md)
 
 | Mode | When to run | Evidence boundary |
 |---|---|---|
-| `dev` | Local development before pushing | Native source-policy enforcement; Rust formatting; canonical CellScript example formatting; all workspace-package Rust checks (including the standalone artifact checker and `cellscript-tools`); checker mutation/Myelin handoff tests; exact-handle CKB-VM/transaction-validation tests; deployment-line receipt/value tests; frozen 0.30 business-corpus inventory and same-transaction anchor; simulator package scenarios; frozen/offline canonical workspace-diamond plus resolve-graph/build-plan and transactional-upgrade schema checks, including byte-identical source locks; both Registry verifiers and their compiler-dependency boundaries; reproducible Registry Type Script build and CKB-VM tests; strict backend quick audit, syntax-combination quick audit, parity-gated skill-pack freshness, README-linked CellScript doc Status freshness, local markdown link check, whitespace diff check |
-| `ci` | Pull requests, pushes, and routine merge readiness | Node 22 and native source-policy enforcement; all compiler/checker/adapter/tool tests and clippy; simulator plus CKB-VM package scenarios; standalone-checker dependency and mutation evidence; reproducible Registry Type Script identity plus CKB-VM tests and clippy; Registry API typecheck/tests with compiler-backed and least-privilege artifact workers, Node bundles, and dry-run Worker build; full website behavior/build regression suite; strict backend CI audit; package verification; parity-gated skill-pack/doc freshness; local-link and script syntax checks |
-| `backend` | Changes touching IR, codegen, assembler, ABI, ELF, or RISC-V behavior | Compiler, artifact-checker, and Fiber checks/tests/clippy; checker dependency boundary; simulator plus CKB-VM package scenarios; native source-policy enforcement; and strict backend full audit, including stateful CKB scenarios |
+| `commit` | Ordinary commits and pushes (default) | Staged/unstaged whitespace, native source policy, doc status and local links; changed shell syntax; affected Rust package formatting and locked host checks; add focused behavioral regressions |
+| `dev` | Local integration checkpoints | Native source-policy enforcement; Rust formatting; canonical CellScript example formatting; all workspace-package Rust checks (including the standalone artifact checker and `cellscript-tools`); checker mutation/Myelin handoff tests; exact-handle CKB-VM/transaction-validation tests; deployment-line receipt/value tests; frozen 0.30 business-corpus inventory and same-transaction anchor; simulator package scenarios; frozen/offline canonical workspace-diamond plus resolve-graph/build-plan and transactional-upgrade schema checks, including byte-identical source locks; both Registry verifiers and their compiler-dependency boundaries; reproducible Registry Type Script build and CKB-VM tests; strict backend quick audit, syntax-combination quick audit, parity-gated skill-pack freshness, README-linked CellScript doc Status freshness, local markdown link check, whitespace diff check |
+| `ci` | Pull requests and merge readiness; configured CI pushes | Node 22 and native source-policy enforcement; all compiler/checker/adapter/tool tests and clippy; simulator plus CKB-VM package scenarios; standalone-checker dependency and mutation evidence; reproducible Registry Type Script identity plus CKB-VM tests and clippy; Registry API typecheck/tests with compiler-backed and least-privilege artifact workers, Node bundles, and dry-run Worker build; full website behavior/build regression suite; strict backend CI audit; package verification; parity-gated skill-pack/doc freshness; local-link and script syntax checks |
+| `backend` | Integration readiness for IR, codegen, assembler, ABI, ELF, or RISC-V behavior | Compiler, artifact-checker, and Fiber checks/tests/clippy; checker dependency boundary; simulator plus CKB-VM package scenarios; native source-policy enforcement; and strict backend full audit, including stateful CKB scenarios |
 | `release` | Nightly/stable release candidates and any production CKB claim | Clean source, strict release-corpus acceptance, and `ci`, a fresh size-gated website WASM rebuild, tooling/docs and VS Code checks, pinned-CKB acceptance harnesses, public builder-contract generation, and mandatory stateful scenario/action coverage; GitHub publication additionally requires the matching version tag |
 | `release-quick` | Wrapper compatibility and local compile-only preflight | `ci` plus compile-only production acceptance; not external live/devnet evidence |
 
@@ -757,7 +796,10 @@ coverage pins effect compatibility, escape rejection, and crossing
 ## Command Cheatsheet
 
 ```bash
-# Local fast path
+# Lightweight ordinary commit/push checks
+./scripts/cellscript_gate.sh commit
+
+# Local integration checkpoint
 ./scripts/cellscript_gate.sh dev
 
 # Default CI/PR gate

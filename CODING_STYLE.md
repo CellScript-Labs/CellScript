@@ -15,11 +15,19 @@ project contract.
 - Use enums and typed fields when the concept already has a structured
   representation.
 - Error messages should name the rejected boundary and the next valid action.
-- Run `./scripts/cellscript_gate.sh dev` before committing routine compiler or
-  documentation changes.
+- Run `./scripts/cellscript_gate.sh commit` before ordinary commits and pushes,
+  plus focused checks for changed behavior. Documentation-only changes need no
+  VM execution, reproducible ELF build or full compiler test suite.
+- Use `./scripts/cellscript_gate.sh dev` at integration checkpoints, not before
+  every commit. A checkpoint failure does not prevent an unrelated documentation
+  commit whose own checks pass; report the failure without claiming integration
+  readiness.
 - Run `./scripts/cellscript_gate.sh ci` before merge-readiness claims.
-- Run `./scripts/cellscript_gate.sh backend` for IR, codegen, assembler, ABI,
-  ELF, or RISC-V changes.
+- Run `./scripts/cellscript_gate.sh backend` before claiming integration readiness
+  for IR, codegen, assembler, ABI, ELF, or RISC-V changes. Intermediate commits
+  use `commit` and focused regressions for the changed contract.
+- Run `./scripts/cellscript_gate.sh release` for publication and production
+  acceptance. A passing commit/dev gate never substitutes for release evidence.
 - Focused commands such as `cargo check --locked -p cellscript --all-targets`,
   `cargo test --locked -p cellscript`, clippy with `-D warnings`, and
   `git diff --check` remain useful while debugging, but passing one component

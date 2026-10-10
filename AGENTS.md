@@ -85,14 +85,16 @@ deployed Scripts, network behaviour, or OffCKB behaviour. Verify before coding.
 ## Build, test, lint — the only commands you should reach for
 
 The unified entry point is `./scripts/cellscript_gate.sh <mode>`. CI runs it
-with mode `ci`; the local analogue is `dev`. Other modes are heavier and
-require extra tooling.
+with mode `ci`. Ordinary commits and pushes use the default `commit` mode
+plus focused behavioral checks. `dev` is a broader integration checkpoint, not
+a per-commit requirement. Backend/release modes require extra tooling.
 
 | Mode | What it does |
 | --- | --- |
-| `dev` | Explicit workspace-package formatting and checks for the compiler, standalone artifact checker, Fiber adapter, CKB adapter, WASM crate, CKB SDK builder example, `cellscript-tools`, and both independent Registry verifiers; checker mutation/Myelin handoff tests; simulator package scenarios; reproducible Registry Type Script build and CKB-VM tests; native source-policy enforcement; strict backend audit (quick); syntax combo audit (quick); parity-gated skill-pack freshness; `git diff --check`. Run before committing. |
+| `commit` | Lightweight default: staged/unstaged whitespace, source policy, doc status/links, changed shell syntax, and affected Rust package formatting/locked host checks. Add focused checks for changed behavior; no VM suite or reproducible child ELF build. Run before ordinary commits/pushes. |
+| `dev` | Explicit workspace-package formatting and checks for the compiler, standalone artifact checker, Fiber adapter, CKB adapter, WASM crate, CKB SDK builder example, `cellscript-tools`, and both independent Registry verifiers; checker mutation/Myelin handoff tests; simulator package scenarios; reproducible Registry Type Script build and CKB-VM tests; native source-policy enforcement; strict backend audit (quick); syntax combo audit (quick); parity-gated skill-pack freshness; `git diff --check`. Run at integration checkpoints, not before every commit. |
 | `ci` | `dev` coverage plus tests and clippy for every workspace package, `cellscript-tools`, both Registry verifiers, and the Registry Type Script; simulator and CKB-VM package scenarios; Registry API tests plus Node API/verifier bundles; full package contents check, website build check (requires `npm`), shell syntax and native source-policy checks, parity-gated skill-pack freshness, and trailing-whitespace check. Run before claiming merge-readiness. |
-| `backend` | For IR / codegen / assembler / ABI / ELF / RISC-V changes: explicit workspace-package format checking, compiler/checker tests and clippy, both package-scenario backends, standalone-checker dependency enforcement, strict backend audit (full, which itself fires the CKB stateful-scenarios harness via `cellscript_ckb_stateful_scenarios.sh`), and `git diff --check`. |
+| `backend` | Before integration-readiness claims for IR / codegen / assembler / ABI / ELF / RISC-V changes: explicit workspace-package format checking, compiler/checker tests and clippy, both package-scenario backends, standalone-checker dependency enforcement, strict backend audit (full, which itself fires the CKB stateful-scenarios harness via `cellscript_ckb_stateful_scenarios.sh`), and `git diff --check`. |
 | `release` / `release-quick` | Everything `ci` does plus release-auxiliary checks (CKB acceptance, NovaSeal pinning, NovaSeal Rust tooling for RISC-V, fresh WASM + VS Code packaging, CKB tx measure tool, etc.) and the CKB acceptance harness (`scripts/ckb_cellscript_acceptance.sh`). These modes need the pinned sibling CKB checkout from `scripts/ckb_acceptance_pin.json`, the NovaSeal submodule, a sibling `ckb-sdk-rust` checkout at tag `v5.1.0`, Docker for the canonical Linux/amd64 WASM build, and `riscv64imac-unknown-none-elf` for NovaSeal verifier builds. Do not run them casually. |
 
 Focused commands are still useful while debugging — `cargo check --locked -p
@@ -108,7 +110,7 @@ Notes on Rust toolchain / target:
   fails closed if neither SHA-256 tool is available.
 - The NovaSeal verifier (`proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier_riscv`)
   builds with `--target riscv64imac-unknown-none-elf` in release mode.
-  `scripts/cellscript_gate.sh` will not pass without it.
+  Release gates will not pass without it; the commit gate does not build it.
 - `Cargo.toml` pins exact versions for several deps (`indexmap = "=2.2.6"`,
   `clap = "=4.5.49"`, `ckb-vm = "0.24"` with `asm` + `detect-asm`, etc.). Do
   not bump them without running the full gate.
@@ -368,7 +370,10 @@ Existing command families to be aware of:
 ## Quick command cheat sheet
 
 ```bash
-# Local development (fast feedback, what to run before commit)
+# Ordinary commits and pushes (default; add focused behavioral checks)
+./scripts/cellscript_gate.sh commit
+
+# Local integration checkpoint
 ./scripts/cellscript_gate.sh dev
 
 # Merge-readiness (slow, ~CI parity; needs npm)
