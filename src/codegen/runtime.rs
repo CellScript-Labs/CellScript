@@ -6705,10 +6705,10 @@ impl CodeGenerator {
         }
         self.emit(format!("ld t0, {INDEX}(sp)"));
         self.emit(format!("sb t0, {}(t3)", OPEN_HANDLE_MEMBER_DOMAIN.len()));
-        self.emit(format!("addi a0, sp, {LEAF_STAGING}"));
-        self.emit(format!("addi a0, a0, {}", OPEN_HANDLE_MEMBER_DOMAIN.len() + 1));
-        self.emit(format!("ld a1, {HANDLE_PTR}(sp)"));
-        self.emit(format!("addi a1, a1, {OPEN_HANDLE_MEMBER_OFFSET}"));
+        self.emit(format!("ld a0, {HANDLE_PTR}(sp)"));
+        self.emit(format!("addi a0, a0, {OPEN_HANDLE_MEMBER_OFFSET}"));
+        self.emit(format!("addi a1, sp, {LEAF_STAGING}"));
+        self.emit(format!("addi a1, a1, {}", OPEN_HANDLE_MEMBER_DOMAIN.len() + 1));
         self.emit("li a2, 292");
         self.emit("call __cellscript_memcpy_fixed");
         self.emit(format!("addi a0, sp, {LEAF_STAGING}"));
@@ -6731,29 +6731,29 @@ impl CodeGenerator {
             self.emit(format!("beqz t0, {sibling_left}"));
             // Index bit set: the sibling is the left child, the current
             // hash the right one.
-            self.emit(format!("addi a0, sp, {NODE_STAGING}"));
-            self.emit(format!("addi a0, a0, {}", OPEN_HANDLE_NODE_DOMAIN.len()));
-            self.emit(format!("ld a1, {HANDLE_PTR}(sp)"));
-            self.emit(format!("addi a1, a1, {}", OPEN_HANDLE_SIBLING_OFFSET + depth * 32));
+            self.emit(format!("ld a0, {HANDLE_PTR}(sp)"));
+            self.emit(format!("addi a0, a0, {}", OPEN_HANDLE_SIBLING_OFFSET + depth * 32));
+            self.emit(format!("addi a1, sp, {NODE_STAGING}"));
+            self.emit(format!("addi a1, a1, {}", OPEN_HANDLE_NODE_DOMAIN.len()));
             self.emit("li a2, 32");
             self.emit("call __cellscript_memcpy_fixed");
-            self.emit(format!("addi a0, sp, {NODE_STAGING}"));
-            self.emit(format!("addi a0, a0, {}", OPEN_HANDLE_NODE_DOMAIN.len() + 32));
-            self.emit(format!("addi a1, sp, {CURRENT_HASH}"));
+            self.emit(format!("addi a0, sp, {CURRENT_HASH}"));
+            self.emit(format!("addi a1, sp, {NODE_STAGING}"));
+            self.emit(format!("addi a1, a1, {}", OPEN_HANDLE_NODE_DOMAIN.len() + 32));
             self.emit("li a2, 32");
             self.emit("call __cellscript_memcpy_fixed");
             self.emit(format!("j {joined}"));
             // Index bit clear: the current hash is the left child.
             self.emit_label(&sibling_left);
-            self.emit(format!("addi a0, sp, {NODE_STAGING}"));
-            self.emit(format!("addi a0, a0, {}", OPEN_HANDLE_NODE_DOMAIN.len()));
-            self.emit(format!("addi a1, sp, {CURRENT_HASH}"));
+            self.emit(format!("addi a0, sp, {CURRENT_HASH}"));
+            self.emit(format!("addi a1, sp, {NODE_STAGING}"));
+            self.emit(format!("addi a1, a1, {}", OPEN_HANDLE_NODE_DOMAIN.len()));
             self.emit("li a2, 32");
             self.emit("call __cellscript_memcpy_fixed");
-            self.emit(format!("addi a0, sp, {NODE_STAGING}"));
-            self.emit(format!("addi a0, a0, {}", OPEN_HANDLE_NODE_DOMAIN.len() + 32));
-            self.emit(format!("ld a1, {HANDLE_PTR}(sp)"));
-            self.emit(format!("addi a1, a1, {}", OPEN_HANDLE_SIBLING_OFFSET + depth * 32));
+            self.emit(format!("ld a0, {HANDLE_PTR}(sp)"));
+            self.emit(format!("addi a0, a0, {}", OPEN_HANDLE_SIBLING_OFFSET + depth * 32));
+            self.emit(format!("addi a1, sp, {NODE_STAGING}"));
+            self.emit(format!("addi a1, a1, {}", OPEN_HANDLE_NODE_DOMAIN.len() + 32));
             self.emit("li a2, 32");
             self.emit("call __cellscript_memcpy_fixed");
             self.emit_label(&joined);
@@ -6769,15 +6769,15 @@ impl CodeGenerator {
             self.emit(format!("li t0, {byte}"));
             self.emit(format!("sb t0, {offset}(t3)"));
         }
-        self.emit(format!("addi a0, sp, {POLICY_STAGING}"));
-        self.emit(format!("addi a0, a0, {}", OPEN_HANDLE_POLICY_DOMAIN.len()));
-        self.emit(format!("ld a1, {HANDLE_PTR}(sp)"));
-        self.emit(format!("addi a1, a1, {OPEN_HANDLE_SELECTION_HEADER_OFFSET}"));
+        self.emit(format!("ld a0, {HANDLE_PTR}(sp)"));
+        self.emit(format!("addi a0, a0, {OPEN_HANDLE_SELECTION_HEADER_OFFSET}"));
+        self.emit(format!("addi a1, sp, {POLICY_STAGING}"));
+        self.emit(format!("addi a1, a1, {}", OPEN_HANDLE_POLICY_DOMAIN.len()));
         self.emit("li a2, 188");
         self.emit("call __cellscript_memcpy_fixed");
-        self.emit(format!("addi a0, sp, {POLICY_STAGING}"));
-        self.emit(format!("addi a0, a0, {}", OPEN_HANDLE_POLICY_DOMAIN.len() + 188));
-        self.emit(format!("addi a1, sp, {CURRENT_HASH}"));
+        self.emit(format!("addi a0, sp, {CURRENT_HASH}"));
+        self.emit(format!("addi a1, sp, {POLICY_STAGING}"));
+        self.emit(format!("addi a1, a1, {}", OPEN_HANDLE_POLICY_DOMAIN.len() + 188));
         self.emit("li a2, 32");
         self.emit("call __cellscript_memcpy_fixed");
         self.emit(format!("addi a0, sp, {POLICY_STAGING}"));

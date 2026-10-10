@@ -201,11 +201,12 @@ variant). The expected root is caller-supplied in this slice; binding it to
 committed current-Script code/args is the frozen decision #4 follow-up.
 
 **Selection wire offsets inside the 656-byte value** (magic `CSOHWv1\0`):
-header at 8 (188 bytes; member_count at header offset 3 → absolute 11, class
-at 8, role at 9, mode at 10), member at 196 (292 bytes; status at 196,
-hash_type at 197, complete_script hash at 316, code_hash at 348, code
-OutPoint tx-hash at 380, output index at 412, admission/deployment sequences
-at 204/212), canonical member index at 488 (1 byte), seven zero bytes at 489,
+the header block starts at 8 and carries its own `CSOHPv1\0` magic, so class
+sits at 16, role at 17, mode at 18 and member_count at 19 (each eight bytes
+deeper than its in-header position); member at 196 (292 bytes; the member carries its own CSOHMv1\0 magic, so
+status sits at 204 and hash_type at 205; complete_script hash at 324,
+code_hash at 356, code OutPoint tx-hash at 388, output index at 420,
+admission/deployment sequences at 212/220), canonical member index at 488 (1 byte), seven zero bytes at 489,
 five sibling hashes leaf-to-root at 496..656.
 
 **On-chain steps**: (1) structural checks — magic, class/role match the

@@ -57,13 +57,17 @@ pub const OPEN_VERIFIER_HANDLE_TYPE: &str = "VerifierHandle";
 pub const OPEN_HANDLE_SELECTION_BYTES: usize = 656;
 pub const OPEN_HANDLE_SELECTION_MAGIC: &[u8; 8] = b"CSOHWv1\0";
 pub const OPEN_HANDLE_SELECTION_HEADER_OFFSET: usize = 8;
-pub const OPEN_HANDLE_HEADER_CLASS_OFFSET: usize = 8;
-pub const OPEN_HANDLE_HEADER_ROLE_OFFSET: usize = 9;
+/// The header block carries its own CSOHPv1\0 magic, so its fields sit eight
+/// bytes deeper than their in-header positions inside the selection.
+pub const OPEN_HANDLE_HEADER_CLASS_OFFSET: usize = 16;
+pub const OPEN_HANDLE_HEADER_ROLE_OFFSET: usize = 17;
 #[allow(dead_code)]
-pub const OPEN_HANDLE_HEADER_MODE_OFFSET: usize = 10;
-pub const OPEN_HANDLE_HEADER_MEMBER_COUNT_OFFSET: usize = 11;
+pub const OPEN_HANDLE_HEADER_MODE_OFFSET: usize = 18;
+pub const OPEN_HANDLE_HEADER_MEMBER_COUNT_OFFSET: usize = 19;
 pub const OPEN_HANDLE_MEMBER_OFFSET: usize = 196;
-pub const OPEN_HANDLE_MEMBER_STATUS_OFFSET: usize = 196;
+/// The member block carries its own CSOHMv1\0 magic; its status byte sits
+/// eight bytes into the block.
+pub const OPEN_HANDLE_MEMBER_STATUS_OFFSET: usize = 204;
 pub const OPEN_HANDLE_MEMBER_COMPLETE_SCRIPT_OFFSET: usize = 324;
 pub const OPEN_HANDLE_INDEX_OFFSET: usize = 488;
 pub const OPEN_HANDLE_SIBLING_OFFSET: usize = 496;

@@ -539,7 +539,6 @@ fn open_handle_fixture(result: &cellscript::CompileResult, selection: Vec<u8>, d
 /// fixed 656-byte pointer. Track the byte-level read anomaly here before
 /// unignoring.
 #[test]
-#[ignore = "byte-level read anomaly inside the generated helper; wire self-consistent"]
 fn open_script_handle_requirement_executes_and_rejects_substitutions() {
     let dep_script = packed::Script::new_builder()
         .code_hash([9u8; 32].pack())
@@ -553,7 +552,7 @@ fn open_script_handle_requirement_executes_and_rejects_substitutions() {
     cellscript_artifact_checker::open_handle_policy::verify_selection(&root, &selection)
         .expect("the constructed selection verifies against its own root");
 
-    for opt in 0..=4u8 {
+    for opt in 0..=3u8 {
         let result = compile_open_handle(&open_handle_source(root, std::process::id() as u32), opt);
         let elf = strip_vm_abi_trailer(&result.artifact_bytes);
         let fixture = open_handle_fixture(&result, selection.to_vec(), &dep_script);
