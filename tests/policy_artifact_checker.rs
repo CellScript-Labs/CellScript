@@ -4152,7 +4152,7 @@ fn direct_type_group_rejects_actual_receipt_bundle_byte_substitution() {
 }
 
 #[test]
-fn nested_public_layouts_stay_pending_entry_body_certification() {
+fn nested_public_layouts_admit_end_to_end_with_certified_frame_copies() {
     const NESTED_SOURCE: &str = r#"
 module nested_codec
 resource Token has store, consume { amount: u64 }
@@ -4167,15 +4167,61 @@ action burn(input token: Token, witness value: u64) {
     consume token
 }
 "#;
-    // Retaining a nested public layout currently requires body usage, and the
-    // struct-literal helper frame is outside the certified entry-body shapes:
-    // the finite Cell-field certification fails closed. The declaration-level
-    // codec obligations for nested unsigned layouts are unit-checked in the
-    // checker crate; admitting them end to end needs the nested
-    // field-materialization certification, which stays a recorded boundary.
     for opt in 0..=3 {
         let fixture = external_fixture(NESTED_SOURCE, opt);
-        let error = fixed_external_codec(&fixture).unwrap_err();
-        assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "opt={opt}: {error}");
+        let checked = fixed_external_codec(&fixture).unwrap();
+        let record: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
+        assert_eq!(record["profile"], "policy-unit-scalars-nested-unsigned-cell-v1");
+        let outer = record["public_layouts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|layout| layout["declaration"].as_str().is_some_and(|identity| identity.contains("Outer")))
+            .unwrap();
+        assert_eq!(outer["width"], 16);
+        // A same-width nominal substitute keeps every width but changes the
+        // declaration, so the codec identity distinguishes owners.
+        let swapped = fixed_external_codec(&external_fixture(
+            &NESTED_SOURCE
+                .replace("public struct Inner", "public struct Substitute")
+                .replace("meta: Inner", "meta: Substitute")
+                .replace("Inner { first: 1", "Substitute { first: 1"),
+            opt,
+        ))
+        .unwrap();
+        assert_ne!(checked.identity(), swapped.identity());
+        // Machine-word mutations at the certified copy sites reject: the
+        // destination offset escapes the frame, the length becomes unbounded,
+        // or the call target leaves the certified helper.
+        let memcpy_entry = fixture.record.entries.iter().find(|entry| entry.name == "__cellscript_memcpy_fixed").unwrap();
+        let memcpy_start = fixture.record.blocks.iter().find(|block| block.id == memcpy_entry.entry_block).unwrap().range.start;
+        let burn = fixture.record.entries.iter().find(|entry| entry.name == "burn").unwrap();
+        let burn_start = fixture.record.blocks.iter().find(|block| block.id == burn.entry_block).unwrap().range.start;
+        let elf = parse_elf(&fixture.artifact, CheckerBudgets::default().instructions).unwrap();
+        let mut sites = Vec::new();
+        for instruction in &elf.instructions {
+            if matches!(instruction.word & 0x7f, 0x6f | 0x67)
+                && ((instruction.word >> 7) & 31) == 1
+                && instruction.address >= burn_start
+                && elf.control_flow.iter().any(|flow| flow.address == instruction.address && flow.target == memcpy_start)
+            {
+                sites.push(instruction.address);
+            }
+        }
+        assert!(!sites.is_empty(), "opt={opt}");
+        for site in sites {
+            for mutation in ["destination", "length"] {
+                let mut changed = fixture.clone();
+                let argument = if mutation == "destination" { site - 8 } else { site - 12 };
+                let original = elf.instructions.iter().find(|item| item.address == argument).unwrap().word;
+                changed.replace_machine_word(argument, (original & !(0xfff << 20)) | (0x7ffu32 << 20));
+                changed.check().unwrap();
+                assert_eq!(
+                    fixed_external_codec(&changed).unwrap_err().code,
+                    CheckerRejectionCode::V2420TypedMachineBindingInvalid,
+                    "opt={opt} site={site} {mutation}"
+                );
+            }
+        }
     }
 }

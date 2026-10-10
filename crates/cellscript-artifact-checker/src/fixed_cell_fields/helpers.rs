@@ -197,3 +197,47 @@ pub(super) fn check_membership_frame(record: &VerifiedLoweringRecord, elf: &Pars
     }
     Ok(())
 }
+
+/// Certify the fixed memory-copy helper's own frame. It owns no stack space:
+/// every instruction stays in its owned range, makes no calls, never writes
+/// its return or stack registers, and returns. Its stores write through the
+/// destination argument, which every certified call site bounds to the
+/// caller's own frame below.
+pub(super) fn check_memcpy_frame(record: &VerifiedLoweringRecord, elf: &ParsedElf, target: u64) -> Result<(), CheckerError> {
+    let owner = "runtime:__cellscript_memcpy_fixed";
+    if target != entry_start(record, owner)? {
+        return Err(invalid("memcpy call lacks its actual private frame"));
+    }
+    let instructions = owned_instructions(record, elf, owner, 512)?;
+    // Copy loops legitimately branch backward inside the owned range; only
+    // escaping flows and exterior jumps into the interior reject.
+    if elf.control_flow.iter().any(|flow| {
+        let inside_address = instructions.contains_key(&flow.address);
+        let inside_target = instructions.contains_key(&flow.target);
+        (inside_address && !inside_target) || (!inside_address && inside_target && flow.target != target)
+    }) {
+        return Err(invalid("memcpy helper has escaping or incoming interior flow"));
+    }
+    let mut returns = 0usize;
+    for (&_address, &instruction) in &instructions {
+        let opcode = instruction & 0x7f;
+        let rd = (instruction >> 7) & 31;
+        if instruction == 0x00008067 {
+            returns += 1;
+            continue;
+        }
+        if !matches!(opcode, 0x6f | 0x67) && !instructions.contains_key(&(_address + 4)) {
+            return Err(invalid("memcpy helper falls out of its owned instruction range"));
+        }
+        if opcode == 0x67 || (opcode == 0x6f && rd != 0) {
+            return Err(invalid("memcpy helper makes an unproved call"));
+        }
+        if matches!(opcode, 0x03 | 0x13 | 0x17 | 0x1b | 0x33 | 0x37 | 0x3b | 0x6f) && matches!(rd, 1 | 2) {
+            return Err(invalid("memcpy helper writes its return or stack register"));
+        }
+    }
+    if returns == 0 {
+        return Err(invalid("memcpy helper never returns"));
+    }
+    Ok(())
+}

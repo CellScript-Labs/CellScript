@@ -16,13 +16,18 @@ may compose nested ordinary struct layouts — each nested member must resolve t
 exactly one retained concrete struct layout and recursively satisfy the same
 unsigned obligations (contiguous offsets, matched widths, depth ≤ 8, total
 ≤ 512 bytes); these declaration-level obligations are unit-checked in the
-checker. Entry-bound Cell layouts stay flat: retaining a nested public layout
-currently requires entry-body usage, and the struct-literal helper frame is
-outside the certified entry-body shapes, so end-to-end admission of nested
-layouts stays fail-closed at the Cell-field certification until nested
-field-materialization certification exists. Public constants reject because the
-current projection proves their types but not their values; an independent
-constant-value proof needs its own evaluation contract. Uninstantiated generic
+checker. Entry-bound Cell layouts stay flat: their field materialization evidence is
+certified per direct scalar field. Nested public layouts retained through
+entry-body construction are now admitted end to end: the fixed memory-copy
+helper receives its own frame certification (owned instruction range, internal
+loops allowed but no calls, no return/stack-register writes, at least one
+return), and every call site proves its destination — the only definition in
+the pre-call window is a stack-relative offset inside the caller's frame with a
+positive constant length ≤ 512 bytes, disjoint from checked Cell data and the
+received Cell pointer, with no incoming flow into the argument window. Public
+constants still reject because the current projection proves their types but
+not their values; an independent constant-value proof needs its own evaluation
+contract. Uninstantiated generic
 declarations remain declaration-only; they cannot claim an executable external
 codec. Broader bundle inspection remains unchanged.
 

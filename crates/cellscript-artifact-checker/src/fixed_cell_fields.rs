@@ -42,6 +42,71 @@ struct Field {
     register: u32,
     native_load: bool,
 }
+/// A certified copy call moves a bounded constant number of bytes to a
+/// destination whose only definition in the pre-call window is a stack-relative
+/// offset inside the caller's own frame, disjoint from checked Cell data and
+/// the received Cell pointer, with no incoming flow into the argument window.
+fn certify_frame_copy(
+    instructions: &BTreeMap<u64, u32>,
+    call: u64,
+    frame: u32,
+    buffer_offset: u32,
+    pointer_offset: u32,
+    elf: &crate::ParsedElf,
+) -> Result<(), CheckerError> {
+    let mut destination = None;
+    let mut length = None;
+    let mut scan = call;
+    for _ in 0..32 {
+        let Some(next) = scan.checked_sub(4) else {
+            break;
+        };
+        scan = next;
+        let Some(&instruction) = instructions.get(&scan) else {
+            break;
+        };
+        let opcode = instruction & 0x7f;
+        let rd = (instruction >> 7) & 31;
+        let rs1 = (instruction >> 15) & 31;
+        let funct3 = (instruction >> 12) & 7;
+        let immediate = (instruction as i32) >> 20;
+        if rd == 11 && destination.is_none() {
+            if opcode == 0x13 && funct3 == 0 && rs1 == 2 && immediate >= 0 {
+                destination = Some((immediate as u32, scan));
+            } else {
+                return Err(invalid("frame copy destination lacks a proved stack base"));
+            }
+        }
+        if rd == 12 && length.is_none() {
+            if opcode == 0x13 && funct3 == 0 && rs1 == 0 && immediate > 0 {
+                length = Some(immediate as u32);
+            } else {
+                return Err(invalid("frame copy length is not a positive constant"));
+            }
+        }
+        if destination.is_some() && length.is_some() {
+            break;
+        }
+    }
+    let (Some((destination, defined_at)), Some(length)) = (destination, length) else {
+        return Err(invalid("frame copy arguments lack bounded definitions"));
+    };
+    if length > 512
+        || destination.checked_add(length).is_none_or(|end| end > frame)
+        || elf
+            .control_flow
+            .iter()
+            .any(|flow| defined_at < flow.target && flow.target < call && !(defined_at <= flow.address && flow.address < call))
+    {
+        return Err(invalid("frame copy exceeds its owned frame or its argument window has incoming flow"));
+    }
+    let overlaps = |start: u32, width: u32, other: u32, other_width: u32| start < other + other_width && other < start + width;
+    if overlaps(destination, length, buffer_offset, 512) || overlaps(destination, length, pointer_offset, 8) {
+        return Err(invalid("frame copy overwrites checked Cell data or its received pointer"));
+    }
+    Ok(())
+}
+
 fn invalid(message: impl Into<String>) -> CheckerError {
     CheckerError::new(CheckerRejectionCode::V2420TypedMachineBindingInvalid, format!("fixed Cell scalar fields: {}", message.into()))
 }
@@ -168,7 +233,15 @@ pub fn check_fixed_cell_scalar_fields(
                     return Err(invalid("unsupported call return register"));
                 }
                 let target = *flows.get(&address).ok_or_else(|| invalid("call lacks actual target"))?;
-                helpers::check_membership_frame(&record, &elf, target)?;
+                if crate::checker::entry_start(&record, "runtime:__cellscript_memcpy_fixed")
+                    .map(|start| start == target)
+                    .unwrap_or(false)
+                {
+                    helpers::check_memcpy_frame(&record, &elf, target)?;
+                    certify_frame_copy(&instructions, address, frame, cell.buffer_offset, cell.pointer_offset, &elf)?;
+                } else {
+                    helpers::check_membership_frame(&record, &elf, target)?;
+                }
                 returning_calls.insert(address);
             }
             if opcode == 0x23 {
