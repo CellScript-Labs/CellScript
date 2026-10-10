@@ -131,7 +131,15 @@ The independent checker verifies bounded syntax/scopes, concrete field order,
 qualified field types, enum tags/payloads, generic instance agreement and public
 source completeness. `InterfaceInspection::validate_symbolic_declarations`
 separately checks public type/signature closure and universal value-ability
-claims against parameter minima and symbolic fields. It rejects recursive,
+claims against parameter minima and symbolic fields, and now sweeps the entire
+retained generic catalog rather than public declarations alone: private
+templates and declarations no retained instantiation exercises carry the same
+parameter-minima and symbolic-ability contract — an absent template cannot
+derive ability evidence from an instance that does not exist — and retained
+function templates keep their symbolic parameter/return references resolvable
+through their defining scopes. Each root declaration restarts the traversal
+counter, so one declaration's expansion cannot consume another's bounded
+budget while catalog bounds limit the root count. It rejects recursive,
 unknown or unbounded graphs, stronger nested generic demands and missing catalogs;
 it does not prove generic function behavior. Its result cannot authorize a
 policy root, deployment or open runtime value.

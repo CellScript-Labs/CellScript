@@ -229,6 +229,49 @@ pub(super) fn verify(inspection: &InterfaceInspection) -> Result<(), CheckerErro
             return Err(invalid("public type lacks its universal declaration contract"));
         }
     }
+    // Every retained structural template declaration — private templates and
+    // declarations no retained instantiation exercises included — carries the
+    // same universal parameter minima and symbolic ability contract as public
+    // declarations; an absent template cannot derive ability evidence from an
+    // instance that does not exist. Each root restarts the traversal counter
+    // so one declaration's expansion cannot consume another's bounded budget;
+    // the catalog bounds limit the number of roots.
+    let templates = contracts.generics.values().copied().collect::<Vec<_>>();
+    for declaration in templates {
+        contracts.visits = 0;
+        let mut parameters = BTreeMap::new();
+        for parameter in &declaration.parameters {
+            let bits = declared(&parameter.constraints)?;
+            if !parameter.phantom && bits & (FIXED | SERIALIZABLE | NON_LINEAR) != FIXED | SERIALIZABLE | NON_LINEAR {
+                return Err(invalid("universal layout parameter lacks the fixed value boundary"));
+            }
+            parameters.insert(parameter.name.clone(), bits);
+        }
+        contracts.generic(declaration, &parameters, 0)?;
+    }
+    // Retained function templates keep their symbolic signatures universally
+    // resolvable as well: binders stay well formed and every parameter and
+    // return reference resolves through its defining scope.
+    for declaration in record
+        .generic_declarations
+        .iter()
+        .flat_map(|catalog| &catalog.declarations)
+        .filter(|declaration| declaration.kind == "function")
+    {
+        contracts.visits = 0;
+        let parameters = declaration
+            .parameters
+            .iter()
+            .map(|parameter| Ok((parameter.name.clone(), declared(&parameter.constraints)?)))
+            .collect::<Result<BTreeMap<_, _>, CheckerError>>()?;
+        let Shape::Function { params, return_type } = &declaration.declaration else {
+            return Err(invalid("generic function declaration lacks its symbolic signature"));
+        };
+        for param in params {
+            contracts.source(&param.ty, &declaration.module, &parameters, 0)?;
+        }
+        contracts.source(return_type, &declaration.module, &parameters, 0)?;
+    }
     for callable in &inspection.declared().callables {
         let parameters = callable
             .type_parameters

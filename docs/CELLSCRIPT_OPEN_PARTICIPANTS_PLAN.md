@@ -48,7 +48,10 @@ The initial audit is against `35bf983db30aae80281f97e30bbce08a878d7c58`.
   generic types and enum payloads; phantom Cell names do not create runtime roles.
   Missing nominal evidence cannot grant `non_linear`. Private template
   structural use and phantom-only identity dependencies now project through the
-  checked module closure; universal/absent template coverage and full
+  checked module closure, and symbolic universal verification sweeps every
+  retained template declaration including private and never-instantiated
+  entries with resolvable function-template signatures; complete nominal
+  qualification for ambiguous unqualified instantiation arguments and full
   directional receipts remain pending; this prerequisite does not complete H1
   or runtime admission.
 - Existing closed roles identify their exact providers at bundle construction.

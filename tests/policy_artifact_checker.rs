@@ -2177,6 +2177,93 @@ fn uninstantiated_generic_catalog_rejects_rebound_shape_and_bound_mutations() {
 }
 
 #[test]
+fn private_absent_template_declarations_reject_rebound_universal_mutations() {
+    use cellscript_artifact_checker::TypedSemanticGenericDeclaration as Declaration;
+    let source = format!(
+        "{SOURCE}\nprivate struct Sealed<T: fixed_value> has copy, drop, store, fixed, serializable, non_linear {{ inner: T }}\nprivate fn select<T: fixed_value>(value: T) -> T {{ value }}"
+    );
+    for opt_level in 0..=3 {
+        let baseline = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, opt_level, declaration());
+        baseline.assert_interface_inspection();
+        let inspected = cellscript_artifact_checker::interface::inspect_bundle(
+            &baseline.artifact,
+            &serde_json::to_vec(&baseline.metadata).unwrap(),
+            &serde_json::to_vec(&baseline.record).unwrap(),
+            &serde_json::to_vec(&baseline.source_map).unwrap(),
+            &CheckerBudgets::default(),
+        )
+        .unwrap();
+        // The private templates stay declaration-only: no instantiation or
+        // lowered entry exercises them at any optimization level.
+        assert!(baseline
+            .record
+            .typed_semantics
+            .instantiations
+            .iter()
+            .all(|instance| !matches!(instance.template.as_str(), "Sealed" | "select")));
+        assert!(!baseline.record.typed_semantics.entries.iter().any(|entry| entry.name.contains("select")));
+        inspected.validate_symbolic_declarations().unwrap();
+        inspected.project_module_contract().unwrap();
+        for mutation in ["boundary", "field-vec", "field-missing", "ability-order", "function-param", "function-return"] {
+            let mut changed = baseline.clone();
+            let catalog = changed.record.typed_semantics.generic_declarations.as_mut().unwrap();
+            let sealed = catalog
+                .declarations
+                .iter()
+                .position(|contract| contract.name == "Sealed" && contract.visibility == "private")
+                .unwrap();
+            let function =
+                catalog.declarations.iter().position(|contract| contract.name == "select" && contract.kind == "function").unwrap();
+            match mutation {
+                "boundary" => {
+                    catalog.declarations[sealed].parameters[0].constraints.retain(|ability| ability != "fixed");
+                }
+                "field-vec" | "field-missing" | "ability-order" => {
+                    let Declaration::Struct { fields, abilities } = &mut catalog.declarations[sealed].declaration else {
+                        unreachable!()
+                    };
+                    match mutation {
+                        "field-vec" => fields[0].ty = "Vec<T>".into(),
+                        "field-missing" => fields[0].ty = "Missing".into(),
+                        _ => abilities.push("copy".into()),
+                    }
+                }
+                "function-param" | "function-return" => {
+                    let Declaration::Function { params, return_type } = &mut catalog.declarations[function].declaration else {
+                        unreachable!()
+                    };
+                    if mutation == "function-param" {
+                        params[0].ty = "Missing".into();
+                    } else {
+                        *return_type = "Missing".into();
+                    }
+                }
+                _ => unreachable!(),
+            }
+            changed.rebind_policy_identity();
+            let inspected = cellscript_artifact_checker::interface::inspect_bundle(
+                &changed.artifact,
+                &serde_json::to_vec(&changed.metadata).unwrap(),
+                &serde_json::to_vec(&changed.record).unwrap(),
+                &serde_json::to_vec(&changed.source_map).unwrap(),
+                &CheckerBudgets::default(),
+            );
+            // Ability ordering and unresolved structural fields are owned by
+            // the earlier catalog binding checks; the remaining mutations must
+            // pass that layer and reject exactly at the universal sweep.
+            if matches!(mutation, "ability-order" | "field-missing") {
+                let error = inspected.unwrap_err();
+                assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid, "opt={opt_level} {mutation}: {error}");
+                continue;
+            }
+            let error = inspected.unwrap().validate_symbolic_declarations().unwrap_err();
+            assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid, "opt={opt_level} {mutation}: {error}");
+            assert!(error.message.contains("universal"), "opt={opt_level} {mutation}: {error}");
+        }
+    }
+}
+
+#[test]
 fn nominal_catalog_rejects_rebound_scopes_shapes_and_public_omissions() {
     let source = format!("{SOURCE}\npublic struct Snapshot {{ z: u64, a: Hash }}\npublic enum Event {{ First(u64), Second(Hash) }}\npublic fn view(value: Snapshot) -> u64 {{ value.z }}");
     for opt_level in 0..=3 {
