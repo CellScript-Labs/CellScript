@@ -1,7 +1,10 @@
 # Checked compatible-interface receipt contract
 
 Status: draft implementation input for #28, following the
-[open-participant plan](CELLSCRIPT_OPEN_PARTICIPANTS_PLAN.md). Implementer: Codex.
+[open-participant plan](CELLSCRIPT_OPEN_PARTICIPANTS_PLAN.md). The
+consolidated design record and threat model live in
+[CELLSCRIPT_OPEN_HANDLE_DESIGN.md](CELLSCRIPT_OPEN_HANDLE_DESIGN.md).
+Implementer: Codex.
 Independent security reviewer: unassigned. This document does not admit a source
 handle, prove executable template instances, or authorize a deployment.
 

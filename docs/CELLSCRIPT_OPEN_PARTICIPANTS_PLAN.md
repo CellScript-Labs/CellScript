@@ -3,6 +3,8 @@
 Status: implementation plan, not an implemented language/runtime contract.
 Owners: #28 (compatible-open handles) and #29 (open roles). Implementer: Codex.
 Independent security reviewer: unassigned; stable admission remains pending.
+The consolidated design record and threat model for these contracts live in
+[CELLSCRIPT_OPEN_HANDLE_DESIGN.md](CELLSCRIPT_OPEN_HANDLE_DESIGN.md).
 This work was promoted into 0.32 on 2026-10-04. It does not change the
 accepted exact-handle or closed-role contracts.
 

@@ -1,0 +1,129 @@
+# Compatible-open handle design record and threat model
+
+Status: versioned design record v1 (`cellscript-open-handle-design-v1`) for
+issue #28, consolidating the implemented authorization-set boundary. The
+implemented portion covers the host wire codec, finite receipts, native
+policy/source bindings and transaction snapshots. Complete general receipts,
+immutable on-chain root authorization, nominal source handles and CKB runtime
+enforcement (H2) remain unimplemented. Independent security review remains
+unassigned and required before stable admission. Companion records:
+[receipt contract](CELLSCRIPT_OPEN_INTERFACE_RECEIPT.md),
+[authorization-set wire](CELLSCRIPT_OPEN_HANDLE_POLICY.md),
+[participants plan](CELLSCRIPT_OPEN_PARTICIPANTS_PLAN.md).
+
+## Protected claim
+
+A compatible-open handle selection asserts: one member of a specific
+authorization set, whose exact four-file artifact bundle, complete selected
+Script (code hash, hash type, concrete args), deployment OutPoint and network
+context were independently checked, satisfies the required interface contract
+of the consuming package under the declared selection mode. It does not assert
+behavioral equivalence, peer acceptance, Cell liveness, Registry freshness, or
+authority over any Cell. Compatibility is directional (required baseline to
+candidate) and never symmetrical.
+
+## Parties and trust boundaries
+
+| Party | Controls | Cannot grant |
+| --- | --- | --- |
+| Consumer author | Required interface `I`, source closure, lockfile | Runtime facts, deployment history |
+| Policy maintainer | Authorization-set members, status, floors, sequences | Artifact validity (checker recomputes) |
+| Artifact producer | Source, compiled bundle | Own admission; `compatible` bits are not evidence |
+| Transaction builder | Final transaction bytes, signing | The policy root; post-build substitution |
+| Registry | Discovery records only | Consensus authority, authorization, freshness |
+| Current Script at runtime | Committed code/args, syscalls | Peer authorization, genesis identity |
+| CKB consensus | Dependency resolution, group execution | Semantic compatibility |
+
+The policy root is authorized by the current Script's committed code/args or
+an explicit controlled state transition. A witness carrying a selection proof
+never authorizes its own expected root; the expected root is supplied
+separately and retained in the immutable membership result.
+
+## Design decisions
+
+1. **Nominal interface parameter `I`.** `I` denotes the resolver-owned checked
+   package interface: its defining package/module owner, pinned source closure
+   and effective checked projection digest. Raw Scripts, local structs,
+   package display names and producer flags cannot supply it. Implemented for
+   host receipts via source receipts and projection identities; the nominal
+   `ScriptHandle<I>`/`VerifierHandle<I>` source values remain H2.
+2. **Bounded authorization set.** 1–32 canonically ordered members over a
+   depth-five tree with a 656-byte selection; duplicate receipts (including
+   same hash with differing fields) reject at wire construction. Implemented.
+3. **Immutable authorization root.** Snapshot semantics: a later Registry yank
+   cannot retroactively modify an unchanged root; changing the expected
+   authenticated root invalidates old selection witnesses. Live revocation
+   requires a separately authenticated policy-state contract and is out of
+   scope for this record. Root binding to committed code/args remains H2.
+4. **Exact and compatible selection.** Exact mode requires the named receipt
+   present in the set. Compatible mode requires an active member within the
+   closed floor/policy-sequence interval plus independently checked
+   directional admission; the source profile adds SemVer precedence with
+   stable-major compatibility, and build metadata is committed without
+   ordering. Implemented as declared immutable snapshot facts; they are not
+   authenticated Registry/version facts.
+5. **Type-hash deployment binding.** Wire members retain deployment line,
+   history tip and deployment sequence separately from policy admission
+   sequence. Type identity alone never authorizes replacement bytes or a
+   different OutPoint; two receipts cannot claim different bytes at one
+   OutPoint or competing tips at one line/sequence. The native binding
+   currently fails closed on Type-hash members because authenticated history
+   validation is not implemented; the data2 profile is the only natively
+   bound deployment mode.
+6. **Compatibility axes.** Serialized layouts, callable contracts, witness
+   codecs, effects, capabilities, target profile, runtime ABI and builder
+   requirements are compared field-wise under a conservative relation with
+   candidate-only additions permitted. Unclassified changes reject. The
+   implemented finite profile covers unit results, bounded scalar parameters
+   and flat unsigned Cell layouts; public constants reject (types proven,
+   values not), and uninstantiated generics stay declaration-only.
+
+## Threat model
+
+| # | Adversary action | Enforcing boundary | State |
+| --- | --- | --- | --- |
+| T1 | Producer asserts compatibility without evidence | Checker recomputes every receipt field from the actual bundle; no producer flag is read | Enforced (finite profile) |
+| T2 | Builder substitutes artifact, CellDep, Script or transaction after checking | `check_unchanged_inputs` rechecks bundle/RawTransaction/output index/Script; direct-dependency snapshot binds exact creation OutPoint and every supplied Cell | Enforced host-side; runtime recheck is H2 |
+| T3 | Witness authorizes its own policy root | Expected root supplied separately from the membership proof; H2 binds it to committed code/args or controlled state | Wire separation enforced; on-chain binding pending |
+| T4 | Downgrade to an older or incompatible-major version | SemVer precedence for selectable members, floors, exact-mode receipt pinning; unselectable history stays fully checked | Enforced as declared snapshot facts |
+| T5 | Yank bypass or stale-snapshot confusion | Yanked/below-floor members committed but unselectable; immutable root ignores later Registry changes; changing the root invalidates old witnesses | Enforced |
+| T6 | Duplicate or ambiguous code dependency at runtime | Raw versus resolved dependency indices stay distinct; data-hash lookup keeps the last match and Type-hash lookup rejects different-data duplicates, so ambiguous matching code/Type identities reject instead of guessing | Dependency facts pinned to CKB `f7fa4436`; runtime enforcement is H2 |
+| T7 | Cross-network replay | Header commits network genesis; native catalog rejects other pinned networks | Enforced |
+| T8 | Replacement bytes under an unchanged Type hash | Member binds exact artifact hash, code OutPoint, deployment line and history tip together | Wire fields enforced; authenticated history validation pending |
+| T9 | Duplicate or conflicting members in one set | Canonical member ordering plus duplicate/conflict rejection at construction, before any policy exists | Enforced |
+| T10 | Rebound outer hashes hiding inner changes | Native binding rechecks every member against its private receipt; rebinding interface/bundle/outer hashes cannot smuggle layout, ABI, effect, profile, role/args or Script changes | Enforced (12-axis and substitution tests) |
+| T11 | Oversized or algorithmically hostile inputs | Preparse ceilings (4 MiB per file, 16 MiB shared, 16 MiB source closure), bounded H1 counts (256 types/128 callables/64 fields/32 variants/16 nesting/4,096 traversal nodes), no proof-controlled allocation | Enforced |
+| T12 | Demand live revocation from an offline snapshot | Explicit non-goal; requires an authenticated policy-state transition contract | Out of scope, documented |
+| T13 | Claim behavioral equivalence from API compatibility | Body predicates are outside the projection; two artifacts with identical API projections and different behavior are both admissible | Non-goal by contract |
+
+## Residual risks before stable admission
+
+Unimplemented surfaces are residual risk until H1/H2 complete: the finite
+profile excludes public constants, executable generics and general codecs, so
+interfaces outside that profile cannot be admitted at all (fail-closed) rather
+than weakly checked. Root authorization is currently host-side only; a
+compromised builder with unchanged inputs is detected, but nothing yet executes
+the membership check inside CKB-VM. Native filesystem reads are not sandboxed
+against concurrent hostile file replacement; snapshot comparison detects
+changes but provides no allocation guarantee. Generated-builder and
+ProtocolBundle parity on identical transaction bytes is not yet integrated.
+Worst-case runtime cycles/stack/witness budgets for on-chain enforcement are
+unmeasured. Independent security review is unassigned; the 2026-10-03 waiver
+does not cover this contract.
+
+## Evidence index
+
+- Wire codec, vectors and tag freeze: [CELLSCRIPT_OPEN_HANDLE_POLICY.md](CELLSCRIPT_OPEN_HANDLE_POLICY.md),
+  `crates/cellscript-artifact-checker/src/open_handle_policy.rs`,
+  `crates/cellscript-artifact-checker/tests/open_handle_policy.rs`.
+- Finite receipt construction and directional matching:
+  [FIXED_POLICY_RECEIPT.md](FIXED_POLICY_RECEIPT.md),
+  `crates/cellscript-artifact-checker/src/fixed_policy_receipt.rs`,
+  `tests/policy_artifact_checker.rs`.
+- Native policy/source bindings and selection:
+  [FROZEN_CODE_POLICY.md](FROZEN_CODE_POLICY.md),
+  `src/package/frozen_interface/code_policy.rs`, `tests/frozen_interface.rs`.
+- Final transaction snapshots: [DIRECT_CODE_DEPENDENCY.md](DIRECT_CODE_DEPENDENCY.md),
+  [DIRECT_TYPE_GROUP.md](DIRECT_TYPE_GROUP.md).
+- H1 host limits and receipt projection prerequisites:
+  [CELLSCRIPT_OPEN_INTERFACE_RECEIPT.md](CELLSCRIPT_OPEN_INTERFACE_RECEIPT.md).
