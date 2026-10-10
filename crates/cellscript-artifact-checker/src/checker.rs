@@ -3072,8 +3072,12 @@ fn validate_typed_operation(
             // whose signatures the check below pins.
             let is_open_handle_call = matches!(
                 call.target.as_str(),
-                "__ckb_require_cell_dep_open_script_handle" | "__ckb_require_cell_dep_open_verifier_handle"
+                "__ckb_require_cell_dep_open_script_handle"
+                    | "__ckb_require_cell_dep_open_verifier_handle"
+                    | "__ckb_require_cell_dep_open_script_handle_from_args"
+                    | "__ckb_require_cell_dep_open_verifier_handle_from_args"
             );
+            let is_open_handle_from_args_call = call.target.ends_with("_from_args");
             if !is_open_handle_call
                 && operation.operands.iter().any(|operand| {
                     matches!(operand.ty.split('<').next().unwrap_or(operand.ty.as_str()), "ScriptHandle" | "VerifierHandle")
@@ -3082,7 +3086,7 @@ fn validate_typed_operation(
                 return typed_error("compatible-open handle operand is passed to an unrecognized runtime helper".to_string());
             }
             if is_open_handle_call {
-                let class = if call.target.ends_with("open_script_handle") { "ScriptHandle" } else { "VerifierHandle" };
+                let class = if call.target.contains("open_script_handle") { "ScriptHandle" } else { "VerifierHandle" };
                 let handle_operand = operation
                     .operands
                     .get(1)
@@ -3093,14 +3097,18 @@ fn validate_typed_operation(
                     operation.operands.get(2).and_then(|operand| operand.constant.as_ref()),
                     Some(TypedSemanticConstant::Hash(_))
                 );
-                if operation.operands.len() != 3
+                let arity_valid = if is_open_handle_from_args_call {
+                    operation.operands.len() == 2
+                } else {
+                    operation.operands.len() == 3 && root_is_constant
+                };
+                if !arity_valid
                     || !source_type_valid
                     || handle_operand != class
                     || call.contract != "versioned-runtime-helper"
                     || call.effect != "runtime-contract"
                     || call.return_type != "unit"
                     || !operation.destinations.is_empty()
-                    || !root_is_constant
                 {
                     return typed_error(
                         "compatible-open handle call does not declare its canonical expected-root commitment and runtime contract"

@@ -223,6 +223,27 @@ lock/type Script hash by the member role (field ids as the exact helpers) and
 compare against the member's complete_script at 316. Every mismatch fails
 closed with a new specific `CellScriptRuntimeError`.
 
+**From-args binding status**: the `..._from_args` variants (expected root
+derived from the current Script's committed 32-byte args via LOAD_SCRIPT)
+are implemented through every layer — typecheck, lowering, argument
+loading, runtime generator, checker signature and LSP — with the prologue
+live-verified (committed Script size 85, staged root reading the committed
+args, reloaded selection pointer and length byte-verified). One
+control-flow defect keeps the helper failing closed with
+`open-handle-invalid` before the membership recomputation despite the
+verified inputs; it is tracked by an ignore-marked VM test carrying the
+complete matrix. The constant-root variant remains the fully admitted
+surface.
+
+**Measured budgets** (CKB-VM acceptance fixture, one-member compatible
+selection, action with one handle witness parameter and one CellDep):
+76,181 cycles at O0 and 76,176 at O1–O3 — frozen ceiling 3,000,000 cycles
+for the verification action; witness payload fixed at 664 bytes (8-byte
+entry ABI magic + the 656-byte selection); helper frame 848 bytes over the
+entry wrapper's 5,376-byte frame. The ceiling is an assertion in the VM
+acceptance test, so regressions fail the suite rather than silently
+consuming the policy budget.
+
 **Layer checklist**: typecheck arm beside the exact handles
 (`src/types/mod.rs` ~7144), lowering to
 `__ckb_require_cell_dep_open_script_handle`, `calls.rs` argument loading

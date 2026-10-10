@@ -788,6 +788,14 @@ impl LspServer {
                         "ckb::require_cell_dep_open_verifier_handle(${1:source::cell_dep(0)}, ${2:handle}, ${3:expected_root})",
                     ),
                     (
+                        "require_cell_dep_open_script_handle_from_args",
+                        "ckb::require_cell_dep_open_script_handle_from_args(${1:source::cell_dep(0)}, ${2:handle})",
+                    ),
+                    (
+                        "require_cell_dep_open_verifier_handle_from_args",
+                        "ckb::require_cell_dep_open_verifier_handle_from_args(${1:source::cell_dep(0)}, ${2:handle})",
+                    ),
+                    (
                         "require_bounded_cell_dep_data_hash",
                         "ckb::require_bounded_cell_dep_data_hash(${1:8}, ${2:expected_data_hash})",
                     ),

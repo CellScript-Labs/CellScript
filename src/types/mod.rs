@@ -7175,6 +7175,26 @@ impl<'a> TypeChecker<'a> {
                             }
                             Type::Unit
                         }
+                        (
+                            "ckb",
+                            "require_cell_dep_open_script_handle_from_args" | "require_cell_dep_open_verifier_handle_from_args",
+                        ) => {
+                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
+                            let valid_dep = matches!(&arg_types[0], Type::Named(view) if view == CKB_CELL_DEP_VIEW_TYPE);
+                            let expected_class = if suffix == "require_cell_dep_open_script_handle_from_args" {
+                                crate::script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE
+                            } else {
+                                crate::script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
+                            };
+                            let valid_handle = matches!(&arg_types[1], Type::Named(view) if view.split('<').next().unwrap_or(view.as_str()) == expected_class);
+                            if !valid_dep || !valid_handle {
+                                return Err(CompileError::new(
+                                    format!("{name} expects (dep: CellDepView, handle: {expected_class}<module>); the root comes from the current Script's committed 32-byte args"),
+                                    call.span,
+                                ));
+                            }
+                            Type::Unit
+                        }
                         ("ckb", "require_cell_dep_open_script_handle" | "require_cell_dep_open_verifier_handle") => {
                             self.validate_builtin_arity(name, 3, arg_types, call.span)?;
                             let valid_dep = matches!(&arg_types[0], Type::Named(view) if view == CKB_CELL_DEP_VIEW_TYPE);

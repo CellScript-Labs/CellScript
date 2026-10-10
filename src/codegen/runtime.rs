@@ -641,6 +641,14 @@ impl CodeGenerator {
                 "CSOHWv1 structural, membership and selected verifier CellDep binding check",
             ),
             (
+                "__ckb_require_cell_dep_open_script_handle_from_args",
+                "CSOHWv1 membership with the expected root derived from the current Script's committed 32-byte args",
+            ),
+            (
+                "__ckb_require_cell_dep_open_verifier_handle_from_args",
+                "CSOHWv1 verifier membership with the expected root derived from the current Script's committed 32-byte args",
+            ),
+            (
                 "__ckb_require_cell_lock_deployment_line_handle",
                 "active CSLINv1 admission plus exact Lock Script and Type-hash code CellDep binding check",
             ),
@@ -898,6 +906,12 @@ impl CodeGenerator {
                 "__ckb_require_cell_dep_open_verifier_handle" => {
                     self.emit_runtime_open_handle_requirement_helper(name, detail, false, enabled)
                 }
+                "__ckb_require_cell_dep_open_script_handle_from_args" => {
+                    self.emit_runtime_open_handle_from_args_requirement_helper(name, detail, true, enabled)
+                }
+                "__ckb_require_cell_dep_open_verifier_handle_from_args" => {
+                    self.emit_runtime_open_handle_from_args_requirement_helper(name, detail, false, enabled)
+                }
                 "__ckb_require_cell_lock_deployment_line_handle" => self.emit_runtime_deployment_line_handle_requirement_helper(
                     name,
                     detail,
@@ -1130,6 +1144,8 @@ impl CodeGenerator {
                     | "__ckb_require_cell_dep_exact_verifier_handle"
                     | "__ckb_require_cell_dep_open_script_handle"
                     | "__ckb_require_cell_dep_open_verifier_handle"
+                    | "__ckb_require_cell_dep_open_script_handle_from_args"
+                    | "__ckb_require_cell_dep_open_verifier_handle_from_args"
                     | "__ckb_require_cell_lock_deployment_line_handle"
                     | "__ckb_require_cell_type_deployment_line_handle"
                     | "__ckb_require_cell_dep_deployment_line_verifier_handle"
@@ -1168,6 +1184,8 @@ impl CodeGenerator {
             || referenced_helpers.contains("__ckb_require_cell_dep_exact_verifier_handle")
             || referenced_helpers.contains("__ckb_require_cell_dep_open_script_handle")
             || referenced_helpers.contains("__ckb_require_cell_dep_open_verifier_handle")
+            || referenced_helpers.contains("__ckb_require_cell_dep_open_script_handle_from_args")
+            || referenced_helpers.contains("__ckb_require_cell_dep_open_verifier_handle_from_args")
             || referenced_helpers.contains("__ckb_require_cell_lock_deployment_line_handle")
             || referenced_helpers.contains("__ckb_require_cell_type_deployment_line_handle")
             || referenced_helpers.contains("__ckb_require_cell_dep_deployment_line_verifier_handle")
@@ -6612,7 +6630,32 @@ impl CodeGenerator {
     /// selected CellDep's Lock/Type (or data) hash. Every mismatch fails
     /// closed with OpenHandleInvalid.
     #[allow(clippy::too_many_lines)]
+    /// The from-args variant derives the expected authorization root from
+    /// the current Script's committed args (exactly 32 bytes) instead of a
+    /// caller-supplied constant: the witness never authorizes its own root.
     fn emit_runtime_open_handle_requirement_helper(&mut self, symbol: &str, detail: &str, script_variant: bool, enabled: bool) {
+        self.emit_open_handle_requirement_body(symbol, detail, script_variant, false, enabled)
+    }
+
+    fn emit_runtime_open_handle_from_args_requirement_helper(
+        &mut self,
+        symbol: &str,
+        detail: &str,
+        script_variant: bool,
+        enabled: bool,
+    ) {
+        self.emit_open_handle_requirement_body(symbol, detail, script_variant, true, enabled)
+    }
+
+    fn emit_open_handle_requirement_body(
+        &mut self,
+        symbol: &str,
+        detail: &str,
+        script_variant: bool,
+        root_from_args: bool,
+        enabled: bool,
+    ) {
+        let _ = root_from_args;
         use crate::script_handle_contract::{
             OPEN_HANDLE_CLASS_SCRIPT, OPEN_HANDLE_CLASS_VERIFIER, OPEN_HANDLE_HEADER_CLASS_OFFSET,
             OPEN_HANDLE_HEADER_MEMBER_COUNT_OFFSET, OPEN_HANDLE_HEADER_ROLE_OFFSET, OPEN_HANDLE_INDEX_OFFSET,
@@ -6630,13 +6673,16 @@ impl CodeGenerator {
         const IDENTITY_HASH: usize = 48;
         const CURRENT_HASH: usize = 80;
         const RA: usize = 112;
+        const ARGS_LEN: usize = 822;
+        const ARGS_SIZE: usize = 828;
+        const ARGS_BUFFER: usize = 848;
         const LEAF_STAGING: usize = 128;
         const LEAF_INPUT: usize = OPEN_HANDLE_MEMBER_DOMAIN.len() + 1 + 292;
         const NODE_STAGING: usize = LEAF_STAGING + 336;
         const NODE_INPUT: usize = OPEN_HANDLE_NODE_DOMAIN.len() + 64;
         const POLICY_STAGING: usize = NODE_STAGING + 97;
         const POLICY_INPUT: usize = OPEN_HANDLE_POLICY_DOMAIN.len() + 188 + 32;
-        const FRAME: usize = (POLICY_STAGING + POLICY_INPUT).div_ceil(16) * 16 + 16;
+        const FRAME: usize = (ARGS_BUFFER + 128).div_ceil(16) * 16 + 16;
 
         let invalid = self.fresh_label("open_handle_invalid");
         let hash_failed = self.fresh_label("open_handle_hash_failed");
@@ -6657,19 +6703,63 @@ impl CodeGenerator {
         self.emit(format!("addi sp, sp, -{FRAME}"));
         self.emit(format!("sd ra, {RA}(sp)"));
         self.emit(format!("sd a1, {HANDLE_PTR}(sp)"));
-        self.emit(format!("sd a3, {ROOT_PTR}(sp)"));
+        // The from-args LOAD_SCRIPT clobbers caller-saved registers, so the
+        // CellDepView and selection length must be staged before the syscall.
         self.emit(format!("sd a0, {VIEW}(sp)"));
+        self.emit("mv t4, a2");
+        self.emit(format!("sd t4, {ARGS_LEN}(sp)"));
+        if root_from_args {
+            // Derive the expected root from the current Script's committed
+            // args: LOAD_SCRIPT, require the serialized args field to be
+            // exactly 32 bytes (53-byte Script prefix + 32), and stage the
+            // pointer to those committed bytes as the root. The witness
+            // never authorizes its own root.
+            let args_loaded = self.fresh_label("open_handle_args_loaded");
+            self.emit("li t0, 128");
+            self.emit(format!("sd t0, {ARGS_SIZE}(sp)"));
+            self.emit(format!("addi a0, sp, {ARGS_BUFFER}"));
+            self.emit(format!("addi a1, sp, {ARGS_SIZE}"));
+            self.emit("li a2, 0");
+            self.emit(format!("li a7, {}", abi.load_script));
+            self.emit("ecall");
+            self.emit_near_cond("beqz a0", &args_loaded);
+            self.emit(format!("j {invalid}"));
+            self.emit_label(&args_loaded);
+            self.emit(format!("ld t0, {ARGS_SIZE}(sp)"));
+            self.emit("li t1, 85");
+            self.emit("sub t2, t0, t1");
+            self.emit_near_cond("bnez t2", &invalid);
+            self.emit(format!("addi t0, sp, {ARGS_BUFFER}"));
+            self.emit("addi t0, t0, 53");
+            self.emit(format!("sd t0, {ROOT_PTR}(sp)"));
+        } else {
+            self.emit(format!("sd a3, {ROOT_PTR}(sp)"));
+            self.emit(format!("sd a0, {VIEW}(sp)"));
+        }
 
         // Structural checks: null pointers, exact lengths, magic, class, role,
         // active status and the canonical index below the declared count.
+        // The from-args variant receives no root argument (a3/a4 are zero);
+        // its expected root pointer is already staged from committed args.
+        if root_from_args {
+            // Reload the staged selection pointer and length: the prologue's
+            // LOAD_SCRIPT clobbered the argument registers.
+            self.emit(format!("ld t5, {HANDLE_PTR}(sp)"));
+            self.emit(format!("ld a2, {ARGS_LEN}(sp)"));
+            self.emit("mv a1, t5");
+        }
         self.emit_near_cond("beqz a1", &invalid);
-        self.emit_near_cond("beqz a3", &invalid);
+        if !root_from_args {
+            self.emit_near_cond("beqz a3", &invalid);
+        }
         self.emit(format!("li t0, {OPEN_HANDLE_SELECTION_BYTES}"));
         self.emit("sub t1, a2, t0");
         self.emit_near_cond("bnez t1", &invalid);
-        self.emit("li t0, 32");
-        self.emit("sub t1, a4, t0");
-        self.emit_near_cond("bnez t1", &invalid);
+        if !root_from_args {
+            self.emit("li t0, 32");
+            self.emit("sub t1, a4, t0");
+            self.emit_near_cond("bnez t1", &invalid);
+        }
         self.emit(format!("ld t3, {HANDLE_PTR}(sp)"));
         for (offset, byte) in OPEN_HANDLE_SELECTION_MAGIC.iter().enumerate() {
             self.emit(format!("lbu t0, {offset}(t3)"));
@@ -6789,7 +6879,7 @@ impl CodeGenerator {
         self.emit(format!("ld a1, {ROOT_PTR}(sp)"));
         self.emit("li a2, 32");
         self.emit("call __cellscript_memcmp_fixed");
-        self.emit(format!("bnez a0, {invalid}"));
+        self.emit_near_cond("bnez a0", &invalid);
 
         // Selected dependency: the member's complete Script hash equals the
         // dep's Lock/Type (script variant, by the header role) or data hash
@@ -6832,7 +6922,7 @@ impl CodeGenerator {
         self.emit(format!("addi a1, a1, {}", crate::script_handle_contract::OPEN_HANDLE_MEMBER_COMPLETE_SCRIPT_OFFSET));
         self.emit("li a2, 32");
         self.emit("call __cellscript_memcmp_fixed");
-        self.emit(format!("bnez a0, {invalid}"));
+        self.emit_near_cond("bnez a0", &invalid);
         self.emit("li a0, 0");
         self.emit(format!("j {done}"));
 

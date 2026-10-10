@@ -7514,6 +7514,24 @@ impl IrGenerator {
                     vars,
                     call.span,
                 ),
+                "ckb::require_cell_dep_open_script_handle_from_args" if call.args.len() == 2 => self
+                    .lower_open_handle_from_args_requirement(
+                        "__ckb_require_cell_dep_open_script_handle_from_args",
+                        &call.args,
+                        current,
+                        blocks,
+                        vars,
+                        call.span,
+                    ),
+                "ckb::require_cell_dep_open_verifier_handle_from_args" if call.args.len() == 2 => self
+                    .lower_open_handle_from_args_requirement(
+                        "__ckb_require_cell_dep_open_verifier_handle_from_args",
+                        &call.args,
+                        current,
+                        blocks,
+                        vars,
+                        call.span,
+                    ),
                 "ckb::require_cell_dep_open_verifier_handle" if call.args.len() == 3 => self.lower_open_handle_requirement(
                     "__ckb_require_cell_dep_open_verifier_handle",
                     &call.args,
@@ -9240,6 +9258,33 @@ impl IrGenerator {
         }
         if !matches!(lowered.get(2), Some(IrOperand::Const(IrConst::Hash(_)))) {
             self.record_error("exact Script handle handle_hash must be a compile-time Hash literal", span);
+        }
+        self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+            dest: None,
+            func: runtime_helper.to_string(),
+            args: lowered,
+        });
+        Some(LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: Some(active) })
+    }
+
+    fn lower_open_handle_from_args_requirement(
+        &mut self,
+        runtime_helper: &str,
+        args: &[Expr],
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+        span: Span,
+    ) -> Option<LoweredExpr> {
+        let mut active = current;
+        let mut lowered = Vec::with_capacity(args.len());
+        for arg in args {
+            let value = self.lower_expr(arg, active, blocks, vars);
+            active = value.current?;
+            lowered.push(value.operand);
+        }
+        if lowered.len() != 2 {
+            self.record_error("open handle from-args requirement takes exactly the CellDep and the handle", span);
         }
         self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
             dest: None,
