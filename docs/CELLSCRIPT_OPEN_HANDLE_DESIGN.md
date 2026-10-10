@@ -185,3 +185,49 @@ parameter. Every other parameter kind and callable class stays identity-only.
 No versioned helper consumes the value yet, so the checker's operand-flow jail
 holds: any operation touching a handle operand fails closed until the runtime
 helper ships with its membership and selected-dependency enforcement.
+
+## H2 versioned helper specification (implementation-ready, next slice)
+
+The consumption helper's complete design is frozen here so the next session
+implements without re-derivation. The on-chain runtime already provides
+`__ckb_hash_blake2b_var` and `__cellscript_memcmp_fixed`; the exact-handle
+requirement helper (`emit_runtime_exact_script_handle_requirement_helper`,
+`src/codegen/runtime.rs`) is the frame/syscall skeleton to reuse.
+
+**DSL surface**: `ckb::require_cell_dep_open_script_handle(dep: CellDepView,
+handle: ScriptHandle<I>, expected_root: Hash) -> unit` (mirrors the exact
+helper's three-argument shape; `VerifierHandle` gets the spawned-verifier
+variant). The expected root is caller-supplied in this slice; binding it to
+committed current-Script code/args is the frozen decision #4 follow-up.
+
+**Selection wire offsets inside the 656-byte value** (magic `CSOHWv1\0`):
+header at 8 (188 bytes; member_count at header offset 3 → absolute 11, class
+at 8, role at 9, mode at 10), member at 196 (292 bytes; status at 196,
+hash_type at 197, complete_script hash at 316, code_hash at 348, code
+OutPoint tx-hash at 380, output index at 412, admission/deployment sequences
+at 204/212), canonical member index at 488 (1 byte), seven zero bytes at 489,
+five sibling hashes leaf-to-root at 496..656.
+
+**On-chain steps**: (1) structural checks — magic, class/role match the
+helper variant, index < member_count, status active, mode tag sane;
+(2) membership — recompute the member leaf
+`H("cellscript-open-handle-member-v1\0" || u8(index) || member[196..488])`
+and fold five levels
+`H("cellscript-open-handle-node-v1\0" || left || right)` using the index bit
+at each depth to order (slot index equals the canonical index for occupied
+slots), then the root
+`H("cellscript-open-handle-policy-v1\0" || header[8..196] || tree_root)` and
+compare against expected_root; (3) selected dependency — load the dep's
+lock/type Script hash by the member role (field ids as the exact helpers) and
+compare against the member's complete_script at 316. Every mismatch fails
+closed with a new specific `CellScriptRuntimeError`.
+
+**Layer checklist**: typecheck arm beside the exact handles
+(`src/types/mod.rs` ~7144), lowering to
+`__ckb_require_cell_dep_open_script_handle`, `calls.rs` argument loading
+(656-byte fixed-byte source + 32-byte root, exact pattern), the runtime
+helper generator (frame layout, frame-resident hash input buffers for the
+domain-prefixed leaves — 326/97-byte staging slots), checker jail exemption
+naming exactly this target plus its signature checks, a new runtime error
+code, LSP completion, and O0–O3 CKB-VM positives with substituted-root,
+swapped-member, wrong-dep and malformed-wire negatives.
