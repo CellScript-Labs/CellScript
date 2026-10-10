@@ -158,6 +158,7 @@ impl ValueType {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct AbilityFacts {
     types: BTreeMap<String, Option<u8>>,
     aliases: BTreeMap<String, String>,
@@ -174,6 +175,50 @@ impl AbilityFacts {
 /// Use a topological worklist rather than recursive nominal traversal. The
 /// number of nodes/edges is bounded by the already checked record, and a cycle
 /// cannot obtain abilities by assuming its own declarations are true.
+fn open_handle_leaf(value: &str) -> Option<&'static str> {
+    crate::interface::nominals::OPEN_HANDLE_CLASSES
+        .iter()
+        .find(|class| value.starts_with(&format!("{}<", **class)) && value.ends_with('>'))
+        .copied()
+}
+
+/// An open-handle leaf's interface designation must name a module of the
+/// checked source closure (a nominal-catalog scope); its identity-only
+/// abilities are copy and drop.
+fn register_open_handle_leaf(
+    facts: &mut AbilityFacts,
+    record_scope: Option<(&crate::NominalDeclarationCatalog, &crate::NominalDeclarationScope)>,
+    record_module: &str,
+    leaf: &str,
+) -> Result<(), CheckerError> {
+    let Some(class) = open_handle_leaf(leaf) else {
+        return Err(invalid("open handle leaf is not a complete designation"));
+    };
+    let designation = leaf
+        .strip_prefix(class)
+        .and_then(|rest| rest.strip_prefix('<'))
+        .and_then(|rest| rest.strip_suffix('>'))
+        .ok_or_else(|| invalid("open handle designation is malformed"))?;
+    if designation.is_empty() || designation.contains('<') || designation.split("::").any(str::is_empty) {
+        return Err(invalid("open handle designation must be a plain module path"));
+    }
+    match record_scope {
+        Some((catalog, _)) => {
+            // The designation names an imported module's interface; the
+            // current module's own interface is implicit and never spelled.
+            if designation == record_module {
+                return Err(invalid("open handle designation must name an imported module"));
+            }
+            if !catalog.scopes.iter().any(|scope| scope.module == designation) {
+                return Err(invalid("open handle designation does not name a module of the checked source closure"));
+            }
+        }
+        None => return Err(invalid("open handle leaf requires the declaration catalogs")),
+    }
+    facts.types.insert(crate::checker::canonical_abi_type(leaf), Some(COPY | DROP));
+    Ok(())
+}
+
 pub(crate) fn verify(record: &TypedSemanticRecord) -> Result<AbilityFacts, CheckerError> {
     let indices = record
         .types
@@ -195,6 +240,39 @@ pub(crate) fn verify(record: &TypedSemanticRecord) -> Result<AbilityFacts, Check
         .as_ref()
         .map(|catalog| Ok::<_, CheckerError>((catalog, crate::interface::nominals::scope(catalog, &record.module)?)))
         .transpose()?;
+    for ty in &record.types {
+        let parsed = ty
+            .fields
+            .iter()
+            .map(|field| field.ty.as_str())
+            .chain(ty.variants.iter().flat_map(|variant| variant.fields.iter().map(|field| field.ty.as_str())))
+            .map(|field| ValueType::parse(&crate::checker::canonical_abi_type(field), 0))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut leaves = BTreeSet::new();
+        for field in &parsed {
+            field.leaves(&mut leaves);
+        }
+        for leaf in leaves {
+            if open_handle_leaf(leaf).is_some() {
+                register_open_handle_leaf(&mut facts, record_scope, &record.module, leaf)?;
+            }
+        }
+    }
+    // Generic arguments are the identity position for handle designations;
+    // register their evidence before the worklist so every consumer of the
+    // returned facts resolves them.
+    for instance in &record.instantiations {
+        for argument in &instance.type_arguments {
+            let parsed = ValueType::parse(&crate::checker::canonical_abi_type(argument), 0)?;
+            let mut leaves = BTreeSet::new();
+            parsed.leaves(&mut leaves);
+            for leaf in leaves {
+                if open_handle_leaf(leaf).is_some() {
+                    register_open_handle_leaf(&mut facts, record_scope, &record.module, leaf)?;
+                }
+            }
+        }
+    }
     let insert_alias = |facts: &mut AbilityFacts, ambiguous: &mut BTreeSet<String>, alias: String, target: &str| {
         if ambiguous.contains(&alias) {
             return;
@@ -380,6 +458,9 @@ fn verify_instantiations(record: &TypedSemanticRecord, facts: &AbilityFacts) -> 
                 .map(|scope| crate::interface::nominals::qualified_source_type(argument, scope))
                 .transpose()?
                 .unwrap_or_else(|| argument.clone());
+            if open_handle_leaf(&checked_argument).is_some() && layout && !parameter.phantom {
+                return Err(invalid("open handle designation cannot occupy a layout parameter"));
+            }
             let actual = facts.for_type(&checked_argument)?;
             let fixed_value = FIXED | SERIALIZABLE | NON_LINEAR;
             if required & !actual != 0

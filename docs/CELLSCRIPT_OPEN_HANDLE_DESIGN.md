@@ -162,3 +162,14 @@ independent nominal-catalog verification until each slice below ships.
    on-chain claim; a compiler-only compatibility check is not runtime
    evidence. Expected-root binding, helper admission and measured
    cycle/stack/witness budgets land with the runtime slices.
+
+The marker slice landed after these decisions: an interface designation is a
+plain module path in the handle's single type argument, validated by the
+project resolver on the producer side (exactly one imported, loaded module —
+never the current module, a local type, a primitive or a nested application)
+and independently by the checker against the nominal-catalog scopes of the
+checked source closure. Handle leaves carry copy/drop only, never occupy a
+layout parameter, and reject in value positions (fields, callable parameters)
+until the runtime encoding slice; identity use as a generic application
+argument is admitted and projected. Bare spellings and user declarations of
+the two class names keep their reserved-surface rejection.

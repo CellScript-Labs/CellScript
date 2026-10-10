@@ -6,6 +6,10 @@ use crate::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Reserved compatible-open handle class names (#28 H2). The independent
+/// value-ability layer validates any leaf built from them.
+pub(crate) const OPEN_HANDLE_CLASSES: [&str; 2] = ["ScriptHandle", "VerifierHandle"];
+
 fn invalid(message: &str) -> CheckerError {
     CheckerError::new(CheckerRejectionCode::V2419TypedSemanticsInvalid, message)
 }

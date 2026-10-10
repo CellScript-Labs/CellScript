@@ -1434,6 +1434,45 @@ impl<'a> TypeChecker<'a> {
         Ok(())
     }
 
+    /// Open handle types are identity-only in this release: they may appear
+    /// only as generic application arguments (phantom identity use). A field,
+    /// parameter or nested value position would need the runtime encoding
+    /// slice, so it fails closed here.
+    fn reject_open_handle_value_type(&self, ty: &Type, position: &str, span: crate::error::Span) -> Result<()> {
+        match ty {
+            Type::Named(name) => {
+                let base = name.split('<').next().unwrap_or(name);
+                if matches!(
+                    base,
+                    crate::script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE | crate::script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
+                ) {
+                    return Err(CompileError::new(
+                        format!(
+                            "open handle types are identity-only in this release; {position} would need the runtime encoding slice"
+                        ),
+                        span,
+                    ));
+                }
+                if let Some((_, arguments)) = crate::generics::applied_type(name) {
+                    for argument in arguments {
+                        self.reject_open_handle_value_type(&Type::Named(argument.clone()), position, span)?;
+                    }
+                }
+                Ok(())
+            }
+            Type::Array(inner, _) | Type::Ref(inner) | Type::MutRef(inner) => {
+                self.reject_open_handle_value_type(inner, position, span)
+            }
+            Type::Tuple(items) => {
+                for item in items {
+                    self.reject_open_handle_value_type(item, position, span)?;
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
     fn validate_schema_fields(&self, fields: &[Field], item_kind: &str, item_name: &str) -> Result<()> {
         let mut seen = HashSet::new();
         for field in fields {
@@ -1453,6 +1492,11 @@ impl<'a> TypeChecker<'a> {
                 ));
             }
             self.validate_type(&field.ty)?;
+            self.reject_open_handle_value_type(
+                &field.ty,
+                &format!("{} '{}' field '{}'", item_kind, item_name, field.name),
+                field.span,
+            )?;
             self.validate_stored_type_has_no_references(
                 &field.ty,
                 &format!("{} '{}' field '{}'", item_kind, item_name, field.name),
@@ -2729,6 +2773,11 @@ impl<'a> TypeChecker<'a> {
                 ));
             }
             self.validate_type(&param.ty)?;
+            self.reject_open_handle_value_type(
+                &param.ty,
+                &format!("{} '{}' parameter '{}'", callable_kind, callable_name, param.name),
+                param.span,
+            )?;
             if callable_kind != "function" && self.enum_type_contains_linear_payload(&param.ty, &mut HashSet::new()) {
                 return Err(CompileError::new(
                     format!(
@@ -8529,6 +8578,81 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    /// The compatible-open handle class spellings admit exactly one
+    /// interface parameter: an imported module designation resolved by the
+    /// project resolver. Local types, primitives, the current module and
+    /// unknown or nested spellings never manufacture an interface identity.
+    fn validate_open_handle_type(&self, name: &str, base_name: &str) -> Result<()> {
+        let designation = format!("{base_name}<");
+        let Some(argument) = name.strip_prefix(&designation).and_then(|rest| rest.strip_suffix('>')) else {
+            return Err(CompileError::new(
+                format!(
+                    "type '{base_name}' requires exactly one imported module interface designation, for example {base_name}<owner::module>"
+                ),
+                Span::default(),
+            ));
+        };
+        if argument.is_empty() || argument.contains('<') || argument.contains('>') || argument.trim() != argument {
+            return Err(CompileError::new(
+                format!("interface parameter of '{base_name}' must be a plain module path"),
+                Span::default(),
+            ));
+        }
+        if matches!(
+            argument,
+            "u8" | "u16"
+                | "u32"
+                | "i32"
+                | "u64"
+                | "u128"
+                | "bool"
+                | "unit"
+                | "address"
+                | "hash"
+                | "usize"
+                | "isize"
+                | "String"
+                | "Vec"
+                | "Script"
+        ) {
+            return Err(CompileError::new(
+                format!("'{argument}' is a value type and cannot designate a module interface"),
+                Span::default(),
+            ));
+        }
+        let argument_base = argument.split('<').next().unwrap_or(argument);
+        let local = self.current_module.as_deref().map(|module| {
+            self.type_fields.contains_key(argument)
+                || self.enum_variants.contains_key(argument)
+                || argument_base.split("::").next() == Some(module)
+        });
+        if local == Some(true) {
+            return Err(CompileError::new(
+                format!("'{argument}' is a locally visible type; an interface parameter must designate an imported module"),
+                Span::default(),
+            ));
+        }
+        let (Some(resolver), Some(current)) = (self.resolver, self.current_module.as_deref()) else {
+            return Err(CompileError::new(
+                "an interface designation requires the project resolver; single-file compilation cannot bind it",
+                Span::default(),
+            ));
+        };
+        if argument == current {
+            return Err(CompileError::new(
+                "designate an imported module's interface; the current module's own interface is implicit",
+                Span::default(),
+            ));
+        }
+        if resolver.module(argument).is_none() {
+            return Err(CompileError::new(
+                format!("module '{argument}' is not loaded; an interface designation must name an imported module"),
+                Span::default(),
+            ));
+        }
+        Ok(())
+    }
+
     fn validate_named_type(&self, name: &str) -> Result<()> {
         let base_name = name.split('<').next().unwrap_or(name);
         match base_name {
@@ -8545,13 +8669,7 @@ impl<'a> TypeChecker<'a> {
             base_name,
             crate::script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE | crate::script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
         ) {
-            return Err(CompileError::new(
-                format!(
-                    "type '{}' is reserved for the compatible-open handle surface (#28 H2) and is not admitted in this release",
-                    name
-                ),
-                Span::default(),
-            ));
+            return self.validate_open_handle_type(name, base_name);
         }
 
         if let Some(inner) = crate::commitment_contract::commitment_inner_type(name) {

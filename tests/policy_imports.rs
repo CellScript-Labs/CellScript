@@ -468,3 +468,187 @@ fn imported_template_nested_under_imported_template_materializes_across_owners()
         project_template_case(&compiled);
     }
 }
+
+const MARKER_MAIN: &str = r#"
+module qual::main
+use qual::types::Token
+
+public struct Wrapper<phantom H: copy> { tag: u64 }
+public action verify(input token: Token, witness value: u64) {
+    verification
+    consume token
+    let wrapped: Wrapper<ScriptHandle<qual::types>> = Wrapper<ScriptHandle<qual::types>> { tag: value }
+    require wrapped.tag > 0
+}
+"#;
+
+/// The interface parameter designates an imported module: the handle leaf is
+/// identity-only (phantom argument), its designation resolves through the
+/// loaded modules, and the checker independently re-validates the designation
+/// against the source-closure scopes.
+#[test]
+fn interface_designation_marker_binds_imported_modules() {
+    for opt_level in 0..=3 {
+        let sources = [("src/main.cell", MARKER_MAIN), ("src/types.cell", TEMPLATE_TOKEN)]
+            .into_iter()
+            .map(|(path, source)| InMemorySource { path: path.into(), source: source.into(), role: None })
+            .collect::<Vec<_>>();
+        let compiled = compile_sources_artifact(
+            &sources,
+            "src/main.cell",
+            CompileOptions {
+                edition: CellScriptEdition::Edition2027,
+                opt_level,
+                target: Some("riscv64-elf".into()),
+                target_profile: Some("ckb".into()),
+                source_contracts: true,
+                ..Default::default()
+            },
+            template_declaration(),
+            ExecutableSurfacePolicy::DenyFailClosed,
+        )
+        .unwrap();
+        let typed = &compiled.metadata.typed_semantics;
+        assert!(typed
+            .instantiations
+            .iter()
+            .any(|instance| instance.template == "Wrapper" && instance.type_arguments == ["ScriptHandle<qual::types>"]));
+        let inspection = cellscript_artifact_checker::interface::inspect_bundle(
+            &compiled.artifact_bytes,
+            &serde_json::to_vec(&compiled.metadata).unwrap(),
+            &serde_json::to_vec(compiled.verified_lowering_record.as_ref().unwrap()).unwrap(),
+            &serde_json::to_vec(compiled.source_artifact_map.as_ref().unwrap()).unwrap(),
+            &cellscript_artifact_checker::CheckerBudgets::default(),
+        )
+        .unwrap();
+        inspection.validate_symbolic_declarations().unwrap();
+    }
+}
+
+#[test]
+fn interface_designation_marker_rejects_invalid_bindings() {
+    let cases = [
+        ("arity", "Wrapper<ScriptHandle<qual::types>, ScriptHandle<qual::types>>"),
+        ("primitive", "Wrapper<ScriptHandle<u64>>"),
+        ("unknown-module", "Wrapper<ScriptHandle<qual::missing>>"),
+        ("self-module", "Wrapper<ScriptHandle<qual::main>>"),
+        ("local-type", "Wrapper<ScriptHandle<Token>>"),
+        ("value-type-spelling", "Wrapper<ScriptHandle<Script>>"),
+    ];
+    for (label, application) in cases {
+        for opt_level in 0..=3 {
+            let source = MARKER_MAIN.replace("ScriptHandle<qual::types>", application);
+            let sources = [("src/main.cell", source.leak() as &'static str), ("src/types.cell", TEMPLATE_TOKEN as &'static str)]
+                .into_iter()
+                .map(|(path, source)| InMemorySource { path: path.into(), source: source.into(), role: None })
+                .collect::<Vec<_>>();
+            let result = compile_sources_artifact(
+                &sources,
+                "src/main.cell",
+                CompileOptions {
+                    edition: CellScriptEdition::Edition2027,
+                    opt_level,
+                    target: Some("riscv64-elf".into()),
+                    target_profile: Some("ckb".into()),
+                    source_contracts: true,
+                    ..Default::default()
+                },
+                template_declaration(),
+                ExecutableSurfacePolicy::DenyFailClosed,
+            )
+            .map_err(|error| error.to_string().lines().next().unwrap_or("").to_string());
+            let message = match result {
+                Err(message) => message,
+                Ok(_) => panic!("{label} opt={opt_level} unexpectedly compiled"),
+            };
+            assert!(
+                message.contains("designate")
+                    || message.contains("designation")
+                    || message.contains("interface parameter")
+                    || message.contains("type argument"),
+                "{label} opt={opt_level}: {message}"
+            );
+        }
+    }
+}
+
+#[test]
+fn handle_designation_mutations_reject_after_rebinding() {
+    let compile = |opt: u8| {
+        let sources = [("src/main.cell", MARKER_MAIN), ("src/types.cell", TEMPLATE_TOKEN)]
+            .into_iter()
+            .map(|(path, source)| InMemorySource { path: path.into(), source: source.into(), role: None })
+            .collect::<Vec<_>>();
+        compile_sources_artifact(
+            &sources,
+            "src/main.cell",
+            CompileOptions {
+                edition: CellScriptEdition::Edition2027,
+                opt_level: opt,
+                target: Some("riscv64-elf".into()),
+                target_profile: Some("ckb".into()),
+                source_contracts: true,
+                ..Default::default()
+            },
+            template_declaration(),
+            ExecutableSurfacePolicy::DenyFailClosed,
+        )
+        .unwrap()
+    };
+    for opt_level in 0..=3 {
+        let compiled = compile(opt_level);
+        let mut record = compiled.verified_lowering_record.clone().unwrap();
+        for instance in &mut record.typed_semantics.instantiations {
+            for argument in &mut instance.type_arguments {
+                if argument == "ScriptHandle<qual::types>" {
+                    *argument = "ScriptHandle<qual::missing>".to_string();
+                }
+            }
+        }
+        // Rebind the semantic and bundle identities so the rejection comes
+        // from the designation contract itself, not a stale hash.
+        record.typed_semantics_hash =
+            cellscript_artifact_checker::canonical_hash(cellscript_artifact_checker::TYPED_SEMANTICS_SCHEMA, &record.typed_semantics)
+                .unwrap();
+        let mut metadata = serde_json::to_value(&compiled.metadata).unwrap();
+        metadata["typed_semantics"] = serde_json::to_value(&record.typed_semantics).unwrap();
+        metadata["typed_semantics_hash"] = serde_json::Value::String(record.typed_semantics_hash.clone());
+        let record_hash =
+            cellscript_artifact_checker::canonical_hash(cellscript_artifact_checker::LOWERING_RECORD_SCHEMA, &record).unwrap();
+        let mut source_map = compiled.source_artifact_map.clone().unwrap();
+        source_map.lowering_record_hash = record_hash.clone();
+        let source_map_hash =
+            cellscript_artifact_checker::canonical_hash(cellscript_artifact_checker::SOURCE_MAP_SCHEMA, &source_map).unwrap();
+        let verified_bundle_id = cellscript_artifact_checker::canonical_hash(
+            "cellscript-verified-bundle-id-v1",
+            &(
+                record.artifact_hash.as_str(),
+                record.typed_semantics_hash.as_str(),
+                record.compatibility_profile_hash.as_str(),
+                record_hash.as_str(),
+                source_map_hash.as_str(),
+                source_map.source_digest.as_str(),
+            ),
+        )
+        .unwrap();
+        metadata["verified_artifact"]["lowering_record_hash"] = serde_json::Value::String(record_hash);
+        metadata["verified_artifact"]["source_map_hash"] = serde_json::Value::String(source_map_hash);
+        metadata["verified_artifact"]["verified_bundle_id"] = serde_json::Value::String(verified_bundle_id);
+        let error = cellscript_artifact_checker::interface::inspect_bundle(
+            &compiled.artifact_bytes,
+            &serde_json::to_vec(&metadata).unwrap(),
+            &serde_json::to_vec(&record).unwrap(),
+            &serde_json::to_vec(&source_map).unwrap(),
+            &cellscript_artifact_checker::CheckerBudgets::default(),
+        )
+        .unwrap_err();
+        // The mutated designation cannot pass: the canonical identity layer
+        // catches an argument swap, and a self-consistent rewrite would have
+        // to face the designation scope check.
+        assert!(
+            error.message.contains("does not name a module of the checked source closure")
+                || error.message.contains("non-canonical identity"),
+            "opt={opt_level}: {error}"
+        );
+    }
+}

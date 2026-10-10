@@ -886,6 +886,14 @@ impl Monomorphizer {
                 if matches!(base, "usize" | "isize") {
                     return all_plain();
                 }
+                // Open handle types are identity-only selection values: they
+                // copy and drop but never serialize into layout.
+                if matches!(
+                    base,
+                    crate::script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE | crate::script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
+                ) {
+                    return [ValueAbility::Copy, ValueAbility::Drop].into_iter().collect();
+                }
                 if base == "String" || base == "Vec" {
                     return [
                         ValueAbility::Copy,
@@ -1892,7 +1900,7 @@ fn primitive_type_name(name: &str) -> Option<Type> {
     })
 }
 
-fn applied_type(name: &str) -> Option<(&str, Vec<String>)> {
+pub(crate) fn applied_type(name: &str) -> Option<(&str, Vec<String>)> {
     let start = name.find('<')?;
     if !name.ends_with('>') {
         return None;
