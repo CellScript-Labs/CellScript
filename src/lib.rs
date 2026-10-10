@@ -9255,6 +9255,7 @@ fn bind_typed_semantics(
     if source_contracts {
         typed.generic_declarations = typed_semantics::generic_catalog_for_context(ast, resolver);
         typed.nominal_declarations = typed_semantics::nominal_catalog(ast, resolver, ir, &typed);
+        typed.constant_values = typed_semantics::constant_catalog(ast);
     }
     typed.interface_hash = metadata.interface_hash.clone();
     typed.canonicalize();

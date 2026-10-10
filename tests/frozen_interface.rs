@@ -431,32 +431,34 @@ fn native_code_catalog_requires_finite_receipts_for_unselected_and_final_members
     let original = directory.path().join("original");
     let constant = directory.path().join("constant");
     code_package(&original, CODE_SOURCE);
-    code_package(&constant, &format!("{CODE_SOURCE}\npublic const LIMIT: u64 = 7"));
+    code_package(&constant, &format!("{CODE_SOURCE}\npublic const LABEL: String = \"sealed\""));
     for opt in 0..=3 {
         let invalid = code_candidate(compile_code(&constant, opt), vec![2]);
-        let origin = check_code_cell_origin(
+        // A constant outside the proven-value grammar cannot construct its
+        // finite receipt at all: the origin check itself fails closed.
+        let origin_error = check_code_cell_origin(
             invalid.module.bundle(),
             &invalid.raw_transaction,
             0,
             &invalid.selected_script,
             &CheckerBudgets::default(),
         )
-        .unwrap();
-        assert!(check_code_cell_target(origin).is_ok());
+        .unwrap_err();
+        assert!(origin_error.message.contains("constant"), "{origin_error:?}");
         let error = freeze_code_catalog(
             compile_code(&original, opt),
             vec![code_candidate(compile_code(&original, opt), vec![1]), invalid],
             &CheckerBudgets::default(),
         )
         .unwrap_err();
-        assert!(error.message.contains("public constant values"), "{error:?}");
+        assert!(error.message.contains("constant"), "{error:?}");
     }
     let mut inputs = (0..31).map(|index| code_candidate(compile_code(&original, 0), vec![index])).collect::<Vec<_>>();
     inputs.push(code_candidate(compile_code(&constant, 0), vec![31]));
     assert!(freeze_code_catalog(compile_code(&original, 0), inputs, &CheckerBudgets::default())
         .unwrap_err()
         .message
-        .contains("public constant values"));
+        .contains("constant"));
 }
 
 #[test]

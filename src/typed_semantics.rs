@@ -17,6 +17,8 @@ use cellscript_artifact_checker::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
+mod constants;
+pub(crate) use constants::constant_catalog;
 mod declarations;
 mod nominals;
 mod policy;
@@ -255,6 +257,7 @@ pub(crate) fn build(module: &ir::IrModule, metadata: &CompileMetadata) -> TypedS
         instantiations,
         generic_declarations: None,
         nominal_declarations: None,
+        constant_values: None,
         trusted_external_verifiers: metadata.runtime.trusted_external_verifiers.clone(),
         foundation: SemanticFoundationRecord::default(),
     };

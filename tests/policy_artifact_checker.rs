@@ -331,12 +331,20 @@ fn fixed_policy_receipts_compare_directionally_without_predicate_or_deployment_e
     }
 }
 #[test]
-fn fixed_policy_receipt_rejects_unproven_constants_and_preserves_declaration_only_templates() {
+fn fixed_policy_receipt_admits_proven_constants_and_rejects_unproven_ones() {
     for opt in 0..=3 {
-        let fixture = external_fixture(&format!("{EXTERNAL_SOURCE}\npublic const LIMIT: u64 = 7"), opt);
-        assert!(fixed_external_codec(&fixture).is_ok());
+        // A constant inside the closed grammar is independently re-evaluated
+        // and admitted through the finite external codec.
+        let fixture = external_fixture(&format!("{EXTERNAL_SOURCE}\npublic const LIMIT: u64 = 3 * 7"), opt);
+        let checked = fixed_external_codec(&fixture).unwrap();
+        let codec_record: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
+        assert_eq!(codec_record["constants"][0]["value"], "21");
+        assert!(fixed_policy_receipt(&fixture, vec![1]).is_ok());
+        // Constants outside the closed grammar keep no proven value and the
+        // receipt fails closed exactly as before.
+        let fixture = external_fixture(&format!("{EXTERNAL_SOURCE}\npublic const LABEL: String = \"sealed\""), opt);
         let error = fixed_policy_receipt(&fixture, vec![1]).unwrap_err();
-        assert!(error.message.contains("public constant values"), "{error:?}");
+        assert!(error.message.contains("constant"), "{error:?}");
         let fixture = external_fixture(&format!("{EXTERNAL_SOURCE}\npublic struct Pair<T: fixed_value> {{ value: T }}\npublic fn first<T: fixed_value>(value: T) -> T {{ value }}"), opt);
         let checked = fixed_policy_receipt(&fixture, vec![1]).unwrap();
         let record: Value = serde_json::from_slice(&checked.target_origin().origin().codec().canonical_bytes().unwrap()).unwrap();
@@ -4222,6 +4230,60 @@ action burn(input token: Token, witness value: u64) {
                     "opt={opt} site={site} {mutation}"
                 );
             }
+        }
+    }
+}
+
+#[test]
+fn constant_value_catalog_rejects_rebound_mutations() {
+    use cellscript_artifact_checker::{ConstantExpression, ConstantValueContract};
+    for opt in 0..=3 {
+        let fixture = external_fixture(&format!("{EXTERNAL_SOURCE}\npublic const LIMIT: u64 = 3 * 7"), opt);
+        fixed_external_codec(&fixture).unwrap();
+        for mutation in ["value", "expression", "div-zero", "deep", "missing-catalog", "undeclared"] {
+            let mut changed = fixture.clone();
+            if mutation == "missing-catalog" {
+                changed.record.typed_semantics.constant_values = None;
+            } else {
+                let catalog = changed.record.typed_semantics.constant_values.as_mut().unwrap();
+                match mutation {
+                    "value" => catalog.values[0].value = "22".into(),
+                    "expression" => {
+                        let ConstantExpression::Binary { right, .. } = &mut catalog.values[0].expression else { unreachable!() };
+                        **right = ConstantExpression::Literal { value: "8".into() };
+                    }
+                    "div-zero" => {
+                        let ConstantExpression::Binary { op, right, .. } = &mut catalog.values[0].expression else { unreachable!() };
+                        *op = "div".into();
+                        **right = ConstantExpression::Literal { value: "0".into() };
+                    }
+                    "deep" => {
+                        // Twenty nested additions evaluate to the recorded
+                        // value but exceed the evaluation depth budget.
+                        let mut expression = ConstantExpression::Literal { value: "1".into() };
+                        for _ in 0..20 {
+                            expression = ConstantExpression::Binary {
+                                op: "add".into(),
+                                left: Box::new(expression),
+                                right: Box::new(ConstantExpression::Literal { value: "1".into() }),
+                            };
+                        }
+                        catalog.values[0].expression = expression;
+                        catalog.values[0].value = "21".into();
+                    }
+                    "undeclared" => catalog.values.push(ConstantValueContract {
+                        module: catalog.values[0].module.clone(),
+                        name: "OTHER".into(),
+                        ty: "u64".into(),
+                        value: "1".into(),
+                        expression: ConstantExpression::Literal { value: "1".into() },
+                    }),
+                    _ => unreachable!(),
+                }
+            }
+            changed.rebind_policy_identity();
+            let error = fixed_external_codec(&changed).unwrap_err();
+            assert!(error.message.contains("constant"), "opt={opt} {mutation}: {error}");
         }
     }
 }

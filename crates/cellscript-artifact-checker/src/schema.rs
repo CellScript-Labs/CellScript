@@ -125,8 +125,43 @@ pub struct TypedSemanticRecord {
     pub generic_declarations: Option<GenericDeclarationCatalog>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nominal_declarations: Option<NominalDeclarationCatalog>,
+    /// Independently re-evaluated public constant values. Omitted entries and
+    /// absent catalogs keep their constants fail-closed at the finite codec.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constant_values: Option<ConstantValueCatalog>,
     pub trusted_external_verifiers: Vec<TrustedExternalVerifierRecord>,
     pub foundation: SemanticFoundationRecord,
+}
+
+pub const CONSTANT_VALUE_CATALOG_SCHEMA: &str = "cellscript-constant-value-catalog-v1";
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConstantValueCatalog {
+    pub schema: String,
+    pub values: Vec<ConstantValueContract>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConstantValueContract {
+    pub module: String,
+    pub name: String,
+    pub ty: String,
+    pub value: String,
+    pub expression: ConstantExpression,
+}
+
+/// Closed bounded initializer grammar. Only scalar literals and checked
+/// binary operations over u64 participate; every other initializer stays
+/// outside the catalog and rejects at the finite codec.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ConstantExpression {
+    #[serde(rename = "literal")]
+    Literal { value: String },
+    #[serde(rename = "binary")]
+    Binary { op: String, left: Box<ConstantExpression>, right: Box<ConstantExpression> },
 }
 
 pub const GENERIC_DECLARATION_CATALOG_SCHEMA: &str = "cellscript-generic-declaration-catalog-v1";

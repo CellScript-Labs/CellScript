@@ -107,9 +107,8 @@ pub fn check_fixed_policy_receipt(
 ) -> Result<CheckedFixedPolicyReceipt, CheckerError> {
     let target = check_code_cell_target(check_code_cell_origin(bundle, raw_transaction, output_index, selected_script, budgets)?)?;
     let inspection = inspect_bundle(bundle[0], bundle[1], bundle[2], bundle[3], budgets)?;
-    if !inspection.declared().constants.is_empty() {
-        return Err(invalid("public constant values lack this finite receipt profile"));
-    }
+    // Public constants are admitted through the independently re-evaluated
+    // constant-value catalog inside the finite external codec below.
     let entry_contract = &inspection.effective().foundation.entry_contract;
     if entry_contract.script_role != "type" {
         return Err(invalid("requires the independently checked Type-policy role; Lock/verifier receipts need another profile"));

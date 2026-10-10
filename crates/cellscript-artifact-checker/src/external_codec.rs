@@ -41,6 +41,14 @@ struct Record {
     callables: Vec<Callable>,
     cells: Vec<Cell>,
     public_layouts: Vec<PublicLayout>,
+    constants: Vec<ProvenConstant>,
+}
+
+#[derive(Debug, Serialize)]
+struct ProvenConstant {
+    declaration: String,
+    ty: String,
+    value: String,
 }
 #[derive(Debug, Serialize)]
 struct Callable {
@@ -221,6 +229,25 @@ pub fn check_fixed_external_codec(
             availability: "fixed-flat-unsigned-layout",
         });
     }
+    // Public constants need independently re-evaluated value evidence; an
+    // absent catalog, an incomplete set or an expression that folds to a
+    // different value fails closed here.
+    let mut constants = Vec::new();
+    if !inspection.declared().constants.is_empty() {
+        let declared = inspection
+            .declared()
+            .constants
+            .iter()
+            .map(|constant| (inspection.declared().module.clone(), constant.name.clone(), constant.r#type.clone()))
+            .collect::<Vec<_>>();
+        let proven = crate::constant_values::check_constant_values(typed, &declared)?;
+        for constant in &inspection.declared().constants {
+            let (ty, value) = proven
+                .proven(&inspection.declared().module, &constant.name)
+                .ok_or_else(|| invalid("declared constant lacks its proven value"))?;
+            constants.push(ProvenConstant { declaration: constant.identity.clone(), ty: ty.clone(), value: value.clone() });
+        }
+    }
     let mut cells = Vec::new();
     for variant in &policy.variants {
         let entry =
@@ -271,6 +298,7 @@ pub fn check_fixed_external_codec(
         callables,
         cells,
         public_layouts,
+        constants,
     };
     let identity = crate::canonical_hash("cellscript-fixed-external-codec-id-v1", &record)?;
     Ok(CheckedFixedExternalCodec { parameters, fields, record, identity })

@@ -24,10 +24,17 @@ loops allowed but no calls, no return/stack-register writes, at least one
 return), and every call site proves its destination — the only definition in
 the pre-call window is a stack-relative offset inside the caller's frame with a
 positive constant length ≤ 512 bytes, disjoint from checked Cell data and the
-received Cell pointer, with no incoming flow into the argument window. Public
-constants still reject because the current projection proves their types but
-not their values; an independent constant-value proof needs its own evaluation
-contract. Uninstantiated generic
+received Cell pointer, with no incoming flow into the argument window. Public constants now carry
+independently re-evaluated value evidence: with the source contracts the
+producer emits a `cellscript-constant-value-catalog-v1` recording each exported
+constant's canonical type, folded value and initializer expression over a
+closed grammar (u64/bool literals and checked add/sub/mul/div/rem/and/or/xor/
+shl/shr over u64), and the checker re-evaluates every expression under depth
+16 / step 1024 budgets before admitting the constant into the codec record;
+the proven set must equal the declared public set. Overflow, division or
+remainder by zero, undefined shifts, unknown operators, value drift, budget
+exhaustion, absent catalogs and initializers outside the grammar (references,
+strings, bytes, wider widths) all fail closed. Uninstantiated generic
 declarations remain declaration-only; they cannot claim an executable external
 codec. Broader bundle inspection remains unchanged.
 
