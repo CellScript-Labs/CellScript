@@ -200,12 +200,19 @@ optimization prunes their runtime entry; retained helpers are explicitly distinc
 from external dispatch.
 
 `check_required_contracts` compares every required projected key against a
-candidate and allows additional candidate keys. It conservatively requires exact
-effect and binder-constraint agreement; it does not yet implement safe effect
-weakening or binder-constraint relaxation. Optimizer levels can retain different
-helper/layout evidence, so equality of projection identities across optimizer
-levels is not promised. Body predicates are outside this projection: two checked
-artifacts can have identical API projections and different behavior.
+candidate and allows additional candidate keys, under the enumerated
+directional relation: inferred and declared effects may only become more
+restrictive (Pure admits only Pure; ReadOnly admits Pure or ReadOnly; each of
+Mutating/Creating/Destroying admits itself and the two smaller classes, since
+the three state-changing classes are pairwise incomparable), and binder
+constraints may only relax — a candidate may stop demanding an ability the
+baseline demanded, so baseline-admitted arguments still satisfy it, but may
+never demand a new ability. Binder names, phantom flags, declared template
+abilities, codecs and every other contract field stay exact. Optimizer levels
+can retain different helper/layout evidence, so equality of projection
+identities across optimizer levels is not promised. Body predicates are
+outside this projection: two checked artifacts can have identical API
+projections and different behavior.
 
 This is a module coherence prerequisite, **not the H1 open receipt**. Frozen
 package/module ownership, complete builder requirements, independently checked

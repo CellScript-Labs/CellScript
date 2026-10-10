@@ -198,7 +198,7 @@ fn optimizer_pruned_helpers_keep_declarations_without_inventing_execution() {
 }
 
 #[test]
-fn inferred_effect_changes_reject_when_source_annotations_are_identical() {
+fn inferred_effects_may_only_become_more_restrictive() {
     for opt in 0..=3 {
         let pure = project("module effects\npublic action verify() { verification require true }", opt);
         let read = project("module effects\npublic action verify() { verification let amount = ckb::cell_capacity(source::input(0)) require amount > 0 }", opt);
@@ -207,8 +207,28 @@ fn inferred_effect_changes_reject_when_source_annotations_are_identical() {
         assert_eq!(pure_wire["contracts"]["callable:effects::verify"], read_wire["contracts"]["callable:effects::verify"]);
         assert_eq!(pure_wire["contracts"]["effective:effects::verify"]["effect"], "Pure");
         assert_eq!(read_wire["contracts"]["effective:effects::verify"]["effect"], "ReadOnly");
+        // A candidate doing strictly less than the required effect still
+        // honors the baseline's bound; the reverse direction rejects.
+        read.check_required_contracts(&pure).unwrap();
         assert!(pure.check_required_contracts(&read).is_err());
-        assert!(read.check_required_contracts(&pure).is_err());
+    }
+}
+
+/// Binder constraints relax directionally: a candidate may stop demanding an
+/// ability the baseline demanded (baseline-admitted arguments still satisfy
+/// it), never demand a new one.
+#[test]
+fn binder_constraints_may_only_relax_directionally() {
+    for opt in 0..=3 {
+        let required = project(&BASE.replace("Marker<phantom T: copy>", "Marker<phantom T: copy + drop>"), opt);
+        let relaxed = project(BASE, opt);
+        required.check_required_contracts(&relaxed).unwrap();
+        assert!(relaxed.check_required_contracts(&required).is_err());
+        // A generic callable binder may also relax, with every other contract
+        // field unchanged; the strengthened direction rejects.
+        let relaxed_callable = project(&BASE.replace("identity<T: fixed_value>", "identity<T: copy>"), opt);
+        required.check_required_contracts(&relaxed_callable).unwrap();
+        assert!(relaxed_callable.check_required_contracts(&required).is_err());
     }
 }
 

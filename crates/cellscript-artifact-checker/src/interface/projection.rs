@@ -54,19 +54,98 @@ impl CheckedModuleProjection {
     }
 
     /// Candidate additions are permitted. Every required declaration, nested
-    /// nominal, retained layout and effective callable binding stays identical.
-    /// Effects and binder constraints currently use conservative exact equality.
+    /// nominal, retained layout and effective callable binding stays bound
+    /// under the directional relation: inferred and declared effects may only
+    /// become more restrictive, and binder constraints may only relax (the
+    /// candidate may not demand an ability the baseline did not demand).
+    /// Binder names, phantom flags, abilities, codecs and every other field
+    /// remain exact.
     pub fn check_required_contracts(&self, candidate: &Self) -> Result<(), CheckerError> {
         if self.record.module != candidate.record.module || self.record.runtime != candidate.record.runtime {
             return Err(invalid("required module or runtime profile differs"));
         }
         for (key, required) in &self.record.contracts {
-            if candidate.record.contracts.get(key) != Some(required) {
+            let Some(offered) = candidate.record.contracts.get(key) else {
+                return Err(invalid(&format!("required checked module contract is absent: {key}")));
+            };
+            if required != offered && !contract_satisfies(key, required, offered) {
                 return Err(invalid(&format!("required checked module contract differs: {key}")));
             }
         }
         Ok(())
     }
+}
+
+/// The enumerated effect-weakening relation. Pure does nothing observable,
+/// ReadOnly observes without changing state, and Mutating/Creating/Destroying
+/// change state in pairwise-incomparable ways: each class admits only itself
+/// and the strictly smaller classes as a compatible candidate effect.
+fn effect_weakens(required: &str, candidate: &str) -> bool {
+    matches!(
+        (required, candidate),
+        ("Pure", "Pure")
+            | ("ReadOnly", "Pure" | "ReadOnly")
+            | ("Mutating", "Pure" | "ReadOnly" | "Mutating")
+            | ("Creating", "Pure" | "ReadOnly" | "Creating")
+            | ("Destroying", "Pure" | "ReadOnly" | "Destroying")
+    )
+}
+
+/// Every ability the candidate demands must already be demanded by the
+/// baseline, so arguments admitted under the required contract still satisfy
+/// the candidate. Binder names and phantom flags stay identical.
+fn parameters_relax(required: &[Value], candidate: &[Value]) -> bool {
+    required.len() == candidate.len()
+        && required.iter().zip(candidate).all(|(required, candidate)| {
+            let (Some(required), Some(candidate)) = (required.as_object(), candidate.as_object()) else {
+                return false;
+            };
+            if required.get("name") != candidate.get("name") || required.get("phantom") != candidate.get("phantom") {
+                return false;
+            }
+            match (required.get("constraints").and_then(Value::as_array), candidate.get("constraints").and_then(Value::as_array)) {
+                (Some(required), Some(candidate)) => candidate.iter().all(|ability| required.contains(ability)),
+                (None, None) => true,
+                _ => false,
+            }
+        })
+}
+
+/// One admitted directional difference: the field name and the predicate
+/// deciding whether the candidate's value satisfies the required value.
+type RelaxedField = (&'static str, fn(&Value, &Value) -> bool);
+
+/// Compare contract objects field-wise. The field sets must match exactly;
+/// only the named fields may differ and only in the admitted direction.
+fn directional_object(required: &Value, candidate: &Value, relaxed: &[RelaxedField]) -> bool {
+    let (Some(required), Some(candidate)) = (required.as_object(), candidate.as_object()) else {
+        return false;
+    };
+    if required.len() != candidate.len() {
+        return false;
+    }
+    required.iter().all(|(field, value)| match candidate.get(field) {
+        Some(other) if value == other => true,
+        Some(other) => relaxed.iter().any(|(name, admissible)| field == name && admissible(value, other)),
+        None => false,
+    })
+}
+
+fn contract_satisfies(key: &str, required: &Value, candidate: &Value) -> bool {
+    let effect: fn(&Value, &Value) -> bool = |required, candidate| matches!((required.as_str(), candidate.as_str()), (Some(required), Some(candidate)) if effect_weakens(required, candidate));
+    let parameters: fn(&Value, &Value) -> bool = |required, candidate| matches!((required.as_array(), candidate.as_array()), (Some(required), Some(candidate)) if parameters_relax(required, candidate));
+    if key.starts_with("callable:")
+        && directional_object(required, candidate, &[("declared_effect", effect), ("type_parameters", parameters)])
+    {
+        return true;
+    }
+    if key.starts_with("effective:") && directional_object(required, candidate, &[("effect", effect)]) {
+        return true;
+    }
+    if key.starts_with("nominal:") && directional_object(required, candidate, &[("parameters", parameters)]) {
+        return true;
+    }
+    false
 }
 
 fn check_sizes(lengths: [usize; 4]) -> Result<(), CheckerError> {

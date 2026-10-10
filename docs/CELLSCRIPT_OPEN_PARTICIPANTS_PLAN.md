@@ -59,8 +59,11 @@ The initial audit is against `35bf983db30aae80281f97e30bbce08a878d7c58`.
   fail-closed without the declaration catalogs. An imported template
   instantiated under another imported template's arguments — the doubly-external
   nested case — still fails closed at the owner seed boundary and needs its own
-  orchestrator contract. Full directional receipts remain pending; this
-  prerequisite does not complete H1 or runtime admission.
+  orchestrator contract. Directional receipt comparison now implements the
+  enumerated effect-weakening relation and binder-constraint relaxation with
+  exact binder identities, abilities and codecs; the complete H1 open receipt
+  still needs its general codec/builder obligations. This prerequisite does
+  not complete H1 or runtime admission.
 - Existing closed roles identify their exact providers at bundle construction.
   New participant selection must retain their lifecycle/observation distinction
   and preserve the transaction identity through signing.
