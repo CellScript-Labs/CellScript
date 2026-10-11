@@ -283,7 +283,7 @@ fn freeze_policy(
         let role = candidate.receipt().entry_contract().script_role.as_str();
         let child = verifier && role == "type" && candidate.origin().codec().parameters().parameterless_single_entry();
         if !child && (verifier || !matches!((header.role, role), (ScriptRole::Type, "type") | (ScriptRole::Lock, "lock"))) {
-            return Err(invalid("policy role differs from the independently checked entry role"));
+            return Err(invalid("code policy role differs from the independently checked entry role"));
         }
         let origin = candidate.origin();
         let deployment_valid = match origin.selected_hash_type() {

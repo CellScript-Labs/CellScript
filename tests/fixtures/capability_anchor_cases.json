@@ -92,7 +92,7 @@
     "cycles": 40886,
     "max_stack_frame_bytes": 5376,
     "occupied_capacity_shannons": 32800000000,
-    "protocol_bundle_hash": "450eceff91f5634875dd6d03034e6a80ceca9f83f6195981b47a0aa16a67559d",
+    "protocol_bundle_hash": "2defa1ead3471c6e47d20e2fe9ff493b4585b49667d54b4e078da3b2a42b372d",
     "raw_transaction_hash": "0x025f688c8e33abb001f85534b0d16bc6f2e08adf18159965cfb0d5403a6b0880",
     "serialized_transaction_hash": "0x1f634e453a4365addf6e2dc1b2dcccda52c7ff553c6b0016928b95cadcb0872f",
     "transaction_bytes": 1423,
