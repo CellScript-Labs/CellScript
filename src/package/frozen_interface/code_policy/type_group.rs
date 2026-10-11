@@ -2,7 +2,7 @@
 use super::{FrozenSourceCodeDependency, FrozenSourceCodePolicySelection};
 use crate::error::Result;
 use crate::package::frozen_interface::checker_error;
-use cellscript_artifact_checker::code_origin::{check_direct_type_group, CheckedDirectTypeGroup, SuppliedTypeGroupTransaction};
+use cellscript_artifact_checker::code_origin::{check_direct_script_group, CheckedDirectTypeGroup, SuppliedTypeGroupTransaction};
 use cellscript_artifact_checker::{canonical_bytes, canonical_hash, CheckerBudgets};
 use serde::Serialize;
 
@@ -69,8 +69,19 @@ impl<'a> FrozenSourceCodeDependency<'a> {
         inputs: &SuppliedTypeGroupTransaction<'_>,
         budgets: &CheckerBudgets,
     ) -> Result<FrozenSourceCodeTypeGroup<'a>> {
-        let group =
-            check_direct_type_group(self.selection.candidate().receipt(), self.dependency, inputs, budgets).map_err(checker_error)?;
+        if self.selection.candidate().receipt().entry_contract().script_role != "type" {
+            return Err(super::super::invalid("Type group cannot admit a Lock receipt"));
+        }
+        self.check_script_group(inputs, budgets)
+    }
+    /// Bind the complete Lock or Type group selected by the checked policy.
+    pub fn check_script_group(
+        self,
+        inputs: &SuppliedTypeGroupTransaction<'_>,
+        budgets: &CheckerBudgets,
+    ) -> Result<FrozenSourceCodeTypeGroup<'a>> {
+        let group = check_direct_script_group(self.selection.candidate().receipt(), self.dependency, inputs, budgets)
+            .map_err(checker_error)?;
         self.selection.inner.policy.sources.check_unchanged_sources()?;
         let mut checked = FrozenSourceCodeTypeGroup { selection: self.selection, group, identity: String::new() };
         checked.identity =

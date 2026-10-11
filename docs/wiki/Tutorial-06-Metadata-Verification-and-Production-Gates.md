@@ -823,13 +823,16 @@ not external production release evidence.
 
 `cellc protocol bundle check bundle.json --open-admission open.json --output report.json --json`
 reconstructs private source-policy proofs from frozen package inputs, then binds
-the selected finite Type-policy participants to the complete transaction bytes.
+the selected Type-policy, single Type/Lock or parameterless spawned-verifier
+participants to the complete transaction bytes.
 Generated builders can extract the admitted 656-byte selection and encode its
 664-byte entry witness. The adapter requires those same bytes before signing;
 every Script group must still succeed during the subsequent signed dry-run.
 
 The offline command does not establish signatures, live Cells, network inclusion
-or general Lock/verifier compatibility. See the
+or successful participant execution. A verifier must have an independently
+checked membership-to-SPAWN/WAIT path; the child inherits its consumer's Script
+group, and a nonzero child exit rejects the parent. See the
 [input and evidence contract](https://github.com/CellScript-Labs/CellScript/blob/0.32/docs/CELLSCRIPT_OPEN_HANDLE_DESIGN.md#cli-and-generated-witness-transport).
 The maintainer waived external human review for #28 and #29; independent artifact
 checking and their remaining technical acceptance requirements still apply.

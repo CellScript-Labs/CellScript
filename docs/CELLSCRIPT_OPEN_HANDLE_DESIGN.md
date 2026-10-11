@@ -1,14 +1,13 @@
 # Compatible-open handle design record and threat model
 
-Status: versioned design record v1 (`cellscript-open-handle-design-v1`) for
-issue #28, consolidating the implemented authorization-set boundary. The
-implemented portion covers the host wire codec, finite receipts, native
-policy/source bindings and transaction snapshots. Nominal imported-interface
-handle witnesses and bounded membership/dependency helpers are implemented,
-including roots read from committed current-Script args. Complete general
-receipts and integrated H2 admission remain unfinished. Bounded Type-ID
-lineage is now checked from actual creation/replacement transactions; this is
-policy-authorized byte consistency, not independent chain inclusion evidence. The maintainer waived #28 and #29's external
+Status: versioned design record v2 (`cellscript-open-handle-design-v2`) for
+issues #28 and #29. Native admission now composes independent public receipts,
+nominal imported-interface witnesses, committed current-Script args roots,
+Lock/Type groups and explicit spawned-verifier execution. The admitted codec
+profiles and execution bounds are specified below; unsupported interfaces reject.
+Bounded Type-ID lineage is checked from actual creation/replacement transactions;
+this is policy-authorized byte consistency, not independent chain inclusion
+evidence. The maintainer waived #28 and #29's external
 audit requirement on [2026-10-11](CELLSCRIPT_0_32_IMPLEMENTATION.md#maintainer-decision--2026-10-11-28-external-audit);
 technical acceptance and independent artifact checking remain required. Companion records:
 [receipt contract](CELLSCRIPT_OPEN_INTERFACE_RECEIPT.md),
@@ -37,18 +36,45 @@ concrete skeleton inputs, outputs, dependencies, headers and witnesses with the
 actual bytes before selecting a receipt. The adapter uses its existing SDK
 serializer and requires identical raw and complete transaction hashes.
 
-This profile admits one `ScriptHandle<I>` witness per Type consumer, with the
-32-byte authorization root committed in an actual input Script's args. All
-policy members retain the checked finite Type-policy profile. The consumer
-must unconditionally require membership in its typed entry block. A selection
-also requires that block's action to be the actual independently checked
-single Type entry with the canonical `WitnessArgs.input_type` placement. A
-different declared action cannot stand in for the running entry. The selection
+Admission accepts one `ScriptHandle<I>` or `VerifierHandle<I>` witness per
+single-entry Lock or Type consumer, with the 32-byte authorization root committed
+in an actual input Script's args. The consumer must unconditionally require
+membership in its typed entry block. The independent checker verifies the
+entire actual entry wrapper, bounded WitnessArgs normalization, CSARG magic,
+exact width, argument reception and terminating rejection paths. The declared
+entry must be the actual entry with canonical `WitnessArgs.input_type` placement;
+another retained label cannot stand in for it. The selection
 binds the provider's exact admitted module, source receipt, complete Script,
 network and actual direct code dependency. The complete selected peer group
 and its canonical policy witness are derived from the transaction. At most
 32 bindings, 64 direct dependencies and 256 inputs/outputs/witnesses are
 accepted; input bytes are bounded before parsing to 4 MiB each and 16 MiB total.
+
+| Selected participant | Independent codec and execution obligation |
+| --- | --- |
+| Type policy | Existing finite CSPOL dispatch, scalar parameters, unit results and exact group cardinalities |
+| Single Type action | Canonical CSARG scalar parameters, unit result and complete input/output Type group |
+| Single Lock | Canonical CSARG scalar parameters, boolean result and complete input Lock group; output Locks never constitute execution |
+| Spawned verifier | Parameterless single Type entry, exact selected direct dependency and checked unconditional SPAWN/WAIT after membership |
+
+Every profile checks the complete public interface, including nested unsigned
+nominal layouts, callable availability, witness ABI, effects, target and source
+codec. Public scalar parameters are u8/u16/u32/u64/i32; directly decoded Cell
+parameters use the checked flat unsigned layout. Public constants require the
+independently re-evaluated bounded u64/bool initializer grammar. Executable
+generic instances, dynamic/wide entry codecs, output serialization and arbitrary
+argv decoders remain fail-closed. Generic handles are nominal in `I`; they do
+not promise an executable codec for every DSL type.
+
+Verifier admission creates no fictional child Script group. The child inherits
+the consumer Script/group context and accesses the same transaction, as defined
+by the pinned CKB scheduler. Its parameterless wrapper does not decode argv as
+positional arguments. The checker proves the complete bounded hex4 helper,
+selected dependency index, SPAWN and WAIT syscall arguments, and rejection of
+syscall errors or nonzero child exit. Raw, conditional, mismatched or multiple
+unbound spawns retain the existing runtime-required obligation. The invocation
+record binds the consumer, child receipt, dependency and complete transaction;
+it explicitly leaves `vm_execution_claimed = false` until actual execution.
 
 `ckb::require_open_script_participant_from_args(dep, handle, subject)` adds a
 read-only complete-Script observation using `InputView<T>` or `OutputView<T>`.
@@ -71,7 +97,8 @@ or grants lifecycle authority through a foreign observation.
 | Claim | Boundary |
 | --- | --- |
 | Membership, committed root, selected code bytes/OutPoint, optional observed Script identity | `checked_by_current_script` |
-| Selected participant's own predicates, data decoding and lifecycle rules | `required_peer_script_group` |
+| Selected Script participant's own predicates, data decoding and lifecycle rules | `required_peer_script_group` |
+| Spawned verifier's own predicates and inherited transaction decoding | `checked_by_bundle_dry_run` (requires actual child execution) |
 | Every Script group succeeds over the materialized bytes | `checked_by_bundle_dry_run` (not established by the offline report) |
 | Input liveness, network consensus admission and committed transaction | `guaranteed_only_by_ckb_consensus` |
 
@@ -86,8 +113,12 @@ while a post-signing witness change fails the Lock group. The adapter also
 rejects changed bytes against the original signing preparation. These local
 fixtures do not establish live-network observations or transaction inclusion.
 `tests/exact_script_handles.rs` covers runtime source/identity substitutions.
-General Lock/verifier admission and general codec closure remain unfinished;
-these bounded tests do not close #28 or #29.
+`open_lock_and_verifier_profiles_materialize_and_execute_identical_transactions`
+adds the 16 O0–O3 combinations of Lock/Type consumers and Lock/verifier
+participants. It compares native/CLI reports, generated TypeScript witness
+bytes and SDK transactions, executes every actual group, rejects a false Lock
+predicate and propagates a failing child's exit. Rebound role, dependency,
+group, claim-boundary and child-exit-machine substitutions reject independently.
 
 ### CLI and generated witness transport
 
@@ -153,7 +184,7 @@ separately and retained in the immutable membership result.
    package display names and producer flags cannot supply it. Implemented for
    host receipts via source receipts and projection identities. Nominal
    `ScriptHandle<I>`/`VerifierHandle<I>` witnesses use imported module markers;
-   complete receipt-to-consumer admission remains H2.
+   native receipt-to-consumer admission verifies the defining owner and all members.
 2. **Bounded authorization set.** 1–32 canonically ordered members over a
    depth-five tree with a 656-byte selection; duplicate receipts (including
    same hash with differing fields) reject at wire construction. Implemented.
@@ -162,7 +193,8 @@ separately and retained in the immutable membership result.
    authenticated root invalidates old selection witnesses. Live revocation
    requires a separately authenticated policy-state contract and is out of
    scope for this record. Constant roots and exactly 32-byte current-Script
-   args are supported by the runtime helpers; policy-state updates remain H2.
+   args are supported by runtime helpers. Authenticated mutable policy-state
+   updates are outside this immutable-snapshot contract.
 4. **Exact and compatible selection.** Exact mode requires the named receipt
    present in the set. Compatible mode requires an active member within the
    closed floor/policy-sequence interval plus independently checked
@@ -182,8 +214,9 @@ separately and retained in the immutable membership result.
    codecs, effects, capabilities, target profile, runtime ABI and builder
    requirements are compared field-wise under a conservative relation with
    candidate-only additions permitted. Unclassified changes reject. The
-   implemented finite profile covers unit results, bounded scalar parameters
-   and flat unsigned Cell layouts. Public constants require independently
+   admitted profiles cover unit Type results, boolean Lock results, bounded
+   scalar parameters, nested unsigned public layouts and flat unsigned Cell
+   decoders. Public constants require independently
    re-evaluated value evidence; unsupported values reject. Uninstantiated
    generics stay declaration-only.
 
@@ -192,7 +225,7 @@ separately and retained in the immutable membership result.
 | # | Adversary action | Enforcing boundary | State |
 | --- | --- | --- | --- |
 | T1 | Producer asserts compatibility without evidence | Checker recomputes every receipt field from the actual bundle; no producer flag is read | Enforced (finite profile) |
-| T2 | Builder substitutes artifact, CellDep, Script or transaction after checking | `check_unchanged_inputs` rechecks bundle/RawTransaction/output index/Script; direct-dependency snapshot binds exact creation OutPoint and every supplied Cell | Enforced host-side; runtime helpers bind actual code bytes and exact OutPoint under a bounded direct-dependency profile; full transaction admission remains H2 |
+| T2 | Builder substitutes artifact, CellDep, Script or transaction after checking | `check_unchanged_inputs` rechecks bundle/RawTransaction/output index/Script; direct-dependency snapshot binds exact creation OutPoint and every supplied Cell | Enforced in native admission, CLI reconstruction and adapter materialization; runtime binds selected code and exact OutPoint |
 | T3 | Witness authorizes its own policy root | Expected root supplied separately from the membership proof; runtime roots are compile-time constants or exactly 32 bytes of committed current-Script args | Wire separation and constant/args-root membership enforced; controlled-state updates remain pending |
 | T4 | Downgrade to an older or incompatible-major version | SemVer precedence for selectable members, floors, exact-mode receipt pinning; unselectable history stays fully checked | Enforced as declared snapshot facts |
 | T5 | Yank bypass or stale-snapshot confusion | Yanked/below-floor members committed but unselectable; immutable root ignores later Registry changes; changing the root invalidates old witnesses | Enforced |
@@ -205,10 +238,9 @@ separately and retained in the immutable membership result.
 | T12 | Demand live revocation from an offline snapshot | Explicit non-goal; requires an authenticated policy-state transition contract | Out of scope, documented |
 | T13 | Claim behavioral equivalence from API compatibility | Body predicates are outside the projection; two artifacts with identical API projections and different behavior are both admissible | Non-goal by contract |
 
-## Residual risks before stable admission
+## Profile limits and residual risks
 
-Unimplemented surfaces are residual risk until H1/H2 complete: the finite
-profile excludes unsupported constant/codec shapes and executable generics, so
+The finite profiles exclude unsupported constant/codec shapes and executable generics, so
 interfaces outside that profile cannot be admitted at all (fail-closed) rather
 than weakly checked. CKB-VM helpers enforce membership, exact receipt selection, active status and
 admission-sequence bounds against a constant or committed-args root. They bind
@@ -217,13 +249,15 @@ The direct-dependency profile rejects groups, ambiguity and counts over 64.
 Complete interface receipt admission and historical-chain inclusion are not
 inferred from this runtime check. Native filesystem reads are not sandboxed
 against concurrent hostile file replacement; snapshot comparison detects
-changes but provides no allocation guarantee. The bounded Type-policy
-integration above establishes generated-builder/ProtocolBundle byte parity;
-general Lock/verifier admission and codec coverage remain unfinished.
-First-slice VM tests enforce a 3,000,000-cycle action ceiling and fixed
-664-byte witness payload; a complete worst-case admission resource corpus
-remains pending. External human review for #28 was waived on 2026-10-11; that
-decision does not resolve these technical risks or claim an audit occurred.
+changes but provides no concurrent-filesystem isolation guarantee. The native
+profiles above establish generated-builder/ProtocolBundle byte parity.
+VM tests enforce a 3,000,000-cycle ceiling and fixed 664-byte handle payload;
+the 64-dependency boundary corpus covers bounded dependency traversal. Single
+entry decoding uses a 5,376-byte wrapper frame and a 4,096-byte witness ceiling;
+the SPAWN/WAIT hex4 helper uses a 624-byte frame and at most 256 input bytes
+(512 hex digits plus terminator). These are checked transport bounds, not a
+cycle guarantee for arbitrary participant predicates. External human review was
+waived on 2026-10-11; no audit or live-network inclusion is claimed.
 
 ## Evidence index
 

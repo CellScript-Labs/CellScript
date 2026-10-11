@@ -2784,11 +2784,12 @@ impl<'a> TypeChecker<'a> {
                 ));
             }
             self.validate_type(&param.ty)?;
-            // Action witness parameters are the entry-ABI position for the
+            // Action and Lock witness parameters are the entry-ABI position for the
             // bounded 656-byte handle encoding; every other parameter kind
             // and callable class stays identity-only.
-            let witness_admitted =
-                matches!(param.source, ParamSource::Witness) && callable_kind == "action" && self.is_open_handle_type(&param.ty);
+            let witness_admitted = matches!(param.source, ParamSource::Witness)
+                && matches!(callable_kind, "action" | "lock")
+                && self.is_open_handle_type(&param.ty);
             if !witness_admitted {
                 self.reject_open_handle_value_type(
                     &param.ty,

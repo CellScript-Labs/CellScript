@@ -246,7 +246,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
-const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v68-0.32-open-participant-observation";
+const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v69-0.32-open-lock-entry";
 pub const METADATA_SCHEMA_VERSION: u32 = 72;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 2;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -12394,14 +12394,19 @@ fn body_verifier_obligations(
             );
         }
         if access.operation == "spawn-wait-checked" {
+            let open_bound = body_open_verifier_spawn_is_bound(body);
             push_verifier_obligation(
                 &mut obligations,
                 &mut seen,
                 &scope,
                 "spawn-delegation",
                 "spawn-target-and-checked-child-exit",
-                "runtime-required",
-                "SPAWN and WAIT require a successful child exit before continuing parent checks; artifact validation does not authenticate or prove the selected external CellDep verifier",
+                if open_bound { "checked-runtime" } else { "runtime-required" },
+                if open_bound {
+                    "Committed-args VerifierHandle membership binds the exact direct CellDep before SPAWN; WAIT checks child exit before continuation. Child interface admission requires the private ProtocolBundle receipt; this does not claim behavioral equivalence or consensus acceptance"
+                } else {
+                    "SPAWN and WAIT require a successful child exit before continuing parent checks; artifact validation does not authenticate or prove the selected external CellDep verifier"
+                },
             );
         }
     }
@@ -12470,6 +12475,49 @@ fn body_verifier_obligations(
     }
 
     obligations
+}
+
+/// Only straight-line entry-block membership followed by the same fixed direct
+/// dependency may discharge target/exit binding. Every raw spawn in the body
+/// must be covered; conditional or mixed delegation retains the existing gap.
+fn body_open_verifier_spawn_is_bound(body: &ir::IrBody) -> bool {
+    use ir::{IrConst, IrInstruction, IrOperand, IrType};
+    let Some(entry) = body.blocks.first() else { return false };
+    let raw = body
+        .blocks
+        .iter()
+        .flat_map(|b| &b.instructions)
+        .filter(|op| matches!(op, IrInstruction::Call { func, .. } if func == "__ckb_spawn_wait_cell_dep_hex4"))
+        .count();
+    if raw != 1 {
+        return false;
+    }
+    let mut views = BTreeMap::new();
+    let mut checked = BTreeSet::new();
+    let mut covered = 0;
+    for op in &entry.instructions {
+        let IrInstruction::Call { dest, func, args } = op else { continue };
+        if func == "__ckb_source_cell_dep" {
+            if let (Some(dest), Some(IrOperand::Const(IrConst::U64(index)))) = (dest, args.first())
+                && *index < 64
+            {
+                views.insert(dest.id, *index);
+            }
+        } else if func == "__ckb_require_cell_dep_open_verifier_handle_from_args" {
+            if let [IrOperand::Var(view), IrOperand::Var(handle)] = args.as_slice()
+                && matches!(&handle.ty, IrType::Named(name) if name.starts_with("VerifierHandle<"))
+                && let Some(index) = views.get(&view.id)
+            {
+                checked.insert(*index);
+            }
+        } else if func == "__ckb_spawn_wait_cell_dep_hex4"
+            && let Some(IrOperand::Const(IrConst::U64(index))) = args.first()
+            && checked.contains(index)
+        {
+            covered += 1;
+        }
+    }
+    covered == raw
 }
 
 struct StaticResourceOperationCheck {

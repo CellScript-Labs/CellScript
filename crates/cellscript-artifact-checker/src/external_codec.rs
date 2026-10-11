@@ -130,8 +130,9 @@ fn invalid(message: impl Into<String>) -> CheckerError {
     CheckerError::new(CheckerRejectionCode::V2420TypedMachineBindingInvalid, format!("fixed external codec: {}", message.into()))
 }
 
-/// The initial profile accepts policy-witness-v1, unit results, no output Cell
-/// serialization, and at most one directly bound flat unsigned Cell per entry.
+/// Profiles accept policy-witness-v1 or single-entry dispatch, unit Type results
+/// or boolean Lock results, no output serialization, and at most one directly
+/// bound flat unsigned Cell per entry.
 /// Every concrete public callable must actually be externally dispatched;
 /// generic declarations remain explicitly non-executable. Missing, pruned or
 /// retained-helper ABI evidence fails closed instead of completing a receipt.
@@ -142,12 +143,18 @@ pub fn check_fixed_external_codec(
     let parameters = check_fixed_policy_parameter_decoders(bundle[0], bundle[1], bundle[2], bundle[3], budgets)?;
     let inspection = inspect_bundle(bundle[0], bundle[1], bundle[2], bundle[3], budgets)?;
     let typed = inspection.effective();
-    let EntryDispatchContract::PolicyWitnessV1(policy) = &typed.foundation.entry_contract.dispatch else {
-        return Err(invalid("requires independently checked policy-witness-v1 dispatch"));
+    let contract = &typed.foundation.entry_contract;
+    let single = matches!(contract.dispatch, EntryDispatchContract::SingleEntry);
+    let variants = match &contract.dispatch {
+        EntryDispatchContract::PolicyWitnessV1(policy) => {
+            if !policy.common_checks.is_empty() {
+                return Err(invalid("common-check call ABI lacks this finite profile"));
+            }
+            policy.variants.iter().map(|v| (v.entry_id.as_str(), Some(v.tag))).collect::<Vec<_>>()
+        }
+        EntryDispatchContract::SingleEntry => vec![(contract.exact_entry.as_str(), None)],
+        _ => return Err(invalid("requires independently checked fixed dispatch")),
     };
-    if !policy.common_checks.is_empty() {
-        return Err(invalid("common-check call ABI lacks this finite profile"));
-    }
     let mut callables = Vec::new();
     let mut external = BTreeSet::new();
     for declaration in &inspection.declared().callables {
@@ -170,23 +177,24 @@ pub fn check_fixed_external_codec(
             .iter()
             .find(|entry| entry.name == declaration.name)
             .ok_or_else(|| invalid(format!("public callable is not executable: {}", declaration.identity)))?;
-        let variants = policy.variants.iter().filter(|variant| variant.entry_id == entry.id).collect::<Vec<_>>();
-        if variants.len() != 1
-            || entry.return_type != "unit"
-            || declaration.return_type.as_deref().is_some_and(|ty| ty != "unit")
+        let matching = variants.iter().filter(|(id, _)| *id == entry.id).collect::<Vec<_>>();
+        let result_type = if single && contract.script_role == "lock" { "bool" } else { "unit" };
+        if matching.len() != 1
+            || entry.return_type != result_type
+            || declaration.return_type.as_deref().is_some_and(|ty| ty != result_type)
             || !declaration.outputs.is_empty()
         {
-            return Err(invalid("public callable requires exactly one dispatch tag, unit return and no serialized outputs"));
+            return Err(invalid("public callable requires exactly one dispatch, role-specific return and no serialized outputs"));
         }
         external.insert(entry.id.as_str());
         callables.push(Callable {
             declaration: declaration.identity.clone(),
             entry: Some(entry.id.clone()),
-            tag: Some(variants[0].tag),
-            availability: "external-policy-entry",
+            tag: matching[0].1,
+            availability: if single { "external-single-entry" } else { "external-policy-entry" },
         });
     }
-    if policy.variants.iter().any(|variant| !external.contains(variant.entry_id.as_str())) {
+    if variants.iter().any(|(id, _)| !external.contains(id)) {
         return Err(invalid("dispatch contains an entry outside the checked public contract"));
     }
     let catalog = typed.nominal_declarations.as_ref().ok_or_else(|| invalid("missing checked source declaration catalog"))?;
@@ -249,9 +257,8 @@ pub fn check_fixed_external_codec(
         }
     }
     let mut cells = Vec::new();
-    for variant in &policy.variants {
-        let entry =
-            typed.entries.iter().find(|entry| entry.id == variant.entry_id).ok_or_else(|| invalid("missing actual dispatch entry"))?;
+    for (id, _) in &variants {
+        let entry = typed.entries.iter().find(|entry| entry.id == *id).ok_or_else(|| invalid("missing actual dispatch entry"))?;
         if entry.cell_bindings.len() > 1 {
             return Err(invalid("this initial profile permits at most one directly bound Cell per entry"));
         }
@@ -284,14 +291,13 @@ pub fn check_fixed_external_codec(
     };
     let lowering: crate::VerifiedLoweringRecord = serde_json::from_slice(bundle[2]).map_err(|error| invalid(error.to_string()))?;
     let elf = crate::parse_elf(bundle[0], budgets.instructions).map_err(|error| invalid(error.to_string()))?;
-    for variant in &policy.variants {
-        let entry =
-            typed.entries.iter().find(|entry| entry.id == variant.entry_id).ok_or_else(|| invalid("missing dispatch owner"))?;
+    for (id, _) in &variants {
+        let entry = typed.entries.iter().find(|entry| entry.id == *id).ok_or_else(|| invalid("missing dispatch owner"))?;
         prologue::check(entry, typed, &lowering, &elf, fields.as_ref())?;
     }
     let record = Record {
         schema: "cellscript-fixed-external-codec-v1",
-        profile: "policy-unit-scalars-nested-unsigned-cell-v1",
+        profile: if single { "single-entry-scalars-nested-unsigned-cell-v1" } else { "policy-unit-scalars-nested-unsigned-cell-v1" },
         module_contract: parameters.module_projection().identity().into(),
         parameter_decoder: parameters.identity().into(),
         cell_fields: fields.as_ref().map(|fields| fields.identity().into()),

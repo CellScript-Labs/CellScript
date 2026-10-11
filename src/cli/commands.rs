@@ -8272,8 +8272,8 @@ fn selected_builder_actions<'a>(metadata: &'a CompileMetadata, action_name: Opti
         return Ok(vec![action]);
     }
 
-    if metadata.actions.is_empty() {
-        return Err(crate::error::CompileError::without_span("no actions found in metadata for generated builder"));
+    if metadata.actions.is_empty() && metadata.locks.is_empty() {
+        return Err(crate::error::CompileError::without_span("no actions or locks found in metadata for generated builder"));
     }
 
     Ok(metadata.actions.iter().collect())
@@ -9023,6 +9023,7 @@ fn typescript_builder_manifest(
         "cell_data_codec_manifest": metadata.cell_data_codec_manifest,
         "locked_identity": locked_identity,
         "deployment_identity": deployment_identity,
+        "locks": metadata.locks,
         "actions": actions
             .iter()
             .map(|action| {
@@ -9438,7 +9439,9 @@ export function openHandleWitnessFromCheckedBundle(
   const bindings = bundle.open_handles?.filter((value) => value.consumer === consumer.id && value.parameter === parameter) ?? [];
   if (bindings.length !== 1) throw new Error("missing or duplicate native open handle admission");
   const binding = bindings[0];
-  const hashes = [binding.source_policy, binding.selected_receipt, binding.checked_dependency, binding.checked_type_group];
+  const invocation = binding.verifier_invocation as Record<string, unknown> | undefined;
+  const hashes = [binding.source_policy, binding.selected_receipt, binding.checked_dependency,
+    invocation ? invocation.identity : binding.checked_type_group];
   if (binding.schema !== "cellscript-protocol-open-handle-v1"
     || hashes.some((value) => typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value))
     || binding.authorization_root !== consumer.deployment.script.args
@@ -9448,9 +9451,10 @@ export function openHandleWitnessFromCheckedBundle(
     || !bundle.artifacts?.some((value) => value.id === binding.participant && value.artifact_hash === binding.selected_artifact_hash)) {
     throw new Error("native open handle admission differs from the consumer root or selected participant");
   }
-  const actions = builderManifest.actions as readonly { name: string; params: readonly Record<string, unknown>[] }[];
+  const actions = (consumer.entry.kind === "lock" ? builderManifest.locks : builderManifest.actions) as readonly { name: string; params: readonly Record<string, unknown>[] }[];
   const declared = actions.find((action) => action.name === consumer.entry.name)?.params.find((value) => value.name === parameter);
-  if (!declared || declared.ty !== `ScriptHandle<${binding.interface_module}>` || declared.fixed_byte_len !== 656) {
+  const handleClass = invocation ? "VerifierHandle" : "ScriptHandle";
+  if (!declared || declared.ty !== `${handleClass}<${binding.interface_module}>` || declared.fixed_byte_len !== 656) {
     throw new Error("open handle parameter differs from the generated nominal interface");
   }
   const witnessPayload = encodeOpenHandleWitness(binding.selection as HexString);

@@ -1,4 +1,4 @@
-# Finite checked Type-policy receipt
+# Finite checked Script and verifier receipt
 
 `cellscript_artifact_checker::fixed_policy_receipt::check_fixed_policy_receipt`
 consumes the actual four-file artifact bundle, canonical RawTransaction bytes,
@@ -9,8 +9,10 @@ selection proofs; exported JSON cannot reconstruct it.
 
 Construction applies the existing six-input preflight before parsing: 4 MiB per
 file, 16 MiB shared, and caller artifact/record/source-map ceilings. It requires
-the independently checked Type-policy role and the finite
-`policy-unit-scalars-nested-unsigned-cell-v1` external profile: unit results,
+an independently checked Type or Lock role and the finite
+`policy-unit-scalars-nested-unsigned-cell-v1` or
+`single-entry-scalars-nested-unsigned-cell-v1` external profile: unit Type results,
+boolean Lock results,
 bounded scalar parameters and unsigned Cell layouts. Public layout declarations
 may compose nested ordinary struct layouts — each nested member must resolve to
 exactly one retained concrete struct layout and recursively satisfy the same
@@ -66,7 +68,10 @@ ownership and pinned chain checks remain separate native evidence. These finite
 receipts do not contain authenticated source publisher identity, version/status
 or downgrade decisions, Type replacement history, active chain VM context,
 immutable consumer authorization, nominal source `I`/handles, or H2 runtime
-checks. They do not complete H1, #28, #29 or stable admission. External human
+checks. Those obligations are composed by the native admission described in
+[design record v2](CELLSCRIPT_OPEN_HANDLE_DESIGN.md), including the parameterless
+single-entry child profile for spawned verifiers. A standalone receipt does not
+authorize a selection. External human
 review for #28 is waived by the
 [2026-10-11 decision](CELLSCRIPT_0_32_IMPLEMENTATION.md#maintainer-decision--2026-10-11-28-external-audit);
 External human review for #29 is also waived by the maintainer's 2026-10-11 decision.

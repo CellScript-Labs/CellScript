@@ -1,16 +1,18 @@
 # Compatible-open handles and transaction participants: 0.32 work plan
 
-Status: implementation plan, not an implemented language/runtime contract.
+Status: original implementation plan with the delivered profiles recorded in
+[design record v2](CELLSCRIPT_OPEN_HANDLE_DESIGN.md).
 Owners: #28 (compatible-open handles) and #29 (open roles). Implementer: Codex.
 External review for #28 and #29: waived by the maintainer on
 [2026-10-11](CELLSCRIPT_0_32_IMPLEMENTATION.md#maintainer-decision--2026-10-11-28-external-audit).
-Technical acceptance for both issues remains pending.
+The implementation covers Type-policy, single Type, single Lock and parameterless
+spawned-verifier participants, including complete transaction and execution evidence.
 The consolidated design record and threat model for these contracts live in
 [CELLSCRIPT_OPEN_HANDLE_DESIGN.md](CELLSCRIPT_OPEN_HANDLE_DESIGN.md).
 This work was promoted into 0.32 on 2026-10-04. It does not change the
 accepted exact-handle or closed-role contracts.
 
-## Evidence baseline
+## Historical evidence baseline
 
 The initial audit is against `35bf983db30aae80281f97e30bbce08a878d7c58`.
 
@@ -236,7 +238,11 @@ source catalogs, qualified ordinary layout origins and complete public sets.
 A separate symbolic checker rejects unsupported universal ability guarantees
 without inferring them from a concrete instance. See the
 [receipt contract](CELLSCRIPT_OPEN_INTERFACE_RECEIPT.md) for its exact limits.
-Full H1 receipt projection/admission and H2 runtime enforcement remain pending.
-
-No phase in this document is yet accepted. This plan identifies the work that
-remains; it is not a replacement for either issue's acceptance evidence.
+The integrated implementation now composes these prerequisites with complete
+public receipts, immutable roots, deployment/history proofs and final transaction
+admission. `tests/frozen_interface.rs` covers CLI/native/TypeScript/SDK parity,
+real signing and all-group execution; `tests/exact_script_handles.rs` covers
+on-chain identity, role, source and bounded-dependency substitutions;
+`tests/policy_artifact_checker.rs` covers independently rebound decoder mutations.
+The v2 design record defines the admitted codec limits and claim responsibilities.
+This historical plan is not a substitute for the applicable CI/backend gate logs.

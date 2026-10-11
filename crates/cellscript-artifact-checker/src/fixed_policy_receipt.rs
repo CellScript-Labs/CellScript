@@ -93,10 +93,10 @@ fn byte_hashes(bundle: ModuleBundle<'_>) -> [String; 4] {
     bundle.map(|bytes| crate::hex_encode(&crate::ckb_blake2b256(bytes)))
 }
 /// The existing six-input origin preflight enforces 4 MiB/file, shared 16 MiB
-/// and caller byte budgets before any parsing. The receipt only certifies the
-/// finite unit-result/scalar/flat-unsigned-Cell public Type-policy profile.
-/// Generic declarations remain explicitly non-executable; public constants
-/// reject because their values are not independently proven by this profile.
+/// and caller byte budgets before any parsing. The receipt certifies the finite
+/// policy or single-entry Script codec, nested unsigned public layouts and flat
+/// directly decoded Cell fields. Generic declarations remain non-executable;
+/// constants require independently re-evaluated bounded initializer evidence.
 /// Historical exact handles and broader bundle inspection remain unchanged.
 pub fn check_fixed_policy_receipt(
     bundle: ModuleBundle<'_>,
@@ -110,13 +110,17 @@ pub fn check_fixed_policy_receipt(
     // Public constants are admitted through the independently re-evaluated
     // constant-value catalog inside the finite external codec below.
     let entry_contract = &inspection.effective().foundation.entry_contract;
-    if entry_contract.script_role != "type" {
-        return Err(invalid("requires the independently checked Type-policy role; Lock/verifier receipts need another profile"));
+    if !matches!(entry_contract.script_role.as_str(), "type" | "lock") {
+        return Err(invalid("requires an independently checked Lock or Type entry"));
     }
     let codec = target.origin().codec();
     let record = Record {
         schema: "cellscript-fixed-policy-interface-receipt-v1",
-        profile: "policy-unit-scalars-nested-unsigned-cell-v1",
+        profile: if matches!(entry_contract.dispatch, crate::EntryDispatchContract::SingleEntry) {
+            "single-entry-scalars-nested-unsigned-cell-v1"
+        } else {
+            "policy-unit-scalars-nested-unsigned-cell-v1"
+        },
         declared_interface: inspection.declared().clone(),
         entry_contract: entry_contract.clone(),
         module_contract: codec.parameters().module_projection().identity().into(),

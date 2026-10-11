@@ -1,4 +1,4 @@
-//! Host byte consistency for a direct data2 Type group and complete witnesses.
+//! Host byte consistency for a checked direct Script group and complete witnesses.
 //! Supplied inputs are not authenticated resolution, liveness or signatures.
 use super::{molecule, CheckedDirectCodeDependency, SuppliedDependencyCell};
 use crate::fixed_policy_receipt::CheckedFixedPolicyReceipt;
@@ -194,19 +194,42 @@ pub fn check_direct_type_group(
     supplied: &SuppliedTypeGroupTransaction<'_>,
     budgets: &CheckerBudgets,
 ) -> Result<CheckedDirectTypeGroup, CheckerError> {
+    if receipt.entry_contract().script_role != "type" {
+        return Err(invalid("Type-group checking cannot admit a Lock receipt"));
+    }
+    check_direct_script_group(receipt, dependency, supplied, budgets)
+}
+
+/// Derive an entire Lock or Type group from the selected receipt's actual
+/// entry role. Lock outputs never form an executable group. Single-entry
+/// witnesses use the independently checked CSARG decoder, while policy
+/// variants retain their exact tag and cardinality checks.
+pub fn check_direct_script_group(
+    receipt: &CheckedFixedPolicyReceipt,
+    dependency: CheckedDirectCodeDependency,
+    supplied: &SuppliedTypeGroupTransaction<'_>,
+    budgets: &CheckerBudgets,
+) -> Result<CheckedDirectTypeGroup, CheckerError> {
     preflight(supplied, budgets)?;
     if receipt.target_origin().identity() != dependency.target_identity() {
         return Err(invalid("dependency belongs to a different actual target receipt; bind the exact selected receipt"));
     }
     let entry = receipt.entry_contract();
-    let EntryDispatchContract::PolicyWitnessV1(contract) = &entry.dispatch else {
-        return Err(invalid("requires the checked Type-policy dispatch"));
+    let contract = match &entry.dispatch {
+        EntryDispatchContract::PolicyWitnessV1(contract) => Some(contract),
+        EntryDispatchContract::SingleEntry => None,
+        _ => return Err(invalid("requires an independently checked fixed dispatch")),
     };
-    if entry.script_role != "type"
-        || entry.entry_payload_abi != crate::POLICY_PAYLOAD_ABI
-        || entry.witness_placement_abi != crate::POLICY_PLACEMENT_ABI
-        || entry.witness_placement_field != "input_type"
-        || entry.witness_placement_source != crate::POLICY_WITNESS_SOURCE
+    let lock = entry.script_role == "lock";
+    if !matches!(entry.script_role.as_str(), "type" | "lock") {
+        return Err(invalid("receipt has no executable Script group role"));
+    }
+    if contract.is_some()
+        && (entry.script_role != "type"
+            || entry.entry_payload_abi != crate::POLICY_PAYLOAD_ABI
+            || entry.witness_placement_abi != crate::POLICY_PLACEMENT_ABI
+            || entry.witness_placement_field != "input_type"
+            || entry.witness_placement_source != crate::POLICY_WITNESS_SOURCE)
     {
         return Err(invalid("unsupported selected role or witness placement; use the checked Type-policy profile"));
     }
@@ -231,7 +254,11 @@ pub fn check_direct_type_group(
     for (index, input) in raw.inputs.chunks_exact(44).enumerate() {
         let point: [u8; 36] = input[8..].try_into().expect("checked input width");
         let output = cells.get(&point).ok_or_else(|| invalid("missing referenced input Cell or extra supplied input"))?;
-        if output.type_script.as_ref().is_some_and(|script| hash(script.bytes) == selected_hash) {
+        if if lock {
+            hash(output.lock.bytes) == selected_hash
+        } else {
+            output.type_script.as_ref().is_some_and(|script| hash(script.bytes) == selected_hash)
+        } {
             group_inputs.push(index);
         }
     }
@@ -240,7 +267,7 @@ pub fn check_direct_type_group(
         .iter()
         .enumerate()
         .filter_map(|(index, output)| {
-            output.type_script.as_ref().is_some_and(|script| hash(script.bytes) == selected_hash).then_some(index)
+            (!lock && output.type_script.as_ref().is_some_and(|script| hash(script.bytes) == selected_hash)).then_some(index)
         })
         .collect::<Vec<_>>();
     let (witness_source, witness_index) = if let Some(&index) = group_inputs.first() {
@@ -249,36 +276,57 @@ pub fn check_direct_type_group(
         ("group-output[0]", index)
     } else {
         return Err(invalid(
-            "selected complete Type Script has no input or output group; Lock/code-hash-only matches cannot substitute",
+            "selected complete Script has no executable group for its role; code-hash-only matches cannot substitute",
         ));
     };
-    let witness = *witnesses.get(witness_index).ok_or_else(|| invalid("first selected group witness is missing"))?;
-    if witness.len() > contract.max_witness_bytes as usize || witness.len() > 4096 {
+    let decoder = receipt.target_origin().origin().codec().parameters();
+    let payload_free = contract.is_none() && decoder.check_payload(0, &[]).is_ok();
+    let witness = if payload_free {
+        &[][..]
+    } else {
+        *witnesses.get(witness_index).ok_or_else(|| invalid("first selected group witness is missing"))?
+    };
+    if witness.len() > contract.map_or(4096, |c| c.max_witness_bytes as usize) || witness.len() > 4096 {
         return Err(invalid("selected WitnessArgs exceeds the checked policy limit"));
     }
-    let witness_fields = molecule::fields(witness, 3)?;
-    for field in &witness_fields {
-        if !field.is_empty() {
-            molecule::fixed(field, 1, 4096)?;
+    let bundle = if payload_free {
+        &[][..]
+    } else {
+        let witness_fields = molecule::fields(witness, 3)?;
+        for field in &witness_fields {
+            if !field.is_empty() {
+                molecule::fixed(field, 1, 4096)?;
+            }
         }
-    }
-    if witness_fields[1].is_empty() {
-        return Err(invalid("selected WitnessArgs.input_type is absent"));
-    }
-    let bundle = molecule::fixed(witness_fields[1], 1, 4076)?;
-    let (tag, args) = policy_request(bundle, selected_hash)?;
-    let variant = contract
-        .variants
-        .iter()
-        .find(|variant| variant.tag == tag)
-        .ok_or_else(|| invalid("selected tag is outside the checked artifact dispatch"))?;
-    if group_inputs.len() != variant.input_count as usize || group_outputs.len() != variant.output_count as usize {
-        return Err(invalid("selected Type group cardinality differs from the checked action; bind every group Cell"));
-    }
-    receipt.target_origin().origin().codec().parameters().check_payload(tag, args)?;
+        if witness_fields[1].is_empty() {
+            return Err(invalid("selected WitnessArgs.input_type is absent"));
+        }
+        molecule::fixed(witness_fields[1], 1, 4076)?
+    };
+    let (tag, args) = if let Some(contract) = contract {
+        let (tag, args) = policy_request(bundle, selected_hash)?;
+        let variant = contract
+            .variants
+            .iter()
+            .find(|variant| variant.tag == tag)
+            .ok_or_else(|| invalid("selected tag is outside the checked artifact dispatch"))?;
+        if group_inputs.len() != variant.input_count as usize || group_outputs.len() != variant.output_count as usize {
+            return Err(invalid("selected Type group cardinality differs from the checked action; bind every group Cell"));
+        }
+        (tag, args)
+    } else {
+        (0, bundle)
+    };
+    decoder.check_payload(tag, args)?;
     let record = Record {
         schema: "cellscript-direct-type-group-v1",
-        profile: "data2-direct-supplied-type-policy-group-v1",
+        profile: if contract.is_some() {
+            "data2-direct-supplied-type-policy-group-v1"
+        } else if lock {
+            "direct-supplied-single-lock-group-v1"
+        } else {
+            "direct-supplied-single-type-group-v1"
+        },
         fixed_receipt: receipt.identity().into(),
         checked_dependency: dependency.identity().into(),
         full_transaction_hash: hash(supplied.full_transaction),

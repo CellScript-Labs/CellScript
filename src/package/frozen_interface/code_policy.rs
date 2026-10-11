@@ -231,8 +231,9 @@ fn freeze_policy(
         return Err(invalid("code policy must bind exactly every checked catalog candidate"));
     }
     let header = policy.header();
-    if header.class != HandleClass::Script || header.role != ScriptRole::Type {
-        return Err(invalid("code policy bindings require the checked finite Type-policy role"));
+    let verifier = header.class == HandleClass::Verifier && header.role == ScriptRole::SpawnedVerifier;
+    if !verifier && (header.class != HandleClass::Script || !matches!(header.role, ScriptRole::Type | ScriptRole::Lock)) {
+        return Err(invalid("code policy bindings require a checked Script role"));
     }
     let required = sources.catalog().required();
     let runtime = required.projection().runtime_contract();
@@ -279,6 +280,11 @@ fn freeze_policy(
             return Err(invalid("code policy repeats a checked catalog candidate"));
         }
         let candidate = &candidates[index];
+        let role = candidate.receipt().entry_contract().script_role.as_str();
+        let child = verifier && role == "type" && candidate.origin().codec().parameters().parameterless_single_entry();
+        if !child && (verifier || !matches!((header.role, role), (ScriptRole::Type, "type") | (ScriptRole::Lock, "lock"))) {
+            return Err(invalid("policy role differs from the independently checked entry role"));
+        }
         let origin = candidate.origin();
         let deployment_valid = match origin.selected_hash_type() {
             4 => {

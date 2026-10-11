@@ -11,7 +11,9 @@ pub use dependency::{
     check_direct_code_dependency, check_direct_code_dependency_with_history, CheckedDirectCodeDependency, SuppliedDependencyCell,
 };
 mod type_group;
-pub use type_group::{check_direct_type_group, CheckedDirectTypeGroup, SuppliedInputCell, SuppliedTypeGroupTransaction};
+pub use type_group::{
+    check_direct_script_group, check_direct_type_group, CheckedDirectTypeGroup, SuppliedInputCell, SuppliedTypeGroupTransaction,
+};
 mod target;
 pub use target::{check_code_cell_target, CheckedTargetCodeCellOrigin};
 mod transaction;
@@ -21,6 +23,9 @@ pub use transaction::{
 };
 mod history;
 pub use history::{check_type_code_history, CheckedTypeCodeHistory, TypeCodeHistoryStep};
+mod verifier;
+pub(crate) use verifier::validate_claims as validate_open_verifier_claims;
+pub use verifier::{check_open_verifier_invocation, CheckedOpenVerifierInvocation, OpenVerifierInvocation};
 
 #[derive(Debug)]
 pub struct CheckedCodeCellOrigin {

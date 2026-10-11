@@ -1238,6 +1238,9 @@ fn validate_builder_manifest(input: &ProtocolArtifactInput, metadata: &CompileMe
             }
         }
     }
+    if input.entry.kind == ProtocolEntryKind::Lock && manifest.get("locks") != Some(&serde_json::to_value(&metadata.locks)?) {
+        return Err(CompileError::without_span("generated Lock builder manifest differs from the checked Lock ABI"));
+    }
     canonical_hash("cellscript-generated-action-builder-v0.23-edition-2026", &manifest)
         .map_err(|error| CompileError::without_span(format!("failed to hash builder manifest for '{}': {error}", input.id)))
 }

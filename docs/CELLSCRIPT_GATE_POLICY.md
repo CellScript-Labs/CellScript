@@ -828,13 +828,17 @@ tests do not replace `dev`; runtime-adapter, CKB-VM, and chain evidence remain
 outside the current command.
 
 On the 0.32 development branch, `--open-admission OPEN_JSON` additionally
-recompiles frozen source packages, independently checks every finite Type-policy
+recompiles frozen source packages, independently checks every admitted Script/verifier
 member and compares the complete supplied transaction with the bundle skeleton.
 It produces the same report as the private native admission API. Input format,
 bounds and claim limits are in the
 [open-handle design](CELLSCRIPT_OPEN_HANDLE_DESIGN.md#cli-and-generated-witness-transport).
-This option performs no signing, network resolution or VM execution. General
-Lock/verifier receipt admission remains outside this bounded profile. Changes
+This option performs no signing, network resolution or VM execution. Profiles
+include Type-policy, single Type/Lock entries and parameterless spawned verifiers.
+Verifier admission independently checks the actual unconditional SPAWN/WAIT
+machine path after membership; the report still does not claim child execution.
+`gen-builder` emits Lock declarations and transports either nominal handle class
+through the same canonical witness codec. Changes
 to its runtime helpers require the backend gate; merge-readiness still requires
 the complete `ci` gate.
 

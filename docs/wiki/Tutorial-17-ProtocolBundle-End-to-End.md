@@ -265,3 +265,24 @@ For the complete field and conflict contract, read
 [CellScript ProtocolBundle v1](../CELLSCRIPT_PROTOCOL_BUNDLE.md). For deployment
 and node adapter details, read the
 [CKB adapter contract](../CELLSCRIPT_CKB_ADAPTER.md).
+
+## Open selection on the 0.32 development branch
+
+Use `cellc protocol bundle check bundle.json --open-admission open.json --output report.json --json`
+to reconstruct private source receipts and bind a selected participant before
+materialization. Generated builders for actions and Locks expose
+`openHandleWitnessFromCheckedBundle(report, consumer, parameter)`; its 664-byte
+payload contains the exact 656-byte selection under the committed args root.
+The native checker, CLI, generated helper and SDK must agree on the complete
+transaction bytes. Changing the final witness requires fresh admission and signing.
+
+Both Lock and Type consumers may select checked Type-policy, single Type/Lock
+participants or parameterless spawned verifiers. The latter require an explicit
+unconditional `ckb::spawn_wait_cell_dep_hex4` of the selected dependency after
+`ckb::require_cell_dep_open_verifier_handle_from_args`. The checker verifies
+dependency and child-exit binding; only execution establishes that the child
+succeeded. The child has the consumer's transaction/Script context, not a peer
+Script group. An observed foreign Cell never grants local lifecycle authority.
+
+The complete input schema, admitted codecs, fail-closed limits and tests are in
+the [open-handle design](../CELLSCRIPT_OPEN_HANDLE_DESIGN.md).

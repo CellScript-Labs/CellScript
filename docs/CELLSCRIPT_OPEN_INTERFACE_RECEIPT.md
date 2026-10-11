@@ -1,14 +1,19 @@
 # Checked compatible-interface receipt contract
 
-Status: draft implementation input for #28, following the
+Status: receipt contract and prerequisite history for #28, following the
 [open-participant plan](CELLSCRIPT_OPEN_PARTICIPANTS_PLAN.md). The
 consolidated design record and threat model live in
 [CELLSCRIPT_OPEN_HANDLE_DESIGN.md](CELLSCRIPT_OPEN_HANDLE_DESIGN.md).
 Implementer: Codex.
 External review for #28: waived by the maintainer on
 [2026-10-11](CELLSCRIPT_0_32_IMPLEMENTATION.md#maintainer-decision--2026-10-11-28-external-audit).
-Independent artifact checking remains required. This document does not admit a source
-handle, prove executable template instances, or authorize a deployment.
+Independent artifact checking remains required. The current composed admission
+contract, including Lock and spawned-verifier profiles, is
+[design record v2](CELLSCRIPT_OPEN_HANDLE_DESIGN.md). The prerequisite sections
+below retain their original local proof boundaries: statements that a particular
+prerequisite does not complete H1/H2 describe that component alone, not the
+current integrated path. A receipt alone does not authorize a deployment or prove
+executable template instances.
 
 ## Interface identity and evidence
 

@@ -289,6 +289,7 @@ pub fn check_bundle_values(
     validate_bounded_group_input_machine_contract(record, &elf)?;
     validate_bounded_output_plan_machine_contract(metadata, record, &elf)?;
     validate_policy_dispatch_machine_contract(record, &elf)?;
+    crate::code_origin::validate_open_verifier_claims(record, &elf)?;
     validate_source_map(source_map, record, artifact, &elf)?;
 
     Ok(CheckerReport {

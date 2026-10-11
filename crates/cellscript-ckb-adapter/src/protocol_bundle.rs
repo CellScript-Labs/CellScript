@@ -614,8 +614,13 @@ fn validate_open_materialization(bundle: &BundleWire, tx: &TransactionView) -> R
     }
     let mut seen = HashSet::new();
     for binding in &bundle.open_handles {
+        let verifier = binding.verifier_invocation.is_some();
         if binding.claim_boundaries
-            != cellscript_artifact_checker::code_origin::OpenHandleClaimBoundaries::for_observation(binding.observation.is_some())
+            != if verifier {
+                cellscript_artifact_checker::code_origin::OpenHandleClaimBoundaries::for_verifier()
+            } else {
+                cellscript_artifact_checker::code_origin::OpenHandleClaimBoundaries::for_observation(binding.observation.is_some())
+            }
         {
             bail!("open receipt cannot promote peer, execution or consensus claims into local authority");
         }
@@ -635,8 +640,10 @@ fn validate_open_materialization(bundle: &BundleWire, tx: &TransactionView) -> R
             .iter()
             .find(|a| a.id == binding.participant)
             .ok_or_else(|| anyhow::anyhow!("open participant is absent"))?;
-        if !matches!(consumer.script_role, ScriptRoleWire::Type) || !matches!(provider.script_role, ScriptRoleWire::Type) {
-            bail!("open receipt requires admitted Type consumer and participant groups");
+        if !matches!(consumer.script_role, ScriptRoleWire::Type | ScriptRoleWire::Lock)
+            || verifier != matches!(provider.script_role, ScriptRoleWire::SpawnedVerifier)
+        {
+            bail!("open receipt requires admitted Script consumer and participant groups");
         }
         let root = parse_byte32("open authorization root", &binding.authorization_root)?;
         let selection = parse_hex("open selection", &binding.selection)?;
@@ -644,8 +651,13 @@ fn validate_open_materialization(bundle: &BundleWire, tx: &TransactionView) -> R
         let member = membership.member();
         let provider_script = parse_script("open participant", &provider.deployment.script)?;
         let consumer_script = parse_script("open consumer", &consumer.deployment.script)?;
-        if membership.header().class != HandleClass::Script
-            || membership.header().role != ScriptRole::Type
+        if membership.header().class != if verifier { HandleClass::Verifier } else { HandleClass::Script }
+            || membership.header().role
+                != match provider.script_role {
+                    ScriptRoleWire::Lock => ScriptRole::Lock,
+                    ScriptRoleWire::Type => ScriptRole::Type,
+                    ScriptRoleWire::SpawnedVerifier => ScriptRole::SpawnedVerifier,
+                }
             || membership.header().network_genesis != parse_byte32("network", &bundle.network.genesis_hash)?
             || consumer_script.args().raw_data().as_ref() != root
             || member.receipt != parse_raw_hash32("selected receipt", &binding.selected_receipt)?
@@ -656,11 +668,33 @@ fn validate_open_materialization(bundle: &BundleWire, tx: &TransactionView) -> R
         {
             bail!("open receipt root, member, participant or network was substituted");
         }
-        for id in [&binding.source_policy, &binding.checked_dependency, &binding.checked_type_group] {
+        for id in [&binding.source_policy, &binding.checked_dependency] {
             parse_raw_hash32("private admission identity", id)?;
         }
-        let first = bundle.transaction.inputs.iter().position(|cell| {
-            cell.type_script.as_ref().is_some_and(|script| parse_script("input Type", script).is_ok_and(|s| s == consumer_script))
+        if let Some(invocation) = &binding.verifier_invocation {
+            parse_raw_hash32("private verifier invocation", &invocation.identity)?;
+            if invocation.schema != "cellscript-open-verifier-invocation-v1"
+                || invocation.consumer_entry != consumer.entry.name
+                || invocation.child_entry.is_empty()
+                || invocation.dependency_index != binding.code_dependency_index
+                || invocation.operation != "spawn-wait-hex4-v1"
+                || invocation.context != "inherited-consumer-script-group"
+                || invocation.vm_execution_claimed
+                || !binding.checked_type_group.is_empty()
+                || !binding.peer_input_indices.is_empty()
+                || !binding.peer_output_indices.is_empty()
+                || binding.observation.is_some()
+            {
+                bail!("open verifier invocation cannot substitute its dependency, context or claim a peer group");
+            }
+        } else {
+            parse_raw_hash32("private group admission", &binding.checked_type_group)?;
+        }
+        let first = bundle.transaction.inputs.iter().position(|cell| match consumer.script_role {
+            ScriptRoleWire::Lock => parse_script("input Lock", &cell.lock).is_ok_and(|s| s == consumer_script),
+            _ => {
+                cell.type_script.as_ref().is_some_and(|script| parse_script("input Type", script).is_ok_and(|s| s == consumer_script))
+            }
         });
         if first != Some(binding.witness_index as usize) {
             bail!("open root is not committed by the consumer's first input group Cell");
@@ -684,21 +718,28 @@ fn validate_open_materialization(bundle: &BundleWire, tx: &TransactionView) -> R
         {
             bail!("open direct code dependency was substituted");
         }
-        let matching_indices = |cells: &[CellWire], selected: &Script| -> Vec<u32> {
+        let matching_indices = |cells: &[CellWire], selected: &Script, lock: bool, input: bool| -> Vec<u32> {
             cells
                 .iter()
                 .enumerate()
                 .filter_map(|(index, cell)| {
-                    cell.type_script
-                        .as_ref()
-                        .is_some_and(|script| parse_script("Type group", script).is_ok_and(|s| &s == selected))
-                        .then_some(index as u32)
+                    (if lock {
+                        input && parse_script("Lock group", &cell.lock).is_ok_and(|s| &s == selected)
+                    } else {
+                        cell.type_script
+                            .as_ref()
+                            .is_some_and(|script| parse_script("Type group", script).is_ok_and(|s| &s == selected))
+                    })
+                    .then_some(index as u32)
                 })
                 .collect()
         };
-        let peer_inputs = matching_indices(&bundle.transaction.inputs, &provider_script);
-        let peer_outputs = matching_indices(&bundle.transaction.outputs, &provider_script);
-        if peer_inputs.is_empty() && peer_outputs.is_empty() {
+        let provider_lock = matches!(provider.script_role, ScriptRoleWire::Lock);
+        let peer_inputs =
+            if verifier { Vec::new() } else { matching_indices(&bundle.transaction.inputs, &provider_script, provider_lock, true) };
+        let peer_outputs =
+            if verifier { Vec::new() } else { matching_indices(&bundle.transaction.outputs, &provider_script, provider_lock, false) };
+        if !verifier && peer_inputs.is_empty() && peer_outputs.is_empty() {
             bail!("selected open participant has no required peer Script group");
         }
         if peer_inputs != binding.peer_input_indices || peer_outputs != binding.peer_output_indices {
@@ -718,7 +759,7 @@ fn validate_open_materialization(bundle: &BundleWire, tx: &TransactionView) -> R
             let input = matches!(observation.source, OpenCellSource::Input | OpenCellSource::GroupInput);
             let cells = if input { &bundle.transaction.inputs } else { &bundle.transaction.outputs };
             let transaction_index = if matches!(observation.source, OpenCellSource::GroupInput | OpenCellSource::GroupOutput) {
-                *matching_indices(cells, &consumer_script)
+                *matching_indices(cells, &consumer_script, matches!(consumer.script_role, ScriptRoleWire::Lock), input)
                     .get(observation.index as usize)
                     .ok_or_else(|| anyhow::anyhow!("open group-relative observation is absent"))?
             } else {

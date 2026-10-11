@@ -118,6 +118,75 @@ fn fixed_external_codec_checks_complete_available_public_scalar_profile() {
         }
     }
 }
+
+fn single_entry_fixture(lock: bool, witness: bool, opt_level: u8) -> Fixture {
+    let param = if witness { "witness value: u64" } else { "" };
+    let predicate = if witness { "value > 7" } else { "true" };
+    let body = if lock {
+        format!("public lock verify({param}) -> bool {{ verification {predicate} }}")
+    } else {
+        format!("public action verify({param}) {{ verification require {predicate} }}")
+    };
+    let result = cellscript::compile(
+        &format!("module single_codec\n{body}\n"),
+        CompileOptions {
+            source_contracts: true,
+            target_profile: Some("ckb".into()),
+            edition: CellScriptEdition::Edition2027,
+            opt_level,
+            target: Some("riscv64-elf".into()),
+            ..CompileOptions::default()
+        },
+    )
+    .unwrap();
+    Fixture {
+        artifact: result.artifact_bytes,
+        metadata: serde_json::to_value(result.metadata).unwrap(),
+        record: result.verified_lowering_record.unwrap(),
+        source_map: result.source_artifact_map.unwrap(),
+    }
+}
+
+#[test]
+fn single_entry_codec_proves_lock_and_action_witness_decoders() {
+    for opt in 0..=3 {
+        for lock in [false, true] {
+            for witness in [false, true] {
+                let fixture = single_entry_fixture(lock, witness, opt);
+                fixed_external_codec(&fixture).unwrap_or_else(|e| panic!("O{opt} lock={lock} witness={witness}: {e}"));
+            }
+        }
+    }
+}
+
+#[test]
+fn single_entry_codec_rejects_rebound_envelope_and_argument_instructions() {
+    for opt in 0..=3 {
+        let fixture = single_entry_fixture(true, true, opt);
+        fixed_external_codec(&fixture).unwrap();
+        let elf = parse_elf(&fixture.artifact, CheckerBudgets::default().instructions).unwrap();
+        for (prefix, offset) in [
+            (".Lentry_witness_buffer_ok_", 4),
+            (".Lentry_witness_size_ok_", 4),
+            (".Lentry_witness_exact_size_ok_", 4),
+            (".Lentry_witness_v2_field_done_", 4),
+        ] {
+            let address = fixture
+                .record
+                .blocks
+                .iter()
+                .find(|b| b.machine_label.as_deref().is_some_and(|l| l.starts_with(prefix)))
+                .unwrap()
+                .range
+                .start
+                + offset;
+            let mut changed = fixture.clone();
+            let word = elf.instructions.iter().find(|i| i.address == address).unwrap().word;
+            changed.replace_machine_word(address, word ^ (1 << 20));
+            assert!(fixed_external_codec(&changed).is_err(), "O{opt} mutation {prefix} admitted");
+        }
+    }
+}
 #[test]
 fn fixed_external_codec_does_not_grant_pruned_helpers_outputs_or_unsupported_layouts() {
     for opt in 0..=3 {

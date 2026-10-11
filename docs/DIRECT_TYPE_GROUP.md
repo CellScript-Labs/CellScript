@@ -1,6 +1,6 @@
 # Direct Type-group transaction snapshot
 
-Status: experimental host byte-consistency prerequisite for #28. This is an
+Status: host byte-consistency component of #28 admission. This is an
 optional standalone checker operation, not source handle syntax or on-chain
 authorization. `code_origin::check_direct_type_group` consumes an actual private
 `CheckedDirectCodeDependency` and a private `CheckedFixedPolicyReceipt` with the
@@ -9,6 +9,17 @@ cannot create `CheckedDirectTypeGroup`. The dependency record directly stores
 its checked target identity. This operation separately commits the supplied
 private fixed-receipt identity; the native composition
 always uses the source selection's exact candidate receipt.
+
+`check_direct_script_group` generalizes this private proof to independently
+checked single-entry Type and Lock receipts. Lock groups include matching input
+Locks only; output Locks do not execute. Single-entry witnesses use the checked
+CSARG decoder, while parameterless entries require no invented witness. The
+legacy `check_direct_type_group` API still rejects Lock receipts. Serialized
+record/type names retain compatibility; the profile explicitly distinguishes
+`direct-supplied-single-lock-group-v1`, `direct-supplied-single-type-group-v1`
+and the original Type-policy profile. Native `check_script_group` composes the
+same source policy and unchanged-input checks. Spawned verifiers instead use
+the separate checked invocation proof in [design record v2](CELLSCRIPT_OPEN_HANDLE_DESIGN.md).
 
 ## Complete inputs and group derivation
 
@@ -92,8 +103,7 @@ substitution. One native test covers both source
 selection modes at O0–O3 and changed full witnesses/consumer sources; a
 compile-fail doctest rejects artifact-only substitution.
 
-Authenticated resolution/liveness, immutable root authority, Type history,
-nominal `I`/handles, full H1/H2, ProtocolBundle/generated-builder signing parity,
-#29 and #44–#46 remain required. External human review for #28 is waived by
+This component does not establish authenticated resolution/liveness. Root,
+history, nominal handles and builder/signing obligations are composed in the
+[native admission path](CELLSCRIPT_OPEN_HANDLE_DESIGN.md). External human review for #28 is waived by
 the [2026-10-11 decision](CELLSCRIPT_0_32_IMPLEMENTATION.md#maintainer-decision--2026-10-11-28-external-audit); the waiver also covers #29.
-Full CI is deferred until the complete implementation queue.

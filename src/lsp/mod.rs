@@ -1276,6 +1276,8 @@ impl LspServer {
             "Hash",
             "ScriptHash",
             "ExactScriptHandle",
+            "ScriptHandle",
+            "VerifierHandle",
             "ZkTransitionProof",
             "VerificationKeyCommitment",
             "DeploymentLineHandle",
@@ -1306,7 +1308,11 @@ impl LspServer {
                 label: ty.to_string(),
                 kind: CompletionItemKind::TypeParameter,
                 detail: Some(format!("{} type", ty)),
-                documentation: None,
+                documentation: match ty {
+                    "ScriptHandle" => Some("ScriptHandle<I>: a 656-byte nominal imported-interface selection for a checked Lock/Type participant; accepted as an action or Lock witness. Membership does not prove peer acceptance.".into()),
+                    "VerifierHandle" => Some("VerifierHandle<I>: a 656-byte nominal imported-interface selection. Native admission requires the parameterless child profile and unconditional checked SPAWN/WAIT after committed-args membership.".into()),
+                    _ => None,
+                },
                 insert_text: None,
             })
             .collect()

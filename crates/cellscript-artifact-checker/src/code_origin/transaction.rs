@@ -27,6 +27,8 @@ pub struct ResolvedOpenHandle {
     pub selected_artifact_hash: String,
     pub checked_dependency: String,
     pub checked_type_group: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verifier_invocation: Option<super::OpenVerifierInvocation>,
     pub raw_transaction_hash: String,
     pub serialized_transaction_hash: String,
     pub peer_input_indices: Vec<u32>,
@@ -58,6 +60,11 @@ pub struct OpenHandleClaimBoundaries {
     pub foreign_observation_grants_lifecycle_authority: bool,
 }
 impl OpenHandleClaimBoundaries {
+    pub fn for_verifier() -> Self {
+        let mut claims = Self::for_observation(false);
+        claims.participant_predicates_and_data = OpenHandleClaimBoundary::CheckedByBundleDryRun;
+        claims
+    }
     pub fn for_observation(observed: bool) -> Self {
         use OpenHandleClaimBoundary::*;
         Self {

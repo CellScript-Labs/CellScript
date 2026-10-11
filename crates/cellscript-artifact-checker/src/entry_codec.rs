@@ -12,6 +12,8 @@ use crate::{
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
+mod single;
+pub(crate) use single::verify_spawn;
 
 const SCHEMA: &str = "cellscript-fixed-policy-parameter-decoder-v1";
 const MAX_PAYLOAD: u32 = 1536;
@@ -23,6 +25,14 @@ pub struct CheckedFixedPolicyParameterDecoders {
     identity: String,
 }
 impl CheckedFixedPolicyParameterDecoders {
+    /// A child with no positional parameters has no witness/argv transport to
+    /// confuse with its parent's handle witness. Transaction reads still use
+    /// CKB's inherited caller context and are not an independent Script group.
+    pub fn parameterless_single_entry(&self) -> bool {
+        self.record.schema == "cellscript-fixed-single-entry-parameter-decoder-v1"
+            && self.record.variants.len() == 1
+            && self.record.variants.get(&0).is_some_and(|variant| variant.parameters.is_empty())
+    }
     /// Check bytes against this privately verified positional decoder. The
     /// finite external profile separately restricts transported witness types.
     pub(crate) fn check_payload(&self, tag: u32, bytes: &[u8]) -> Result<(), CheckerError> {
@@ -106,13 +116,19 @@ pub fn check_fixed_policy_parameter_decoders(
         } else {
             verify(&record, &elf)?
         };
-    let record = Record { schema: SCHEMA, module_contract: module.identity().into(), variants };
+    let schema = if matches!(record.typed_semantics.foundation.entry_contract.dispatch, EntryDispatchContract::SingleEntry) {
+        "cellscript-fixed-single-entry-parameter-decoder-v1"
+    } else {
+        SCHEMA
+    };
+    let record = Record { schema, module_contract: module.identity().into(), variants };
     let identity = crate::canonical_hash("cellscript-fixed-policy-parameter-decoder-id-v1", &record)?;
     Ok(CheckedFixedPolicyParameterDecoders { module, record, identity })
 }
 
 fn width(ty: &SourceType) -> Result<u32, CheckerError> {
     let result = match ty {
+        SourceType::Named(name, args) if matches!(name.as_str(), "ScriptHandle" | "VerifierHandle") && args.len() == 1 => 656,
         SourceType::Named(name, args) if args.is_empty() => match name.as_str() {
             "unit" => 0,
             "u8" => 1,
@@ -209,6 +225,9 @@ impl Cursor<'_> {
     }
 }
 fn verify(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result<BTreeMap<u32, Variant>, CheckerError> {
+    if matches!(record.typed_semantics.foundation.entry_contract.dispatch, EntryDispatchContract::SingleEntry) {
+        return single::verify(record, elf);
+    }
     let EntryDispatchContract::PolicyWitnessV1(policy) = &record.typed_semantics.foundation.entry_contract.dispatch else {
         return Err(invalid("only checked policy-witness-v1 adapters have this machine profile"));
     };

@@ -6,7 +6,7 @@ exported JSON. It owns the independent policy decoder and, where applicable,
 Cell read/storage/scalar-field evidence. All byte identities remain bound through
 those checked objects.
 
-The versioned `policy-unit-scalars-flat-unsigned-cell-v1` profile checks every
+The versioned `policy-unit-scalars-nested-unsigned-cell-v1` profile checks every
 concrete public callable against exactly one actual policy-witness dispatch tag.
 Unit returns and no output serialization are required. A public helper retained
 in ELF without external dispatch, or a pruned public function, fails instead of
@@ -14,10 +14,19 @@ acquiring executable availability from its declaration. Uninstantiated generic
 functions/types remain explicitly `declaration-only`; concrete generic instances
 require a separate supported profile and reject here.
 
+`single-entry-scalars-nested-unsigned-cell-v1` additionally admits the exact
+single Type or Lock entry. The checker verifies the complete wrapper and
+WitnessArgs/CSARG decoder, including fallback, width, argument loads and reject
+edges. Type results are unit; Lock results are boolean. A parameterless Type
+entry also supplies the child codec for an independently bound SPAWN/WAIT
+invocation. It does not decode argv as positional arguments.
+
 Every concrete public nominal type needs its uniquely bound, independently
 checked layout, including types unused by the selected action. This finite
 profile permits 1–64 contiguous unsigned u8/u16/u32/u64 fields and at most 512
-encoded bytes. Nested/array fields, enum tags, booleans, empty layouts, missing
+encoded bytes. Public layouts may contain nested ordinary unsigned structs
+to depth eight; directly decoded Cell parameters remain flat. Array fields,
+enum tags, booleans, empty layouts, missing
 layouts and dynamic representations reject. Source signatures, effects,
 qualified declarations and all other module axes remain in the separately
 checked module projection; a coincidental scalar width does not create ownership.
@@ -37,11 +46,11 @@ behavior equivalence, outputs or general helper/lifetime closure. Its exact
 identity changes when machine bytes change even if a directional module
 comparison permits the same public contract.
 
-This is a partial #28 prerequisite, not the complete H1 receipt or H2 admission.
+This checker operation is one component of the complete native admission.
 Nominal resolver-owned I, actual deployment/Script args/raw and resolved deps,
 Type history, immutable policy authorization, all-member admitted receipts,
 builder/runtime/editor parity remain necessary. External human review for #28
 is waived by the
 [2026-10-11 decision](CELLSCRIPT_0_32_IMPLEMENTATION.md#maintainer-decision--2026-10-11-28-external-audit).
-Verifier-specific entry profiles are not admitted by this policy-action profile.
-Full CI remains deferred until the whole requested implementation queue is ready.
+The composed Lock/Type/verifier profiles and evidence are specified in
+[design record v2](CELLSCRIPT_OPEN_HANDLE_DESIGN.md).

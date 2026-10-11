@@ -47,12 +47,13 @@ fn same_module(module: &FrozenPackageModule, artifact: &ProtocolArtifactIdentity
     Ok(metadata)
 }
 fn parameter_type(metadata: &CompileMetadata, entry: &ProtocolEntryIdentity, parameter: &str) -> Result<String> {
-    if entry.kind != ProtocolEntryKind::Action {
-        return Err(invalid("open consumer requires a checked action entry"));
+    let params = match entry.kind {
+        ProtocolEntryKind::Action => metadata.actions.iter().find(|a| a.name == entry.name).map(|a| &a.params),
+        ProtocolEntryKind::Lock => metadata.locks.iter().find(|a| a.name == entry.name).map(|a| &a.params),
+        _ => None,
     }
-    let action =
-        metadata.actions.iter().find(|action| action.name == entry.name).ok_or_else(|| invalid("consumer action is absent"))?;
-    let witnesses = action.params.iter().filter(|param| param.source == "witness").collect::<Vec<_>>();
+    .ok_or_else(|| invalid("open consumer requires an actual Action or Lock entry"))?;
+    let witnesses = params.iter().filter(|param| param.source == "witness").collect::<Vec<_>>();
     if witnesses.len() != 1 || witnesses[0].name != parameter {
         return Err(invalid("bounded open consumer requires exactly one handle witness parameter"));
     }
@@ -92,14 +93,14 @@ fn root_helper(
     let contract = &metadata.typed_semantics.foundation.entry_contract;
     if contract.exact_entry != typed.id
         || !matches!(contract.dispatch, cellscript_artifact_checker::EntryDispatchContract::SingleEntry)
-        || contract.script_role != "type"
+        || !matches!(contract.script_role.as_str(), "type" | "lock")
         || contract.entry_payload_abi != "cellscript-entry-witness-v1"
         || contract.witness_placement_abi != "cellscript-witnessargs-input-type-v2"
         || contract.witness_placement_field != "input_type"
         || contract.witness_placement_source != "group-input-0-then-group-output-0"
     {
         return Err(invalid(
-            "consumer admission requires its actual single-entry Type dispatcher and canonical handle witness placement",
+            "consumer admission requires its actual single-entry Script dispatcher and canonical handle witness placement",
         ));
     }
     let param = typed.params.iter().find(|p| p.name == parameter).ok_or_else(|| invalid("typed handle parameter is absent"))?;
@@ -111,7 +112,9 @@ fn root_helper(
             op.call.as_ref().is_some_and(|call| {
                 matches!(
                     call.target.as_str(),
-                    "__ckb_require_cell_dep_open_script_handle_from_args" | "__ckb_require_open_script_participant_from_args"
+                    "__ckb_require_cell_dep_open_script_handle_from_args"
+                        | "__ckb_require_open_script_participant_from_args"
+                        | "__ckb_require_cell_dep_open_verifier_handle_from_args"
                 ) && op.operands.get(1).is_some_and(|operand| operand.local == Some(param.binding_id))
             })
         })
@@ -174,11 +177,17 @@ pub(super) fn admit(
             return Err(invalid("open participant cannot grant itself foreign authority"));
         }
         let source = same_module(binding.consumer_module, consumer)?;
+        let bundle = binding.consumer_module.bundle();
+        checked(cellscript_artifact_checker::entry_codec::check_fixed_policy_parameter_decoders(
+            bundle[0], bundle[1], bundle[2], bundle[3], &budgets,
+        ))?;
         if binding.consumer_module.context_identity() != binding.policy.sources().sources().context_identity() {
             return Err(invalid("consumer source/lock closure differs from the policy's defining-owner proof"));
         }
         let module = binding.policy.sources().catalog().required().projection().module();
-        if parameter_type(&source, &consumer.entry, binding.parameter)? != format!("ScriptHandle<{module}>") {
+        let verifier = binding.policy.policy().header().class == HandleClass::Verifier;
+        let class = if verifier { "VerifierHandle" } else { "ScriptHandle" };
+        if parameter_type(&source, &consumer.entry, binding.parameter)? != format!("{class}<{module}>") {
             return Err(invalid("nominal handle interface differs from its resolver-owned checked baseline"));
         }
         let observed = root_helper(&source, &consumer.entry, binding.parameter)?;
@@ -186,13 +195,39 @@ pub(super) fn admit(
             return Err(invalid("consumer Script args do not authorize this policy root"));
         }
         let selected = binding.policy.check_selection(binding.selection)?;
-        if selected.membership().header().class != HandleClass::Script
-            || provider.script_role != ProtocolScriptRole::Type
-            || consumer.script_role != ProtocolScriptRole::Type
+        let expected_role = match provider.script_role {
+            ProtocolScriptRole::Lock => cellscript_artifact_checker::open_handle_policy::ScriptRole::Lock,
+            ProtocolScriptRole::Type => cellscript_artifact_checker::open_handle_policy::ScriptRole::Type,
+            ProtocolScriptRole::SpawnedVerifier => cellscript_artifact_checker::open_handle_policy::ScriptRole::SpawnedVerifier,
+        };
+        if verifier != (provider.script_role == ProtocolScriptRole::SpawnedVerifier)
+            || selected.membership().header().role != expected_role
+            || !matches!(consumer.script_role, ProtocolScriptRole::Type | ProtocolScriptRole::Lock)
         {
-            return Err(invalid("this source receipt profile requires a Type Script participant"));
+            return Err(invalid("policy class or role differs from the actual participant"));
         }
         let provider_metadata = same_module(selected.candidate().module(), provider)?;
+        let provider_contract = selected.candidate().receipt().entry_contract().clone();
+        let check_provider_entry = |entry_id: &str| -> Result<()> {
+            let actual = provider_metadata
+                .typed_semantics
+                .entries
+                .iter()
+                .find(|e| e.id == entry_id)
+                .ok_or_else(|| invalid("selected participant entry is absent"))?;
+            let kind = match provider.entry.kind {
+                ProtocolEntryKind::Action => "action",
+                ProtocolEntryKind::Lock => "lock",
+                ProtocolEntryKind::Function => "function",
+            };
+            if actual.name != provider.entry.name || actual.kind != kind {
+                return Err(invalid("declared participant entry differs from the actual selected dispatcher"));
+            }
+            Ok(())
+        };
+        if matches!(provider_contract.dispatch, cellscript_artifact_checker::EntryDispatchContract::SingleEntry) {
+            check_provider_entry(&provider_contract.exact_entry)?;
+        }
         let origin = selected.candidate().origin();
         let selected_script_hash = origin.selected_script_hash().to_string();
         let selected_artifact_hash = origin.artifact_hash().to_string();
@@ -213,18 +248,43 @@ pub(super) fn admit(
         let dependency = selected.check_direct_dependency(tx.raw_transaction(), supplied.dependencies, &budgets)?;
         let dependency_id = dependency.dependency().identity().to_string();
         let dependency_index = dependency.dependency().raw_dependency_index();
-        let group = dependency.check_type_group(
-            &cellscript_artifact_checker::code_origin::SuppliedTypeGroupTransaction {
-                full_transaction: supplied.full_transaction,
-                dependencies: supplied.dependencies,
-                inputs: supplied.inputs,
-            },
-            &budgets,
-        )?;
+        let selected_receipt = dependency.selection().candidate().source_receipt().identity().to_string();
+        let (group_id, group_inputs, group_outputs, verifier_invocation) = if verifier {
+            if observed.is_some() {
+                return Err(invalid("a spawned verifier cannot claim an independent observed Script group"));
+            }
+            let invocation = checked(cellscript_artifact_checker::code_origin::check_open_verifier_invocation(
+                binding.consumer_module.bundle(),
+                binding.parameter,
+                dependency.selection().candidate().receipt(),
+                dependency.dependency(),
+                &tx,
+                &budgets,
+            ))?;
+            (String::new(), Vec::new(), Vec::new(), Some(invocation.evidence().clone()))
+        } else {
+            let group = dependency.check_script_group(
+                &cellscript_artifact_checker::code_origin::SuppliedTypeGroupTransaction {
+                    full_transaction: supplied.full_transaction,
+                    dependencies: supplied.dependencies,
+                    inputs: supplied.inputs,
+                },
+                &budgets,
+            )?;
+            if let cellscript_artifact_checker::EntryDispatchContract::PolicyWitnessV1(policy) = &provider_contract.dispatch {
+                let variant = policy
+                    .variants
+                    .iter()
+                    .find(|v| v.tag == group.group().selected_tag())
+                    .ok_or_else(|| invalid("selected policy tag is absent"))?;
+                check_provider_entry(&variant.entry_id)?;
+            }
+            (group.group().identity().to_string(), group.group().group_inputs().to_vec(), group.group().group_outputs().to_vec(), None)
+        };
         for role in input.roles.iter().filter(|role| role.artifact == binding.consumer) {
             let indices = match role.location {
-                ProtocolCellLocation::Input => group.group().group_inputs(),
-                ProtocolCellLocation::Output => group.group().group_outputs(),
+                ProtocolCellLocation::Input => &group_inputs,
+                ProtocolCellLocation::Output => &group_outputs,
             };
             if indices.contains(&(role.index as usize)) && role.ownership != ProtocolRoleOwnership::SharedRead {
                 return Err(invalid("an open consumer cannot claim lifecycle ownership of its foreign participant's Cells"));
@@ -238,7 +298,11 @@ pub(super) fn admit(
                     cells
                         .iter()
                         .enumerate()
-                        .filter(|(_, cell)| cell.r#type.as_ref() == Some(&consumer.deployment.script))
+                        .filter(|(_, cell)| match consumer.script_role {
+                            ProtocolScriptRole::Lock => is_input && cell.lock == consumer.deployment.script,
+                            ProtocolScriptRole::Type => cell.r#type.as_ref() == Some(&consumer.deployment.script),
+                            ProtocolScriptRole::SpawnedVerifier => false,
+                        })
                         .nth(index as usize)
                         .map(|(index, _)| index)
                         .ok_or_else(|| invalid("observed group-relative participant is absent"))?
@@ -246,7 +310,12 @@ pub(super) fn admit(
                     index as usize
                 };
                 let cell = cells.get(transaction_index).ok_or_else(|| invalid("observed participant is absent"))?;
-                if cell.r#type.as_ref() != Some(&provider.deployment.script) {
+                let matching = match provider.script_role {
+                    ProtocolScriptRole::Lock => is_input && cell.lock == provider.deployment.script,
+                    ProtocolScriptRole::Type => cell.r#type.as_ref() == Some(&provider.deployment.script),
+                    ProtocolScriptRole::SpawnedVerifier => false,
+                };
+                if !matching {
                     return Err(invalid("observed participant source or complete Script differs from the selection"));
                 }
                 let source_catalog = source
@@ -305,7 +374,7 @@ pub(super) fn admit(
             participant: binding.participant.into(),
             interface_module: module.into(),
             source_policy: binding.policy.identity().into(),
-            selected_receipt: group.selection().candidate().source_receipt().identity().into(),
+            selected_receipt,
             authorization_root: format!("0x{}", hex_encode(&binding.policy.policy().root())),
             selection: format!("0x{}", hex_encode(binding.selection)),
             witness_index: witness_index as u32,
@@ -314,14 +383,17 @@ pub(super) fn admit(
             selected_script_hash,
             selected_artifact_hash,
             checked_dependency: dependency_id,
-            checked_type_group: group.group().identity().into(),
+            checked_type_group: group_id,
+            verifier_invocation,
             raw_transaction_hash: tx.raw_hash(),
             serialized_transaction_hash: tx.full_hash(),
-            peer_input_indices: group.group().group_inputs().iter().map(|index| *index as u32).collect(),
-            peer_output_indices: group.group().group_outputs().iter().map(|index| *index as u32).collect(),
-            claim_boundaries: cellscript_artifact_checker::code_origin::OpenHandleClaimBoundaries::for_observation(
-                observation.is_some(),
-            ),
+            peer_input_indices: group_inputs.iter().map(|index| *index as u32).collect(),
+            peer_output_indices: group_outputs.iter().map(|index| *index as u32).collect(),
+            claim_boundaries: if verifier {
+                cellscript_artifact_checker::code_origin::OpenHandleClaimBoundaries::for_verifier()
+            } else {
+                cellscript_artifact_checker::code_origin::OpenHandleClaimBoundaries::for_observation(observation.is_some())
+            },
             observation,
         });
     }

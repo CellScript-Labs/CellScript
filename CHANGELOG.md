@@ -2,6 +2,18 @@
 
 ## Unreleased — 0.32
 
+Complete compatible-open Lock/Type/verifier admission through independent public
+receipts, immutable source policies and complete ProtocolBundle transactions.
+Add machine-checked single-entry WitnessArgs/CSARG decoding and bounded
+SPAWN/WAIT target/exit proofs. Lock groups derive from actual input Locks;
+parameterless spawned verifiers inherit the consumer context and propagate
+child rejection. Generated builders support Lock consumers and both nominal
+handle classes. O0–O3 tests cover CLI/native reports, TypeScript/SDK byte parity,
+all-group execution, missing peers, rebound machine code and unbound delegation.
+The admitted codecs and fail-closed limits are specified in
+`docs/CELLSCRIPT_OPEN_HANDLE_DESIGN.md`; external human review is waived, while
+independent checking and CI/backend acceptance remain required.
+
 Measure bundled-example metadata budgets with repository-relative source-unit
 paths so checkout location cannot change the result. Preserve the existing
 byte ceilings and the compiler's actual provenance records. Make the external
@@ -21,12 +33,12 @@ unique data2/Type identities in 1–64 direct CellDeps; dep groups fail closed.
 Enforce exact receipt selection and admission sequence bounds on-chain.
 Independently check bounded Type-ID creation/replacement histories and bind
 private lineage proofs into native source policies and final dependency
-snapshots. Preserve no-history record identities. Full receipt-to-consumer and
-general ProtocolBundle/generated-builder admission remains incomplete; #28 stays open.
+snapshots. Preserve no-history record identities. Native admission composes these
+proofs with the consumer and generated-builder boundary.
 
 Add a bounded native ProtocolBundle admission path for private source policies,
-one committed-args handle witness per Type consumer, and finite Type-policy
-participants. Compare the complete builder transaction with every concrete
+one committed-args handle witness per Lock/Type consumer, and independently
+checked Type-policy, single-entry Script or spawned-verifier participants. Compare the complete builder transaction with every concrete
 skeleton field and input snapshot, then recheck byte identity in the existing
 adapter serializer. Bind complete peer groups and optional typed input/output
 observations to source declarations and fixed Cell schemas. The new
@@ -36,8 +48,7 @@ O0–O3 integration tests execute every Script group, including a selected peer
 that rejects despite valid admission. Reconstruct private source policies through
 `cellc protocol bundle check --open-admission`, and provide generated TypeScript
 selection-to-witness transport. Verify identical CLI/native reports, SDK bytes,
-real secp256k1 signatures and post-signing rejection at O0–O3. This bounded slice does not complete
-general #28/#29 acceptance.
+real secp256k1 signatures and post-signing rejection at O0–O3.
 
 Normalize the pinned byte-context child ELF by removing its non-allocated
 linker comment with the pinned `rust-objcopy`. The old fixture and fresh builds
@@ -52,8 +63,8 @@ Bind a checked direct data2 dependency and finite Type-policy receipt to complet
 canonical transaction/witness bytes and every supplied input Cell. Derive Type
 group indices from complete Scripts, validate all policy records and the
 selected tag/cardinality/fixed args, and reject later witness/input substitution.
-Compose private source/version proofs with this host snapshot. Resolution,
-signature validity, root authority and full #28 remain pending; see
+Compose private source/version proofs with this host snapshot. This component
+alone does not establish resolution, signatures or root authority; see
 `docs/DIRECT_TYPE_GROUP.md`.
 
 Bind checked data2 code creation identities to canonical final raw direct deps
@@ -62,7 +73,7 @@ extra, copied or duplicate code, changed selected outputs, malformed unselected
 Cells, dep groups and Type history without proof. Give source/version policies
 and selections distinct native types and compose both proofs with source
 rechecks. Supplied snapshots do not establish consensus resolution, root
-permission or final witness/signature freezing; whole #28 remains pending.
+permission or final witness/signature freezing.
 See `docs/DIRECT_CODE_DEPENDENCY.md`.
 
 Bind each frozen code candidate's actual source context, defining module and
@@ -72,13 +83,13 @@ source receipt members: exact and compatible selections enforce the actual
 baseline SemVer precedence floor; compatible selections require stable versions
 and the same major. Preserve artifact-only policy v1 and advance the experimental
 native catalog to v4. Manifest facts do not authenticate Registry releases or
-authorize a root; full H1/H2 remains pending. See `docs/FROZEN_CODE_POLICY.md`.
+authorize a root. See `docs/FROZEN_CODE_POLICY.md`.
 
 Bind every member of a declared finite policy snapshot to actual resolver-owned
 sources and private receipts. Check Header/API/network/runtime and complete
 candidate/deployment fields before returning host selection evidence; reject
 later source/input changes and Type-hash history without proof. This data2
-Type-policy binding does not authorize a root or complete H1/H2; see
+binding alone does not authorize a root; see
 `docs/FROZEN_CODE_POLICY.md`.
 
 Compose independently checked finite Type-policy receipts from actual API,
@@ -86,7 +97,7 @@ codec, code-origin and target proofs; bind every original bundle file and reject
 later input substitution. Require these private receipts for every frozen code
 catalog member and advance the experimental native catalog to v3. Public
 constants reject where values lack proof; generic declarations remain
-non-executable. Whole H1/H2 and authorization remain pending; see
+non-executable. Policy authorization is checked separately; see
 `docs/FIXED_POLICY_RECEIPT.md`.
 
 Require every frozen code-catalog candidate's selected Script hash type to match
@@ -134,15 +145,14 @@ Independently check direct unsigned Cell field materializations, receiver
 dominance, protected caller storage and the membership helper's private-frame
 memory boundary. Bound inline capacity/hash writes and fix missed RV64 word
 register writes and stale caller/syscall register facts. Rebound byte/offset/
-register changes and unsupported profiles reject. This optional evidence ends
-at decoded registers; full receipts and
-open admission remain pending. See `docs/FIXED_CELL_SCALAR_FIELDS.md`.
+register changes and unsupported profiles reject. This component proves decoded
+registers; receipts and admission compose it with the remaining private proofs. See `docs/FIXED_CELL_SCALAR_FIELDS.md`.
 
 Bind eligible fixed Cell source parameters to their actual ABI spills and
 post-read pointer receivers under a finite uncompressed scalar-slot profile.
 Reject rebound source IDs, overlapping argument spills and changed receivers.
-This optional prerequisite ends at pointer reception; field decoding, full
-receipts and open admission remain pending. See
+This component proves pointer reception; field decoding, receipts and admission
+compose additional independent evidence. See
 `docs/FIXED_CELL_PARAMETER_STORAGE.md`.
 
 Add optional independent fixed Cell-data read gate evidence: actual source and
