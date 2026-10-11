@@ -716,6 +716,23 @@ fn compact_json_len<T: serde::Serialize>(value: &T) -> usize {
     serde_json::to_vec(value).expect("metadata should serialize as compact JSON").len()
 }
 
+fn budget_source_units(metadata: &CompileMetadata) -> Vec<cellscript::SourceUnitMetadata> {
+    // Measure repository-relative provenance paths so moving the checkout does
+    // not change a compiler size budget. Keep each actual source path and all
+    // other provenance fields; only the machine-local checkout prefix varies.
+    let root = Utf8Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut units = metadata.source_units.clone();
+    for unit in &mut units {
+        unit.path =
+            Utf8Path::new(&unit.path).strip_prefix(root).expect("bundled example sources must be inside the repository").to_string();
+    }
+    units
+}
+
+fn compact_metadata_budget_len(metadata: &CompileMetadata) -> usize {
+    compact_json_len(metadata) - compact_json_len(&metadata.source_units) + compact_json_len(&budget_source_units(metadata))
+}
+
 fn assert_source_units_are_not_source_archives(example: &str, metadata: &CompileMetadata, budget: FullMetadataSizeBudget) {
     assert!(
         metadata.source_units.len() <= budget.max_source_units,
@@ -725,7 +742,7 @@ fn assert_source_units_are_not_source_archives(example: &str, metadata: &Compile
         budget.max_source_units,
         metadata.source_units
     );
-    let source_units_bytes = compact_json_len(&metadata.source_units);
+    let source_units_bytes = compact_json_len(&budget_source_units(metadata));
     assert!(
         source_units_bytes <= budget.max_compact_source_units_bytes,
         "{} metadata source_units JSON grew past budget: {} > {}; source_units={:?}",
@@ -791,7 +808,7 @@ fn assert_proof_plan_is_bounded(example: &str, entry: &str, metadata: &CompileMe
 fn assert_full_metadata_size_budget(example: &str, metadata: &CompileMetadata) {
     let budget = full_metadata_size_budget(example);
     let expected_counts = full_metadata_entry_counts(example);
-    let metadata_bytes = compact_json_len(metadata);
+    let metadata_bytes = compact_metadata_budget_len(metadata);
     assert!(
         metadata_bytes <= budget.max_compact_metadata_bytes,
         "{} compact metadata JSON grew past budget: {} > {} bytes",
@@ -844,7 +861,7 @@ fn assert_entry_artifact_size_budget(example: &str, entry_kind: &str, entry_name
         entry
     );
 
-    let metadata_bytes = compact_json_len(&result.metadata);
+    let metadata_bytes = compact_metadata_budget_len(&result.metadata);
     assert!(
         metadata_bytes <= budget.max_compact_metadata_bytes,
         "{} {} compact metadata JSON grew past budget: {} > {} bytes",

@@ -2,6 +2,10 @@
 
 ## Unreleased — 0.32
 
+Measure bundled-example metadata budgets with repository-relative source-unit
+paths so checkout location cannot change the result. Preserve the existing
+byte ceilings and the compiler's actual provenance records.
+
 Fix compatible-open handle runtime bindings: keep the saved selection length
 separate from the current-Script load length, and compare verifier dependency
 data against the selected artifact hash. Restore the committed-args-root VM
