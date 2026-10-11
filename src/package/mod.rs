@@ -4959,7 +4959,9 @@ version = "^1.2.0"
             }
         });
         let resolver_path = root.join("resolver.sh");
-        std::fs::write(&resolver_path, format!("#!/bin/sh\nprintf '%s\\n' '{}'\n", response)).unwrap();
+        // Consume the request before exiting so the fixture cannot race the
+        // parent's stdin writes and fail nondeterministically with BrokenPipe.
+        std::fs::write(&resolver_path, format!("#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '{}'\n", response)).unwrap();
         let mut permissions = std::fs::metadata(&resolver_path).unwrap().permissions();
         permissions.set_mode(0o700);
         std::fs::set_permissions(&resolver_path, permissions).unwrap();

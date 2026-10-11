@@ -4,7 +4,9 @@
 
 Measure bundled-example metadata budgets with repository-relative source-unit
 paths so checkout location cannot change the result. Preserve the existing
-byte ceilings and the compiler's actual provenance records.
+byte ceilings and the compiler's actual provenance records. Make the external
+resolver test fixture consume its request before exiting, avoiding a race with
+the parent process's pipe writes.
 
 Fix compatible-open handle runtime bindings: keep the saved selection length
 separate from the current-Script load length, and compare verifier dependency
