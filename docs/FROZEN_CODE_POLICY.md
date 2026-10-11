@@ -10,8 +10,9 @@ for the resulting root.
 The supported boundary is Script/Type with the independently checked data2
 `ckb` profile and [finite Type-policy receipts](FIXED_POLICY_RECEIPT.md).
 Type-hash code receipts remain constructible by the separate byte/target/receipt
-APIs, but this policy-binding constructor rejects them: their authenticated
-replacement history is not established by a structurally valid wire member.
+APIs. The original constructor rejects them;
+`freeze_source_code_policy_with_histories` requires independently checked
+Type-ID lineage for each candidate, as described below.
 Lock and spawned-verifier policy bindings need separate complete profiles.
 
 The Header must match the actual required module projection identity, the
@@ -53,12 +54,11 @@ creation inputs; they are not a final transaction or resolved CellDep proof.
 
 Status, policy/admission sequences and floors are application-declared immutable
 snapshot choices. The finite artifact-only constructor does not enforce source package version
-floors. Neither constructor authenticates Registry freshness or deployment
-history. The expected root must later be
+floors. Neither constructor authenticates Registry freshness or chain inclusion. The expected root must later be
 bound to committed current-Script code/args or controlled state; a witness cannot
 authorize its own root. This result is not a nominal source handle or stable
-admission token. Active chain/VM context, Type history, complete general receipts,
-source `I`, H2, ProtocolBundle/generated-builder parity and independent review
+admission token. Active chain/VM context, complete general receipts,
+source `I`, H2 and ProtocolBundle/generated-builder parity
 remain required. No consensus, liveness, behavioral equivalence, production
 admission or final signing/materialization claim is inferred.
 
@@ -113,7 +113,10 @@ The separately named artifact-only constructor retains its v1 record/domain
 and omitted source-profile fields. Historical JSON cannot construct private
 proofs. The wire layout, 656-byte selection, tree depth and runtime budgets are
 unchanged. Both profiles return host evidence; immutable on-chain root
-authorization, complete H1/H2 and independent review remain pending.
+authorization and complete H1/H2 remain pending. External human review for #28
+is waived by the
+[2026-10-11 decision](CELLSCRIPT_0_32_IMPLEMENTATION.md#maintainer-decision--2026-10-11-28-external-audit);
+independent artifact verification remains mandatory.
 
 Five additional native tests cover actual source receipt fields and independent
 hash oracles, all O0–O3 version cases, exact/compatible selection, 32 members and
@@ -130,7 +133,7 @@ These tests supply no new CKB-VM or production claim.
 
 The source/version selection can additionally consume itself into a private
 [direct code dependency binding](DIRECT_CODE_DEPENDENCY.md) for canonical final
-raw bytes and every supplied Cell snapshot. This finite data2/direct profile
+raw bytes and every supplied Cell snapshot. This finite direct profile
 rechecks actual source closure and rejects wrong/missing/duplicate/copied code,
 malformed unselected Cells, dep groups and unproved Type history. It does not
 certify supplied snapshots as consensus/VM resolution or freeze witnesses and
@@ -142,3 +145,32 @@ witness bytes, all supplied input Cells and derived group indices to its exact
 candidate receipt. Consumer source rechecks remain required. It does not verify
 signatures, authenticate supplied Cells or authorize a policy root; all existing
 source policy and dependency records/domains remain unchanged.
+
+
+## Bounded Type-ID history profile
+
+`code_origin::check_type_code_history` independently parses 1–32 canonical
+RawTransactions (4 MiB each, 16 MiB shared, caller record budget applied before
+parsing). Genesis must use the built-in TYPE_ID Script with its args recomputed
+from the actual first CellInput and output index. Each successor consumes the
+exact preceding OutPoint, preserves the complete Type-ID Script and custody
+Lock, and creates exactly one output in that Type group. Repeated transactions,
+truncated genesis, forks, changed custody/Type identity and substituted final
+artifact bytes reject. The final output must equal the private checked code
+origin, including its transaction hash, index, Type hash and artifact hash.
+
+The private `CheckedTypeCodeHistory` records canonical step transaction/output/
+artifact identities under `cellscript-type-code-history-v1`; its tip hashes that
+record under `cellscript-type-code-history-id-v1`. The deployment line is the
+complete Type-ID Script hash; sequence is the number of replacements. These
+are byte-consistency facts, not signature validity, confirmations or liveness.
+The consumer's immutable policy must authorize that exact history tip.
+
+`freeze_source_code_policy_with_histories` consumes actual private histories,
+requires exact coverage of Type-hash candidates, and rejects duplicate or
+unreferenced histories. Every member binds the checked line/tip/sequence as well
+as all existing source/API/artifact/Script/OutPoint fields. Records with histories
+use `cellscript-frozen-code-policy-bindings-v3` and the corresponding `id-v3`
+domain. Existing no-history v1/v2 identities retain their original encoding.
+Tests cover O0–O3, 1/2/32 steps, genesis/truncation/repeated-transaction limits,
+canonical custody/Type/predecessor/output/artifact substitutions and final deps.

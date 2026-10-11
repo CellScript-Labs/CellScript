@@ -59,7 +59,9 @@ parameter-to-Cell pointer provenance, general signed/boolean/enum codecs,
 source equivalence, group/cardinality authorization, peer execution, deployment
 identity or Type-hash history. Full issue #28 still requires those applicable
 contracts plus complete receipts, nominal identities and bounded runtime
-handles. Independent security review remains required before stable admission.
+handles. External human review for #28 is waived by the
+[2026-10-11 decision](CELLSCRIPT_0_32_IMPLEMENTATION.md#maintainer-decision--2026-10-11-28-external-audit);
+independent artifact verification remains required.
 Full CI stays deferred until the entire requested queue is implemented.
 
 The separate [fixed Cell parameter storage check](FIXED_CELL_PARAMETER_STORAGE.md)

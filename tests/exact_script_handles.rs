@@ -479,6 +479,13 @@ fn compile_open_handle(source: &str, opt: u8) -> cellscript::CompileResult {
 }
 
 fn open_authorization_set(script_hash: [u8; 32]) -> (cellscript_artifact_checker::open_handle_policy::AuthorizationSet, [u8; 656]) {
+    open_authorization_set_for_identity(script_hash, None)
+}
+
+fn open_authorization_set_for_identity(
+    script_hash: [u8; 32],
+    verifier_data_hash: Option<[u8; 32]>,
+) -> (cellscript_artifact_checker::open_handle_policy::AuthorizationSet, [u8; 656]) {
     use cellscript_artifact_checker::open_handle_policy::*;
     let fill = |byte: u8| {
         let mut hash = [0u8; 32];
@@ -486,8 +493,8 @@ fn open_authorization_set(script_hash: [u8; 32]) -> (cellscript_artifact_checker
         hash
     };
     let header = PolicyHeader {
-        class: HandleClass::Script,
-        role: ScriptRole::Type,
+        class: if verifier_data_hash.is_some() { HandleClass::Verifier } else { HandleClass::Script },
+        role: if verifier_data_hash.is_some() { ScriptRole::SpawnedVerifier } else { ScriptRole::Type },
         mode: SelectionMode::Compatible,
         member_count: 1,
         sequence: 1,
@@ -505,14 +512,14 @@ fn open_authorization_set(script_hash: [u8; 32]) -> (cellscript_artifact_checker
         deployment_sequence: 0,
         receipt: fill(0x51),
         interface: fill(0x52),
-        artifact: fill(0x53),
+        artifact: verifier_data_hash.unwrap_or_else(|| blake2b_256(b"open-script-code")),
         script: script_hash,
         // Data-mode members bind their code hash to the artifact identity.
-        code_hash: fill(0x53),
-        code_tx_hash: fill(0x55),
+        code_hash: verifier_data_hash.unwrap_or_else(|| blake2b_256(b"open-script-code")),
+        code_tx_hash: blake2b_256([b"cellscript-test-cell-dep-v1".as_slice(), &0u64.to_le_bytes()].concat()),
         deployment_line: [0; 32],
         history_tip: [0; 32],
-        code_output_index: 7,
+        code_output_index: 0,
     };
     let set = AuthorizationSet::new(header, &[member]).expect("structurally valid authorization set");
     let selection = set.selection(&fill(0x51)).expect("single-member selection");
@@ -526,18 +533,17 @@ fn open_handle_fixture(result: &cellscript::CompileResult, selection: Vec<u8>, d
     let witness = packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(payload)).pack()).build().as_bytes();
     let mut fixture = build_simple_fixture(Bytes::default(), 1, 1);
     fixture.current_type_script_input_indices = vec![0];
-    fixture.cell_deps.push(FixtureCell { capacity: 100_000_000_000, type_script: Some(dep_script.clone()), data: Bytes::default() });
+    fixture.cell_deps.push(FixtureCell {
+        capacity: 100_000_000_000,
+        type_script: Some(dep_script.clone()),
+        data: Bytes::from_static(b"open-script-code"),
+    });
     fixture.witnesses = vec![witness];
     fixture
 }
 
-/// The helper pipeline is complete through assembly (typecheck, lowering,
-/// argument loading, runtime generator, checker jail exemption, error code);
-/// the CKB-VM positive case still fails closed with `open-handle-invalid`
-/// because structural bytes read as zero inside the generated helper even
-/// though the wire is self-consistent and the entry wrapper now hands the
-/// fixed 656-byte pointer. Track the byte-level read anomaly here before
-/// unignoring.
+/// The constant-root helper binds the selection and selected dependency at
+/// every optimization level, with independent substitution negatives.
 #[test]
 fn open_script_handle_requirement_executes_and_rejects_substitutions() {
     let dep_script = packed::Script::new_builder()
@@ -571,7 +577,11 @@ fn open_script_handle_requirement_executes_and_rejects_substitutions() {
             "opt={opt} open-handle verification exceeds its measured cycle budget: {}",
             execution.cycles
         );
-        assert_eq!(8 + 656, 664, "the witness payload keeps its frozen 664-byte size");
+        assert_eq!(
+            result.metadata.actions[0].entry_witness_args(&[EntryWitnessArg::Bytes(selection.to_vec())]).unwrap().len(),
+            664,
+            "the generated witness payload keeps its frozen size"
+        );
 
         // Wrong expected root: a fresh compilation with a different constant.
         let mut wrong = root;
@@ -589,16 +599,13 @@ fn open_script_handle_requirement_executes_and_rejects_substitutions() {
             assert_eq!(execution.exit_code, 85, "opt={opt} substitution at selection byte {offset} must fail closed");
         }
 
-        // A different dep Script (its type hash no longer matches the member's
-        // complete Script hash) rejects with the same closed failure.
-        let other_script = packed::Script::new_builder()
-            .code_hash([7u8; 32].pack())
-            .hash_type(ckb_testtool::ckb_types::core::ScriptHashType::Data2)
-            .args(Bytes::default().pack())
-            .build();
-        let fixture = open_handle_fixture(&result, selection.to_vec(), &other_script);
-        let execution = execute_cellscript_script(elf, &fixture);
-        assert_eq!(execution.exit_code, 85, "opt={opt} a substituted CellDep Script must fail closed");
+        // Code bytes, not the Script guarding the code Cell, are selected.
+        let mut fixture = open_handle_fixture(&result, selection.to_vec(), &dep_script);
+        fixture.cell_deps[0].data = Bytes::from_static(b"substituted-code");
+        assert_eq!(execute_cellscript_script(elf, &fixture).exit_code, 85);
+        let mut fixture = open_handle_fixture(&result, selection.to_vec(), &dep_script);
+        fixture.cell_deps.push(fixture.cell_deps[0].clone());
+        assert_eq!(execute_cellscript_script(elf, &fixture).exit_code, 85, "ambiguous code identity");
     }
 }
 
@@ -634,7 +641,11 @@ fn open_handle_from_args_fixture(
     let witness = packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(payload)).pack()).build().as_bytes();
     let mut fixture = build_simple_fixture(Bytes::from(script_args), 1, 1);
     fixture.current_type_script_input_indices = vec![0];
-    fixture.cell_deps.push(FixtureCell { capacity: 100_000_000_000, type_script: Some(dep_script.clone()), data: Bytes::default() });
+    fixture.cell_deps.push(FixtureCell {
+        capacity: 100_000_000_000,
+        type_script: Some(dep_script.clone()),
+        data: Bytes::from_static(b"open-script-code"),
+    });
     fixture.witnesses = vec![witness];
     fixture
 }
@@ -644,16 +655,10 @@ fn open_handle_from_args_fixture(
 /// its own root. A root committed in args verifies; every substituted args
 /// root, a wrong-length args field and the substitution classes all fail
 /// closed with the open-handle error.
-/// The from-args variant's four-layer pipeline is complete (typecheck,
-/// lowering, loading, runtime generator, checker, LSP) and its prologue is
-/// verified live: LOAD_SCRIPT returns the 85-byte committed Script, the
-/// staged root pointer reads the committed args (dumped root[0] matches),
-/// and the reloaded selection pointer and length are byte-verified
-/// ('C','W', 656). One control-flow defect remains — the helper still fails
-/// closed with 85 before the leaf hash despite those verified inputs — and
-/// is tracked here with the full matrix ready.
+/// Regression: the saved selection length and LOAD_SCRIPT's eight-byte length
+/// output must not overlap. The former layout corrupted the saved length and
+/// rejected even the valid committed root before membership verification.
 #[test]
-#[ignore = "from-args helper: one unresolved fail-closed path after verified prologue"]
 fn open_handle_from_args_binds_the_root_to_committed_script_args() {
     let dep_script = packed::Script::new_builder()
         .code_hash([9u8; 32].pack())
@@ -719,6 +724,268 @@ fn open_handle_from_args_binds_the_root_to_committed_script_args() {
             let fixture = open_handle_from_args_fixture(&result, root.to_vec(), substituted, &dep_script);
             let execution = execute_cellscript_script(elf, &fixture);
             assert_eq!(execution.exit_code, 85, "opt={opt} substitution at byte {offset} must fail closed");
+        }
+    }
+}
+
+#[test]
+fn open_verifier_handle_binds_artifact_data_for_constant_and_args_roots() {
+    let dep_script = packed::Script::new_builder()
+        .code_hash([9u8; 32].pack())
+        .hash_type(ckb_testtool::ckb_types::core::ScriptHashType::Data2)
+        .args(Bytes::default().pack())
+        .build();
+    let script_hash: [u8; 32] = dep_script.calc_script_hash().unpack();
+    let dep_data = Bytes::from_static(b"open-verifier-artifact");
+    let data_hash = blake2b_256(&dep_data);
+    assert_ne!(data_hash, script_hash);
+    let (set, selection) = open_authorization_set_for_identity(script_hash, Some(data_hash));
+    let root = set.root();
+
+    for from_args in [false, true] {
+        for opt in 0..=3 {
+            let source = if from_args { open_handle_from_args_source(0) } else { open_handle_source(root, 0) }
+                .replace("ScriptHandle<", "VerifierHandle<")
+                .replace("open_script_handle", "open_verifier_handle");
+            let result = compile_open_handle(&source, opt);
+            let elf = strip_vm_abi_trailer(&result.artifact_bytes);
+            let mut fixture = open_handle_from_args_fixture(&result, root.to_vec(), selection.to_vec(), &dep_script);
+            fixture.cell_deps[0].data = dep_data.clone();
+            let execution = execute_cellscript_script(elf, &fixture);
+            assert_eq!(execution.exit_code, 0, "opt={opt} from_args={from_args}: {:?}", execution.captured_debug);
+            assert!(execution.cycles <= 3_000_000, "opt={opt} from_args={from_args} exceeds the cycle ceiling");
+
+            // Membership alone cannot admit different executable bytes, even
+            // when the guarding Script and the proof are unchanged.
+            fixture.cell_deps[0].data = Bytes::from_static(b"substituted-open-verifier");
+            assert_eq!(execute_cellscript_script(elf, &fixture).exit_code, 85, "opt={opt} from_args={from_args}");
+
+            // A correctly committed policy whose artifact does not match the
+            // dependency still rejects; a matching Script hash is insufficient.
+            let (wrong_set, wrong_selection) = open_authorization_set_for_identity(script_hash, Some([0x7a; 32]));
+            let wrong_source = if from_args { open_handle_from_args_source(0) } else { open_handle_source(wrong_set.root(), 0) }
+                .replace("ScriptHandle<", "VerifierHandle<")
+                .replace("open_script_handle", "open_verifier_handle");
+            let wrong_result = compile_open_handle(&wrong_source, opt);
+            let mut wrong_fixture =
+                open_handle_from_args_fixture(&wrong_result, wrong_set.root().to_vec(), wrong_selection.to_vec(), &dep_script);
+            wrong_fixture.cell_deps[0].data = dep_data.clone();
+            assert_eq!(
+                execute_cellscript_script(strip_vm_abi_trailer(&wrong_result.artifact_bytes), &wrong_fixture).exit_code,
+                85,
+                "opt={opt} from_args={from_args} wrong artifact under an authorized root"
+            );
+        }
+    }
+}
+
+#[test]
+fn open_code_selection_enforces_type_bytes_outpoints_modes_and_floors() {
+    use cellscript_artifact_checker::open_handle_policy::{AuthorizationSet, CodeHashType, MemberStatus, SelectionMode};
+    let code_type = packed::Script::new_builder().code_hash([9u8; 32].pack()).hash_type(1u8).build();
+    let script_hash = code_type.calc_script_hash().unpack();
+    let (baseline, _) = open_authorization_set(script_hash);
+    for opt in 0..=3 {
+        for type_hash in [false, true] {
+            for case in ["valid", "exact", "wrong-exact", "yanked", "floor", "outpoint", "index"] {
+                let mut header = baseline.header().clone();
+                let mut member = baseline.members()[0].clone();
+                if type_hash {
+                    member.hash_type = CodeHashType::Type;
+                    member.code_hash = script_hash;
+                    member.deployment_line = script_hash;
+                    member.history_tip = [0x31; 32];
+                }
+                match case {
+                    "exact" => {
+                        header.mode = SelectionMode::Exact;
+                        header.exact_receipt = member.receipt;
+                    }
+                    "wrong-exact" => {
+                        header.mode = SelectionMode::Exact;
+                        header.exact_receipt = [0x91; 32];
+                    }
+                    "yanked" => member.status = MemberStatus::Yanked,
+                    "floor" => header.minimum_admission_sequence = 1,
+                    "outpoint" => member.code_tx_hash[0] ^= 1,
+                    "index" => member.code_output_index = 1,
+                    _ => {}
+                }
+                // Include a second member for a valid exact-mode policy which
+                // authorizes one receipt while the witness selects the other.
+                let mut members = vec![member.clone()];
+                if case == "wrong-exact" {
+                    let mut other = member.clone();
+                    other.receipt = header.exact_receipt;
+                    other.code_tx_hash[0] ^= 2;
+                    other.artifact[0] ^= 2;
+                    if !type_hash {
+                        other.code_hash = other.artifact;
+                    }
+                    if type_hash {
+                        other.deployment_line[0] ^= 2;
+                    }
+                    members.push(other);
+                    header.member_count = 2;
+                }
+                let set = AuthorizationSet::new(header, &members).unwrap();
+                let selection = set.selection(&member.receipt).unwrap();
+                let result = compile_open_handle(&open_handle_from_args_source(0), opt);
+                let elf = strip_vm_abi_trailer(&result.artifact_bytes);
+                let fixture = open_handle_from_args_fixture(&result, set.root().to_vec(), selection.to_vec(), &code_type);
+                let execution = execute_cellscript_script(elf, &fixture);
+                let expected = if matches!(case, "valid" | "exact") { 0 } else { 85 };
+                assert_eq!(
+                    execution.exit_code, expected,
+                    "opt={opt} type_hash={type_hash} case={case}: {:?}",
+                    execution.captured_debug
+                );
+                if expected == 0 {
+                    assert!(execution.cycles <= 3_000_000);
+                    let mut replacement = fixture.clone();
+                    replacement.cell_deps[0].data = Bytes::from_static(b"replacement-under-unchanged-type");
+                    assert_eq!(execute_cellscript_script(elf, &replacement).exit_code, 85);
+                    let mut ambiguous = fixture.clone();
+                    ambiguous.cell_deps.push(ambiguous.cell_deps[0].clone());
+                    assert_eq!(execute_cellscript_script(elf, &ambiguous).exit_code, 85);
+                    let mut reserved = selection.to_vec();
+                    reserved[489] = 1; // outside the hashed header and member
+                    let changed = open_handle_from_args_fixture(&result, set.root().to_vec(), reserved, &code_type);
+                    assert_eq!(execute_cellscript_script(elf, &changed).exit_code, 85);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn open_code_dependency_budget_covers_every_direct_cell() {
+    use ckb_script_runner::execute_cellscript_script_with_observer;
+    let code_type = packed::Script::new_builder().code_hash([9u8; 32].pack()).hash_type(1u8).build();
+    let (set, selection) = open_authorization_set(code_type.calc_script_hash().unpack());
+    for opt in 0..=3 {
+        let result = compile_open_handle(&open_handle_from_args_source(0), opt);
+        let elf = strip_vm_abi_trailer(&result.artifact_bytes);
+        let mut fixture = open_handle_from_args_fixture(&result, set.root().to_vec(), selection.to_vec(), &code_type);
+        // The harness adds the executing Script and always-success code deps.
+        // Sixty-two supplied cells therefore exercise the full 64-entry bound.
+        for index in 1..62u8 {
+            fixture.cell_deps.push(FixtureCell { capacity: 100_000_000_000, type_script: None, data: Bytes::from(vec![index]) });
+        }
+        let (execution, tx_hash) = execute_cellscript_script_with_observer(
+            elf,
+            &fixture,
+            |tx, _| tx,
+            |_, tx, _| {
+                assert_eq!(tx.cell_deps().len(), 64);
+                tx.hash()
+            },
+        );
+        assert_eq!(execution.exit_code, 0, "opt={opt}: {:?}", execution.captured_debug);
+        assert!(execution.cycles <= 3_000_000, "opt={opt}: {} cycles", execution.cycles);
+        let (replay, replay_hash) = execute_cellscript_script_with_observer(elf, &fixture, |tx, _| tx, |_, tx, _| tx.hash());
+        assert_eq!(replay.exit_code, 0);
+        assert_eq!(tx_hash, replay_hash);
+        assert_eq!(execution.cycles, replay.cycles);
+        eprintln!(
+            "open-direct-64 opt={opt} artifact={} raw_tx={} cycles={} witness_payload=664 helper_frame=992",
+            hex::encode(blake2b_256(elf)),
+            hex::encode(tx_hash.as_slice()),
+            execution.cycles
+        );
+        // A duplicate in the last permitted slot cannot hide after a valid first
+        // dependency. Adding a 65th direct dependency separately exceeds bounds.
+        fixture.cell_deps[61].data = fixture.cell_deps[0].data.clone();
+        assert_eq!(execute_cellscript_script(elf, &fixture).exit_code, 85);
+        fixture.cell_deps[61].data = Bytes::from(vec![61]);
+        fixture.cell_deps.push(FixtureCell { capacity: 100_000_000_000, type_script: None, data: Bytes::from(vec![62]) });
+        assert_eq!(execute_cellscript_script(elf, &fixture).exit_code, 85);
+    }
+}
+
+#[test]
+fn open_code_dependency_rejects_actual_dep_group_expansion() {
+    use ckb_script_runner::execute_cellscript_script_with_transaction_transform;
+    use ckb_testtool::ckb_types::core::DepType;
+    let code_type = packed::Script::new_builder().code_hash([9u8; 32].pack()).hash_type(1u8).build();
+    let (set, selection) = open_authorization_set(code_type.calc_script_hash().unpack());
+    let mut point_seed = b"cellscript-test-cell-dep-v1".to_vec();
+    point_seed.extend_from_slice(&0u64.to_le_bytes());
+    let point = packed::OutPoint::new_builder().tx_hash(blake2b_256(&point_seed).pack()).index(0u32).build();
+    let group: packed::OutPointVec = vec![point].pack();
+    for opt in 0..=3 {
+        let result = compile_open_handle(&open_handle_from_args_source(0), opt);
+        let elf = strip_vm_abi_trailer(&result.artifact_bytes);
+        let mut fixture = open_handle_from_args_fixture(&result, set.root().to_vec(), selection.to_vec(), &code_type);
+        fixture.cell_deps.push(FixtureCell { capacity: 100_000_000_000, type_script: None, data: group.as_bytes() });
+        assert_eq!(execute_cellscript_script(elf, &fixture).exit_code, 0);
+        // The group contains an existing valid code OutPoint. It is otherwise
+        // resolvable and does not fail because its member is missing or malformed.
+        let execution = execute_cellscript_script_with_transaction_transform(elf, &fixture, |tx, _| {
+            let deps = tx
+                .cell_deps()
+                .into_iter()
+                .enumerate()
+                .map(|(index, dep)| if index == 1 { dep.as_builder().dep_type(DepType::DepGroup).build() } else { dep })
+                .collect();
+            tx.as_advanced_builder().set_cell_deps(deps).build()
+        });
+        assert_eq!(execution.exit_code, 85, "opt={opt}: {:?}", execution.captured_debug);
+    }
+}
+
+#[test]
+fn open_participant_observation_binds_role_source_and_complete_script_without_peer_authority() {
+    let participant = packed::Script::new_builder()
+        .code_hash(blake2b_256(&*ckb_testtool::builtin::ALWAYS_SUCCESS).pack())
+        .hash_type(4u8)
+        .args(Bytes::from_static(b"participant-args").pack())
+        .build();
+    let (original, _) = open_authorization_set(participant.calc_script_hash().unpack());
+    let mut member = original.members()[0].clone();
+    member.artifact = blake2b_256(&*ckb_testtool::builtin::ALWAYS_SUCCESS);
+    member.code_hash = member.artifact;
+    let set =
+        cellscript_artifact_checker::open_handle_policy::AuthorizationSet::new(original.header().clone(), &[member.clone()]).unwrap();
+    let selection = set.selection(&member.receipt).unwrap();
+    for opt in 0..=3 {
+        for subject in ["ckb::input<Token>(1)", "ckb::output<Token>(0)"] {
+            let source = open_handle_from_args_source(0)
+                .replace("public action", "resource Token has store { amount: u64 }\npublic action")
+                .replace("require_cell_dep_open_script_handle_from_args", "require_open_script_participant_from_args")
+                .replace("        handle\n", &format!("        handle,\n        {subject}\n"));
+            let result = compile_open_handle(&source, opt);
+            let elf = strip_vm_abi_trailer(&result.artifact_bytes);
+            let mut fixture = open_handle_from_args_fixture(&result, set.root().to_vec(), selection.to_vec(), &participant);
+            fixture.cell_deps[0].data = ckb_testtool::builtin::ALWAYS_SUCCESS.clone();
+            fixture.inputs.push(FixtureCell {
+                capacity: 100_000_000_000,
+                type_script: Some(participant.clone()),
+                data: Bytes::default(),
+            });
+            fixture.outputs[0].type_script = Some(participant.clone());
+            fixture.witnesses.push(Bytes::default());
+            let execution = execute_cellscript_script(elf, &fixture);
+            assert_eq!(execution.exit_code, 0, "O{opt} {subject}: {:?}", execution.captured_debug);
+            assert!(execution.cycles < 3_000_000);
+            let mut changed = fixture.clone();
+            let replacement = participant.clone().as_builder().args(Bytes::from_static(b"substituted").pack()).build();
+            if subject == "ckb::input<Token>(1)" {
+                changed.inputs[1].type_script = Some(replacement);
+            } else {
+                changed.outputs[0].type_script = Some(replacement);
+            }
+            assert_eq!(execute_cellscript_script(elf, &changed).exit_code, 85, "complete Script args O{opt} {subject}");
+            let wrong_source = source.replace(subject, "ckb::group_input<Token>(0)");
+            let wrong_result = compile_open_handle(&wrong_source, opt);
+            assert_eq!(
+                execute_cellscript_script(strip_vm_abi_trailer(&wrong_result.artifact_bytes), &fixture).exit_code,
+                85,
+                "group-relative source must observe the actual own group"
+            );
+            let missing_source = source.replace(subject, "ckb::input<Token>(2)");
+            let missing_result = compile_open_handle(&missing_source, opt);
+            assert_eq!(execute_cellscript_script(strip_vm_abi_trailer(&missing_result.artifact_bytes), &fixture).exit_code, 85);
         }
     }
 }

@@ -60,6 +60,7 @@ decoder check, not a claim that arbitrary aggregate expressions are executable.
 Full issue #28 still needs complete Cell-data/source codec and deployment
 receipts, package interface ownership, all-member admission and nominal runtime
 handles. Issue #29 still needs independently enforced participant obligations.
-Stable admission also requires the independent security review specified by
-those issues. Full CI remains deferred until the user's entire queue is
-implemented.
+External human review for #28 is waived by the
+[2026-10-11 decision](CELLSCRIPT_0_32_IMPLEMENTATION.md#maintainer-decision--2026-10-11-28-external-audit);
+The same decision also waives external human review for #29. Full CI remains
+deferred until the user's entire queue is implemented.

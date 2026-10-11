@@ -52,5 +52,7 @@ pointer lifetime, all scratch storage, general alias freedom, helper closure,
 source-to-machine equivalence, complete signed/boolean/enum codecs, role or
 cardinality authorization, peer execution, deployment or Type-hash history.
 Those applicable contracts remain necessary for full #28/#29 admission.
-Independent security review remains required before stable admission. Full CI
-is deferred until the entire requested implementation queue is complete.
+External human review for #28 is waived by the
+[2026-10-11 decision](CELLSCRIPT_0_32_IMPLEMENTATION.md#maintainer-decision--2026-10-11-28-external-audit);
+External human review for #29 is also waived by the same decision. Full CI is
+deferred until the entire requested implementation queue is complete.

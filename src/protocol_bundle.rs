@@ -19,6 +19,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+#[cfg(feature = "cli")]
+mod open_handles;
+pub use cellscript_artifact_checker::code_origin::ResolvedOpenHandle;
+#[cfg(feature = "cli")]
+pub use open_handles::{check_protocol_bundle_with_open_handles_file, ProtocolOpenHandleBinding, ProtocolOpenTransaction};
+
 pub const PROTOCOL_BUNDLE_SCHEMA: &str = "cellscript-protocol-bundle-v1";
 pub const PROTOCOL_BUNDLE_INPUT_SCHEMA: &str = "cellscript-protocol-bundle-input-v1";
 pub const PROTOCOL_BUNDLE_REPORT_SCHEMA: &str = "cellscript-protocol-bundle-report-v1";
@@ -461,6 +467,8 @@ pub struct ResolvedProtocolBundle {
     pub artifacts: Vec<ProtocolArtifactIdentity>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub deployment_lines: Vec<DeploymentLineAdmissionEvidence>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub open_handles: Vec<ResolvedOpenHandle>,
     pub transaction: ProtocolTransactionSkeleton,
     pub roles: Vec<ProtocolRoleBinding>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -513,12 +521,56 @@ pub fn check_protocol_bundle_file(path: &Path) -> Result<ProtocolBundleReport> {
     let bytes = read_bounded_file(path, MAX_MANIFEST_BYTES, "ProtocolBundle manifest")?;
     let input: ProtocolBundleInput = serde_json::from_slice(&bytes)
         .map_err(|error| CompileError::without_span(format!("failed to parse ProtocolBundle '{}': {}", path.display(), error)))?;
-    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let base = path.parent().filter(|path| !path.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
     check_protocol_bundle(&input, base)
 }
 
 /// Check an already parsed bundle using file paths relative to `base`.
 pub fn check_protocol_bundle(input: &ProtocolBundleInput, base: &Path) -> Result<ProtocolBundleReport> {
+    check_protocol_bundle_inner(input, base, |artifacts, metadata| {
+        if !open_handle_parameters(artifacts, metadata).is_empty() {
+            return Err(CompileError::without_span("missing private receipt admission for an open handle; provide checked source policies and final bytes with the native cli feature").with_code("E2611"));
+        }
+        Ok(Vec::new())
+    })
+}
+
+fn open_handle_parameters(
+    artifacts: &[ProtocolArtifactIdentity],
+    metadata: &BTreeMap<String, CompileMetadata>,
+) -> BTreeSet<(String, String)> {
+    let mut required = BTreeSet::new();
+    for artifact in artifacts {
+        // Locks and callable entries must not bypass private admission merely
+        // because they are absent from the action-only builder metadata.
+        for entry in metadata[&artifact.id].typed_semantics.entries.iter().filter(|entry| entry.name == artifact.entry.name) {
+            for param in &entry.params {
+                if param.ty.starts_with("ScriptHandle<") || param.ty.starts_with("VerifierHandle<") {
+                    required.insert((artifact.id.clone(), param.name.clone()));
+                }
+            }
+        }
+    }
+    required
+}
+
+/// Admit private source policies and exactly the concrete transaction emitted
+/// by the builder. Missing, duplicate or substituted bindings fail before the
+/// adapter can materialize/sign a resolved open-participant report.
+#[cfg(feature = "cli")]
+pub fn check_protocol_bundle_with_open_handles(
+    input: &ProtocolBundleInput,
+    base: &Path,
+    open: &ProtocolOpenTransaction<'_>,
+) -> Result<ProtocolBundleReport> {
+    check_protocol_bundle_inner(input, base, |artifacts, metadata| open_handles::admit(input, artifacts, metadata, open))
+}
+
+fn check_protocol_bundle_inner(
+    input: &ProtocolBundleInput,
+    base: &Path,
+    admit_open: impl FnOnce(&[ProtocolArtifactIdentity], &BTreeMap<String, CompileMetadata>) -> Result<Vec<ResolvedOpenHandle>>,
+) -> Result<ProtocolBundleReport> {
     validate_input_shape(input)?;
     let base = std::fs::canonicalize(base).map_err(|error| {
         CompileError::without_span(format!("failed to canonicalize ProtocolBundle base '{}': {}", base.display(), error))
@@ -527,6 +579,7 @@ pub fn check_protocol_bundle(input: &ProtocolBundleInput, base: &Path) -> Result
     let mut identities = Vec::with_capacity(input.artifacts.len());
     let mut reports = BTreeMap::new();
     let mut metadata_validation = BTreeMap::new();
+    let mut admitted_metadata = BTreeMap::new();
     let mut required_deployment_lines = BTreeSet::new();
     for artifact in &input.artifacts {
         let (identity, report, metadata) = admit_artifact(artifact, &base)?;
@@ -535,10 +588,12 @@ pub fn check_protocol_bundle(input: &ProtocolBundleInput, base: &Path) -> Result
         }
         let transaction_value = transaction_validation_view(&input.transaction, &artifact.deployment.script)?;
         metadata_validation.insert(artifact.id.clone(), validate_transaction_against_metadata(&metadata, &transaction_value));
+        admitted_metadata.insert(artifact.id.clone(), metadata);
         reports.insert(artifact.id.clone(), report);
         identities.push(identity);
     }
     identities.sort_by(|left, right| left.id.cmp(&right.id));
+    let open_handles = admit_open(&identities, &admitted_metadata)?;
     let mut deployment_line_admission = BTreeMap::new();
     let mut bound_deployment_lines = BTreeSet::new();
     for evidence in &input.deployment_lines {
@@ -576,6 +631,7 @@ pub fn check_protocol_bundle(input: &ProtocolBundleInput, base: &Path) -> Result
         network: normalized_network(&input.network)?,
         artifacts: identities,
         deployment_lines: input.deployment_lines.clone(),
+        open_handles,
         transaction: input.transaction.clone(),
         roles: input.roles.clone(),
         closed_roles,
@@ -2101,6 +2157,7 @@ mod tests {
             network: network.clone(),
             artifacts: vec![artifact("order", network.clone()), artifact("token", network)],
             deployment_lines: Vec::new(),
+            open_handles: Vec::new(),
             transaction: ProtocolTransactionSkeleton {
                 version: 0,
                 inputs: vec![ProtocolCellSlot {

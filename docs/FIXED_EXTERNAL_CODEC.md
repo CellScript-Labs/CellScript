@@ -40,6 +40,8 @@ comparison permits the same public contract.
 This is a partial #28 prerequisite, not the complete H1 receipt or H2 admission.
 Nominal resolver-owned I, actual deployment/Script args/raw and resolved deps,
 Type history, immutable policy authorization, all-member admitted receipts,
-builder/runtime/editor parity and independent security review remain necessary.
+builder/runtime/editor parity remain necessary. External human review for #28
+is waived by the
+[2026-10-11 decision](CELLSCRIPT_0_32_IMPLEMENTATION.md#maintainer-decision--2026-10-11-28-external-audit).
 Verifier-specific entry profiles are not admitted by this policy-action profile.
 Full CI remains deferred until the whole requested implementation queue is ready.

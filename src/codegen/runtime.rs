@@ -645,6 +645,10 @@ impl CodeGenerator {
                 "CSOHWv1 membership with the expected root derived from the current Script's committed 32-byte args",
             ),
             (
+                "__ckb_require_open_script_participant_from_args",
+                "CSOHWv1 committed-root membership, exact code dependency and observed participant Script identity",
+            ),
+            (
                 "__ckb_require_cell_dep_open_verifier_handle_from_args",
                 "CSOHWv1 verifier membership with the expected root derived from the current Script's committed 32-byte args",
             ),
@@ -906,7 +910,7 @@ impl CodeGenerator {
                 "__ckb_require_cell_dep_open_verifier_handle" => {
                     self.emit_runtime_open_handle_requirement_helper(name, detail, false, enabled)
                 }
-                "__ckb_require_cell_dep_open_script_handle_from_args" => {
+                "__ckb_require_cell_dep_open_script_handle_from_args" | "__ckb_require_open_script_participant_from_args" => {
                     self.emit_runtime_open_handle_from_args_requirement_helper(name, detail, true, enabled)
                 }
                 "__ckb_require_cell_dep_open_verifier_handle_from_args" => {
@@ -1145,6 +1149,7 @@ impl CodeGenerator {
                     | "__ckb_require_cell_dep_open_script_handle"
                     | "__ckb_require_cell_dep_open_verifier_handle"
                     | "__ckb_require_cell_dep_open_script_handle_from_args"
+                    | "__ckb_require_open_script_participant_from_args"
                     | "__ckb_require_cell_dep_open_verifier_handle_from_args"
                     | "__ckb_require_cell_lock_deployment_line_handle"
                     | "__ckb_require_cell_type_deployment_line_handle"
@@ -1185,6 +1190,7 @@ impl CodeGenerator {
             || referenced_helpers.contains("__ckb_require_cell_dep_open_script_handle")
             || referenced_helpers.contains("__ckb_require_cell_dep_open_verifier_handle")
             || referenced_helpers.contains("__ckb_require_cell_dep_open_script_handle_from_args")
+            || referenced_helpers.contains("__ckb_require_open_script_participant_from_args")
             || referenced_helpers.contains("__ckb_require_cell_dep_open_verifier_handle_from_args")
             || referenced_helpers.contains("__ckb_require_cell_lock_deployment_line_handle")
             || referenced_helpers.contains("__ckb_require_cell_type_deployment_line_handle")
@@ -6655,7 +6661,6 @@ impl CodeGenerator {
         root_from_args: bool,
         enabled: bool,
     ) {
-        let _ = root_from_args;
         use crate::script_handle_contract::{
             OPEN_HANDLE_CLASS_SCRIPT, OPEN_HANDLE_CLASS_VERIFIER, OPEN_HANDLE_HEADER_CLASS_OFFSET,
             OPEN_HANDLE_HEADER_MEMBER_COUNT_OFFSET, OPEN_HANDLE_HEADER_ROLE_OFFSET, OPEN_HANDLE_INDEX_OFFSET,
@@ -6668,26 +6673,26 @@ impl CodeGenerator {
         const ROOT_PTR: usize = 8;
         const VIEW: usize = 16;
         const INDEX: usize = 24;
-        const SOURCE: usize = 32;
-        const SIZE: usize = 40;
+        const SUBJECT: usize = 32;
         const IDENTITY_HASH: usize = 48;
         const CURRENT_HASH: usize = 80;
         const RA: usize = 112;
-        const ARGS_LEN: usize = 822;
-        const ARGS_SIZE: usize = 828;
-        const ARGS_BUFFER: usize = 848;
         const LEAF_STAGING: usize = 128;
         const LEAF_INPUT: usize = OPEN_HANDLE_MEMBER_DOMAIN.len() + 1 + 292;
         const NODE_STAGING: usize = LEAF_STAGING + 336;
         const NODE_INPUT: usize = OPEN_HANDLE_NODE_DOMAIN.len() + 64;
         const POLICY_STAGING: usize = NODE_STAGING + 97;
         const POLICY_INPUT: usize = OPEN_HANDLE_POLICY_DOMAIN.len() + 188 + 32;
+        // Both lengths occupy eight bytes. Place them after the hash staging
+        // buffers and keep LOAD_SCRIPT's in/out length separate from the saved
+        // selection length, which is reloaded after the syscall.
+        const ARGS_LEN: usize = (POLICY_STAGING + POLICY_INPUT).div_ceil(8) * 8;
+        const ARGS_SIZE: usize = ARGS_LEN + 8;
+        const ARGS_BUFFER: usize = 848;
         const FRAME: usize = (ARGS_BUFFER + 128).div_ceil(16) * 16 + 16;
 
         let invalid = self.fresh_label("open_handle_invalid");
         let hash_failed = self.fresh_label("open_handle_hash_failed");
-        let invalid_source = self.fresh_label("open_handle_source_invalid");
-        let load_failed = self.fresh_label("open_handle_load_failed");
         let done = self.fresh_label("open_handle_done");
         let abi = self.runtime_abi();
 
@@ -6706,6 +6711,10 @@ impl CodeGenerator {
         // The from-args LOAD_SCRIPT clobbers caller-saved registers, so the
         // CellDepView and selection length must be staged before the syscall.
         self.emit(format!("sd a0, {VIEW}(sp)"));
+        let participant = symbol == "__ckb_require_open_script_participant_from_args";
+        if participant {
+            self.emit_stack_store("a3", SUBJECT);
+        }
         self.emit("mv t4, a2");
         self.emit(format!("sd t4, {ARGS_LEN}(sp)"));
         if root_from_args {
@@ -6787,6 +6796,43 @@ impl CodeGenerator {
         self.emit(format!("sd t0, {INDEX}(sp)"));
         self.emit(format!("lbu t1, {OPEN_HANDLE_HEADER_MEMBER_COUNT_OFFSET}(t3)"));
         self.emit_near_cond("bgeu t0,t1", &invalid);
+        self.emit("li t2, 32");
+        self.emit_near_cond("bltu t2,t1", &invalid);
+        for (base, magic) in [(8, b"CSOHPv1\0"), (196, b"CSOHMv1\0")] {
+            for (offset, byte) in magic.iter().enumerate() {
+                self.emit(format!("lbu t0, {}(t3)", base + offset));
+                self.emit(format!("li t1, {byte}"));
+                self.emit_near_cond("bne t0,t1", &invalid);
+            }
+        }
+        for offset in (206..212).chain(489..496) {
+            self.emit(format!("lbu t0, {offset}(t3)"));
+            self.emit_near_cond("bnez t0", &invalid);
+        }
+        // The committed set may retain yanked/below-floor history. Membership
+        // alone must never make those members selectable. Decode unaligned
+        // little-endian u64 fields without native scalar loads.
+        for (register, offset) in [("t0", 212), ("t1", 28), ("t2", 20)] {
+            self.emit(format!("li {register}, 0"));
+            for byte in (0..8).rev() {
+                self.emit(format!("slli {register}, {register}, 8"));
+                self.emit(format!("lbu t4, {}(t3)", offset + byte));
+                self.emit(format!("or {register}, {register}, t4"));
+            }
+        }
+        self.emit_near_cond("bltu t0,t1", &invalid);
+        self.emit_near_cond("bltu t2,t0", &invalid);
+        let compatible = self.fresh_label("open_handle_compatible");
+        self.emit("lbu t0, 18(t3)");
+        self.emit("li t1, 1");
+        self.emit_near_cond("bltu t1,t0", &invalid);
+        self.emit(format!("bnez t0,{compatible}"));
+        self.emit("addi a0, t3, 68");
+        self.emit("addi a1, t3, 228");
+        self.emit("li a2, 32");
+        self.emit("call __cellscript_memcmp_fixed");
+        self.emit_near_cond("bnez a0", &invalid);
+        self.emit_label(&compatible);
 
         self.emit(format!("addi t3, sp, {LEAF_STAGING}"));
         for (offset, byte) in OPEN_HANDLE_MEMBER_DOMAIN.iter().enumerate() {
@@ -6881,57 +6927,13 @@ impl CodeGenerator {
         self.emit("call __cellscript_memcmp_fixed");
         self.emit_near_cond("bnez a0", &invalid);
 
-        // Selected dependency: the member's complete Script hash equals the
-        // dep's Lock/Type (script variant, by the header role) or data hash
-        // (verifier variant).
-        self.emit(format!("ld a0, {VIEW}(sp)"));
-        self.emit_decode_source_view_to_t1_t2(&invalid_source);
-        self.emit(format!("sd t1, {INDEX}(sp)"));
-        self.emit(format!("sd t2, {SOURCE}(sp)"));
-        self.emit("li t0, 32");
-        self.emit(format!("sd t0, {SIZE}(sp)"));
-        if script_variant {
-            let role_type = self.fresh_label("open_handle_role_type");
-            let role_bound = self.fresh_label("open_handle_role_bound");
-            self.emit(format!("ld t3, {HANDLE_PTR}(sp)"));
-            self.emit(format!("lbu t0, {OPEN_HANDLE_HEADER_ROLE_OFFSET}(t3)"));
-            self.emit(format!("bnez t0, {role_type}"));
-            self.emit(format!("li t6, {}", CKB_CELL_FIELD_LOCK_HASH));
-            self.emit(format!("j {role_bound}"));
-            self.emit_label(&role_type);
-            self.emit(format!("li t6, {}", CKB_CELL_FIELD_TYPE_HASH));
-            self.emit_label(&role_bound);
-        } else {
-            self.emit(format!("li t6, {}", CKB_CELL_FIELD_DATA_HASH));
+        self.emit_open_handle_code_dependency(&invalid);
+        if participant {
+            self.emit_open_handle_participant(&invalid);
         }
-        self.emit(format!("addi a0, sp, {IDENTITY_HASH}"));
-        self.emit(format!("addi a1, sp, {SIZE}"));
-        self.emit("li a2, 0");
-        self.emit(format!("ld a3, {INDEX}(sp)"));
-        self.emit(format!("ld a4, {SOURCE}(sp)"));
-        self.emit("add a5, x0, t6");
-        self.emit(format!("li a7, {}", abi.load_cell_by_field));
-        self.emit("ecall");
-        self.emit_near_cond("bnez a0", &load_failed);
-        self.emit(format!("ld t0, {SIZE}(sp)"));
-        self.emit("li t1, 32");
-        self.emit("sub t2, t0, t1");
-        self.emit_near_cond("bnez t2", &invalid);
-        self.emit(format!("addi a0, sp, {IDENTITY_HASH}"));
-        self.emit(format!("ld a1, {HANDLE_PTR}(sp)"));
-        self.emit(format!("addi a1, a1, {}", crate::script_handle_contract::OPEN_HANDLE_MEMBER_COMPLETE_SCRIPT_OFFSET));
-        self.emit("li a2, 32");
-        self.emit("call __cellscript_memcmp_fixed");
-        self.emit_near_cond("bnez a0", &invalid);
         self.emit("li a0, 0");
         self.emit(format!("j {done}"));
 
-        self.emit_label(&invalid_source);
-        self.emit(format!("li a0, {}", CellScriptRuntimeError::CkbSourceViewInvalid.code()));
-        self.emit(format!("j {done}"));
-        self.emit_label(&load_failed);
-        self.emit(format!("li a0, {}", CellScriptRuntimeError::CkbSourceViewInvalid.code()));
-        self.emit(format!("j {done}"));
         self.emit_label(&hash_failed);
         self.emit(format!("li a0, {}", CellScriptRuntimeError::OpenHandleInvalid.code()));
         self.emit(format!("j {done}"));
@@ -6941,6 +6943,214 @@ impl CodeGenerator {
         self.emit(format!("ld ra, {RA}(sp)"));
         self.emit(format!("addi sp, sp, {FRAME}"));
         self.emit("ret");
+    }
+
+    /// Observe the complete selected Lock/Type Script on one actual Cell. This
+    /// grants no lifecycle authority and makes no claim that a peer executed.
+    /// The caller's handle at 0, subject at 32 and return address stay live;
+    /// syscall scratch reuses the dead size/hash slots at 40 and 48.
+    fn emit_open_handle_participant(&mut self, invalid: &str) {
+        let source_ready = self.fresh_label("open_participant_source");
+        let field_ready = self.fresh_label("open_participant_field");
+        self.emit_stack_load("a0", 32);
+        self.emit_decode_source_view_to_t1_t2(invalid);
+        for source in
+            [CKB_SOURCE_INPUT, CKB_SOURCE_OUTPUT, CKB_SOURCE_GROUP_FLAG | CKB_SOURCE_INPUT, CKB_SOURCE_GROUP_FLAG | CKB_SOURCE_OUTPUT]
+        {
+            self.emit(format!("li t0, {source}"));
+            self.emit_near_cond("beq t0,t2", &source_ready);
+        }
+        self.emit(format!("j {invalid}"));
+        self.emit_label(&source_ready);
+        self.emit("mv a3, t1");
+        self.emit("mv a4, t2");
+        self.emit_stack_load("t3", 0);
+        self.emit(format!("lbu t0, {}(t3)", crate::script_handle_contract::OPEN_HANDLE_HEADER_ROLE_OFFSET));
+        self.emit(format!("li a5, {CKB_CELL_FIELD_LOCK_HASH}"));
+        self.emit_near_cond("beqz t0", &field_ready);
+        self.emit(format!("li a5, {CKB_CELL_FIELD_TYPE_HASH}"));
+        self.emit_label(&field_ready);
+        self.emit("li t0, 32");
+        self.emit_stack_store("t0", 40);
+        self.emit_sp_addi("a0", 48);
+        self.emit_sp_addi("a1", 40);
+        self.emit("li a2, 0");
+        self.emit(format!("li a7, {}", ckb_abi::syscall::LOAD_CELL_BY_FIELD));
+        self.emit("ecall");
+        self.emit_near_cond("bnez a0", invalid);
+        self.emit_stack_load("t0", 40);
+        self.emit("li t1, 32");
+        self.emit_near_cond("bne t0,t1", invalid);
+        self.emit_sp_addi("a0", 48);
+        self.emit_stack_load("a1", 0);
+        self.emit("addi a1, a1, 324");
+        self.emit("li a2, 32");
+        self.emit("call __cellscript_memcmp_fixed");
+        self.emit_near_cond("bnez a0", invalid);
+    }
+
+    /// Inline into the membership helper after its root comparison. The old
+    /// hash staging area at 128..336 is dead here; root/handle/view slots and ra
+    /// remain live. All syscall/child-call state lives in distinct stack slots.
+    fn emit_open_handle_code_dependency(&mut self, invalid: &str) {
+        const HANDLE: usize = 0;
+        const VIEW: usize = 16;
+        const SELECTED: usize = 24;
+        const SIZE: usize = 40;
+        const HASH: usize = 48;
+        const HEADER: usize = 128;
+        const COUNT: usize = 176;
+        const CURSOR: usize = 184;
+        const DEP: usize = 192;
+        let scan = self.fresh_label("open_code_scan");
+        let next = self.fresh_label("open_code_next");
+        let not_selected = self.fresh_label("open_code_not_selected");
+        let data_field = self.fresh_label("open_code_data_field");
+        let field_ready = self.fresh_label("open_code_field_ready");
+        let loaded = self.fresh_label("open_code_loaded");
+        let finish = self.fresh_label("open_code_finish");
+        self.emit_stack_load("a0", VIEW);
+        self.emit_decode_source_view_to_t1_t2(invalid);
+        self.emit(format!("li t0, {}", ckb_abi::source::CELL_DEP));
+        self.emit_near_cond("bne t0,t2", invalid);
+        self.emit_stack_store("t1", SELECTED);
+        self.emit("li t0, 48");
+        self.emit_stack_store("t0", SIZE);
+        self.emit_sp_addi("a0", HEADER);
+        self.emit_sp_addi("a1", SIZE);
+        self.emit("li a2, 0");
+        self.emit(format!("li a7, {}", ckb_abi::syscall::LOAD_TRANSACTION));
+        self.emit("ecall");
+        self.emit_near_cond("bnez a0", invalid);
+        self.emit_stack_load("t1", SIZE);
+        self.emit("li t0, 68");
+        self.emit_near_cond("bltu t1,t0", invalid);
+        self.emit_stack_u32_le_to("t0", HEADER);
+        self.emit_near_cond("bne t0,t1", invalid);
+        // LOAD_TRANSACTION supplies a canonical node transaction. Still bind
+        // the offsets we use, and bound the complete raw direct dependency set.
+        for (offset, value) in [(4, 12), (16, 28), (20, 32)] {
+            self.emit_stack_u32_le_to("t0", HEADER + offset);
+            self.emit(format!("li t1, {value}"));
+            self.emit_near_cond("bne t0,t1", invalid);
+        }
+        self.emit_stack_u32_le_to("t0", HEADER + 44);
+        self.emit_near_cond("beqz t0", invalid);
+        self.emit("li t1, 64");
+        self.emit_near_cond("bltu t1,t0", invalid);
+        self.emit_stack_store("t0", COUNT);
+        self.emit_stack_load("t1", SELECTED);
+        self.emit_near_cond("bgeu t1,t0", invalid);
+        self.emit("li t1, 37");
+        self.emit("mul t0, t0, t1");
+        self.emit("addi t0, t0, 36");
+        self.emit_stack_u32_le_to("t1", HEADER + 24);
+        self.emit_near_cond("bne t0,t1", invalid);
+        self.emit_stack_store("zero", CURSOR);
+        self.emit_label(&scan);
+        self.emit("li t0, 37");
+        self.emit_stack_store("t0", SIZE);
+        self.emit_stack_load("t1", CURSOR);
+        self.emit("mul a2, t1, t0");
+        self.emit("addi a2, a2, 48");
+        self.emit_sp_addi("a0", DEP);
+        self.emit_sp_addi("a1", SIZE);
+        self.emit(format!("li a7, {}", ckb_abi::syscall::LOAD_TRANSACTION));
+        self.emit("ecall");
+        self.emit_near_cond("bnez a0", invalid);
+        self.emit_stack_load("t0", SIZE);
+        self.emit("li t1, 37");
+        self.emit_near_cond("bltu t0,t1", invalid);
+        self.emit_stack_load_byte("t0", DEP + 36);
+        self.emit_near_cond("bnez t0", invalid); // no dep-group expansion
+        self.emit_stack_load("t0", CURSOR);
+        self.emit_stack_load("t1", SELECTED);
+        self.emit(format!("bne t0,t1,{not_selected}"));
+        self.emit_sp_addi("a0", DEP);
+        self.emit_stack_load("a1", HANDLE);
+        self.emit("addi a1, a1, 388");
+        // tx_hash and output index are not contiguous in the selection wire.
+        self.emit("li a2, 32");
+        self.emit("call __cellscript_memcmp_fixed");
+        self.emit_near_cond("bnez a0", invalid);
+        self.emit_sp_addi("a0", DEP + 32);
+        self.emit_stack_load("a1", HANDLE);
+        self.emit("addi a1, a1, 484");
+        self.emit("li a2, 4");
+        self.emit("call __cellscript_memcmp_fixed");
+        self.emit_near_cond("bnez a0", invalid);
+        self.emit_label(&not_selected);
+        self.emit_stack_load("t3", HANDLE);
+        self.emit("lbu t0, 205(t3)");
+        self.emit("li t1, 4");
+        self.emit(format!("beq t0,t1,{data_field}"));
+        self.emit("li t1, 1");
+        self.emit_near_cond("bne t0,t1", invalid);
+        self.emit(format!("li a5, {}", ckb_abi::cell_field::TYPE_HASH));
+        self.emit(format!("j {field_ready}"));
+        self.emit_label(&data_field);
+        self.emit(format!("li a5, {}", ckb_abi::cell_field::DATA_HASH));
+        self.emit_label(&field_ready);
+        self.emit("li t0, 32");
+        self.emit_stack_store("t0", SIZE);
+        self.emit_sp_addi("a0", HASH);
+        self.emit_sp_addi("a1", SIZE);
+        self.emit("li a2, 0");
+        self.emit_stack_load("a3", CURSOR);
+        self.emit(format!("li a4, {}", ckb_abi::source::CELL_DEP));
+        self.emit(format!("li a7, {}", ckb_abi::syscall::LOAD_CELL_BY_FIELD));
+        self.emit("ecall");
+        self.emit(format!("beqz a0,{loaded}"));
+        // ITEM_MISSING is permitted only for an unselected Cell's Type Script.
+        self.emit("li t0, 2");
+        self.emit_near_cond("bne a0,t0", invalid);
+        self.emit_stack_load("t0", CURSOR);
+        self.emit_stack_load("t1", SELECTED);
+        self.emit_near_cond("beq t0,t1", invalid);
+        self.emit(format!("j {next}"));
+        self.emit_label(&loaded);
+        self.emit_stack_load("t0", SIZE);
+        self.emit("li t1, 32");
+        self.emit_near_cond("bne t0,t1", invalid);
+        self.emit_sp_addi("a0", HASH);
+        self.emit_stack_load("a1", HANDLE);
+        self.emit("addi a1, a1, 356");
+        self.emit("li a2, 32");
+        self.emit("call __cellscript_memcmp_fixed");
+        self.emit_stack_load("t0", CURSOR);
+        self.emit_stack_load("t1", SELECTED);
+        let matched = self.fresh_label("open_code_matched");
+        self.emit(format!("beqz a0,{matched}"));
+        self.emit_near_cond("beq t0,t1", invalid);
+        self.emit(format!("j {next}"));
+        self.emit_label(&matched);
+        self.emit_near_cond("bne t0,t1", invalid); // ambiguous code identity
+                                                   // Always check actual bytes as well, including Type-hash replacements.
+        self.emit("li t0, 32");
+        self.emit_stack_store("t0", SIZE);
+        self.emit_sp_addi("a0", HASH);
+        self.emit_sp_addi("a1", SIZE);
+        self.emit("li a2, 0");
+        self.emit_stack_load("a3", SELECTED);
+        self.emit(format!("li a4, {}", ckb_abi::source::CELL_DEP));
+        self.emit(format!("li a5, {}", ckb_abi::cell_field::DATA_HASH));
+        self.emit(format!("li a7, {}", ckb_abi::syscall::LOAD_CELL_BY_FIELD));
+        self.emit("ecall");
+        self.emit_near_cond("bnez a0", invalid);
+        self.emit_sp_addi("a0", HASH);
+        self.emit_stack_load("a1", HANDLE);
+        self.emit(format!("addi a1, a1, {}", crate::script_handle_contract::OPEN_HANDLE_MEMBER_ARTIFACT_OFFSET));
+        self.emit("li a2, 32");
+        self.emit("call __cellscript_memcmp_fixed");
+        self.emit_near_cond("bnez a0", invalid);
+        self.emit_label(&next);
+        self.emit_stack_load("t0", CURSOR);
+        self.emit("addi t0, t0, 1");
+        self.emit_stack_store("t0", CURSOR);
+        self.emit_stack_load("t1", COUNT);
+        self.emit(format!("beq t0,t1,{finish}"));
+        self.emit(format!("j {scan}"));
+        self.emit_label(&finish);
     }
 
     fn emit_runtime_deployment_line_handle_requirement_helper(

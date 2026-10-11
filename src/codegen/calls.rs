@@ -1227,9 +1227,12 @@ impl CodeGenerator {
     fn emit_runtime_open_handle_requirement_call(&mut self, func: &str, args: &[IrOperand]) -> Result<bool> {
         if matches!(
             func,
-            "__ckb_require_cell_dep_open_script_handle_from_args" | "__ckb_require_cell_dep_open_verifier_handle_from_args"
+            "__ckb_require_cell_dep_open_script_handle_from_args"
+                | "__ckb_require_cell_dep_open_verifier_handle_from_args"
+                | "__ckb_require_open_script_participant_from_args"
         ) {
-            if args.len() != 2 {
+            let participant = func == "__ckb_require_open_script_participant_from_args";
+            if args.len() != if participant { 3 } else { 2 } {
                 return Ok(false);
             }
             let Some(handle) = self.expected_fixed_byte_source(&args[1], 656) else {
@@ -1243,7 +1246,11 @@ impl CodeGenerator {
                 return Ok(true);
             }
             self.emit("li a2, 656");
-            self.emit("li a3, 0");
+            if participant {
+                self.emit_operand_to_register("a3", &args[2]);
+            } else {
+                self.emit("li a3, 0");
+            }
             self.emit("li a4, 0");
             self.emit(format!("call {func}"));
             let ok = self.fresh_label("open_handle_from_args_ok");

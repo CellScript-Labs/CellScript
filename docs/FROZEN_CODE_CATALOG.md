@@ -52,8 +52,9 @@ transaction commitment, consensus validity, live code Cells, Lock authorization,
 Type replacement history, status/yank/downgrade policy, consumer authorization or
 immutable on-chain roots. Type-hash candidates are byte/profile-bound, not admitted
 replacement histories. Full H1/H2, nominal `I`, source handles, ProtocolBundle /
-generated-builder integration, #29 and #44–#46 remain unfinished. Independent
-security review remains required before stable admission.
+generated-builder integration, #29 and #44–#46 remain unfinished. External
+human review for #28 and #29 was waived by the maintainer on 2026-10-11;
+all technical acceptance remains required.
 
 The native [resolver-bound source owner](RESOLVED_CODE_CATALOG.md) additionally
 links the defining baseline to its actual selected origin inside a consumer's

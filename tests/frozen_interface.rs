@@ -423,10 +423,7 @@ fn native_code_catalog_rejects_unselected_bad_origins_interfaces_and_networks() 
 #[test]
 fn native_code_catalog_requires_finite_receipts_for_unselected_and_final_members() {
     use cellscript::package::frozen_interface::freeze_code_catalog;
-    use cellscript_artifact_checker::{
-        code_origin::{check_code_cell_origin, check_code_cell_target},
-        CheckerBudgets,
-    };
+    use cellscript_artifact_checker::{code_origin::check_code_cell_origin, CheckerBudgets};
     let directory = tempfile::tempdir().unwrap();
     let original = directory.path().join("original");
     let constant = directory.path().join("constant");
@@ -1311,6 +1308,178 @@ fn code_policy_rejects_actual_type_hash_receipts_without_authenticated_history()
     }
 }
 
+#[test]
+fn source_policy_binds_type_id_history_and_the_exact_final_dependency() {
+    use cellscript::package::frozen_interface::{
+        freeze_code_catalog, freeze_package_sources, freeze_source_code_policy_with_histories, resolve_source_catalog,
+        CodeCandidateInput,
+    };
+    use cellscript_artifact_checker::code_origin::{check_type_code_history, SuppliedDependencyCell, TypeCodeHistoryStep};
+    use cellscript_artifact_checker::open_handle_policy::{AuthorizationSet, CodeHashType};
+    use ckb_testtool::ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*};
+
+    let (_directory, library, _candidate, consumer) = policy_fixture();
+    for opt in 0..=3 {
+        for count in [1usize, 2, 32] {
+            let compile = || {
+                compile_module(
+                    Utf8Path::from_path(&library).unwrap(),
+                    "dev",
+                    CompileOptions { opt_level: opt, target_profile: Some("ckb-type-hash".into()), ..Default::default() },
+                    EntrySelection::Artifact("code-policy".into()),
+                )
+                .unwrap()
+            };
+            let module = compile();
+            let first = packed::CellInput::new_builder()
+                .previous_output(packed::OutPoint::new_builder().tx_hash([0x31; 32].pack()).index(2u32).build())
+                .build();
+            let mut type_code_hash = [0u8; 32];
+            type_code_hash[25..].copy_from_slice(b"TYPE_ID");
+            let mut seed = first.as_slice().to_vec();
+            seed.extend_from_slice(&0u64.to_le_bytes());
+            let code_type = packed::Script::new_builder()
+                .code_hash(type_code_hash.pack())
+                .hash_type(1u8)
+                .args(Bytes::from(ckb_testtool::ckb_hash::blake2b_256(&seed).to_vec()).pack())
+                .build();
+            let custody = packed::Script::new_builder().code_hash([0x32; 32].pack()).hash_type(2u8).build();
+            let output = packed::CellOutput::new_builder()
+                .capacity(1000000000000u64)
+                .lock(custody.clone())
+                .type_(Some(code_type.clone()).pack())
+                .build();
+            let mut input = first;
+            let mut history = Vec::new();
+            for sequence in 0..count {
+                let data = if sequence + 1 == count { module.bundle()[0].to_vec() } else { vec![sequence as u8; 8] };
+                let tx =
+                    TransactionBuilder::default().input(input).output(output.clone()).output_data(Bytes::from(data).pack()).build();
+                input = packed::CellInput::new_builder()
+                    .previous_output(packed::OutPoint::new_builder().tx_hash(tx.hash()).index(0u32).build())
+                    .build();
+                history.push(tx.data().raw().as_slice().to_vec());
+            }
+            let selected = packed::Script::new_builder()
+                .code_hash(code_type.calc_script_hash())
+                .hash_type(1u8)
+                .args(Bytes::from(vec![1]).pack())
+                .build();
+            let catalog = freeze_code_catalog(
+                compile(),
+                vec![CodeCandidateInput {
+                    module,
+                    raw_transaction: history.last().unwrap().clone(),
+                    output_index: 0,
+                    selected_script: selected.as_slice().to_vec(),
+                }],
+                &Default::default(),
+            )
+            .unwrap();
+            let sources =
+                resolve_source_catalog(freeze_package_sources(Utf8Path::from_path(&consumer).unwrap(), "dev").unwrap(), catalog)
+                    .unwrap();
+            let target = sources.catalog().candidates()[0].target_origin();
+            let steps = history.iter().map(|raw| TypeCodeHistoryStep { raw_transaction: raw, output_index: 0 }).collect::<Vec<_>>();
+            let proof = check_type_code_history(target, &steps, &Default::default()).unwrap();
+            assert_eq!(proof.sequence(), (count - 1) as u64);
+            assert_eq!(proof.deployment_line().as_slice(), code_type.calc_script_hash().as_slice());
+            let record: serde_json::Value = serde_json::from_slice(&proof.canonical_bytes().unwrap()).unwrap();
+            assert_eq!(record["steps"].as_array().unwrap().len(), count);
+            // A truncated lineage never becomes a fresh Type-ID genesis.
+            if count > 1 {
+                assert!(check_type_code_history(target, &steps[1..], &Default::default()).unwrap_err().message.contains("genesis"));
+            }
+            let duplicate = (0..33).map(|_| TypeCodeHistoryStep { raw_transaction: &history[0], output_index: 0 }).collect::<Vec<_>>();
+            assert!(check_type_code_history(target, &duplicate, &Default::default()).is_err());
+            let mut changed = history.clone();
+            changed[0].push(0);
+            let changed_steps =
+                changed.iter().map(|raw| TypeCodeHistoryStep { raw_transaction: raw, output_index: 0 }).collect::<Vec<_>>();
+            assert!(check_type_code_history(target, &changed_steps, &Default::default()).is_err());
+
+            // Rebind canonical transaction bytes rather than merely corrupting
+            // a digest: custody, Type-ID, predecessor, uniqueness and the final
+            // artifact each have an independently enforced boundary.
+            let last = packed::RawTransaction::from_slice(history.last().unwrap()).unwrap();
+            let mutations = [
+                last.clone()
+                    .as_builder()
+                    .outputs(
+                        vec![output
+                            .clone()
+                            .as_builder()
+                            .lock(custody.clone().as_builder().args(Bytes::from(vec![9]).pack()).build())
+                            .build()]
+                        .pack(),
+                    )
+                    .build(),
+                last.clone()
+                    .as_builder()
+                    .outputs(
+                        vec![output
+                            .clone()
+                            .as_builder()
+                            .type_(Some(code_type.clone().as_builder().args(Bytes::from(vec![9; 32]).pack()).build()).pack())
+                            .build()]
+                        .pack(),
+                    )
+                    .build(),
+                last.clone()
+                    .as_builder()
+                    .inputs(
+                        vec![packed::CellInput::new_builder()
+                            .previous_output(packed::OutPoint::new_builder().tx_hash([0x99; 32].pack()).build())
+                            .build()]
+                        .pack(),
+                    )
+                    .build(),
+                last.clone()
+                    .as_builder()
+                    .outputs(vec![output.clone(), output.clone()].pack())
+                    .outputs_data(vec![last.outputs_data().get(0).unwrap(), last.outputs_data().get(0).unwrap()].pack())
+                    .build(),
+                last.clone().as_builder().outputs_data(vec![Bytes::from(vec![0x99]).pack()].pack()).build(),
+            ];
+            for mutation in mutations {
+                let mut changed = history.clone();
+                *changed.last_mut().unwrap() = mutation.as_slice().to_vec();
+                let refs = changed.iter().map(|raw| TypeCodeHistoryStep { raw_transaction: raw, output_index: 0 }).collect::<Vec<_>>();
+                assert!(check_type_code_history(target, &refs, &Default::default()).is_err(), "opt={opt} count={count}");
+            }
+            let repeated = [
+                TypeCodeHistoryStep { raw_transaction: &history[0], output_index: 0 },
+                TypeCodeHistoryStep { raw_transaction: &history[0], output_index: 0 },
+            ];
+            assert!(check_type_code_history(target, &repeated, &Default::default()).is_err());
+
+            let (header, mut members) = source_policy_records(&sources, false, 0);
+            members[0].hash_type = CodeHashType::Type;
+            members[0].code_hash = proof.deployment_line();
+            members[0].deployment_line = proof.deployment_line();
+            members[0].history_tip = proof.history_tip();
+            members[0].deployment_sequence = proof.sequence();
+            let policy =
+                freeze_source_code_policy_with_histories(sources, AuthorizationSet::new(header, &members).unwrap(), vec![proof])
+                    .unwrap();
+            let witness = policy.policy().selection(&members[0].receipt).unwrap();
+            let candidate = policy.sources().catalog().candidates().first().unwrap();
+            let (raw, point, output_bytes, data) = final_code_dependency(candidate);
+            let cells = [SuppliedDependencyCell { out_point: point, output: &output_bytes, data: &data }];
+            let checked =
+                policy.check_selection(&witness).unwrap().check_direct_dependency(&raw, &cells, &Default::default()).unwrap();
+            checked.check_unchanged_inputs(&raw, &cells, &Default::default()).unwrap();
+            let bad_data = [0x99];
+            let bad_cells = [SuppliedDependencyCell { out_point: point, output: &output_bytes, data: &bad_data }];
+            assert!(policy.check_selection(&witness).unwrap().check_direct_dependency(&raw, &bad_cells, &Default::default()).is_err());
+            let mut other_point = point;
+            other_point[0] ^= 1;
+            let copied = [SuppliedDependencyCell { out_point: other_point, output: &output_bytes, data: &data }];
+            assert!(policy.check_selection(&witness).unwrap().check_direct_dependency(&raw, &copied, &Default::default()).is_err());
+        }
+    }
+}
+
 fn source_policy_records(
     sources: &cellscript::package::frozen_interface::ResolvedSourceCatalog,
     exact: bool,
@@ -1722,5 +1891,465 @@ fn source_type_group_binds_final_witnesses_and_rechecks_consumer_sources() {
             assert_eq!(changed_recheck.message, source_error.message);
             std::fs::write(&source_path, original).unwrap();
         }
+    }
+}
+
+#[test]
+fn open_protocol_admission_binds_private_receipts_to_complete_transaction_bytes() {
+    use cellscript::package::frozen_interface::freeze_source_code_policy;
+    use cellscript::policy_witness::{encode_policy_witness_bundle, PolicyScriptRole, PolicyWitnessRecord};
+    use cellscript::protocol_bundle::{
+        check_protocol_bundle, check_protocol_bundle_with_open_handles, ProtocolBundleInput, ProtocolOpenHandleBinding,
+        ProtocolOpenTransaction,
+    };
+    use cellscript_artifact_checker::{
+        code_origin::{check_protocol_transaction, SuppliedDependencyCell, SuppliedInputCell},
+        open_handle_policy::AuthorizationSet,
+    };
+    use ckb_sdk::{
+        traits::{OffchainTransactionDependencyProvider, SecpCkbRawKeySigner},
+        types::{ScriptGroup, ScriptId},
+        unlock::{ScriptSigner, ScriptUnlocker, SecpSighashScriptSigner, SecpSighashUnlocker},
+        SECP256K1,
+    };
+    use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
+    let signer_key = secp256k1::SecretKey::from_slice(&[0x51; 32]).unwrap();
+    let public_key = secp256k1::PublicKey::from_secret_key(&SECP256K1, &signer_key);
+    let owner = cellscript_artifact_checker::ckb_blake2b256(&public_key.serialize());
+    let signer = || SecpSighashScriptSigner::new(Box::new(SecpCkbRawKeySigner::new_with_secret_keys(vec![signer_key])));
+    let lock_code = ckb_system_scripts_v0_6_0::BUNDLED_CELL.get("specs/cells/secp256k1_blake160_sighash_all").unwrap();
+    let secp_data = ckb_system_scripts_v0_6_0::BUNDLED_CELL.get("specs/cells/secp256k1_data").unwrap();
+    let (directory, library, candidate, consumer) = policy_fixture();
+    std::fs::write(consumer.join("src/main.cell"), "module client\nuse foreign::Token\npublic action verify(witness handle: ScriptHandle<foreign>) { verification let dep = ckb::cell_dep(0) ckb::require_open_script_participant_from_args(dep, handle, ckb::input<Token>(1)) }\n").unwrap();
+    lock(&consumer);
+    let hex = |bytes: &[u8]| format!("0x{}", cellscript_artifact_checker::hex_encode(bytes));
+    let script_json = |script: &packed::Script| serde_json::json!({"code_hash": hex(script.code_hash().as_slice()), "hash_type": match script.hash_type().as_slice()[0] {4 => "data2", 2 => "data1", 1 => "type", _ => "data"}, "args": hex(&script.args().raw_data())});
+    for opt in 0..=3 {
+        let sources = policy_sources(&library, &candidate, &consumer, opt, 2);
+        let (header, members) = source_policy_records(&sources, false, 1);
+        let policy = freeze_source_code_policy(sources, AuthorizationSet::new(header, &members).unwrap()).unwrap();
+        let selection = policy.policy().selection(&members[1].receipt).unwrap();
+        let chosen = policy.check_selection(&selection).unwrap();
+        let consumer_module = compile(&consumer, opt);
+        let (raw, point, code_output, code_data) = final_code_dependency(chosen.candidate());
+        let provider_script = packed::Script::from_slice(chosen.candidate().selected_script()).unwrap();
+        let consumer_script = packed::Script::new_builder()
+            .code_hash(packed::CellOutput::calc_data_hash(consumer_module.bundle()[0]))
+            .hash_type(4u8)
+            .args(Bytes::copy_from_slice(&policy.policy().root()).pack())
+            .build();
+        let lock_script = packed::Script::new_builder()
+            .code_hash(packed::CellOutput::calc_data_hash(&lock_code))
+            .hash_type(4u8)
+            .args(Bytes::copy_from_slice(&owner[..20]).pack())
+            .build();
+        let mut lock_group = ScriptGroup::from_lock_script(&lock_script);
+        lock_group.input_indices = vec![0, 1];
+        let consumer_point = packed::OutPoint::new_builder().tx_hash([0x83u8; 32].pack()).build();
+        let lock_point = packed::OutPoint::new_builder().tx_hash([0x84u8; 32].pack()).build();
+        let secp_point = packed::OutPoint::new_builder().tx_hash([0x85u8; 32].pack()).build();
+        let consumer_code = packed::CellOutput::new_builder().capacity(200_000_000_000u64).lock(lock_script.clone()).build();
+        let extra_deps = [consumer_point.clone(), lock_point.clone(), secp_point.clone()]
+            .map(|point| packed::CellDep::new_builder().out_point(point).build());
+        let input_points = [
+            packed::OutPoint::new_builder().tx_hash([81u8; 32].pack()).build(),
+            packed::OutPoint::new_builder().tx_hash([82u8; 32].pack()).build(),
+        ];
+        let input_outputs = [consumer_script.clone(), provider_script.clone()].map(|script| {
+            packed::CellOutput::new_builder().capacity(200_000_000_000u64).lock(lock_script.clone()).type_(Some(script).pack()).build()
+        });
+        let input_data = [Vec::new(), 1u64.to_le_bytes().to_vec()];
+        let payload = [b"CSARGv1\0".as_slice(), selection.as_slice()].concat();
+        let provider_payload = encode_policy_witness_bundle(&[PolicyWitnessRecord {
+            role: PolicyScriptRole::Type,
+            script_hash: provider_script.calc_script_hash().as_slice().try_into().unwrap(),
+            tag: 40,
+            args: [b"CSARGv1\0".as_slice(), &7u64.to_le_bytes()].concat(),
+        }])
+        .unwrap();
+        let witnesses = [payload.clone(), provider_payload]
+            .map(|bytes| packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(bytes)).pack()).build());
+        let raw = packed::RawTransaction::from_slice(&raw).unwrap();
+        let raw_deps = raw.cell_deps().into_iter().chain(extra_deps).collect::<Vec<_>>();
+        let raw = raw
+            .as_builder()
+            .cell_deps(raw_deps.pack())
+            .inputs(
+                input_points
+                    .iter()
+                    .map(|point| packed::CellInput::new_builder().previous_output(point.clone()).build())
+                    .collect::<Vec<_>>()
+                    .pack(),
+            )
+            .build();
+        let tx = packed::Transaction::new_builder()
+            .raw(raw)
+            .witnesses(witnesses.iter().map(|w| w.as_bytes().pack()).collect::<Vec<_>>().pack())
+            .build();
+        let inputs = [0, 1].map(|index| SuppliedInputCell {
+            out_point: input_points[index].as_slice().try_into().unwrap(),
+            output: input_outputs[index].as_slice(),
+            data: &input_data[index],
+        });
+        let deps = [
+            SuppliedDependencyCell { out_point: point, output: &code_output, data: &code_data },
+            SuppliedDependencyCell {
+                out_point: consumer_point.as_slice().try_into().unwrap(),
+                output: consumer_code.as_slice(),
+                data: consumer_module.bundle()[0],
+            },
+            SuppliedDependencyCell {
+                out_point: lock_point.as_slice().try_into().unwrap(),
+                output: consumer_code.as_slice(),
+                data: &lock_code,
+            },
+            SuppliedDependencyCell {
+                out_point: secp_point.as_slice().try_into().unwrap(),
+                output: consumer_code.as_slice(),
+                data: &secp_data,
+            },
+        ];
+        let network = serde_json::json!({"chain_id": "test-chain", "genesis_hash": format!("0x{}", "11".repeat(32))});
+        let selected_dep = serde_json::json!({"out_point": {"tx_hash": hex(&point[..32]), "index": u32::from_le_bytes(point[32..].try_into().unwrap())}, "dep_type": "code"});
+        let root = directory.path();
+        let mut artifacts = Vec::new();
+        for (id, action, module, script, dep) in [
+            (
+                "consumer",
+                "verify",
+                &consumer_module,
+                &consumer_script,
+                serde_json::json!({"out_point": {"tx_hash": format!("0x{}", "83".repeat(32)), "index": 0}, "dep_type": "code"}),
+            ),
+            ("provider", "burn", chosen.candidate().module(), &provider_script, selected_dep.clone()),
+        ] {
+            let files =
+                [format!("{id}.elf"), format!("{id}.meta.json"), format!("{id}.lowering.json"), format!("{id}.sourcemap.json")];
+            for (name, bytes) in files.iter().zip(module.bundle()) {
+                std::fs::write(root.join(name), bytes).unwrap();
+            }
+            let generated = common::cellc_command()
+                .args(["gen-builder", "--metadata"])
+                .arg(root.join(&files[1]))
+                .args(["--target", "typescript", "--action", action, "--output"])
+                .arg(root.join(format!("{id}-builder")))
+                .arg("--json")
+                .output()
+                .unwrap();
+            assert!(generated.status.success(), "{}", String::from_utf8_lossy(&generated.stderr));
+            artifacts.push(serde_json::json!({"id": id, "package_coordinate": id, "lock_node_id": id, "entry": {"kind": "action", "name": action}, "script_role": "type", "files": {"artifact": files[0], "metadata": files[1], "lowering_record": files[2], "source_map": files[3], "builder_manifest": format!("{id}-builder/cellscript-builder-manifest.json")}, "deployment": {"network": network, "artifact_hash": cellscript_artifact_checker::hex_encode(&cellscript_artifact_checker::ckb_blake2b256(module.bundle()[0])), "script": script_json(script), "code_cell_dep": dep}}));
+        }
+        let extra_deps_json = [consumer_point.clone(), lock_point.clone(), secp_point.clone()]
+            .map(|p| serde_json::json!({"out_point": {"tx_hash": hex(p.tx_hash().as_slice()), "index": 0}, "dep_type": "code"}));
+        let skeleton = serde_json::json!({"version": 0, "inputs": ([0, 1].map(|index| serde_json::json!({"cell_commitment": hex(&[index as u8 + 1; 32]), "capacity": 200_000_000_000u64, "lock": script_json(&lock_script), "type": script_json(if index == 0 {&consumer_script} else {&provider_script}), "data": hex(&input_data[index]), "out_point": {"tx_hash": hex(input_points[index].tx_hash().as_slice()), "index": 0}, "since": 0}))), "outputs": [], "witnesses": witnesses.iter().map(|w| {let bytes = w.input_type().to_opt().unwrap().raw_data(); serde_json::json!({"input_type": hex(&cellscript_artifact_checker::ckb_blake2b256(&bytes)), "input_type_bytes": hex(&bytes)})}).collect::<Vec<_>>(), "cell_deps": [selected_dep, extra_deps_json[0], extra_deps_json[1], extra_deps_json[2]], "header_deps": [], "fee_policy_hash": hex(&[8; 32]), "change_policy_hash": hex(&[9; 32])});
+        check_protocol_transaction(tx.as_slice(), &inputs, &skeleton, &Default::default()).unwrap();
+        let input: ProtocolBundleInput = serde_json::from_value(serde_json::json!({"schema": "cellscript-protocol-bundle-input-v1", "network": network, "artifacts": artifacts, "transaction": skeleton, "roles": [
+            {"artifact": "consumer", "name": "consumer-input", "location": "input", "index": 0, "ownership": "exclusive", "expected_type": script_json(&consumer_script)},
+            {"artifact": "provider", "name": "provider-input", "location": "input", "index": 1, "ownership": "exclusive", "expected_type": script_json(&provider_script)}
+        ]})).unwrap();
+        let bindings = [ProtocolOpenHandleBinding {
+            consumer: "consumer",
+            parameter: "handle",
+            consumer_module: &consumer_module,
+            policy: &policy,
+            selection: &selection,
+            participant: "provider",
+        }];
+        let supplied =
+            ProtocolOpenTransaction { full_transaction: tx.as_slice(), inputs: &inputs, dependencies: &deps, bindings: &bindings };
+        let report = check_protocol_bundle_with_open_handles(&input, root, &supplied).unwrap();
+        assert_eq!(report.bundle.open_handles.len(), 1);
+        // The CLI receives raw sources/transactions and recomputes private
+        // proofs. Exported proof IDs or a producer's verified flag cannot enter.
+        let module_request = |package: &str, kind: &str, entry: &str| {
+            serde_json::json!({
+                "package": package, "environment": "dev", "entry_kind": kind, "entry": entry, "opt_level": opt,
+            })
+        };
+        let mut candidate_requests = Vec::new();
+        for (index, candidate) in policy.sources().catalog().candidates().iter().enumerate() {
+            let file = format!("creation-{index}.molecule");
+            std::fs::write(root.join(&file), candidate.raw_transaction()).unwrap();
+            candidate_requests.push(serde_json::json!({
+                "module": module_request(if index == 0 { "library" } else { "candidate" }, "artifact", "code-policy"),
+                "creation_transaction_file": file, "output_index": candidate.origin().output_index(),
+                "selected_script": hex(candidate.selected_script()),
+            }));
+        }
+        std::fs::write(root.join("transaction.molecule"), tx.as_slice()).unwrap();
+        std::fs::write(root.join("bundle-input.json"), serde_json::to_vec(&input).unwrap()).unwrap();
+        let open_request = serde_json::json!({
+            "schema": "cellscript-protocol-open-admission-input-v1", "transaction_file": "transaction.molecule",
+            "inputs": inputs.iter().map(|cell| serde_json::json!({"out_point": hex(&cell.out_point), "output": hex(cell.output), "data": hex(cell.data)})).collect::<Vec<_>>(),
+            "dependencies": deps.iter().map(|cell| serde_json::json!({"out_point": hex(&cell.out_point), "output": hex(cell.output), "data": hex(cell.data)})).collect::<Vec<_>>(),
+            "bindings": [{
+                "consumer": "consumer", "parameter": "handle", "participant": "provider",
+                "consumer_module": module_request("consumer", "action", "verify"),
+                "required": module_request("library", "artifact", "code-policy"), "candidates": candidate_requests,
+                "policy_header": hex(&policy.policy().header().encode().unwrap()),
+                "policy_members": policy.policy().members().iter().map(|member| hex(&member.encode().unwrap())).collect::<Vec<_>>(),
+                "selection": hex(&selection),
+            }],
+        });
+        std::fs::write(root.join("open-input.json"), serde_json::to_vec(&open_request).unwrap()).unwrap();
+        let cli = common::cellc_command()
+            .current_dir(root)
+            .args([
+                "protocol",
+                "bundle",
+                "check",
+                "bundle-input.json",
+                "--open-admission",
+                "open-input.json",
+                "--output",
+                "open-cli-report.json",
+                "--json",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            cli.status.success(),
+            "open admission CLI O{opt}: {} {}",
+            String::from_utf8_lossy(&cli.stdout),
+            String::from_utf8_lossy(&cli.stderr)
+        );
+        let cli_report: Value = serde_json::from_slice(&std::fs::read(root.join("open-cli-report.json")).unwrap()).unwrap();
+        assert_eq!(cli_report, serde_json::to_value(&report).unwrap(), "CLI/native private admission parity O{opt}");
+        for pointer in
+            ["/schema", "/bindings/0/policy_header", "/bindings/0/candidates/0/creation_transaction_file", "/inputs/0/out_point"]
+        {
+            let mut bad_request = open_request.clone();
+            *bad_request.pointer_mut(pointer).unwrap() = serde_json::json!("invalid");
+            std::fs::write(root.join("bad-open-input.json"), serde_json::to_vec(&bad_request).unwrap()).unwrap();
+            assert!(
+                cellscript::protocol_bundle::check_protocol_bundle_with_open_handles_file(
+                    &root.join("bundle-input.json"),
+                    &root.join("bad-open-input.json")
+                )
+                .is_err(),
+                "malformed open input {pointer}"
+            );
+        }
+        std::fs::write(root.join("open-report.json"), serde_json::to_vec(&report).unwrap()).unwrap();
+        let smoke = root.join("consumer-builder/open-witness-smoke.mjs");
+        std::fs::write(&smoke, r#"
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {bindProtocolBundleArtifact, encodeOpenHandleWitness, openHandleWitnessFromCheckedBundle, planVerify} from './src/index.ts';
+const checked = JSON.parse(readFileSync(new URL('../open-report.json', import.meta.url), 'utf8'));
+const consumer = checked.bundle.artifacts.find(value => value.id === 'consumer');
+const d = consumer.deployment;
+const artifact = bindProtocolBundleArtifact({id: consumer.id, packageCoordinate: consumer.package_coordinate, lockNodeId: consumer.lock_node_id,
+  entry: consumer.entry, scriptRole: consumer.script_role, deployment: {network: {chainId:d.network.chain_id,genesisHash:d.network.genesis_hash},artifactHash:d.artifact_hash,
+    script:{codeHash:d.script.code_hash,hashType:d.script.hash_type,args:d.script.args},codeCellDep:{outPoint:{txHash:d.code_cell_dep.out_point.tx_hash,index:d.code_cell_dep.out_point.index},depType:d.code_cell_dep.dep_type}}});
+const admitted = openHandleWitnessFromCheckedBundle(checked, artifact, 'handle');
+const expected = checked.bundle.transaction.witnesses[0].input_type_bytes;
+assert.equal('0x'+Buffer.from(admitted.witnessPayload).toString('hex'), expected);
+assert.equal('0x'+Buffer.from(encodeOpenHandleWitness(admitted.selection)).toString('hex'), expected);
+assert.equal(planVerify({handle:admitted.selection}).params.handle, admitted.selection);
+for (const bytes of [new Uint8Array(655), new Uint8Array(657), new Uint8Array(656), '0x00']) assert.throws(() => encodeOpenHandleWitness(bytes));
+const changed = structuredClone(checked);
+changed.bundle.open_handles[0].authorization_root = '0x'+'00'.repeat(32);
+assert.throws(() => openHandleWitnessFromCheckedBundle(changed, artifact, 'handle'));
+assert.throws(() => openHandleWitnessFromCheckedBundle(checked, artifact, 'other'));
+const duplicate = structuredClone(checked);
+duplicate.bundle.open_handles.push(duplicate.bundle.open_handles[0]);
+assert.throws(() => openHandleWitnessFromCheckedBundle(duplicate, artifact, 'handle'));
+"#).unwrap();
+        let node = std::process::Command::new("node").arg("--experimental-strip-types").arg(&smoke).output().unwrap();
+        assert!(node.status.success(), "generated open witness O{opt}: {}", String::from_utf8_lossy(&node.stderr));
+
+        let (materialized, evidence) =
+            cellscript_ckb_adapter::materialize_protocol_bundle_report(&serde_json::to_vec(&report).unwrap()).unwrap();
+        assert_eq!(materialized.data().as_slice(), tx.as_slice(), "O{opt}: existing SDK serializer must reproduce all admitted bytes");
+        assert_eq!(evidence.serialized_transaction_hash, hex(&cellscript_artifact_checker::ckb_blake2b256(tx.as_slice())));
+        let mut context = ckb_testtool::context::Context::default();
+        for cell in &deps {
+            context.create_cell_with_out_point(
+                packed::OutPoint::from_slice(&cell.out_point).unwrap(),
+                packed::CellOutput::from_slice(cell.output).unwrap(),
+                Bytes::copy_from_slice(cell.data),
+            );
+        }
+        for cell in &inputs {
+            context.create_cell_with_out_point(
+                packed::OutPoint::from_slice(&cell.out_point).unwrap(),
+                packed::CellOutput::from_slice(cell.output).unwrap(),
+                Bytes::copy_from_slice(cell.data),
+            );
+        }
+        // Local observations exercise the adapter's byte-binding state machine;
+        // they are not observations from a live network or consensus inclusion.
+        let live_cells = inputs
+            .iter()
+            .map(|cell| (packed::CellOutput::from_slice(cell.output).unwrap(), Bytes::copy_from_slice(cell.data)))
+            .collect::<Vec<_>>();
+        let live = cellscript_ckb_adapter::protocol_bundle_live_resolution_evidence(
+            &materialized,
+            &evidence,
+            "test-chain",
+            &format!("0x{}", "11".repeat(32)),
+            &live_cells,
+        )
+        .unwrap();
+        let observations = deps[..2]
+            .iter()
+            .enumerate()
+            .map(|(index, cell)| cellscript_ckb_adapter::ProtocolBundleCellDepObservation {
+                transaction_cell_dep_index: index as u32,
+                root: cellscript_ckb_adapter::ProtocolBundleLiveCellObservation {
+                    out_point: packed::OutPoint::from_slice(&cell.out_point).unwrap(),
+                    output: packed::CellOutput::from_slice(cell.output).unwrap(),
+                    data: Bytes::copy_from_slice(cell.data),
+                },
+                dep_group_members: vec![],
+            })
+            .collect::<Vec<_>>();
+        let resolved =
+            cellscript_ckb_adapter::protocol_bundle_dependency_resolution_evidence(&materialized, &evidence, &live, &observations)
+                .unwrap();
+        let ready =
+            cellscript_ckb_adapter::protocol_bundle_ready_to_sign_evidence(&materialized, &evidence, &live, &resolved).unwrap();
+        let provider = OffchainTransactionDependencyProvider {
+            tx_tip_num_map: Default::default(),
+            txs: Default::default(),
+            cells: input_points
+                .iter()
+                .zip(&live_cells)
+                .map(|(point, cell)| ((point.tx_hash().unpack(), point.index().unpack()), cell.clone()))
+                .collect(),
+        };
+        let unlockers = std::collections::HashMap::from([(
+            ScriptId::new(lock_script.code_hash().unpack(), ckb_testtool::ckb_types::core::ScriptHashType::Data2),
+            Box::new(SecpSighashUnlocker::new(signer())) as Box<dyn ScriptUnlocker>,
+        )]);
+        let (signed, signing) =
+            cellscript_ckb_adapter::unlock_protocol_bundle_transaction(&materialized, &ready, &provider, &unlockers).unwrap();
+        assert_eq!(signing.changed_lock_witness_indexes, vec![0]);
+        assert!(signing.entry_witness_fields_preserved && signing.all_lock_groups_processed);
+        assert!(context.verify_tx(&materialized, 3_000_000).is_err(), "unsigned transaction must not pass its real Lock group");
+        let cycles = context.verify_tx(&signed, 3_000_000).unwrap();
+        eprintln!("open admission signed all-group O{opt}: cycles={cycles} tx={}", signing.signed_serialized_transaction_hash);
+        // Even a field unused by the Type scripts is covered by the signature.
+        let signed_witness = packed::WitnessArgs::from_slice(signed.witnesses().get(0).unwrap().raw_data().as_ref()).unwrap();
+        let changed_witness = signed_witness.as_builder().output_type(Some(Bytes::from_static(b"after-signing")).pack()).build();
+        let mut changed_witnesses = signed.witnesses().into_iter().collect::<Vec<_>>();
+        changed_witnesses[0] = changed_witness.as_bytes().pack();
+        let substituted = signed.as_advanced_builder().set_witnesses(changed_witnesses).build();
+        let rejected = context.verify_tx(&substituted, 3_000_000).unwrap_err();
+        assert!(
+            format!("{rejected:?}").contains("Inputs[0].Lock"),
+            "post-signing substitution must fail the actual Lock group: {rejected:?}"
+        );
+        assert!(
+            cellscript_ckb_adapter::unlock_protocol_bundle_transaction(&substituted, &ready, &provider, &unlockers).is_err(),
+            "old signing preparation cannot bind changed transaction bytes"
+        );
+
+        assert_eq!(report.bundle.open_handles[0].selected_receipt, chosen.candidate().source_receipt().identity());
+        assert!(check_protocol_bundle(&input, root).is_err(), "a serialized report cannot manufacture a private receipt");
+        let mut foreign_owner = input.clone();
+        foreign_owner.roles[1].artifact = "consumer".into();
+        assert!(check_protocol_bundle_with_open_handles(&foreign_owner, root, &supplied).is_err());
+        let mut rebound_owner = serde_json::to_value(&report).unwrap();
+        rebound_owner["bundle"]["roles"][1]["artifact"] = serde_json::json!("consumer");
+        rebound_owner["bundle_hash"] =
+            serde_json::json!(
+                cellscript_artifact_checker::canonical_hash("cellscript-protocol-bundle-v1", &rebound_owner["bundle"]).unwrap()
+            );
+        assert!(cellscript_ckb_adapter::materialize_protocol_bundle_report(&serde_json::to_vec(&rebound_owner).unwrap()).is_err());
+        let mut observation_input = input.clone();
+        let mut observation_role = observation_input.roles[1].clone();
+        observation_role.artifact = "consumer".into();
+        observation_role.name = "observed-peer".into();
+        observation_role.ownership = cellscript::protocol_bundle::ProtocolRoleOwnership::SharedRead;
+        observation_input.roles.push(observation_role);
+        let observation_report = check_protocol_bundle_with_open_handles(&observation_input, root, &supplied).unwrap();
+        assert_eq!(observation_report.status, "ok");
+        let (observed_tx, _) =
+            cellscript_ckb_adapter::materialize_protocol_bundle_report(&serde_json::to_vec(&observation_report).unwrap()).unwrap();
+        assert_eq!(observed_tx.data().as_slice(), tx.as_slice(), "foreign read-only claims preserve the exact transaction");
+        // A semantically rejected peer request still has a valid source receipt,
+        // canonical codec and selection. Complete VM execution must reject it.
+        let rejected_payload = encode_policy_witness_bundle(&[PolicyWitnessRecord {
+            role: PolicyScriptRole::Type,
+            script_hash: provider_script.calc_script_hash().as_slice().try_into().unwrap(),
+            tag: 40,
+            args: [b"CSARGv1\0".as_slice(), &6u64.to_le_bytes()].concat(),
+        }])
+        .unwrap();
+        let rejected_witness =
+            packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(rejected_payload.clone())).pack()).build();
+        let rejected_tx =
+            tx.clone().as_builder().witnesses(vec![witnesses[0].as_bytes().pack(), rejected_witness.as_bytes().pack()].pack()).build();
+        let mut rejected_input = input.clone();
+        rejected_input.transaction.witnesses[1].input_type =
+            Some(hex(&cellscript_artifact_checker::ckb_blake2b256(&rejected_payload)));
+        rejected_input.transaction.witnesses[1].input_type_bytes = Some(hex(&rejected_payload));
+        let rejected_supplied = ProtocolOpenTransaction { full_transaction: rejected_tx.as_slice(), ..supplied };
+        let rejected_report = check_protocol_bundle_with_open_handles(&rejected_input, root, &rejected_supplied).unwrap();
+        let (rejected_materialized, _) =
+            cellscript_ckb_adapter::materialize_protocol_bundle_report(&serde_json::to_vec(&rejected_report).unwrap()).unwrap();
+        let rejected_signed = signer().sign_tx(&rejected_materialized, &lock_group).unwrap();
+        let rejected = context.verify_tx(&rejected_signed, 3_000_000).unwrap_err();
+        assert!(format!("{rejected:?}").contains("Inputs[1].Type"), "rejection must come from the selected peer: {rejected:?}");
+        for pointer in [
+            "/transaction/inputs/0/since",
+            "/open_handles/0/witness_index",
+            "/open_handles/0/selected_artifact_hash",
+            "/open_handles/0/participant",
+            "/open_handles/0/claim_boundaries/participant_predicates_and_data",
+        ] {
+            let mut rebound = serde_json::to_value(&report).unwrap();
+            let value = rebound["bundle"].pointer_mut(pointer).unwrap();
+            *value = if pointer.ends_with("participant_predicates_and_data") {
+                serde_json::json!("checked_by_current_script")
+            } else if value.is_number() {
+                serde_json::json!(99)
+            } else {
+                serde_json::json!("substituted")
+            };
+            rebound["bundle_hash"] =
+                serde_json::json!(
+                    cellscript_artifact_checker::canonical_hash("cellscript-protocol-bundle-v1", &rebound["bundle"]).unwrap()
+                );
+            assert!(
+                cellscript_ckb_adapter::materialize_protocol_bundle_report(&serde_json::to_vec(&rebound).unwrap()).is_err(),
+                "rebound report O{opt}: {pointer}"
+            );
+        }
+
+        for pointer in [
+            "/inputs/0/capacity",
+            "/inputs/1/type/args",
+            "/inputs/0/out_point/index",
+            "/inputs/0/since",
+            "/inputs/1/data",
+            "/cell_deps/0/dep_type",
+            "/witnesses/0/input_type_bytes",
+            "/witnesses/1/input_type",
+            "/version",
+        ] {
+            let mut changed = skeleton.clone();
+            let value = changed.pointer_mut(pointer).unwrap();
+            *value = if value.is_number() { serde_json::json!(999) } else { serde_json::json!("0xff") };
+            assert!(check_protocol_transaction(tx.as_slice(), &inputs, &changed, &Default::default()).is_err(), "O{opt} {pointer}");
+        }
+        let mut malformed_since = skeleton.clone();
+        malformed_since["inputs"][0]["since"] = serde_json::json!("zero");
+        assert!(check_protocol_transaction(tx.as_slice(), &inputs, &malformed_since, &Default::default()).is_err());
+        for pointer in ["/inputs", "/outputs", "/cell_deps", "/header_deps", "/witnesses"] {
+            let mut changed = skeleton.clone();
+            changed.pointer_mut(pointer).unwrap().as_array_mut().unwrap().push(serde_json::json!({}));
+            assert!(
+                check_protocol_transaction(tx.as_slice(), &inputs, &changed, &Default::default()).is_err(),
+                "O{opt} {pointer} cardinality"
+            );
+        }
+        let mut changed = input.clone();
+        changed.artifacts[0].deployment.script.args = hex(&[0; 32]);
+        assert!(check_protocol_bundle_with_open_handles(&changed, root, &supplied).is_err());
+        let missing = ProtocolOpenTransaction { bindings: &[], ..supplied };
+        assert!(check_protocol_bundle_with_open_handles(&input, root, &missing).is_err());
     }
 }

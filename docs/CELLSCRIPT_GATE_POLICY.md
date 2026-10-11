@@ -827,6 +827,17 @@ in [CellScript ProtocolBundle v1](CELLSCRIPT_PROTOCOL_BUNDLE.md). Focused bundle
 tests do not replace `dev`; runtime-adapter, CKB-VM, and chain evidence remain
 outside the current command.
 
+On the 0.32 development branch, `--open-admission OPEN_JSON` additionally
+recompiles frozen source packages, independently checks every finite Type-policy
+member and compares the complete supplied transaction with the bundle skeleton.
+It produces the same report as the private native admission API. Input format,
+bounds and claim limits are in the
+[open-handle design](CELLSCRIPT_OPEN_HANDLE_DESIGN.md#cli-and-generated-witness-transport).
+This option performs no signing, network resolution or VM execution. General
+Lock/verifier receipt admission remains outside this bounded profile. Changes
+to its runtime helpers require the backend gate; merge-readiness still requires
+the complete `ci` gate.
+
 The old release wrapper remains supported:
 
 ```bash

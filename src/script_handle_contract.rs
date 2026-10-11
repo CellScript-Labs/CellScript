@@ -68,7 +68,7 @@ pub const OPEN_HANDLE_MEMBER_OFFSET: usize = 196;
 /// The member block carries its own CSOHMv1\0 magic; its status byte sits
 /// eight bytes into the block.
 pub const OPEN_HANDLE_MEMBER_STATUS_OFFSET: usize = 204;
-pub const OPEN_HANDLE_MEMBER_COMPLETE_SCRIPT_OFFSET: usize = 324;
+pub const OPEN_HANDLE_MEMBER_ARTIFACT_OFFSET: usize = 292;
 pub const OPEN_HANDLE_INDEX_OFFSET: usize = 488;
 pub const OPEN_HANDLE_SIBLING_OFFSET: usize = 496;
 pub const OPEN_HANDLE_TREE_DEPTH: usize = 5;

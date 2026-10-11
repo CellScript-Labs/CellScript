@@ -3075,6 +3075,7 @@ fn validate_typed_operation(
                 "__ckb_require_cell_dep_open_script_handle"
                     | "__ckb_require_cell_dep_open_verifier_handle"
                     | "__ckb_require_cell_dep_open_script_handle_from_args"
+                    | "__ckb_require_open_script_participant_from_args"
                     | "__ckb_require_cell_dep_open_verifier_handle_from_args"
             );
             let is_open_handle_from_args_call = call.target.ends_with("_from_args");
@@ -3086,7 +3087,8 @@ fn validate_typed_operation(
                 return typed_error("compatible-open handle operand is passed to an unrecognized runtime helper".to_string());
             }
             if is_open_handle_call {
-                let class = if call.target.contains("open_script_handle") { "ScriptHandle" } else { "VerifierHandle" };
+                let participant = call.target == "__ckb_require_open_script_participant_from_args";
+                let class = if participant || call.target.contains("open_script_handle") { "ScriptHandle" } else { "VerifierHandle" };
                 let handle_operand = operation
                     .operands
                     .get(1)
@@ -3097,7 +3099,13 @@ fn validate_typed_operation(
                     operation.operands.get(2).and_then(|operand| operand.constant.as_ref()),
                     Some(TypedSemanticConstant::Hash(_))
                 );
-                let arity_valid = if is_open_handle_from_args_call {
+                let arity_valid = if participant {
+                    operation.operands.len() == 3
+                        && operation
+                            .operands
+                            .get(2)
+                            .is_some_and(|operand| matches!(operand.ty.split('<').next(), Some("InputView" | "OutputView")))
+                } else if is_open_handle_from_args_call {
                     operation.operands.len() == 2
                 } else {
                     operation.operands.len() == 3 && root_is_constant

@@ -185,8 +185,12 @@ Still required for #28: complete independent receipt projection and directional
 compatibility; nominal interface resolution; checked admission of all members;
 source/IR/runtime/helper and independent machine evidence; actual dependency,
 history, network and final-transaction bindings; builder/ProtocolBundle/editor
-parity; measured worst-case resources and independent review. #29 additionally
-requires its participant ownership/claim matrix and complete peer execution.
+parity; measured worst-case resources. External human review for #28 was waived
+by the maintainer on
+[2026-10-11](CELLSCRIPT_0_32_IMPLEMENTATION.md#maintainer-decision--2026-10-11-28-external-audit).
+#29 additionally requires its participant ownership/claim matrix and complete
+peer execution. Its external human review requirement was also waived by the
+maintainer on 2026-10-11; independent software artifact checking remains required.
 Neither issue can close on this codec alone.
 
 ## Native finite field-binding prerequisite
@@ -194,8 +198,9 @@ Neither issue can close on this codec alone.
 The [frozen code-policy binding](FROZEN_CODE_POLICY.md) now matches a separately
 declared wire snapshot to an actual resolver-owned source catalog and every
 private finite receipt. It recomputes Header bindings and checks every Member,
-including unselected/inactive entries, under a data2 Type-policy profile.
-Selections retain actual candidate evidence and detect later source/receipt input
-substitution. Type-hash history, root authorization and package/version/Registry
-facts are not established by that private host result. Full H1/H2 and
+including unselected/inactive entries. The source/version constructor binds
+actual manifest versions and resolver ownership; its history variant additionally
+requires private checked Type-ID lineage. Selections retain actual candidate
+evidence and detect later source/receipt input substitution. Root authority,
+chain inclusion and Registry authenticity are not established by that host result. Full H1/H2 and
 ProtocolBundle/generated-builder integration remain outstanding.

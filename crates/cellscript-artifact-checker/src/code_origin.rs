@@ -7,11 +7,20 @@ use crate::{CheckerBudgets, CheckerError, CheckerRejectionCode};
 use serde::Serialize;
 mod dependency;
 mod molecule;
-pub use dependency::{check_direct_code_dependency, CheckedDirectCodeDependency, SuppliedDependencyCell};
+pub use dependency::{
+    check_direct_code_dependency, check_direct_code_dependency_with_history, CheckedDirectCodeDependency, SuppliedDependencyCell,
+};
 mod type_group;
 pub use type_group::{check_direct_type_group, CheckedDirectTypeGroup, SuppliedInputCell, SuppliedTypeGroupTransaction};
 mod target;
 pub use target::{check_code_cell_target, CheckedTargetCodeCellOrigin};
+mod transaction;
+pub use transaction::{
+    check_protocol_transaction, CheckedProtocolTransaction, OpenCellSource, OpenHandleClaimBoundaries, OpenHandleClaimBoundary,
+    OpenParticipantObservation, ResolvedOpenHandle,
+};
+mod history;
+pub use history::{check_type_code_history, CheckedTypeCodeHistory, TypeCodeHistoryStep};
 
 #[derive(Debug)]
 pub struct CheckedCodeCellOrigin {

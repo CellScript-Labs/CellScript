@@ -3,7 +3,9 @@
 use super::FrozenSourceCodePolicySelection;
 use crate::error::Result;
 use crate::package::frozen_interface::checker_error;
-use cellscript_artifact_checker::code_origin::{check_direct_code_dependency, CheckedDirectCodeDependency, SuppliedDependencyCell};
+use cellscript_artifact_checker::code_origin::{
+    check_direct_code_dependency_with_history, CheckedDirectCodeDependency, SuppliedDependencyCell,
+};
 use cellscript_artifact_checker::{canonical_bytes, canonical_hash, CheckerBudgets};
 use serde::Serialize;
 
@@ -51,7 +53,7 @@ impl FrozenSourceCodeDependency<'_> {
 impl<'a> FrozenSourceCodePolicySelection<'a> {
     /// Consume a source/version-checked selection, then bind actual final raw
     /// direct deps to every supplied Cell snapshot. Pure checker bounds/parsing
-    /// precede the separate consumer source recheck. Only data2/direct deps are
+    /// precede the separate consumer source recheck. Direct data2 and checked Type-ID-history deps are
     /// supported. Supplied cells are not authenticated VM/consensus resolution;
     /// raw tx excludes witnesses/signatures. This does not authorize the root.
     ///
@@ -68,8 +70,14 @@ impl<'a> FrozenSourceCodePolicySelection<'a> {
         cells: &[SuppliedDependencyCell<'_>],
         budgets: &CheckerBudgets,
     ) -> Result<FrozenSourceCodeDependency<'a>> {
-        let dependency =
-            check_direct_code_dependency(self.candidate().receipt().target_origin(), raw, cells, budgets).map_err(checker_error)?;
+        let dependency = check_direct_code_dependency_with_history(
+            self.candidate().receipt().target_origin(),
+            self.type_history(),
+            raw,
+            cells,
+            budgets,
+        )
+        .map_err(checker_error)?;
         self.inner.policy.sources.check_unchanged_sources()?;
         let mut checked = FrozenSourceCodeDependency { selection: self, dependency, identity: String::new() };
         checked.identity =

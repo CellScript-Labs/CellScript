@@ -95,5 +95,7 @@ At the existing 64-variant/64-read limits, 256 field sites pass and 257 reject.
 Complete public codecs, output serialization, general helper/lifetime closure,
 stable owned interface identities, deployment/history, all-member authorization
 and nominal runtime handles remain necessary for full #28. #29 and #44–#46
-remain unfinished. Independent security review remains required and unassigned.
+remain unfinished. External human review for #28 is waived by the
+[2026-10-11 decision](CELLSCRIPT_0_32_IMPLEMENTATION.md#maintainer-decision--2026-10-11-28-external-audit);
+External human review for #29 is also waived by the same decision.
 Full CI stays deferred until the whole requested implementation queue is done.

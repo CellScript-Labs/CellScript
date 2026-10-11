@@ -1,6 +1,6 @@
-//! Bind direct data2 code dependencies to supplied canonical Cell snapshots.
+//! Bind direct data2 or checked Type-ID code dependencies to supplied canonical Cell snapshots.
 //! Supplied snapshots are not authenticated node/consensus or VM observations.
-use super::{molecule, CheckedTargetCodeCellOrigin};
+use super::{molecule, CheckedTargetCodeCellOrigin, CheckedTypeCodeHistory};
 use crate::{canonical_bytes, canonical_hash, ckb_blake2b256, hex_encode, CheckerBudgets, CheckerError, CheckerRejectionCode};
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -30,6 +30,8 @@ struct Record {
     consensus_claimed: bool,
     vm_execution_claimed: bool,
     authorization_claimed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    type_history: Option<String>,
 }
 #[derive(Debug, Serialize, PartialEq, Eq)]
 struct CellFingerprint {
@@ -128,10 +130,30 @@ pub fn check_direct_code_dependency(
     cells: &[SuppliedDependencyCell<'_>],
     budgets: &CheckerBudgets,
 ) -> Result<CheckedDirectCodeDependency, CheckerError> {
+    check_direct_code_dependency_with_history(target, None, raw, cells, budgets)
+}
+
+/// Type-hash selections additionally require actual private lineage evidence.
+/// Reject ambiguous Type identities even when the competing data is equal;
+/// this is the deliberately stricter bounded direct-dependency profile.
+pub fn check_direct_code_dependency_with_history(
+    target: &CheckedTargetCodeCellOrigin,
+    history: Option<&CheckedTypeCodeHistory>,
+    raw: &[u8],
+    cells: &[SuppliedDependencyCell<'_>],
+    budgets: &CheckerBudgets,
+) -> Result<CheckedDirectCodeDependency, CheckerError> {
     preflight(raw, cells, budgets)?;
     let origin = target.origin();
-    if origin.selected_hash_type() != 4 || target.runtime_contract().target_profile != "ckb" {
-        return Err(invalid("only checked data2 targets belong to this direct profile; Type history needs separate evidence"));
+    let is_type = origin.selected_hash_type() == 1;
+    if is_type {
+        if target.runtime_contract().target_profile != "ckb-type-hash"
+            || !history.is_some_and(|history| history.target_identity() == target.identity())
+        {
+            return Err(invalid("Type history needs matching independently checked lineage evidence"));
+        }
+    } else if origin.selected_hash_type() != 4 || target.runtime_contract().target_profile != "ckb" || history.is_some() {
+        return Err(invalid("direct dependency requires checked data2 or Type history with its matching target profile"));
     }
     let tx = molecule::transaction(raw)?;
     if tx.deps.chunks_exact(37).any(|dep| dep[36] != 0) {
@@ -147,11 +169,20 @@ pub fn check_direct_code_dependency(
             return Err(invalid("duplicate or unreferenced supplied Cell; bind each raw OutPoint exactly once"));
         }
         let output = molecule::cell(cell.output)?;
-        if hex_encode(&ckb_blake2b256(cell.data)) == origin.artifact_hash() {
+        let data_matches = hex_encode(&ckb_blake2b256(cell.data)) == origin.artifact_hash();
+        let identity_matches = if is_type {
+            output.type_script.as_ref().map(|script| hex_encode(&ckb_blake2b256(script.bytes))).as_deref() == origin.type_script_hash()
+        } else {
+            data_matches
+        };
+        if identity_matches {
             if selected.is_some() {
                 return Err(invalid(
-                    "selected data hash is not unique across all supplied dependencies; keep exactly one selected code Cell",
+                    "selected data hash or Type identity is not unique across all supplied dependencies; keep exactly one selected code Cell",
                 ));
+            }
+            if !data_matches {
+                return Err(invalid("Type-hash dependency replacement bytes differ from the admitted artifact"));
             }
             let tx_hash = hex_encode(&cell.out_point[..32]);
             let output_index = u32::from_le_bytes(cell.out_point[32..].try_into().expect("fixed OutPoint index"));
@@ -179,8 +210,8 @@ pub fn check_direct_code_dependency(
         .position(|dep| dep[..36] == cells[supplied_cell_index].out_point)
         .ok_or_else(|| invalid("selected deployment has no raw direct code dependency; add its exact direct CellDep"))?;
     let record = Record {
-        schema: "cellscript-direct-code-dependency-v1",
-        profile: "data2-direct-host-supplied-cells-v1",
+        schema: if is_type { "cellscript-direct-code-dependency-v2" } else { "cellscript-direct-code-dependency-v1" },
+        profile: if is_type { "type-history-direct-host-supplied-cells-v1" } else { "data2-direct-host-supplied-cells-v1" },
         target_origin: target.identity().into(),
         transaction_hash: hex_encode(&ckb_blake2b256(raw)),
         raw_transaction_bytes: raw.len(),
@@ -190,7 +221,11 @@ pub fn check_direct_code_dependency(
         consensus_claimed: false,
         vm_execution_claimed: false,
         authorization_claimed: false,
+        type_history: history.map(|history| hex_encode(&history.history_tip())),
     };
-    let identity = canonical_hash("cellscript-direct-code-dependency-id-v1", &record)?;
+    let identity = canonical_hash(
+        if is_type { "cellscript-direct-code-dependency-id-v2" } else { "cellscript-direct-code-dependency-id-v1" },
+        &record,
+    )?;
     Ok(CheckedDirectCodeDependency { record, identity })
 }

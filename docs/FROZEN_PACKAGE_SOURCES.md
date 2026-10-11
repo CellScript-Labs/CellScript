@@ -44,5 +44,7 @@ tests still exercise the shared matcher.
 This is host source ownership, not complete H1/H2, source-to-machine/behavior
 equivalence, live deployment, Type replacement history, immutable authority,
 ProtocolBundle signing admission or peer execution. #29 and #44–#46 remain
-unfinished. Independent review remains required before stable admission, and
-full CI remains deferred until the complete implementation queue is ready.
+unfinished. External human review for #28 is waived by the
+[2026-10-11 decision](CELLSCRIPT_0_32_IMPLEMENTATION.md#maintainer-decision--2026-10-11-28-external-audit);
+External human review for #29 is also waived by the same decision. Full CI
+remains deferred until the complete implementation queue is ready.

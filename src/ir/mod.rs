@@ -7523,6 +7523,15 @@ impl IrGenerator {
                         vars,
                         call.span,
                     ),
+                "ckb::require_open_script_participant_from_args" if call.args.len() == 3 => self
+                    .lower_open_handle_from_args_requirement(
+                        "__ckb_require_open_script_participant_from_args",
+                        &call.args,
+                        current,
+                        blocks,
+                        vars,
+                        call.span,
+                    ),
                 "ckb::require_cell_dep_open_verifier_handle_from_args" if call.args.len() == 2 => self
                     .lower_open_handle_from_args_requirement(
                         "__ckb_require_cell_dep_open_verifier_handle_from_args",
@@ -9283,8 +9292,9 @@ impl IrGenerator {
             active = value.current?;
             lowered.push(value.operand);
         }
-        if lowered.len() != 2 {
-            self.record_error("open handle from-args requirement takes exactly the CellDep and the handle", span);
+        let participant = runtime_helper == "__ckb_require_open_script_participant_from_args";
+        if lowered.len() != if participant { 3 } else { 2 } {
+            self.record_error("open handle from-args requirement has an invalid operand count", span);
         }
         self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
             dest: None,

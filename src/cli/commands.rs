@@ -690,6 +690,7 @@ pub struct VerifyArtifactArgs {
 #[derive(Debug, Default)]
 pub struct ProtocolBundleCheckArgs {
     pub manifest: PathBuf,
+    pub open_admission: Option<PathBuf>,
     pub output: Option<PathBuf>,
     pub json: bool,
 }
@@ -4574,7 +4575,11 @@ impl CommandExecutor {
     }
 
     fn protocol_bundle_check(args: ProtocolBundleCheckArgs) -> Result<()> {
-        let report = crate::protocol_bundle::check_protocol_bundle_file(&args.manifest)?;
+        let report = if let Some(open) = args.open_admission.as_deref() {
+            crate::protocol_bundle::check_protocol_bundle_with_open_handles_file(&args.manifest, open)?
+        } else {
+            crate::protocol_bundle::check_protocol_bundle_file(&args.manifest)?
+        };
         let machine = serde_json::to_value(&report).map_err(|error| {
             crate::error::CompileError::without_span(format!("failed to serialize ProtocolBundle report: {}", error))
         })?;
@@ -9377,6 +9382,84 @@ export interface BoundExactScriptHandle {
   receipt: ExactScriptHandleReceipt;
   value: ExactScriptHandleValue;
   handleHash: string;
+}
+
+export interface BoundOpenHandleWitness {
+  consumer: string;
+  parameter: string;
+  participant: string;
+  sourcePolicy: string;
+  selectedReceipt: string;
+  authorizationRoot: HexString;
+  selection: HexString;
+  witnessPayload: Uint8Array;
+}
+
+/** Encode the bounded one-handle CSARGv1 envelope. This performs serialization,
+ * not receipt admission, membership verification or root authorization. */
+export function encodeOpenHandleWitness(selection: HexString | Uint8Array): Uint8Array {
+  if ((typeof selection === "string" && !/^0x[0-9a-f]{1312}$/.test(selection))
+    || (selection instanceof Uint8Array && selection.length !== 656)) {
+    throw new Error("open handle selection must be exactly 656 canonical bytes");
+  }
+  const bytes = boundedOutputBytes(selection, "open handle selection");
+  const magic = new TextEncoder().encode("CSOHWv1\0");
+  if (bytes.length !== 656 || magic.some((byte, index) => bytes[index] !== byte)) {
+    throw new Error("open handle selection has invalid CSOHWv1 magic");
+  }
+  const payload = new Uint8Array(664);
+  payload.set(new TextEncoder().encode("CSARGv1\0"));
+  payload.set(bytes, 8);
+  return payload;
+}
+
+/** Extract an already admitted witness from the native private-receipt path.
+ * The runtime adapter must still recheck materialization and protect the final
+ * witness through signing. This helper cannot construct a native receipt. */
+export function openHandleWitnessFromCheckedBundle(
+  checked: CheckedProtocolBundle,
+  consumer: ProtocolBundleArtifactBinding,
+  parameter: string,
+): BoundOpenHandleWitness {
+  if (checked.schema !== PROTOCOL_BUNDLE_REPORT_SCHEMA || checked.status !== "ok"
+    || !/^[0-9a-f]{64}$/.test(checked.bundle_hash)) {
+    throw new Error("open handle requires a successful native ProtocolBundle report");
+  }
+  const bundle = checked.bundle as {
+    artifacts?: readonly Record<string, unknown>[];
+    open_handles?: readonly Record<string, unknown>[];
+  };
+  exactScriptHandleFromCheckedBundle(checked, consumer);
+  const artifact = bundle.artifacts?.find((value) => value.id === consumer.id);
+  if (!artifact || artifact.artifact_hash !== consumer.artifactHash
+    || artifact.verified_bundle_id !== consumer.verifiedBundleId) {
+    throw new Error("open handle consumer differs from the generated checked artifact");
+  }
+  const bindings = bundle.open_handles?.filter((value) => value.consumer === consumer.id && value.parameter === parameter) ?? [];
+  if (bindings.length !== 1) throw new Error("missing or duplicate native open handle admission");
+  const binding = bindings[0];
+  const hashes = [binding.source_policy, binding.selected_receipt, binding.checked_dependency, binding.checked_type_group];
+  if (binding.schema !== "cellscript-protocol-open-handle-v1"
+    || hashes.some((value) => typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value))
+    || binding.authorization_root !== consumer.deployment.script.args
+    || binding.witness_field !== "input_type"
+    || typeof binding.selection !== "string"
+    || typeof binding.participant !== "string" || binding.participant === consumer.id
+    || !bundle.artifacts?.some((value) => value.id === binding.participant && value.artifact_hash === binding.selected_artifact_hash)) {
+    throw new Error("native open handle admission differs from the consumer root or selected participant");
+  }
+  const actions = builderManifest.actions as readonly { name: string; params: readonly Record<string, unknown>[] }[];
+  const declared = actions.find((action) => action.name === consumer.entry.name)?.params.find((value) => value.name === parameter);
+  if (!declared || declared.ty !== `ScriptHandle<${binding.interface_module}>` || declared.fixed_byte_len !== 656) {
+    throw new Error("open handle parameter differs from the generated nominal interface");
+  }
+  const witnessPayload = encodeOpenHandleWitness(binding.selection as HexString);
+  return Object.freeze({
+    consumer: consumer.id, parameter, participant: binding.participant,
+    sourcePolicy: binding.source_policy as string, selectedReceipt: binding.selected_receipt as string,
+    authorizationRoot: binding.authorization_root as HexString,
+    selection: binding.selection as HexString, witnessPayload,
+  });
 }
 
 function exactDeploymentMatches(artifact: ProtocolBundleArtifactBinding, receipt: ExactScriptHandleReceipt): boolean {
@@ -17179,7 +17262,7 @@ impl CliParser {
             .subcommand(
                 ClapCommand::new("protocol")
                     .display_order(42)
-                    .about("Compose and inspect artifact-only multi-Script protocols")
+                    .about("Compose and inspect independently checked multi-Script protocols")
                     .arg_required_else_help(true)
                     .subcommand(
                         ClapCommand::new("bundle")
@@ -17193,6 +17276,12 @@ impl CliParser {
                                             .value_name("BUNDLE_JSON")
                                             .required(true)
                                             .help("cellscript-protocol-bundle-input-v1 manifest with relative checked-artifact paths"),
+                                    )
+                                    .arg(
+                                        Arg::new("open-admission")
+                                            .long("open-admission")
+                                            .value_name("OPEN_JSON")
+                                            .help("Recompute frozen source policies and bind the complete open-participant transaction"),
                                     )
                                     .arg(
                                         Arg::new("output")
@@ -18653,6 +18742,7 @@ impl CliParser {
                 Some(("bundle", bundle)) => match bundle.subcommand() {
                     Some(("check", check)) => Command::ProtocolBundleCheck(ProtocolBundleCheckArgs {
                         manifest: check.get_one::<String>("manifest").map(PathBuf::from).expect("required ProtocolBundle manifest"),
+                        open_admission: check.get_one::<String>("open-admission").map(PathBuf::from),
                         output: check.get_one::<String>("output").map(PathBuf::from),
                         json: json_output(check),
                     }),

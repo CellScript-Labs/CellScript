@@ -45,7 +45,8 @@ It does not introduce source-level `I`, `ScriptHandle<I>` / `VerifierHandle<I>`,
 complete H1 receipts, package-family/publisher inference, Type replacement
 history, immutable authorization, on-chain enforcement, ProtocolBundle signing
 admission or behavioral equivalence. Whole H1/H2, #29 and #44–#46 remain
-unfinished. Independent security review still precedes stable admission.
+unfinished. External human review for #28 is waived by the
+[2026-10-11 decision](CELLSCRIPT_0_32_IMPLEMENTATION.md#maintainer-decision--2026-10-11-28-external-audit); the waiver also covers #29.
 
 The native integration tests in `tests/frozen_interface.rs` cover O0–O3 alias
 invariance, same-module/same-API definitions from distinct actual packages and

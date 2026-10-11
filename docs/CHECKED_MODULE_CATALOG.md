@@ -57,6 +57,7 @@ Neither factory creates a full admission receipt, `AuthorizationSet` or nominal
 source handle. It does not establish complete Cell-data codecs, source/behavior
 equivalence, actual Code Cell/CellDep/Script args, live Registry status, Type
 replacement history, peer execution or transaction signing authorization.
-Those remain mandatory work for #28/#29. Their independent security review is
-still unassigned and required before stable admission. Whole-queue CI remains
+Those remain mandatory work for #28/#29. External human review for #28 is waived
+by the [2026-10-11 decision](CELLSCRIPT_0_32_IMPLEMENTATION.md#maintainer-decision--2026-10-11-28-external-audit);
+External human review for #29 is also waived by the same decision. Whole-queue CI remains
 deferred until all requested implementations are complete.

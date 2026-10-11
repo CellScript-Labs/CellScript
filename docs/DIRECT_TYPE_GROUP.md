@@ -94,5 +94,6 @@ compile-fail doctest rejects artifact-only substitution.
 
 Authenticated resolution/liveness, immutable root authority, Type history,
 nominal `I`/handles, full H1/H2, ProtocolBundle/generated-builder signing parity,
-#29 and #44–#46 remain required. Independent security review remains pending;
-full CI is deferred until the complete implementation queue.
+#29 and #44–#46 remain required. External human review for #28 is waived by
+the [2026-10-11 decision](CELLSCRIPT_0_32_IMPLEMENTATION.md#maintainer-decision--2026-10-11-28-external-audit); the waiver also covers #29.
+Full CI is deferred until the complete implementation queue.

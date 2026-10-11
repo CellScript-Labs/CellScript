@@ -85,9 +85,11 @@ repeat final raw/snapshot bounds and consumer source checks. Candidate sources
 remain immutable historical snapshots, as in the source receipt boundary.
 
 This remains host evidence. Immutable root authorization, actual authenticated
-resolution/liveness, Type history, complete H1/H2, `I` / source handles, general
+resolution/liveness, complete H1/H2, `I` / source handles, general
 codec, ProtocolBundle/generated-builder signing parity, #29 and #44–#46 remain
-pending. Independent security review is still required for stable admission.
+pending. External human review for #28 was waived by the
+[2026-10-11 decision](CELLSCRIPT_0_32_IMPLEMENTATION.md#maintainer-decision--2026-10-11-28-external-audit);
+independent artifact checking remains mandatory.
 
 Five independent tests cover O0–O3 SDK-built fixtures, separate list positions,
 raw hash/canonical identity oracles, 12 mutation axes, Type targets, preparse
@@ -96,3 +98,21 @@ source/version membership composition at O0–O3 and both selection modes,
 changed final raw/data and changed consumer source. Two compile-fail doctests
 reject artifact-only proof/selection substitution. These tests provide no new
 on-chain execution, consensus, behavioral-equivalence or production claim.
+
+
+## Checked Type-ID dependency profile
+
+`check_direct_code_dependency_with_history` additionally accepts a private
+`CheckedTypeCodeHistory` belonging to the exact checked target. Type selections
+require the `ckb-type-hash` profile and bind both the unique selected Type hash
+and the admitted data hash. A different artifact under the same Type hash,
+ambiguous matching Types even with equal data, wrong creation OutPoint and
+changed output snapshots all reject. Direct-dependency bounds and exact
+snapshot coverage are unchanged. Data2 selections reject extraneous history.
+
+The Type profile is `type-history-direct-host-supplied-cells-v1`, under
+`cellscript-direct-code-dependency-v2` / `cellscript-direct-code-dependency-id-v2`;
+its record additionally commits the checked history tip. Data2 v1 identities
+retain their encoding. Native source selections forward their retained private
+history to this checker. This does not extend the separate Type-group witness
+profile or grant chain, signing or peer-execution claims.

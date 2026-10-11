@@ -359,6 +359,8 @@ struct BundleWire {
     artifacts: Vec<ArtifactWire>,
     #[serde(default)]
     deployment_lines: Vec<DeploymentLineAdmissionWire>,
+    #[serde(default)]
+    open_handles: Vec<cellscript_artifact_checker::code_origin::ResolvedOpenHandle>,
     transaction: TransactionWire,
     #[serde(default)]
     roles: Vec<RoleWire>,
@@ -518,6 +520,8 @@ struct RoleWire {
     artifact: String,
     location: CellLocationWire,
     index: u32,
+    #[serde(default)]
+    ownership: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -568,6 +572,7 @@ pub fn materialize_protocol_bundle_report(bytes: &[u8]) -> Result<(TransactionVi
     let serialized = packed_transaction.as_slice();
     let serialized_transaction_hash = hash_hex(serialized);
     let raw_transaction_hash = format!("0x{}", hex::encode(tx.hash().as_slice()));
+    validate_open_materialization(&bundle, &tx)?;
     let script_groups = resolve_script_groups(&bundle, &serialized_transaction_hash)?;
     let code_cell_dep_expectations = resolve_code_cell_dep_expectations(&bundle)?;
     let deployment_line_cell_expectations = resolve_deployment_line_admission_expectations(&bundle, &code_cell_dep_expectations)?;
@@ -597,6 +602,136 @@ pub fn materialize_protocol_bundle_report(bytes: &[u8]) -> Result<(TransactionVi
             chain_evidence: "not-executed",
         },
     ))
+}
+
+/// Recheck selection/root, participant and complete builder bytes after the
+/// existing SDK serializer. Source compatibility is admitted by the native
+/// private receipt API; these serialized records cannot manufacture that proof.
+fn validate_open_materialization(bundle: &BundleWire, tx: &TransactionView) -> Result<()> {
+    use cellscript_artifact_checker::open_handle_policy::{verify_selection, HandleClass, ScriptRole};
+    if bundle.open_handles.len() > 32 {
+        bail!("open receipt count exceeds 32");
+    }
+    let mut seen = HashSet::new();
+    for binding in &bundle.open_handles {
+        if binding.claim_boundaries
+            != cellscript_artifact_checker::code_origin::OpenHandleClaimBoundaries::for_observation(binding.observation.is_some())
+        {
+            bail!("open receipt cannot promote peer, execution or consensus claims into local authority");
+        }
+        if binding.schema != "cellscript-protocol-open-handle-v1"
+            || !seen.insert((&binding.consumer, &binding.parameter))
+            || binding.consumer == binding.participant
+            || binding.witness_field != "input_type"
+            || binding.raw_transaction_hash != hex::encode(tx.hash().as_slice())
+            || binding.serialized_transaction_hash != hex::encode(blake2b_256(tx.data().as_slice()))
+        {
+            bail!("open receipt schema, uniqueness or final transaction binding differs");
+        }
+        let consumer =
+            bundle.artifacts.iter().find(|a| a.id == binding.consumer).ok_or_else(|| anyhow::anyhow!("open consumer is absent"))?;
+        let provider = bundle
+            .artifacts
+            .iter()
+            .find(|a| a.id == binding.participant)
+            .ok_or_else(|| anyhow::anyhow!("open participant is absent"))?;
+        if !matches!(consumer.script_role, ScriptRoleWire::Type) || !matches!(provider.script_role, ScriptRoleWire::Type) {
+            bail!("open receipt requires admitted Type consumer and participant groups");
+        }
+        let root = parse_byte32("open authorization root", &binding.authorization_root)?;
+        let selection = parse_hex("open selection", &binding.selection)?;
+        let membership = verify_selection(&root, &selection).map_err(|error| anyhow::anyhow!("invalid open selection: {error:?}"))?;
+        let member = membership.member();
+        let provider_script = parse_script("open participant", &provider.deployment.script)?;
+        let consumer_script = parse_script("open consumer", &consumer.deployment.script)?;
+        if membership.header().class != HandleClass::Script
+            || membership.header().role != ScriptRole::Type
+            || membership.header().network_genesis != parse_byte32("network", &bundle.network.genesis_hash)?
+            || consumer_script.args().raw_data().as_ref() != root
+            || member.receipt != parse_raw_hash32("selected receipt", &binding.selected_receipt)?
+            || member.script != parse_raw_hash32("selected Script", &binding.selected_script_hash)?
+            || member.script.as_slice() != provider_script.calc_script_hash().as_slice()
+            || member.artifact != parse_raw_hash32("selected artifact", &binding.selected_artifact_hash)?
+            || member.artifact != parse_raw_hash32("provider artifact", &provider.artifact_hash)?
+        {
+            bail!("open receipt root, member, participant or network was substituted");
+        }
+        for id in [&binding.source_policy, &binding.checked_dependency, &binding.checked_type_group] {
+            parse_raw_hash32("private admission identity", id)?;
+        }
+        let first = bundle.transaction.inputs.iter().position(|cell| {
+            cell.type_script.as_ref().is_some_and(|script| parse_script("input Type", script).is_ok_and(|s| s == consumer_script))
+        });
+        if first != Some(binding.witness_index as usize) {
+            bail!("open root is not committed by the consumer's first input group Cell");
+        }
+        let witness = tx.witnesses().get(binding.witness_index as usize).ok_or_else(|| anyhow::anyhow!("open witness is absent"))?;
+        let args = WitnessArgs::from_slice(&witness.raw_data()).context("invalid open WitnessArgs")?;
+        let payload = args.input_type().to_opt().ok_or_else(|| anyhow::anyhow!("open selection witness is absent"))?.raw_data();
+        if payload.len() != 664 || !payload.starts_with(b"CSARGv1\0") || payload[8..] != selection {
+            bail!("open selection witness changed after receipt admission");
+        }
+        let dep = tx
+            .cell_deps()
+            .get(binding.code_dependency_index as usize)
+            .ok_or_else(|| anyhow::anyhow!("open code dependency is absent"))?;
+        if dep != parse_cell_dep("open code dependency", &provider.deployment.code_cell_dep)?
+            || dep.dep_type().as_slice()[0] != 0
+            || dep.out_point().tx_hash().as_slice() != member.code_tx_hash
+            || dep.out_point().index().as_slice() != member.code_output_index.to_le_bytes()
+            || tx.cell_deps().into_iter().any(|dep| dep.dep_type().as_slice()[0] != 0)
+            || tx.cell_deps().len() > 64
+        {
+            bail!("open direct code dependency was substituted");
+        }
+        let matching_indices = |cells: &[CellWire], selected: &Script| -> Vec<u32> {
+            cells
+                .iter()
+                .enumerate()
+                .filter_map(|(index, cell)| {
+                    cell.type_script
+                        .as_ref()
+                        .is_some_and(|script| parse_script("Type group", script).is_ok_and(|s| &s == selected))
+                        .then_some(index as u32)
+                })
+                .collect()
+        };
+        let peer_inputs = matching_indices(&bundle.transaction.inputs, &provider_script);
+        let peer_outputs = matching_indices(&bundle.transaction.outputs, &provider_script);
+        if peer_inputs.is_empty() && peer_outputs.is_empty() {
+            bail!("selected open participant has no required peer Script group");
+        }
+        if peer_inputs != binding.peer_input_indices || peer_outputs != binding.peer_output_indices {
+            bail!("open participant cardinality or complete Script group changed");
+        }
+        for role in bundle.roles.iter().filter(|role| role.artifact == binding.consumer) {
+            let indices = match role.location {
+                CellLocationWire::Input => &peer_inputs,
+                CellLocationWire::Output => &peer_outputs,
+            };
+            if indices.contains(&role.index) && role.ownership.as_deref() != Some("shared-read") {
+                bail!("open foreign observation cannot grant lifecycle ownership to the consumer");
+            }
+        }
+        if let Some(observation) = &binding.observation {
+            use cellscript_artifact_checker::code_origin::OpenCellSource;
+            let input = matches!(observation.source, OpenCellSource::Input | OpenCellSource::GroupInput);
+            let cells = if input { &bundle.transaction.inputs } else { &bundle.transaction.outputs };
+            let transaction_index = if matches!(observation.source, OpenCellSource::GroupInput | OpenCellSource::GroupOutput) {
+                *matching_indices(cells, &consumer_script)
+                    .get(observation.index as usize)
+                    .ok_or_else(|| anyhow::anyhow!("open group-relative observation is absent"))?
+            } else {
+                observation.index
+            };
+            let peers = if input { &peer_inputs } else { &peer_outputs };
+            if transaction_index != observation.transaction_index || !peers.contains(&transaction_index) {
+                bail!("open observation was rebound to another source, index or participant");
+            }
+            parse_raw_hash32("observed schema", &observation.schema_hash)?;
+        }
+    }
+    Ok(())
 }
 
 /// Verify materialized ProtocolBundle input expectations against live Cell

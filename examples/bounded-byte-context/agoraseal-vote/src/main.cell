@@ -56,7 +56,7 @@ action cast(
         for i in 0..8 { context.push(((deposit_height >> (i * 8)) & 255) as u8) }
         for i in 0..8 { context.push(((proposal_height >> (i * 8)) & 255) as u8) }
         ckb::trusted_spawn_wait_cell_dep_hex4(
-            2, Hash::from_bytes(b"\xb5\x87\x79\x00\xe3\xc6\x47\x2e\x33\xb4\xee\x75\x57\x82\xf9\x70\xe5\xaa\x28\xf0\x88\x9b\x2b\xa9\x9e\xa1\x92\x8d\x01\x61\x03\x9f"), context, 36, 8, 8, 0
+            2, Hash::from_bytes(b"\x50\x6c\x04\xcb\x44\x53\xf9\x43\x35\xf5\x00\x75\x7c\xb4\xb9\x3a\xe2\x6f\x25\xa7\x82\xf0\x33\xe4\x76\xcb\xf4\xcc\x55\x60\x18\x61"), context, 36, 8, 8, 0
         )
         return 0
 }

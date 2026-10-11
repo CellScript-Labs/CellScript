@@ -5,7 +5,9 @@ Status: draft implementation input for #28, following the
 consolidated design record and threat model live in
 [CELLSCRIPT_OPEN_HANDLE_DESIGN.md](CELLSCRIPT_OPEN_HANDLE_DESIGN.md).
 Implementer: Codex.
-Independent security reviewer: unassigned. This document does not admit a source
+External review for #28: waived by the maintainer on
+[2026-10-11](CELLSCRIPT_0_32_IMPLEMENTATION.md#maintainer-decision--2026-10-11-28-external-audit).
+Independent artifact checking remains required. This document does not admit a source
 handle, prove executable template instances, or authorize a deployment.
 
 ## Interface identity and evidence
@@ -114,7 +116,7 @@ Runtime cardinalities remain the frozen policy bounds; no proving key, prover,
 network lookup or unbounded allocation enters ordinary compilation. Resource
 ceilings, checker/producer agreement, SDK vectors and editor/WASM behavior must
 be fixed by executable implementation, not asserted complete by this draft.
-Independent review remains a final stable-admission requirement.
+External human review is waived for both #28 and #29 by the 2026-10-11 decision.
 
 ## Implemented declaration prerequisite
 
@@ -172,7 +174,7 @@ advances to `project-source-set-v64-0.32-source-declaration-contracts`.
 
 Full receipt projection, directional comparison, checked catalog admission,
 nominal resolver values and CKB enforcement are still required. These declaration
-checks do not complete H1, H2, #28 or #29, and independent review remains pending.
+checks do not complete H1, H2, #28 or #29. External human review for #29 was also waived on 2026-10-11.
 
 ## Checked module projection prerequisite
 
@@ -326,7 +328,7 @@ These are manifest source facts, not authenticated Registry releases, publisher
 identity or freshness. Candidate source snapshots remain immutable historical
 facts; a newly captured candidate must bind its new source receipt. Selection
 rechecks the actual consumer's pinned closure. Immutable root authorization,
-complete H1/H2, general codec, source handles and independent review remain
+complete H1/H2, general codec and source handles remain
 required; this native profile does not expand the wire or runtime budgets.
 
 

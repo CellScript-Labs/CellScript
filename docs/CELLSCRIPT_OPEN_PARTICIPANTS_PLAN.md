@@ -2,7 +2,9 @@
 
 Status: implementation plan, not an implemented language/runtime contract.
 Owners: #28 (compatible-open handles) and #29 (open roles). Implementer: Codex.
-Independent security reviewer: unassigned; stable admission remains pending.
+External review for #28 and #29: waived by the maintainer on
+[2026-10-11](CELLSCRIPT_0_32_IMPLEMENTATION.md#maintainer-decision--2026-10-11-28-external-audit).
+Technical acceptance for both issues remains pending.
 The consolidated design record and threat model for these contracts live in
 [CELLSCRIPT_OPEN_HANDLE_DESIGN.md](CELLSCRIPT_OPEN_HANDLE_DESIGN.md).
 This work was promoted into 0.32 on 2026-10-04. It does not change the
@@ -224,9 +226,10 @@ failure. Keep the existing closed-role positive/negative corpus unchanged.
 For each issue, record final source identities, positive/negative execution,
 checker mutations, frozen budgets, generated-builder byte parity, editor/WASM
 scope, and matching dev/CI/backend gate results. The receipt prototype alone
-cannot close #28; a bundle-only precheck cannot close #29. Independent security
-review is a final stable-admission requirement for these newly promoted
-contracts. Do not infer that it occurred from the earlier 0.32 review waiver.
+cannot close #28; a bundle-only precheck cannot close #29. The maintainer
+cancelled #28 and #29's external human review requirements on 2026-10-11, without
+waiving independent artifact checking or any technical acceptance criterion.
+Neither waiver asserts that an external audit occurred.
 
 The declaration prerequisite now retains optional bounded pre-optimization
 source catalogs, qualified ordinary layout origins and complete public sets.

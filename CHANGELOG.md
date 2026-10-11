@@ -2,6 +2,41 @@
 
 ## Unreleased — 0.32
 
+Fix compatible-open handle runtime bindings: keep the saved selection length
+separate from the current-Script load length, and compare verifier dependency
+data against the selected artifact hash. Restore the committed-args-root VM
+regression and cover both verifier root sources at O0–O3. Advance the artifact
+cache identity so earlier helper code is not reused. The maintainer cancelled
+#28 and #29's external audit requirements; independent artifact checking and the remaining
+technical acceptance criteria still apply. See `docs/CELLSCRIPT_OPEN_HANDLE_DESIGN.md`.
+
+Bind both open handle classes to actual code bytes, exact raw OutPoints and
+unique data2/Type identities in 1–64 direct CellDeps; dep groups fail closed.
+Enforce exact receipt selection and admission sequence bounds on-chain.
+Independently check bounded Type-ID creation/replacement histories and bind
+private lineage proofs into native source policies and final dependency
+snapshots. Preserve no-history record identities. Full receipt-to-consumer and
+general ProtocolBundle/generated-builder admission remains incomplete; #28 stays open.
+
+Add a bounded native ProtocolBundle admission path for private source policies,
+one committed-args handle witness per Type consumer, and finite Type-policy
+participants. Compare the complete builder transaction with every concrete
+skeleton field and input snapshot, then recheck byte identity in the existing
+adapter serializer. Bind complete peer groups and optional typed input/output
+observations to source declarations and fixed Cell schemas. The new
+`ckb::require_open_script_participant_from_args` helper checks membership, code
+and observed Script identity without granting foreign lifecycle authority.
+O0–O3 integration tests execute every Script group, including a selected peer
+that rejects despite valid admission. Reconstruct private source policies through
+`cellc protocol bundle check --open-admission`, and provide generated TypeScript
+selection-to-witness transport. Verify identical CLI/native reports, SDK bytes,
+real secp256k1 signatures and post-signing rejection at O0–O3. This bounded slice does not complete
+general #28/#29 acceptance.
+
+Normalize the pinned byte-context child ELF by removing its non-allocated
+linker comment with the pinned `rust-objcopy`. The old fixture and fresh builds
+normalize to identical bytes; update its fixture and example hashes together.
+
 Separate ordinary commit checks from integration and release acceptance. The
 default `commit` gate checks source/docs hygiene, changed shell syntax and
 affected Rust package formatting/host compilation. `dev` remains a broader

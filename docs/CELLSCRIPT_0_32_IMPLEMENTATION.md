@@ -22,11 +22,9 @@ post-v1/post-0.32 work into the implementation scope. It does not make an
 unfinished contract implemented. The separate finance plan (#43) is not part
 of this closure request.
 
-Implementer for this follow-up work: Codex. Independent security review for
-the newly promoted compatible-open handles and open roles is still required
-before stable admission; the earlier waiver is not assumed to cover these
-new contracts. Their reviewer remains to be assigned. Work can proceed through
-implementation and executable verification before that final admission step.
+Implementer for this follow-up work: Codex. Independent security review was
+originally required for the newly promoted compatible-open handles and open
+roles. Both requirements are superseded by the 2026-10-11 decision below.
 
 The scope of each issue remains its stated acceptance contract. In particular,
 the cost research can conclude by rejecting a measured candidate and retaining
@@ -35,6 +33,21 @@ the current implementation; this does not implement a deferred optimization.
 follow-ups for its remaining tracks. A roadmap alone cannot close it.
 The [open-participant work plan](CELLSCRIPT_OPEN_PARTICIPANTS_PLAN.md) records
 the missing #28/#29 contracts and their implementation/acceptance order.
+
+## Maintainer decision — 2026-10-11 (#28 external audit)
+
+The maintainer cancelled the external audit / independent human security
+review requirement for #28 and #29. This explicitly supersedes their original
+stable-admission review condition and earlier statements that the 2026-10-03
+waiver did not cover this contract. No external audit is claimed to have
+occurred, and assigning an external reviewer is no longer a closure gate for
+either issue. The maintainer explicitly extended the cancellation to #29.
+
+The waiver does not waive the independent artifact checker, receipt recomputation,
+compiler/checker agreement, adversarial CKB-VM execution, Type-hash history
+binding, generated-builder/ProtocolBundle byte parity, resource budgets,
+reproducibility or the applicable unified gates. Incomplete technical acceptance
+still prevents closing either issue; this decision grants no release or deployment claim.
 
 ## Scope and evidence
 
@@ -47,8 +60,8 @@ the missing #28/#29 contracts and their implementation/acceptance order.
 | #39 | Bounded register-retention experiment and scratch-ownership decision | Two candidates measured and rejected: first has 1,707 unchanged runs; [second](reports/0.32/retention-second/README.md) saves one cycle in four runs without ELF/store/stack savings; conservative scratch ownership retained. The archive is published on `0.32`; [resumed verification](reports/0.32/resumed/README.md) checks all twenty archive files and replays the native comparator; [evaluation closed with evidence](https://github.com/CellScript-Labs/CellScript/issues/39#issuecomment-6099388124) |
 | #40 | Cost attribution, experiment decisions, combined comparison and residual-cost report | Clean 1,707-run attribution, 6,782-metric replay, paired cost frontier and residual sites archived; wider transformations have explicit blockers. The [resumed record](reports/0.32/resumed/README.md) preserves the unchanged default's clean `6dba1768` backend receipt; later queue changes require their own gates; [closed with evidence](https://github.com/CellScript-Labs/CellScript/issues/40#issuecomment-6099391394) |
 | #22 | One exact typed ZK profile, real verifier execution and state binding | V2 composition plus private-counter application circuit, proving/VK package, lifecycle and explicit single-party setup admission implemented |
-| #28 | Independently verified compatible-open Script/verifier handle selection | Bounded actual-bundle inspection binds concrete layouts and callable signatures to checked records. Optional pre-optimization source catalogs retain qualified ownership, public declaration completeness and absent templates; a separate symbolic checker validates universal type/ability guarantees. The [receipt contract](CELLSCRIPT_OPEN_INTERFACE_RECEIPT.md) documents the remaining H1/H2 boundary. The [host policy codec](CELLSCRIPT_OPEN_HANDLE_POLICY.md) fixes 1–32 members and a 656-byte selection with independent CCC vectors. Complete receipt/admission, nominal interface resolution and CKB runtime enforcement remain pending |
-| #29 | Bounded runtime-selected cross-Script roles | Depends on #28; participant/claim attribution, builder materialization and current-Script enforcement remain pending |
+| #28 | Independently verified compatible-open Script/verifier handle selection | Bounded actual-bundle inspection binds concrete layouts and callable signatures to checked records. Optional pre-optimization source catalogs retain qualified ownership, public declaration completeness and absent templates; a separate symbolic checker validates universal type/ability guarantees. The [receipt contract](CELLSCRIPT_OPEN_INTERFACE_RECEIPT.md) documents the remaining H1/H2 boundary. The [host policy codec](CELLSCRIPT_OPEN_HANDLE_POLICY.md) fixes 1–32 members and a 656-byte selection with independent CCC vectors. Nominal imported-interface witnesses and runtime constant/args-root checks now bind actual code bytes and exact direct CellDeps, with exact/yanked/floor enforcement. Host Type-ID lineage checks bind creation/replacement steps. The bounded Type-policy path now composes private source receipts with complete transaction bytes, CLI reconstruction and TypeScript/SDK witness parity. General Lock/verifier receipts and codec closure remain pending |
+| #29 | Bounded runtime-selected cross-Script roles | The finite Type-policy path binds observed source/schema/complete Script, serializes claim boundaries, rejects foreign authority promotion and materializes byte-identical transactions. SDK signatures and O0–O3 all-group VM tests reject peer and post-signing substitutions. General participant profiles still depend on unfinished #28 acceptance |
 | #42 | Usable ZK application workflow and explicit disposition of remaining tracks | P1 has [fresh clean-source CCC node evidence](reports/0.32/resumed-ccc/README.md) on signed `bfb19100`: ordinary updates and interrupted-proving recovery, followed by old-key update → old-key-authorized migration → new-key successor update with actual fee signatures and confirmed lineage. New-key self-installation, old-key reuse, repeated migration, stale configuration and transaction/proof substitutions reject. Current dev/backend gates pass; whole-queue CI remains deferred. P2–P4 remain the scoped #44/#45/#46 follow-ups; no production setup or deployment is claimed |
 
 #28 and #29 are now independent 0.32 deliverables; they remain unnecessary for
@@ -104,8 +117,8 @@ The [catalog replay archive](reports/0.32/code-catalog-replay/README.md) retains
 each validation's exact source identity. Its full backend/CCC evidence binds
 `16e6b721`; later staged dev records do not extend that provenance. The
 [historical WIP logs](reports/0.32/wip-handoff/README.md) retain their original
-failure context. Full H1/H2, #29 and #44–#46 remain unfinished, and independent
-security review for #28/#29 remains required before stable admission.
+failure context. Full H1/H2, #29 and #44–#46 remain unfinished. External review
+for #28 and #29 is waived by the 2026-10-11 decision.
 
 ## Integration baseline
 

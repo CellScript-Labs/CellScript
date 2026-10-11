@@ -66,8 +66,10 @@ ownership and pinned chain checks remain separate native evidence. These finite
 receipts do not contain authenticated source publisher identity, version/status
 or downgrade decisions, Type replacement history, active chain VM context,
 immutable consumer authorization, nominal source `I`/handles, or H2 runtime
-checks. They do not complete H1, #28, #29 or stable admission. Independent security
-review remains unassigned and required before stable admission.
+checks. They do not complete H1, #28, #29 or stable admission. External human
+review for #28 is waived by the
+[2026-10-11 decision](CELLSCRIPT_0_32_IMPLEMENTATION.md#maintainer-decision--2026-10-11-28-external-audit);
+External human review for #29 is also waived by the maintainer's 2026-10-11 decision.
 
 `tests/policy_artifact_checker.rs` checks both targets at O0–O3, every recorded
 field and an independent domain/hash oracle, deterministic reconstruction,
