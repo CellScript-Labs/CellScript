@@ -1,8 +1,8 @@
 # Compatible-open participant acceptance record
 
-Status (2026-10-12): implementation and full CI passed; final clean-source
-backend acceptance is pending. Issues #28 and #29 remain open until that replay
-and publication of the signed changes finish.
+Status (2026-10-12): implementation, full CI and clean-source backend acceptance
+passed. Technical acceptance for issues #28 and #29 is complete within the
+bounded profiles below.
 
 Implementation: `bb2981d5fe4cebe9931173014139e0d0a6422340`.
 Test base: `5323f391d0b81f251662fa8028240df25b820fb5`, plus the anchor/inventory
@@ -10,8 +10,9 @@ refresh and preserved `code policy` diagnostic prefix. This three-file binary
 Git diff has SHA-256
 `d78b8a78bee61c841378a86accdb7a6581913604c9fc21958748ee9a3f193099`.
 The resulting tracked source tree is `80069d275bef6d7dfab5cf99bb4153f3daa6b237`
-(before this acceptance document). Both isolated checkouts contain those exact
-changes. The refresh changes the anchor's ProtocolBundle hash because generated
+(before this acceptance document). Signed source commit
+`16b9e58394aa182f071303e6b5ab15dc94d304f4` contains those exact changes and this
+acceptance document's initial record. The refresh changes the anchor's ProtocolBundle hash because generated
 builder manifests now retain Lock declarations; its artifact, raw/serialized
 transaction, cycle, stack, witness and capacity assertions remain unchanged.
 External human review for #28 and #29 was waived on 2026-10-11; no external
@@ -65,14 +66,19 @@ including 42 frozen-interface tests, 77 policy artifact-checker tests, the
 trusted-external regression suite, clippy, independent CCC vectors, Cargo package
 verification, Registry services and the website build.
 
-The backend gate passed compiler/checker tests, clippy, dual-backend package
-scenarios, release proof/application/resource regressions, machine contracts
-and all 183 syntax combinations. Its final CKB stateful-scenario command refused
-the three uncommitted corrections because it requires a clean source checkout.
-The subsequent standalone node check likewise refused the predecessor's
-acceptance receipt. Neither result is reported as a passing backend gate or
-current-commit node acceptance. The remaining procedure is to sign the corrections,
-replay the backend gate in a clean checkout and record the resulting receipt.
+The full backend gate passed on signed source commit `16b9e583` in a clean
+checkout: compiler/checker tests, clippy, dual-backend package scenarios, release
+proof/application/resource regressions, machine contracts, all 183 syntax
+combinations, pinned CKB stateful scenarios and `counter_node_acceptance`.
+The CKB receipt binds that exact commit with `git_dirty = false`, a clean pinned
+CKB checkout, and fresh runtime binary SHA-256
+`3aa055152d45c3a9aab36c8227d1f20b12ea17acc1df89f40a3ba294c7d36286`.
+The hardening gate reports no failures; its resource identity evidence remains
+`always-success-fixture-only`, not an arbitrary application resource guarantee.
+The node test verified the receipt, source identity and binary identity before
+executing its local-node transaction acceptance. The earlier dirty-source refusal
+is superseded by this successful clean replay. This final record changes only
+documentation; its parent source commit is the executable acceptance identity.
 
 Logs are retained locally under `target/open-handle-acceptance-80069d27/`.
 Their SHA-256 identities are:
@@ -80,7 +86,9 @@ Their SHA-256 identities are:
 | Evidence | SHA-256 |
 | --- | --- |
 | Full CI, exit 0 | `17e9f16143a23afd481f1e1bb05abe54ebc364c891d52998d0f7260e0db2d846` |
-| Backend, blocked at clean-source acceptance | `821fa840fc3068c81f3b2ecc83ca4aca5cad768ab1149bbc93f66133f053b8f0` |
+| Full backend including node acceptance, exit 0 | `d768615c34b8054b907448347606b9e01fdfbbd7206101a8352ed2296b191269` |
+| Strict backend audit, passed | `093138c609ab64847338683c6c34117a33fb6738e01bf6c480322eaee6fa12cf` |
+| Clean-source CKB acceptance receipt, passed | `a144be567c14c35702034370f7ccc1c76ded743441560528a45425829a36908c` |
 | Focused checker and trusted-external suites, 77 + 8 passed | `eeda94bf1fae65951a5796d10b263323e5ae0fed4ed2aa3448cad28e6ada3671` |
 | Rebound header/member substitution matrix, passed | `edf434a60f5773adfcb2607f583cc3a42abae56cf189e14696a8ee6e34bd42d7` |
 
