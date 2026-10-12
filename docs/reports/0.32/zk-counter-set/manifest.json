@@ -219,6 +219,27 @@
       "raw_bytes": 547779,
       "stored_sha256": "05e2bfae09c1042335025ee3eb6aeaea65e75439f8efef49a9fda69b57e54575",
       "stored_bytes": 121160
+    },
+    {
+      "file": "clean-commit-replay.json.gz",
+      "raw_sha256": "4ae6780be5ee6672fd821caa9fe6a2001cf804a1c6e52e787ac3a5cd3555f6f3",
+      "raw_bytes": 18506,
+      "stored_sha256": "66969ccb57fc01570105cce16d859d39e1f22d3077b13f8b0db1aa608d09bda5",
+      "stored_bytes": 2056
+    },
+    {
+      "file": "clean-commit-replay.log.gz",
+      "raw_sha256": "f88546988e823c395fe67e06fe8bfae81af39f8c6e017baadb96a83e70b8c4e9",
+      "raw_bytes": 1001,
+      "stored_sha256": "f2642c5e209cb96a103d060b363459439663c9b81532cb08735264441ec6ee6c",
+      "stored_bytes": 374
+    },
+    {
+      "file": "clean-commit-fixtures.json.gz",
+      "raw_sha256": "0dd93c8d678430e626314002a2fa2ca176aa924d40bc104b4d6853e28174d0b9",
+      "raw_bytes": 1814962,
+      "stored_sha256": "d64889c756095471cb3249b1b68e5e5df732902166fe6a8e7f59f2aee54ab998",
+      "stored_bytes": 370345
     }
   ],
   "review_disposition": "Codex implementation and boundary review, no independent human review",
@@ -231,5 +252,11 @@
     "tag": "v5.1.0",
     "commit": "1fbf3d4c9b35ef90bdb9e6621a8d26edde6325ce",
     "tracked_source_dirty": false
+  },
+  "clean_commit_replay": {
+    "source_commit": "98375e0a48daf8f9523fd033c59b9e8f217b5b9d",
+    "status": "passed",
+    "git_tracked_source_dirty": false,
+    "report": "clean-commit-replay.json.gz"
   }
 }

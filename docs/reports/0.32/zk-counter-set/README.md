@@ -82,6 +82,15 @@ the capsule. It is an extracted source reconstruction; publication verifies
 that the committed implementation matches its exact source-file commitments.
 The capsule records its pre-publication state separately from Git signatures.
 
+A subsequent clean detached checkout of signed implementation commit
+`98375e0a48daf8f9523fd033c59b9e8f217b5b9d` passed the complete native 1/2/4-cell
+positive/negative suite, with no tracked changes before or after execution.
+All 35 capsule entries match that committed source. `clean-commit-replay.json.gz`
+and its retained log/complete fixtures identify this final clean-checkout
+acceptance separately from the earlier extracted-source replay. This is a
+focused test, not a CI/backend/dev gate. The tested child/lifecycle artifacts
+match the retained exact bytes and reproducibility records above.
+
 Two fresh target directories, one using a copied source tree at another path,
 produce byte-identical lifecycle ELFs matching the exact tested binary:
 SHA-256 `e85fc75b94426747cafdbf1328fb84cfc5524177d18350db6aa8ff774170e409`,
