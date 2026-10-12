@@ -26,6 +26,7 @@ use std::{
     path::Path,
 };
 
+pub mod counter_set;
 pub mod policy_witness;
 mod protocol_bundle;
 pub mod zk;

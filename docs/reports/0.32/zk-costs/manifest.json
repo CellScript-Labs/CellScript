@@ -1,0 +1,92 @@
+{
+  "schema": "cellscript-zk-cost-evidence-v1",
+  "scope": "single protected counter and maximum fixed-pair envelope; the separately versioned set-manifest.json records the complete 1/2/4-counter extension",
+  "source_base": "16b9e58394aa182f071303e6b5ab15dc94d304f4",
+  "source_files": {
+    "contracts/zk-private-counter/tests/proving_costs.rs": "6edd690ed0fa406be4284971a9dfe090c06399715725ba876b1c740c61c5abfa",
+    "tests/zk_application_costs.rs": "3b52e2753135e24df2ec25cff291b3504aa528f19c3b8f1966796f9a57b4563f",
+    "tests/support/cost_trace.rs": "5bdf04ddc6663f3ce8302b92e239e209386014434c421e2b0de6bcc178f4bd00",
+    "tests/support/cost_measurement.rs": "030746e0603b1a5c63f952e8d5ad328d303a7f7c266dd8d7fc67190d2039d7b4",
+    "contracts/zk-private-counter/src/lib.rs": "1ef20bf0858139a7b9300abcec948e960d50e5349f2017cfbd8e2eeaf5ab8ee3",
+    "contracts/zk-private-counter/src/package.rs": "1a9c80773cec2599bb46450dcb62799d1d9e3ca61930503c3859f298f366b312",
+    "contracts/zk-private-counter/Cargo.lock": "aa29e13729505d86c425a789dd7c2e2284c32ce5392a832d02b90f4c8828ed0f",
+    "crates/cellscript-artifact-checker/src/zk.rs": "c6b9a4aa367a72fd9d77a10f8e3baf9cc178f3585f44f2471cc2ef616cf45635"
+  },
+  "frozen_limits_sha256": "4be69d3b4201527ca0c06958020c0133475bdba6610ba026c125822c1420b8f1",
+  "decisions_sha256": "982a78ce5f4b0cc381cecb905ecefa65c802c6f7f112e3dbe4c4d28b538b1c0d",
+  "archives": [
+    {
+      "file": "pilot.json.gz",
+      "raw_sha256": "44c9926c60aadbb896bd683f020149462bfa9f4530159be7a0d8e40cbd6f40fb",
+      "raw_bytes": 23016,
+      "stored_sha256": "86a6222542b71a3ee2fc2983819a0ed4932aee5943034b9fbb0d74e469c34623",
+      "stored_bytes": 4133
+    },
+    {
+      "file": "application-pilot.json.gz",
+      "raw_sha256": "4b8ecdb70aa4fdfacca4361ac1132318ff565bd0b207a4fb0c6331fe45d3a7b0",
+      "raw_bytes": 114392,
+      "stored_sha256": "873d3449ea9a8aed293e2de57b0d8d1976fbee7ec47e7c5ec32e7b6fed0e37b3",
+      "stored_bytes": 21363
+    },
+    {
+      "file": "host-acceptance.json.gz",
+      "raw_sha256": "98abef24b97254cbdf8516311545a01b72adb2fbff1928552a2def45b88f610f",
+      "raw_bytes": 23122,
+      "stored_sha256": "cabd92858abeb8ecb5bc133185993e413146268ed0cc98257dbfb6bcb3c09e5e",
+      "stored_bytes": 4185
+    },
+    {
+      "file": "application-acceptance.json.gz",
+      "raw_sha256": "55239a09cacf161ebd88009674b85d8ff770ba316381c746e02b8aa23c21b8e3",
+      "raw_bytes": 114518,
+      "stored_sha256": "da332b2d2ba05e4eb51561a4d0dbdf291e0d588abd0cc3f8d523e85479ce87ff",
+      "stored_bytes": 21431
+    },
+    {
+      "file": "zk-cost-pilot.log.gz",
+      "raw_sha256": "f02a64f35153e1eda692041608485526f230bceeba258f4dbc2c3ade4ad013d7",
+      "raw_bytes": 895,
+      "stored_sha256": "c3b88655d13a2d17030335c952ad9abd1247e6db53710e2d3813df60975ef706",
+      "stored_bytes": 470
+    },
+    {
+      "file": "zk-cost-application-pilot.log.gz",
+      "raw_sha256": "57918edfd20eaee045fb2ec0f174f28f10a86532d9513e9ce6d9ac6f69f5471e",
+      "raw_bytes": 400,
+      "stored_sha256": "9c0990bac1c3287faba79fc7786fb2d48afca8850b2dca67a47f359a8e992e91",
+      "stored_bytes": 276
+    },
+    {
+      "file": "zk-cost-acceptance.log.gz",
+      "raw_sha256": "c409b7ead12749b8aa4de55c0a16ebbb8f83e559cc120ee62fe4d6f20456086f",
+      "raw_bytes": 905,
+      "stored_sha256": "8a14d9dfb69d1bcd573aec9cce4e3a4a64d15365a621c9c6c45216085a0e4bc5",
+      "stored_bytes": 471
+    },
+    {
+      "file": "zk-cost-application-acceptance.log.gz",
+      "raw_sha256": "a759fbf13f98440985588ddeed1be9682fee7bfc612b94295395a160c5070878",
+      "raw_bytes": 405,
+      "stored_sha256": "43a43fce97418ffed8d88464f78c9c6fa26bd09002027580020eb3757fbd7d22",
+      "stored_bytes": 280
+    },
+    {
+      "file": "zk-cost-clippy.log.gz",
+      "raw_sha256": "0301069177990bf02085268b16286cf1473f5fa4438b5dbeb30cd75d61753d23",
+      "raw_bytes": 445,
+      "stored_sha256": "ded257061b0c6b1b68467b254f4d48ba37b72db670e2909a95d98934b11a4833",
+      "stored_bytes": 226
+    },
+    {
+      "file": "zk-cost-root-clippy.log.gz",
+      "raw_sha256": "fc72a1253a480c58dba5cae1a4110624ed54275d91465ebb5a58d1896b494764",
+      "raw_bytes": 8757,
+      "stored_sha256": "7f1f82c6db66a401325bae83b9e002431238b29b919ecb2f37fe25ab4e87e097",
+      "stored_bytes": 2453
+    }
+  ],
+  "ci_or_gates_run": false,
+  "independent_human_review": false,
+  "production_setup_admitted": false
+}

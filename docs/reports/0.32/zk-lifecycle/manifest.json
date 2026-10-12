@@ -1,0 +1,198 @@
+{
+  "schema": "cellscript-zk-lifecycle-evidence-v1",
+  "status": "passed-targeted",
+  "issue": 45,
+  "source_base": "16b9e58394aa182f071303e6b5ab15dc94d304f4",
+  "node_source": "16b9e58394aa182f071303e6b5ab15dc94d304f4",
+  "scope": "component-composed off-chain planner and unchanged node application; no new CI or gates",
+  "ci_or_gates_run": false,
+  "production_setup_admitted": false,
+  "independent_human_review": false,
+  "source_files": {
+    "crates/cellscript-zk-counter-client/src/lib.rs": "3a7b4657aff5656ce11acc109fa58f42975964082e116106485c11c93a4a1fff",
+    "crates/cellscript-zk-counter-client/src/migration.rs": "71bc31ef2df4473f6eebfcd707231bd8a17afc2e30fe66f2388865b325725c8c",
+    "crates/cellscript-zk-counter-client/src/lifecycle.rs": "ff24dd1fcc464cbd00e80a32065e6c41c39e6c4a627f8e3584e85ab1285a5b81",
+    "crates/cellscript-zk-counter-client/src/lifecycle/deployment.rs": "9f1ec38e96961868c55ad4e7e50068b14c23cb8d969ff0e146733f992dbd18dc",
+    "crates/cellscript-zk-counter-client/tests/lifecycle.rs": "54d9f8836260a7ad9095d92e87c5171d0d2118cb151ea98917c3cdfcf6b942f6",
+    "crates/cellscript-zk-counter-client/tests/migration.rs": "b8bb19dce7b49afbfc10c26e945ea5d568ce93366029caa64c7b1af7a9bb46ff",
+    "crates/cellscript-zk-counter-client/tests/lifecycle_node.rs": "679f91b16bf0265a352f7980cdfbd134a60799ec579e6f98d183a71b6b5a2da0",
+    "examples/zk/lifecycle.ts": "514a0462233930226ca98d8693b01852b2364e14aa3764f858924cac7565f5dc",
+    "examples/zk/lifecycle.test.ts": "559c5c092001a6e4d6de504275fd70cf0096a03b9f4dc69fda92aaab581e6979",
+    "examples/zk/lifecycle-cli.ts": "413668758288cfa583789d603ad7ce2e31fe7c8c480a9b5681a987edfb7f655d",
+    "examples/zk/package.json": "2e651079e9b5272be2028a4d3cbb705b46e3b7750188eeacf5a345cbb462c687",
+    "examples/zk/tsconfig.json": "e5882052b478b3f9f76564bab7e943fff8c60f9fad017ae66eedf30f14ca0bef"
+  },
+  "retained_public_artifacts": {
+    "key-0.bin": {
+      "bytes": 744,
+      "sha256": "a5c9d7063c8cdcccc3c1b62f60a8b985bd23a227ef0524df1cb3fbca9d1e23a4"
+    },
+    "key-1.bin": {
+      "bytes": 744,
+      "sha256": "9b2eae37ac1510eda80315a67561bb29055b074327959ff3e1ed780ad436f4c5"
+    },
+    "setup-0.json": {
+      "bytes": 799,
+      "sha256": "f4261212d95059e13b5906e001bb18fc08e48f4345609d4d79e7da7cfb9648f4"
+    },
+    "setup-1.json": {
+      "bytes": 799,
+      "sha256": "d5da6b32df2904dce1de11bde530f16ea0f8f689475f13950e85245757b9ebf0"
+    },
+    "child.elf": {
+      "bytes": 197384,
+      "sha256": "d3b0c172b4f6a807b203b888e45a6656e69761b7fffc2e4d3524b8b379e6a555"
+    },
+    "lifecycle.elf": {
+      "bytes": 67536,
+      "sha256": "d5c693dfcf1b07125d6f524f1b10d652b97421386692e05c1a738e9235edb80b"
+    },
+    "guard.elf": {
+      "bytes": 65024,
+      "sha256": "321884b9184c3162ce211ca2889d3470e3b16fc48a04b44581421581a1c3f8f9"
+    },
+    "prover": {
+      "bytes": 3277472,
+      "sha256": "d91da6b4a4c8413d87b317c235ee8c25ee3c02744ddaedd78cfdb7ae89445a21"
+    },
+    "migration-manifest.json": {
+      "bytes": 5019,
+      "sha256": "baeb26cb73dc737bce4ff8f28fbd20b1f57b49bffacaba8b0c1268ffcdec2863"
+    }
+  },
+  "archives": [
+    {
+      "file": "node-evidence.json.gz",
+      "raw_bytes": 24711,
+      "raw_sha256": "293ede6efd786053bcc8949cb49b5a3c85bdb638c2a992912ff4efd82c6c496b",
+      "stored_bytes": 5372,
+      "stored_sha256": "a2b7bc900161444710f51d155a3a2e84d88269140a043dd305bb4aa1bba1c8fc"
+    },
+    {
+      "file": "ccc-migration.json.gz",
+      "raw_bytes": 1382,
+      "raw_sha256": "166c5d9d7c638ed9fda140a7ce5232f6191277c34c743662363d048a1a9914ef",
+      "stored_bytes": 571,
+      "stored_sha256": "470c099523b3f4d0af30802771e5c167438ce074b5b27a44599232539f07b3ce"
+    },
+    {
+      "file": "lifecycle-report.json.gz",
+      "raw_bytes": 14068,
+      "raw_sha256": "c28270a596ed9ad655dfb9a183f9d7579019b09eef346c230ea7fa52343a58bc",
+      "stored_bytes": 3897,
+      "stored_sha256": "719d058cb00dc8fbc012603dd3148f8fc088ccd489b89d8fedf6f78273e8eca6"
+    },
+    {
+      "file": "replay.json.gz",
+      "raw_bytes": 437,
+      "raw_sha256": "30f697c027a5411425650a0419c7fe3316c3a9ce7ee65da166fd475167f159cd",
+      "stored_bytes": 326,
+      "stored_sha256": "c460c4f7f5a493275b489dd06e0dd55fd2a4a699518b53a7cdb441c01f135005"
+    },
+    {
+      "file": "cli-report.json.gz",
+      "raw_bytes": 646,
+      "raw_sha256": "d4ac34441b825551db472469f62e832bbb7099452cdeee695603bec2ff0a570c",
+      "stored_bytes": 386,
+      "stored_sha256": "fbb41b373450bba17eabb8bb8b6fe63942f6f24564db12106b449e3e0d0d3894"
+    },
+    {
+      "file": "zk-lifecycle-vectors.json.gz",
+      "raw_bytes": 151808,
+      "raw_sha256": "b8bde550bd1c507550a5daa6f9db4a2e0fbeb85650d9e03f073e0c6556fb7c99",
+      "stored_bytes": 4666,
+      "stored_sha256": "db6e09932df85612fe88162dcab9bc34bad6da7320d0bd8c5fdebf6370e3c189"
+    },
+    {
+      "file": "zk-lifecycle-package-vector.json.gz",
+      "raw_bytes": 14835,
+      "raw_sha256": "4835f18276939951b531d699747ea20605ce6c1a9ca3f3b7e7b371e346093275",
+      "stored_bytes": 3001,
+      "stored_sha256": "e144e188beaca5c819a960d087418c38ea6e7e439615b5efeab94054d3ccd5cf"
+    },
+    {
+      "file": "zk-lifecycle-deployment-vectors.json.gz",
+      "raw_bytes": 65502,
+      "raw_sha256": "eaca314fecbb58a6df8b7373305a6b44a9598565e547797d9e7744fdadfdfe70",
+      "stored_bytes": 3229,
+      "stored_sha256": "992dc37afb9ef246409389af0da3304f6b35734f42acb5693838d11e4c0df1a7"
+    },
+    {
+      "file": "zk-lifecycle-client-check.log.gz",
+      "raw_bytes": 1090,
+      "raw_sha256": "5f0381fa37fb01ba4e15bee0666f7c6ba2da77bcf8a5abaaf99ef2e9bbe7849e",
+      "stored_bytes": 547,
+      "stored_sha256": "f5fd2b11b12dddc299e33241a481c25df0470bf95699d3ecbd0126d09a639f6b"
+    },
+    {
+      "file": "zk-lifecycle-clippy.log.gz",
+      "raw_bytes": 192,
+      "raw_sha256": "ac61955eece853ce85234049bb7cc0755c9e99466a9f81d4fe82ef57f036d37e",
+      "stored_bytes": 161,
+      "stored_sha256": "625b1833ba175e8df820b8fe331f43721f003a0091548997b7fb6c8ce53e0744"
+    },
+    {
+      "file": "zk-lifecycle-typescript-check.log.gz",
+      "raw_bytes": 1618,
+      "raw_sha256": "ce7c77f792d84cbf0e8782da652d1cbd26e955adabf2555d6190b07668ad5240",
+      "stored_bytes": 532,
+      "stored_sha256": "ffef02548b40e9faba5fa07e4ec1785a6afdac1d4f0df3b9f29783b092f9d69c"
+    },
+    {
+      "file": "zk-lifecycle-migration-check.log.gz",
+      "raw_bytes": 668,
+      "raw_sha256": "2b0b37ab172c74efb45a6c85e22f920fbf96653e1e0be732a2cbdf48df174cc1",
+      "stored_bytes": 355,
+      "stored_sha256": "4eb0f2dac38ce49f9486fd297a8ade04d4ec4344a85af7b7d25e2951a01738e4"
+    },
+    {
+      "file": "zk-lifecycle-resource-check.log.gz",
+      "raw_bytes": 305,
+      "raw_sha256": "212fb4fb00569705ab1e547960d3cc1c4eb693217d579faf215e203e9283ccd9",
+      "stored_bytes": 225,
+      "stored_sha256": "61b8666488f543c5dad19462fd93d890e5a20f814b3e9771c844c0caf563f5c8"
+    },
+    {
+      "file": "migration-evidence.json.gz",
+      "raw_bytes": 15825,
+      "raw_sha256": "5fb39f79f63c0dfb3150d604b9f07598a09133083e4e4c54e64a80ea3f4f5b24",
+      "stored_bytes": 2158,
+      "stored_sha256": "a36514c3c9bd2ff74b74a4f1aefa24959393b27b2a737d999e59a9fe683d4782"
+    },
+    {
+      "file": "migration-resources.json.gz",
+      "raw_bytes": 33987,
+      "raw_sha256": "d09f0e8e39ac52a745636f6514e30bf946249e54765ec2dc616b9b01a0bdd60c",
+      "stored_bytes": 6898,
+      "stored_sha256": "b0a54be4f014f695684a5aa69b25a997ee263069dfa562cc508d721dcb2fce19"
+    },
+    {
+      "file": "migration-client-evidence.json.gz",
+      "raw_bytes": 1218,
+      "raw_sha256": "31f2e9a21007796ce7fba9e36113aac500890e6173db63e46912cbda81392dc7",
+      "stored_bytes": 570,
+      "stored_sha256": "f4e444847b8deb3c66c76c3cc0d7f47465621bc3be4bfdd9973ddaaa007c3d3d"
+    },
+    {
+      "file": "migration-lifecycle-versions.json.gz",
+      "raw_bytes": 16712,
+      "raw_sha256": "8d780fc97176e851e14e7c44063c6d2d794dd275b1152b37ae08bcdbe30646a6",
+      "stored_bytes": 4233,
+      "stored_sha256": "11eb64dc1cb6b6f4b77981aef3db12916796051b324df292ab56e46f53f88534"
+    },
+    {
+      "file": "node-replay.log.gz",
+      "raw_bytes": 1012,
+      "raw_sha256": "50a40dc912fb1e6ef1a67229c2ee618da61d7660f363fa8b678d446dce1a865a",
+      "stored_bytes": 395,
+      "stored_sha256": "ca34a0430e934e8c44abf405567148147fc8a66c65df8eb5b02dff97018c144b"
+    },
+    {
+      "file": "tested-source.json.gz",
+      "raw_bytes": 129825,
+      "raw_sha256": "f1599e483a813cfae13a2c0f1b447b8f025b3a29b4345b43de3b5b57d70b5f95",
+      "stored_bytes": 29640,
+      "stored_sha256": "097b34816f61feed04cd2f489a1d76d497fbbcf1187779074451aa287cb9c738"
+    }
+  ]
+}

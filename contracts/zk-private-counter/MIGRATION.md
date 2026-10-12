@@ -61,7 +61,9 @@ must execute both groups successfully. The counter group EXECs its exact parent,
 which derives its usual single-state statement and Spawn/IPC verifier contract.
 The proof's raw-transaction commitment additionally authorizes the configuration
 transition. This fixed pair does not implement #44's variable protected-state
-set, or #45's general cross-version lifecycle tooling.
+set. The separate [cross-version lifecycle planner](../../docs/CELLSCRIPT_ZK_LIFECYCLE.md)
+exports its checked identities and assesses this existing authorization path;
+it cannot add a new destination to the fixed pair.
 
 Only consensus/node acceptance establishes dependency liveness and rejection of
 already-spent configuration Cells. A testtool fixture can inject arbitrary Cell

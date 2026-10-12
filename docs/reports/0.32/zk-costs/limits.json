@@ -1,0 +1,35 @@
+{
+  "schema": "cellscript-zk-application-cost-limits-v1",
+  "scope": "existing single protected counter, ordinary update and maximum fixed-pair migration; not multi-Cell acceptance",
+  "frozen_before_acceptance": true,
+  "pilot_evidence": {
+    "pilot.json": {
+      "raw_sha256": "44c9926c60aadbb896bd683f020149462bfa9f4530159be7a0d8e40cbd6f40fb",
+      "stored_sha256": "86a6222542b71a3ee2fc2983819a0ed4932aee5943034b9fbb0d74e469c34623"
+    },
+    "application-pilot.json": {
+      "raw_sha256": "4b8ecdb70aa4fdfacca4361ac1132318ff565bd0b207a4fb0c6331fe45d3a7b0",
+      "stored_sha256": "873d3449ea9a8aed293e2de57b0d8d1976fbee7ec47e7c5ec32e7b6fed0e37b3"
+    }
+  },
+  "host": {
+    "max_request_ns": 12000000000,
+    "max_prove_and_local_verify_ns": 2000000000,
+    "max_startup_key_ns": 10000000000,
+    "max_process_elapsed_ns": 50000000000,
+    "max_process_peak_rss_kib": 786432,
+    "max_setup_generation_ns": 5000000000,
+    "max_proving_key_bytes": 33554432
+  },
+  "application": {
+    "max_transaction_cycles": 250000000,
+    "max_group_cycles": 250000000,
+    "max_transaction_bytes": 16384,
+    "max_vm_stack_bytes": 32768,
+    "max_deployed_elf_bytes": 262144,
+    "proof_bytes": 128,
+    "public_input_bytes": 484,
+    "verification_key_bytes": 744
+  },
+  "rationale": "Host ceilings include headroom over retained pilot observations; existing transaction/cycle/stack limits unchanged. Corpus v1 is host-specific and leaves unavailable rejected-total cycles/heap peaks null. No #40 budget changes."
+}

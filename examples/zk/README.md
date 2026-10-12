@@ -6,6 +6,21 @@ It demonstrates one circuit with Rust and TypeScript clients. Another relation
 needs its own circuit, setup/VK and lifecycle; editing the `.cell` parent alone
 cannot turn this counter into a payment or membership application.
 
+For an update over 1–4 independently owned counters, use the separately versioned
+[bounded counter-set profile](../../docs/CELLSCRIPT_ZK_COUNTER_SET.md) and
+`counter-set.ts`. It derives every protected input/successor, freezes the common
+transaction and collects one unchanged exact proof per counter. This is a
+conjunction, not aggregation. Native/CCC/checker byte parity, all-group execution
+and local-node conflicting-spend recovery have focused tests. Existing immutable
+counter Cells cannot be retrofitted into its new lifecycle.
+
+For cross-version circuit/key/verifier decisions, use the
+[lifecycle planner](../../docs/CELLSCRIPT_ZK_LIFECYCLE.md). The native client and
+independent `npm run lifecycle -- OLD.json OLD_SHA256 NEW.json NEW_SHA256`
+consumer bind exact manifests, package upgrade receipts and deployment records.
+Their reports identify reproving and existing authorization requirements; they
+do not authorize a migration or admit a setup.
+
 ## Run locally
 
 Use the repository's Rust 1.97.1 toolchain, the

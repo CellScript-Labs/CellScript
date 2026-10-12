@@ -5,7 +5,10 @@
   "scripts": {
     "check": "tsc --noEmit",
     "test": "node --experimental-strip-types --test client.test.ts",
-    "test:migration": "node --experimental-strip-types --test migration.test.ts"
+    "test:migration": "node --experimental-strip-types --test migration.test.ts",
+    "test:lifecycle": "node --experimental-strip-types --test lifecycle.test.ts",
+    "test:counter-set": "node --experimental-strip-types --test counter-set.test.ts",
+    "lifecycle": "node --experimental-strip-types lifecycle-cli.ts"
   },
   "dependencies": {
     "@ckb-ccc/shell": "1.3.15"

@@ -1,0 +1,81 @@
+{
+  "schema": "cellscript-zk-set-cost-decisions-v1",
+  "scope": "complete 1/2/4 protected-counter sets, no aggregation and no global optimum",
+  "host_summary": [
+    {
+      "count": 1,
+      "candidate": "per-leaf-key",
+      "request_ms_median": 6627.131437,
+      "sum_leaf_prove_and_verify_ms_median": 775.242414,
+      "process_elapsed_ms": 26689.513159,
+      "process_peak_rss_kib": 605068
+    },
+    {
+      "count": 1,
+      "candidate": "shared-request-key",
+      "request_ms_median": 6809.657114,
+      "sum_leaf_prove_and_verify_ms_median": 788.583412,
+      "process_elapsed_ms": 27351.290912,
+      "process_peak_rss_kib": 605880
+    },
+    {
+      "count": 2,
+      "candidate": "per-leaf-key",
+      "request_ms_median": 13836.160863,
+      "sum_leaf_prove_and_verify_ms_median": 1577.691931,
+      "process_elapsed_ms": 55291.661657,
+      "process_peak_rss_kib": 605408
+    },
+    {
+      "count": 2,
+      "candidate": "shared-request-key",
+      "request_ms_median": 7675.304839,
+      "sum_leaf_prove_and_verify_ms_median": 1552.792862,
+      "process_elapsed_ms": 30755.366479,
+      "process_peak_rss_kib": 627712
+    },
+    {
+      "count": 4,
+      "candidate": "per-leaf-key",
+      "request_ms_median": 27459.082636,
+      "sum_leaf_prove_and_verify_ms_median": 3111.968126,
+      "process_elapsed_ms": 109912.186947,
+      "process_peak_rss_kib": 658268
+    },
+    {
+      "count": 4,
+      "candidate": "shared-request-key",
+      "request_ms_median": 9328.838478,
+      "sum_leaf_prove_and_verify_ms_median": 3157.788564,
+      "process_elapsed_ms": 37465.820262,
+      "process_peak_rss_kib": 624712
+    }
+  ],
+  "candidate_proof_bytes_equal": true,
+  "decisions": [
+    {
+      "candidate": "one checked PK per complete set request",
+      "decision": "retain existing native caller-owned key capability; no CLI default change",
+      "reason": "For 2/4 leaves, avoiding repeated checked loads materially reduces full-set proving request latency. It does not eliminate any proof or local verification. One leaf has no systematic benefit, and peak process RSS is not predictably reduced. No cross-request key cache or new process service is introduced."
+    },
+    {
+      "candidate": "four-thread combination",
+      "decision": "not selected",
+      "reason": "The single-state controlled 2x2 study rejected this slower default; the set extension retains automatic Rayon and introduces no additional combination."
+    },
+    {
+      "candidate": "aggregate or recursive verifier",
+      "decision": "defer",
+      "reason": "Four exact proofs approach the frozen 500m transaction ceiling (about 442m); this is a measured scaling limit, not permission to aggregate. Aggregation needs its own relation, codec, keys/setup, CKB verifier and measured bounds before a dedicated implementation/admission issue."
+    },
+    {
+      "candidate": "cross-transaction batching or additional proof system",
+      "decision": "defer without a profile proposal",
+      "reason": "Live overlapping sets conflict and require complete rebuild/reproof; no joint transaction/ownership/nullifier or alternate verifier trust contract is selected. Existing setup/privacy claims remain unchanged."
+    }
+  ],
+  "retained_default": "existing per-invocation CLI key checks and automatic Rayon; native callers may share their checked key within one bounded request",
+  "transport_decision": "retain unchanged exact leaf proof codec; earlier gzip rejection unchanged",
+  "production_setup_admitted": false,
+  "ci_or_gates_run": false
+}

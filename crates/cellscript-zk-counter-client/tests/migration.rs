@@ -99,6 +99,82 @@ fn checked_migration_client_binds_manifest_selection_dependencies_and_proof_snap
         || Artifacts { lifecycle: &lifecycle.2, config_guard: &guard.2, children: [&child.2; 2], keys: [&keys[0].2, &keys[1].2] };
     let load = |bytes: &[u8]| CheckedDeployment::load(bytes, counter::hash(bytes), "ckb-testnet", [0x11; 32], artifacts());
     let deployment = load(&manifest_bytes)?;
+    // Lifecycle planning consumes actual checked migration versions, including
+    // their different VKs/parents. Prover/build bytes here are explicit fixtures.
+    use cellscript_zk_counter_client::lifecycle as life;
+    let mut lifecycle_versions = Vec::new();
+    let mut deployed_records = Vec::new();
+    for (i, key) in keys.iter().enumerate() {
+        let deployed = deployment.lifecycle_deployment_record(i, cellscript::package::DeploymentStatus::Active)?;
+        let version = deployment.lifecycle_manifest(
+            i,
+            life::ManifestContext {
+                version: i as u64,
+                status: life::Status::Active,
+                prover_executable: b"lifecycle test prover",
+                prover_build_record: b"lifecycle test build record",
+                package: life::PackageBinding {
+                    member: ".".into(),
+                    lock_sha256: package::sha256(b"fixture lock"),
+                    deployed_manifest_sha256: life::deployment_record_digest(&deployed)?,
+                },
+            },
+        )?;
+        let encoded = serde_json::to_vec(&version)?;
+        let checked = life::CheckedManifest::load(&encoded, &package::sha256(&encoded))?;
+        checked.check_deployment_record(&deployed, [0x11; 32], life::DeploymentUse::Candidate)?;
+        checked.check_runtime_artifacts(
+            &key.2,
+            &child.2,
+            &find_hash(&hex::decode(&manifest.versions[i].parent.data_hash)?).2,
+            b"lifecycle test prover",
+        )?;
+        lifecycle_versions.push((version, checked));
+        deployed_records.push(deployed);
+    }
+    let impact = life::compare(&lifecycle_versions[0].1, &lifecycle_versions[1].1, None)?;
+    assert!(impact.changes.contains(&life::Change::VerificationKey));
+    assert!(impact.changes.contains(&life::Change::Deployment));
+    assert!(impact.candidate_requires_reproving);
+    assert!(!impact.old_proof_reusable_for_identical_statement);
+    assert_eq!(impact.migration, life::MigrationDisposition::ExistingAuthorizationRequired);
+    assert_eq!(impact.immutable_counter_disposition(), life::LegacyDisposition::RetrofitMigrationUnsupported);
+    let migration_plan =
+        deployment.assess_lifecycle_migration(&impact, &lifecycle_versions[0].1, &lifecycle_versions[1].1, 0, None)?;
+    assert!(!migration_plan.chain_authorization_established);
+    assert!(migration_plan.requires_fresh_old_key_proof && migration_plan.preserves_owner_and_state_lineage);
+    assert_eq!(migration_plan.authorizing_old_parent, manifest.versions[0].parent.data_hash);
+    assert_eq!(migration_plan.destination_parent, manifest.versions[1].parent.data_hash);
+    failure(
+        deployment.assess_lifecycle_migration(&impact, &lifecycle_versions[0].1, &lifecycle_versions[1].1, 1, None),
+        "second migration",
+    );
+    for mutate in [
+        (|m: &mut life::Manifest| m.circuit.relation_sha256 = package::sha256(b"other relation")) as fn(&mut life::Manifest),
+        |m| m.verification_key_sha256 = package::sha256(b"other key"),
+        |m| m.circuit.codec_sha256 = package::sha256(b"other codec"),
+        |m| m.setup.trust = life::SetupTrust::LocalSingleParty,
+        |m| m.deployment.parent_data_hash = package::sha256(b"self-installed parent"),
+        |m| m.deployment.code_out_point = hex::encode(packed::OutPoint::default().as_slice()),
+    ] {
+        let mut changed = lifecycle_versions[1].0.clone();
+        mutate(&mut changed);
+        let changed = serde_json::to_vec(&changed)?;
+        let changed = life::CheckedManifest::load(&changed, &package::sha256(&changed))?;
+        let rebound = life::compare(&lifecycle_versions[0].1, &changed, None)?;
+        assert!(deployment.assess_lifecycle_migration(&rebound, &lifecycle_versions[0].1, &changed, 0, None).is_err());
+    }
+    fs::write(
+        target.join("migration-lifecycle-versions.json"),
+        serde_json::to_vec_pretty(&json!({
+        "old": lifecycle_versions[0].0, "new": lifecycle_versions[1].0, "plan": impact,
+        "old_manifest_bytes": hex::encode(serde_json::to_vec(&lifecycle_versions[0].0)?),
+        "new_manifest_bytes": hex::encode(serde_json::to_vec(&lifecycle_versions[1].0)?),
+        "migration_authorization_path": migration_plan,
+        "deployed_records": deployed_records,
+            "prover_provenance": "explicit test fixture; not a pinned production prover"
+        }))?,
+    )?;
     let instance = deployment.bind_instance(counter_script.clone(), config_script.clone())?;
     let generated = deployment.instance(&creation.inputs().get(0).unwrap(), 0, 1)?;
     assert_eq!(generated.counter(), &counter_script);

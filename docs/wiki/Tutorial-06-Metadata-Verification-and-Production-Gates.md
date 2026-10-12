@@ -1,5 +1,11 @@
 # Tutorial 06: Metadata Verification and Production Gates
 
+The bounded [ZK counter-set profile](../CELLSCRIPT_ZK_COUNTER_SET.md) composes
+1–4 unchanged exact leaf proofs over one final transaction. Its separate set
+codec/checker reconstructs complete transaction-wide membership; leaf metadata
+alone does not establish set completeness. Local-node conflict/recovery and
+per-VM resource evidence remain separate from host parsing and SDK byte parity.
+
 Native package builds can explicitly request bounded source declaration evidence
 with `cellc build --target riscv64-elf --source-contracts`; the corresponding
 inspection command is `cellc build-plan --source-contracts`. Default builds

@@ -549,6 +549,10 @@ run_zk_child_research_check() {
     run cargo fmt --manifest-path crates/cellscript-zk-counter-client/Cargo.toml -- --check
     run cargo clippy --locked --release --manifest-path crates/cellscript-zk-counter-client/Cargo.toml --all-targets -- -D warnings
     run cargo test --locked --release --manifest-path crates/cellscript-zk-counter-client/Cargo.toml
+    # The native producer above emits complete 1/2/4-state snapshots. Keep the
+    # independent consumer and all-group resource replay ordered after it.
+    run cargo test --locked --release -p cellscript-artifact-checker --test counter_set -- --ignored --nocapture
+    run cargo test --locked --release -p cellscript --test zk_counter_set_resources -- --ignored --nocapture
     run bash contracts/zk-private-counter/reproduce.sh
     run cargo test --locked -p cellscript --release --test zk_resources -- --ignored --nocapture
 }

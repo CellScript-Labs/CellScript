@@ -78,6 +78,7 @@ pub struct CheckedDeployment {
     lifecycle_hash: [u8; 32],
     config_hash: [u8; 32],
     instance: Instance,
+    child_sha256: [String; 2],
 }
 
 impl CheckedDeployment {
@@ -156,9 +157,164 @@ impl CheckedDeployment {
             parents,
             parent_hashes,
             instance,
+            child_sha256: artifacts.children.map(package::sha256),
         };
         deployment.bind_instance(deployment.instance.counter.clone(), deployment.instance.config.clone())?;
         Ok(deployment)
+    }
+
+    /// Export version identities from the actual checked application, without
+    /// reading a PK or running a prover. Setup and package trust stay separate.
+    pub fn lifecycle_manifest(
+        &self,
+        selector: usize,
+        context: crate::lifecycle::ManifestContext<'_>,
+    ) -> Result<crate::lifecycle::Manifest> {
+        use crate::lifecycle as life;
+        ensure!(selector < 2, "migration lifecycle selector must be 0 or 1");
+        ensure!(
+            !context.prover_executable.is_empty() && context.prover_executable.len() <= 134_217_728,
+            "migration lifecycle prover byte budget"
+        );
+        ensure!(
+            !context.prover_build_record.is_empty() && context.prover_build_record.len() <= 32_768,
+            "migration lifecycle build record byte budget"
+        );
+        let version = &self.manifest.versions[selector];
+        let manifest = life::Manifest {
+            schema: life::MANIFEST_SCHEMA.into(),
+            application: counter::APPLICATION.into(),
+            version: context.version,
+            status: context.status,
+            circuit: life::Circuit {
+                source_sha256: package::sha256(include_bytes!("../../../contracts/zk-private-counter/src/lib.rs")),
+                relation_sha256: version.setup.circuit.r1cs_sha256.clone(),
+                statement_sha256: package::sha256(wire::PROFILE_PREIMAGE.as_bytes()),
+                codec_sha256: package::sha256(include_bytes!("../../cellscript-artifact-checker/src/zk.rs")),
+                profile: wire::PROFILE.into(),
+            },
+            proving: life::Proving {
+                key_sha256: version.setup.proving_key_sha256.clone(),
+                executable_sha256: package::sha256(context.prover_executable),
+                build_sha256: package::sha256(context.prover_build_record),
+                toolchain: version.setup.rust_toolchain.clone(),
+            },
+            verification_key_sha256: package::sha256(&self.keys[selector]),
+            setup: life::Setup {
+                manifest_sha256: package::sha256(&serde_json::to_vec(&version.setup)?),
+                transcript_sha256: None,
+                trust: match version.setup.setup_kind {
+                    package::SetupKind::PublicTestSeed => life::SetupTrust::PublicTestOnly,
+                    package::SetupKind::LocalSingleParty => life::SetupTrust::LocalSingleParty,
+                },
+            },
+            verifier_sha256: self.child_sha256[selector].clone(),
+            deployment: life::Deployment {
+                chain_id: self.manifest.chain_id.clone(),
+                genesis_hash: hex::encode(hash32(&self.manifest.genesis_hash, "genesis")?),
+                verifier_data_hash: hex::encode(hash32(&version.verifier.child_data_hash, "child")?),
+                parent_data_hash: hex::encode(self.parent_hashes[selector]),
+                code_out_point: hex::encode(version.parent.out_point()?.as_slice()),
+                application_script: hex::encode(self.instance.counter.as_slice()),
+            },
+            package: context.package,
+        };
+        let bytes = serde_json::to_vec(&manifest)?;
+        life::CheckedManifest::load(&bytes, &package::sha256(&bytes))?;
+        Ok(manifest)
+    }
+
+    /// Project the checked parent into the existing deployment-record schema.
+    /// The caller supplies discovery status; no deployment or liveness is inferred.
+    pub fn lifecycle_deployment_record(
+        &self,
+        selector: usize,
+        status: cellscript::package::DeploymentStatus,
+    ) -> Result<cellscript::package::DeployedManifest> {
+        ensure!(selector < 2, "migration lifecycle selector must be 0 or 1");
+        let version = &self.manifest.versions[selector];
+        let metadata = &self.parents[selector].compiled.metadata;
+        let profile_hash = hex::encode(counter::hash(&serde_json::to_vec(&metadata.compatibility_profile)?));
+        let parent_hash = hex::encode(self.parent_hashes[selector]);
+        let tx_hash = format!("0x{}", hex::encode(hash32(&version.parent.tx_hash, "parent tx hash")?));
+        let record: cellscript::package::DeployedManifest = serde_json::from_value(serde_json::json!({
+            "version": cellscript::package::DeployedManifest::CURRENT_VERSION,
+            "schema": cellscript::package::DEPLOYED_MANIFEST_SCHEMA,
+            "package": {"name":"private-counter-parent", "version":"0.32.0", "edition":metadata.edition},
+            "build": {"edition":metadata.edition, "compatibility_profile_hash":profile_hash,
+                "compiler_version":cellscript::VERSION, "artifact_hash":parent_hash},
+            "deployments": [{"edition":metadata.edition, "network":self.manifest.chain_id, "chain_id":self.manifest.chain_id,
+                "tx_hash":tx_hash, "output_index":version.parent.index,
+                "code_hash":parent_hash, "data_hash":parent_hash, "artifact_hash":parent_hash,
+                "hash_type":"data2", "dep_type":"code", "out_point":format!("{tx_hash}:{}", version.parent.index),
+                "compatibility_profile_hash":profile_hash, "script_role":"helper", "status":status}]
+        }))?;
+        record.validate_schema().map_err(|e| anyhow::anyhow!("migration deployment record: {e}"))?;
+        Ok(record)
+    }
+
+    /// Identify the existing on-chain authorization path from independently
+    /// checked deployment bytes. Actual configuration liveness, proof/signing
+    /// and consensus acceptance still pass through `prepare` and the node.
+    pub fn assess_lifecycle_migration(
+        &self,
+        plan: &crate::lifecycle::Plan,
+        old: &crate::lifecycle::CheckedManifest,
+        new: &crate::lifecycle::CheckedManifest,
+        current_selector: u8,
+        package_plan: Option<&cellscript::package::upgrade::UpgradePlan>,
+    ) -> Result<crate::lifecycle::FixedPairMigration> {
+        use crate::lifecycle as life;
+        life::validate_current(plan, old, new, package_plan)?;
+        ensure!(current_selector == 0, "migration lifecycle rollback or second migration rejected");
+        for (i, m) in [old.manifest(), new.manifest()].iter().enumerate() {
+            let version = &self.manifest.versions[i];
+            ensure!(
+                m.application == counter::APPLICATION
+                    && m.circuit.source_sha256 == package::sha256(include_bytes!("../../../contracts/zk-private-counter/src/lib.rs"))
+                    && m.circuit.relation_sha256 == version.setup.circuit.r1cs_sha256
+                    && m.circuit.profile == wire::PROFILE
+                    && m.circuit.statement_sha256 == package::sha256(wire::PROFILE_PREIMAGE.as_bytes())
+                    && m.circuit.codec_sha256 == package::sha256(include_bytes!("../../cellscript-artifact-checker/src/zk.rs")),
+                "migration lifecycle circuit/statement/codec differs from checked application"
+            );
+            ensure!(
+                m.verification_key_sha256 == package::sha256(&self.keys[i])
+                    && m.proving.key_sha256 == version.setup.proving_key_sha256
+                    && m.proving.toolchain == version.setup.rust_toolchain
+                    && m.setup.manifest_sha256 == package::sha256(&serde_json::to_vec(&version.setup)?),
+                "migration lifecycle key/setup binding mismatch"
+            );
+            let trust = match version.setup.setup_kind {
+                package::SetupKind::PublicTestSeed => life::SetupTrust::PublicTestOnly,
+                package::SetupKind::LocalSingleParty => life::SetupTrust::LocalSingleParty,
+            };
+            ensure!(
+                m.setup.trust == trust && m.setup.transcript_sha256.is_none(),
+                "migration lifecycle cannot promote the checked setup trust"
+            );
+            ensure!(
+                m.verifier_sha256 == self.child_sha256[i]
+                    && m.deployment.chain_id == self.manifest.chain_id
+                    && m.deployment.genesis_hash == hex::encode(hash32(&self.manifest.genesis_hash, "genesis")?)
+                    && m.deployment.verifier_data_hash == hex::encode(hash32(&version.verifier.child_data_hash, "child")?)
+                    && m.deployment.parent_data_hash == hex::encode(self.parent_hashes[i])
+                    && m.deployment.code_out_point == hex::encode(version.parent.out_point()?.as_slice())
+                    && m.deployment.application_script == hex::encode(self.instance.counter.as_slice()),
+                "migration lifecycle destination/deployment substitution"
+            );
+        }
+        Ok(life::FixedPairMigration {
+            schema: "cellscript-zk-fixed-pair-migration-plan-v1".into(),
+            counter_script_hash: hex::encode(self.instance.counter.calc_script_hash().as_slice()),
+            configuration_script_hash: hex::encode(self.instance.config.calc_script_hash().as_slice()),
+            authorizing_old_parent: hex::encode(self.parent_hashes[0]),
+            destination_parent: hex::encode(self.parent_hashes[1]),
+            configuration_transition: "0->1".into(),
+            requires_fresh_old_key_proof: true,
+            preserves_owner_and_state_lineage: true,
+            chain_authorization_established: false,
+        })
     }
 
     /// Output indices are global. The creation builder must retain this first

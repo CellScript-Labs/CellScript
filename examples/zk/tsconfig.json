@@ -15,6 +15,11 @@
     "migration.ts",
     "migration.test.ts",
     "node-migration.ts",
-    "migration-cli.ts"
+    "migration-cli.ts",
+    "lifecycle.ts",
+    "lifecycle-cli.ts",
+    "lifecycle.test.ts",
+    "counter-set.ts",
+    "counter-set.test.ts"
   ]
 }

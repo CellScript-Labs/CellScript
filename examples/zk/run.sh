@@ -29,4 +29,11 @@ if [[ $# -eq 2 ]]; then
 else
     bash examples/zk/run-migration.sh "$output/migration"
 fi
+cargo test --locked --release --manifest-path crates/cellscript-zk-counter-client/Cargo.toml \
+    --test counter_set --test lifecycle --test migration
+cargo test --locked --release -p cellscript-artifact-checker --test counter_set -- --ignored --nocapture
+cargo run --locked -p cellscript --bin cellc -- gen-builder --target typescript \
+    --metadata "$root/target/counter-set/parent-metadata.json" --output "$root/target/counter-set/sdk"
+npm --prefix examples/zk run test:counter-set
+npm --prefix examples/zk run test:lifecycle
 printf '\nExamples passed. Read %s/walkthrough-report.json and typescript-report.json\n' "$output"

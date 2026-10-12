@@ -1,0 +1,156 @@
+{
+  "schema": "cellscript-zk-cost-decisions-v1",
+  "scope": "finite single-counter/fixed-pair application corpus, no global optimum",
+  "host_summary": [
+    {
+      "case": "ordinary",
+      "candidate": "reference",
+      "request_ms_median": 6615.09663,
+      "proving_ms_median": 769.749993,
+      "process_peak_rss_kib": 606296
+    },
+    {
+      "case": "ordinary",
+      "candidate": "four-workers",
+      "request_ms_median": 8256.754408,
+      "proving_ms_median": 1054.209392,
+      "process_peak_rss_kib": 585932
+    },
+    {
+      "case": "ordinary",
+      "candidate": "reuse-key",
+      "request_ms_median": 783.0114,
+      "proving_ms_median": 783.011026,
+      "process_peak_rss_kib": 606508
+    },
+    {
+      "case": "ordinary",
+      "candidate": "combined",
+      "request_ms_median": 1071.388653,
+      "proving_ms_median": 1071.388317,
+      "process_peak_rss_kib": 583668
+    },
+    {
+      "case": "maximum",
+      "candidate": "reference",
+      "request_ms_median": 6842.290078,
+      "proving_ms_median": 794.974139,
+      "process_peak_rss_kib": 606036
+    },
+    {
+      "case": "maximum",
+      "candidate": "four-workers",
+      "request_ms_median": 8311.30277,
+      "proving_ms_median": 1051.817667,
+      "process_peak_rss_kib": 581416
+    },
+    {
+      "case": "maximum",
+      "candidate": "reuse-key",
+      "request_ms_median": 785.660211,
+      "proving_ms_median": 785.659872,
+      "process_peak_rss_kib": 606388
+    },
+    {
+      "case": "maximum",
+      "candidate": "combined",
+      "request_ms_median": 1069.823661,
+      "proving_ms_median": 1069.823333,
+      "process_peak_rss_kib": 586364
+    }
+  ],
+  "transport_trial": {
+    "encoding": "gzip, mtime=0, Python standard-library gzip for offline byte-size experiment only; no runtime codec admitted",
+    "rows": [
+      {
+        "case": "ordinary",
+        "repetition": 1,
+        "proof_sha256": "2cb8c2b75ed2100a008bee0a85bb36949c7f6f1c712e1761e6ff75c7314f9670",
+        "proof_bytes": 128,
+        "gzip_bytes": 151,
+        "gzip_sha256": "bc3cced5ef291770ab48b7ce31fff561f13a31d48a84559a179bdc4492439aae"
+      },
+      {
+        "case": "ordinary",
+        "repetition": 2,
+        "proof_sha256": "d1f9ef2edda1bc1102f01132e040dc9b253fe58e0072f2fa1801ebbbc8fd790e",
+        "proof_bytes": 128,
+        "gzip_bytes": 151,
+        "gzip_sha256": "6199d3f30f0b0bd1970ebe14ea9f87d6d4601be39ea6c06456b64fe04678dbb6"
+      },
+      {
+        "case": "ordinary",
+        "repetition": 3,
+        "proof_sha256": "d685c78e9a0e25661c5bd2a99201dcb9369e65b6d707b318e14587485397de14",
+        "proof_bytes": 128,
+        "gzip_bytes": 151,
+        "gzip_sha256": "cfc7c9351c6d8c2c62648d1470d6123955b29684701cc30fface30477e1daa98"
+      },
+      {
+        "case": "maximum",
+        "repetition": 1,
+        "proof_sha256": "3778076bfc86ebbca379d54653125bc427aea8a6a76d4143720a6d4ced025320",
+        "proof_bytes": 128,
+        "gzip_bytes": 151,
+        "gzip_sha256": "a5627705921b695e15580c2c5840a5aee03c1f8af51ddcf66b747670bcbf120a"
+      },
+      {
+        "case": "maximum",
+        "repetition": 2,
+        "proof_sha256": "b1f1124f903c83637a8911a03b7834a26f18598b43ead37e96fbaaa2ebc080fe",
+        "proof_bytes": 128,
+        "gzip_bytes": 151,
+        "gzip_sha256": "ec0bd2db530f3c47088782e6e850b29a97df8b15f03367d2a23bf7362164dcf2"
+      },
+      {
+        "case": "maximum",
+        "repetition": 3,
+        "proof_sha256": "46d94cd7778be077703f5aaa2a4d763aaa0579b6dc8cac2479b98d767fa36dda",
+        "proof_bytes": 128,
+        "gzip_bytes": 151,
+        "gzip_sha256": "0f21661d8baa5a8e13532afda8ceaca9f8518df56d5c68995decad85d17314e1"
+      }
+    ]
+  },
+  "decisions": [
+    {
+      "candidate": "four Rayon workers",
+      "decision": "reject as default",
+      "reason": "Slower requests/proving in both cases; small RSS reduction does not justify default latency regression."
+    },
+    {
+      "candidate": "reuse checked PK in an application process",
+      "decision": "retain existing native API capability; defer automatic CLI cache",
+      "reason": "Measured lower request latency, but process RSS remains about 592 MiB. Native callers already own a checked PK. A persistent CLI service needs authenticated key/cache invalidation and secret lifetime policy; no new daemon or implicit trust change is justified here."
+    },
+    {
+      "candidate": "four workers plus key reuse",
+      "decision": "reject as default",
+      "reason": "Measured slower than automatic threading plus reuse; no additional application latency benefit."
+    },
+    {
+      "candidate": "gzip proof transport",
+      "decision": "reject",
+      "reason": "All six 128-byte canonical proofs expand; changing the admitted codec has no byte benefit."
+    },
+    {
+      "candidate": "cross-transaction batching",
+      "decision": "defer",
+      "reason": "Independent raw transaction/UTXO conflicts cannot be merged by transport; requires a bounded joint statement and authorization policy, separate from the existing single-state contract."
+    },
+    {
+      "candidate": "aggregation or recursion",
+      "decision": "defer",
+      "reason": "No admitted aggregate relation, aggregation keys, recursive verifier or setup/resource contract; observed key-load overhead can be addressed through the existing native API without this trust expansion."
+    },
+    {
+      "candidate": "additional proof systems",
+      "decision": "defer without profile proposal",
+      "reason": "No selected scheme/implementation with exact CKB verifier, statement/codec/key/setup and measured application advantage. No new profile is proposed or admitted."
+    }
+  ],
+  "retained_default": "existing CLI per-invocation checked loading and automatic Rayon; existing exact Groth16/BN254 transport and verifier",
+  "multi_cell_extension": "pending #44 actual protected-set application; maximum fixed-pair envelope is not multi-Cell evidence",
+  "production_setup_admitted": false,
+  "ci_or_gates_run": false
+}

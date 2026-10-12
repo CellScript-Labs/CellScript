@@ -5,7 +5,11 @@ use crate::external_codec::{check_fixed_external_codec, CheckedFixedExternalCode
 use crate::interface::ModuleBundle;
 use crate::{CheckerBudgets, CheckerError, CheckerRejectionCode};
 use serde::Serialize;
+mod counter_set;
 mod dependency;
+pub use counter_set::{
+    check_counter_set, decode_counter_set, encode_counter_set, CheckedCounterSet, CounterSetLeaf, COUNTER_SET_PROFILE,
+};
 mod molecule;
 pub use dependency::{
     check_direct_code_dependency, check_direct_code_dependency_with_history, CheckedDirectCodeDependency, SuppliedDependencyCell,

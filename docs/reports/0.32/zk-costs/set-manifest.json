@@ -1,0 +1,55 @@
+{
+  "schema": "cellscript-zk-set-cost-evidence-v1",
+  "source_base": "16b9e58394aa182f071303e6b5ab15dc94d304f4",
+  "source_files": {
+    "contracts/zk-private-counter/tests/proving_set_costs.rs": "05cae8ba65fc6999a5b61000cc206314b15fccf9e55fd29d6c33080dadb4940b",
+    "tests/zk_counter_set_resources.rs": "d80309072098e430172230e3e72f68d2945b20ea7f5ca0ed6303fecbfe06f62c",
+    "tests/support/cost_trace.rs": "5bdf04ddc6663f3ce8302b92e239e209386014434c421e2b0de6bcc178f4bd00",
+    "tests/support/cost_measurement.rs": "030746e0603b1a5c63f952e8d5ad328d303a7f7c266dd8d7fc67190d2039d7b4",
+    "contracts/zk-private-counter/src/lib.rs": "1ef20bf0858139a7b9300abcec948e960d50e5349f2017cfbd8e2eeaf5ab8ee3",
+    "contracts/zk-private-counter/src/package.rs": "1a9c80773cec2599bb46450dcb62799d1d9e3ca61930503c3859f298f366b312",
+    "contracts/zk-private-counter/Cargo.lock": "aa29e13729505d86c425a789dd7c2e2284c32ce5392a832d02b90f4c8828ed0f"
+  },
+  "frozen_limits_sha256": "27a0dbe8f87eebca5f824df4d5f18c1f9b6a1e72f0df29db1e9057de18ee9bb4",
+  "decisions_sha256": "033cebbba7237ce15f429d0622982d611e1042b714520a25b2465a6b8148d26b",
+  "archives": [
+    {
+      "file": "set-pilot.json.gz",
+      "raw_sha256": "ebfc78a977d19a1bb22405dba551e33bd806406744a2f1c96d0c0593151e1e44",
+      "raw_bytes": 25017,
+      "stored_sha256": "a0df77b7a300dca680d8dcdea9feca2b5d6925e3a3cb824d5c3d99f8a1f8ce22",
+      "stored_bytes": 4086
+    },
+    {
+      "file": "set-acceptance.json.gz",
+      "raw_sha256": "1af62a503165ab3cbc0f238249eb322dcba4665e0aa1548ff9b8588a08a29135",
+      "raw_bytes": 25114,
+      "stored_sha256": "d5b93f59f749a2fe559af7ab8aa50ec39d9efc77a50b0b359038899d15e15a8b",
+      "stored_bytes": 4133
+    },
+    {
+      "file": "set-environment.json.gz",
+      "raw_sha256": "4ff29e167ba2326304d7ea3c171befdb16072550e12a570ebaf0c3e05002ee4e",
+      "raw_bytes": 734,
+      "stored_sha256": "27ee7c573e493beb1626f18df44f73a2e3623e3dfebf1a714ca5a414201355ec",
+      "stored_bytes": 523
+    },
+    {
+      "file": "set-pilot.log.gz",
+      "raw_sha256": "f7977beb2d3fd2ebc5ecd2154cdf35887a19b3df1d9c8fcd00f373d5dd01229f",
+      "raw_bytes": 658,
+      "stored_sha256": "bdb150357711dc2f2659e987554cf17e255b704dffbe682a1af5ff3057431122",
+      "stored_bytes": 345
+    },
+    {
+      "file": "set-acceptance.log.gz",
+      "raw_sha256": "f799517c4c9f01a5a38b1aae9d8f211cdc372d2f5513b1670260437e05db5587",
+      "raw_bytes": 668,
+      "stored_sha256": "7936c026d3c6cdb28fdb84a1369d4c2241c57ebf43b5d16bddb57bd4f19ef961",
+      "stored_bytes": 350
+    }
+  ],
+  "application_evidence": "../zk-counter-set/manifest.json (separate all-group/node/complete-input fixture evidence)",
+  "ci_or_gates_run": false,
+  "production_setup_admitted": false
+}

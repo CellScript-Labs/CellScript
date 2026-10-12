@@ -1,5 +1,14 @@
 # CellScript Gate Policy
 
+The exact ZK application checks include bounded counter-set producer fixtures,
+independent complete-set checker mutations and separate per-VM resource replay.
+The example walkthrough checks native/CCC/generated-SDK set parity and lifecycle
+manifest decisions. Controlled host cost studies and pinned-node conflict tests
+remain explicit opt-in measurements. For the 2026-10-12 ZK work the maintainer
+requested targeted checks only: these checks were run directly, while CI and
+gate scripts were not executed. See the [counter-set contract](CELLSCRIPT_ZK_COUNTER_SET.md)
+and [cost study](CELLSCRIPT_ZK_COST_STUDY.md) for evidence scope.
+
 Native package builds can explicitly request bounded source declaration evidence
 with `cellc build --target riscv64-elf --source-contracts`; the corresponding
 inspection command is `cellc build-plan --source-contracts`. Default builds

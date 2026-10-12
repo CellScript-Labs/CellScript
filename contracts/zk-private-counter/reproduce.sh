@@ -8,7 +8,7 @@ for pass in a b; do
     CARGO_TARGET_DIR="$root/target/counter-repro/$pass" cargo build --locked \
         --manifest-path contracts/zk-private-counter/script/Cargo.toml --target riscv64imac-unknown-none-elf --release
 done
-for name in cellscript-counter-migratable-lifecycle cellscript-counter-config; do
+for name in cellscript-counter-migratable-lifecycle cellscript-counter-config cellscript-counter-set; do
     cmp "$root/target/counter-repro/a/riscv64imac-unknown-none-elf/release/$name" \
         "$root/target/counter-repro/b/riscv64imac-unknown-none-elf/release/$name"
     cmp "$root/target/counter-repro/a/riscv64imac-unknown-none-elf/release/$name" \

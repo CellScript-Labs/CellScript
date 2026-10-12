@@ -1,0 +1,16 @@
+{
+  "schema": "cellscript-zk-set-cost-limits-v1",
+  "scope": "complete 1/2/4 protected-counter proof requests; sequential unchanged leaf proofs, not aggregation",
+  "frozen_before_acceptance": true,
+  "pilot": {
+    "file": "set-pilot.json.gz",
+    "raw_sha256": "ebfc78a977d19a1bb22405dba551e33bd806406744a2f1c96d0c0593151e1e44",
+    "stored_sha256": "a0df77b7a300dca680d8dcdea9feca2b5d6925e3a3cb824d5c3d99f8a1f8ce22"
+  },
+  "max_complete_set_request_ns": 40000000000,
+  "max_leaf_prove_and_verify_ns": 2000000000,
+  "max_worker_elapsed_ns": 160000000000,
+  "max_worker_rss_kib": 786432,
+  "application_limits": "docs/CELLSCRIPT_ZK_COUNTER_SET.md: 500000000 cycles, 16384 transaction bytes, 32768 separate per-VM stack bytes; frozen before implementation",
+  "rationale": "Headroom over pilot maximum request 27.70 s, worker 109.45 s, peak RSS 628708 KiB; original single-state v1 and #40 budgets unchanged."
+}

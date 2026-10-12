@@ -2,6 +2,32 @@
 
 ## Unreleased — 0.32
 
+Publish a controlled ZK cost study for ordinary/fixed-pair updates and complete
+1/2/4-counter proof sets. Retain raw pilot/acceptance observations under separately
+frozen host limits, authoritative all-group/per-VM accounting and explicit missing
+heap metrics. Compare thread count and checked-key reuse, reject gzip proof
+transport and slower thread defaults, and retain existing CLI/proof-system
+defaults with concrete defer decisions for aggregation and additional profiles.
+See `docs/CELLSCRIPT_ZK_COST_STUDY.md` and `docs/reports/0.32/zk-costs/README.md`.
+
+Add the bounded `cellscript-zk-counter-set-v1` application for 1–4 independently
+owned counter Cells. Derive complete ordered input/successor membership on chain,
+preserve custody and require each unchanged exact counter proof over the common
+transaction. Add the versioned Molecule set codec, independent checker, native
+adapter/client and CCC consumer with generated leaf SDK parity. Focused tests
+cover maximum bounds, all Script groups and local-node conflict/reprove recovery;
+CI and gates were excluded by maintainer instruction. See
+`docs/CELLSCRIPT_ZK_COUNTER_SET.md` for trust and execution scope.
+
+Add bounded ZK lifecycle manifests and deterministic change reports in the native
+counter client and independent TypeScript consumer. Separate source/prover,
+statement/codec, circuit/VK, setup, verifier, deployment and package changes;
+bind package upgrade receipts and existing deployment records; reject stale,
+yanked and downgraded candidates. Checked fixed-pair migration identifies the
+old-parent proof path, while immutable legacy counters retain an explicit
+unsupported retrofit disposition. No new circuit, setup or on-chain ABI is
+admitted. See `docs/CELLSCRIPT_ZK_LIFECYCLE.md` for evidence and bounds.
+
 Complete compatible-open Lock/Type/verifier admission through independent public
 receipts, immutable source policies and complete ProtocolBundle transactions.
 Add machine-checked single-entry WitnessArgs/CSARG decoding and bounded
