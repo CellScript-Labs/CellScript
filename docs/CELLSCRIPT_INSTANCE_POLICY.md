@@ -127,6 +127,15 @@ and index. Reconstructing a witness Script without that observation is
 insufficient. The standalone checker must independently establish those machine
 checks and their rejecting paths after enclosing hashes are rebound.
 
+Direct O0–O3 VM regressions exercise the new helper with global input/output
+and group-relative input/output views. Lock-role cases place the observed Cell
+at global index 1 and group index 0, so aliasing those scopes cannot pass.
+Type-role cases accept the foreign global participant and reject group views
+that actually select the consumer's Type Script. Each view also rejects an
+out-of-range index and substitution of a different, independently policy-valid
+instance. These isolated observation tests use an always-success peer; actual
+peer authority and rejection are covered by the application tests below.
+
 The native `freeze_instance_policy` path retains the original private
 source/implementation proof, independently checks a new fixed-policy receipt
 for the concrete Script at the exact original deployment, and binds a new
@@ -434,7 +443,7 @@ passing low-level codec test does not close #80.
 | Independent canonical wire, four selection combinations, A/B subject separation | Seven standalone checker tests including fourteen frozen independently generated CCC/Molecule vectors; host-only |
 | Preserve #11/#28 formats, roots and vectors | Existing exact/open suites; open wire regressions unchanged |
 | Private source/receipt and actual instance/dependency binding | `tests/frozen_interface.rs` checks O0–O3, exact/compatible implementation policies, SDK Script serialization, distinct A/B receipts/groups, dependency/witness/source replacement and exact Type-ID history reuse; ProtocolBundle binds consumer args to actual input snapshots |
-| Actual args/root machine checks and rehashed mutations | `tests/exact_script_handles.rs` executes bounded args/config/root and A/B negatives at O0–O3; `tests/artifact_checker.rs` rejects over 200 rehashed instruction changes and transitive-helper mutations |
+| Actual args/root machine checks and rehashed mutations | `tests/exact_script_handles.rs` executes bounded args/config/root, all four global/group input/output views, actual Lock/Type fields and A/B negatives at O0–O3; `tests/artifact_checker.rs` rejects over 200 rehashed instruction changes and transitive-helper mutations |
 | Source/type/lowering/ProofPlan/metadata/editor/WASM parity | Formatter round-trip, native CLI/LSP cross-profile rejection, completion and browser multi-source nominal-type regressions pass; full integration validation remains open |
 | Native/CLI/generated-builder/SDK byte parity and signing negatives | `instance_protocol_admission_binds_private_receipts_to_complete_transaction_bytes` passes O0–O3 native/CLI/Node/SDK parity, real secp signing, actual all-group success, signed peer rejection, post-signing witness replacement, schema downgrade and rebound report mutations; unchanged open-path regression also passes |
 | Fixed verifier allowlist and actual child-failure regressions | The unchanged `open_lock_and_verifier_profiles_materialize_and_execute_identical_transactions` passes at O0–O3 for Lock/Type consumers, including actual SPAWN/WAIT, child-predicate failure, machine failure-path mutations and native/CLI/generated-builder/adapter parity; full gate revalidation continues |

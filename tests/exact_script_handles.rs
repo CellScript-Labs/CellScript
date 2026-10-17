@@ -1011,6 +1011,117 @@ fn instance_handle_source() -> String {
 }
 
 #[test]
+fn instance_participant_reads_actual_role_and_global_or_group_relative_views() {
+    use cellscript_artifact_checker::instance_policy::{self, ArgsConstraint, ConsumerArgs, InstanceMode, InstancePolicy};
+    use cellscript_artifact_checker::open_handle_policy::{AuthorizationSet, ScriptRole};
+    use ckb_script_runner::execute_cellscript_script_with_context_setup_and_observer;
+
+    let participant = packed::Script::new_builder()
+        .code_hash(blake2b_256(&*ckb_testtool::builtin::ALWAYS_SUCCESS).pack())
+        .hash_type(4u8)
+        .args(Bytes::from_static(b"instance-A").pack())
+        .build();
+    let (original, _) = open_authorization_set(participant.calc_script_hash().unpack());
+    let mut member = original.members()[0].clone();
+    member.artifact = blake2b_256(&*ckb_testtool::builtin::ALWAYS_SUCCESS);
+    member.code_hash = member.artifact;
+    for role in [ScriptRole::Lock, ScriptRole::Type] {
+        let mut header = original.header().clone();
+        header.role = role;
+        let set = AuthorizationSet::new(header, &[member.clone()]).unwrap();
+        let policy = InstancePolicy {
+            implementation_root: set.root(),
+            mode: InstanceMode::Constrained,
+            args_length: 10,
+            config_length: 0,
+            constraints: vec![ArgsConstraint::Any { offset: 0, length: 10 }],
+        };
+        let selection = instance_policy::encode_selection(&policy, &set.selection(&member.receipt).unwrap(), b"instance-A").unwrap();
+        let committed =
+            ConsumerArgs { policy_root: policy.root().unwrap(), subject: participant.calc_script_hash().unpack(), config: Vec::new() }
+                .encode()
+                .unwrap();
+        for opt in 0..=3 {
+            for (view, is_input, is_group) in
+                [("input", true, false), ("output", false, false), ("group_input", true, true), ("group_output", false, true)]
+            {
+                let index = usize::from(!is_group);
+                let source = instance_handle_source().replace("ckb::input<Document>(1)", &format!("ckb::{view}<Document>({index})"));
+                let result = compile_open_handle(&source, opt);
+                let elf = strip_vm_abi_trailer(&result.artifact_bytes);
+                let mut fixture = open_handle_from_args_fixture(&result, committed.to_vec(), selection.to_vec(), &participant);
+                fixture.cell_deps[0].data = ckb_testtool::builtin::ALWAYS_SUCCESS.clone();
+                fixture.inputs.push(FixtureCell {
+                    capacity: 100_000_000_000,
+                    type_script: Some(participant.clone()),
+                    data: Bytes::new(),
+                });
+                fixture.outputs.push(fixture.inputs[1].clone());
+                fixture.witnesses.push(Bytes::new());
+                if role == ScriptRole::Lock {
+                    // The current Type group starts at global index 1. Its
+                    // group index 0 must not alias the unrelated global Cell 0.
+                    fixture.current_type_script_input_indices = vec![1];
+                    fixture.outputs[0].type_script = Some(participant.clone());
+                    fixture.outputs[1].type_script = None;
+                    fixture.witnesses.swap(0, 1);
+                }
+                let run = |observed: &packed::Script, fixture: &CkbVmFixture, elf: &[u8]| {
+                    execute_cellscript_script_with_context_setup_and_observer(
+                        elf,
+                        fixture,
+                        |tx, _| {
+                            let outputs = tx
+                                .outputs()
+                                .into_iter()
+                                .enumerate()
+                                .map(|(index, output)| {
+                                    if index != 1 || is_input {
+                                        output
+                                    } else if role == ScriptRole::Lock {
+                                        output.as_builder().lock(observed.clone()).build()
+                                    } else {
+                                        output.as_builder().type_(Some(observed.clone()).pack()).build()
+                                    }
+                                })
+                                .collect();
+                            tx.as_advanced_builder().set_outputs(outputs).build()
+                        },
+                        |context, tx, _| {
+                            if is_input {
+                                let point = tx.inputs().get(1).unwrap().previous_output();
+                                let (output, data) = context.get_cell(&point).unwrap();
+                                let output = if role == ScriptRole::Lock {
+                                    output.as_builder().lock(observed.clone()).build()
+                                } else {
+                                    output.as_builder().type_(Some(observed.clone()).pack()).build()
+                                };
+                                context.create_cell_with_out_point(point, output, data);
+                            }
+                        },
+                        |_, _, _| (),
+                    )
+                    .0
+                };
+                // For Type-role group views the actual observed Type is the
+                // consumer itself, not the foreign participant at global 1.
+                let expected = if role == ScriptRole::Type && is_group { 85 } else { 0 };
+                let execution = run(&participant, &fixture, elf);
+                assert_eq!(execution.exit_code, expected, "O{opt} {role:?} {view}: {:?}", execution.captured_debug);
+                let other = participant.clone().as_builder().args(Bytes::from_static(b"instance-B").pack()).build();
+                assert_eq!(run(&other, &fixture, elf).exit_code, 85, "O{opt} {role:?} {view}: substituted instance");
+                let missing = compile_open_handle(&source.replace(&format!("<Document>({index})"), "<Document>(99)"), opt);
+                assert_eq!(
+                    run(&participant, &fixture, strip_vm_abi_trailer(&missing.artifact_bytes)).exit_code,
+                    85,
+                    "O{opt} {role:?} {view}: missing view"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn instance_handle_authoring_preserves_format_and_rejects_cross_profile_types() {
     let source = instance_handle_source();
     let tokens = cellscript::lexer::lex(&source).unwrap();
