@@ -329,7 +329,9 @@ impl Monomorphizer {
             if let Some(name) = item_decl_name(item).filter(|name| {
                 matches!(
                     *name,
-                    crate::script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE | crate::script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
+                    crate::script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE
+                        | crate::script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
+                        | crate::script_handle_contract::INSTANCE_SCRIPT_HANDLE_TYPE
                 )
             }) {
                 return Err(generic_declaration_error(
@@ -890,7 +892,9 @@ impl Monomorphizer {
                 // copy and drop but never serialize into layout.
                 if matches!(
                     base,
-                    crate::script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE | crate::script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
+                    crate::script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE
+                        | crate::script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
+                        | crate::script_handle_contract::INSTANCE_SCRIPT_HANDLE_TYPE
                 ) {
                     return [ValueAbility::Copy, ValueAbility::Drop].into_iter().collect();
                 }

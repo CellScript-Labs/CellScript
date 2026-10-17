@@ -833,6 +833,8 @@ run_ci_gate() {
     # This does not couple open-handle authority to the ZK application.
     run node crates/cellscript-artifact-checker/tests/fixtures/open_handle_policy_vectors.cjs \
         examples/zk/package.json --check
+    run node crates/cellscript-artifact-checker/tests/fixtures/instance_policy_vectors.cjs \
+        examples/zk/package.json --check
     run cargo clippy --locked --manifest-path contracts/registry-type-script/Cargo.toml --tests -- -D warnings
     run ./scripts/cellscript_strict_backend_audit.sh ci
     run cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \

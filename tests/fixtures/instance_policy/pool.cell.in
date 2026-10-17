@@ -1,0 +1,92 @@
+module foreign
+
+private struct Amount has copy, drop, store, fixed, serializable, non_linear { value: u64 }
+private struct Balances has copy, drop, store, fixed, serializable, non_linear { a: u64, b: u64, revision: u64 }
+private struct Custody has copy, drop, store, fixed, serializable, non_linear { pool: Hash, controller: Hash, asset: Hash }
+
+// State: pool Type ID hash, two ordered asset Script hashes, owner Lock hash,
+// network domain (five full hashes), fee LE64, nonce LE64, balances/revision.
+// Lock args commit the immutable first 176 bytes. Bootstrap consumes a
+// separately funded, untyped instance of this Lock; Type ID authenticates the
+// first state output. Each pool has its own bootstrap and successor lineage.
+public lock verify(
+    witness before_a: u64, witness before_b: u64, witness after_a: u64, witness after_b: u64,
+    witness revision: u64, witness input_base: u64, witness output_base: u64, witness fee: u64,
+) -> bool {
+    verification
+    check_pool(before_a, before_b, after_a, after_b, revision, input_base, output_base, fee)
+}
+
+private fn output_reserve(index: u64, amount: u64, pool: Hash, controller: Hash, asset: Hash) -> bool {
+    let reserve = source::output(index)
+    if ckb::cell_data_size(reserve) != 104 { return false }
+    if ckb::cell_lock_hash_type(reserve) != 4 { return false }
+    if ckb::cell_lock_code_hash(reserve) != Hash::from_bytes(b"@RESERVE_CODE_HASH@") { return false }
+    ckb::require_cell_type_hash(reserve, asset)
+    let expected = Custody { pool, controller, asset }
+    let commitment = ckb::hash_data_packed(expected)
+    ckb::require_cell_lock_args_hash(reserve, commitment)
+    if ckb::cell_data_blake2b_span(reserve, 8, 96) != commitment { return false }
+    return ckb::cell_data_blake2b_span(reserve, 0, 8) == ckb::hash_data_packed(Amount { value: amount })
+}
+
+private fn input_reserve(index: u64, amount: u64, pool: Hash, controller: Hash, asset: Hash) -> bool {
+    let reserve = source::input(index)
+    if ckb::cell_data_size(reserve) != 104 { return false }
+    if ckb::cell_lock_hash_type(reserve) != 4 { return false }
+    if ckb::cell_lock_code_hash(reserve) != Hash::from_bytes(b"@RESERVE_CODE_HASH@") { return false }
+    ckb::require_cell_type_hash(reserve, asset)
+    let expected = Custody { pool, controller, asset }
+    let commitment = ckb::hash_data_packed(expected)
+    ckb::require_cell_lock_args_hash(reserve, commitment)
+    if ckb::cell_data_blake2b_span(reserve, 8, 96) != commitment { return false }
+    return ckb::cell_data_blake2b_span(reserve, 0, 8) == ckb::hash_data_packed(Amount { value: amount })
+}
+
+private fn check_pool(a: u64, b: u64, next_a: u64, next_b: u64, revision: u64, ib: u64, ob: u64, fee: u64) -> bool {
+    if ckb::cell_count(source::group_input(0)) != 1 { return false }
+    if ib > 16 || ob > 16 || fee > 1000 || revision > 1000000 { return false }
+    if a == 0 || b == 0 || a > 1000000000 || b > 1000000000 { return false }
+    if next_a == 0 || next_b == 0 || next_a > 1000000000 || next_b > 1000000000 { return false }
+    let current = source::group_input(0)
+    let output = source::output(ob)
+    if ckb::cell_data_size(current) != 200 || ckb::cell_data_size(output) != 200 { return false }
+    let commitment = ckb::cell_data_blake2b_span(current, 0, 176)
+    ckb::require_cell_lock_args_hash(current, commitment)
+    if ckb::cell_data_blake2b_span(output, 0, 176) != commitment { return false }
+    let pool = ckb::cell_data_hash_at(current, 0)
+    let asset_a = ckb::cell_data_hash_at(current, 32)
+    let asset_b = ckb::cell_data_hash_at(current, 64)
+    if asset_a == asset_b { return false }
+    let owner = ckb::cell_data_hash_at(current, 96)
+    if ckb::cell_data_hash_at(current, 128) != Hash::from_bytes(b"@NETWORK_DOMAIN@") { return false }
+    if ckb::cell_data_blake2b_span(current, 160, 8) != ckb::hash_data_packed(Amount { value: fee }) { return false }
+    let controller = ckb::cell_lock_hash(current)
+    ckb::require_cell_lock_hash(source::input(ib), controller)
+    ckb::require_cell_lock_hash(output, controller)
+    ckb::require_cell_type_hash(output, pool)
+    if ckb::cell_type_hash_type(output) != 1 { return false }
+    if ckb::cell_type_code_hash(output) != Hash::from_bytes(b"@TYPE_ID_CODE_HASH@") { return false }
+    if !output_reserve(ob + 1, next_a, pool, controller, asset_a) { return false }
+    if !output_reserve(ob + 2, next_b, pool, controller, asset_b) { return false }
+    if !ckb::cell_has_type(current) {
+        ckb::require_cell_lock_hash(source::input(0), owner)
+        if revision != 0 || a != next_a || b != next_b { return false }
+        let balances = Balances { a, b, revision: 0 }
+        return ckb::cell_data_blake2b_span(output, 176, 24) == ckb::hash_data_packed(balances)
+    }
+    ckb::require_cell_type_hash(current, pool)
+    ckb::require_cell_type_hash(source::input(ib), pool)
+    ckb::require_cell_lock_hash(source::input(ib + 3), owner)
+    let before = Balances { a, b, revision }
+    let after = Balances { a: next_a, b: next_b, revision: revision + 1 }
+    if ckb::cell_data_blake2b_span(current, 176, 24) != ckb::hash_data_packed(before) { return false }
+    if ckb::cell_data_blake2b_span(output, 176, 24) != ckb::hash_data_packed(after) { return false }
+    if !input_reserve(ib + 1, a, pool, controller, asset_a) { return false }
+    if !input_reserve(ib + 2, b, pool, controller, asset_b) { return false }
+    if next_a <= a || next_b >= b { return false }
+    let deposited = next_a - a
+    let net = deposited - deposited * fee / 10000
+    if net == 0 { return false }
+    return b - next_b == b * net / (a + net)
+}

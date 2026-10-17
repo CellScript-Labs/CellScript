@@ -1,0 +1,47 @@
+module reserve
+
+// Reserve args commit the exact pool Type Script hash, controller Lock hash
+// and asset Type Script hash. Amount (first eight data bytes) may change only
+// alongside that authentic pool transition. Extra deposits cannot impersonate
+// a different pool or asset and do not create shares.
+public lock verify() -> bool {
+    verification
+    check_reserve()
+}
+
+private fn check_reserve() -> bool {
+    if ckb::cell_count(source::group_input(0)) != 1 { return false }
+    let reserve = source::group_input(0)
+    if ckb::cell_data_size(reserve) != 104 { return false }
+    ckb::require_cell_lock_args_hash(reserve, ckb::cell_data_blake2b_span(reserve, 8, 96))
+    let pool = ckb::cell_data_hash_at(reserve, 8)
+    let controller = ckb::cell_data_hash_at(reserve, 40)
+    let asset = ckb::cell_data_hash_at(reserve, 72)
+    ckb::require_cell_type_hash(reserve, asset)
+    let inputs = ckb::cell_count(source::input(0))
+    let outputs = ckb::cell_count(source::output(0))
+    if inputs > 16 || outputs > 16 { return false }
+    let mut i = 0
+    let mut found_input = 0
+    while i < inputs {
+        let cell = source::input(i)
+        if ckb::cell_has_type(cell) {
+            if ckb::cell_type_hash(cell) == pool && ckb::cell_lock_hash(cell) == controller {
+                found_input = found_input + 1
+            }
+        }
+        i = i + 1
+    }
+    i = 0
+    let mut found_output = 0
+    while i < outputs {
+        let cell = source::output(i)
+        if ckb::cell_has_type(cell) {
+            if ckb::cell_type_hash(cell) == pool && ckb::cell_lock_hash(cell) == controller {
+                found_output = found_output + 1
+            }
+        }
+        i = i + 1
+    }
+    return found_input == 1 && found_output == 1
+}

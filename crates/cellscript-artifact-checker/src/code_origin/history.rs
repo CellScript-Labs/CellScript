@@ -20,7 +20,7 @@ pub struct CheckedTypeCodeHistory {
     record: Record,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct Record {
     schema: &'static str,
     type_script_hash: String,
@@ -28,7 +28,7 @@ struct Record {
     steps: Vec<Step>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct Step {
     transaction_hash: String,
     output_index: u32,
@@ -50,6 +50,38 @@ impl CheckedTypeCodeHistory {
     }
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, CheckerError> {
         canonical_bytes(&self.record)
+    }
+
+    /// Carry an already checked code lineage to another independently checked
+    /// Script instance of that exact code output. Only the selected instance
+    /// may differ; this cannot retarget the history to a replacement code Cell.
+    /// Instance authorization is supplied separately by the caller's policy.
+    pub fn bind_instance(
+        &self,
+        original: &CheckedTargetCodeCellOrigin,
+        instance: &CheckedTargetCodeCellOrigin,
+    ) -> Result<Self, CheckerError> {
+        let old = original.origin();
+        let new = instance.origin();
+        if self.target != original.identity()
+            || original.runtime_contract() != instance.runtime_contract()
+            || old.selected_hash_type() != 1
+            || new.selected_hash_type() != 1
+            || old.transaction_hash() != new.transaction_hash()
+            || old.output_index() != new.output_index()
+            || old.artifact_hash() != new.artifact_hash()
+            || old.type_script_hash() != new.type_script_hash()
+            || new.type_script_hash() != Some(hex_encode(&self.line).as_str())
+        {
+            return Err(invalid("instance lineage differs from its original checked code, target, Type identity or OutPoint"));
+        }
+        Ok(Self {
+            target: instance.identity().into(),
+            line: self.line,
+            tip: self.tip,
+            sequence: self.sequence,
+            record: self.record.clone(),
+        })
     }
 }
 

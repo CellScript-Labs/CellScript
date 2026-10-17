@@ -624,7 +624,9 @@ fn validate_open_materialization(bundle: &BundleWire, tx: &TransactionView) -> R
         {
             bail!("open receipt cannot promote peer, execution or consensus claims into local authority");
         }
-        if binding.schema != "cellscript-protocol-open-handle-v1"
+        let expected_schema =
+            if binding.instance.is_some() { "cellscript-protocol-instance-handle-v1" } else { "cellscript-protocol-open-handle-v1" };
+        if binding.schema != expected_schema
             || !seen.insert((&binding.consumer, &binding.parameter))
             || binding.consumer == binding.participant
             || binding.witness_field != "input_type"
@@ -647,10 +649,54 @@ fn validate_open_materialization(bundle: &BundleWire, tx: &TransactionView) -> R
         }
         let root = parse_byte32("open authorization root", &binding.authorization_root)?;
         let selection = parse_hex("open selection", &binding.selection)?;
-        let membership = verify_selection(&root, &selection).map_err(|error| anyhow::anyhow!("invalid open selection: {error:?}"))?;
-        let member = membership.member();
         let provider_script = parse_script("open participant", &provider.deployment.script)?;
         let consumer_script = parse_script("open consumer", &consumer.deployment.script)?;
+        let instance_membership = binding
+            .instance
+            .as_ref()
+            .map(|record| -> Result<_> {
+                use cellscript_artifact_checker::instance_policy::{self, InstanceMode};
+                let admitted = instance_policy::verify_selection(&consumer_script.args().raw_data(), &selection)
+                    .map_err(|error| anyhow::anyhow!("invalid instance selection: {error}"))?;
+                let policy = admitted.policy();
+                if verifier
+                    || binding.observation.is_none()
+                    || record.schema != "cellscript-protocol-instance-admission-v1"
+                    || record.consumer_args != consumer.deployment.script.args
+                    || policy.implementation_root != root
+                    || policy.root().map_err(|error| anyhow::anyhow!("invalid instance root: {error}"))?
+                        != parse_byte32("instance policy root", &record.policy_root)?
+                    || policy.args_schema().map_err(|error| anyhow::anyhow!("invalid instance schema: {error}"))?
+                        != parse_raw_hash32("instance args schema", &record.args_schema)?
+                    || record.instance_mode
+                        != match policy.mode {
+                            InstanceMode::Exact => "exact",
+                            InstanceMode::Constrained => "constrained",
+                        }
+                    || admitted.script() != provider_script.as_slice()
+                    || admitted.script_hash() != parse_raw_hash32("selected instance", &binding.selected_script_hash)?
+                {
+                    bail!("instance policy, actual configuration or concrete participant changed after admission");
+                }
+                for identity in [&record.source_policy, &record.selection_identity, &binding.selected_receipt] {
+                    parse_raw_hash32("private instance admission identity", identity)?;
+                }
+                Ok(admitted)
+            })
+            .transpose()?;
+        let old_membership = if binding.instance.is_none() {
+            Some(verify_selection(&root, &selection).map_err(|error| anyhow::anyhow!("invalid open selection: {error:?}"))?)
+        } else {
+            None
+        };
+        let membership = instance_membership
+            .as_ref()
+            .map(|value| value.implementation())
+            .or(old_membership.as_ref())
+            .ok_or_else(|| anyhow::anyhow!("missing selection membership"))?;
+        let member = membership.member();
+        let implementation_receipt =
+            binding.instance.as_ref().map_or(binding.selected_receipt.as_str(), |value| value.implementation_receipt.as_str());
         if membership.header().class != if verifier { HandleClass::Verifier } else { HandleClass::Script }
             || membership.header().role
                 != match provider.script_role {
@@ -659,10 +705,11 @@ fn validate_open_materialization(bundle: &BundleWire, tx: &TransactionView) -> R
                     ScriptRoleWire::SpawnedVerifier => ScriptRole::SpawnedVerifier,
                 }
             || membership.header().network_genesis != parse_byte32("network", &bundle.network.genesis_hash)?
-            || consumer_script.args().raw_data().as_ref() != root
-            || member.receipt != parse_raw_hash32("selected receipt", &binding.selected_receipt)?
-            || member.script != parse_raw_hash32("selected Script", &binding.selected_script_hash)?
-            || member.script.as_slice() != provider_script.calc_script_hash().as_slice()
+            || (binding.instance.is_none()
+                && (consumer_script.args().raw_data().as_ref() != root
+                    || member.script != parse_raw_hash32("selected Script", &binding.selected_script_hash)?
+                    || member.script.as_slice() != provider_script.calc_script_hash().as_slice()))
+            || member.receipt != parse_raw_hash32("implementation receipt", implementation_receipt)?
             || member.artifact != parse_raw_hash32("selected artifact", &binding.selected_artifact_hash)?
             || member.artifact != parse_raw_hash32("provider artifact", &provider.artifact_hash)?
         {
@@ -702,7 +749,7 @@ fn validate_open_materialization(bundle: &BundleWire, tx: &TransactionView) -> R
         let witness = tx.witnesses().get(binding.witness_index as usize).ok_or_else(|| anyhow::anyhow!("open witness is absent"))?;
         let args = WitnessArgs::from_slice(&witness.raw_data()).context("invalid open WitnessArgs")?;
         let payload = args.input_type().to_opt().ok_or_else(|| anyhow::anyhow!("open selection witness is absent"))?.raw_data();
-        if payload.len() != 664 || !payload.starts_with(b"CSARGv1\0") || payload[8..] != selection {
+        if payload.len() != selection.len() + 8 || !payload.starts_with(b"CSARGv1\0") || payload[8..] != selection {
             bail!("open selection witness changed after receipt admission");
         }
         let dep = tx

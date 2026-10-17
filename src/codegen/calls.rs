@@ -1230,22 +1230,25 @@ impl CodeGenerator {
             "__ckb_require_cell_dep_open_script_handle_from_args"
                 | "__ckb_require_cell_dep_open_verifier_handle_from_args"
                 | "__ckb_require_open_script_participant_from_args"
+                | "__ckb_require_instance_script_participant_from_args"
         ) {
-            let participant = func == "__ckb_require_open_script_participant_from_args";
+            let instance = func == "__ckb_require_instance_script_participant_from_args";
+            let participant = instance || func == "__ckb_require_open_script_participant_from_args";
+            let width = if instance { crate::script_handle_contract::INSTANCE_SCRIPT_HANDLE_BYTES } else { 656 };
             if args.len() != if participant { 3 } else { 2 } {
                 return Ok(false);
             }
-            let Some(handle) = self.expected_fixed_byte_source(&args[1], 656) else {
+            let Some(handle) = self.expected_fixed_byte_source(&args[1], width) else {
                 self.emit_fail(CellScriptRuntimeError::OpenHandleInvalid);
                 return Ok(true);
             };
-            self.emit_prepare_fixed_byte_source(&handle, 656, "compatible-open handle selection");
+            self.emit_prepare_fixed_byte_source(&handle, width, "versioned handle selection");
             self.emit_operand_to_register("a0", &args[0]);
             if !self.emit_fixed_byte_source_pointer_or_const_to("a1", &handle) {
                 self.emit_fail(CellScriptRuntimeError::OpenHandleInvalid);
                 return Ok(true);
             }
-            self.emit("li a2, 656");
+            self.emit(format!("li a2, {width}"));
             if participant {
                 self.emit_operand_to_register("a3", &args[2]);
             } else {

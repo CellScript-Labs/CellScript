@@ -6533,6 +6533,7 @@ pub(crate) fn entry_witness_static_type_len(ty: &str) -> Option<usize> {
         other if other == script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE => {
             return Some(script_handle_contract::EXACT_SCRIPT_HANDLE_BYTES)
         }
+        other if other.starts_with("InstanceScriptHandle<") => return Some(script_handle_contract::INSTANCE_SCRIPT_HANDLE_BYTES),
         // The compatible-open handle runtime value is the frozen 656-byte
         // selection witness; its width never depends on the designation.
         other
@@ -18637,6 +18638,11 @@ fn metadata_fixed_byte_width(ty: &ir::IrType, fixed_size: Option<usize>) -> Opti
         {
             Some(size)
         }
+        (ir::IrType::Named(name), Some(size))
+            if name.starts_with("InstanceScriptHandle<") && size == script_handle_contract::INSTANCE_SCRIPT_HANDLE_BYTES =>
+        {
+            Some(size)
+        }
         (ir::IrType::Named(name), Some(656))
             if matches!(
                 name.split('<').next().unwrap_or(name),
@@ -21904,6 +21910,9 @@ fn operand_fixed_byte_width(operand: &ir::IrOperand) -> Option<usize> {
         ir::IrOperand::Const(ir::IrConst::Address(_) | ir::IrConst::Hash(_)) => Some(32),
         ir::IrOperand::Const(ir::IrConst::Array(items)) => Some(items.len()),
         ir::IrOperand::Var(var) => match &var.ty {
+            ir::IrType::Named(name) if name.starts_with("InstanceScriptHandle<") => {
+                Some(script_handle_contract::INSTANCE_SCRIPT_HANDLE_BYTES)
+            }
             ir::IrType::Address | ir::IrType::Hash => Some(32),
             ir::IrType::Array(inner, len) if matches!(inner.as_ref(), ir::IrType::U8) => Some(*len),
             ir::IrType::Named(name) if zk_contract::fixed_width(name).is_some() => zk_contract::fixed_width(name),
@@ -21931,6 +21940,9 @@ fn operand_fixed_byte_width(operand: &ir::IrOperand) -> Option<usize> {
 
 fn type_static_length(ty: &ir::IrType) -> Option<usize> {
     match ty {
+        ir::IrType::Named(name) if name.starts_with("InstanceScriptHandle<") => {
+            Some(script_handle_contract::INSTANCE_SCRIPT_HANDLE_BYTES)
+        }
         ir::IrType::Bool | ir::IrType::U8 => Some(1),
         ir::IrType::U16 => Some(2),
         ir::IrType::U32 => Some(4),
@@ -22021,6 +22033,7 @@ fn param_metadata(
             && zk_contract::fixed_width(name).is_none()
             && name != script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE
             && name != script_handle_contract::DEPLOYMENT_LINE_HANDLE_TYPE
+            && !name.starts_with("InstanceScriptHandle<")
             && !matches!(
                 name.split('<').next().unwrap_or(name),
                 script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE | script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE

@@ -272,6 +272,7 @@ pub fn check_bundle_values(
     crate::fixed_results::validate(record, &elf)?;
     validate_syscalls(record, &elf)?;
     validate_script_hash_machine_contract(record, &elf)?;
+    crate::instance_machine::validate(record, &elf)?;
     zk::validate(record, &elf)?;
     let zk_contracts = crate::zk_profile::contracts(&record.typed_semantics)
         .map_err(|message| CheckerError::new(CheckerRejectionCode::V2419TypedSemanticsInvalid, message))?;
@@ -3077,19 +3078,30 @@ fn validate_typed_operation(
                     | "__ckb_require_cell_dep_open_verifier_handle"
                     | "__ckb_require_cell_dep_open_script_handle_from_args"
                     | "__ckb_require_open_script_participant_from_args"
+                    | "__ckb_require_instance_script_participant_from_args"
                     | "__ckb_require_cell_dep_open_verifier_handle_from_args"
             );
             let is_open_handle_from_args_call = call.target.ends_with("_from_args");
             if !is_open_handle_call
                 && operation.operands.iter().any(|operand| {
-                    matches!(operand.ty.split('<').next().unwrap_or(operand.ty.as_str()), "ScriptHandle" | "VerifierHandle")
+                    matches!(
+                        operand.ty.split('<').next().unwrap_or(operand.ty.as_str()),
+                        "ScriptHandle" | "VerifierHandle" | "InstanceScriptHandle"
+                    )
                 })
             {
                 return typed_error("compatible-open handle operand is passed to an unrecognized runtime helper".to_string());
             }
             if is_open_handle_call {
-                let participant = call.target == "__ckb_require_open_script_participant_from_args";
-                let class = if participant || call.target.contains("open_script_handle") { "ScriptHandle" } else { "VerifierHandle" };
+                let instance = call.target == "__ckb_require_instance_script_participant_from_args";
+                let participant = instance || call.target == "__ckb_require_open_script_participant_from_args";
+                let class = if instance {
+                    "InstanceScriptHandle"
+                } else if participant || call.target.contains("open_script_handle") {
+                    "ScriptHandle"
+                } else {
+                    "VerifierHandle"
+                };
                 let handle_operand = operation
                     .operands
                     .get(1)

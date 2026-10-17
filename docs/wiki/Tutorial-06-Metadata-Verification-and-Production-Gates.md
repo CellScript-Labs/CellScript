@@ -843,6 +843,16 @@ group, and a nonzero child exit rejects the parent. See the
 The maintainer waived external human review for #28 and #29; independent artifact
 checking and their remaining technical acceptance requirements still apply.
 
+The experimental constrained-instance extension keeps that old path intact.
+Use request schema `cellscript-protocol-instance-admission-input-v1` with the
+same CLI option, and add the canonical `instance_policy` to each instance
+binding. `InstanceScriptHandle<I>` selections are 1768 bytes and their CSARG
+payloads are 1776 bytes. Generated builders expose separate
+`encodeInstanceHandleWitness` / `instanceHandleWitnessFromCheckedBundle`
+functions; the SDK rechecks the concrete instance and configuration before
+signing. This extension has its own unfinished acceptance and review record:
+[constrained Script instances](https://github.com/CellScript-Labs/CellScript/blob/0.32/docs/CELLSCRIPT_INSTANCE_POLICY.md).
+
 ## Next
 
 Once the verification boundary is clear, continue with

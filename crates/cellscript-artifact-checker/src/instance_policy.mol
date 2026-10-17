@@ -1,0 +1,47 @@
+// Fixed layouts for cellscript-instance-policy-v1. All integers are LE.
+// Tags, lengths, zero padding, partition and constraints are checked in Rust
+// and must also be enforced by any admitted machine decoder.
+import open_handle_policy;
+
+array InstanceU16 [byte; 2];
+array InstanceReserved2 [byte; 2];
+array InstanceReserved6 [byte; 6];
+array InstanceReserved8 [byte; 8];
+array InstanceArgsBuffer [byte; 256];
+array InstanceConfigBuffer [byte; 128];
+
+struct InstanceConstraint {
+    tag: byte,
+    reserved: byte,
+    length: InstanceU16,
+    offset: InstanceU16,
+    config_offset: InstanceU16,
+    reserved8: InstanceReserved8,
+    value: OpenHandleHash,
+}
+array InstanceConstraints [InstanceConstraint; 16];
+struct InstancePolicy {
+    magic: OpenHandleMagic,
+    mode: byte,
+    count: byte,
+    args_length: InstanceU16,
+    config_length: InstanceU16,
+    reserved: InstanceReserved2,
+    implementation_root: OpenHandleHash,
+    args_schema: OpenHandleHash,
+    constraints: InstanceConstraints,
+}
+struct InstanceConsumerArgs {
+    magic: OpenHandleMagic,
+    policy_root: OpenHandleHash,
+    subject: OpenHandleHash,
+    config_length: InstanceU16,
+    reserved: InstanceReserved6,
+    config: InstanceConfigBuffer,
+}
+struct InstanceSelection {
+    magic: OpenHandleMagic,
+    policy: InstancePolicy,
+    implementation: OpenHandlePolicySelection,
+    args: InstanceArgsBuffer,
+}

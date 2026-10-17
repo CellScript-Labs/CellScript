@@ -73,7 +73,7 @@ impl Contracts<'_> {
                 // Compatible-open handle leaves carry their designation as a
                 // module path argument: identity-only copy/drop values whose
                 // defining module the value-ability layer already validated.
-                if matches!(name.as_str(), "ScriptHandle" | "VerifierHandle") {
+                if super::nominals::OPEN_HANDLE_CLASSES.contains(&name.as_str()) {
                     return if arguments.len() == 1 {
                         Ok(COPY | DROP)
                     } else {

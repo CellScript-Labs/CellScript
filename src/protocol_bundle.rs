@@ -23,7 +23,10 @@ use std::path::{Path, PathBuf};
 mod open_handles;
 pub use cellscript_artifact_checker::code_origin::ResolvedOpenHandle;
 #[cfg(feature = "cli")]
-pub use open_handles::{check_protocol_bundle_with_open_handles_file, ProtocolOpenHandleBinding, ProtocolOpenTransaction};
+pub use open_handles::{
+    check_protocol_bundle_with_open_handles_file, ProtocolInstanceHandleBinding, ProtocolInstanceTransaction,
+    ProtocolOpenHandleBinding, ProtocolOpenTransaction,
+};
 
 pub const PROTOCOL_BUNDLE_SCHEMA: &str = "cellscript-protocol-bundle-v1";
 pub const PROTOCOL_BUNDLE_INPUT_SCHEMA: &str = "cellscript-protocol-bundle-input-v1";
@@ -545,7 +548,10 @@ fn open_handle_parameters(
         // because they are absent from the action-only builder metadata.
         for entry in metadata[&artifact.id].typed_semantics.entries.iter().filter(|entry| entry.name == artifact.entry.name) {
             for param in &entry.params {
-                if param.ty.starts_with("ScriptHandle<") || param.ty.starts_with("VerifierHandle<") {
+                if param.ty.starts_with("ScriptHandle<")
+                    || param.ty.starts_with("VerifierHandle<")
+                    || param.ty.starts_with("InstanceScriptHandle<")
+                {
                     required.insert((artifact.id.clone(), param.name.clone()));
                 }
             }
@@ -564,6 +570,17 @@ pub fn check_protocol_bundle_with_open_handles(
     open: &ProtocolOpenTransaction<'_>,
 ) -> Result<ProtocolBundleReport> {
     check_protocol_bundle_inner(input, base, |artifacts, metadata| open_handles::admit(input, artifacts, metadata, open))
+}
+
+/// Admit versioned instance policies, optionally alongside unchanged open
+/// handles, against the exact final transaction and authenticated input args.
+#[cfg(feature = "cli")]
+pub fn check_protocol_bundle_with_instance_handles(
+    input: &ProtocolBundleInput,
+    base: &Path,
+    supplied: &ProtocolInstanceTransaction<'_>,
+) -> Result<ProtocolBundleReport> {
+    check_protocol_bundle_inner(input, base, |artifacts, metadata| open_handles::admit_instances(input, artifacts, metadata, supplied))
 }
 
 fn check_protocol_bundle_inner(

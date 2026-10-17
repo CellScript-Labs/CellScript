@@ -197,6 +197,11 @@ impl Projector<'_> {
         }
         match ty {
             SourceType::Named(name, arguments) => {
+                // A handle parameter designates an already checked module;
+                // a qualified module path is not a nested value declaration.
+                if nominals::OPEN_HANDLE_CLASSES.contains(&name.as_str()) {
+                    return Ok(());
+                }
                 if name.contains("::") && !parameters.contains(&name.as_str()) {
                     self.pending.push_back(name.clone());
                 }

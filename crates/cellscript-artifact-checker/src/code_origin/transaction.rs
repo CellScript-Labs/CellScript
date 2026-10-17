@@ -36,6 +36,23 @@ pub struct ResolvedOpenHandle {
     pub claim_boundaries: OpenHandleClaimBoundaries,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observation: Option<OpenParticipantObservation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance: Option<ResolvedInstanceAdmission>,
+}
+
+/// Evidence of the separately versioned instance policy. Old selections keep
+/// `instance` absent and retain their exact-instance meaning and byte format.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResolvedInstanceAdmission {
+    pub schema: String,
+    pub source_policy: String,
+    pub selection_identity: String,
+    pub implementation_receipt: String,
+    pub args_schema: String,
+    pub policy_root: String,
+    pub consumer_args: String,
+    pub instance_mode: String,
 }
 
 /// Assign responsibility for a claim, never assert that pending execution or

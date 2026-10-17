@@ -22,6 +22,10 @@ mod code_catalog;
 pub use code_catalog::{freeze_code_catalog, CodeCandidateInput, FrozenCodeCandidate, FrozenCodeCatalog};
 mod source_receipt;
 pub use source_receipt::CheckedSourceCodeReceipt;
+mod instance_policy;
+pub use instance_policy::{
+    freeze_instance_policy, FrozenInstanceDependency, FrozenInstanceGroup, FrozenInstancePolicy, FrozenInstanceSelection,
+};
 mod code_policy;
 pub use code_policy::{
     freeze_code_policy, freeze_source_code_policy, freeze_source_code_policy_with_histories, FrozenCodePolicy,

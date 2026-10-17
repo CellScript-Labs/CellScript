@@ -12,6 +12,8 @@ pub mod fixed_cell_storage;
 pub mod fixed_policy_receipt;
 mod fixed_results;
 mod generic_projection;
+mod instance_machine;
+pub mod instance_policy;
 pub mod interface;
 pub mod open_handle_policy;
 mod policy;

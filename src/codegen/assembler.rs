@@ -2033,6 +2033,7 @@ pub(super) fn is_void_runtime_requirement_call(func: &str) -> bool {
             | "__ckb_require_cell_dep_open_verifier_handle"
             | "__ckb_require_cell_dep_open_script_handle_from_args"
             | "__ckb_require_open_script_participant_from_args"
+            | "__ckb_require_instance_script_participant_from_args"
             | "__ckb_require_cell_dep_open_verifier_handle_from_args"
             | "__ckb_require_cell_lock_deployment_line_handle"
             | "__ckb_require_cell_type_deployment_line_handle"

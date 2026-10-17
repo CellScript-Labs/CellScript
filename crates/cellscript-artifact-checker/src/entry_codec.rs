@@ -96,8 +96,10 @@ fn invalid(message: impl Into<String>) -> CheckerError {
 }
 
 /// Read actual bundles through the independent checker first. This initial
-/// machine profile accepts <=1536 fixed argument bytes and <=8 ABI registers;
-/// bool, enums, named/dynamic witness values, Script.args and outgoing stack
+/// machine profile accepts <=1536 fixed argument bytes and <=8 ABI registers.
+/// The separately versioned instance profile accepts one 1768-byte
+/// InstanceScriptHandle only; it does not widen the old aggregate limit.
+/// Bool, enums, other named/dynamic witness values, Script.args and outgoing stack
 /// arguments reject. Runtime-bound null pairs are checked only as transport,
 /// never as proof of their eventual transaction Cell-data decoding.
 pub fn check_fixed_policy_parameter_decoders(
@@ -116,7 +118,9 @@ pub fn check_fixed_policy_parameter_decoders(
         } else {
             verify(&record, &elf)?
         };
-    let schema = if matches!(record.typed_semantics.foundation.entry_contract.dispatch, EntryDispatchContract::SingleEntry) {
+    let schema = if variants.values().any(|variant| variant.parameters.iter().any(|p| p.ty.starts_with("InstanceScriptHandle<"))) {
+        "cellscript-fixed-instance-parameter-decoder-v1"
+    } else if matches!(record.typed_semantics.foundation.entry_contract.dispatch, EntryDispatchContract::SingleEntry) {
         "cellscript-fixed-single-entry-parameter-decoder-v1"
     } else {
         SCHEMA
@@ -128,6 +132,9 @@ pub fn check_fixed_policy_parameter_decoders(
 
 fn width(ty: &SourceType) -> Result<u32, CheckerError> {
     let result = match ty {
+        SourceType::Named(name, args) if name == "InstanceScriptHandle" && args.len() == 1 => {
+            return Ok(crate::instance_policy::SELECTION_BYTES as u32);
+        }
         SourceType::Named(name, args) if matches!(name.as_str(), "ScriptHandle" | "VerifierHandle") && args.len() == 1 => 656,
         SourceType::Named(name, args) if args.is_empty() => match name.as_str() {
             "unit" => 0,
@@ -156,6 +163,13 @@ pub(crate) fn parameters(entry: &TypedSemanticEntry, typed: &TypedSemanticRecord
     let mut result = Vec::new();
     let mut cursor = 0u32;
     let mut abi = 0u32;
+    // The new instance codec admits one dedicated fixed witness. It does not
+    // silently enlarge the earlier scalar/open-handle payload profile.
+    let payload_limit = if entry.params.len() == 1 && entry.params[0].ty.starts_with("InstanceScriptHandle<") {
+        crate::instance_policy::SELECTION_BYTES as u32
+    } else {
+        MAX_PAYLOAD
+    };
     for param in &entry.params {
         if param.source == "lockargs" {
             return Err(invalid("Script.args decoding requires a separate machine profile"));
@@ -189,7 +203,7 @@ pub(crate) fn parameters(entry: &TypedSemanticEntry, typed: &TypedSemanticRecord
         });
         cursor = cursor.checked_add(size).ok_or_else(|| invalid("payload width overflow"))?;
         abi += arguments;
-        if cursor > MAX_PAYLOAD || abi > 8 {
+        if cursor > payload_limit || abi > 8 {
             return Err(invalid("fixed decoder exceeds payload/register profile"));
         }
     }

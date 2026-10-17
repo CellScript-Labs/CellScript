@@ -373,6 +373,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn wasm_typed_byte_vec_constructor_compiles_and_preserves_primary_diagnostic() {
+        for constructor in ["Vec::new()", "Vec::with_capacity(52)"] {
+            let source = format!("module browser_bytes\naction verify() {{ verification\nlet mut context: Vec<u8> = {constructor}\ncontext.push(7 as u8)\nrequire context.len() == 1\n}}");
+            let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(&source, "2027", None)).unwrap();
+            assert!(result.get("error").is_none(), "{result}");
+            assert_eq!(result["module"], "browser_bytes");
+            assert_eq!(result["actions"][0]["name"], "verify");
+            assert_eq!(result["runtime"]["fail_closed_runtime_features"], serde_json::json!([]));
+        }
+        let source = "module browser_bytes\naction verify() { verification\nlet mut context: Vec<u8> = Vec::with_capacity(true)\ncontext.push(7 as u8)\nrequire context.len() == 1\n}";
+        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(source, "2027", None)).unwrap();
+        let diagnostics = result["diagnostics"].as_array().unwrap();
+        assert_eq!(diagnostics.len(), 1, "{result}");
+        assert!(diagnostics[0]["message"].as_str().unwrap().contains("expects a u64 capacity"));
+        assert!(!result.to_string().contains("undefined"));
+    }
+
+    #[test]
     fn wasm_zk_metadata_preserves_exact_contract() {
         let hash = |byte: u8| format!("Hash::from_bytes(b\"{}\")", format!("\\x{byte:02x}").repeat(32));
         let source = format!(
@@ -680,6 +698,35 @@ action inspect() -> bool {
         {
             let language: serde_json::Value = serde_json::from_str(&language_service_json(&source, 0, 0)).unwrap();
             assert!(language["error"].as_str().is_some_and(|message| message.contains("source exceeds")));
+        }
+    }
+
+    #[test]
+    fn wasm_instance_handles_preserve_nominal_types_and_reject_old_handle_substitution() {
+        let source = "module consumer\nuse documents::Document\npublic action observe(witness handle: InstanceScriptHandle<documents>) { verification ckb::require_instance_script_participant_from_args(ckb::cell_dep(0), handle, ckb::input<Document>(0)) }\n";
+        let compile = |source: &str| -> serde_json::Value {
+            let sources = serde_json::json!([
+                {"path": "consumer.cell", "source": source},
+                {"path": "documents.cell", "source": "module documents\npublic resource Document has store { serial: u64 }\n", "role": "library"}
+            ]);
+            serde_json::from_str(&compile_metadata_json_sources(&sources.to_string(), "consumer.cell", "2026", None)).unwrap()
+        };
+        let admitted = compile(source);
+        assert_eq!(admitted["error_count"], 0, "{admitted}");
+        assert_eq!(admitted["metadata"]["actions"][0]["params"][0]["ty"], "InstanceScriptHandle<documents>");
+        assert!(admitted["metadata"].get("typed_semantics").is_none(), "browser summary must remain bounded");
+        for changed in [
+            source.replace("InstanceScriptHandle<documents>", "ScriptHandle<documents>"),
+            source.replace("ckb::input<Document>(0)", "ckb::cell_dep(0)"),
+        ] {
+            let rejected = compile(&changed);
+            assert!(rejected["error_count"].as_u64().unwrap() > 0, "{rejected}");
+            assert!(
+                rejected["diagnostics"].as_array().unwrap().iter().any(|diagnostic| diagnostic["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("InstanceScriptHandle<module>"))),
+                "{rejected}"
+            );
         }
     }
 

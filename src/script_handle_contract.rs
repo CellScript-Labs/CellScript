@@ -45,12 +45,14 @@ pub const DEPLOYMENT_LINE_HANDLE_STATUS_ACTIVE: u8 = 0;
 pub const DEPLOYMENT_LINE_HANDLE_STATUS_YANKED: u8 = 1;
 pub const DEPLOYMENT_LINE_COMMITMENT_MAGIC: &[u8; 7] = b"CSREGv1";
 
-/// Reserved nominal class names for the #28 compatible-open handle surface
-/// (H2). The source syntax is not admitted yet: both spellings fail closed at
-/// type validation and declaration registration until the frozen
-/// interface-parameter binding ships with its runtime enforcement.
+/// Nominal imported-interface classes for the #28 compatible-open surface.
+/// Designations are resolver-owned; witness values use the unchanged v1
+/// selection encoding and never confer Cell lifecycle authority.
 pub const OPEN_SCRIPT_HANDLE_TYPE: &str = "ScriptHandle";
 pub const OPEN_VERIFIER_HANDLE_TYPE: &str = "VerifierHandle";
+/// Versioned Script-instance selection; the old handle widths are unchanged.
+pub const INSTANCE_SCRIPT_HANDLE_TYPE: &str = "InstanceScriptHandle";
+pub const INSTANCE_SCRIPT_HANDLE_BYTES: usize = cellscript_artifact_checker::instance_policy::SELECTION_BYTES;
 
 /// Bounded runtime layout of the 656-byte compatible-open selection witness
 /// (`CSOHWv1\0`), shared by the on-chain requirement helpers and the tests.

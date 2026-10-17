@@ -796,6 +796,10 @@ impl LspServer {
                         "ckb::require_open_script_participant_from_args(${1:ckb::cell_dep(0)}, ${2:handle}, ${3:ckb::input<Cell>(0)})",
                     ),
                     (
+                        "require_instance_script_participant_from_args",
+                        "ckb::require_instance_script_participant_from_args(${1:ckb::cell_dep(0)}, ${2:handle}, ${3:ckb::input<Cell>(0)})",
+                    ),
+                    (
                         "require_cell_dep_open_verifier_handle_from_args",
                         "ckb::require_cell_dep_open_verifier_handle_from_args(${1:source::cell_dep(0)}, ${2:handle})",
                     ),
@@ -1277,6 +1281,7 @@ impl LspServer {
             "ScriptHash",
             "ExactScriptHandle",
             "ScriptHandle",
+            "InstanceScriptHandle",
             "VerifierHandle",
             "ZkTransitionProof",
             "VerificationKeyCommitment",
@@ -1310,6 +1315,7 @@ impl LspServer {
                 detail: Some(format!("{} type", ty)),
                 documentation: match ty {
                     "ScriptHandle" => Some("ScriptHandle<I>: a 656-byte nominal imported-interface selection for a checked Lock/Type participant; accepted as an action or Lock witness. Membership does not prove peer acceptance.".into()),
+                    "InstanceScriptHandle" => Some("InstanceScriptHandle<I>: a versioned 1768-byte selection combining implementation membership with bounded Script-args constraints. Its consumer commits a policy, concrete subject and configuration in 208-byte CSINCv1 args. Observation grants no ownership or peer-execution authority.".into()),
                     "VerifierHandle" => Some("VerifierHandle<I>: a 656-byte nominal imported-interface selection. Native admission requires the parameterless child profile and unconditional checked SPAWN/WAIT after committed-args membership.".into()),
                     _ => None,
                 },

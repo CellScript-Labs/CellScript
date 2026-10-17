@@ -1,5 +1,9 @@
 #![cfg(all(feature = "cli", not(feature = "wasm")))]
 mod common;
+#[path = "support/instance_document.rs"]
+mod instance_document;
+#[path = "support/instance_pool.rs"]
+mod instance_pool;
 use camino::Utf8Path;
 use cellscript::package::frozen_interface::{compile_module, freeze_module_catalog, EntrySelection, FrozenPackageModule};
 use cellscript::CompileOptions;
@@ -1384,6 +1388,39 @@ fn source_policy_binds_type_id_history_and_the_exact_final_dependency() {
             let proof = check_type_code_history(target, &steps, &Default::default()).unwrap();
             assert_eq!(proof.sequence(), (count - 1) as u64);
             assert_eq!(proof.deployment_line().as_slice(), code_type.calc_script_hash().as_slice());
+            // Reusable lineage may follow a new instance only when an
+            // independent receipt still selects the exact same code output.
+            let new_script = selected.clone().as_builder().args(Bytes::from(vec![2, 3]).pack()).build();
+            let selected_candidate = &sources.catalog().candidates()[0];
+            let instance_receipt = cellscript_artifact_checker::fixed_policy_receipt::check_fixed_policy_receipt(
+                selected_candidate.module().bundle(),
+                history.last().unwrap(),
+                0,
+                new_script.as_slice(),
+                &Default::default(),
+            )
+            .unwrap();
+            let instance_history = proof.bind_instance(target, instance_receipt.target_origin()).unwrap();
+            assert_eq!(instance_history.target_identity(), instance_receipt.target_origin().identity());
+            assert_ne!(instance_history.target_identity(), proof.target_identity());
+            assert_eq!(instance_history.canonical_bytes().unwrap(), proof.canonical_bytes().unwrap());
+            assert!(proof.bind_instance(instance_receipt.target_origin(), target).is_err());
+            let last = packed::RawTransaction::from_slice(history.last().unwrap()).unwrap();
+            let moved = last
+                .clone()
+                .as_builder()
+                .outputs(vec![output.clone(), output.clone()].pack())
+                .outputs_data(vec![last.outputs_data().get(0).unwrap(), last.outputs_data().get(0).unwrap()].pack())
+                .build();
+            let moved_receipt = cellscript_artifact_checker::fixed_policy_receipt::check_fixed_policy_receipt(
+                selected_candidate.module().bundle(),
+                moved.as_slice(),
+                1,
+                new_script.as_slice(),
+                &Default::default(),
+            )
+            .unwrap();
+            assert!(proof.bind_instance(target, moved_receipt.target_origin()).is_err());
             let record: serde_json::Value = serde_json::from_slice(&proof.canonical_bytes().unwrap()).unwrap();
             assert_eq!(record["steps"].as_array().unwrap().len(), count);
             // A truncated lineage never becomes a fresh Type-ID genesis.
@@ -2386,15 +2423,213 @@ fn source_type_group_binds_final_witnesses_and_rechecks_consumer_sources() {
 }
 
 #[test]
+fn instance_selection_binds_private_sources_actual_code_and_concrete_script_group() {
+    use cellscript::package::frozen_interface::{freeze_instance_policy, freeze_source_code_policy};
+    use cellscript::policy_witness::{encode_policy_witness_bundle, PolicyScriptRole, PolicyWitnessRecord};
+    use cellscript_artifact_checker::{
+        ckb_blake2b256,
+        code_origin::{SuppliedDependencyCell, SuppliedInputCell, SuppliedTypeGroupTransaction},
+        instance_policy::{encode_selection, instance_script, ArgsConstraint, ConsumerArgs, InstanceMode, InstancePolicy},
+        open_handle_policy::AuthorizationSet,
+    };
+    use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
+    let (_directory, library, candidate, consumer) = policy_fixture();
+    for opt in 0..=3 {
+        for exact_implementation in [false, true] {
+            let sources = policy_sources(&library, &candidate, &consumer, opt, 2);
+            let (header, members) = source_policy_records(&sources, exact_implementation, 1);
+            let implementation = freeze_source_code_policy(sources, AuthorizationSet::new(header, &members).unwrap()).unwrap();
+            let inner = implementation.policy().selection(&members[1].receipt).unwrap();
+            let policy = InstancePolicy {
+                implementation_root: implementation.policy().root(),
+                mode: InstanceMode::Constrained,
+                args_length: 10,
+                config_length: 1,
+                constraints: vec![
+                    ArgsConstraint::Config { offset: 0, length: 1, config_offset: 0 },
+                    ArgsConstraint::Unsigned { offset: 1, width: 8, minimum: 1, maximum: u64::MAX },
+                    ArgsConstraint::Any { offset: 9, length: 1 },
+                ],
+            };
+            let root = policy.root().unwrap();
+            let mut args = vec![0x41];
+            args.extend_from_slice(&0x0123456789abcdefu64.to_le_bytes());
+            args.push(0x51);
+            let wire = encode_selection(&policy, &inner, &args).unwrap();
+            let script = instance_script(&members[1].code_hash, members[1].hash_type, &args).unwrap();
+            let sdk_script = packed::Script::new_builder()
+                .code_hash(members[1].code_hash.pack())
+                .hash_type(match members[1].hash_type {
+                    cellscript_artifact_checker::open_handle_policy::CodeHashType::Data => 0u8,
+                    cellscript_artifact_checker::open_handle_policy::CodeHashType::Type => 1,
+                    cellscript_artifact_checker::open_handle_policy::CodeHashType::Data1 => 2,
+                    cellscript_artifact_checker::open_handle_policy::CodeHashType::Data2 => 4,
+                })
+                .args(Bytes::copy_from_slice(&args).pack())
+                .build();
+            assert_eq!(sdk_script.as_slice(), script);
+            let subject = ckb_blake2b256(&script);
+            assert_eq!(subject.as_slice(), sdk_script.calc_script_hash().as_slice());
+            let consumer_args = ConsumerArgs { policy_root: root, subject, config: vec![0x41] }.encode().unwrap();
+            let frozen = freeze_instance_policy(implementation, policy.clone()).unwrap();
+            let selection = frozen.check_selection(&consumer_args, &wire, &Default::default()).unwrap();
+            assert_eq!(selection.membership().script(), script);
+            assert_ne!(selection.source_receipt().identity(), selection.implementation().candidate().source_receipt().identity());
+            selection.check_unchanged_selection(&consumer_args, &wire).unwrap();
+            let mut other_args = args.clone();
+            other_args[9] ^= 1;
+            let other_wire = encode_selection(&policy, &inner, &other_args).unwrap();
+            assert!(frozen.check_selection(&consumer_args, &other_wire, &Default::default()).is_err());
+            assert!(selection.check_unchanged_selection(&consumer_args, &other_wire).is_err());
+            let other_script = instance_script(&members[1].code_hash, members[1].hash_type, &other_args).unwrap();
+            let other_consumer =
+                ConsumerArgs { policy_root: root, subject: ckb_blake2b256(&other_script), config: vec![0x41] }.encode().unwrap();
+            // Both instances are allowed independently, but retain different
+            // private admission identities and cannot share a concrete group.
+            let other = frozen.check_selection(&other_consumer, &other_wire, &Default::default()).unwrap();
+            assert_ne!(selection.identity(), other.identity());
+            let (raw, point, code_output, data) = final_code_dependency(selection.implementation().candidate());
+            let input_point = packed::OutPoint::new_builder().tx_hash([91u8; 32].pack()).index(2u32).build();
+            let input_output = packed::CellOutput::new_builder()
+                .capacity(200000000000u64)
+                .lock(packed::CellOutput::from_slice(&code_output).unwrap().lock())
+                .type_(Some(sdk_script.clone()).pack())
+                .build();
+            let mut entry_args = b"CSARGv1\0".to_vec();
+            entry_args.extend_from_slice(&7u64.to_le_bytes());
+            let bundle = encode_policy_witness_bundle(&[PolicyWitnessRecord {
+                role: PolicyScriptRole::Type,
+                script_hash: subject,
+                tag: 40,
+                args: entry_args,
+            }])
+            .unwrap();
+            let witness = packed::WitnessArgs::new_builder()
+                .lock(Some(Bytes::from(vec![0; 65])).pack())
+                .input_type(Some(Bytes::from(bundle)).pack())
+                .build();
+            let raw = packed::RawTransaction::from_slice(&raw)
+                .unwrap()
+                .as_builder()
+                .inputs(vec![packed::CellInput::new_builder().previous_output(input_point.clone()).build()].pack())
+                .build();
+            let tx = packed::Transaction::new_builder().raw(raw.clone()).witnesses(vec![witness.as_bytes().pack()].pack()).build();
+            let deps = [SuppliedDependencyCell { out_point: point, output: &code_output, data: &data }];
+            let input_data = 1u64.to_le_bytes();
+            let inputs = [SuppliedInputCell {
+                out_point: input_point.as_slice().try_into().unwrap(),
+                output: input_output.as_slice(),
+                data: &input_data,
+            }];
+            let supplied = SuppliedTypeGroupTransaction { full_transaction: tx.as_slice(), dependencies: &deps, inputs: &inputs };
+            let group = selection
+                .check_direct_dependency(raw.as_slice(), &deps, &Default::default())
+                .unwrap()
+                .check_script_group(&supplied, &Default::default())
+                .unwrap();
+            assert_eq!(group.group().group_inputs(), &[0]);
+            let record: Value = serde_json::from_slice(&group.canonical_bytes().unwrap()).unwrap();
+            assert_eq!(record["schema"], "cellscript-frozen-instance-group-v1");
+            assert_eq!(record["policy"], frozen.identity());
+            assert_eq!(record["selection"], group.selection().identity());
+            assert_eq!(record["checked_transaction"], group.group().identity());
+            let mut material = b"cellscript-frozen-instance-group-id-v1\0".to_vec();
+            material.extend_from_slice(&group.canonical_bytes().unwrap());
+            assert_eq!(group.identity(), cellscript_artifact_checker::hex_encode(&ckb_blake2b256(&material)));
+            group.check_unchanged_inputs(&supplied, &Default::default()).unwrap();
+            assert!(other
+                .check_direct_dependency(raw.as_slice(), &deps, &Default::default())
+                .unwrap()
+                .check_script_group(&supplied, &Default::default())
+                .is_err());
+            let changed_tx = tx.clone().as_builder().witnesses(vec![Bytes::from(vec![0]).pack()].pack()).build();
+            assert!(group
+                .check_unchanged_inputs(
+                    &SuppliedTypeGroupTransaction { full_transaction: changed_tx.as_slice(), dependencies: &deps, inputs: &inputs },
+                    &Default::default()
+                )
+                .is_err());
+            let mut changed_data = data.clone();
+            *changed_data.last_mut().unwrap() ^= 1;
+            let changed_deps = [SuppliedDependencyCell { out_point: point, output: &code_output, data: &changed_data }];
+            assert!(frozen
+                .check_selection(&consumer_args, &wire, &Default::default())
+                .unwrap()
+                .check_direct_dependency(raw.as_slice(), &changed_deps, &Default::default())
+                .is_err());
+            let path = consumer.join("src/main.cell");
+            let original = std::fs::read_to_string(&path).unwrap();
+            std::fs::write(&path, format!("{original}\n// source changed after instance admission\n")).unwrap();
+            assert!(group.check_unchanged_inputs(&supplied, &Default::default()).is_err());
+            assert!(frozen.check_selection(&consumer_args, &wire, &Default::default()).is_err());
+            std::fs::write(&path, original).unwrap();
+        }
+    }
+}
+
+#[test]
+fn exact_instance_admission_preserves_the_original_private_receipt() {
+    use cellscript::package::frozen_interface::{freeze_instance_policy, freeze_source_code_policy};
+    use cellscript_artifact_checker::{
+        ckb_blake2b256,
+        instance_policy::{encode_selection, ArgsConstraint, ConsumerArgs, InstanceMode, InstancePolicy},
+        open_handle_policy::AuthorizationSet,
+    };
+    use ckb_testtool::ckb_types::{packed, prelude::*};
+    let (_directory, library, candidate, consumer) = policy_fixture();
+    for exact_implementation in [false, true] {
+        let sources = policy_sources(&library, &candidate, &consumer, 0, 2);
+        let (header, members) = source_policy_records(&sources, exact_implementation, 1);
+        let implementation = freeze_source_code_policy(sources, AuthorizationSet::new(header, &members).unwrap()).unwrap();
+        let original = &implementation.sources().catalog().candidates()[1];
+        let script = original.selected_script().to_vec();
+        let receipt_identity = original.receipt().identity().to_string();
+        let source_identity = original.source_receipt().identity().to_string();
+        let args = packed::Script::from_slice(&script).unwrap().args().raw_data();
+        let policy = InstancePolicy {
+            implementation_root: implementation.policy().root(),
+            mode: InstanceMode::Exact,
+            args_length: args.len() as u16,
+            config_length: 0,
+            constraints: args
+                .chunks(32)
+                .enumerate()
+                .map(|(index, value)| ArgsConstraint::Bytes { offset: (index * 32) as u16, value: value.to_vec() })
+                .collect(),
+        };
+        let consumer_args =
+            ConsumerArgs { policy_root: policy.root().unwrap(), subject: ckb_blake2b256(&script), config: vec![] }.encode().unwrap();
+        let inner = implementation.policy().selection(&members[1].receipt).unwrap();
+        let wire = encode_selection(&policy, &inner, &args).unwrap();
+        let frozen = freeze_instance_policy(implementation, policy).unwrap();
+        let selected = frozen.check_selection(&consumer_args, &wire, &Default::default()).unwrap();
+        assert_eq!(selected.membership().script(), script);
+        assert_eq!(selected.receipt().identity(), receipt_identity);
+        assert_eq!(selected.source_receipt().identity(), source_identity);
+    }
+}
+
+#[test]
 fn open_protocol_admission_binds_private_receipts_to_complete_transaction_bytes() {
-    use cellscript::package::frozen_interface::freeze_source_code_policy;
+    protocol_admission_binds_private_receipts_to_complete_transaction_bytes(false);
+}
+
+#[test]
+fn instance_protocol_admission_binds_private_receipts_to_complete_transaction_bytes() {
+    protocol_admission_binds_private_receipts_to_complete_transaction_bytes(true);
+}
+
+fn protocol_admission_binds_private_receipts_to_complete_transaction_bytes(instance: bool) {
+    use cellscript::package::frozen_interface::{freeze_instance_policy, freeze_source_code_policy};
     use cellscript::policy_witness::{encode_policy_witness_bundle, PolicyScriptRole, PolicyWitnessRecord};
     use cellscript::protocol_bundle::{
-        check_protocol_bundle, check_protocol_bundle_with_open_handles, ProtocolBundleInput, ProtocolOpenHandleBinding,
+        check_protocol_bundle, check_protocol_bundle_with_instance_handles, check_protocol_bundle_with_open_handles,
+        ProtocolBundleInput, ProtocolInstanceHandleBinding, ProtocolInstanceTransaction, ProtocolOpenHandleBinding,
         ProtocolOpenTransaction,
     };
     use cellscript_artifact_checker::{
         code_origin::{check_protocol_transaction, SuppliedDependencyCell, SuppliedInputCell},
+        instance_policy::{self, ArgsConstraint, ConsumerArgs, InstanceMode, InstancePolicy},
         open_handle_policy::AuthorizationSet,
     };
     use ckb_sdk::{
@@ -2411,7 +2646,12 @@ fn open_protocol_admission_binds_private_receipts_to_complete_transaction_bytes(
     let lock_code = ckb_system_scripts_v0_6_0::BUNDLED_CELL.get("specs/cells/secp256k1_blake160_sighash_all").unwrap();
     let secp_data = ckb_system_scripts_v0_6_0::BUNDLED_CELL.get("specs/cells/secp256k1_data").unwrap();
     let (directory, library, candidate, consumer) = policy_fixture();
-    std::fs::write(consumer.join("src/main.cell"), "module client\nuse foreign::Token\npublic action verify(witness handle: ScriptHandle<foreign>) { verification let dep = ckb::cell_dep(0) ckb::require_open_script_participant_from_args(dep, handle, ckb::input<Token>(1)) }\n").unwrap();
+    let (handle_type, helper) = if instance {
+        ("InstanceScriptHandle", "require_instance_script_participant_from_args")
+    } else {
+        ("ScriptHandle", "require_open_script_participant_from_args")
+    };
+    std::fs::write(consumer.join("src/main.cell"), format!("module client\nuse foreign::Token\npublic action verify(witness handle: {handle_type}<foreign>) {{ verification let dep = ckb::cell_dep(0) ckb::{helper}(dep, handle, ckb::input<Token>(1)) }}\n")).unwrap();
     lock(&consumer);
     let hex = |bytes: &[u8]| format!("0x{}", cellscript_artifact_checker::hex_encode(bytes));
     let script_json = |script: &packed::Script| serde_json::json!({"code_hash": hex(script.code_hash().as_slice()), "hash_type": match script.hash_type().as_slice()[0] {4 => "data2", 2 => "data1", 1 => "type", _ => "data"}, "args": hex(&script.args().raw_data())});
@@ -2419,15 +2659,50 @@ fn open_protocol_admission_binds_private_receipts_to_complete_transaction_bytes(
         let sources = policy_sources(&library, &candidate, &consumer, opt, 2);
         let (header, members) = source_policy_records(&sources, false, 1);
         let policy = freeze_source_code_policy(sources, AuthorizationSet::new(header, &members).unwrap()).unwrap();
-        let selection = policy.policy().selection(&members[1].receipt).unwrap();
-        let chosen = policy.check_selection(&selection).unwrap();
+        let (plain_policy, instance_policy) = if instance {
+            let constraints = InstancePolicy {
+                implementation_root: policy.policy().root(),
+                mode: InstanceMode::Constrained,
+                args_length: 16,
+                config_length: 8,
+                constraints: vec![
+                    ArgsConstraint::Config { offset: 0, length: 8, config_offset: 0 },
+                    ArgsConstraint::Unsigned { offset: 8, width: 8, minimum: 1, maximum: 100 },
+                ],
+            };
+            (None, Some(freeze_instance_policy(policy, constraints).unwrap()))
+        } else {
+            (Some(policy), None)
+        };
+        let policy = plain_policy.as_ref().unwrap_or_else(|| instance_policy.as_ref().unwrap().implementation());
+        let implementation_selection = policy.policy().selection(&members[1].receipt).unwrap();
+        let chosen = policy.check_selection(&implementation_selection).unwrap();
         let consumer_module = compile(&consumer, opt);
         let (raw, point, code_output, code_data) = final_code_dependency(chosen.candidate());
-        let provider_script = packed::Script::from_slice(chosen.candidate().selected_script()).unwrap();
+        let mut provider_script = packed::Script::from_slice(chosen.candidate().selected_script()).unwrap();
+        let (selection, consumer_args) = if let Some(policy) = &instance_policy {
+            let args = [19u64.to_le_bytes(), 37u64.to_le_bytes()].concat();
+            provider_script = provider_script.as_builder().args(Bytes::from(args.clone()).pack()).build();
+            let consumer_args = ConsumerArgs {
+                policy_root: policy.policy().root().unwrap(),
+                subject: provider_script.calc_script_hash().as_slice().try_into().unwrap(),
+                config: 19u64.to_le_bytes().to_vec(),
+            }
+            .encode()
+            .unwrap();
+            (
+                instance_policy::encode_selection(policy.policy(), &implementation_selection, &args).unwrap().to_vec(),
+                consumer_args.to_vec(),
+            )
+        } else {
+            (implementation_selection.to_vec(), policy.policy().root().to_vec())
+        };
+        let selected_instance =
+            instance_policy.as_ref().map(|policy| policy.check_selection(&consumer_args, &selection, &Default::default()).unwrap());
         let consumer_script = packed::Script::new_builder()
             .code_hash(packed::CellOutput::calc_data_hash(consumer_module.bundle()[0]))
             .hash_type(4u8)
-            .args(Bytes::copy_from_slice(&policy.policy().root()).pack())
+            .args(Bytes::copy_from_slice(&consumer_args).pack())
             .build();
         let lock_script = packed::Script::new_builder()
             .code_hash(packed::CellOutput::calc_data_hash(&lock_code))
@@ -2542,13 +2817,47 @@ fn open_protocol_admission_binds_private_receipts_to_complete_transaction_bytes(
             consumer: "consumer",
             parameter: "handle",
             consumer_module: &consumer_module,
-            policy: &policy,
+            policy,
             selection: &selection,
             participant: "provider",
         }];
-        let supplied =
-            ProtocolOpenTransaction { full_transaction: tx.as_slice(), inputs: &inputs, dependencies: &deps, bindings: &bindings };
-        let report = check_protocol_bundle_with_open_handles(&input, root, &supplied).unwrap();
+        let instance_bindings = instance_policy.as_ref().map(|policy| {
+            [ProtocolInstanceHandleBinding {
+                consumer: "consumer",
+                parameter: "handle",
+                consumer_module: &consumer_module,
+                policy,
+                selection: &selection,
+                participant: "provider",
+            }]
+        });
+        let admit = |input: &ProtocolBundleInput, full_transaction: &[u8], missing: bool| {
+            if let Some(bindings) = &instance_bindings {
+                check_protocol_bundle_with_instance_handles(
+                    input,
+                    root,
+                    &ProtocolInstanceTransaction {
+                        full_transaction,
+                        inputs: &inputs,
+                        dependencies: &deps,
+                        bindings: if missing { &[] } else { bindings },
+                        open_bindings: &[],
+                    },
+                )
+            } else {
+                check_protocol_bundle_with_open_handles(
+                    input,
+                    root,
+                    &ProtocolOpenTransaction {
+                        full_transaction,
+                        inputs: &inputs,
+                        dependencies: &deps,
+                        bindings: if missing { &[] } else { &bindings },
+                    },
+                )
+            }
+        };
+        let report = admit(&input, tx.as_slice(), false).unwrap();
         assert_eq!(report.bundle.open_handles.len(), 1);
         // The CLI receives raw sources/transactions and recomputes private
         // proofs. Exported proof IDs or a producer's verified flag cannot enter.
@@ -2569,8 +2878,8 @@ fn open_protocol_admission_binds_private_receipts_to_complete_transaction_bytes(
         }
         std::fs::write(root.join("transaction.molecule"), tx.as_slice()).unwrap();
         std::fs::write(root.join("bundle-input.json"), serde_json::to_vec(&input).unwrap()).unwrap();
-        let open_request = serde_json::json!({
-            "schema": "cellscript-protocol-open-admission-input-v1", "transaction_file": "transaction.molecule",
+        let mut open_request = serde_json::json!({
+            "schema": if instance { "cellscript-protocol-instance-admission-input-v1" } else { "cellscript-protocol-open-admission-input-v1" }, "transaction_file": "transaction.molecule",
             "inputs": inputs.iter().map(|cell| serde_json::json!({"out_point": hex(&cell.out_point), "output": hex(cell.output), "data": hex(cell.data)})).collect::<Vec<_>>(),
             "dependencies": deps.iter().map(|cell| serde_json::json!({"out_point": hex(&cell.out_point), "output": hex(cell.output), "data": hex(cell.data)})).collect::<Vec<_>>(),
             "bindings": [{
@@ -2582,6 +2891,9 @@ fn open_protocol_admission_binds_private_receipts_to_complete_transaction_bytes(
                 "selection": hex(&selection),
             }],
         });
+        if let Some(policy) = &instance_policy {
+            open_request["bindings"][0]["instance_policy"] = serde_json::json!(hex(&policy.policy().encode().unwrap()));
+        }
         std::fs::write(root.join("open-input.json"), serde_json::to_vec(&open_request).unwrap()).unwrap();
         let cli = common::cellc_command()
             .current_dir(root)
@@ -2606,6 +2918,19 @@ fn open_protocol_admission_binds_private_receipts_to_complete_transaction_bytes(
         );
         let cli_report: Value = serde_json::from_slice(&std::fs::read(root.join("open-cli-report.json")).unwrap()).unwrap();
         assert_eq!(cli_report, serde_json::to_value(&report).unwrap(), "CLI/native private admission parity O{opt}");
+        if instance {
+            let mut downgraded = open_request.clone();
+            downgraded["schema"] = serde_json::json!("cellscript-protocol-open-admission-input-v1");
+            std::fs::write(root.join("downgraded-input.json"), serde_json::to_vec(&downgraded).unwrap()).unwrap();
+            assert!(
+                cellscript::protocol_bundle::check_protocol_bundle_with_open_handles_file(
+                    &root.join("bundle-input.json"),
+                    &root.join("downgraded-input.json")
+                )
+                .is_err(),
+                "old request schema cannot carry instance policy semantics"
+            );
+        }
         for pointer in
             ["/schema", "/bindings/0/policy_header", "/bindings/0/candidates/0/creation_transaction_file", "/inputs/0/out_point"]
         {
@@ -2623,7 +2948,7 @@ fn open_protocol_admission_binds_private_receipts_to_complete_transaction_bytes(
         }
         std::fs::write(root.join("open-report.json"), serde_json::to_vec(&report).unwrap()).unwrap();
         let smoke = root.join("consumer-builder/open-witness-smoke.mjs");
-        std::fs::write(&smoke, r#"
+        let smoke_source = r#"
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {bindProtocolBundleArtifact, encodeOpenHandleWitness, openHandleWitnessFromCheckedBundle, planVerify} from './src/index.ts';
@@ -2638,7 +2963,8 @@ const expected = checked.bundle.transaction.witnesses[0].input_type_bytes;
 assert.equal('0x'+Buffer.from(admitted.witnessPayload).toString('hex'), expected);
 assert.equal('0x'+Buffer.from(encodeOpenHandleWitness(admitted.selection)).toString('hex'), expected);
 assert.equal(planVerify({handle:admitted.selection}).params.handle, admitted.selection);
-for (const bytes of [new Uint8Array(655), new Uint8Array(657), new Uint8Array(656), '0x00']) assert.throws(() => encodeOpenHandleWitness(bytes));
+const width = (admitted.selection.length - 2) / 2;
+for (const bytes of [new Uint8Array(width-1), new Uint8Array(width+1), new Uint8Array(width), '0x00']) assert.throws(() => encodeOpenHandleWitness(bytes));
 const changed = structuredClone(checked);
 changed.bundle.open_handles[0].authorization_root = '0x'+'00'.repeat(32);
 assert.throws(() => openHandleWitnessFromCheckedBundle(changed, artifact, 'handle'));
@@ -2646,7 +2972,32 @@ assert.throws(() => openHandleWitnessFromCheckedBundle(checked, artifact, 'other
 const duplicate = structuredClone(checked);
 duplicate.bundle.open_handles.push(duplicate.bundle.open_handles[0]);
 assert.throws(() => openHandleWitnessFromCheckedBundle(duplicate, artifact, 'handle'));
-"#).unwrap();
+"#;
+        let mut smoke_source = if instance {
+            smoke_source
+                .replace("encodeOpenHandleWitness", "encodeInstanceHandleWitness")
+                .replace("openHandleWitnessFromCheckedBundle", "instanceHandleWitnessFromCheckedBundle")
+        } else {
+            smoke_source.to_string()
+        };
+        if instance {
+            smoke_source.push_str(
+                r#"
+import {encodeOpenHandleWitness, openHandleWitnessFromCheckedBundle} from './src/index.ts';
+assert.throws(() => encodeOpenHandleWitness(admitted.selection));
+assert.throws(() => openHandleWitnessFromCheckedBundle(checked, artifact, 'handle'));
+for (const field of ['schema', 'policy_root', 'consumer_args', 'args_schema', 'instance_mode']) {
+  const changed = structuredClone(checked);
+  changed.bundle.open_handles[0].instance[field] = 'substituted';
+  assert.throws(() => instanceHandleWitnessFromCheckedBundle(changed, artifact, 'handle'), field);
+}
+const missingInstance = structuredClone(checked);
+delete missingInstance.bundle.open_handles[0].instance;
+assert.throws(() => instanceHandleWitnessFromCheckedBundle(missingInstance, artifact, 'handle'));
+"#,
+            );
+        }
+        std::fs::write(&smoke, smoke_source).unwrap();
         let node = std::process::Command::new("node").arg("--experimental-strip-types").arg(&smoke).output().unwrap();
         assert!(node.status.success(), "generated open witness O{opt}: {}", String::from_utf8_lossy(&node.stderr));
 
@@ -2737,11 +3088,16 @@ assert.throws(() => openHandleWitnessFromCheckedBundle(duplicate, artifact, 'han
             "old signing preparation cannot bind changed transaction bytes"
         );
 
-        assert_eq!(report.bundle.open_handles[0].selected_receipt, chosen.candidate().source_receipt().identity());
+        assert_eq!(
+            report.bundle.open_handles[0].selected_receipt,
+            selected_instance
+                .as_ref()
+                .map_or_else(|| chosen.candidate().source_receipt().identity(), |selection| selection.source_receipt().identity())
+        );
         assert!(check_protocol_bundle(&input, root).is_err(), "a serialized report cannot manufacture a private receipt");
         let mut foreign_owner = input.clone();
         foreign_owner.roles[1].artifact = "consumer".into();
-        assert!(check_protocol_bundle_with_open_handles(&foreign_owner, root, &supplied).is_err());
+        assert!(admit(&foreign_owner, tx.as_slice(), false).is_err());
         let mut rebound_owner = serde_json::to_value(&report).unwrap();
         rebound_owner["bundle"]["roles"][1]["artifact"] = serde_json::json!("consumer");
         rebound_owner["bundle_hash"] =
@@ -2755,7 +3111,7 @@ assert.throws(() => openHandleWitnessFromCheckedBundle(duplicate, artifact, 'han
         observation_role.name = "observed-peer".into();
         observation_role.ownership = cellscript::protocol_bundle::ProtocolRoleOwnership::SharedRead;
         observation_input.roles.push(observation_role);
-        let observation_report = check_protocol_bundle_with_open_handles(&observation_input, root, &supplied).unwrap();
+        let observation_report = admit(&observation_input, tx.as_slice(), false).unwrap();
         assert_eq!(observation_report.status, "ok");
         let (observed_tx, _) =
             cellscript_ckb_adapter::materialize_protocol_bundle_report(&serde_json::to_vec(&observation_report).unwrap()).unwrap();
@@ -2777,20 +3133,31 @@ assert.throws(() => openHandleWitnessFromCheckedBundle(duplicate, artifact, 'han
         rejected_input.transaction.witnesses[1].input_type =
             Some(hex(&cellscript_artifact_checker::ckb_blake2b256(&rejected_payload)));
         rejected_input.transaction.witnesses[1].input_type_bytes = Some(hex(&rejected_payload));
-        let rejected_supplied = ProtocolOpenTransaction { full_transaction: rejected_tx.as_slice(), ..supplied };
-        let rejected_report = check_protocol_bundle_with_open_handles(&rejected_input, root, &rejected_supplied).unwrap();
+        let rejected_report = admit(&rejected_input, rejected_tx.as_slice(), false).unwrap();
         let (rejected_materialized, _) =
             cellscript_ckb_adapter::materialize_protocol_bundle_report(&serde_json::to_vec(&rejected_report).unwrap()).unwrap();
         let rejected_signed = signer().sign_tx(&rejected_materialized, &lock_group).unwrap();
         let rejected = context.verify_tx(&rejected_signed, 3_000_000).unwrap_err();
         assert!(format!("{rejected:?}").contains("Inputs[1].Type"), "rejection must come from the selected peer: {rejected:?}");
-        for pointer in [
+        let mut report_mutations = vec![
             "/transaction/inputs/0/since",
             "/open_handles/0/witness_index",
             "/open_handles/0/selected_artifact_hash",
             "/open_handles/0/participant",
             "/open_handles/0/claim_boundaries/participant_predicates_and_data",
-        ] {
+        ];
+        if instance {
+            report_mutations.extend([
+                "/open_handles/0/instance/schema",
+                "/open_handles/0/instance/policy_root",
+                "/open_handles/0/instance/consumer_args",
+                "/open_handles/0/instance/args_schema",
+                "/open_handles/0/instance/instance_mode",
+                "/open_handles/0/instance/implementation_receipt",
+                "/open_handles/0/selected_script_hash",
+            ]);
+        }
+        for pointer in report_mutations {
             let mut rebound = serde_json::to_value(&report).unwrap();
             let value = rebound["bundle"].pointer_mut(pointer).unwrap();
             *value = if pointer.ends_with("participant_predicates_and_data") {
@@ -2839,8 +3206,7 @@ assert.throws(() => openHandleWitnessFromCheckedBundle(duplicate, artifact, 'han
         }
         let mut changed = input.clone();
         changed.artifacts[0].deployment.script.args = hex(&[0; 32]);
-        assert!(check_protocol_bundle_with_open_handles(&changed, root, &supplied).is_err());
-        let missing = ProtocolOpenTransaction { bindings: &[], ..supplied };
-        assert!(check_protocol_bundle_with_open_handles(&input, root, &missing).is_err());
+        assert!(admit(&changed, tx.as_slice(), false).is_err());
+        assert!(admit(&input, tx.as_slice(), true).is_err());
     }
 }

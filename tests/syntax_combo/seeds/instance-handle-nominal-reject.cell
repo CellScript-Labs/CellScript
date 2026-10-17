@@ -1,0 +1,9 @@
+// audit: phase=reject_compile
+// audit: contains=interface parameter
+module cellscript::audit::seed_instance_handle_nominal_reject
+
+public struct Marker { tag: u64 }
+public action verify(witness handle: InstanceScriptHandle<Marker>) {
+    verification
+    require true
+}

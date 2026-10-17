@@ -851,6 +851,16 @@ through the same canonical witness codec. Changes
 to its runtime helpers require the backend gate; merge-readiness still requires
 the complete `ci` gate.
 
+The experimental #80 instance extension uses the same CLI option with the
+separate `cellscript-protocol-instance-admission-input-v1` request schema.
+Its 848-byte instance policy, 1768-byte selection and 208-byte committed
+consumer configuration do not reinterpret the old root or witness formats.
+Native/CLI/generated-builder/SDK parity must include actual signed all-group
+execution, a rejecting peer and post-signing substitutions. Machine changes
+also require independent rebound-hash mutation coverage and the `backend`
+gate. Application, maximum-resource and `dev`/`backend`/`ci` acceptance remain
+open until recorded in the [instance-policy ledger](CELLSCRIPT_INSTANCE_POLICY.md).
+
 The old release wrapper remains supported:
 
 ```bash

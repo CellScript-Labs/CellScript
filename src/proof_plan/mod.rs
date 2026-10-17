@@ -1,5 +1,6 @@
 //! Covenant ProofPlan metadata for CKB trigger/scope/coverage auditing.
 
+mod instance;
 pub mod soundness;
 mod zk;
 
@@ -178,6 +179,7 @@ pub fn build_for_body(
     plans
         .extend(body.borrow_regions.iter().enumerate().map(|(index, region)| plan_for_borrow_region(scope_kind, name, index, region)));
     plans.extend(exact_script_handle_plans(scope_kind, name, body));
+    plans.extend(instance::plans(scope_kind, name, body));
     plans.extend(zk::plans(scope_kind, name, body));
     plans.extend(deployment_line_handle_plans(scope_kind, name, body));
     plans.extend(committed_state_plans(scope_kind, name, body));

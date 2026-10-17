@@ -30,14 +30,16 @@ use ckb_vm::{
     instructions::{extract_opcode, instruction_opcode_name},
     machine::DefaultMachine,
     registers::{A7, SP},
-    Bytes, CoreMachine, DefaultCoreMachine, DefaultMachineRunner, Error, SparseMemory, SupportMachine, Syscalls, WXorXMemory,
+    Bytes, CoreMachine, DefaultCoreMachine, DefaultMachineRunner, Error, SupportMachine, Syscalls,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::cost_measurement::{measure_group, resolve_transaction, CycleObservation};
 
-type Core = DefaultCoreMachine<u64, WXorXMemory<SparseMemory<u64>>>;
+#[path = "memory_observer.rs"]
+mod memory_observer;
+type Core = DefaultCoreMachine<u64, memory_observer::ObservedMemory>;
 type Shared = Arc<Mutex<BTreeMap<(VmId, u64), VmTrace>>>;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -59,6 +61,10 @@ pub struct VmTrace {
     pub entry_sp: u64,
     pub minimum_sp: u64,
     pub observed_stack_bytes: u64,
+    // Keep the frozen v1 JSON unchanged. Callers opting into the additional
+    // guest-page measurement publish it under their own versioned report.
+    #[serde(skip)]
+    pub touched_guest_page_bytes: u64,
     pub instructions: BTreeMap<String, u64>,
     pub syscalls: BTreeMap<u64, u64>,
     pub pcs: BTreeMap<u64, PcCost>,
@@ -176,6 +182,7 @@ impl DefaultMachineRunner for ObservedMachine {
                 entry_sp: before_sp,
                 minimum_sp: before_sp,
                 observed_stack_bytes: 0,
+                touched_guest_page_bytes: 0,
                 instructions: BTreeMap::new(),
                 syscalls: BTreeMap::new(),
                 pcs: BTreeMap::new(),
@@ -187,6 +194,7 @@ impl DefaultMachineRunner for ObservedMachine {
             }
             trace.minimum_sp = trace.minimum_sp.min(before_sp).min(after_sp);
             trace.observed_stack_bytes = trace.entry_sp - trace.minimum_sp;
+            trace.touched_guest_page_bytes = self.machine.memory().touched_page_bytes();
             *trace.instructions.entry(name.into()).or_default() += 1;
             if name == "ECALL" {
                 *trace.syscalls.entry(syscall).or_default() += 1;

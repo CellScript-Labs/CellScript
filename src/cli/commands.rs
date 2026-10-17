@@ -9466,6 +9466,88 @@ export function openHandleWitnessFromCheckedBundle(
   });
 }
 
+export interface BoundInstanceHandleWitness extends BoundOpenHandleWitness {
+  instancePolicyRoot: HexString;
+  instanceSourcePolicy: string;
+  instanceSelectionIdentity: string;
+}
+
+/** Serialize the separate instance profile; old CSOH selections are not accepted. */
+export function encodeInstanceHandleWitness(selection: HexString | Uint8Array): Uint8Array {
+  if ((typeof selection === "string" && !/^0x[0-9a-f]{3536}$/.test(selection))
+    || (selection instanceof Uint8Array && selection.length !== 1768)) {
+    throw new Error("instance handle selection must be exactly 1768 canonical bytes");
+  }
+  const bytes = boundedOutputBytes(selection, "instance handle selection");
+  const magic = new TextEncoder().encode("CSINWv1\0");
+  if (bytes.length !== 1768 || magic.some((byte, index) => bytes[index] !== byte)) {
+    throw new Error("instance handle selection has invalid CSINWv1 magic");
+  }
+  const payload = new Uint8Array(1776);
+  payload.set(new TextEncoder().encode("CSARGv1\0"));
+  payload.set(bytes, 8);
+  return payload;
+}
+
+/** Extract native instance admission evidence. This is not an independent
+ * policy verifier; the adapter rechecks the policy and final transaction. */
+export function instanceHandleWitnessFromCheckedBundle(
+  checked: CheckedProtocolBundle,
+  consumer: ProtocolBundleArtifactBinding,
+  parameter: string,
+): BoundInstanceHandleWitness {
+  if (checked.schema !== PROTOCOL_BUNDLE_REPORT_SCHEMA || checked.status !== "ok"
+    || !/^[0-9a-f]{64}$/.test(checked.bundle_hash)) {
+    throw new Error("instance handle requires a successful native ProtocolBundle report");
+  }
+  exactScriptHandleFromCheckedBundle(checked, consumer);
+  const bundle = checked.bundle as {
+    artifacts?: readonly Record<string, unknown>[];
+    open_handles?: readonly Record<string, unknown>[];
+  };
+  const artifact = bundle.artifacts?.find((value) => value.id === consumer.id);
+  const bindings = bundle.open_handles?.filter((value) => value.consumer === consumer.id && value.parameter === parameter) ?? [];
+  if (!artifact || artifact.artifact_hash !== consumer.artifactHash
+    || artifact.verified_bundle_id !== consumer.verifiedBundleId || bindings.length !== 1) {
+    throw new Error("missing, duplicate or mismatched native instance admission");
+  }
+  const binding = bindings[0];
+  const instance = binding.instance as Record<string, unknown> | undefined;
+  const args = consumer.deployment.script.args;
+  if (!instance || instance.schema !== "cellscript-protocol-instance-admission-v1"
+    || binding.schema !== "cellscript-protocol-instance-handle-v1" || binding.verifier_invocation != null
+    || [binding.source_policy, binding.selected_receipt, binding.checked_dependency, binding.checked_type_group,
+      instance.source_policy, instance.selection_identity, instance.implementation_receipt, instance.args_schema]
+      .some((value) => typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value))
+    || !/^0x4353494e43763100[0-9a-f]{400}$/.test(args) || instance.consumer_args !== args
+    || instance.policy_root !== `0x${args.slice(18, 82)}`
+    || (instance.instance_mode !== "exact" && instance.instance_mode !== "constrained")
+    || binding.witness_field !== "input_type" || typeof binding.selection !== "string"
+    || typeof binding.authorization_root !== "string" || !/^0x[0-9a-f]{64}$/.test(binding.authorization_root)
+    || typeof binding.participant !== "string" || binding.participant === consumer.id
+    || !bundle.artifacts?.some((value) => value.id === binding.participant && value.artifact_hash === binding.selected_artifact_hash)) {
+    throw new Error("native instance admission differs from the consumer configuration or selected participant");
+  }
+  const actions = (consumer.entry.kind === "lock" ? builderManifest.locks : builderManifest.actions) as readonly { name: string; params: readonly Record<string, unknown>[] }[];
+  const declared = actions.find((action) => action.name === consumer.entry.name)?.params.find((value) => value.name === parameter);
+  if (!declared || declared.ty !== `InstanceScriptHandle<${binding.interface_module}>` || declared.fixed_byte_len !== 1768) {
+    throw new Error("instance handle parameter differs from the generated nominal interface");
+  }
+  const witnessPayload = encodeInstanceHandleWitness(binding.selection as HexString);
+  if (binding.authorization_root !== `0x${binding.selection.slice(50, 114)}`
+    || instance.args_schema !== binding.selection.slice(114, 178)
+    || binding.selection.slice(34, 36) !== (instance.instance_mode === "exact" ? "00" : "01")) {
+    throw new Error("instance witness differs from its admitted implementation, schema or mode");
+  }
+  return Object.freeze({
+    consumer: consumer.id, parameter, participant: binding.participant,
+    sourcePolicy: binding.source_policy as string, selectedReceipt: binding.selected_receipt as string,
+    authorizationRoot: binding.authorization_root as HexString, selection: binding.selection as HexString, witnessPayload,
+    instancePolicyRoot: instance.policy_root as HexString, instanceSourcePolicy: instance.source_policy as string,
+    instanceSelectionIdentity: instance.selection_identity as string,
+  });
+}
+
 function exactDeploymentMatches(artifact: ProtocolBundleArtifactBinding, receipt: ExactScriptHandleReceipt): boolean {
   const left = artifact.deployment;
   const right = receipt.deployment;

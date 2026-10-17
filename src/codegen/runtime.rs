@@ -185,7 +185,10 @@ impl CodeGenerator {
                 "ckb::input_since is rejected outside the ckb target profile",
             );
         }
-        let v014_helpers = referenced_v014_runtime_helpers(ir);
+        let mut v014_helpers = referenced_v014_runtime_helpers(ir);
+        if v014_helpers.contains("__ckb_require_instance_script_participant_from_args") {
+            v014_helpers.insert("__ckb_require_cell_dep_open_script_handle".into());
+        }
         self.emit_runtime_ckb_v014_surface_helpers(&v014_helpers);
     }
 
@@ -276,6 +279,9 @@ impl CodeGenerator {
 
     fn emit_runtime_ckb_v014_surface_helpers(&mut self, referenced_helpers: &BTreeSet<String>) {
         let enabled = self.options.target_profile.is_ckb();
+        if referenced_helpers.contains("__ckb_require_instance_script_participant_from_args") {
+            self.emit_runtime_instance_participant(enabled);
+        }
         for (name, syscall, detail) in [
             ("__ckb_spawn", ckb_abi::syscall::SPAWN, "spawn bounded verifier child"),
             ("__ckb_wait", ckb_abi::syscall::WAIT, "wait for bounded verifier child"),
@@ -6618,7 +6624,7 @@ impl CodeGenerator {
     /// Conditional branches reach at most +-2048 bytes and the assembler
     /// performs no relaxation; route every far conditional through a local
     /// trampoline so long helpers never wrap a branch immediate.
-    fn emit_near_cond(&mut self, branch: &str, far: &str) {
+    pub(crate) fn emit_near_cond(&mut self, branch: &str, far: &str) {
         let fail = self.fresh_label("near_cond_fail");
         let skip = self.fresh_label("near_cond_skip");
         self.emit(format!("{branch},{fail}"));

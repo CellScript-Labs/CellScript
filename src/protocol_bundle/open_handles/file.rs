@@ -2,8 +2,8 @@
 //! serialized checked proofs. Source compilation remains frozen and offline.
 use super::*;
 use crate::package::frozen_interface::{
-    compile_module, freeze_code_catalog, freeze_package_sources, freeze_source_code_policy_with_histories, resolve_source_catalog,
-    CodeCandidateInput, EntrySelection,
+    compile_module, freeze_code_catalog, freeze_instance_policy, freeze_package_sources, freeze_source_code_policy_with_histories,
+    resolve_source_catalog, CodeCandidateInput, EntrySelection, FrozenInstancePolicy,
 };
 use cellscript_artifact_checker::code_origin::{check_type_code_history, TypeCodeHistoryStep};
 use cellscript_artifact_checker::open_handle_policy::{AuthorizationSet, PolicyHeader, PolicyMember};
@@ -42,6 +42,20 @@ struct Binding {
     policy_header: String,
     policy_members: Vec<String>,
     selection: String,
+    #[serde(default)]
+    instance_policy: Option<String>,
+}
+enum OwnedPolicy {
+    Open(FrozenSourceCodePolicy),
+    Instance(FrozenInstancePolicy),
+}
+impl OwnedPolicy {
+    fn borrowed(&self) -> AdmissionPolicy<'_> {
+        match self {
+            Self::Open(value) => AdmissionPolicy::Open(value),
+            Self::Instance(value) => AdmissionPolicy::Instance(value),
+        }
+    }
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -150,7 +164,9 @@ fn read_file(path: &Path, limit: usize) -> Result<Vec<u8>> {
 pub fn check_protocol_bundle_with_open_handles_file(bundle_path: &Path, request_path: &Path) -> Result<ProtocolBundleReport> {
     let input: ProtocolBundleInput = serde_json::from_slice(&read_file(bundle_path, MAX_MANIFEST_BYTES as usize)?)?;
     let request: Request = serde_json::from_slice(&read_file(request_path, 16 * 1024 * 1024)?)?;
-    if request.schema != "cellscript-protocol-open-admission-input-v1"
+    let instance_schema = request.schema == "cellscript-protocol-instance-admission-input-v1";
+    if (!instance_schema && request.schema != "cellscript-protocol-open-admission-input-v1")
+        || instance_schema != request.bindings.iter().any(|binding| binding.instance_policy.is_some())
         || request.bindings.is_empty()
         || request.bindings.len() > 32
         || request.inputs.len() > 256
@@ -217,6 +233,13 @@ pub fn check_protocol_bundle_with_open_handles_file(bundle_path: &Path, request_
         }
         let sources = freeze_package_sources(&binding.consumer_module.root(&base)?, &binding.consumer_module.environment)?;
         let policy = freeze_source_code_policy_with_histories(resolve_source_catalog(sources, catalog)?, wire, histories)?;
+        let policy = if let Some(bytes) = &binding.instance_policy {
+            let instance = cellscript_artifact_checker::instance_policy::InstancePolicy::decode(&budget.hex(bytes)?)
+                .map_err(|error| invalid(&error.to_string()))?;
+            OwnedPolicy::Instance(freeze_instance_policy(policy, instance)?)
+        } else {
+            OwnedPolicy::Open(policy)
+        };
         let consumer = binding.consumer_module.compile(&base)?;
         owners.push((consumer, policy, selection));
     }
@@ -224,12 +247,12 @@ pub fn check_protocol_bundle_with_open_handles_file(bundle_path: &Path, request_
         .bindings
         .iter()
         .zip(&owners)
-        .map(|(binding, (consumer, policy, selection))| ProtocolOpenHandleBinding {
+        .map(|(binding, (consumer, policy, selection))| super::Binding {
             consumer: &binding.consumer,
             parameter: &binding.parameter,
             participant: &binding.participant,
             consumer_module: consumer,
-            policy,
+            policy: policy.borrowed(),
             selection,
         })
         .collect::<Vec<_>>();
@@ -241,14 +264,11 @@ pub fn check_protocol_bundle_with_open_handles_file(bundle_path: &Path, request_
         .iter()
         .map(|cell| SuppliedDependencyCell { out_point: cell.point, output: &cell.output, data: &cell.data })
         .collect::<Vec<_>>();
-    check_protocol_bundle_with_open_handles(
+    let supplied =
+        ProtocolOpenTransaction { full_transaction: &full, inputs: &input_cells, dependencies: &dependency_cells, bindings: &[] };
+    check_protocol_bundle_inner(
         &input,
         bundle_path.parent().filter(|path| !path.as_os_str().is_empty()).unwrap_or_else(|| Path::new(".")),
-        &ProtocolOpenTransaction {
-            full_transaction: &full,
-            inputs: &input_cells,
-            dependencies: &dependency_cells,
-            bindings: &bindings,
-        },
+        |artifacts, metadata| admit_bindings(&input, artifacts, metadata, &supplied, &bindings),
     )
 }

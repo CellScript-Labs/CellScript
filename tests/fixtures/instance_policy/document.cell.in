@@ -1,0 +1,47 @@
+module foreign
+
+private struct DigestWords has copy, drop, store, fixed, serializable, non_linear {
+    word0: u64, word1: u64, word2: u64, word3: u64,
+}
+
+// Raw transaction predicates own both lifecycle branches. The open-handle
+// profile does not claim a public output serialization codec for `create`.
+// The approved implementation pins the complete issuer Lock hash. Instances
+// vary their namespace (16), category LE64 and serial LE64 in 32-byte args.
+// Data repeats those exact args followed by the complete document digest (32).
+public action verify(witness digest0: u64, witness digest1: u64, witness digest2: u64, witness digest3: u64) {
+    verification
+    require check_document(digest0, digest1, digest2, digest3)
+}
+
+private fn check_document(digest0: u64, digest1: u64, digest2: u64, digest3: u64) -> bool {
+    if digest0 == 0 && digest1 == 0 && digest2 == 0 && digest3 == 0 { return false }
+    if ckb::cell_count(source::group_input(0)) == 0 {
+        if ckb::cell_count(source::group_output(0)) != 1 { return false }
+        return check_issue(digest0, digest1, digest2, digest3)
+    } else {
+        if ckb::cell_count(source::group_input(0)) != 1 { return false }
+        if ckb::cell_count(source::group_output(0)) != 0 { return false }
+        return check_retire(digest0, digest1, digest2, digest3)
+    }
+}
+
+private fn check_issue(digest0: u64, digest1: u64, digest2: u64, digest3: u64) -> bool {
+    let output = source::group_output(0)
+    if ckb::cell_data_size(output) != 64 { return false }
+    let issuer = Hash::from_bytes(b"@ISSUER_LOCK_HASH@")
+    ckb::require_cell_lock_hash(source::input(0), issuer)
+    ckb::require_cell_lock_hash(output, issuer)
+    ckb::require_cell_type_args_hash(output, ckb::cell_data_hash_at(output, 0))
+    let expected = DigestWords { word0: digest0, word1: digest1, word2: digest2, word3: digest3 }
+    return ckb::cell_data_blake2b_span(output, 32, 32) == ckb::hash_data_packed(expected)
+}
+
+private fn check_retire(digest0: u64, digest1: u64, digest2: u64, digest3: u64) -> bool {
+    let input = source::group_input(0)
+    if ckb::cell_data_size(input) != 64 { return false }
+    ckb::require_cell_lock_hash(input, Hash::from_bytes(b"@ISSUER_LOCK_HASH@"))
+    ckb::require_cell_type_args_hash(input, ckb::cell_data_hash_at(input, 0))
+    let expected = DigestWords { word0: digest0, word1: digest1, word2: digest2, word3: digest3 }
+    return ckb::cell_data_blake2b_span(input, 32, 32) == ckb::hash_data_packed(expected)
+}

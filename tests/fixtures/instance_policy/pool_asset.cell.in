@@ -1,0 +1,45 @@
+module asset
+
+private struct Amount has copy, drop, store, fixed, serializable, non_linear { value: u64 }
+
+// A deliberately named test-asset profile, not sUDT/xUDT. Amounts occupy the
+// first eight bytes; the only admitted tail is the 96-byte custody commitment.
+// At most four inputs and outputs permit two pools to swap the same asset in
+// one transaction. All amounts are bound to actual group data before summing.
+public action verify(
+    witness i0: u64, witness i1: u64, witness i2: u64, witness i3: u64,
+    witness o0: u64, witness o1: u64, witness o2: u64, witness o3: u64,
+) {
+    verification
+    require check_asset(i0, i1, i2, i3, o0, o1, o2, o3)
+}
+
+private fn input_amount(index: u64, amount: u64) -> bool {
+    if index >= ckb::cell_count(source::group_input(0)) { return amount == 0 }
+    let cell = source::group_input(index)
+    let size = ckb::cell_data_size(cell)
+    if size != 8 && size != 104 { return false }
+    return ckb::cell_data_blake2b_span(cell, 0, 8) == ckb::hash_data_packed(Amount { value: amount })
+}
+
+private fn output_amount(index: u64, amount: u64) -> bool {
+    if index >= ckb::cell_count(source::group_output(0)) { return amount == 0 }
+    let cell = source::group_output(index)
+    let size = ckb::cell_data_size(cell)
+    if size != 8 && size != 104 { return false }
+    return ckb::cell_data_blake2b_span(cell, 0, 8) == ckb::hash_data_packed(Amount { value: amount })
+}
+
+private fn check_asset(i0: u64, i1: u64, i2: u64, i3: u64, o0: u64, o1: u64, o2: u64, o3: u64) -> bool {
+    if ckb::cell_count(source::group_input(0)) > 4 || ckb::cell_count(source::group_output(0)) > 4 { return false }
+    if !input_amount(0, i0) || !input_amount(1, i1) || !input_amount(2, i2) || !input_amount(3, i3) { return false }
+    if !output_amount(0, o0) || !output_amount(1, o1) || !output_amount(2, o2) || !output_amount(3, o3) { return false }
+    // The admitted numeric domain makes all intermediate sums representable.
+    if i0 > 1000000000 || i1 > 1000000000 || i2 > 1000000000 || i3 > 1000000000 { return false }
+    if o0 > 1000000000 || o1 > 1000000000 || o2 > 1000000000 || o3 > 1000000000 { return false }
+    if ckb::cell_count(source::group_input(0)) == 0 {
+        ckb::require_cell_type_args_hash(source::group_output(0), ckb::cell_lock_hash(source::input(0)))
+        return o0 + o1 + o2 + o3 > 0
+    }
+    return i0 + i1 + i2 + i3 == o0 + o1 + o2 + o3
+}

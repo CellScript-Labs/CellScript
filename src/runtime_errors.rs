@@ -175,7 +175,7 @@ impl CellScriptRuntimeError {
             Self::ZkCloseFailed => "The ZK request writer could not be closed.",
             Self::ZkChildRejected => "The verifier child rejected the proof or Wait failed.",
             Self::ZkCycleBoundExceeded => "The exact verifier call exceeded its declared cycle budget.",
-            Self::OpenHandleInvalid => "A compatible-open handle selection failed its structural, membership or selected-dependency check.",
+            Self::OpenHandleInvalid => "An open or instance handle failed its encoding, authorization, dependency or concrete Script constraint check.",
             Self::SyscallFailed => "A target VM syscall returned a non-zero status while loading transaction context.",
             Self::BoundsCheckFailed => "Loaded bytes were smaller than the verifier-required minimum.",
             Self::CellLoadFailed => "Cell data or field loading failed or returned an unusable result.",
@@ -282,7 +282,7 @@ impl CellScriptRuntimeError {
             Self::ZkCloseFailed => "Check the exact ZK profile, transaction-derived statement, verifier/VK CellDeps and bounded Spawn/IPC evidence.",
             Self::ZkChildRejected => "Check the exact ZK profile, transaction-derived statement, verifier/VK CellDeps and bounded Spawn/IPC evidence.",
             Self::ZkCycleBoundExceeded => "Check the exact ZK profile, transaction-derived statement, verifier/VK CellDeps and bounded Spawn/IPC evidence.",
-            Self::OpenHandleInvalid => "Check the 656-byte selection witness, the expected authorization root and the selected CellDep.",
+            Self::OpenHandleInvalid => "Check the declared profile: a 656-byte open selection with its 32-byte root, or a 1768-byte instance selection with its 208-byte committed configuration. Verify the selected CellDep, actual Script args and subject identity.",
             Self::SyscallFailed => {
                 "Check transaction input/output/cell_dep indexes, source flags, and target-profile syscall compatibility."
             }

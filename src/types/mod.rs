@@ -1444,7 +1444,7 @@ impl<'a> TypeChecker<'a> {
             Type::Named(name)
                 if matches!(
                     name.split('<').next().unwrap_or(name),
-                    crate::script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE | crate::script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
+                    crate::script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE | crate::script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE | crate::script_handle_contract::INSTANCE_SCRIPT_HANDLE_TYPE
                 )
         )
     }
@@ -1455,7 +1455,9 @@ impl<'a> TypeChecker<'a> {
                 let base = name.split('<').next().unwrap_or(name);
                 if matches!(
                     base,
-                    crate::script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE | crate::script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
+                    crate::script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE
+                        | crate::script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
+                        | crate::script_handle_contract::INSTANCE_SCRIPT_HANDLE_TYPE
                 ) {
                     return Err(CompileError::new(
                         format!(
@@ -7176,6 +7178,16 @@ impl<'a> TypeChecker<'a> {
                             }
                             Type::Unit
                         }
+                        ("ckb", "require_instance_script_participant_from_args") => {
+                            self.validate_builtin_arity(name, 3, arg_types, call.span)?;
+                            if !matches!(&arg_types[0], Type::Named(view) if view == CKB_CELL_DEP_VIEW_TYPE)
+                                || !matches!(&arg_types[1], Type::Named(view) if view.starts_with("InstanceScriptHandle<"))
+                                || !matches!(&arg_types[2], Type::Named(view) if matches!(view.split('<').next(), Some(CKB_INPUT_VIEW_TYPE | CKB_OUTPUT_VIEW_TYPE)))
+                            {
+                                return Err(CompileError::new(format!("{name} expects (dep: CellDepView, handle: InstanceScriptHandle<module>, subject: InputView|OutputView); policy and configuration come from the current Script's versioned args"), call.span));
+                            }
+                            Type::Unit
+                        }
                         (
                             "ckb",
                             "require_cell_dep_open_script_handle_from_args"
@@ -8731,7 +8743,9 @@ impl<'a> TypeChecker<'a> {
 
         if matches!(
             base_name,
-            crate::script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE | crate::script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
+            crate::script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE
+                | crate::script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
+                | crate::script_handle_contract::INSTANCE_SCRIPT_HANDLE_TYPE
         ) {
             return self.validate_open_handle_type(name, base_name);
         }

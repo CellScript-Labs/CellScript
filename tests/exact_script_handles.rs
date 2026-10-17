@@ -15,6 +15,16 @@ use std::process::Command;
 #[allow(dead_code)]
 mod ckb_script_runner;
 
+#[path = "support/cost_measurement.rs"]
+#[allow(dead_code)]
+mod cost_measurement;
+#[path = "support/cost_provenance.rs"]
+#[allow(dead_code)]
+mod cost_provenance;
+#[path = "support/cost_trace.rs"]
+#[allow(dead_code)]
+mod cost_trace;
+
 use ckb_script_runner::{build_simple_fixture, execute_cellscript_script, CkbVmFixture, FixtureCell};
 
 const HANDLE_BYTES: usize = 202;
@@ -406,6 +416,8 @@ fn compatible_open_handle_spellings_stay_reserved() {
             "template-declaration",
             "module reserved\npublic struct VerifierHandle<T: fixed_value> { value: T }\npublic action verify() { verification require true }",
         ),
+        ("instance-bare", "module reserved\npublic action verify(witness handle: InstanceScriptHandle) { verification require true }"),
+        ("instance-declaration", "module reserved\npublic struct InstanceScriptHandle { value: u64 }\npublic action verify() { verification require true }"),
     ];
     for (label, source) in cases {
         for opt in 0..=3 {
@@ -988,4 +1000,481 @@ fn open_participant_observation_binds_role_source_and_complete_script_without_pe
             assert_eq!(execute_cellscript_script(strip_vm_abi_trailer(&missing_result.artifact_bytes), &fixture).exit_code, 85);
         }
     }
+}
+
+fn instance_handle_source() -> String {
+    open_handle_from_args_source(0)
+        .replace("public action", "public resource Document has store { digest: Hash }\npublic action")
+        .replace("ScriptHandle<", "InstanceScriptHandle<")
+        .replace("require_cell_dep_open_script_handle_from_args", "require_instance_script_participant_from_args")
+        .replace("        handle\n", "        handle,\n        ckb::input<Document>(1)\n")
+}
+
+#[test]
+fn instance_handle_authoring_preserves_format_and_rejects_cross_profile_types() {
+    let source = instance_handle_source();
+    let tokens = cellscript::lexer::lex(&source).unwrap();
+    let parsed = cellscript::parser::parse(&tokens).unwrap();
+    let formatted = cellscript::fmt::format_default(&parsed).unwrap();
+    let result = compile_open_handle(&formatted, 0);
+    assert_eq!(result.metadata.actions[0].params[0].ty, "InstanceScriptHandle<openiface::types>");
+    let plan = result.metadata.actions[0].proof_plan.iter().find(|plan| plan.category == "script-instance-admission").unwrap();
+    assert!(plan.on_chain_checked && plan.identity_lifecycle_policy.contains("application predicates"));
+    // This initial decoder profile is intentionally one handle only; accepting
+    // its dedicated width must not widen the old aggregate payload limit.
+    let multiple = compile_open_handle(
+        &source.replace(
+            "witness handle: InstanceScriptHandle<openiface::types>",
+            "witness handle: InstanceScriptHandle<openiface::types>, witness extra: u64",
+        ),
+        0,
+    );
+    assert!(
+        cellscript_artifact_checker::entry_codec::check_fixed_policy_parameter_decoders(
+            &multiple.artifact_bytes,
+            &serde_json::to_vec(&multiple.metadata).unwrap(),
+            &serde_json::to_vec(multiple.verified_lowering_record.as_ref().unwrap()).unwrap(),
+            &serde_json::to_vec(multiple.source_artifact_map.as_ref().unwrap()).unwrap(),
+            &Default::default(),
+        )
+        .is_err(),
+        "instance-only width cannot authorize additional entry parameters"
+    );
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("main.cell");
+    std::fs::write(directory.path().join("iface.cell"), OPEN_IFACE).unwrap();
+    for changed in [
+        formatted.replace("InstanceScriptHandle<", "ScriptHandle<"),
+        formatted.replace("InstanceScriptHandle<", "VerifierHandle<"),
+        formatted.replace("ckb::input<Document>(1)", "ckb::cell_dep(1)"),
+        formatted.replace("require_instance_script_participant_from_args", "require_open_script_participant_from_args"),
+    ] {
+        assert_ne!(changed, formatted, "mutation must change formatted source");
+        std::fs::write(&path, &changed).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&path).arg("--json").output().unwrap();
+        assert!(!output.status.success(), "cross-profile source must reject");
+        let diagnostic: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(diagnostic.to_string().contains("expects (dep: CellDepView"), "{diagnostic}");
+    }
+    #[cfg(feature = "lsp")]
+    {
+        let mut server = cellscript::lsp::LspServer::new();
+        let uri = format!("file://{}", path.display());
+        std::fs::write(&path, &formatted).unwrap();
+        server.open_document(uri.clone(), formatted.clone());
+        assert!(server.get_diagnostics(&uri).is_empty(), "{:?}", server.get_diagnostics(&uri));
+        server.update_document(uri.clone(), formatted.replace("InstanceScriptHandle<", "ScriptHandle<"));
+        assert!(server.get_diagnostics(&uri).iter().any(|diagnostic| diagnostic.message.contains("InstanceScriptHandle<module>")));
+        server.update_document(uri.clone(), "ckb::".into());
+        let completions = server.completion(&uri, cellscript::lsp::Position { line: 0, character: 5 });
+        assert!(completions.iter().any(|item| item.label == "require_instance_script_participant_from_args"));
+    }
+}
+
+#[test]
+fn constrained_instance_reads_committed_configuration_and_actual_participant_args() {
+    use cellscript_artifact_checker::instance_policy::{self, ArgsConstraint, ConsumerArgs, InstanceMode, InstancePolicy};
+    let mut args = vec![1];
+    args.extend_from_slice(&[0x41; 32]);
+    args.extend_from_slice(&150u64.to_le_bytes());
+    args.extend_from_slice(&1u64.to_le_bytes());
+    let participant = packed::Script::new_builder()
+        .code_hash(blake2b_256(&*ckb_testtool::builtin::ALWAYS_SUCCESS).pack())
+        .hash_type(4u8)
+        .args(Bytes::from(args.clone()).pack())
+        .build();
+    let (original, _) = open_authorization_set(participant.calc_script_hash().unpack());
+    let mut member = original.members()[0].clone();
+    member.artifact = blake2b_256(&*ckb_testtool::builtin::ALWAYS_SUCCESS);
+    member.code_hash = member.artifact;
+    let set =
+        cellscript_artifact_checker::open_handle_policy::AuthorizationSet::new(original.header().clone(), &[member.clone()]).unwrap();
+    let inner = set.selection(&member.receipt).unwrap();
+    let policy = InstancePolicy {
+        implementation_root: set.root(),
+        mode: InstanceMode::Constrained,
+        args_length: 49,
+        config_length: 32,
+        constraints: vec![
+            ArgsConstraint::Bytes { offset: 0, value: vec![1] },
+            ArgsConstraint::Config { offset: 1, length: 32, config_offset: 0 },
+            ArgsConstraint::Unsigned { offset: 33, width: 8, minimum: 100, maximum: 200 },
+            ArgsConstraint::Any { offset: 41, length: 8 },
+        ],
+    };
+    let selection = instance_policy::encode_selection(&policy, &inner, &args).unwrap();
+    let committed =
+        ConsumerArgs { policy_root: policy.root().unwrap(), subject: participant.calc_script_hash().unpack(), config: vec![0x41; 32] }
+            .encode()
+            .unwrap();
+    for opt in 0..=3 {
+        let source = instance_handle_source();
+        let result = compile_open_handle(&source, opt);
+        assert_eq!(result.metadata.actions[0].params[0].fixed_byte_len, Some(instance_policy::SELECTION_BYTES));
+        cellscript_artifact_checker::check_bundle_values(
+            &result.artifact_bytes,
+            &serde_json::to_value(&result.metadata).unwrap(),
+            result.verified_lowering_record.as_ref().unwrap(),
+            result.source_artifact_map.as_ref().unwrap(),
+            &Default::default(),
+        )
+        .unwrap();
+        cellscript_artifact_checker::entry_codec::check_fixed_policy_parameter_decoders(
+            &result.artifact_bytes,
+            &serde_json::to_vec(&result.metadata).unwrap(),
+            &serde_json::to_vec(result.verified_lowering_record.as_ref().unwrap()).unwrap(),
+            &serde_json::to_vec(result.source_artifact_map.as_ref().unwrap()).unwrap(),
+            &Default::default(),
+        )
+        .unwrap();
+        let elf = strip_vm_abi_trailer(&result.artifact_bytes);
+        let fixture_for = |consumer: Vec<u8>, wire: Vec<u8>, script: packed::Script| {
+            let mut fixture = open_handle_from_args_fixture(&result, consumer, wire, &script);
+            fixture.cell_deps[0].data = ckb_testtool::builtin::ALWAYS_SUCCESS.clone();
+            fixture.inputs.push(FixtureCell { capacity: 100_000_000_000, type_script: Some(script), data: Bytes::new() });
+            fixture.witnesses.push(Bytes::new());
+            fixture
+        };
+        let fixture = fixture_for(committed.to_vec(), selection.to_vec(), participant.clone());
+        let execution = execute_cellscript_script(elf, &fixture);
+        assert_eq!(execution.exit_code, 0, "O{opt}: {:?}", execution.captured_debug);
+        // B is also policy-valid, but changing only the observed Cell cannot
+        // substitute it for the subject authorized by the consumer's args.
+        let mut other_args = args.clone();
+        other_args[41] = 2;
+        let mut other = fixture.clone();
+        other.inputs[1].type_script = Some(participant.clone().as_builder().args(Bytes::from(other_args).pack()).build());
+        assert_eq!(execute_cellscript_script(elf, &other).exit_code, 85);
+        // Grant the changed subject explicitly, so permission predicates must
+        // reject invalid values after all hashes have been recomputed.
+        for (offset, value, expected) in
+            [(0, 2, 85), (1, 0x42, 85), (33, 99, 85), (33, 100, 0), (33, 200, 0), (33, 201, 85), (41, 2, 0)]
+        {
+            let mut changed = args.clone();
+            changed[offset] = value;
+            let script = participant.clone().as_builder().args(Bytes::from(changed.clone()).pack()).build();
+            let wire = instance_policy::encode_selection(&policy, &inner, &changed).unwrap();
+            let consumer = ConsumerArgs {
+                policy_root: policy.root().unwrap(),
+                subject: script.calc_script_hash().unpack(),
+                config: vec![0x41; 32],
+            }
+            .encode()
+            .unwrap();
+            assert_eq!(instance_policy::verify_selection(&consumer, &wire).is_ok(), expected == 0);
+            assert_eq!(
+                execute_cellscript_script(elf, &fixture_for(consumer.to_vec(), wire.to_vec(), script)).exit_code,
+                expected,
+                "O{opt} field offset={offset} value={value}"
+            );
+        }
+        // Reconstruct the advertised schema and policy roots even for malformed
+        // wire rows. Rejecting merely because a digest is stale is insufficient.
+        for (offset, value) in [
+            (16, 2),
+            (17, 17),
+            (19, 2),
+            (20, 129),
+            (22, 1),
+            (88, 4),
+            (89, 1),
+            (90, 0),
+            (90, 33),
+            (92, 1),
+            (94, 1),
+            (96, 1),
+            (105, 1),
+            (136 + 6, 1),
+            (136 + 16, 1),
+            (184 + 2, 3),
+            (184 + 16, 201),
+            (184 + 32, 1),
+            (232 + 16, 1),
+            (280, 1),
+            (instance_policy::ARGS_OFFSET + 49, 1),
+        ] {
+            let mut wire = selection;
+            wire[offset] = value;
+            let mut schema = instance_policy::ARGS_SCHEMA_DOMAIN.to_vec();
+            let mut layout = [0u8; 136];
+            layout[..2].copy_from_slice(&wire[18..20]);
+            layout[2] = wire[17];
+            for index in 0..usize::from(wire[17]).min(16) {
+                let row = 88 + index * 48;
+                let slot = 8 + index * 8;
+                layout[slot..slot + 2].copy_from_slice(&wire[row + 4..row + 6]);
+                layout[slot + 2..slot + 4].copy_from_slice(&wire[row + 2..row + 4]);
+                layout[slot + 4] = u8::from(wire[row] == 1);
+            }
+            schema.extend_from_slice(&layout);
+            wire[56..88].copy_from_slice(&blake2b_256(&schema));
+            let mut root = instance_policy::POLICY_DOMAIN.to_vec();
+            root.extend_from_slice(&wire[8..instance_policy::IMPLEMENTATION_OFFSET]);
+            let mut consumer = committed;
+            consumer[8..40].copy_from_slice(&blake2b_256(&root));
+            assert!(instance_policy::verify_selection(&consumer, &wire).is_err(), "host offset={offset}");
+            assert_eq!(
+                execute_cellscript_script(elf, &fixture_for(consumer.to_vec(), wire.to_vec(), participant.clone())).exit_code,
+                85,
+                "rebound O{opt} offset={offset}"
+            );
+        }
+        for offset in [0, 8, 40, 72, 73, 74, 112, 207] {
+            let mut consumer = committed;
+            consumer[offset] ^= 1;
+            assert_eq!(
+                execute_cellscript_script(elf, &fixture_for(consumer.to_vec(), selection.to_vec(), participant.clone())).exit_code,
+                85,
+                "consumer O{opt} offset={offset}"
+            );
+        }
+        for length in [0, 32, 207, 209] {
+            let mut consumer = committed.to_vec();
+            consumer.resize(length, 0);
+            assert_eq!(execute_cellscript_script(elf, &fixture_for(consumer, selection.to_vec(), participant.clone())).exit_code, 85);
+        }
+        eprintln!("instance-smoke O{opt} ELF={} cycles={}", elf.len(), execution.cycles);
+    }
+}
+
+#[test]
+fn instance_runtime_empty_maximum_scalar_widths_and_late_rejection_are_bounded() {
+    use cellscript_artifact_checker::instance_policy::{self, ArgsConstraint, ConsumerArgs, InstanceMode, InstancePolicy};
+    use cellscript_artifact_checker::open_handle_policy::{AuthorizationSet, SelectionMode};
+    use ckb_testtool::ckb_script::ScriptGroupType;
+    let mut resource_records = Vec::new();
+    for opt in 0..=3 {
+        let compiled = compile_open_handle(&instance_handle_source(), opt);
+        let elf = strip_vm_abi_trailer(&compiled.artifact_bytes);
+        let mut profiles = Vec::new();
+        for mode in [InstanceMode::Exact, InstanceMode::Constrained] {
+            profiles.push((format!("empty-{mode:?}"), mode, Vec::new(), Vec::new(), Vec::new(), false));
+            let args = vec![0x41; 256];
+            let config = if mode == InstanceMode::Constrained { vec![0x41; 128] } else { Vec::new() };
+            let rules = (0..16)
+                .map(|index| {
+                    if mode == InstanceMode::Constrained && index < 8 {
+                        ArgsConstraint::Config { offset: index * 16, length: 16, config_offset: index * 16 }
+                    } else {
+                        ArgsConstraint::Bytes { offset: index * 16, value: vec![0x41; 16] }
+                    }
+                })
+                .collect::<Vec<_>>();
+            profiles.push((format!("maximum-{mode:?}"), mode, args.clone(), config.clone(), rules.clone(), false));
+            if mode == InstanceMode::Constrained {
+                profiles.push(("late-invalid".into(), mode, args, config, rules, true));
+            }
+        }
+        for width in [1, 2, 4, 8] {
+            let maximum = if width == 8 { u64::MAX } else { (1u64 << (8 * width)) - 1 };
+            for value in [0, maximum] {
+                profiles.push((
+                    format!("unsigned-{width}-{value}"),
+                    InstanceMode::Constrained,
+                    value.to_le_bytes()[..width as usize].to_vec(),
+                    Vec::new(),
+                    vec![ArgsConstraint::Unsigned { offset: 0, width, minimum: 0, maximum }],
+                    false,
+                ));
+            }
+        }
+        // Exercise each constraint-family cost at the largest representable
+        // partition, together with all 32 members and all 64 direct deps.
+        // Sixteen eight-byte scalars necessarily occupy 128, not 256, bytes.
+        for family in ["bytes", "config", "scalar", "any", "scalar-any"] {
+            let length = if family == "scalar" { 128 } else { 256 };
+            let rules = (0..16)
+                .map(|index| match family {
+                    "bytes" => ArgsConstraint::Bytes { offset: index * 16, value: vec![0x41; 16] },
+                    "config" => ArgsConstraint::Config { offset: index * 16, length: 16, config_offset: (index % 8) * 16 },
+                    "scalar" | "scalar-any" if index < 15 || family == "scalar" => ArgsConstraint::Unsigned {
+                        offset: index * 8,
+                        width: 8,
+                        minimum: 0x4141414141414141,
+                        maximum: 0x4141414141414141,
+                    },
+                    "scalar-any" => ArgsConstraint::Any { offset: 120, length: 136 },
+                    _ => ArgsConstraint::Any { offset: index * 16, length: 16 },
+                })
+                .collect::<Vec<_>>();
+            profiles.push((
+                format!("full-{family}"),
+                InstanceMode::Constrained,
+                vec![0x41; length],
+                vec![0x41; 128],
+                rules.clone(),
+                false,
+            ));
+            if family == "bytes" || family == "config" {
+                profiles.push((
+                    format!("full-{family}-late"),
+                    InstanceMode::Constrained,
+                    vec![0x41; length],
+                    vec![0x41; 128],
+                    rules,
+                    true,
+                ));
+            }
+        }
+        for width in [1u16, 2, 4] {
+            let value = u64::from_le_bytes([0x41; 8]) >> (64 - width as u32 * 8);
+            let mut rules = (0..15)
+                .map(|index| ArgsConstraint::Unsigned { offset: index * width, width, minimum: value, maximum: value })
+                .collect::<Vec<_>>();
+            rules.push(ArgsConstraint::Any { offset: 15 * width, length: 256 - 15 * width });
+            profiles.push((
+                format!("full-scalar-{width}-any"),
+                InstanceMode::Constrained,
+                vec![0x41; 256],
+                vec![0x41; 128],
+                rules,
+                false,
+            ));
+        }
+        for (name, mode, mut args, config, constraints, late_invalid) in profiles {
+            // Both implementation modes remain orthogonal to instance mode.
+            for exact_implementation in [false, true] {
+                let code_hash = blake2b_256(&*ckb_testtool::builtin::ALWAYS_SUCCESS);
+                let original_script = packed::Script::new_builder()
+                    .code_hash(code_hash.pack())
+                    .hash_type(4u8)
+                    .args(Bytes::from(args.clone()).pack())
+                    .build();
+                let (original, _) = open_authorization_set(original_script.calc_script_hash().unpack());
+                let mut member = original.members()[0].clone();
+                member.artifact = code_hash;
+                member.code_hash = code_hash;
+                let mut header = original.header().clone();
+                let full = name.starts_with("full-");
+                if full {
+                    member.receipt = [255; 32];
+                }
+                if exact_implementation {
+                    header.mode = SelectionMode::Exact;
+                    header.exact_receipt = member.receipt;
+                }
+                let mut members = vec![member.clone()];
+                if full {
+                    header.member_count = 32;
+                    for index in 1..32 {
+                        let mut sibling = member.clone();
+                        sibling.receipt = [index; 32];
+                        members.push(sibling);
+                    }
+                }
+                let set = AuthorizationSet::new(header, &members).unwrap();
+                let policy = InstancePolicy {
+                    implementation_root: set.root(),
+                    mode,
+                    args_length: args.len() as u16,
+                    config_length: config.len() as u16,
+                    constraints: constraints.clone(),
+                };
+                if late_invalid {
+                    args[255] = 0x42;
+                }
+                let script = original_script.as_builder().args(Bytes::from(args.clone()).pack()).build();
+                let committed = ConsumerArgs {
+                    policy_root: policy.root().unwrap(),
+                    subject: script.calc_script_hash().unpack(),
+                    config: config.clone(),
+                }
+                .encode()
+                .unwrap();
+                let selection = instance_policy::encode_selection(&policy, &set.selection(&member.receipt).unwrap(), &args).unwrap();
+                assert_eq!(instance_policy::verify_selection(&committed, &selection).is_ok(), !late_invalid);
+                let mut fixture = open_handle_from_args_fixture(&compiled, committed.to_vec(), selection.to_vec(), &script);
+                fixture.cell_deps[0].data = ckb_testtool::builtin::ALWAYS_SUCCESS.clone();
+                fixture.inputs.push(FixtureCell { capacity: 100_000_000_000, type_script: Some(script.clone()), data: Bytes::new() });
+                fixture.witnesses.push(Bytes::new());
+                if full {
+                    // Two harness dependencies supplement these 62 Cells.
+                    for index in 1..62u8 {
+                        fixture.cell_deps.push(FixtureCell {
+                            capacity: 100_000_000_000,
+                            type_script: None,
+                            data: Bytes::from(vec![index]),
+                        });
+                    }
+                }
+                let execution = execute_cellscript_script(elf, &fixture);
+                assert_eq!(
+                    execution.exit_code,
+                    if late_invalid { 85 } else { 0 },
+                    "{name} O{opt} exact={exact_implementation}: {:?}",
+                    execution.captured_debug
+                );
+                assert!(execution.cycles <= 1_000_000, "{name}: {}", execution.cycles);
+                if full || ((name == "maximum-Constrained" || late_invalid) && !exact_implementation) {
+                    let (observed, trace) = ckb_script_runner::execute_cellscript_script_with_observer(
+                        elf,
+                        &fixture,
+                        |tx, _| tx,
+                        |context, tx, script| {
+                            if full {
+                                assert_eq!(tx.cell_deps().len(), 64);
+                            }
+                            (cost_trace::measure(context, tx, script, ScriptGroupType::Type, 3_000_000), tx.data().as_slice().len())
+                        },
+                    );
+                    let (trace, transaction_bytes) = trace;
+                    assert_eq!(observed.exit_code, execution.exit_code);
+                    assert_eq!(trace.status, "measured", "{trace:?}");
+                    assert_eq!(trace.authoritative_cycles, trace.stepped_cycles);
+                    assert_eq!(trace.exit_code.map(i64::from), Some(execution.exit_code));
+                    let group_cycles = trace.authoritative_cycles.unwrap();
+                    assert!(group_cycles <= if full { 275_000 } else { 205_000 }, "{name}: group cycles={group_cycles}");
+                    let stack = trace.vms.iter().map(|vm| vm.observed_stack_bytes).max().unwrap();
+                    assert!(stack <= 10_240, "{name}: observed stack={stack}");
+                    assert!(trace.vms.iter().all(|vm| vm.touched_guest_page_bytes <= 32_768), "{name}: guest-page budget");
+                    assert!(transaction_bytes <= 4_800, "{name}: transaction-byte budget");
+                    assert!(elf.len() <= 16_384, "instance helper ELF exceeded the frozen fixture budget");
+                    eprintln!(
+                        "instance-bound O{opt} {name}: ELF={} witness={} group_cycles={group_cycles} observed_stack={stack}",
+                        elf.len(),
+                        selection.len() + 8
+                    );
+                    let phoff = u64::from_le_bytes(elf[32..40].try_into().unwrap()) as usize;
+                    let phsize = u16::from_le_bytes(elf[54..56].try_into().unwrap()) as usize;
+                    let count = u16::from_le_bytes(elf[56..58].try_into().unwrap()) as usize;
+                    let load_segment_bytes: u64 = (0..count)
+                        .filter_map(|index| {
+                            let header = &elf[phoff + index * phsize..phoff + (index + 1) * phsize];
+                            (u32::from_le_bytes(header[..4].try_into().unwrap()) == 1)
+                                .then(|| u64::from_le_bytes(header[40..48].try_into().unwrap()))
+                        })
+                        .sum();
+                    resource_records.push(serde_json::json!({
+                        "case": name, "optimization": opt, "exact_implementation": exact_implementation,
+                        "members": set.members().len(), "direct_dependencies": if full { 64 } else { 3 },
+                        "args_bytes": args.len(), "config_bytes": config.len(), "constraints": constraints.len(),
+                        "group_cycles": group_cycles, "observed_stack_bytes": stack, "elf_bytes": elf.len(),
+                        "elf_load_segment_bytes": load_segment_bytes, "vm_memory_limit_bytes": ckb_vm::RISCV_MAX_MEMORY,
+                        "touched_guest_page_bytes": trace.vms.iter().map(|vm| vm.touched_guest_page_bytes).collect::<Vec<_>>(),
+                        "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+                        "witness_payload_bytes": selection.len() + 8, "transaction_bytes": transaction_bytes,
+                        "artifact_hash": hex::encode(blake2b_256(elf)), "trace": trace,
+                    }));
+                }
+                if args.len() == 256 && !late_invalid {
+                    let mut oversized = fixture.clone();
+                    let mut args = args.clone();
+                    args.push(0);
+                    oversized.inputs[1].type_script = Some(script.as_builder().args(Bytes::from(args).pack()).build());
+                    assert_eq!(execute_cellscript_script(elf, &oversized).exit_code, 85, "257-byte actual args must reject");
+                }
+            }
+        }
+    }
+    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/instance-policy-evidence/resources");
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(
+        directory.join("report.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema": "cellscript-instance-resource-evidence-v1", "scope": "isolated-admitting-group; always-success peer",
+            "records": resource_records,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
 }

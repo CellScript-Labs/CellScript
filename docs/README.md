@@ -216,6 +216,8 @@ layer.
 
 Active design and evidence records include:
 
+- `CELLSCRIPT_INSTANCE_POLICY.md` for the #80 constrained-instance contract,
+  implementation boundaries and acceptance ledger
 - `CELLSCRIPT_OPEN_HANDLE_DESIGN.md` for the #28 compatible-open handle design
   record and threat model over the implemented authorization-set boundary
 - `CELLSCRIPT_CKB_STD_COMPAT.md` for the ckb-std compatibility boundary

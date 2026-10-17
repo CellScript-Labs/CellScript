@@ -1,0 +1,21 @@
+module client
+use foreign::verify as verify_pool
+
+resource State has store {
+    pool0: u64, pool1: u64, pool2: u64, pool3: u64,
+    asset_a0: u64, asset_a1: u64, asset_a2: u64, asset_a3: u64,
+    asset_b0: u64, asset_b1: u64, asset_b2: u64, asset_b3: u64,
+    owner0: u64, owner1: u64, owner2: u64, owner3: u64,
+    network0: u64, network1: u64, network2: u64, network3: u64,
+    fee: u64, nonce: u64, a: u64, b: u64, revision: u64,
+}
+
+// The index only locates a candidate. The immutable consumer args bind its
+// complete concrete Lock identity, independently of this locator.
+public lock verify(witness handle: InstanceScriptHandle<foreign>) -> bool {
+    verification
+    let index = ckb::cell_data_u64_le(source::group_input(0), 0)
+    require index < 16
+    ckb::require_instance_script_participant_from_args(ckb::cell_dep(2), handle, ckb::input<State>(index))
+    true
+}

@@ -393,6 +393,89 @@ impl Fixture {
 }
 
 #[test]
+fn instance_runtime_checks_and_transitive_dependencies_reject_rehashed_machine_changes() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(
+        directory.path().join("foreign.cell"),
+        "module foreign::documents\npublic struct Marker has copy, drop { value: u64 }\n",
+    )
+    .unwrap();
+    std::fs::write(directory.path().join("main.cell"), "module observer\nuse foreign::documents::Marker\nresource Document has store { digest: Hash }\npublic action verify(witness handle: InstanceScriptHandle<foreign::documents>) { verification ckb::require_instance_script_participant_from_args(ckb::cell_dep(0), handle, ckb::input<Document>(1)) }\n").unwrap();
+    let valid = Fixture::from_result(
+        cellscript::compile_path_with_executable_surface_policy(
+            camino::Utf8PathBuf::from_path_buf(directory.path().join("main.cell")).unwrap(),
+            CompileOptions {
+                edition: NEXT_EDITION,
+                target: Some("riscv64-elf".into()),
+                target_profile: Some("ckb".into()),
+                source_contracts: true,
+                ..Default::default()
+            },
+            None,
+            cellscript::ExecutableSurfacePolicy::DenyFailClosed,
+        )
+        .unwrap(),
+    );
+    let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+    let owner = "runtime:__ckb_require_instance_script_participant_from_args";
+    let mut changed_count = 0;
+    for instruction in &elf.instructions {
+        if !valid.record.blocks.iter().any(|block| block.owner_entry == owner && block.range.contains(instruction.address)) {
+            continue;
+        }
+        let word = instruction.word;
+        let conditional = word & 0x7f == 0x63;
+        let byte_load = word & 0x7f == 0x03 && (word >> 12) & 7 == 4;
+        let constant = word & 0x7f == 0x13
+            && (word >> 12) & 7 == 0
+            && (word >> 15) & 31 == 0
+            && matches!((word >> 7) & 31, 5 | 6 | 7 | 12 | 13 | 14 | 15);
+        if !conditional && !byte_load && !constant {
+            continue;
+        }
+        let mut changed = valid.clone();
+        changed.replace_machine_word(instruction.address, word ^ if conditional { 1 << 12 } else { 1 << 20 });
+        assert!(changed.check().is_err(), "rehashed instance check accepted at {:#x}", instruction.address);
+        changed_count += 1;
+    }
+    assert!(changed_count > 200, "all canonical-field, bounds, predicate, subject and failure branches must be exercised");
+    for helper in [
+        "__ckb_require_cell_dep_open_script_handle",
+        "__ckb_hash_blake2b_var",
+        "__cellscript_blake2b_compress",
+        "__cellscript_memcpy_fixed",
+        "__cellscript_memcmp_fixed",
+    ] {
+        let owner = format!("runtime:{helper}");
+        let instruction = elf
+            .instructions
+            .iter()
+            .find(|instruction| {
+                valid.record.blocks.iter().any(|block| block.owner_entry == owner && block.range.contains(instruction.address))
+                    && instruction.word & 0x7f == 0x03
+            })
+            .unwrap();
+        let mut changed = valid.clone();
+        changed.replace_machine_word(instruction.address, instruction.word ^ (1 << 20));
+        assert!(changed.check().is_err(), "unchecked runtime dependency {helper}");
+    }
+    // Reclassification must not remove the machine profile obligation.
+    let mut changed = valid.clone();
+    let operation = changed
+        .record
+        .typed_semantics
+        .entries
+        .iter_mut()
+        .flat_map(|entry| &mut entry.blocks)
+        .flat_map(|block| &mut block.operations)
+        .find(|op| op.call.as_ref().is_some_and(|call| call.target == "__ckb_require_instance_script_participant_from_args"))
+        .unwrap();
+    operation.call.as_mut().unwrap().target = "__ckb_require_open_script_participant_from_args".into();
+    changed.rebind_typed_semantics();
+    assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
+}
+
+#[test]
 fn exact_zk_machine_mutations_reject_after_hash_rebinding() {
     let hash = |byte: u8| format!("Hash::from_bytes(b\"{}\")", format!("\\x{byte:02x}").repeat(32));
     let source = format!(

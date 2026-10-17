@@ -23,7 +23,7 @@ pub use target::{check_code_cell_target, CheckedTargetCodeCellOrigin};
 mod transaction;
 pub use transaction::{
     check_protocol_transaction, CheckedProtocolTransaction, OpenCellSource, OpenHandleClaimBoundaries, OpenHandleClaimBoundary,
-    OpenParticipantObservation, ResolvedOpenHandle,
+    OpenParticipantObservation, ResolvedInstanceAdmission, ResolvedOpenHandle,
 };
 mod history;
 pub use history::{check_type_code_history, CheckedTypeCodeHistory, TypeCodeHistoryStep};

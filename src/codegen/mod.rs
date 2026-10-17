@@ -19,6 +19,7 @@ mod cell_ops;
 mod collections;
 mod expr;
 mod frame;
+mod instance_policy;
 mod policy;
 mod runtime;
 mod runtime_gather;
@@ -373,6 +374,7 @@ fn is_v014_runtime_helper(func: &str) -> bool {
             | "__ckb_require_cell_dep_open_verifier_handle"
             | "__ckb_require_cell_dep_open_script_handle_from_args"
             | "__ckb_require_open_script_participant_from_args"
+            | "__ckb_require_instance_script_participant_from_args"
             | "__ckb_require_cell_dep_open_verifier_handle_from_args"
             | "__ckb_require_cell_lock_deployment_line_handle"
             | "__ckb_require_cell_type_deployment_line_handle"
@@ -647,6 +649,11 @@ fn fixed_byte_width(ty: &IrType, fixed_size: Option<usize>) -> Option<usize> {
         {
             Some(size)
         }
+        (IrType::Named(name), Some(size))
+            if name.starts_with("InstanceScriptHandle<") && size == crate::script_handle_contract::INSTANCE_SCRIPT_HANDLE_BYTES =>
+        {
+            Some(size)
+        }
         (IrType::Named(name), Some(656))
             if matches!(
                 name.split('<').next().unwrap_or(name),
@@ -734,6 +741,9 @@ fn type_static_length(ty: &IrType) -> Option<usize> {
         }
         IrType::Named(name) if name == crate::script_handle_contract::DEPLOYMENT_LINE_HANDLE_TYPE => {
             Some(crate::script_handle_contract::DEPLOYMENT_LINE_HANDLE_BYTES)
+        }
+        IrType::Named(name) if name.starts_with("InstanceScriptHandle<") => {
+            Some(crate::script_handle_contract::INSTANCE_SCRIPT_HANDLE_BYTES)
         }
         // The compatible-open handle value is the frozen 656-byte selection
         // witness; keep this IR-side table in lockstep with the string-based

@@ -291,6 +291,7 @@ impl PolicyAbiType {
             Self::Ref { inner, .. } => inner.fixed_byte_width(),
             // The compatible-open handle value is the frozen 656-byte
             // selection witness regardless of its designation.
+            Self::Named(name) if name.starts_with("InstanceScriptHandle<") => Some(crate::instance_policy::SELECTION_BYTES as u64),
             Self::Named(name) if matches!(name.split('<').next().unwrap_or(name), "ScriptHandle" | "VerifierHandle") => Some(656),
             _ => None,
         }
