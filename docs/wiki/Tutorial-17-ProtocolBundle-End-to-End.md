@@ -2,13 +2,64 @@
 
 ProtocolBundle v1 composes two or more independently compiled CKB Script
 artifacts into one transaction while keeping every Script's artifact identity,
-transaction claims, and evidence separate. This tutorial follows the 0.30
-development contract from checked ELF files through an externally signed,
-bounded confirmation receipt.
+transaction claims, and evidence separate. Sections 1–7 explain the existing
+closed-role flow from checked ELF files through an externally signed, bounded
+confirmation receipt. Sections 8–11 cover the accepted bounded profiles on the
+**0.32 development branch**, their executable examples, and unfinished work.
+The published 0.31 tool/browser bundle must not be assumed to implement those
+new profiles. Use a matching native compiler and checker.
+
+For a Chinese narrative with a raw Rust comparison, read
+[Organizing multiple CKB contracts](../tutorials/CELLSCRIPT_CROSS_CONTRACT_NERVOS_TALK.md).
+The SSRI/IPC selection discussion is [#81](https://github.com/CellScript-Labs/CellScript/issues/81);
+its proposals are separate from the capabilities demonstrated here.
 
 The current endpoint records a canonical-chain inclusion and caller-selected
 depth without claiming absolute finality. Automatic builder-selected live Cells
 and independently measured per-Script-Group cycles remain open.
+
+## Before starting: three different operations
+
+- **Compose a transaction:** several independent Lock/Type groups validate the
+  same inputs and outputs. ProtocolBundle organizes artifacts and claims.
+- **Select a participant:** authenticate its implementation, interface, concrete
+  Script and role. A compatible interface alone grants no authority.
+- **Run a child program:** explicitly spawn a verifier and enforce its result.
+  The child inherits the consumer context; it is not the selected peer's group.
+
+Reading another group's Cell does not run that group. Including code as a
+CellDep does not make it execute. Each required group still needs actual
+transaction validation, and a child needs its own enforced execution path.
+
+```mermaid
+---
+config:
+  flowchart:
+    subGraphTitleMargin:
+      top: 10
+      bottom: 20
+---
+flowchart TB
+  subgraph Prepare["Off chain · prepare one transaction"]
+    E["Independent ELF bundles"] --> B["ProtocolBundle admission"]
+    S["Concrete inputs / outputs / roles"] --> B
+    B --> W["Live resolution and wallet signing"]
+  end
+  subgraph Validate["CKB · validate the same transaction"]
+    W --> L["Lock groups"]
+    W --> T["Type groups"]
+    T -. "Explicit optional delegation" .-> C["Child verifier"]
+    C -. "Enforced result" .-> T
+    L --> A["Every required group accepts"]
+    T --> A
+  end
+  classDef prep fill:#e8f1ff,stroke:#4267a8,color:#132e53;
+  classDef check fill:#e5f6ee,stroke:#27835d,color:#133d2e;
+  classDef child fill:#fff3d9,stroke:#aa791c,color:#513a12;
+  class E,S,B,W prep;
+  class L,T,A check;
+  class C child;
+```
 
 ## 1. Know the three identities
 
@@ -127,8 +178,8 @@ that schema in checked metadata. The resolver copies each participant's
 interface hash, ELF hash, selected entry, and deployment Script identity into
 the canonical bundle. Providers use `exclusive` or `exclusive-write`;
 consumers use `shared-read`; all references must resolve to the identical Cell
-slot or witness field. Open/runtime-selected participants are not accepted by
-this schema.
+slot or witness field. Open/runtime-selected participants use the separate
+admission path in section 8; do not put them into this closed-role schema.
 
 ## 4. Run the offline composition check
 
@@ -266,7 +317,7 @@ For the complete field and conflict contract, read
 and node adapter details, read the
 [CKB adapter contract](../CELLSCRIPT_CKB_ADAPTER.md).
 
-## Open selection on the 0.32 development branch
+## 8. Select an open participant on the 0.32 development branch
 
 Use `cellc protocol bundle check bundle.json --open-admission open.json --output report.json --json`
 to reconstruct private source receipts and bind a selected participant before
@@ -286,3 +337,214 @@ Script group. An observed foreign Cell never grants local lifecycle authority.
 
 The complete input schema, admitted codecs, fail-closed limits and tests are in
 the [open-handle design](../CELLSCRIPT_OPEN_HANDLE_DESIGN.md).
+
+### Choose implementation policy and instance policy separately
+
+A complete Script includes `code_hash`, `hash_type`, and `args`. Reusing one
+ELF does not make two differently configured Scripts the same instance.
+
+| Implementation selection | Instance selection | Meaning |
+|---|---|---|
+| Exact | Exact | One implementation and one concrete configuration |
+| Compatible, authorized set | Exact | An admitted implementation with a fixed instance |
+| Exact | Constrained | One implementation, configurations satisfying a bounded policy |
+| Compatible, authorized set | Constrained | Both checks apply independently |
+
+The constrained combinations are the accepted bounded #80 profile, documented
+in [Constrained Script instances](../CELLSCRIPT_INSTANCE_POLICY.md). Its
+`InstanceScriptHandle<I>` does not replace the older exact/open encodings.
+The selected concrete Script remains bound even when several instances satisfy
+policy: accepting A does not authorize substituting policy-valid B.
+
+For this profile, the `--open-admission` file uses
+`cellscript-protocol-instance-admission-input-v1`; each instance binding includes
+its canonical `instance_policy`. The selection is 1768 bytes, with a 1776-byte
+CSARG payload. Generated builders expose `encodeInstanceHandleWitness` and
+`instanceHandleWitnessFromCheckedBundle`. Do not feed these bytes to the old
+656-byte open-handle decoder or manually concatenate witness fields.
+
+A practical preparation sequence is:
+
+1. Freeze the consumer package sources, candidate implementations and checked
+   interfaces; resolve their code/deployment evidence.
+2. Select exact or compatible implementation admission. Then define the instance
+   args layout and allowed predicates, together with authenticated consumer
+   configuration. Obtain bounds/encodings from the profile, not guessed offsets.
+3. Select actual transaction Cells and the concrete participant Script. Bind
+   global/group-relative indexes, input snapshots, dependency bytes, required
+   groups and complete final transaction bytes.
+4. Run the same CLI with the instance admission request. Extract the generated
+   witness from the checked report and preserve all compiler-owned fields.
+5. Materialize and recheck exact bytes in the adapter; resolve live dependencies
+   and inputs, sign, and execute every required group. Changed transaction data
+   requires fresh admission and signatures.
+
+There is no automatic discovery or generic service call hidden in this flow.
+`SSRI.get_methods` and a future IPC client are separate proposals, not alternative
+ways to skip these checks.
+
+## 9. Follow a real example: issuing and retiring documents
+
+The non-financial acceptance fixture uses two independently compiled packages:
+
+- [Document Type](../../tests/fixtures/instance_policy/document.cell.in): the
+  permitted issuer Lock is compiled into the implementation; creation checks
+  issuer authorization and custody. Retirement rejects successor documents and
+  checks the expected complete digest.
+- [Observer Lock](../../tests/fixtures/instance_policy/document_observer.cell.in):
+  admits one selected document instance and observes its input; it cannot issue
+  or consume a foreign resource by itself.
+
+Document args are exactly 32 bytes: a 16-byte namespace, LE64 category, and LE64
+serial. Its 64-byte data repeats those args and appends a 32-byte digest. The
+observer policy fixes its namespace, admits categories 1–5, and requires a
+nonzero serial. Each observer also binds the concrete selected Script hash.
+The serial is issuer-assigned, not a globally enforced NFT uniqueness claim.
+
+This is the observer's existing source fragment; the full linked fixture also
+contains the module import and the fixed `Document` layout:
+
+```cell
+public lock verify(witness handle: InstanceScriptHandle<foreign>) -> bool {
+    verification
+    ckb::require_instance_script_participant_from_args(
+        ckb::cell_dep(0), handle, ckb::input<Document>(1),
+    )
+    true
+}
+```
+
+`cell_dep(0)` and transaction input `1` are intentional positions in this
+fixture, not automatic code or Cell discovery. A different transaction layout
+needs matching declarations and admission. Returning `true` here says that this
+Lock's condition passed; the document Type and issuer Lock still have work.
+
+### Reproduce and inspect in order
+
+1. Use a native checkout matching the documented profile. The retained accepted
+   runtime snapshot is `f55508b572aa56c9c7298766bda28f089d57fe14`; the final
+   acceptance documentation is in `602795b3f8a095860eeb544518778495a7e55976`.
+   The fixture creates temporary packages and fills the issuer hash placeholder;
+   the `.cell.in` files are not standalone deployment packages.
+2. Read [the test driver](../../tests/support/instance_document.rs), especially
+   `InstancePolicy` and its `ArgsConstraint` fields. These explicit Rust-side
+   preparation APIs explain the constraints hidden behind the compact DSL call.
+3. For a focused fresh VM reproduction, use the repository's pinned Rust toolchain:
+
+   ```bash
+   cargo test --locked -p cellscript --test frozen_interface instance_document::issued_document_instances_require_real_issuer_custody_and_peer_execution -- --exact --test-threads=1
+   ```
+
+4. Follow the test's signed issuance transactions before its retirement cases.
+   Only ordinary funding Cells are seeded; the documents are genuinely created
+   by transactions accepted by all required groups in the local VM harness.
+5. Inspect `target/instance-policy-evidence/document/O0` through `O3`: rendered
+   sources, checked artifacts, dependency records, input snapshots and the
+   sixteen accepted/rejected signed transaction cases at each optimization level.
+6. Compare the positive cases with category 6, wrong custody, changed digest,
+   missing peer, and policy-valid B substituted for selected A. Identify **which
+   group** rejects each case; an unrelated signature error is not equivalent
+   evidence of the intended rule.
+7. Consult [the retained acceptance index](../reports/0.32/instance-policy-acceptance/README.md)
+   for hashes, full gate provenance and full-backend reproduction prerequisites.
+   The focused command above is not a substitute for those gates.
+
+This fixture is local full-group VM execution plus local live-Cell/capacity
+bookkeeping. It is not a node submission, mainnet deployment, or independent
+human audit. The existing two-pool fixture demonstrates two independently
+configured instances, but it does not complete LP lifecycle, canonical pool
+discovery, general routing, or generated financial-builder acceptance.
+
+### What would raw Rust look like?
+
+A Rust author can implement exactly the same protocol using `ckb-std` and reuse
+helper libraries. The responsibility split, rather than a line-count contest,
+is the useful comparison:
+
+| Responsibility | Raw Rust contract / application | CellScript contract / application |
+|---|---|---|
+| Load actual Script and Cell data | `ckb-std` source/index reads and checked decoding | Typed views plus admitted runtime helpers |
+| Authenticate implementation and instance | Application/library verifies exact identities, policy and concrete target | Handle admission and independently checked generated enforcement |
+| Define issuer, custody and lifecycle | Explicit application predicates | Explicit application predicates; not inferred from a handle |
+| Assemble inputs, outputs and witnesses | SDK plus protocol-specific builder | Generated builders + ProtocolBundle/adapter; fixture setup still explicit |
+| Validate complete transaction | Tests execute every necessary group | Same requirement; metadata alone is insufficient |
+| Add a new IPC service | Rust service/codec/runtime with its own constraints | Still proposed under #83; no general service syntax claimed |
+
+For a side-by-side responsibility sketch and code, see the
+[Chinese community article](../tutorials/CELLSCRIPT_CROSS_CONTRACT_NERVOS_TALK.md#原生-rust-会怎样写).
+The Rust sketch is explanatory pseudocode, not a measured replacement for the
+accepted fixture; no performance advantage is inferred.
+
+## 10. Remaining foundations and their order
+
+Status checked on 2026-10-18. Closed issues describe their admitted bounded
+contracts, not unrestricted composability. #9/#10/#11/#28/#29/#80 are closed;
+#50 (constructor typing) and #51 (bounded byte encoding) are also closed.
+The three general extensions below remain open, planned for 0.33 without a
+completion-date promise:
+
+| Priority / issue | First useful increment | Completion evidence to require |
+|---|---|---|
+| 1 / [#49](https://github.com/CellScript-Labs/CellScript/issues/49) | Fixed-layout heterogeneous Cell roles, complete selection and predecessor/successor pairing; then variable payloads | Missing/extra/duplicate/mispaired Cell rejection, authority preservation, all-group transactions and resource limits |
+| 2 / [#48](https://github.com/CellScript-Labs/CellScript/issues/48) | Bounded lists of byte strings and records with variable payloads, using canonical codecs | Independent codec vectors, malformed offset/length rejection, actual witness/Cell successor checks |
+| 3 / [#47](https://github.com/CellScript-Labs/CellScript/issues/47) | Invocation-local allocation-backed values, followed by deterministic Map/Set | Ownership/allocation failure tests, stable iteration, maximum resource measurements |
+
+```mermaid
+---
+config:
+  flowchart:
+    subGraphTitleMargin:
+      top: 10
+      bottom: 20
+---
+flowchart TD
+  Base["Accepted bounded composition"] --> F["49 · Fixed-layout mixed Cell roles"]
+  Base --> N["48 · Read-only nested codecs"]
+  F --> V["49 · Variable-payload batches"]
+  N --> V
+  H["47 · Bounded allocation and Map/Set"] --> O["Optional owned nested values"]
+  N --> O
+  D["81 · SSRI / IPC decision"] --> S["82 · Discovery and context design"]
+  D --> I["83 · Fixed-message IPC design"]
+  I --> X["Later optional nested-message IPC profile"]
+  N -.-> X
+  classDef done fill:#e5f6ee,stroke:#27835d,color:#133d2e;
+  classDef pending fill:#fff3d9,stroke:#aa791c,color:#513a12;
+  classDef design fill:#eeeaff,stroke:#7958aa,color:#342253;
+  class Base done;
+  class F,N,V,H,O pending;
+  class D,S,I,X design;
+```
+
+Arrows show semantic dependencies, not GitHub-enforced blocking relationships.
+#49 fixed layouts and #48 read-only decoding can proceed without #47. An IPC
+experiment using fixed messages also need not wait for all three. Optional owned
+nested values need an explicitly supported combination of #47 and #48.
+
+A practical implementation schedule is: freeze each shape and its ownership
+rules; build one small non-financial example; implement the runtime and checker
+boundary; add hostile complete transactions and independent vectors; measure
+maximum successful/late-rejecting cases; update affected editor/builders/docs;
+run the applicable gates and record review disposition. New syntax or a happy
+path alone does not close an issue.
+
+## 11. Where SSRI and IPC fit next
+
+[SSRI](https://talk.nervos.org/t/en-cn-script-sourced-rich-information-script/8256)
+can make Script-sourced information and construction logic available to tools.
+[`ckb-script-ipc`](https://github.com/XuJiandong/ckb-script-ipc)
+provides generated request/response services over process communication and
+also supports native host execution. Their responsibilities overlap, but they
+are not drop-in substitutes for each other or for participant authorization.
+
+- [#81](https://github.com/CellScript-Labs/CellScript/issues/81): compare current
+  paths, SSRI adaptation, IPC services, and a layered combination using the same
+  examples and explicit maintenance/interoperability costs.
+- [#82](https://github.com/CellScript-Labs/CellScript/issues/82): discovery,
+  context identity, cache invalidation and candidate-transaction boundaries.
+- [#83](https://github.com/CellScript-Labs/CellScript/issues/83): typed bounded
+  messages, child lifetime, failure propagation, resource limits and upstream
+  compatibility.
+
+These are design reviews. No selection has been finalized, no new service API
+is admitted, and no measurements comparing those candidates are claimed here.

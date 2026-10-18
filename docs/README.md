@@ -25,6 +25,13 @@ contents may be folded into 0.30 without publishing a stable 0.26 release.
 reader-facing tutorials and cookbook material. They should teach the current
 stable surface rather than act as release logs.
 
+The [ProtocolBundle end-to-end tutorial](wiki/Tutorial-17-ProtocolBundle-End-to-End.md)
+separates the stable closed-role workflow from bounded 0.32 development profiles.
+The [Chinese Nervos Talk draft](tutorials/CELLSCRIPT_CROSS_CONTRACT_NERVOS_TALK.md)
+explains cross-contract organization, a raw Rust responsibility comparison,
+the unfinished #47/#48/#49 roadmap and the SSRI/IPC design reviews (#81–#83).
+The community draft is not a release announcement or a published forum post.
+
 ## Release Records
 
 `docs/releases/` contains finalized release notes and active release-note
