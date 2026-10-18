@@ -1,16 +1,16 @@
 # Constrained Script instances
 
-Status: experimental implementation in progress for
+Status: bounded technical implementation accepted for
 [#80](https://github.com/CellScript-Labs/CellScript/issues/80), owned by Codex
-under the maintainer's 2026-10-17 implementation request. This record defines
-the initial bounded profile and tracks the entire issue's acceptance. The
-host wire, private source/receipt composition, source handle, machine enforcement
-and ProtocolBundle transport have focused executable coverage. The bounded
-document and two-pool applications, independent codec vectors and resource
-boundary corpus also execute. Full integration gates remain open. No technical
-acceptance, release, deployment or external audit is claimed. The issue-specific
-implementation self-review is recorded below; it does not inherit the earlier
-#28/#29 human-review waivers.
+under the maintainer's 2026-10-17 implementation request. The versioned profile,
+compiler/checker enforcement, complete transaction transport, non-financial
+application, two-pool slice and resource corpus have executable evidence.
+The retained [acceptance record](reports/0.32/instance-policy-acceptance/README.md)
+identifies the signed source snapshot and the completed `dev`, `ci` and
+`backend` runs, including their exact source deltas and earlier failed attempts.
+Release, public deployment and independent human audit remain separate.
+The issue-specific author self-review is recorded below; no earlier #28/#29
+human-review waiver is inherited.
 
 ## Problem and ownership
 
@@ -434,23 +434,23 @@ financial-builder parity is inferred from these Rust-constructed pool transactio
 
 ## Acceptance ledger
 
-Each row remains open until the named boundary has executable evidence. A
-passing low-level codec test does not close #80.
+The following evidence closes the bounded technical scope of #80. The linked
+acceptance record retains full gate provenance and reproducible application bytes.
 
-| Requirement | Current evidence / remaining work |
+| Requirement | Accepted evidence / scope boundary |
 | --- | --- |
 | Versioned design, owner, bounds and threat model | This bounded profile and threat matrix; Codex ownership and issue-specific author self-review recorded above, with no independent human audit or inherited waiver claim |
 | Independent canonical wire, four selection combinations, A/B subject separation | Seven standalone checker tests including fourteen frozen independently generated CCC/Molecule vectors; host-only |
 | Preserve #11/#28 formats, roots and vectors | Existing exact/open suites; open wire regressions unchanged |
 | Private source/receipt and actual instance/dependency binding | `tests/frozen_interface.rs` checks O0–O3, exact/compatible implementation policies, SDK Script serialization, distinct A/B receipts/groups, dependency/witness/source replacement and exact Type-ID history reuse; ProtocolBundle binds consumer args to actual input snapshots |
 | Actual args/root machine checks and rehashed mutations | `tests/exact_script_handles.rs` executes bounded args/config/root, all four global/group input/output views, actual Lock/Type fields and A/B negatives at O0–O3; `tests/artifact_checker.rs` rejects over 200 rehashed instruction changes and transitive-helper mutations |
-| Source/type/lowering/ProofPlan/metadata/editor/WASM parity | Formatter round-trip, native CLI/LSP cross-profile rejection, completion and browser multi-source nominal-type regressions pass; full integration validation remains open |
+| Source/type/lowering/ProofPlan/metadata/editor/WASM parity | Formatter round-trip, native CLI/LSP cross-profile rejection, completion and browser multi-source nominal-type regressions pass; full integration gates passed with source deltas recorded in the acceptance record |
 | Native/CLI/generated-builder/SDK byte parity and signing negatives | `instance_protocol_admission_binds_private_receipts_to_complete_transaction_bytes` passes O0–O3 native/CLI/Node/SDK parity, real secp signing, actual all-group success, signed peer rejection, post-signing witness replacement, schema downgrade and rebound report mutations; unchanged open-path regression also passes |
-| Fixed verifier allowlist and actual child-failure regressions | The unchanged `open_lock_and_verifier_profiles_materialize_and_execute_identical_transactions` passes at O0–O3 for Lock/Type consumers, including actual SPAWN/WAIT, child-predicate failure, machine failure-path mutations and native/CLI/generated-builder/adapter parity; full gate revalidation continues |
+| Fixed verifier allowlist and actual child-failure regressions | The unchanged `open_lock_and_verifier_profiles_materialize_and_execute_identical_transactions` passes at O0–O3 for Lock/Type consumers, including actual SPAWN/WAIT, child-predicate failure, machine failure-path mutations and native/CLI/generated-builder/adapter parity; full gate revalidation passed |
 | Non-financial instance example with real VM enforcement | O0–O3 document issuance and retirement use actual secp signatures, native source/instance/dependency receipts and complete VM group execution; category-policy, issuer, custody, configuration, lifecycle, missing-peer, rejecting-peer and A/B substitutions reject at their intended boundaries |
 | Two real pool instances, authentic genesis/custody, all-group A/B negatives | O0–O3 bounded pool slice above: real issuance, Type-ID bootstrap, owner/custody/asset groups, separate and combined swaps, native instance/dependency/group admission and targeted A/B negatives; broader #52/#61 financial scope remains separate |
 | Maximum/late-invalid cycles, stack/memory, ELF, witness/tx/capacity | 88 named boundary observations combine all 32 members/64 direct dependencies with maximum predicate shapes; cycles, observed stack, touched guest pages, ELF/load segments and transaction bounds above; real document/pool cases separately check capacity and application budgets |
-| Reference vectors, retained source/artifact/transaction evidence and gates | Independent CCC vectors and replayable application/resource evidence retained; final evidence inventory and dev/backend/ci acceptance remain pending |
+| Reference vectors, retained source/artifact/transaction evidence and gates | Independent CCC vectors and replayable application/resource evidence retained; final hashed inventory, application bytes and dev/backend/ci provenance are retained in the acceptance record |
 
 #50/#51 are independently tracked. On 2026-10-17 the three `vec_constructor`
 tests and four `bounded_byte_context` tests passed again, including CLI/LSP
@@ -463,10 +463,22 @@ by the maintainer and is not silently resumed by this compiler task.
 
 The full `dev` replay passed on 2026-10-17 after isolating document templates as
 `.cell.in` and refreshing the business-corpus inventory through its native
-generator. The earlier failed runs remain failures; this result is a new full
-replay, including all 47 frozen-interface tests, the independent vectors,
-resource cases, strict-backend quick audit, 141 syntax combinations and package
-scenarios. The implementation bytes are copied into an isolated local worktree
-for `backend`/`ci` acceptance: its pinned submodules exclude the maintainer's
-unrelated website edits. Those two gates and the final evidence inventory remain
-pending. The local snapshot does not authorize publication or deployment.
+generator. Full `ci` passed in the isolated acceptance worktree. The CI root
+test binary predates the test-only view/role regression in `f55508b5`; that
+regression passed separately, and the final full `backend` run includes it.
+Compiler, checker and application implementation did not change across that delta.
+
+The final `backend` run uses clean signed source
+`f55508b572aa56c9c7298766bda28f089d57fe14`, `RUST_TEST_THREADS=1` and the
+required clean CKB revision `f7fa4436737756f97a24e254f22c13a36316ecea`.
+The earlier concurrent-fixture and mismatched-CKB attempts remain recorded as
+failures. A subsequent infrastructure change makes the same serialization
+explicit in the backend command; the final documentation/evidence commit does
+not change runtime semantics or rebind the clean-source receipt to a new commit.
+The final commit also passes the ordinary `commit` gate.
+
+Pinned submodules in the isolated worktree exclude unrelated maintainer edits.
+The CKB stateful and counter-node receipts cover their named existing fixtures;
+the document/two-pool slice remains local all-group CKB-VM evidence. These gate
+results establish technical integration acceptance, not a release or public
+network deployment.

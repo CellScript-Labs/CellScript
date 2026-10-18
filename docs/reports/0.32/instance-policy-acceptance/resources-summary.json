@@ -1,0 +1,3092 @@
+{
+  "schema": "cellscript-instance-resource-summary-v1",
+  "scope": "Named bounded fixture observations; full instruction traces retained in the archive",
+  "full_report": {
+    "path": "instance-policy-evidence/resources/report.json",
+    "bytes": 50064201,
+    "sha256": "725cc4cb817fa7e09e7c7167006a58beeb9d31c6335c709c07c810296dadf3e7",
+    "archive_member": true
+  },
+  "records": [
+    {
+      "args_bytes": 256,
+      "artifact_hash": "76791bf1812be4f0b10c0eb5f472b71aa6a146eb402782238fed9f0f9b4153aa",
+      "case": "maximum-Constrained",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 3,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 198615,
+      "members": 1,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 0,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 2429,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 198615,
+        "stepped_cycles": 198615,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "5f99831032709a6f25b975c255eaa44a3cd8ba40789fbecfa96ee5256d4d2914",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "76791bf1812be4f0b10c0eb5f472b71aa6a146eb402782238fed9f0f9b4153aa",
+      "case": "late-invalid",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 3,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 189380,
+      "members": 1,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 0,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 2429,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 189380,
+        "stepped_cycles": 189380,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "5f99831032709a6f25b975c255eaa44a3cd8ba40789fbecfa96ee5256d4d2914",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "76791bf1812be4f0b10c0eb5f472b71aa6a146eb402782238fed9f0f9b4153aa",
+      "case": "full-bytes",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 266401,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 0,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 266401,
+        "stepped_cycles": 266401,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "5f99831032709a6f25b975c255eaa44a3cd8ba40789fbecfa96ee5256d4d2914",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "76791bf1812be4f0b10c0eb5f472b71aa6a146eb402782238fed9f0f9b4153aa",
+      "case": "full-bytes",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 266932,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 0,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 266932,
+        "stepped_cycles": 266932,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "5f99831032709a6f25b975c255eaa44a3cd8ba40789fbecfa96ee5256d4d2914",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "76791bf1812be4f0b10c0eb5f472b71aa6a146eb402782238fed9f0f9b4153aa",
+      "case": "full-bytes-late",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 257166,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 0,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 257166,
+        "stepped_cycles": 257166,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "5f99831032709a6f25b975c255eaa44a3cd8ba40789fbecfa96ee5256d4d2914",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "76791bf1812be4f0b10c0eb5f472b71aa6a146eb402782238fed9f0f9b4153aa",
+      "case": "full-bytes-late",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 257697,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 0,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 257697,
+        "stepped_cycles": 257697,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "5f99831032709a6f25b975c255eaa44a3cd8ba40789fbecfa96ee5256d4d2914",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "76791bf1812be4f0b10c0eb5f472b71aa6a146eb402782238fed9f0f9b4153aa",
+      "case": "full-config",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 271281,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 0,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 271281,
+        "stepped_cycles": 271281,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "5f99831032709a6f25b975c255eaa44a3cd8ba40789fbecfa96ee5256d4d2914",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "76791bf1812be4f0b10c0eb5f472b71aa6a146eb402782238fed9f0f9b4153aa",
+      "case": "full-config",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 271812,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 0,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 271812,
+        "stepped_cycles": 271812,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "5f99831032709a6f25b975c255eaa44a3cd8ba40789fbecfa96ee5256d4d2914",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "76791bf1812be4f0b10c0eb5f472b71aa6a146eb402782238fed9f0f9b4153aa",
+      "case": "full-config-late",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 261396,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 0,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 261396,
+        "stepped_cycles": 261396,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "5f99831032709a6f25b975c255eaa44a3cd8ba40789fbecfa96ee5256d4d2914",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "76791bf1812be4f0b10c0eb5f472b71aa6a146eb402782238fed9f0f9b4153aa",
+      "case": "full-config-late",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 261927,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 0,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 261927,
+        "stepped_cycles": 261927,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "5f99831032709a6f25b975c255eaa44a3cd8ba40789fbecfa96ee5256d4d2914",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 128,
+      "artifact_hash": "76791bf1812be4f0b10c0eb5f472b71aa6a146eb402782238fed9f0f9b4153aa",
+      "case": "full-scalar",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 260780,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 0,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 260780,
+        "stepped_cycles": 260780,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "5f99831032709a6f25b975c255eaa44a3cd8ba40789fbecfa96ee5256d4d2914",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 128,
+      "artifact_hash": "76791bf1812be4f0b10c0eb5f472b71aa6a146eb402782238fed9f0f9b4153aa",
+      "case": "full-scalar",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 261311,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 0,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 261311,
+        "stepped_cycles": 261311,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "5f99831032709a6f25b975c255eaa44a3cd8ba40789fbecfa96ee5256d4d2914",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "76791bf1812be4f0b10c0eb5f472b71aa6a146eb402782238fed9f0f9b4153aa",
+      "case": "full-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 266977,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 0,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 266977,
+        "stepped_cycles": 266977,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "5f99831032709a6f25b975c255eaa44a3cd8ba40789fbecfa96ee5256d4d2914",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "76791bf1812be4f0b10c0eb5f472b71aa6a146eb402782238fed9f0f9b4153aa",
+      "case": "full-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 267508,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 0,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 267508,
+        "stepped_cycles": 267508,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "5f99831032709a6f25b975c255eaa44a3cd8ba40789fbecfa96ee5256d4d2914",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "76791bf1812be4f0b10c0eb5f472b71aa6a146eb402782238fed9f0f9b4153aa",
+      "case": "full-scalar-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 265687,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 0,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 265687,
+        "stepped_cycles": 265687,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "5f99831032709a6f25b975c255eaa44a3cd8ba40789fbecfa96ee5256d4d2914",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "76791bf1812be4f0b10c0eb5f472b71aa6a146eb402782238fed9f0f9b4153aa",
+      "case": "full-scalar-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 266218,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 0,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 266218,
+        "stepped_cycles": 266218,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "5f99831032709a6f25b975c255eaa44a3cd8ba40789fbecfa96ee5256d4d2914",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "76791bf1812be4f0b10c0eb5f472b71aa6a146eb402782238fed9f0f9b4153aa",
+      "case": "full-scalar-1-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 264127,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 0,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 264127,
+        "stepped_cycles": 264127,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "5f99831032709a6f25b975c255eaa44a3cd8ba40789fbecfa96ee5256d4d2914",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "76791bf1812be4f0b10c0eb5f472b71aa6a146eb402782238fed9f0f9b4153aa",
+      "case": "full-scalar-1-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 264658,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 0,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 264658,
+        "stepped_cycles": 264658,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "5f99831032709a6f25b975c255eaa44a3cd8ba40789fbecfa96ee5256d4d2914",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "76791bf1812be4f0b10c0eb5f472b71aa6a146eb402782238fed9f0f9b4153aa",
+      "case": "full-scalar-2-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 264427,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 0,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 264427,
+        "stepped_cycles": 264427,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "5f99831032709a6f25b975c255eaa44a3cd8ba40789fbecfa96ee5256d4d2914",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "76791bf1812be4f0b10c0eb5f472b71aa6a146eb402782238fed9f0f9b4153aa",
+      "case": "full-scalar-2-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 264958,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 0,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 264958,
+        "stepped_cycles": 264958,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "5f99831032709a6f25b975c255eaa44a3cd8ba40789fbecfa96ee5256d4d2914",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "76791bf1812be4f0b10c0eb5f472b71aa6a146eb402782238fed9f0f9b4153aa",
+      "case": "full-scalar-4-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 264922,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 0,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 264922,
+        "stepped_cycles": 264922,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "5f99831032709a6f25b975c255eaa44a3cd8ba40789fbecfa96ee5256d4d2914",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "76791bf1812be4f0b10c0eb5f472b71aa6a146eb402782238fed9f0f9b4153aa",
+      "case": "full-scalar-4-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 265453,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 0,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 265453,
+        "stepped_cycles": 265453,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "5f99831032709a6f25b975c255eaa44a3cd8ba40789fbecfa96ee5256d4d2914",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "maximum-Constrained",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 3,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 198614,
+      "members": 1,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 1,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 2429,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 198614,
+        "stepped_cycles": 198614,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "late-invalid",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 3,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 189379,
+      "members": 1,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 1,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 2429,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 189379,
+        "stepped_cycles": 189379,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-bytes",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 266400,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 1,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 266400,
+        "stepped_cycles": 266400,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-bytes",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 266931,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 1,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 266931,
+        "stepped_cycles": 266931,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-bytes-late",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 257165,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 1,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 257165,
+        "stepped_cycles": 257165,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-bytes-late",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 257696,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 1,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 257696,
+        "stepped_cycles": 257696,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-config",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 271280,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 1,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 271280,
+        "stepped_cycles": 271280,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-config",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 271811,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 1,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 271811,
+        "stepped_cycles": 271811,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-config-late",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 261395,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 1,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 261395,
+        "stepped_cycles": 261395,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-config-late",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 261926,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 1,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 261926,
+        "stepped_cycles": 261926,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 128,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 260779,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 1,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 260779,
+        "stepped_cycles": 260779,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 128,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 261310,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 1,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 261310,
+        "stepped_cycles": 261310,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 266976,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 1,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 266976,
+        "stepped_cycles": 266976,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 267507,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 1,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 267507,
+        "stepped_cycles": 267507,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 265686,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 1,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 265686,
+        "stepped_cycles": 265686,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 266217,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 1,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 266217,
+        "stepped_cycles": 266217,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar-1-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 264126,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 1,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 264126,
+        "stepped_cycles": 264126,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar-1-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 264657,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 1,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 264657,
+        "stepped_cycles": 264657,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar-2-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 264426,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 1,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 264426,
+        "stepped_cycles": 264426,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar-2-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 264957,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 1,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 264957,
+        "stepped_cycles": 264957,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar-4-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 264921,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 1,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 264921,
+        "stepped_cycles": 264921,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar-4-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 265452,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 1,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 265452,
+        "stepped_cycles": 265452,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "maximum-Constrained",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 3,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 198614,
+      "members": 1,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 2,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 2429,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 198614,
+        "stepped_cycles": 198614,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "late-invalid",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 3,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 189379,
+      "members": 1,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 2,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 2429,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 189379,
+        "stepped_cycles": 189379,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-bytes",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 266400,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 2,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 266400,
+        "stepped_cycles": 266400,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-bytes",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 266931,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 2,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 266931,
+        "stepped_cycles": 266931,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-bytes-late",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 257165,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 2,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 257165,
+        "stepped_cycles": 257165,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-bytes-late",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 257696,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 2,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 257696,
+        "stepped_cycles": 257696,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-config",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 271280,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 2,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 271280,
+        "stepped_cycles": 271280,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-config",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 271811,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 2,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 271811,
+        "stepped_cycles": 271811,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-config-late",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 261395,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 2,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 261395,
+        "stepped_cycles": 261395,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-config-late",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 261926,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 2,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 261926,
+        "stepped_cycles": 261926,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 128,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 260779,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 2,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 260779,
+        "stepped_cycles": 260779,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 128,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 261310,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 2,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 261310,
+        "stepped_cycles": 261310,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 266976,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 2,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 266976,
+        "stepped_cycles": 266976,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 267507,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 2,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 267507,
+        "stepped_cycles": 267507,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 265686,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 2,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 265686,
+        "stepped_cycles": 265686,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 266217,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 2,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 266217,
+        "stepped_cycles": 266217,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar-1-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 264126,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 2,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 264126,
+        "stepped_cycles": 264126,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar-1-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 264657,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 2,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 264657,
+        "stepped_cycles": 264657,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar-2-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 264426,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 2,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 264426,
+        "stepped_cycles": 264426,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar-2-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 264957,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 2,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 264957,
+        "stepped_cycles": 264957,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar-4-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 264921,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 2,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 264921,
+        "stepped_cycles": 264921,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar-4-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 265452,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 2,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 265452,
+        "stepped_cycles": 265452,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "maximum-Constrained",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 3,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 198614,
+      "members": 1,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 3,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 2429,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 198614,
+        "stepped_cycles": 198614,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "late-invalid",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 3,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 189379,
+      "members": 1,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 3,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 2429,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 189379,
+        "stepped_cycles": 189379,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-bytes",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 266400,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 3,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 266400,
+        "stepped_cycles": 266400,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-bytes",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 266931,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 3,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 266931,
+        "stepped_cycles": 266931,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-bytes-late",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 257165,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 3,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 257165,
+        "stepped_cycles": 257165,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-bytes-late",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 257696,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 3,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 257696,
+        "stepped_cycles": 257696,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-config",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 271280,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 3,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 271280,
+        "stepped_cycles": 271280,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-config",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 271811,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 3,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 271811,
+        "stepped_cycles": 271811,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-config-late",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 261395,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 3,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 261395,
+        "stepped_cycles": 261395,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-config-late",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 261926,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 3,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 261926,
+        "stepped_cycles": 261926,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 128,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 260779,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 3,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 260779,
+        "stepped_cycles": 260779,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 128,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 261310,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 3,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 261310,
+        "stepped_cycles": 261310,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 266976,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 3,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 266976,
+        "stepped_cycles": 266976,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 267507,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 3,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 267507,
+        "stepped_cycles": 267507,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 265686,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 3,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 265686,
+        "stepped_cycles": 265686,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 266217,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 3,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 266217,
+        "stepped_cycles": 266217,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar-1-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 264126,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 3,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 264126,
+        "stepped_cycles": 264126,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar-1-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 264657,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 3,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 264657,
+        "stepped_cycles": 264657,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar-2-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 264426,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 3,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 264426,
+        "stepped_cycles": 264426,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar-2-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 264957,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 3,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 264957,
+        "stepped_cycles": 264957,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar-4-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": false,
+      "group_cycles": 264921,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 3,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 264921,
+        "stepped_cycles": 264921,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    },
+    {
+      "args_bytes": 256,
+      "artifact_hash": "afd27ff8986bf9e30bb83badcf78cbc80ade15607db17898c518fb7646997910",
+      "case": "full-scalar-4-any",
+      "config_bytes": 128,
+      "constraints": 16,
+      "direct_dependencies": 64,
+      "elf_bytes": 16376,
+      "elf_load_segment_bytes": 16084,
+      "exact_implementation": true,
+      "group_cycles": 265452,
+      "members": 32,
+      "memory_measurement": "successful guest memory initialization/read/write page union per VM; not host heap/RSS",
+      "observed_stack_bytes": 9808,
+      "optimization": 3,
+      "touched_guest_page_bytes": [
+        32768
+      ],
+      "transaction_bytes": 4686,
+      "vm_memory_limit_bytes": 4194304,
+      "witness_payload_bytes": 1776,
+      "trace_identity": {
+        "status": "measured",
+        "authoritative_cycles": 265452,
+        "stepped_cycles": 265452,
+        "vm_programs": [
+          {
+            "vm_id": 0,
+            "generation": 0,
+            "program_sha256": "a9bda7e917f4da9ba2ecf485ceb667671c263e616f3a8128b5df60e7554111b8",
+            "observed_stack_bytes": 9808
+          }
+        ]
+      }
+    }
+  ]
+}

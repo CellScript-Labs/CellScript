@@ -1,0 +1,106 @@
+{
+  "schema": "cellscript-instance-application-summary-v1",
+  "scope": "Final backend replay, local all-group CKB-VM",
+  "applications": [
+    {
+      "suite": "document",
+      "opt": 0,
+      "cases": 16,
+      "maximum_cycles": 1850751,
+      "maximum_transaction_bytes": 2354,
+      "report": {
+        "path": "instance-policy-evidence/document/O0/report.json",
+        "bytes": 81527,
+        "sha256": "3df898b9663a37888ce601d227bc81adeea400ad089a2abee6c24509b504b355",
+        "archive_member": true
+      }
+    },
+    {
+      "suite": "document",
+      "opt": 1,
+      "cases": 16,
+      "maximum_cycles": 1865558,
+      "maximum_transaction_bytes": 2354,
+      "report": {
+        "path": "instance-policy-evidence/document/O1/report.json",
+        "bytes": 81527,
+        "sha256": "628246779b05a54988a717f96af47311119ba1f363c78e3f2a34f0350bacd6b1",
+        "archive_member": true
+      }
+    },
+    {
+      "suite": "document",
+      "opt": 2,
+      "cases": 16,
+      "maximum_cycles": 1865558,
+      "maximum_transaction_bytes": 2354,
+      "report": {
+        "path": "instance-policy-evidence/document/O2/report.json",
+        "bytes": 81527,
+        "sha256": "8a1a6a6a75df6e14f124609356fc9f2aebb3562684aa78245f0f96b86c857127",
+        "archive_member": true
+      }
+    },
+    {
+      "suite": "document",
+      "opt": 3,
+      "cases": 16,
+      "maximum_cycles": 1865558,
+      "maximum_transaction_bytes": 2354,
+      "report": {
+        "path": "instance-policy-evidence/document/O3/report.json",
+        "bytes": 81527,
+        "sha256": "2ec2c2d8b2b63dbbdeb32477b189fcb3ab782ec1c95f6e2c31997adde4a595f8",
+        "archive_member": true
+      }
+    },
+    {
+      "suite": "pools",
+      "opt": 0,
+      "cases": 19,
+      "maximum_cycles": 6567721,
+      "report": {
+        "path": "instance-policy-evidence/pools/O0/report.json",
+        "bytes": 192990,
+        "sha256": "33f0b9ad94b78c2ed149a6074c8518004c7d4dbbf80658b6e9cecc29b590ae6f",
+        "archive_member": true
+      }
+    },
+    {
+      "suite": "pools",
+      "opt": 1,
+      "cases": 19,
+      "maximum_cycles": 6601422,
+      "report": {
+        "path": "instance-policy-evidence/pools/O1/report.json",
+        "bytes": 192992,
+        "sha256": "ecd98bd8b64b2e95c163359156e918a21c29fc24767eb04f46718e161a77ef38",
+        "archive_member": true
+      }
+    },
+    {
+      "suite": "pools",
+      "opt": 2,
+      "cases": 19,
+      "maximum_cycles": 6601422,
+      "report": {
+        "path": "instance-policy-evidence/pools/O2/report.json",
+        "bytes": 192992,
+        "sha256": "70bc3d607bc85295c2fd3e553ca1f47dee1161fe27a199fdd274c09fd12592df",
+        "archive_member": true
+      }
+    },
+    {
+      "suite": "pools",
+      "opt": 3,
+      "cases": 19,
+      "maximum_cycles": 6601422,
+      "report": {
+        "path": "instance-policy-evidence/pools/O3/report.json",
+        "bytes": 192992,
+        "sha256": "5a4644d889800eb930ee4da45558239e0709083ead61a4c84071441697127f11",
+        "archive_member": true
+      }
+    }
+  ]
+}

@@ -873,7 +873,9 @@ run_backend_gate() {
     run cargo check --locked -p cellscript --all-targets
     run cargo check --locked -p cellscript-artifact-checker --all-targets
     run cargo check --locked -p cellscript-fiber-adapter --all-targets
-    run cargo test --locked -p cellscript
+    # The full suite repeats cost_toolchain's executable fixtures. Keep the
+    # same serialization as CI and the preflight, including CLI/iCKB fixtures.
+    run cargo test --locked -p cellscript -- --test-threads=1
     check_cost_evidence
     run cargo test --locked -p cellscript-artifact-checker
     run cargo test --locked -p cellscript-fiber-adapter -- --test-threads=1

@@ -2,6 +2,17 @@
 
 ## Unreleased — 0.32
 
+Add versioned bounded Script-instance admission alongside the existing exact
+and compatible implementation policies. Authenticate concrete args, consumer
+configuration and instance identity in CKB-VM and the independent artifact
+checker; preserve old exact/open encodings. Native, CLI, generated TypeScript
+and SDK paths agree on signed transaction bytes. Retain all-group document and
+two-pool fixtures, independent codec vectors, rebound-machine mutations and
+maximum/late-invalid resource observations. The technical acceptance and gate
+provenance are recorded in `docs/CELLSCRIPT_INSTANCE_POLICY.md`; SSRI/IPC,
+constrained spawned-verifier inputs, release and public deployment remain
+separate. Serialize backend test fixtures consistently with CI.
+
 Publish a controlled ZK cost study for ordinary/fixed-pair updates and complete
 1/2/4-counter proof sets. Retain raw pilot/acceptance observations under separately
 frozen host limits, authoritative all-group/per-VM accounting and explicit missing
