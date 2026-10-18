@@ -24,6 +24,12 @@ not be collapsed into one generic "collections are supported" claim.
 | Fixed-width `BoundedList<Plan, N>` + `create_each` | `witness` source; versioned plan bytes | Checked loop, predicates, numeric outer `+=` accumulators, and one complete create template | `bounded-output-plan-v1` decodes the plan and verifies the same relative `GroupOutput`, output lock, data, capacity floor, and final count | Supported only when `12 + N * plan_width <= 4084`, the output is fixed-width with no custom identity, and lock/capacity policy is explicit; other shapes fail closed |
 | Generic Cell-backed resource collections | No executable ownership model | No | No | Unsupported |
 
+An unadmitted dynamic-element vector's `len`/`is_empty` must return runtime
+error 24, never reinterpret its encoded byte length as element cardinality.
+The bounded nested codec work has independent host and primitive CKB-VM tests,
+but does not yet admit new DSL shapes; see the
+[implementation and evidence ledger](CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md).
+
 ## Stack-Backed Local Vec Rule
 
 The current backend supports bounded local `Vec<T>` operations only when `T`

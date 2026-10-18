@@ -20,6 +20,7 @@ mod collections;
 mod expr;
 mod frame;
 mod instance_policy;
+mod nested;
 mod policy;
 mod runtime;
 mod runtime_gather;

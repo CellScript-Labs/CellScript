@@ -230,6 +230,12 @@ impl CodeGenerator {
         if let Some(static_len) = self.static_length(operand) {
             self.emit(format!("li t0, {}", static_len));
         } else if self.emit_stack_collection_length(operand) || self.emit_dynamic_molecule_vector_length(operand) {
+        } else if matches!(operand, IrOperand::Var(var) if named_type_name(&var.ty).is_some_and(|name| name.starts_with("Vec<"))) {
+            // A dynamic-element vector requires a checked DynVec decoder.
+            // Its encoded byte length is never its element cardinality.
+            self.emit("# cellscript abi: vector cardinality has no admitted codec; fail closed");
+            self.emit_fail(CellScriptRuntimeError::CollectionRuntimeUnsupported);
+            return Ok(());
         } else if let Some(size_offset) = self.dynamic_length_from_size_offset(operand) {
             // For schema-backed or fixed-byte params, the actual size word is already
             // stored at the size offset; load it directly.

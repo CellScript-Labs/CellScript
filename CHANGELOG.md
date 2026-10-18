@@ -2,6 +2,13 @@
 
 ## Unreleased — 0.32
 
+Reject unadmitted dynamic-element vector length operations instead of treating
+encoded byte size as element count. Preserve fixed-element vector semantics.
+Add independent host validation and internally tested CKB-VM decoding for the
+bounded nested-values codec as prerequisites for #48; new source shapes and
+successor admission remain pending. See
+`docs/CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md` for the implementation ledger.
+
 Add versioned bounded Script-instance admission alongside the existing exact
 and compatible implementation policies. Authenticate concrete args, consumer
 configuration and instance identity in CKB-VM and the independent artifact
