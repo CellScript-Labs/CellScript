@@ -1,0 +1,22 @@
+// audit: edition=2027
+// audit: phase=accept
+// Experimental local runtime; independent allocation proof remains pending.
+module collections_deduplication
+
+collections Work {
+    limits { bytes: 1024, allocations: 8 }
+    seen: OrderedSet<Hash> { items: 4 }
+}
+
+action unique(witness identifiers: [Hash; 4]) -> u64 {
+    let mut work = Work::new()
+    work.seen.reserve(4)
+    for id in identifiers {
+        let inserted = work.seen.insert(id)
+        require inserted
+    }
+    let checked = work
+    for id in checked.seen { require checked.seen.contains(id) }
+    require checked.seen.len() == 4
+    return 0
+}

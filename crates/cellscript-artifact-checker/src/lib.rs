@@ -1,5 +1,8 @@
+pub mod allocated_values;
 mod bindings;
 pub mod bounded_nested;
+mod cell_data_view;
+pub mod cell_selection;
 mod checker;
 pub mod code_origin;
 pub mod constant_values;
@@ -16,6 +19,7 @@ mod generic_projection;
 mod instance_machine;
 pub mod instance_policy;
 pub mod interface;
+mod nested_machine;
 pub mod open_handle_policy;
 mod policy;
 mod policy_machine;

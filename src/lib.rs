@@ -3,6 +3,7 @@
 #![cfg_attr(feature = "wasm", allow(dead_code))]
 
 pub(crate) mod aggregate_lowering;
+mod allocated_values;
 pub mod artifact;
 pub mod assumptions;
 pub mod ast;
@@ -13,6 +14,8 @@ mod commitment_contract;
 // which pull native I/O (mio/std::net) that wasm32 cannot link. The
 // pure compiler core (lexer/parser/types/flow/ir/codegen/proof_plan)
 // stays ungated and is what the browser playground calls.
+mod cell_data_view;
+pub mod cell_selection;
 #[cfg(not(feature = "wasm"))]
 pub mod cli;
 pub mod codegen;
@@ -24,6 +27,7 @@ pub mod docgen;
 pub mod edition;
 pub mod error;
 pub mod executable_surface;
+pub mod fixed_cell_builder;
 pub mod flow;
 pub mod fmt;
 pub mod frontend;
@@ -34,6 +38,8 @@ pub mod interface;
 pub mod ir;
 pub mod lexer;
 pub mod lsp;
+pub mod nested_builder;
+mod nested_values;
 pub mod optimize;
 pub mod package;
 pub mod parser;
@@ -246,7 +252,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
-const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v70-0.32-vector-cardinality";
+const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v105-0.32-nested-transaction-data-views";
 pub const METADATA_SCHEMA_VERSION: u32 = 72;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 2;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -1919,6 +1925,7 @@ fn validate_transaction_view_handle_metadata(metadata: &CompileMetadata) -> Resu
             base_type,
             "InputView"
                 | "OutputView"
+                | "CellDataView"
                 | "CellDepView"
                 | "HeaderDepView"
                 | "WitnessArgsView"
@@ -9208,6 +9215,9 @@ pub fn visibility_migration_diagnostics(module: &ast::Module) -> Vec<CompileErro
             return None;
         }
         let span = match item {
+            ast::Item::DataShape(def) => def.span,
+            ast::Item::Collections(def) => def.span,
+            ast::Item::CellRoles(def) => def.span,
             ast::Item::Resource(def) => def.span,
             ast::Item::Shared(def) => def.span,
             ast::Item::Receipt(def) => def.span,
@@ -9390,7 +9400,10 @@ fn browser_fail_closed_metadata(
                 category: "runtime".to_string(),
                 feature: feature.clone(),
                 status: "fail-closed".to_string(),
-                detail: format!("the browser compiler reports '{feature}' as an explicit fail-closed runtime path"),
+                detail: executable_surface::experimental_artifact_admission_detail(&feature).map_or_else(
+                    || format!("the browser compiler reports '{feature}' as an explicit fail-closed runtime path"),
+                    str::to_owned,
+                ),
             });
         }
     }
@@ -10529,6 +10542,23 @@ fn collect_body_scope(body: &ir::IrBody, used_types: &mut BTreeSet<String>, pend
 
 fn collect_instruction_scope(instruction: &ir::IrInstruction, used_types: &mut BTreeSet<String>, pending_functions: &mut Vec<String>) {
     match instruction {
+        ir::IrInstruction::AllocatedValue(op) => {
+            for member in &op.declaration.members {
+                let types = match &member.kind {
+                    ast::ValueCollectionKind::Vec(value) | ast::ValueCollectionKind::OrderedSet(value) => vec![value],
+                    ast::ValueCollectionKind::OrderedMap { key, value } => vec![key, value],
+                };
+                for ty in types {
+                    collect_ir_type_named_types(&ir::ast_type_to_ir(ty), used_types);
+                }
+            }
+            if let Some(dest) = &op.dest {
+                collect_ir_type_named_types(&dest.ty, used_types);
+            }
+            for operand in op.owner.iter().chain(&op.args) {
+                collect_operand_named_types(operand, used_types);
+            }
+        }
         ir::IrInstruction::LoadConst { dest, .. } => collect_ir_type_named_types(&dest.ty, used_types),
         ir::IrInstruction::LoadVar { dest, .. } => collect_ir_type_named_types(&dest.ty, used_types),
         ir::IrInstruction::StoreVar { src, .. } => collect_operand_named_types(src, used_types),
@@ -10624,6 +10654,16 @@ fn collect_instruction_scope(instruction: &ir::IrInstruction, used_types: &mut B
             }
         }
         ir::IrInstruction::BoundedOutputEnd { index } => collect_operand_named_types(index, used_types),
+        ir::IrInstruction::VerifyExactCellRoles { contract, .. } => {
+            used_types.extend(contract.roles.iter().map(|role| role.type_name.clone()));
+        }
+        ir::IrInstruction::ReadExactCellRole { dest, selection, index, .. } => {
+            collect_ir_type_named_types(&dest.ty, used_types);
+            collect_operand_named_types(selection, used_types);
+            if let Some(index) = index {
+                collect_operand_named_types(index, used_types);
+            }
+        }
         ir::IrInstruction::Call { dest, func, args } => {
             if let Some(dest) = dest {
                 collect_ir_type_named_types(&dest.ty, used_types);
@@ -11148,6 +11188,33 @@ fn runtime_view_provenance_by_var(body: &ir::IrBody) -> HashMap<usize, RuntimeVi
     for block in &body.blocks {
         for instruction in &block.instructions {
             match instruction {
+                ir::IrInstruction::FieldAccess { dest, obj: ir::IrOperand::Var(src), field }
+                    if field == "data" && matches!(&dest.ty, ir::IrType::Named(name) if cell_data_view::schema(name).is_some()) =>
+                {
+                    // Helper parameters retain their encoded source/index at
+                    // runtime. Their nominal InputView/OutputView type cannot
+                    // distinguish global from group coordinates; do not invent
+                    // a concrete source when the caller is outside this body.
+                    let provenance = values.get(&src.id).cloned().unwrap_or_else(|| RuntimeViewProvenance {
+                        resolved_source: "SourceView".to_string(),
+                        index: runtime_scalar_dynamic(format!("{}.index", src.name), Some(u64::from(u32::MAX))),
+                    });
+                    values.insert(dest.id, provenance);
+                }
+                ir::IrInstruction::ReadExactCellRole { dest, role, read, .. } if read.indexed() => {
+                    let input = *read == cell_selection::Read::Input;
+                    values.insert(
+                        dest.id,
+                        RuntimeViewProvenance {
+                            resolved_source: if input { "Input" } else { "Output" }.into(),
+                            // An ordinal selects a record; it is not the resulting
+                            // global index. Preserve that distinction for builders.
+                            // Preserve the existing source-view ABI bound. The
+                            // stricter scan bound remains in the typed catalog.
+                            index: runtime_scalar_dynamic(format!("{}.role{role}.global_index", dest.name), Some(u64::from(u32::MAX))),
+                        },
+                    );
+                }
                 ir::IrInstruction::Call { dest: Some(dest), func, args } => {
                     let Some(source) = runtime_source_for_constructor(func) else {
                         continue;
@@ -11191,6 +11258,30 @@ fn body_transaction_view_handles(scope_kind: &str, scope_name: &str, body: &ir::
     for block in &body.blocks {
         for instruction in &block.instructions {
             let (dest, explicit_source, inherited_source, runtime_source, source_origin, source_binding) = match instruction {
+                ir::IrInstruction::FieldAccess { dest, obj: ir::IrOperand::Var(src), field }
+                    if field == "data" && matches!(&dest.ty, ir::IrType::Named(name) if cell_data_view::schema(name).is_some()) =>
+                {
+                    (
+                        dest,
+                        None,
+                        Some(sources.get(&src.id).cloned().unwrap_or_else(|| "SourceView".to_string())),
+                        None,
+                        "inherited-source-view",
+                        Some(src.name.clone()),
+                    )
+                }
+                ir::IrInstruction::ReadExactCellRole { dest, selection: ir::IrOperand::Var(selection), read, .. }
+                    if read.indexed() =>
+                {
+                    (
+                        dest,
+                        Some(if *read == cell_selection::Read::Input { "Input" } else { "Output" }.to_string()),
+                        None,
+                        None,
+                        "inherited-source-view",
+                        Some(selection.name.clone()),
+                    )
+                }
                 ir::IrInstruction::Call { dest: Some(dest), func, args } => {
                     let inherited = args.first().and_then(|operand| match operand {
                         ir::IrOperand::Var(var) => sources.get(&var.id).cloned(),
@@ -11256,7 +11347,9 @@ fn transaction_view_handle_type(ty: &ir::IrType) -> Option<String> {
     };
     let base = name.split('<').next().unwrap_or(name.as_str());
     match base {
-        "InputView" | "OutputView" | "CellDepView" | "HeaderDepView" | "WitnessArgsView" | "WitnessBytesView" => Some(name.clone()),
+        "InputView" | "OutputView" | "CellDepView" | "HeaderDepView" | "WitnessArgsView" | "WitnessBytesView" | "CellDataView" => {
+            Some(name.clone())
+        }
         "__ckb_input_out_point_ref" => Some("OutPoint".to_string()),
         "__ckb_lock_script_ref" | "__ckb_type_script_ref" => Some("ScriptView".to_string()),
         _ => None,
@@ -12452,15 +12545,9 @@ fn body_verifier_obligations(
     }
 
     for feature in fail_closed_runtime_features {
-        push_verifier_obligation(
-            &mut obligations,
-            &mut seen,
-            &scope,
-            "runtime-fail-closed",
-            feature,
-            "fail-closed",
-            "Generated code rejects this path instead of accepting an unimplemented runtime operation",
-        );
+        let detail = executable_surface::experimental_artifact_admission_detail(feature)
+            .unwrap_or("Generated code rejects this path instead of accepting an unimplemented runtime operation");
+        push_verifier_obligation(&mut obligations, &mut seen, &scope, "runtime-fail-closed", feature, "fail-closed", detail);
     }
 
     for check in body_state_transition_checks(body, flow_states, flow_state_fields, type_layouts, params, pure_const_returns) {
@@ -17076,6 +17163,48 @@ fn body_fail_closed_runtime_features(
     pure_const_returns: &HashMap<String, ir::IrConst>,
 ) -> Vec<String> {
     let mut features = BTreeSet::new();
+    if body
+        .blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .any(|instruction| matches!(instruction, ir::IrInstruction::AllocatedValue(_)))
+    {
+        features.insert("allocated-values-artifact-proof".into());
+    }
+    if params.iter().any(|param| matches!(&param.ty, ir::IrType::Named(name) if cell_data_view::transaction_schema(name).is_some())) {
+        // Passing a tagged coordinate is executable, but stable admission
+        // still needs complete caller-to-callee source/value reconstruction,
+        // including helpers that read only transaction metadata or no fields.
+        features.insert("cell-data-view-artifact-proof".to_string());
+    }
+    let nested_type = |name: &str| {
+        nested_values::is_nested_name(name)
+            || type_layouts.get(name).is_some_and(|fields| {
+                fields.values().any(|field| matches!(&field.ty, ir::IrType::Named(name) if nested_values::is_nested_name(name)))
+            })
+    };
+    if body
+        .blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .any(|instruction| matches!(instruction, ir::IrInstruction::VerifyExactCellRoles { .. }))
+    {
+        features.insert("exact-role-selection-artifact-proof".to_string());
+    }
+    if params.iter().any(|param| named_type_name(&param.ty).is_some_and(nested_type))
+        || body.cell_bindings.iter().any(|binding| nested_type(&binding.ty))
+        || body.blocks.iter().flat_map(|block| &block.instructions).any(|instruction| {
+            matches!(instruction, ir::IrInstruction::VerifyExactCellRoles { contract, .. }
+                if contract.profile == cell_selection::BOUNDED_PROFILE)
+                || matches!(instruction, ir::IrInstruction::FieldAccess { obj: ir::IrOperand::Var(var), field, .. }
+                    if named_type_name(&var.ty).and_then(|name| cell_data_view::schema(name)
+                        .or_else(|| (field == "data").then(|| cell_data_view::transaction_schema(name)).flatten())).is_some_and(nested_type))
+        })
+    {
+        // The executable codec slice is not a stable artifact proof. Retain
+        // this blocker until source/codec/output machine obligations bind.
+        features.insert("nested-values-artifact-proof".to_string());
+    }
     for operation in &body.bounded_collection_ops {
         if operation.runtime_contract.is_some() {
             continue;
@@ -17138,6 +17267,12 @@ fn body_fail_closed_runtime_features(
                     }
                 }
                 ir::IrInstruction::FieldAccess { obj, field, .. } => {
+                    if matches!(obj, ir::IrOperand::Var(var) if matches!(&var.ty, ir::IrType::Named(name)
+                        if cell_data_view::schema(name).is_some() || (field == "data" && cell_data_view::transaction_schema(name).is_some())))
+                    {
+                        features.insert("cell-data-view-artifact-proof".to_string());
+                        continue;
+                    }
                     if !is_executable_schema_field_access(obj, field, param_schema_vars, type_layouts)
                         && !is_executable_aggregate_field_access(obj, field, &prelude_availability, type_layouts)
                         && !is_executable_tuple_call_return_field_access(obj, field, &prelude_availability)
@@ -17527,6 +17662,24 @@ fn metadata_prelude_availability(
     for block in &body.blocks {
         for instruction in &block.instructions {
             match instruction {
+                ir::IrInstruction::AllocatedValue(op) => {
+                    if let Some(dest) = &op.dest
+                        && metadata_ir_type_fixed_width(&dest.ty, type_layouts).is_some()
+                    {
+                        availability.fixed_value_vars.insert(dest.id);
+                        if metadata_fixed_scalar_size(&dest.ty).is_some() {
+                            availability.scalar_vars.insert(dest.id);
+                            if dest.ty == ir::IrType::U64 {
+                                availability.u64_value_vars.insert(dest.id);
+                                availability.u64_operand_vars.insert(dest.id);
+                            }
+                        } else {
+                            availability
+                                .aggregate_pointer_vars
+                                .insert(dest.id, MetadataAggregatePointerSource { ty: dest.ty.clone() });
+                        }
+                    }
+                }
                 ir::IrInstruction::StoreVar { name, src: ir::IrOperand::Var(src) } => {
                     if availability.stack_collection_vars.contains(&src.id) {
                         named_stack_collections.insert(name.clone(), src.id);
@@ -17587,11 +17740,15 @@ fn metadata_prelude_availability(
                 ir::IrInstruction::Call { dest: Some(dest), func, .. }
                     if type_layouts.fixed_struct_returns.get(func) == Some(&dest.ty) =>
                 {
-                    // Only local fixed ordinary-struct helpers use caller-owned
-                    // result storage. Cell, enum and dynamic returns retain their
-                    // separate admission rules.
+                    // Local fixed struct/wide-byte helpers use caller-owned
+                    // result storage; short byte arrays retain the scalar ABI.
+                    // Cell, enum and dynamic returns have separate rules.
                     availability.fixed_value_vars.insert(dest.id);
-                    availability.aggregate_pointer_vars.insert(dest.id, MetadataAggregatePointerSource { ty: dest.ty.clone() });
+                    if matches!(&dest.ty, ir::IrType::Array(inner, count) if **inner == ir::IrType::U8 && (1..=8).contains(count)) {
+                        availability.scalar_vars.insert(dest.id);
+                    } else {
+                        availability.aggregate_pointer_vars.insert(dest.id, MetadataAggregatePointerSource { ty: dest.ty.clone() });
+                    }
                 }
                 ir::IrInstruction::Call { dest: Some(dest), func, .. } if pure_const_returns.contains_key(func) => {
                     let value = pure_const_returns.get(func).expect("guarded pure const return");
@@ -17775,7 +17932,12 @@ fn metadata_prelude_availability(
                     {
                         continue;
                     }
-                    let layout = if param_schema_vars.contains(&obj.id) {
+                    let layout = if let ir::IrType::Named(name) = &obj.ty
+                        && let Some(schema) = cell_data_view::schema(name)
+                    {
+                        let Some(layout) = type_layouts.get(schema).and_then(|fields| fields.get(field)).cloned() else { continue };
+                        layout
+                    } else if param_schema_vars.contains(&obj.id) {
                         let Some(type_name) = named_type_name(&obj.ty) else {
                             continue;
                         };
@@ -18847,6 +19009,12 @@ fn body_ckb_runtime_features(
                     features.insert("ckb-cell-data-decode".to_string());
                     features.insert("ckb-script-identity-requirements".to_string());
                 }
+                ir::IrInstruction::VerifyExactCellRoles { .. } => {
+                    features.insert("ckb-bounded-exact-role-selection-v1".to_string());
+                    features.insert("ckb-source-view".to_string());
+                    features.insert("ckb-cell-data-decode".to_string());
+                    features.insert("ckb-script-identity-requirements".to_string());
+                }
                 ir::IrInstruction::BoundedPlanLoad { .. } => {
                     features.insert("ckb-bounded-output-plan-v1".to_string());
                     features.insert("ckb-witness-args-input-type".to_string());
@@ -19764,7 +19932,7 @@ fn body_ckb_runtime_accesses(
     _name: &str,
     body: &ir::IrBody,
     _cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-    _type_layouts: &MetadataTypeLayouts,
+    type_layouts: &MetadataTypeLayouts,
 ) -> Vec<CkbRuntimeAccessMetadata> {
     let mut accesses = Vec::new();
     let view_provenance = runtime_view_provenance_by_var(body);
@@ -19784,6 +19952,30 @@ fn body_ckb_runtime_accesses(
     }
     for block in &body.blocks {
         for instruction in &block.instructions {
+            if let ir::IrInstruction::VerifyExactCellRoles { contract, .. } = instruction {
+                accesses.extend(cell_selection::runtime_accesses(contract, type_layouts));
+            }
+            if let ir::IrInstruction::FieldAccess { obj: ir::IrOperand::Var(view), .. } = instruction
+                && let ir::IrType::Named(name) = &view.ty
+                && let Some(schema) = cell_data_view::schema(name)
+            {
+                let width = metadata_ir_type_fixed_width(&ir::IrType::Named(schema.to_string()), type_layouts);
+                let provenance = view_provenance.get(&view.id);
+                let source = provenance.map(|value| value.resolved_source.as_str()).unwrap_or("SourceView");
+                accesses.push(runtime_access_metadata(
+                    "typed-cell-data",
+                    "LOAD_CELL_DATA",
+                    source,
+                    view.name.clone(),
+                    source,
+                    "inherited-source-view",
+                    Some(view.name.clone()),
+                    provenance.map(|value| value.index.clone()).unwrap_or_else(|| {
+                        runtime_scalar_from_operand(Some(&ir::IrOperand::Var(view.clone())), Some(u64::from(u32::MAX)))
+                    }),
+                    width.map_or_else(runtime_range_whole_value, |width| runtime_range_fixed(width as u64)),
+                ));
+            }
             if let ir::IrInstruction::BoundedCellLoad { index, max_elements, element_type, element_width, .. } = instruction {
                 for (operation, syscall) in [
                     ("bounded-type-group-input-data", "LOAD_CELL_DATA"),
@@ -20627,6 +20819,11 @@ fn metadata_type_layouts(ir: &ir::IrModule) -> MetadataTypeLayouts {
         .filter_map(|item| {
             let ir::IrItem::PureFn(function) = item else { return None };
             let ty = function.return_type.as_ref()?;
+            if matches!(ty, ir::IrType::Hash | ir::IrType::Address)
+                || matches!(ty, ir::IrType::Array(inner, count) if **inner == ir::IrType::U8 && (1..=64).contains(count))
+            {
+                return Some((function.name.clone(), ty.clone()));
+            }
             let ir::IrType::Named(name) = ty else { return None };
             let definition = type_defs.get(name)?;
             if definition.kind != ir::IrTypeKind::Struct
@@ -21431,6 +21628,23 @@ fn molecule_type_for_ir_type(
         ir::IrType::Hash => Some(molecule_fixed_array_alias(aliases, "CellScriptHash", "byte", 32)),
         ir::IrType::Named(name) if name == "String" => Some(molecule_bytes_alias(aliases, "CellScriptString")),
         ir::IrType::Named(name) if name == "Vec" => Some(molecule_dynvec_alias(aliases, "CellScriptUnknownVec", "byte")),
+        ir::IrType::Named(name) if matches!(nested_values::parsed(name), Some(nested_values::NestedType::Values(_))) => {
+            let nested_values::NestedType::Values(values) = nested_values::parsed(name)? else { return None };
+            let item_field = format!("{field}NestedItem");
+            let item =
+                molecule_type_for_named_type(&values.element, owner, &item_field, type_defs, aliases, structs, emitted, visiting)?;
+            // Bounds are part of the schema identity even though Molecule's
+            // vector declaration itself does not express count/byte limits.
+            let alias = format!(
+                "{}{}NestedN{}P{}B{}",
+                molecule_identifier(owner),
+                molecule_identifier(field),
+                values.max_items,
+                values.max_payload_bytes,
+                values.max_total_bytes
+            );
+            Some(molecule_dynvec_alias(aliases, &alias, &item))
+        }
         ir::IrType::Named(name) if name.starts_with("Vec<") && name.ends_with('>') => {
             let inner = name.strip_prefix("Vec<")?.strip_suffix('>')?;
             let inner_ty = molecule_type_for_named_type(inner, owner, field, type_defs, aliases, structs, emitted, visiting)?;

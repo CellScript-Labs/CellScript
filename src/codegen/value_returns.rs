@@ -1,4 +1,4 @@
-//! Fixed ordinary struct results use an explicit caller-owned output buffer.
+//! Fixed ordinary struct and bounded byte-value results use an explicit caller-owned output buffer.
 //! The hidden pointer follows all ordinary machine arguments (including their
 //! lengths/type hashes), so normal outgoing-stack ownership applies. No pointer
 //! into a callee frame or register tuple escapes as a nominal struct value.
@@ -57,6 +57,11 @@ impl CodeGenerator {
     }
 
     pub(super) fn fixed_struct_return_width(&self, ty: &IrType) -> Option<usize> {
+        match ty {
+            IrType::Hash | IrType::Address => return Some(32),
+            IrType::Array(inner, count) if **inner == IrType::U8 && (9..=64).contains(count) => return Some(*count),
+            _ => {}
+        }
         let IrType::Named(name) = ty else { return None };
         if self.cell_type_names.contains(name) || self.enum_fixed_sizes.contains_key(name) || !self.type_layouts.contains_key(name) {
             return None;
@@ -66,6 +71,56 @@ impl CodeGenerator {
 
     pub(super) fn current_return_buffer_bytes(&self) -> Option<usize> {
         self.current_function.as_ref().and_then(|name| self.callable_abis.get(name)).and_then(|abi| abi.return_buffer_bytes)
+    }
+
+    /// Short byte arrays retain the one-word argument/result ABI. Their local
+    /// representation may nevertheless be a copied collection element or a
+    /// schema field, so pack the bytes rather than passing that local pointer.
+    /// The destination is an ABI register or t0; t3/t4 are scratch. Other
+    /// argument registers remain live across this conversion.
+    pub(super) fn emit_small_byte_array_register(&mut self, register: &str, operand: &IrOperand) -> bool {
+        let width = match operand {
+            IrOperand::Var(var) => match &var.ty {
+                IrType::Array(inner, count) if **inner == IrType::U8 && (1..=8).contains(count) => *count,
+                _ => return false,
+            },
+            IrOperand::Const(IrConst::Array(items))
+                if (1..=8).contains(&items.len()) && items.iter().all(|item| matches!(item, IrConst::U8(_))) =>
+            {
+                items.len()
+            }
+            _ => return false,
+        };
+        let Some(mut source) = self.expected_fixed_byte_source(operand, width) else {
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return true;
+        };
+        // FieldAccess already checked and saved this field's pointer. Replaying
+        // its parent decoder here would clobber earlier ABI arguments.
+        if matches!(source, ExpectedFixedByteSource::SchemaField(_))
+            && let IrOperand::Var(var) = operand
+        {
+            source = ExpectedFixedByteSource::PointerBytes { var_id: var.id, width };
+        }
+        if let ExpectedFixedByteSource::LoadedBytes { size_offset, .. } | ExpectedFixedByteSource::ParamBytes { size_offset, .. } =
+            &source
+        {
+            self.emit_stack_load("t5", *size_offset);
+            self.emit(format!("li t6, {width}"));
+            let valid = self.fresh_label("short_bytes_size_ok");
+            self.emit(format!("beq t5, t6, {valid}"));
+            self.emit_fail(CellScriptRuntimeError::ExactSizeMismatch);
+            self.emit_label(&valid);
+        }
+        self.emit(format!("li {register}, 0"));
+        for index in 0..width {
+            self.emit_fixed_byte_source_byte_to("t3", "t4", &source, index);
+            if index != 0 {
+                self.emit(format!("slli t3, t3, {}", index * 8));
+            }
+            self.emit(format!("or {register}, {register}, t3"));
+        }
+        true
     }
 
     pub(super) fn emit_value_return(&mut self, operand: &IrOperand) -> Result<bool> {
@@ -87,6 +142,9 @@ impl CodeGenerator {
                 ExpectedFixedByteSource::PointerBytes { var_id, .. }
                 | ExpectedFixedByteSource::ParamBytes { var_id, .. }
                 | ExpectedFixedByteSource::LoadedBytes { var_id, .. } => (*var_id, 0),
+                // IR materializes returned byte constants as typed locals;
+                // LoadConst stores their rodata pointer in the ordinary slot.
+                ExpectedFixedByteSource::Const(_) => (value.id, 0),
                 ExpectedFixedByteSource::SchemaField(field) if self.type_fixed_sizes.contains_key(&field.type_name) => {
                     (field.obj_var_id, field.layout.offset)
                 }

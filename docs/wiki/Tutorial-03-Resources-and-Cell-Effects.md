@@ -124,6 +124,15 @@ and callees must be `Pure` or `ReadOnly` helpers with compatible `&T`
 parameters. Borrowing grants observation, never permission to consume, create,
 replace, or authorize a Cell.
 
+Use this explicit region when the borrow lifetime or a read-only helper call
+needs to be visible. Ordinary permitted field reads do not need an extra block
+merely to read a value. Transaction data views and nested decoded views are
+separate observation contracts; their experimental restrictions do not grant
+the resource-borrow helper ABI. The adopted
+[#47–#49 authoring direction](../CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md#borrowing-and-helper-composition)
+requires checked helper composition with each view's own source, lifetime and
+authority preserved before stable acceptance. That work is not yet complete.
+
 ## Flows Use Explicit State Fields
 
 State is ordinary schema data. Declare the state field yourself, usually as a

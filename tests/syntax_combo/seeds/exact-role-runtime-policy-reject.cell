@@ -1,0 +1,14 @@
+// audit: phase=reject_compile
+// audit: contains=complete Script hash must be a source string literal
+module cellscript::audit::exact_role_runtime_policy_reject
+
+resource Token has store { id: u64 }
+
+action verify(witness selected_type: Hash) -> u64 {
+    verification
+    ckb::verify_cell_roles(64, 64, 32, 32768,
+        ckb::exact_cell_role<Token>(selected_type,
+            "0x3333333333333333333333333333333333333333333333333333333333333333",
+            "id", "observe", "preserve", 0, 32, 0, 32))
+    return 0
+}

@@ -2,7 +2,9 @@
 //! Every instruction and edge from entry through argument reception is checked;
 //! names only locate blocks and never substitute for executable evidence.
 use super::*;
+mod nested;
 mod spawn;
+pub(crate) use nested::verify as verify_nested;
 pub(crate) use spawn::verify as verify_spawn;
 
 impl Cursor<'_> {
@@ -156,27 +158,7 @@ pub(super) fn verify(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result
             {
                 return Err(invalid("single-entry witness placement differs"));
             }
-            let loaded = label(".Lentry_witness_loaded_")?;
-            let fallback = label(".Lentry_witness_try_group_output_")?;
-            c.syscall(0x0100000000000001, false)?;
-            c.b(10, 0, 0, loaded)?;
-            c.syscall(0x0100000000000001, true)?;
-            c.li(5, 1)?;
-            c.b(10, 5, 0, fallback)?;
-            c.jump(fail)?;
-            c.at(fallback)?;
-            c.syscall(0x0100000000000002, false)?;
-            c.b(10, 0, 0, loaded)?;
-            c.jump(fail)?;
-            c.at(loaded)?;
-            c.load(5, 2, 0, false)?;
-            c.li(6, 4097)?;
-            c.r(7, 5, 6, 0x3000)?;
-            let buffer = label(".Lentry_witness_buffer_ok_")?;
-            c.b(7, 0, 1, buffer)?;
-            c.jump(fail)?;
-            c.at(buffer)?;
-            normalize(&mut c, fail, &label)?;
+            load_witness(&mut c, fail, &label)?;
             // The preceding certified store puts t1 into size[sp]; local
             // store/load forwarding may retain that exact value in t0.
             c.expect(|w| is_ld(w, 5, 2, 0) || is_addi(w, 5, 6, 0))?;
@@ -308,4 +290,29 @@ fn normalize(c: &mut Cursor<'_>, fail: u64, label: &impl Fn(&str) -> Result<u64,
     c.jump(copy)?;
     c.at(copied)?;
     c.store(6, 2, 0, false)
+}
+
+fn load_witness(c: &mut Cursor<'_>, fail: u64, label: &impl Fn(&str) -> Result<u64, CheckerError>) -> Result<(), CheckerError> {
+    let loaded = label(".Lentry_witness_loaded_")?;
+    let fallback = label(".Lentry_witness_try_group_output_")?;
+    c.syscall(0x0100000000000001, false)?;
+    c.b(10, 0, 0, loaded)?;
+    c.syscall(0x0100000000000001, true)?;
+    c.li(5, 1)?;
+    c.b(10, 5, 0, fallback)?;
+    c.jump(fail)?;
+    c.at(fallback)?;
+    c.syscall(0x0100000000000002, false)?;
+    c.b(10, 0, 0, loaded)?;
+    c.jump(fail)?;
+    c.at(loaded)?;
+    c.load(5, 2, 0, false)?;
+    c.li(6, 4097)?;
+    c.r(7, 5, 6, 0x3000)?;
+    let buffer = label(".Lentry_witness_buffer_ok_")?;
+    c.b(7, 0, 1, buffer)?;
+    c.jump(fail)?;
+    c.at(buffer)?;
+    normalize(c, fail, label)?;
+    Ok(())
 }

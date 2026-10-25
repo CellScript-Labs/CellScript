@@ -662,6 +662,15 @@ pub(super) fn machine_layout_evidence(
         blocks,
         edges,
         symbols,
+        symbol_order: plan
+            .parsed
+            .text_ops
+            .iter()
+            .filter_map(|op| match &op.op {
+                AsmOp::Label(label) => Some(label.clone()),
+                _ => None,
+            })
+            .collect(),
         globals: plan.parsed.globals.clone(),
         entry_frame_sizes: entry_frame_sizes.clone(),
         fixed_result_frames: BTreeMap::new(),
@@ -2903,7 +2912,7 @@ mod tests {
             blocks: Vec::new(),
         };
 
-        generator.prepare_function_layout(&body, &params);
+        generator.prepare_function_layout(&body, &params).unwrap();
 
         let loaded_size_offset =
             generator.cell_buffer_size_offsets.get(&binding.id).copied().expect("consumed input should have size slot");

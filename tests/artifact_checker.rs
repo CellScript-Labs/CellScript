@@ -6,6 +6,15 @@ use cellscript_artifact_checker::{
 };
 use serde_json::Value;
 
+#[path = "support/collection_coordinate_helpers.rs"]
+mod collection_coordinate_helpers;
+
+#[path = "support/borrowed_collection_reads.rs"]
+mod borrowed_collection_reads;
+
+#[path = "artifact_checker/allocated_wide_transport.rs"]
+mod allocated_wide_transport;
+
 const FIXTURE_SOURCE: &str = r#"
 module artifact_checker_fixture
 
@@ -18,6 +27,1908 @@ action main(value: u64) -> u64 {
         return increment(value)
 }
 "#;
+
+fn cached_nested_source(hot: bool) -> String {
+    let reads = (0..if hot { 48 } else { 2 })
+        .map(|index| {
+            let method = ["cell_data_u8", "cell_data_u32_le", "cell_data_u64_le"][index % 3];
+            format!("require ckb::{method}(view, {index}) == 0\n")
+        })
+        .collect::<String>();
+    format!(
+        r#"
+module nested_cache::proof
+resource Token has store {{ id: u64 }}
+action verify(witness items: NestedValues<Vec<u8>, 2, 8, 32>) -> u64 {{
+    verification
+    let first = items[0]
+    let view = ckb::input<Token>(0)
+    {reads}
+    require view.type_hash == view.lock_hash
+    require first[0] == 170
+    return 0
+}}
+"#
+    )
+}
+
+#[test]
+fn exact_cached_reads_preserve_borrowed_caches_across_helpers_and_cfg_joins() {
+    for hot in [false, true] {
+        let source = cached_nested_source(hot)
+            .replace("action verify", "fn read_one(index: u64) -> u64 { let view = ckb::input<Token>(index)\nreturn ckb::cell_data_u64_le(view, 0) }\nfn read_twice(index: u64) -> u64 { return read_one(index) + read_one(index) }\naction verify")
+            .replace("let view = ckb::input<Token>(0)", "let view = ckb::input<Token>(0)\nif first.len() > 0 { require read_twice(0) == 0 }\nrequire read_one(0) == 0");
+        for opt_level in [0, 3] {
+            let valid = Fixture::from_result(
+                compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
+                    .unwrap_or_else(|error| panic!("cache helper hot={hot} O{opt_level}: {error}")),
+            );
+            let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+            let helper = valid
+                .record
+                .entries
+                .iter()
+                .find(|entry| entry.kind == cellscript_artifact_checker::EntryKind::Helper && entry.name.ends_with("read_one"))
+                .unwrap();
+            let ranges = valid
+                .record
+                .blocks
+                .iter()
+                .filter(|block| block.owner_entry == helper.id)
+                .map(|block| &block.range)
+                .collect::<Vec<_>>();
+            let setup = elf
+                .instructions
+                .iter()
+                .find(|instruction| {
+                    ranges.iter().any(|range| range.contains(instruction.address))
+                        && instruction.word == ((27 << 15) | (12 << 7) | 0x13)
+                })
+                .unwrap();
+            let mut changed = valid.clone();
+            // A helper cannot substitute another incoming register for the
+            // proved ambient cache, even if all outer hashes are recomputed.
+            changed.replace_machine_word(setup.address, (26 << 15) | (12 << 7) | 0x13);
+            assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+        }
+    }
+}
+
+#[test]
+fn exact_cached_reads_bind_initialization_regions_and_complete_helper_bodies() {
+    for (opt_level, hot) in [(0, false), (3, true)] {
+        let valid = Fixture::from_result(
+            compile(
+                &cached_nested_source(hot),
+                CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            )
+            .unwrap_or_else(|error| panic!("cache hot={hot}: {error}")),
+        );
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let cache_blocks = valid
+            .record
+            .blocks
+            .iter()
+            .filter(|block| {
+                block.owner_entry == "runtime:__cellscript_exact_read_cached"
+                    || ["runtime:__ckb_cell_data_u8", "runtime:__ckb_cell_data_u32_le", "runtime:__ckb_cell_data_u64_le"]
+                        .contains(&block.owner_entry.as_str())
+            })
+            .collect::<Vec<_>>();
+        let mut mutations = 0;
+        for instruction in &elf.instructions {
+            if !cache_blocks.iter().any(|block| block.range.contains(instruction.address)) {
+                continue;
+            }
+            let word = instruction.word;
+            let mask = match word & 0x7f {
+                0x63 => 1 << 12,
+                0x03 | 0x13 => 1 << 20,
+                0x23 => 1 << 7,
+                0x33 => 1 << 20,
+                _ => continue,
+            };
+            let mut changed = valid.clone();
+            changed.replace_machine_word(instruction.address, word ^ mask);
+            assert!(changed.check().is_err(), "cache hot={hot} mutation accepted at {:#x}", instruction.address);
+            mutations += 1;
+        }
+        assert!(mutations > 180);
+        let entry = valid
+            .record
+            .typed_semantics
+            .entries
+            .iter()
+            .find(|entry| entry.params.iter().any(|param| param.ty.contains("NestedValues<")))
+            .unwrap();
+        let owned =
+            valid.record.blocks.iter().filter(|block| block.owner_entry == entry.id).map(|block| &block.range).collect::<Vec<_>>();
+        let initialized = elf
+            .instructions
+            .iter()
+            .find(|instruction| {
+                owned.iter().any(|range| range.contains(instruction.address))
+                    && instruction.word >> 7 & 31 == 27
+                    && matches!(instruction.word & 0x7f, 0x13 | 0x33)
+            })
+            .unwrap()
+            .address;
+        let mut zero_stores = 0;
+        for instruction in &elf.instructions {
+            if instruction.address >= initialized || !owned.iter().any(|range| range.contains(instruction.address)) {
+                continue;
+            }
+            if instruction.word & 0x707f == 0x3023 && instruction.word >> 20 & 31 == 0 {
+                let mut changed = valid.clone();
+                changed.replace_machine_word(instruction.address, instruction.word | (2 << 20));
+                assert!(changed.check().is_err(), "cache initialization store was not proved");
+                zero_stores += 1;
+            }
+        }
+        assert_eq!(zero_stores, 6, "counter, last pointer and four valid flags");
+        let setup = elf
+            .instructions
+            .iter()
+            .find(|instruction| {
+                owned.iter().any(|range| range.contains(instruction.address)) && instruction.word == ((27 << 15) | (12 << 7) | 0x13)
+            })
+            .unwrap();
+        let mut changed = valid.clone();
+        changed.replace_machine_word(setup.address, setup.word | (8 << 20));
+        assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+        if !hot {
+            let mut missing_owner = valid.clone();
+            let writes = elf
+                .instructions
+                .iter()
+                .filter(|instruction| {
+                    instruction.address < setup.address
+                        && owned.iter().any(|range| range.contains(instruction.address))
+                        && instruction.word >> 7 & 31 == 27
+                        && matches!(instruction.word & 0x7f, 0x13 | 0x33 | 0x37)
+                })
+                .map(|instruction| (instruction.address, encode_addi(0, 0, 0)))
+                .collect::<Vec<_>>();
+            assert!(!writes.is_empty());
+            missing_owner.replace_machine_words(&writes);
+            let error = check_bundle_values(
+                &missing_owner.artifact,
+                &missing_owner.metadata,
+                &missing_owner.record,
+                &missing_owner.source_map,
+                &CheckerBudgets::default(),
+            )
+            .unwrap_err();
+            assert!(error.message.contains("public entry borrows an uninitialized"), "{error}");
+        }
+        let hash_entry = valid.record.entries.iter().find(|entry| entry.id == "runtime:__ckb_cell_type_hash").unwrap();
+        let target = valid.record.blocks.iter().find(|block| block.id == hash_entry.entry_block).unwrap().range.start;
+        let call = elf.control_flow.iter().find(|edge| edge.target == target).unwrap();
+        let output = elf
+            .instructions
+            .iter()
+            .rev()
+            .find(|instruction| {
+                instruction.address < call.address
+                    && instruction.address + 64 >= call.address
+                    && instruction.word >> 7 & 31 == 11
+                    && matches!(instruction.word & 0x7f, 0x13 | 0x33)
+            })
+            .unwrap();
+        let mut changed = valid.clone();
+        changed.replace_machine_word(output.address, (27 << 15) | (11 << 7) | 0x13);
+        assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+    }
+}
+
+fn selected_roles_source() -> String {
+    let source = include_str!("../examples/language/ckb/exact_role_verification.cell")
+        .replace("exact_cell_role<Receipt>", "exact_cell_role<Order>");
+    let call = source.split_once("    ckb::verify_cell_roles(").unwrap().1.split_once("    return 0").unwrap().0;
+    source.replacen("ckb::verify_cell_roles(", "let selected = ckb::select_cell_roles(", 1).replace(
+        "return 0",
+        &format!(
+            r#"
+    let other = ckb::select_cell_roles({call}
+    let alias = selected
+    let count = ckb::selected_input_count<Order>(alias, 0)
+    let input = ckb::selected_input<Order>(alias, 0, count - 1)
+    let output = ckb::selected_output<Order>(other, 0, 0)
+    let partner = ckb::selected_successor<Order>(selected, 0, 0)
+    require input.capacity == partner.capacity
+    require output.capacity == partner.capacity
+    return ckb::selected_output_count<Order>(selected, 0)
+    "#
+        ),
+    )
+}
+
+#[test]
+fn cell_data_field_instructions_reject_rebound_source_length_copy_and_branch_changes() {
+    let source = "module typed_data_proof\nresource Token has store { prefix: [u8; 256], padding: [u8; 216], id: u64, owner: Hash }\naction inspect() -> u64 { verification\nlet input = ckb::input<Token>(0)\nrequire input.data.owner == Hash::zero()\nreturn input.data.id }";
+    for opt_level in [0, 3] {
+        let valid = Fixture::from_result(
+            compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+        );
+        let ranges = valid
+            .record
+            .blocks
+            .iter()
+            .flat_map(|block| {
+                block
+                    .exact_role_labels
+                    .iter()
+                    .filter(|label| label.starts_with(".Lexact_role_data_") && !label.ends_with("_done"))
+                    .map(|label| {
+                        let end = valid
+                            .record
+                            .blocks
+                            .iter()
+                            .find(|block| block.exact_role_labels.contains(&format!("{label}_done")))
+                            .unwrap()
+                            .range
+                            .start;
+                        block.range.start..end
+                    })
+            })
+            .collect::<Vec<_>>();
+        assert!(ranges.len() >= 3);
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let mut mutations = 0;
+        for instruction in &elf.instructions {
+            if !ranges.iter().any(|range| range.contains(&instruction.address)) {
+                continue;
+            }
+            let word = instruction.word;
+            let mask = match word & 0x7f {
+                0x03 | 0x13 | 0x1b => 1 << 20,
+                0x23 => 1 << 7,
+                0x33 => 1 << 20,
+                0x37 => 1 << 12,
+                0x63 => 1 << 12,
+                _ => continue,
+            };
+            let mut changed = valid.clone();
+            changed.replace_machine_word(instruction.address, word ^ mask);
+            assert!(changed.check().is_err(), "O{opt_level} accepted changed data field at {:#x}", instruction.address);
+            mutations += 1;
+        }
+        assert!(mutations > 150, "source tags, exact size, wide copy and scalar assembly must all be exercised");
+    }
+}
+
+#[test]
+fn cell_view_helper_parameters_require_admission_blocker_without_data_projection() {
+    let source = include_str!("../examples/language/ckb/typed_cell_predicate.cell")
+        .replace("before.data.id == after.data.id && before.data.owner == after.data.owner", "true");
+    let mut changed = Fixture::from_source(&source);
+    changed.metadata["runtime"]["fail_closed_runtime_features"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|feature| feature.as_str() != Some("cell-data-view-artifact-proof"));
+    changed.rebind_sidecars();
+    assert_code(&changed, CheckerRejectionCode::V2410MetadataBindingMismatch);
+}
+
+#[test]
+fn cell_view_helpers_compose_with_branches_repeated_calls_and_wide_arguments() {
+    let base = include_str!("../examples/language/ckb/typed_cell_predicate.cell");
+    let branched = base.replace(
+        "return matches(before, after)",
+        "if before.capacity > 0 { return matches(before, after) && matches(before, after) }\nreturn matches(before, after)",
+    );
+    let wide = base
+        .replace("before: InputView", "owner: Hash, before: InputView")
+        .replace("return before.data.id", "return owner == before.data.owner && before.data.id")
+        .replace("matches(before", "matches(owner, before")
+        .replace("forward(ckb::input", "forward(ckb::input<Token>(1).data.owner, ckb::input");
+    let same_kind = base.replace("OutputView<Token>", "InputView<Token>").replace("ckb::output<Token>(0)", "ckb::input<Token>(0)");
+    let fixed_result = base
+        .replace(
+            "fn forward(before: InputView<Token>, after: OutputView<Token>) -> bool",
+            "fn forward(before: InputView<Token>, after: OutputView<Token>) -> Check",
+        )
+        .replace("return matches(before, after)", "return Check { ok: matches(before, after) }")
+        .replace("action inspect()", "struct Check { ok: bool }\naction inspect()")
+        .replace("ckb::output<Token>(0))", "ckb::output<Token>(0)).ok");
+    for (case, source) in [&branched, &wide, &same_kind, &fixed_result].into_iter().enumerate() {
+        for opt_level in [0, 3] {
+            Fixture::from_result(
+                compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
+                    .unwrap_or_else(|error| panic!("view composition case={case} O{opt_level}: {error}")),
+            );
+        }
+    }
+}
+
+#[test]
+fn cell_view_values_bind_constructors_aliases_and_caller_slot_lifetimes() {
+    let source = "module coordinates\nresource Token has store { id: u64 }\nfn inspect(before: InputView<Token>, after: OutputView<Token>) -> bool { let input = before\nlet data = input.data\nlet alias = data\nreturn alias.id == after.data.id }\naction verify(index: u64, noise: u64) -> u64 { verification\nif noise == 0 { return 0 }\nlet first = ckb::input<Token>(index)\nlet second = ckb::input<Token>(0)\nlet before = first\nlet ordinary = index + 1\nrequire ordinary > 0\nrequire inspect(before, ckb::output<Token>(0))\nrequire second.capacity > 0\nreturn 0 }";
+    for opt_level in [0, 3] {
+        let valid = Fixture::from_result(
+            compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+        );
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let reject = |fixture: &Fixture| {
+            let error = check_bundle_values(
+                &fixture.artifact,
+                &fixture.metadata,
+                &fixture.record,
+                &fixture.source_map,
+                &CheckerBudgets::default(),
+            )
+            .unwrap_err();
+            assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{error}");
+            assert!(error.message.contains("Cell view") || error.message.contains("exact-role"), "{error}");
+        };
+        // Alter the shared constructor's index range, source tag and packing.
+        let helper = valid.record.blocks.iter().filter(|block| block.owner_entry == "runtime:__ckb_source_input").collect::<Vec<_>>();
+        let start = helper.iter().map(|block| block.range.start).min().unwrap();
+        let end = helper.iter().map(|block| block.range.end).max().unwrap();
+        for instruction in elf.instructions.iter().filter(|i| start <= i.address && i.address < end) {
+            let word = instruction.word;
+            let replacement = match word & 0x7f {
+                0x13 if word >> 7 & 31 != 10 => Some(word ^ (1 << 20)),
+                0x33 => Some(word ^ (1 << 20)),
+                0x63 => Some(word ^ (1 << 12)),
+                _ => None,
+            };
+            if let Some(replacement) = replacement {
+                let mut changed = valid.clone();
+                changed.replace_machine_word(instruction.address, replacement);
+                reject(&changed);
+            }
+        }
+        // Every local operand load and result publication inside the marked
+        // constructors/aliases must use its exact typed scalar slot.
+        for block in &valid.record.blocks {
+            for label in block.cell_view_value_labels.iter().filter(|label| !label.ends_with("_done")) {
+                let done = format!("{label}_done");
+                let end = valid.record.blocks.iter().find(|block| block.cell_view_value_labels.contains(&done)).unwrap().range.start;
+                for instruction in elf.instructions.iter().filter(|i| block.range.start <= i.address && i.address < end) {
+                    let word = instruction.word;
+                    let replacement = match word & 0x707f {
+                        0x3003 => Some(word ^ (8 << 20)),
+                        0x3023 => Some(word ^ (1 << 20)),
+                        _ => None,
+                    };
+                    if let Some(replacement) = replacement {
+                        let mut changed = valid.clone();
+                        changed.replace_machine_word(instruction.address, replacement);
+                        reject(&changed);
+                    }
+                }
+            }
+        }
+        let entry = valid.record.typed_semantics.entries.iter().find(|entry| entry.name == "verify").unwrap();
+        let slot = |id| entry.locals.iter().find(|local| local.id == id).unwrap().source_id * 8;
+        let arithmetic = entry
+            .blocks
+            .iter()
+            .flat_map(|block| &block.operations)
+            .find(|op| matches!(&op.detail, TypedSemanticOperationDetail::BinaryOperator { operator } if operator == "add"))
+            .unwrap();
+        let call = entry
+            .blocks
+            .iter()
+            .flat_map(|block| &block.operations)
+            .find(|op| op.call.as_ref().is_some_and(|call| call.target == "inspect"))
+            .unwrap();
+        let ordinary = slot(arithmetic.destinations[0]);
+        let destination = slot(call.operands[0].local.unwrap());
+        assert!(ordinary < 2048 && destination < 2048);
+        let store = elf
+            .instructions
+            .iter()
+            .find(|i| {
+                i.word & 0x707f == 0x3023
+                    && i.word >> 15 & 31 == 2
+                    && u64::from(((i.word >> 25) << 5) | (i.word >> 7 & 31)) == ordinary
+                    && valid.record.blocks.iter().any(|block| block.owner_entry == entry.id && block.range.contains(i.address))
+            })
+            .unwrap();
+        for partial in [false, true] {
+            let offset = destination as u32 + u32::from(partial) * 7;
+            let word = (store.word & 0x01fff07f) | ((offset >> 5) << 25) | ((offset & 31) << 7);
+            let word = if partial { word & !(7 << 12) } else { word };
+            let mut changed = valid.clone();
+            changed.replace_machine_word(store.address, word);
+            reject(&changed);
+        }
+        let mut missing = valid.clone();
+        for block in &mut missing.record.blocks {
+            block.cell_view_value_labels.clear();
+        }
+        missing.rebind_sidecars();
+        reject(&missing);
+        let begin = valid
+            .record
+            .blocks
+            .iter()
+            .filter(|block| {
+                block.owner_entry == entry.id && block.cell_view_value_labels.iter().any(|label| !label.ends_with("_done"))
+            })
+            .min_by_key(|block| block.range.start)
+            .unwrap();
+        let label = begin.cell_view_value_labels.iter().find(|label| !label.ends_with("_done")).unwrap();
+        let end = valid.record.blocks.iter().find(|block| block.cell_view_value_labels.contains(&format!("{label}_done"))).unwrap();
+        let branch = elf
+            .instructions
+            .iter()
+            .filter(|i| {
+                i.address < begin.range.start
+                    && i.word & 0x7f == 0x63
+                    && valid.record.blocks.iter().any(|block| block.owner_entry == entry.id && block.range.contains(i.address))
+            })
+            .max_by_key(|i| i.address)
+            .unwrap();
+        let mut bypass = valid.clone();
+        bypass.redirect_conditional_branch(branch.address, end.range.start);
+        reject(&bypass);
+    }
+}
+
+#[test]
+fn cell_view_constructor_inventory_survives_erased_markers_without_data_reads() {
+    let source = "module coordinates\nresource Token has store { id: u64 }\naction inspect() -> u64 { verification\nlet view = ckb::input<Token>(0)\nreturn view.capacity }";
+    for opt_level in [0, 3] {
+        let mut changed = Fixture::from_result(
+            compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+        );
+        assert!(changed.record.blocks.iter().any(|block| !block.cell_view_value_labels.is_empty()));
+        for block in &mut changed.record.blocks {
+            block.cell_view_value_labels.clear();
+        }
+        changed.rebind_sidecars();
+        assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+    }
+}
+
+#[test]
+fn named_cell_roles_bind_role_projections_and_aliases_independently() {
+    use cellscript_artifact_checker::cell_selection::Read;
+    let source = include_str!("syntax_combo/seeds/named-role-selection.cell");
+    for opt_level in [0, 3] {
+        let valid = Fixture::from_result(
+            compile(
+                source,
+                CompileOptions {
+                    edition: cellscript::CellScriptEdition::Edition2027,
+                    opt_level,
+                    target: Some("riscv64-elf".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap(),
+        );
+        for case in 0..3 {
+            let mut changed = valid.clone();
+            let mut operations = changed
+                .record
+                .typed_semantics
+                .entries
+                .iter_mut()
+                .flat_map(|entry| &mut entry.blocks)
+                .flat_map(|block| &mut block.operations);
+            match case {
+                0 => {
+                    let operation = operations
+                        .filter(|operation| operation.opcode == "field-access")
+                        .find(
+                            |operation| matches!(&operation.detail, TypedSemanticOperationDetail::Field { name } if name == "orders"),
+                        )
+                        .unwrap();
+                    operation.detail = TypedSemanticOperationDetail::Field { name: "refunds".into() };
+                }
+                1 => {
+                    let operation = operations
+                        .find(|operation| {
+                            matches!(&operation.detail, TypedSemanticOperationDetail::ExactRoleRead { read: Read::Input, .. })
+                        })
+                        .unwrap();
+                    operation.detail = TypedSemanticOperationDetail::ExactRoleRead { role: 1, read: Read::Input };
+                }
+                2 => {
+                    let operation = operations.find(|operation| operation.opcode == "verify-exact-cell-roles").unwrap();
+                    let TypedSemanticOperationDetail::ExactRoleSelection { contract } = &mut operation.detail else { unreachable!() };
+                    contract.names.as_mut().unwrap().roles.swap(0, 1);
+                }
+                _ => unreachable!(),
+            }
+            changed.rebind_typed_semantics();
+            assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
+        }
+        // Rewrite every instruction in projection/alias/read regions in turn;
+        // hashes and lower-level instruction summaries are rebound by Fixture.
+        let ranges: Vec<_> = valid
+            .record
+            .blocks
+            .iter()
+            .flat_map(|block| {
+                block.exact_role_labels.iter().filter_map(|label| {
+                    if !label.starts_with(".Lexact_role_use_") || label.ends_with("_done") {
+                        return None;
+                    }
+                    let end = valid.record.blocks.iter().find(|block| block.exact_role_labels.contains(&format!("{label}_done")))?;
+                    Some(block.range.start..end.range.start)
+                })
+            })
+            .collect();
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let mut mutations = 0;
+        for instruction in
+            elf.instructions.iter().filter(|instruction| ranges.iter().any(|range| range.contains(&instruction.address)))
+        {
+            let mask = match instruction.word & 0x7f {
+                0x03 | 0x13 => 1 << 20,
+                0x23 => 1 << 7,
+                _ => continue,
+            };
+            let mut changed = valid.clone();
+            changed.replace_machine_word(instruction.address, instruction.word ^ mask);
+            assert!(changed.check().is_err(), "O{opt_level} accepted named-role machine substitution at {:#x}", instruction.address);
+            mutations += 1;
+        }
+        assert!(mutations > 40, "exercise projections, aliases and reads");
+    }
+}
+
+#[test]
+fn named_cell_roles_verify_with_independent_machine_checks() {
+    let source = include_str!("syntax_combo/seeds/named-role-verification.cell");
+    for opt_level in [0, 3] {
+        Fixture::from_result(
+            compile(
+                source,
+                CompileOptions {
+                    edition: cellscript::CellScriptEdition::Edition2027,
+                    opt_level,
+                    target: Some("riscv64-elf".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap(),
+        );
+    }
+}
+
+#[test]
+fn cell_view_helper_calls_reject_same_schema_source_substitution() {
+    let source = include_str!("../examples/language/ckb/typed_cell_predicate.cell")
+        .replace("OutputView<Token>", "InputView<Token>")
+        .replace("ckb::output<Token>(0)", "ckb::input<Token>(0)");
+    for opt_level in [0, 3] {
+        let mut changed = Fixture::from_result(
+            compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+        );
+        let forward = changed.record.typed_semantics.entries.iter_mut().find(|entry| entry.name.ends_with("forward")).unwrap();
+        let call = forward
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.operations)
+            .find(|operation| operation.call.as_ref().is_some_and(|call| call.target.ends_with("matches")))
+            .unwrap();
+        assert_eq!(call.operands[0].ty, call.operands[1].ty);
+        assert_ne!(call.operands[0].local, call.operands[1].local);
+        call.operands.swap(0, 1);
+        changed.rebind_typed_semantics();
+        assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+    }
+}
+
+#[test]
+fn cell_view_helpers_bind_register_and_stack_transport_to_typed_slots() {
+    let base = include_str!("../examples/language/ckb/typed_cell_predicate.cell");
+    for padding in [0, 7, 8] {
+        let params = (0..padding).map(|i| format!("p{i}: u64, ")).collect::<String>();
+        let arguments = "0, ".repeat(padding);
+        let forwarded = (0..padding).map(|i| format!("p{i}, ")).collect::<String>();
+        let source = base
+            .replace("before: InputView", &format!("{params}before: InputView"))
+            .replace("matches(before", &format!("matches({forwarded}before"))
+            .replace("forward(ckb::input", &format!("forward({arguments}ckb::input"));
+        for opt_level in [0, 3] {
+            let valid = Fixture::from_result(
+                compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            );
+            let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+            for name in ["matches", "forward"] {
+                let typed = valid.record.typed_semantics.entries.iter().find(|entry| entry.name.ends_with(name)).unwrap();
+                let local = typed.locals.iter().find(|local| local.id == typed.params[padding].binding_id).unwrap();
+                let slot = local.source_id as u32 * 8;
+                let lowering = valid.record.entries.iter().find(|entry| entry.id == typed.id).unwrap();
+                let start = valid.record.blocks.iter().find(|block| block.id == lowering.entry_block).unwrap().range.start;
+                let body = valid
+                    .record
+                    .blocks
+                    .iter()
+                    .filter(|block| block.owner_entry == typed.id && block.lowering_block_id.is_some())
+                    .map(|block| block.range.start)
+                    .min()
+                    .unwrap();
+                let spill = elf
+                    .instructions
+                    .iter()
+                    .find(|instruction| {
+                        let word = instruction.word;
+                        let offset = (word >> 7 & 31) | (word >> 25 << 5);
+                        (start..body).contains(&instruction.address)
+                            && word & 0x707f == 0x3023
+                            && word >> 15 & 31 == 2
+                            && offset == slot
+                    })
+                    .expect("coordinate parameter spill");
+                let mut changed = valid.clone();
+                changed.replace_machine_word(spill.address, spill.word & !(31 << 20));
+                assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+
+                if name == "forward" {
+                    let load = elf
+                        .instructions
+                        .iter()
+                        .find(|instruction| {
+                            let word = instruction.word;
+                            instruction.address >= body
+                                && valid
+                                    .record
+                                    .blocks
+                                    .iter()
+                                    .any(|block| block.owner_entry == typed.id && block.range.contains(instruction.address))
+                                && word & 0x707f == 0x3003
+                                && word >> 15 & 31 == 2
+                                && word >> 20 == slot
+                        })
+                        .expect("forwarded coordinate load");
+                    let mut changed = valid.clone();
+                    changed.replace_machine_word(load.address, load.word ^ (8 << 20));
+                    assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                    if padding == 8 {
+                        let outgoing = elf
+                            .instructions
+                            .iter()
+                            .find(|instruction| {
+                                let word = instruction.word;
+                                let offset = ((((word >> 7 & 31) | (word >> 25 << 5)) as i32) << 20) >> 20;
+                                instruction.address >= body
+                                    && valid
+                                        .record
+                                        .blocks
+                                        .iter()
+                                        .any(|block| block.owner_entry == typed.id && block.range.contains(instruction.address))
+                                    && word & 0x707f == 0x3023
+                                    && word >> 15 & 31 == 2
+                                    && offset == -32
+                            })
+                            .expect("coordinate outgoing stack word");
+                        let mut changed = valid.clone();
+                        changed.replace_machine_word(outgoing.address, outgoing.word ^ (8 << 7));
+                        assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn cell_view_helper_coordinates_cannot_be_overwritten_by_body_stores() {
+    for padding in [0, 7, 8] {
+        let params = (0..padding).map(|i| format!("p{i}: u64, ")).collect::<String>();
+        let forwarded = (0..padding).map(|i| format!("p{i}, ")).collect::<String>();
+        let arguments = "0, ".repeat(padding);
+        let source = include_str!("../examples/language/ckb/typed_cell_predicate.cell")
+            .replace("before: InputView", &format!("delta: u64, {params}before: InputView"))
+            .replace("return before.data.id", "let adjusted = delta + 1\nif adjusted <= delta { return false }\nreturn before.data.id")
+            .replace("matches(before", &format!("matches(delta, {forwarded}before"))
+            .replace("action inspect()", "action inspect(witness delta: u64)")
+            .replace("forward(ckb::input", &format!("forward(delta, {arguments}ckb::input"));
+        for data_projection in [false, true] {
+            let source = if data_projection {
+                source.clone()
+            } else {
+                source.replace(
+                    "before.data.id == after.data.id && before.data.owner == after.data.owner",
+                    "before.capacity <= after.capacity",
+                )
+            };
+            for opt_level in [0, 3] {
+                let valid = Fixture::from_result(
+                    compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
+                        .unwrap_or_else(|error| panic!("padding={padding} data={data_projection} O{opt_level}: {error}")),
+                );
+                let typed = valid.record.typed_semantics.entries.iter().find(|entry| entry.name.ends_with("matches")).unwrap();
+                let binary = typed.blocks.iter().flat_map(|block| &block.operations).find(|op| op.opcode == "binary").unwrap();
+                let result = typed.locals.iter().find(|local| local.id == binary.destinations[0]).unwrap().source_id as u32 * 8;
+                let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+                let store = elf
+                    .instructions
+                    .iter()
+                    .find(|instruction| {
+                        let word = instruction.word;
+                        word & 0x707f == 0x3023
+                            && word >> 15 & 31 == 2
+                            && ((word >> 7 & 31) | (word >> 25 << 5)) == result
+                            && valid.record.blocks.iter().any(|block| {
+                                block.owner_entry == typed.id
+                                    && block.lowering_block_id.is_some()
+                                    && block.range.contains(instruction.address)
+                            })
+                    })
+                    .expect("arithmetic result has a body store");
+                for param in &typed.params[padding + 1..padding + 3] {
+                    let coordinate = typed.locals.iter().find(|local| local.id == param.binding_id).unwrap().source_id as u32 * 8;
+                    assert_ne!(coordinate, result);
+                    assert!(coordinate < 2040 && result < 2048);
+                    // Every write width, including a final-byte overlap, must
+                    // preserve the coordinate for subsequent reads or calls.
+                    for width in 0..=3 {
+                        for offset in [coordinate, coordinate + 7] {
+                            let mut changed = valid.clone();
+                            let word = (store.word & !((31 << 7) | (7 << 12) | (127 << 25)))
+                                | ((offset & 31) << 7)
+                                | (width << 12)
+                                | ((offset >> 5) << 25);
+                            changed.replace_machine_word(store.address, word);
+                            assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn nested_migration_mixed_helper_parameters_keep_coordinate_spills_bound() {
+    let source = include_str!("../examples/language/batches/nested_migration.cell");
+    for opt_level in [0, 3] {
+        let valid = Fixture::from_result(
+            compile(
+                source,
+                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            )
+            .unwrap(),
+        );
+        let typed = valid.record.typed_semantics.entries.iter().find(|entry| entry.name.ends_with("migrate_document")).unwrap();
+        let lowering = valid.record.entries.iter().find(|entry| entry.id == typed.id).unwrap();
+        let start = valid.record.blocks.iter().find(|block| block.id == lowering.entry_block).unwrap().range.start;
+        let body = valid
+            .record
+            .blocks
+            .iter()
+            .filter(|block| block.owner_entry == typed.id && block.lowering_block_id.is_some())
+            .map(|block| block.range.start)
+            .min()
+            .unwrap();
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        for parameter in &typed.params[..2] {
+            let local = typed.locals.iter().find(|local| local.id == parameter.binding_id).unwrap();
+            let slot = local.source_id as u32 * 8;
+            let spill = elf
+                .instructions
+                .iter()
+                .find(|instruction| {
+                    let word = instruction.word;
+                    (start..body).contains(&instruction.address)
+                        && word & 0x707f == 0x3023
+                        && word >> 15 & 31 == 2
+                        && ((word >> 7 & 31) | (word >> 25 << 5)) == slot
+                })
+                .unwrap();
+            let mut changed = valid.clone();
+            changed.replace_machine_word(spill.address, spill.word & !(31 << 20));
+            assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+        }
+    }
+}
+
+#[test]
+fn record_migration_helpers_reject_rebound_paired_payload_substitution() {
+    let source = include_str!("../examples/language/batches/record_migration.cell");
+    for opt_level in [0, 3] {
+        let valid = Fixture::from_result(
+            compile(
+                source,
+                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            )
+            .unwrap(),
+        );
+        valid.check().unwrap();
+        let mut changed = valid.clone();
+        let caller = changed.record.typed_semantics.entries.iter_mut().find(|entry| entry.name == "same_message").unwrap();
+        let caller_id = caller.id.clone();
+        let call = caller
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.operations)
+            .find(|operation| operation.call.as_ref().is_some_and(|call| call.target.ends_with("same_payload")))
+            .unwrap();
+        assert_ne!(call.operands[0].local, call.operands[1].local);
+        call.operands[1] = call.operands[0].clone();
+        changed.rebind_typed_semantics();
+        assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+
+        let callee = valid.record.entries.iter().find(|entry| entry.id == "helper:same_payload").unwrap();
+        let start = valid.record.blocks.iter().find(|block| block.id == callee.entry_block).unwrap().range.start;
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let call = elf
+            .control_flow
+            .iter()
+            .find(|edge| {
+                edge.target == start
+                    && valid.record.blocks.iter().any(|block| block.owner_entry == caller_id && block.range.contains(edge.address))
+            })
+            .unwrap();
+        let body = valid
+            .record
+            .blocks
+            .iter()
+            .filter(|block| block.owner_entry == caller_id && block.lowering_block_id.is_some())
+            .map(|block| block.range.start)
+            .min()
+            .unwrap();
+        let load = |register| {
+            elf.instructions
+                .iter()
+                .rev()
+                .find(|instruction| {
+                    let word = instruction.word;
+                    (body..call.address).contains(&instruction.address)
+                        && word & 0x707f == 0x3003
+                        && word >> 7 & 31 == register
+                        && word >> 15 & 31 == 2
+                })
+                .unwrap()
+        };
+        let mut changed = valid.clone();
+        for (target, substitute) in [(10, 12), (11, 13)] {
+            let (target, substitute) = (load(target), load(substitute));
+            assert_ne!(target.word >> 20, substitute.word >> 20);
+            changed.replace_machine_word(target.address, replace_i_immediate(target.word, (substitute.word as i32) >> 20));
+        }
+        assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+    }
+}
+
+#[test]
+fn cell_data_helper_fields_preserve_independent_machine_checks() {
+    let source = include_str!("../examples/language/ckb/typed_cell_predicate.cell");
+    for opt_level in [0, 3] {
+        let valid = Fixture::from_result(
+            compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+        );
+        let helper = valid.record.entries.iter().find(|entry| entry.name.ends_with("matches")).unwrap();
+        let ranges = valid.record.blocks.iter().filter(|block| block.owner_entry == helper.id).collect::<Vec<_>>();
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let syscalls = elf
+            .instructions
+            .iter()
+            .filter(|instruction| ranges.iter().any(|block| block.range.contains(instruction.address)) && instruction.word == 0x73)
+            .collect::<Vec<_>>();
+        assert!(syscalls.len() >= 4);
+        for syscall in syscalls {
+            let mut changed = valid.clone();
+            changed.replace_machine_word(syscall.address, encode_addi(0, 0, 0));
+            assert_code(&changed, CheckerRejectionCode::V2417SyscallContractInvalid);
+        }
+        let byte = elf
+            .instructions
+            .iter()
+            .find(|instruction| {
+                ranges.iter().any(|block| block.range.contains(instruction.address)) && instruction.word & 0x707f == 0x4003
+            })
+            .expect("helper contains full-width owner reads");
+        let mut changed = valid.clone();
+        changed.replace_machine_word(byte.address, byte.word ^ (1 << 20));
+        assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+    }
+}
+
+#[test]
+fn cell_data_views_keep_nominal_fields_and_experimental_admission_bound() {
+    let source = selected_roles_source().replace(
+        "require input.capacity == partner.capacity",
+        "require input.data.id == partner.data.id\nrequire input.data.amount == partner.data.amount",
+    );
+    let valid = Fixture::from_source(&source);
+    for case in 0..3 {
+        let mut changed = valid.clone();
+        if case == 0 {
+            changed.metadata["runtime"]["fail_closed_runtime_features"]
+                .as_array_mut()
+                .unwrap()
+                .retain(|feature| feature.as_str() != Some("cell-data-view-artifact-proof"));
+            changed.rebind_sidecars();
+            assert_code(&changed, CheckerRejectionCode::V2410MetadataBindingMismatch);
+        } else {
+            let operation = changed
+                .record
+                .typed_semantics
+                .entries
+                .iter_mut()
+                .flat_map(|entry| &mut entry.blocks)
+                .flat_map(|block| &mut block.operations)
+                .find(|operation| {
+                    operation.opcode == "field-access"
+                        && operation.operands.first().is_some_and(|operand| operand.ty.starts_with("CellDataView<"))
+                })
+                .unwrap();
+            if case == 1 {
+                operation.detail = TypedSemanticOperationDetail::Field { name: "missing_field".into() };
+            } else {
+                operation.operands[0].ty = "CellDataView<Receipt>".into();
+            }
+            changed.rebind_typed_semantics();
+            assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
+        }
+    }
+}
+
+#[test]
+fn exact_role_lifetime_rejects_entry_into_a_read_before_construction() {
+    let base = include_str!("../examples/language/ckb/exact_role_verification.cell")
+        .replace("exact_cell_role<Receipt>", "exact_cell_role<Order>");
+    let (prefix, tail) = base.split_once("action verify()").unwrap();
+    let call = tail.split_once("ckb::verify_cell_roles(").unwrap().1.split_once("    return 0").unwrap().0;
+    let source = format!("{prefix}action verify(witness at: u64) -> u64 {{\nverification\nif at > 0 {{\nlet selected = ckb::select_cell_roles({call}\nif at > 1 {{ return ckb::selected_input_count<Order>(selected, 0) }}\n}}\nreturn 0\n}}");
+    for opt_level in [0, 3] {
+        let valid = Fixture::from_result(
+            compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+        );
+        let producer = valid
+            .record
+            .blocks
+            .iter()
+            .find(|block| {
+                block.exact_role_labels.iter().any(|label| label.starts_with(".Lexact_role_check_") && !label.ends_with("_done"))
+            })
+            .unwrap();
+        let consumer = valid
+            .record
+            .blocks
+            .iter()
+            .find(|block| {
+                block.exact_role_labels.iter().any(|label| label.starts_with(".Lexact_role_use_") && !label.ends_with("_done"))
+            })
+            .unwrap();
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let flow = elf
+            .control_flow
+            .iter()
+            .find(|flow| {
+                flow.address < producer.range.start
+                    && flow.target > producer.range.start
+                    && valid
+                        .record
+                        .blocks
+                        .iter()
+                        .any(|block| block.owner_entry == producer.owner_entry && block.range.contains(flow.address))
+                    && elf
+                        .instructions
+                        .iter()
+                        .any(|instruction| instruction.address == flow.address && instruction.word & 0xfff == 0x6f)
+            })
+            .expect("the outer false path jumps over the large selection body");
+        let origin = valid.record.blocks.iter().find(|block| block.range.contains(flow.address)).unwrap();
+        let previous_target = valid.record.blocks.iter().find(|block| block.range.start == flow.target).unwrap();
+        let mut changed = valid.clone();
+        changed.record.edges.iter_mut().find(|edge| edge.from == origin.id && edge.to == previous_target.id).unwrap().to =
+            consumer.id.clone();
+        let mut reached = std::collections::BTreeSet::new();
+        let mut pending = changed.record.entries.iter().map(|entry| entry.entry_block.clone()).collect::<Vec<_>>();
+        while let Some(id) = pending.pop() {
+            if reached.insert(id.clone()) {
+                pending.extend(changed.record.edges.iter().filter(|edge| edge.from == id).map(|edge| edge.to.clone()));
+            }
+        }
+        for block in &mut changed.record.blocks {
+            block.reachable = reached.contains(&block.id);
+        }
+        changed.record.canonicalize();
+        changed.replace_machine_word(flow.address, encode_jal((consumer.range.start as i64 - flow.address as i64) as i32));
+        let error = check_bundle_values(
+            &changed.artifact,
+            &changed.metadata,
+            &changed.record,
+            &changed.source_map,
+            &CheckerBudgets::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+        assert!(error.message.contains("selection read has no constructed handle provenance"), "O{opt_level}: {error}");
+    }
+}
+
+#[test]
+fn exact_role_lifetime_preserves_handles_and_tables_across_calls_and_branches() {
+    let source = selected_roles_source()
+        .replace("action verify()", "fn bump(value: u64) -> u64 { return value + 7 }\naction verify(witness at: u64)")
+        .replace(
+            "let alias = selected",
+            "let marker = at + 7\nrequire marker > at\nif at > 0 { require bump(at) > at }\nlet alias = selected",
+        );
+    for opt_level in 0..=3 {
+        let valid = Fixture::from_result(
+            compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
+                .unwrap_or_else(|error| panic!("selection lifetime O{opt_level}: {error}")),
+        );
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let mut ranges = Vec::new();
+        let mut use_ranges = Vec::new();
+        let mut constructor_stores = Vec::new();
+        let mut tables = Vec::new();
+        let mut last_constructor_end = 0;
+        for block in &valid.record.blocks {
+            for label in &block.exact_role_labels {
+                if label.ends_with("_done") {
+                    continue;
+                }
+                let end = valid
+                    .record
+                    .blocks
+                    .iter()
+                    .find(|block| block.exact_role_labels.contains(&format!("{label}_done")))
+                    .unwrap()
+                    .range
+                    .start;
+                ranges.push(block.range.start..end);
+                if let Some(parts) = label.strip_prefix(".Lexact_role_check_") {
+                    tables.push(parts.split('_').nth(2).unwrap().parse::<i32>().unwrap());
+                    last_constructor_end = last_constructor_end.max(end);
+                    constructor_stores.push(end - 4);
+                } else {
+                    use_ranges.push(block.range.start..end);
+                }
+            }
+        }
+        let typed = valid.record.typed_semantics.entries.iter().find(|entry| entry.name == "verify").unwrap();
+        let handles = typed
+            .locals
+            .iter()
+            .filter(|local| local.ty.starts_with("ExactCellSelection<"))
+            .map(|local| local.source_id as i32 * 8)
+            .collect::<Vec<_>>();
+        assert!(handles.len() >= 2 && tables.len() == 2, "O{opt_level}: handles {handles:?}, tables {tables:?}");
+        // Rebind a second typed handle and all its actual pointer loads/stores
+        // to the first one's slot. Both individual instruction grammars still
+        // match; the enclosing proof must reject the physical alias.
+        let (original, replacement) = (handles[1], handles[0]);
+        let mut mutations = Vec::new();
+        for instruction in &elf.instructions {
+            if !constructor_stores.contains(&instruction.address)
+                && !use_ranges.iter().any(|range| range.contains(&instruction.address))
+            {
+                continue;
+            }
+            let word = instruction.word;
+            if word >> 15 & 31 != 2 {
+                continue;
+            }
+            if word & 0x707f == 0x3003 && (word as i32) >> 20 == original {
+                mutations.push((instruction.address, replace_i_immediate(word, replacement)));
+            } else if word & 0x707f == 0x3023 && ((((word >> 7 & 31) | (word >> 25 << 5)) as i32) << 20 >> 20) == original {
+                mutations.push((
+                    instruction.address,
+                    (word & !0xfe000f80) | ((replacement as u32 & 0xfe0) << 20) | ((replacement as u32 & 31) << 7),
+                ));
+            }
+        }
+        assert!(mutations.len() >= 2);
+        let mut aliased = valid.clone();
+        let entry = aliased.record.typed_semantics.entries.iter_mut().find(|entry| entry.id == typed.id).unwrap();
+        entry.locals.iter_mut().find(|local| local.source_id * 8 == original as u64).unwrap().source_id = replacement as u64 / 8;
+        aliased.rebind_typed_semantics();
+        aliased.replace_machine_words(&mutations);
+        let error = check_bundle_values(
+            &aliased.artifact,
+            &aliased.metadata,
+            &aliased.record,
+            &aliased.source_map,
+            &CheckerBudgets::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+        assert!(error.message.contains("selection pointer slot aliases"), "O{opt_level}: {error}");
+        let store = elf
+            .instructions
+            .iter()
+            .find(|instruction| {
+                instruction.address >= last_constructor_end
+                    && valid
+                        .record
+                        .blocks
+                        .iter()
+                        .any(|block| block.owner_entry == typed.id && block.range.contains(instruction.address))
+                    && !ranges.iter().any(|range| range.contains(&instruction.address))
+                    && instruction.word & 0x707f == 0x3023
+                    && instruction.word >> 15 & 31 == 2
+            })
+            .unwrap();
+        let targets = handles.iter().copied().chain([tables[0], tables[0] + 768, tables[0] + 896]);
+        for offset in targets {
+            for kind in [0, 3] {
+                assert!((0..2048).contains(&offset));
+                let word = (store.word & !0xfe0fff80)
+                    | ((offset as u32 & 0xfe0) << 20)
+                    | ((offset as u32 & 31) << 7)
+                    | (2 << 15)
+                    | (kind << 12);
+                let mut changed = valid.clone();
+                changed.replace_machine_word(store.address, word);
+                let error = check_bundle_values(
+                    &changed.artifact,
+                    &changed.metadata,
+                    &changed.record,
+                    &changed.source_map,
+                    &CheckerBudgets::default(),
+                )
+                .unwrap_err();
+                assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                assert!(error.message.contains("unverified write overlaps"), "O{opt_level} offset={offset}: {error}");
+            }
+        }
+        // A computed alias must retain the same protection as an SP-relative write.
+        let mut changed = valid.clone();
+        changed.replace_machine_words(&[
+            (store.address - 4, ((handles[0] as u32) << 20) | (2 << 15) | (3 << 12) | (30 << 7) | 3),
+            (store.address, (store.word & !0xfe0f8f80) | (30 << 15)),
+        ]);
+        assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+    }
+}
+
+#[test]
+fn exact_role_selected_reads_reject_rebound_words_and_typed_operand_substitutions() {
+    use cellscript_artifact_checker::cell_selection::Read;
+    for opt_level in [0, 3] {
+        let valid = Fixture::from_result(
+            compile(&selected_roles_source(), CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
+                .unwrap_or_else(|error| panic!("O{opt_level}: {error}")),
+        );
+        let mut ranges = Vec::new();
+        for block in &valid.record.blocks {
+            for label in &block.exact_role_labels {
+                if label.starts_with(".Lexact_role_use_") && !label.ends_with("_done") {
+                    let end =
+                        valid.record.blocks.iter().find(|block| block.exact_role_labels.contains(&format!("{label}_done"))).unwrap();
+                    ranges.push(block.range.start..end.range.start);
+                }
+            }
+        }
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        for block in &valid.record.blocks {
+            if block.exact_role_labels.iter().any(|label| label.starts_with(".Lexact_role_check_") && label.ends_with("_done")) {
+                // The retained pointer's address and destination store are
+                // inside the constructor proof, after the restored SP.
+                for address in [block.range.start - 8, block.range.start - 4] {
+                    let word = elf.instructions.iter().find(|instruction| instruction.address == address).unwrap().word;
+                    let mask = if word & 0x7f == 0x23 { 1 << 7 } else { 1 << 15 };
+                    let mut changed = valid.clone();
+                    changed.replace_machine_word(address, word ^ mask);
+                    assert!(changed.check().is_err(), "retained pointer mutation accepted at {address:#x}");
+                }
+            }
+        }
+        let mut mutations = 0;
+        for instruction in &elf.instructions {
+            if !ranges.iter().any(|range| range.contains(&instruction.address)) {
+                continue;
+            }
+            let word = instruction.word;
+            let mask = match word & 0x7f {
+                0x63 => 1 << 12,
+                0x03 | 0x13 => 1 << 20,
+                0x23 => 1 << 7,
+                0x33 => 1 << 20,
+                _ => continue,
+            };
+            let mut changed = valid.clone();
+            changed.replace_machine_word(instruction.address, word ^ mask);
+            assert!(changed.check().is_err(), "O{opt_level} accepted changed read at {:#x}", instruction.address);
+            mutations += 1;
+        }
+        assert!(mutations > 60, "all five reads and local aliases must be exercised");
+        for case in 0..4 {
+            let mut changed = valid.clone();
+            let entry = changed
+                .record
+                .typed_semantics
+                .entries
+                .iter_mut()
+                .find(|entry| {
+                    entry.blocks.iter().flat_map(|block| &block.operations).any(|operation| operation.opcode == "read-exact-cell-role")
+                })
+                .unwrap();
+            let other = entry
+                .blocks
+                .iter()
+                .flat_map(|block| &block.operations)
+                .find(|operation| matches!(operation.detail, TypedSemanticOperationDetail::ExactRoleRead { read: Read::Output, .. }))
+                .unwrap()
+                .operands[0]
+                .local
+                .unwrap();
+            let operation = entry
+                .blocks
+                .iter_mut()
+                .flat_map(|block| &mut block.operations)
+                .find(|operation| {
+                    matches!(operation.detail, TypedSemanticOperationDetail::ExactRoleRead { read: Read::Successor, .. })
+                })
+                .unwrap();
+            match case {
+                0 => operation.detail = TypedSemanticOperationDetail::ExactRoleRead { role: 1, read: Read::Successor },
+                1 => operation.detail = TypedSemanticOperationDetail::ExactRoleRead { role: 0, read: Read::Output },
+                2 => operation.operands[0].local = Some(other),
+                3 => operation.operands[1].constant = Some(TypedSemanticConstant::U64("1".into())),
+                _ => unreachable!(),
+            }
+            changed.rebind_typed_semantics();
+            assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+        }
+    }
+}
+
+#[test]
+fn selected_hash_reads_prove_caller_writes_while_nested_views_remain_live() {
+    let source = selected_roles_source()
+        .replace("verify()", "verify(witness items: NestedValues<Vec<u8>, 2, 8, 32>)")
+        .replace("let alias = selected", "let first = items[0]\nlet alias = selected")
+        .replace(
+            "require input.capacity == partner.capacity",
+            "require input.type_hash == partner.type_hash\nrequire input.lock_hash == partner.lock_hash\nrequire input.data_hash == partner.data_hash\nrequire first[0] == 170",
+        );
+    for opt_level in [0, 3] {
+        let valid = Fixture::from_result(
+            compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
+                .unwrap_or_else(|error| panic!("hash with nested O{opt_level}: {error}")),
+        );
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let blocks =
+            valid.record.blocks.iter().filter(|block| block.owner_entry == "runtime:__ckb_cell_type_hash").collect::<Vec<_>>();
+        assert!(!blocks.is_empty());
+        let mut mutations = 0;
+        for instruction in &elf.instructions {
+            if !blocks.iter().any(|block| block.range.contains(instruction.address)) {
+                continue;
+            }
+            let word = instruction.word;
+            let mask = match word & 0x7f {
+                0x63 => 1 << 12,
+                0x03 | 0x13 => 1 << 20,
+                0x23 => 1 << 7,
+                0x33 => 1 << 20,
+                _ => continue,
+            };
+            let mut changed = valid.clone();
+            changed.replace_machine_word(instruction.address, word ^ mask);
+            assert!(changed.check().is_err(), "hash helper mutation accepted at {:#x}", instruction.address);
+            mutations += 1;
+        }
+        assert!(mutations > 45);
+        let start = blocks.iter().map(|block| block.range.start).min().unwrap();
+        let call = elf.control_flow.iter().find(|edge| edge.target == start).unwrap();
+        let owner = &valid.record.blocks.iter().find(|block| block.range.contains(call.address)).unwrap().owner_entry;
+        let entry = valid.record.typed_semantics.entries.iter().find(|entry| &entry.id == owner).unwrap();
+        let nested_slot = entry.locals.iter().find(|local| local.ty.starts_with("NestedValues<")).unwrap().source_id * 8;
+        assert!(nested_slot < 2048);
+        for register in [11, 12] {
+            let setup = elf
+                .instructions
+                .iter()
+                .rev()
+                .find(|instruction| {
+                    instruction.address < call.address
+                        && instruction.address + 64 >= call.address
+                        && instruction.word >> 7 & 31 == register
+                        && matches!(instruction.word & 0x7f, 0x13 | 0x33)
+                })
+                .unwrap();
+            let mut changed = valid.clone();
+            // Rebind the real caller output or length pointer into a live
+            // nested root slot; the helper itself is unchanged and well formed.
+            changed.replace_machine_word(setup.address, ((nested_slot as u32) << 20) | (2 << 15) | (register << 7) | 0x13);
+            let error = check_bundle_values(
+                &changed.artifact,
+                &changed.metadata,
+                &changed.record,
+                &changed.source_map,
+                &CheckerBudgets::default(),
+            )
+            .unwrap_err();
+            assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+            assert!(error.message.contains("overlaps nested view storage"), "{error}");
+        }
+    }
+}
+
+#[test]
+fn nested_transaction_data_views_bind_complete_tables_and_retained_results() {
+    let source = include_str!("syntax_combo/seeds/named-nested-data-views.cell");
+    for opt_level in 0..=3 {
+        let result = compile(
+            source,
+            CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+        )
+        .unwrap_or_else(|error| panic!("nested data O{opt_level}: {error}"));
+        let valid = Fixture::from_result(result);
+        for blocker in ["cell-data-view-artifact-proof", "nested-values-artifact-proof"] {
+            let mut changed = valid.clone();
+            changed.metadata["runtime"]["fail_closed_runtime_features"]
+                .as_array_mut()
+                .unwrap()
+                .retain(|feature| feature.as_str() != Some(blocker));
+            changed.rebind_sidecars();
+            assert_code(&changed, CheckerRejectionCode::V2410MetadataBindingMismatch);
+        }
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let (start, end) = valid
+            .record
+            .blocks
+            .iter()
+            .find_map(|block| {
+                let label = block.exact_role_labels.iter().find(|label| {
+                    label.starts_with(".Lexact_role_data_")
+                        && !label.ends_with("_done")
+                        && label.strip_prefix(".Lexact_role_data_").unwrap().split('_').count() == 6
+                        && label.strip_prefix(".Lexact_role_data_").unwrap().split('_').nth(4) != Some("0")
+                })?;
+                let end =
+                    valid.record.blocks.iter().find(|block| block.exact_role_labels.contains(&format!("{label}_done")))?.range.start;
+                Some((block.range.start, end))
+            })
+            .unwrap();
+        let body = elf.instructions.iter().filter(|i| (start..end).contains(&i.address)).collect::<Vec<_>>();
+        let pointer = body.iter().find(|i| i.word == ((30 << 20) | (29 << 15) | (5 << 7) | 0x33)).unwrap();
+        let length = body.iter().find(|i| i.word & 0x7f == 0x23 && i.word >> 12 & 7 == 3 && i.word >> 20 & 31 == 6).unwrap();
+        let source = body.iter().find(|i| i.word == ((7 << 15) | (14 << 7) | 0x13)).unwrap();
+        for (address, word) in [
+            (pointer.address, pointer.word ^ (1 << 15)),
+            (length.address, length.word ^ (1 << 10)),
+            (source.address, source.word ^ (1 << 15)),
+        ] {
+            let mut changed = valid.clone();
+            changed.replace_machine_word(address, word);
+            assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+        }
+    }
+}
+
+#[test]
+fn nested_data_view_buffers_cannot_alias_after_coherent_machine_and_marker_rebinding() {
+    let source = include_str!("syntax_combo/seeds/named-nested-data-views.cell")
+        .split("fn total")
+        .next()
+        .unwrap()
+        .replace("encoded_bytes: 4096", "encoded_bytes: 128");
+    let source = format!("{source}\naction verify() -> u64 {{ let before = ckb::input<Batch>(1).data.messages\nlet after = ckb::output<Batch>(0).data.messages\nrequire before[0][0] == 1\nrequire after[0][0] == 4\nreturn 0\n}}");
+    for opt_level in [0, 3] {
+        let valid = Fixture::from_result(
+            compile(
+                &source,
+                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            )
+            .unwrap(),
+        );
+        let mut ranges = Vec::new();
+        for block in &valid.record.blocks {
+            for label in &block.exact_role_labels {
+                let Some(parts) = label.strip_prefix(".Lexact_role_data_") else { continue };
+                let parts = parts.split('_').collect::<Vec<_>>();
+                if parts.len() != 6 || parts[4] == "0" {
+                    continue;
+                }
+                let end = valid
+                    .record
+                    .blocks
+                    .iter()
+                    .find(|block| block.exact_role_labels.contains(&format!("{label}_done")))
+                    .unwrap()
+                    .range
+                    .start;
+                ranges.push((label.clone(), block.range.start..end, parts[3].parse::<i32>().unwrap()));
+            }
+        }
+        assert_eq!(ranges.len(), 2);
+        let (label, range, original) = &ranges[1];
+        let replacement = ranges[0].2;
+        assert!(*original + 520 < 2048, "fixture must exercise directly encoded offsets");
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let mut rewrites = Vec::new();
+        for instruction in elf.instructions.iter().filter(|i| range.contains(&i.address)) {
+            let word = instruction.word;
+            if word >> 15 & 31 != 2 {
+                continue;
+            }
+            let opcode = word & 0x7f;
+            let offset = if opcode == 0x23 {
+                (((word >> 25) << 5) | ((word >> 7) & 31)) as i32
+            } else if opcode == 3 || opcode == 0x13 {
+                (word as i32) >> 20
+            } else {
+                continue;
+            };
+            if (*original..*original + 520).contains(&offset) {
+                let offset = offset - original + replacement;
+                rewrites.push((
+                    instruction.address,
+                    if opcode == 0x23 { replace_s_immediate(word, offset) } else { replace_i_immediate(word, offset) },
+                ));
+            }
+        }
+        assert!(rewrites.len() >= 10);
+        let mut changed = valid.clone();
+        let mut parts = label.strip_prefix(".Lexact_role_data_").unwrap().split('_').map(str::to_string).collect::<Vec<_>>();
+        parts[3] = replacement.to_string();
+        let renamed = format!(".Lexact_role_data_{}", parts.join("_"));
+        for block in &mut changed.record.blocks {
+            for marker in &mut block.exact_role_labels {
+                if marker == label || marker == &format!("{label}_done") {
+                    *marker = marker.replace(label, &renamed);
+                }
+            }
+            if let Some(marker) = &mut block.machine_label
+                && (marker == label || marker == &format!("{label}_done"))
+            {
+                *marker = marker.replace(label, &renamed);
+            }
+        }
+        changed.replace_machine_words(&rewrites);
+        let error = check_bundle_values(
+            &changed.artifact,
+            &changed.metadata,
+            &changed.record,
+            &changed.source_map,
+            &CheckerBudgets::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+        assert!(error.message.contains("share a retained buffer"), "{error}");
+    }
+}
+
+#[test]
+fn nested_role_selection_checks_profiles_layouts_and_complete_machine_code() {
+    let source = include_str!("syntax_combo/seeds/named-nested-selection.cell");
+    for opt_level in 0..=3 {
+        let valid = Fixture::from_result(
+            compile(
+                source,
+                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            )
+            .unwrap_or_else(|error| panic!("nested selection O{opt_level}: {error}")),
+        );
+        let profiles = valid
+            .record
+            .typed_semantics
+            .entries
+            .iter()
+            .flat_map(|entry| &entry.blocks)
+            .flat_map(|block| &block.operations)
+            .filter_map(|op| match &op.detail {
+                TypedSemanticOperationDetail::ExactRoleSelection { contract } => Some(contract.profile.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            profiles.iter().filter(|profile| **profile == cellscript_artifact_checker::cell_selection::BOUNDED_PROFILE).count(),
+            2
+        );
+        assert_eq!(profiles.iter().filter(|profile| **profile == cellscript_artifact_checker::cell_selection::PROFILE).count(), 1);
+        let mut missing = valid.clone();
+        missing.metadata["runtime"]["fail_closed_runtime_features"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|feature| feature.as_str() != Some("nested-values-artifact-proof"));
+        missing.rebind_sidecars();
+        assert_code(&missing, CheckerRejectionCode::V2410MetadataBindingMismatch);
+        let mut downgraded = valid.clone();
+        for op in downgraded
+            .record
+            .typed_semantics
+            .entries
+            .iter_mut()
+            .flat_map(|entry| &mut entry.blocks)
+            .flat_map(|block| &mut block.operations)
+        {
+            if let TypedSemanticOperationDetail::ExactRoleSelection { contract } = &mut op.detail {
+                contract.profile = cellscript_artifact_checker::cell_selection::PROFILE.into();
+            }
+        }
+        downgraded.rebind_typed_semantics();
+        assert_code(&downgraded, CheckerRejectionCode::V2419TypedSemanticsInvalid);
+
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        // Change selected identity offset, actual-byte accounting, nested
+        // key normalization after rebinding hashes.
+        // Each pattern is specific to the admitted selection's instruction body.
+        let patterns = [
+            ((8 << 20) | (29 << 15) | (4 << 12) | (30 << 7) | 3, (4 << 20) | (29 << 15) | (4 << 12) | (30 << 7) | 3),
+            ((16 << 20) | (2 << 15) | (3 << 12) | (7 << 7) | 3, (24 << 20) | (2 << 15) | (3 << 12) | (7 << 7) | 3),
+            ((30 << 20) | (29 << 15) | (29 << 7) | 0x33, (7 << 20) | (29 << 15) | (29 << 7) | 0x33),
+        ];
+        for (original, replacement) in patterns {
+            let instruction =
+                elf.instructions.iter().find(|instruction| instruction.word == original).expect("nested selection obligation");
+            let mut changed = valid.clone();
+            changed.replace_machine_word(instruction.address, replacement);
+            assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+        }
+        let mut reordered = valid.clone();
+        let ty = reordered.record.typed_semantics.types.iter_mut().find(|ty| ty.name == "Order").unwrap();
+        for field in &mut ty.fields {
+            if field.molecule_field_index == Some(0) {
+                field.molecule_field_index = Some(2);
+            } else if field.molecule_field_index == Some(2) {
+                field.molecule_field_index = Some(0);
+            }
+        }
+        reordered.rebind_typed_semantics();
+        assert!(check_bundle_values(
+            &reordered.artifact,
+            &reordered.metadata,
+            &reordered.record,
+            &reordered.source_map,
+            &CheckerBudgets::default()
+        )
+        .is_err());
+    }
+}
+
+#[test]
+fn exact_role_declarations_and_proof_blocker_reject_rebound_substitutions() {
+    let valid = Fixture::from_source(include_str!("../examples/language/ckb/exact_role_verification.cell"));
+    let mut missing = valid.clone();
+    missing.metadata["runtime"]["fail_closed_runtime_features"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|feature| feature.as_str() != Some("exact-role-selection-artifact-proof"));
+    missing.rebind_sidecars();
+    assert_code(&missing, CheckerRejectionCode::V2410MetadataBindingMismatch);
+
+    // These validate the declaration boundary. The separate machine test also
+    // rejects well-formed catalog substitutions after hashes are rebound.
+    for case in 0..7 {
+        let mut changed = valid.clone();
+        let operation = changed
+            .record
+            .typed_semantics
+            .entries
+            .iter_mut()
+            .flat_map(|entry| &mut entry.blocks)
+            .flat_map(|block| &mut block.operations)
+            .find(|op| op.opcode == "verify-exact-cell-roles")
+            .unwrap();
+        let TypedSemanticOperationDetail::ExactRoleSelection { contract } = &mut operation.detail else { panic!() };
+        match case {
+            0 => contract.input_scan = 65,
+            1 => contract.roles[1].type_hash = contract.roles[0].type_hash,
+            2 => contract.roles[0].type_name = "UnknownCell".into(),
+            3 => contract.roles[0].identity_field = "unknown".into(),
+            4 => contract.roles[0].outputs = (2, 1),
+            5 => contract.roles[0].correspondence = cellscript_artifact_checker::cell_selection::Correspondence::Merge(vec![0]),
+            6 => contract.roles.clear(),
+            _ => unreachable!(),
+        }
+        changed.rebind_typed_semantics();
+        assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
+    }
+}
+
+#[test]
+fn exact_role_instruction_contract_checks_each_lifecycle_and_local_authority() {
+    let source = include_str!("../examples/language/ckb/exact_role_verification.cell");
+    for opt_level in [0, 3] {
+        for mode in ["preserve", "create", "burn", "merge"] {
+            let mut source = source.replace("\"preserve\"", &format!("\"{mode}\""));
+            if mode == "merge" {
+                source = source.replace("1, 16, 1, 16", "2, 16, 1, 1, b\"0123456789abcdef\"");
+            }
+            source = source.replacen("\"observe\"", "\"local-type\"", 1);
+            let valid = compile(&source, CompileOptions { target: Some("riscv64-elf".into()), opt_level, ..Default::default() })
+                .unwrap_or_else(|error| panic!("{mode} O{opt_level}: {error}"));
+            Fixture::from_result(valid);
+        }
+    }
+}
+
+#[test]
+fn exact_role_machine_rejects_rebound_predicate_load_store_and_policy_mutations() {
+    let valid = Fixture::from_source(include_str!("../examples/language/ckb/exact_role_verification.cell"));
+    let start = valid
+        .record
+        .blocks
+        .iter()
+        .find(|block| block.exact_role_labels.iter().any(|label| !label.ends_with("_done")))
+        .unwrap()
+        .range
+        .start;
+    let end = valid
+        .record
+        .blocks
+        .iter()
+        .find(|block| block.exact_role_labels.iter().any(|label| label.ends_with("_done")))
+        .unwrap()
+        .range
+        .start;
+    let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+    let mut mutations = 0;
+    for instruction in elf.instructions.iter().filter(|instruction| (start..end).contains(&instruction.address)) {
+        let word = instruction.word;
+        let opcode = word & 0x7f;
+        let mask = match opcode {
+            0x63 => 1 << 12, // Invert a predicate without changing its CFG destinations.
+            0x03 => 1 << 20, // Read the wrong frame, hash or key byte.
+            0x23 => 1 << 7,  // Write another counter/record byte.
+            0x13 if word >> 12 & 7 == 0 && word >> 7 & 31 != 2 => 1 << 20,
+            _ => continue,
+        };
+        let mut changed = valid.clone();
+        changed.replace_machine_word(instruction.address, word ^ mask);
+        assert!(changed.check().is_err(), "rebound selection instruction accepted at {:#x}", instruction.address);
+        mutations += 1;
+    }
+    assert!(mutations > 500, "exercise both complete scans, every role, key bytes and correspondence loops");
+    for case in 0..7 {
+        let mut changed = valid.clone();
+        let operation = changed
+            .record
+            .typed_semantics
+            .entries
+            .iter_mut()
+            .flat_map(|entry| &mut entry.blocks)
+            .flat_map(|block| &mut block.operations)
+            .find(|op| op.opcode == "verify-exact-cell-roles")
+            .unwrap();
+        let TypedSemanticOperationDetail::ExactRoleSelection { contract } = &mut operation.detail else { panic!() };
+        match case {
+            0 => contract.roles[0].type_hash[31] ^= 1,
+            1 => contract.roles[0].lock_hash[31] ^= 1,
+            2 => contract.roles[0].identity_field = "amount".into(),
+            3 => contract.input_scan -= 1,
+            4 => contract.selected_per_side -= 1,
+            5 => contract.roles[0].inputs.0 = 0,
+            6 => contract.roles[0].local_type = true,
+            _ => unreachable!(),
+        }
+        changed.rebind_typed_semantics();
+        assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+    }
+    let mut missing = valid.clone();
+    for block in &mut missing.record.blocks {
+        block.exact_role_labels.clear();
+    }
+    missing.rebind_sidecars();
+    assert_code(&missing, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+}
+
+#[test]
+fn exact_role_machine_binds_verification_order_and_conditional_block_ownership() {
+    let source = include_str!("../examples/language/ckb/exact_role_verification.cell");
+    let begin = source.find("    ckb::verify_cell_roles(").unwrap();
+    let end = source.rfind("    return 0").unwrap();
+    let repeated = format!("{}{}{}{}", &source[..begin], &source[begin..end], &source[begin..end], &source[end..]);
+    let valid = Fixture::from_source(&repeated);
+    let starts = valid
+        .record
+        .blocks
+        .iter()
+        .flat_map(|block| &block.exact_role_labels)
+        .filter(|label| !label.ends_with("_done"))
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(starts.len(), 2);
+    let mut reversed = valid.clone();
+    for block in &mut reversed.record.blocks {
+        for label in &mut block.exact_role_labels {
+            let done = label.ends_with("_done");
+            let base = label.strip_suffix("_done").unwrap_or(label);
+            let replacement = if base == starts[0] {
+                &starts[1]
+            } else if base == starts[1] {
+                &starts[0]
+            } else {
+                continue;
+            };
+            *label = format!("{replacement}{}", if done { "_done" } else { "" });
+        }
+        block.exact_role_labels.sort();
+    }
+    reversed.rebind_sidecars();
+    assert_code(&reversed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+
+    let conditional = format!("{}if flag {{\n{}}}\n{}", &source[..begin], &source[begin..end], &source[end..])
+        .replace("verify()", "verify(witness flag: bool)");
+    for opt_level in [0, 3] {
+        let compiled = compile(&conditional, CompileOptions { target: Some("riscv64-elf".into()), opt_level, ..Default::default() })
+            .unwrap_or_else(|error| panic!("conditional O{opt_level}: {error}"));
+        Fixture::from_result(compiled);
+    }
+}
+
+#[test]
+fn exact_role_scratch_preserves_nested_views_and_rejects_rebound_aliases() {
+    let source = include_str!("../examples/language/ckb/exact_role_verification.cell")
+        .replace("verify()", "verify(witness items: NestedValues<Vec<u8>, 2, 8, 32>)")
+        .replace("    ckb::verify_cell_roles(", "    let first = items[0]\n    let before = first.len()\n    ckb::verify_cell_roles(")
+        .replace(
+            "    return 0",
+            "    require items.len() == 1\n    require first.len() == before\n    require first[0] == 170\n    return 0",
+        );
+    let cell_source = source
+        .replace("witness items: NestedValues<Vec<u8>, 2, 8, 32>", "input document: Document")
+        .replace("action verify(", "resource Document has store, consume { entries: NestedValues<Vec<u8>, 2, 8, 32> }\naction verify(")
+        .replace("let first = items[0]", "let items = document.entries\n    let first = items[0]")
+        .replace("return 0", "consume document\n    return 0");
+    for (source, cell) in [(&source, false), (&cell_source, true)] {
+        for opt_level in 0..=3 {
+            let valid = Fixture::from_result(
+                compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
+                    .unwrap_or_else(|error| panic!("nested selection O{opt_level}: {error}")),
+            );
+            let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+            let (block, label) = valid
+                .record
+                .blocks
+                .iter()
+                .find_map(|block| block.exact_role_labels.iter().find(|label| !label.ends_with("_done")).map(|label| (block, label)))
+                .unwrap();
+            let end_label = format!("{label}_done");
+            let end = valid.record.blocks.iter().find(|block| block.exact_role_labels.contains(&end_label)).unwrap().range.start;
+            let typed = valid.record.typed_semantics.entries.iter().find(|entry| entry.id == block.owner_entry).unwrap();
+            let scalar_end = typed.locals.iter().map(|local| (local.source_id + 1) * 8).max().unwrap();
+            let sizes = valid
+                .record
+                .blocks
+                .iter()
+                .flat_map(|block| {
+                    block
+                        .nested_read_labels
+                        .iter()
+                        .filter(|label| label.starts_with(".Lnested_use_length_") && !label.ends_with("_done"))
+                        .map(|label| {
+                            let done = format!("{label}_done");
+                            let end =
+                                valid.record.blocks.iter().find(|block| block.nested_read_labels.contains(&done)).unwrap().range.start;
+                            (block.range.start, end)
+                        })
+                })
+                .collect::<Vec<_>>();
+            let size = if cell {
+                let label = valid
+                    .record
+                    .blocks
+                    .iter()
+                    .flat_map(|block| &block.nested_cell_labels)
+                    .find(|label| !label.ends_with("_done") && !label.ends_with("_validate"))
+                    .unwrap();
+                let buffer = label.strip_prefix(".Lnested_cell_codec_").unwrap().split('_').nth(2).unwrap().parse::<i32>().unwrap();
+                // Start inside the loaded Cell's bytes, after its scalar pointer.
+                (buffer + 15) & !15
+            } else {
+                elf.instructions
+                    .iter()
+                    .filter(|instruction| {
+                        sizes.iter().any(|(start, end)| (*start..*end).contains(&instruction.address))
+                            && instruction.word & 0x707f == 0x3003
+                            && instruction.word >> 15 & 31 == 2
+                            && instruction.word >> 7 & 31 == 11
+                    })
+                    .map(|instruction| (instruction.word as i32) >> 20)
+                    .find(|offset| *offset >= scalar_end as i32 && offset % 16 == 0)
+                    .expect("a nested length slot outside scalar locals can alias an aligned selection scratch")
+            };
+            assert!(size >= scalar_end as i32 && size < 2048);
+            let start_word = elf.instructions.iter().find(|instruction| instruction.address == block.range.start).unwrap().word;
+            let end_word = elf.instructions.iter().find(|instruction| instruction.address == end - 4).unwrap().word;
+            assert_eq!(start_word & 0xfffff, 0x10113, "small positive SP adjustment");
+            assert_eq!(end_word & 0xfffff, 0x10113, "small negative SP adjustment");
+            let mut changed = valid.clone();
+            changed.replace_machine_words(&[
+                (block.range.start, replace_i_immediate(start_word, size)),
+                (end - 4, replace_i_immediate(end_word, -size)),
+            ]);
+            let mut parts = label.strip_prefix(".Lexact_role_check_").unwrap().split('_').map(str::to_owned).collect::<Vec<_>>();
+            parts[2] = size.to_string();
+            let replacement = format!(".Lexact_role_check_{}", parts.join("_"));
+            for block in &mut changed.record.blocks {
+                for candidate in &mut block.exact_role_labels {
+                    if candidate == label {
+                        *candidate = replacement.clone();
+                    } else if candidate == &end_label {
+                        *candidate = format!("{replacement}_done");
+                    }
+                }
+                block.exact_role_labels.sort();
+            }
+            changed.rebind_sidecars();
+            let error = check_bundle_values(
+                &changed.artifact,
+                &changed.metadata,
+                &changed.record,
+                &changed.source_map,
+                &CheckerBudgets::default(),
+            )
+            .unwrap_err();
+            assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+            assert!(error.message.contains("overlaps nested view storage"), "O{opt_level}: {error:?}");
+        }
+    }
+}
+
+#[test]
+fn exact_role_nested_lifetime_handles_empty_branches_and_rejects_helper_escape() {
+    let source = include_str!("../examples/language/ckb/exact_role_verification.cell")
+        .replace("verify()", "verify(witness items: NestedValues<Vec<u8>, 2, 8, 32>)");
+    let start = source.find("    ckb::verify_cell_roles(").unwrap();
+    let end = source.rfind("    return 0").unwrap();
+    let selection = &source[start..end];
+    let prefix = format!("{}let first = items[0]\nlet before = first.len()\n", &source[..start]);
+    let suffix = format!("require first.len() == before\nrequire items.len() == 1\n{}", &source[end..]);
+    let conditional = format!("{prefix}if before == 2 {{\n{selection}}}\n{suffix}");
+    let helper = format!("{prefix}verify_roles()\n{suffix}")
+        .replace("action verify(", &format!("fn verify_roles() {{\n{selection}}}\naction verify("));
+    for opt_level in 0..=3 {
+        let options = CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() };
+        let compiled = compile(&conditional, options.clone())
+            .unwrap_or_else(|error| panic!("nested selection control flow O{opt_level}: {error}"));
+        let valid = Fixture::from_result(compiled);
+        let selection_end = valid
+            .record
+            .blocks
+            .iter()
+            .find(|block| block.exact_role_labels.iter().any(|label| label.ends_with("_done")))
+            .unwrap()
+            .range
+            .start;
+        let read = valid
+            .record
+            .blocks
+            .iter()
+            .filter(|block| block.range.start >= selection_end)
+            .filter(|block| {
+                block.nested_read_labels.iter().any(|label| label.starts_with(".Lnested_use_length_") && !label.ends_with("_done"))
+            })
+            .min_by_key(|block| block.range.start)
+            .unwrap();
+        let empty = valid
+            .record
+            .typed_semantics
+            .entries
+            .iter()
+            .find(|entry| entry.id == read.owner_entry)
+            .unwrap()
+            .blocks
+            .iter()
+            .find(|block| block.operations.is_empty())
+            .unwrap();
+        assert_ne!(read.lowering_block_id, Some(empty.id));
+        let mut changed = valid.clone();
+        let target = changed.record.blocks.iter_mut().find(|block| block.id == read.id).unwrap();
+        target.lowering_block_id = Some(empty.id);
+        target.typed_block_hash = Some(canonical_hash("cellscript-typed-block-v1", empty).unwrap());
+        for binding in &mut changed.record.entries.iter_mut().find(|entry| entry.id == read.owner_entry).unwrap().typed_blocks {
+            binding.machine_block_ids.retain(|id| id != &read.id);
+            if binding.id == empty.id {
+                binding.machine_block_ids.push(read.id.clone());
+            }
+        }
+        changed.record.canonicalize();
+        changed.rebind_sidecars();
+        let error = check_bundle_values(
+            &changed.artifact,
+            &changed.metadata,
+            &changed.record,
+            &changed.source_map,
+            &CheckerBudgets::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+        assert!(error.message.contains("nested read crosses its owning typed block"), "{error}");
+        let error = compile(&helper, options).unwrap_err();
+        assert!(error.message.contains("exact-role verification requires an action or lock entry"), "{error}");
+    }
+}
 
 fn large_policy_fixture(count: u32) -> CompileResult {
     policy_fixture_with_layouts(count, false)
@@ -367,6 +2278,54 @@ impl Fixture {
         self.rebind_sidecars();
     }
 
+    fn rebind_layered_identities(&mut self) {
+        let typed = &mut self.record.typed_semantics;
+        let foundation = &mut typed.foundation;
+        foundation.identities.core_semantic_id = canonical_hash(
+            "cellscript-core-semantic-id-v2",
+            &(
+                typed.failure_semantics,
+                &typed.types,
+                &foundation.roles,
+                &foundation.dispositions,
+                &foundation.claims,
+                &foundation.legacy_nodes,
+            ),
+        )
+        .unwrap();
+        let roots = foundation
+            .provenance
+            .nodes
+            .iter()
+            .filter(|node| !matches!(node.provenance, cellscript_artifact_checker::ValueProvenance::Derived { .. }))
+            .map(|node| node.id.as_str())
+            .collect::<Vec<_>>();
+        foundation.identities.entry_contract_id = canonical_hash(
+            "cellscript-entry-contract-id-v1",
+            &(
+                foundation.identities.core_semantic_id.as_str(),
+                &foundation.entry_contract,
+                roots,
+                foundation.entry_contract.entry_payload_abi.as_str(),
+                foundation.entry_contract.witness_placement_abi.as_str(),
+            ),
+        )
+        .unwrap();
+        foundation.identities.artifact_contract_id = canonical_hash(
+            "cellscript-artifact-contract-id-v1",
+            &(foundation.identities.entry_contract_id.as_str(), &foundation.artifact_contract),
+        )
+        .unwrap();
+        for (key, value) in [
+            ("core_semantic_id", &foundation.identities.core_semantic_id),
+            ("entry_contract_id", &foundation.identities.entry_contract_id),
+            ("artifact_contract_id", &foundation.identities.artifact_contract_id),
+        ] {
+            self.metadata["verified_artifact"][key] = Value::String(value.clone());
+        }
+        self.rebind_typed_semantics();
+    }
+
     fn bind_artifact_identity(&mut self) {
         let artifact_hash = cellscript_artifact_checker::hex_encode(&cellscript_artifact_checker::ckb_blake2b256(&self.artifact));
         self.record.artifact_hash.clone_from(&artifact_hash);
@@ -379,9 +2338,45 @@ impl Fixture {
     }
 
     fn replace_machine_word(&mut self, address: u64, word: u32) {
+        self.replace_machine_words(&[(address, word)]);
+    }
+
+    fn redirect_conditional_branch(&mut self, address: u64, target: u64) {
         let elf = parse_elf(&self.artifact, CheckerBudgets::default().instructions).unwrap();
-        let offset = (elf.text.offset + address - elf.text.address) as usize;
-        self.artifact[offset..offset + 4].copy_from_slice(&word.to_le_bytes());
+        let word = elf.instructions.iter().find(|i| i.address == address).unwrap().word;
+        assert_eq!(word & 0x7f, 0x63);
+        let origin = self.record.blocks.iter().find(|block| block.range.contains(address)).unwrap().id.clone();
+        let destination = self.record.blocks.iter().find(|block| block.range.start == target).unwrap().id.clone();
+        self.record.edges.iter_mut().find(|edge| edge.from == origin && edge.kind == EdgeKind::ConditionalTaken).unwrap().to =
+            destination;
+        let mut reachable = std::collections::BTreeSet::new();
+        let mut pending = self.record.entries.iter().map(|entry| entry.entry_block.clone()).collect::<Vec<_>>();
+        while let Some(id) = pending.pop() {
+            if reachable.insert(id.clone()) {
+                pending.extend(self.record.edges.iter().filter(|edge| edge.from == id).map(|edge| edge.to.clone()));
+            }
+        }
+        for block in &mut self.record.blocks {
+            block.reachable = reachable.contains(&block.id);
+        }
+        self.record.canonicalize();
+        let displacement = target as i64 - address as i64;
+        assert!((-4096..4096).contains(&displacement) && displacement % 2 == 0);
+        let immediate = displacement as u32;
+        let branch = (word & 0x01fff07f)
+            | (((immediate >> 12) & 1) << 31)
+            | (((immediate >> 5) & 0x3f) << 25)
+            | (((immediate >> 1) & 15) << 8)
+            | (((immediate >> 11) & 1) << 7);
+        self.replace_machine_word(address, branch);
+    }
+
+    fn replace_machine_words(&mut self, replacements: &[(u64, u32)]) {
+        let elf = parse_elf(&self.artifact, CheckerBudgets::default().instructions).unwrap();
+        for &(address, word) in replacements {
+            let offset = (elf.text.offset + address - elf.text.address) as usize;
+            self.artifact[offset..offset + 4].copy_from_slice(&word.to_le_bytes());
+        }
         for block in &mut self.record.blocks {
             let start = (elf.text.offset + block.range.start - elf.text.address) as usize;
             let end = (elf.text.offset + block.range.end - elf.text.address) as usize;
@@ -1573,6 +3568,2532 @@ fn assert_code(fixture: &Fixture, expected: CheckerRejectionCode) {
 }
 
 #[test]
+fn signed_literal_rejects_unsigned_overflow_after_rebinding() {
+    let source = "module signed_literal\naction inspect() -> u64 { let value: i32 = 7\nlet negative = -value\nrequire negative < value\nreturn 0 }";
+    let valid = Fixture::from_result(
+        compile(
+            source,
+            CompileOptions { edition: NEXT_EDITION, target: Some("riscv64-elf".into()), opt_level: 0, ..Default::default() },
+        )
+        .unwrap(),
+    );
+    valid.check().unwrap();
+    for value in ["2147483648", "4294967295", "4294967296", "-1"] {
+        let mut changed = valid.clone();
+        let constant = changed
+            .record
+            .typed_semantics
+            .entries
+            .iter_mut()
+            .flat_map(|entry| &mut entry.blocks)
+            .flat_map(|block| &mut block.operations)
+            .find_map(|op| match &mut op.detail {
+                TypedSemanticOperationDetail::Constant { value: TypedSemanticConstant::U32(value) } => Some(value),
+                _ => None,
+            })
+            .expect("contextual signed literal");
+        *constant = value.to_string();
+        changed.rebind_typed_semantics();
+        assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
+    }
+}
+
+#[test]
+fn allocated_record_contracts_retain_unused_layouts_and_reject_forged_types() {
+    let source = r#"
+module record_proof
+struct Inner { amount: u64 }
+struct Value { inner: Inner }
+struct Unused { bytes: [u8; 32] }
+collections Work { limits { bytes: 512, allocations: 4 }
+values: Vec<Value> { items: 4 }
+unused: OrderedMap<u64, Unused> { items: 4 }
+}
+fn read(view: &Work) -> Value { return view.values.get(0) }
+action inspect(witness value: Value) -> u64 {
+    let mut work = Work::new()
+    work.values.push(value)
+    let copied = read(&work)
+    work.drop()
+    require copied.inner.amount == value.inner.amount
+    return 0
+}
+"#;
+    let valid = Fixture::from_result(
+        compile(source, CompileOptions { edition: NEXT_EDITION, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+    );
+    valid.check().unwrap();
+    for name in ["Inner", "Value", "Unused"] {
+        assert!(valid.record.typed_semantics.types.iter().any(|ty| ty.name == name), "lost {name}");
+    }
+    // Rebind all uses of the contract together so owner-consistency alone
+    // cannot reject these missing, oversized, borrowed or Cell-like layouts.
+    for forged in ["Unknown", "[u8; 65]", "&Value", "Work"] {
+        let mut changed = valid.clone();
+        for op in changed
+            .record
+            .typed_semantics
+            .entries
+            .iter_mut()
+            .flat_map(|entry| &mut entry.blocks)
+            .flat_map(|block| &mut block.operations)
+        {
+            if let TypedSemanticOperationDetail::AllocatedValue { contract, .. } = &mut op.detail {
+                let cellscript_artifact_checker::allocated_values::MemberKind::OrderedMap { value, .. } =
+                    &mut contract.members[1].shape
+                else {
+                    unreachable!()
+                };
+                *value = forged.into();
+            }
+        }
+        changed.rebind_typed_semantics();
+        assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
+    }
+}
+
+#[test]
+fn allocated_allocations_reject_rebound_budget_state_and_zeroing_mutations() {
+    for opt_level in [0, 3] {
+        for bytes in [64, 65536] {
+            let source = format!("module allocation\ncollections Work {{ limits {{ bytes: {bytes}, allocations: 2 }}\nvalues: Vec<u64> {{ items: 4 }} }}\naction inspect() -> u64 {{ let mut first = Work::new()\nfirst.values.reserve(1)\nlet mut moved = first\nmoved.values.push(7)\nlet mut second = Work::new()\nsecond.values.push(8)\nrequire moved.values.get(0) == 7\nreturn second.values.get(0) }}");
+            let valid = Fixture::from_result(
+                compile(
+                    &source,
+                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                )
+                .unwrap(),
+            );
+            let begin = valid
+                .record
+                .blocks
+                .iter()
+                .filter(|block| block.allocated_allocation_labels.iter().any(|label| label.ends_with("_begin")))
+                .min_by_key(|block| block.range.start)
+                .unwrap();
+            let label = begin.allocated_allocation_labels.iter().find(|label| label.ends_with("_begin")).unwrap();
+            let end_label = format!("{}_end", label.strip_suffix("_begin").unwrap());
+            let end = valid.record.blocks.iter().find(|block| block.allocated_allocation_labels.contains(&end_label)).unwrap();
+            let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+            let body =
+                elf.instructions.iter().filter(|i| begin.range.start <= i.address && i.address < end.range.start).collect::<Vec<_>>();
+            let first_store = body.iter().find(|i| i.word & 0x7f == 0x23).unwrap().address;
+            let reject = |fixture: &Fixture| {
+                let error = check_bundle_values(
+                    &fixture.artifact,
+                    &fixture.metadata,
+                    &fixture.record,
+                    &fixture.source_map,
+                    &CheckerBudgets::default(),
+                )
+                .unwrap_err();
+                assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{error}");
+                assert!(error.message.contains("allocated allocation"), "{error}");
+            };
+            let mut mutations = 0;
+            for instruction in &body {
+                let word = instruction.word;
+                let opcode = word & 0x7f;
+                // Preserve branch addresses and CFG while reversing predicates.
+                // Mutate the actual record/state/zero-byte writes, excluding
+                // the spill subframe, and arithmetic outside guard wrappers.
+                let replacement = if opcode == 0x63 {
+                    Some(word ^ (1 << 12))
+                } else if opcode == 0x23 && word >> 15 & 31 == 16 {
+                    Some(word ^ (1 << 20))
+                } else if instruction.address < first_store && matches!(opcode, 0x13 | 0x33 | 0x37 | 0x1b) && word >> 7 & 31 != 2 {
+                    Some(0x00000013)
+                } else if [0x020f8513, 0x00050293, 0x00128293, 0xfff38393].contains(&word) {
+                    // Result pointer +32, zero-loop pointer, stride and count.
+                    Some(word ^ (1 << 20))
+                } else {
+                    None
+                };
+                if let Some(replacement) = replacement {
+                    let mut changed = valid.clone();
+                    changed.replace_machine_word(instruction.address, replacement);
+                    reject(&changed);
+                    mutations += 1;
+                }
+            }
+            assert!(mutations >= 40, "insufficient allocation mutation inventory: {mutations}");
+            for all in [false, true] {
+                let mut missing = valid.clone();
+                for block in &mut missing.record.blocks {
+                    block.allocated_allocation_labels.retain(|candidate| !all && candidate != label && candidate != &end_label);
+                }
+                missing.rebind_sidecars();
+                reject(&missing);
+            }
+            // A marker must not manufacture a second alias of the same bytes.
+            let mut duplicate = valid.clone();
+            let duplicate_block = duplicate.record.blocks.iter_mut().find(|block| block.id == begin.id).unwrap();
+            duplicate_block.allocated_allocation_labels.push(label.replace("_begin", "0_begin"));
+            duplicate_block.allocated_allocation_labels.sort();
+            duplicate.rebind_sidecars();
+            reject(&duplicate);
+
+            let loop_branch = body.iter().find(|i| i.word & 0x707f == 0x1063 && i.word >> 15 & 31 == 7).unwrap();
+            let zero_loop = elf.control_flow.iter().find(|edge| edge.address == loop_branch.address).unwrap().target;
+            let outside = elf
+                .instructions
+                .iter()
+                .filter(|i| i.address < begin.range.start && i.word & 0x7f == 0x63)
+                .max_by_key(|i| i.address)
+                .unwrap()
+                .address;
+            for address in [begin.range.start, outside] {
+                // Keep machine CFG, reachability and all digests consistent;
+                // reject skipped admission and external entry into zeroing.
+                let mut bypass = valid.clone();
+                bypass.redirect_conditional_branch(address, zero_loop);
+                reject(&bypass);
+            }
+        }
+    }
+}
+
+#[test]
+fn allocated_lifecycle_rejects_rebound_lookup_copy_and_retirement_mutations() {
+    for opt_level in [0, 3] {
+        for bytes in [512, 65536] {
+            let source = format!("module lifecycle\ncollections Work {{ limits {{ bytes: {bytes}, allocations: 8 }}\nvalues: Vec<u64> {{ items: 8 }}\nseen: OrderedSet<u64> {{ items: 8 }}\ntotals: OrderedMap<u64, u128> {{ items: 8 }} }}\naction inspect() -> u64 {{ let mut first = Work::new()\nfirst.values.push(7)\nlet mut second = Work::new()\nsecond.values.push(8)\nsecond.values.push(9)\nsecond.values.reserve(8)\nrequire second.values.get(0) == 8\nrequire second.values.get(1) == 9\nsecond.drop()\nfirst.drop()\nreturn 0 }}");
+            let valid = Fixture::from_result(
+                compile(
+                    &source,
+                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                )
+                .unwrap(),
+            );
+            let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+            let reject = |fixture: &Fixture| {
+                let error = check_bundle_values(
+                    &fixture.artifact,
+                    &fixture.metadata,
+                    &fixture.record,
+                    &fixture.source_map,
+                    &CheckerBudgets::default(),
+                )
+                .unwrap_err();
+                assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{error}");
+                assert!(error.message.contains("allocated allocation"), "{error}");
+            };
+            for prefix in [".Lallocated_resize_", ".Lallocated_release_"] {
+                let candidates = valid
+                    .record
+                    .blocks
+                    .iter()
+                    .flat_map(|block| block.allocated_lifecycle_labels.iter().map(move |label| (block, label)))
+                    .filter(|(_, label)| label.starts_with(prefix) && label.ends_with("_begin"))
+                    .collect::<Vec<_>>();
+                let largest_offset = candidates
+                    .iter()
+                    .map(|(_, label)| label.strip_prefix(prefix).unwrap().split('_').next().unwrap().parse::<u32>().unwrap())
+                    .max()
+                    .unwrap();
+                let exact_prefix = format!("{prefix}{largest_offset}_");
+                let (begin, label) = candidates
+                    .into_iter()
+                    .filter(|(_, label)| label.starts_with(&exact_prefix))
+                    .min_by_key(|(block, _)| block.range.start)
+                    .unwrap();
+                let end_label = format!("{}_end", label.strip_suffix("_begin").unwrap());
+                let end = valid.record.blocks.iter().find(|block| block.allocated_lifecycle_labels.contains(&end_label)).unwrap();
+                let allocations = valid
+                    .record
+                    .blocks
+                    .iter()
+                    .filter(|block| begin.range.start <= block.range.start && block.range.start < end.range.start)
+                    .flat_map(|block| {
+                        block
+                            .allocated_allocation_labels
+                            .iter()
+                            .filter(|label| label.ends_with("_begin"))
+                            .map(move |label| (block, label))
+                    })
+                    .map(|(block, label)| {
+                        let finish = format!("{}_end", label.strip_suffix("_begin").unwrap());
+                        let end = valid
+                            .record
+                            .blocks
+                            .iter()
+                            .find(|block| block.allocated_allocation_labels.contains(&finish))
+                            .unwrap()
+                            .range
+                            .start;
+                        (block.range.start, end)
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(allocations.len(), if prefix.contains("resize") { 2 } else { 0 });
+                if bytes == 65536 {
+                    assert!(largest_offset > 65536);
+                }
+                let body = elf
+                    .instructions
+                    .iter()
+                    .filter(|i| {
+                        begin.range.start <= i.address
+                            && i.address < end.range.start
+                            && !allocations.iter().any(|(start, end)| (*start..*end).contains(&i.address))
+                    })
+                    .collect::<Vec<_>>();
+                let mut mutations = 0;
+                for instruction in &body {
+                    let word = instruction.word;
+                    let opcode = word & 0x7f;
+                    let base = word >> 15 & 31;
+                    let source = word >> 20 & 31;
+                    let replacement = match opcode {
+                        0x63 => Some(word ^ (1 << 12)),
+                        0x03 if base != 2 => Some(word ^ (8 << 20)),
+                        0x23 if base != 2 || matches!(source, 6 | 10) => Some(word ^ (1 << 20)),
+                        0x13 | 0x1b | 0x33 if word >> 7 & 31 != 2 => Some(word ^ (1 << 20)),
+                        0x37 => Some(word ^ (1 << 12)),
+                        _ => None,
+                    };
+                    if let Some(replacement) = replacement {
+                        let mut changed = valid.clone();
+                        changed.replace_machine_word(instruction.address, replacement);
+                        reject(&changed);
+                        mutations += 1;
+                    }
+                }
+                assert!(mutations >= 45, "insufficient lifecycle mutations: {mutations}");
+                let mut missing = valid.clone();
+                for block in &mut missing.record.blocks {
+                    block.allocated_lifecycle_labels.retain(|candidate| candidate != label && candidate != &end_label);
+                }
+                missing.rebind_sidecars();
+                reject(&missing);
+                if let Some(&(child, _)) = allocations.first() {
+                    let outside = elf
+                        .instructions
+                        .iter()
+                        .filter(|i| i.address < begin.range.start && i.word & 0x7f == 0x63)
+                        .max_by_key(|i| i.address)
+                        .unwrap()
+                        .address;
+                    for address in [begin.range.start, outside] {
+                        let mut bypass = valid.clone();
+                        bypass.redirect_conditional_branch(address, child);
+                        reject(&bypass);
+                    }
+                }
+            }
+            let mut missing = valid.clone();
+            for block in &mut missing.record.blocks {
+                block.allocated_lifecycle_labels.clear();
+            }
+            missing.rebind_sidecars();
+            reject(&missing);
+        }
+    }
+}
+
+#[test]
+fn allocated_descriptors_bind_member_growth_publication_and_drop() {
+    for opt_level in [0, 3] {
+        for bytes in [512, 65536] {
+            let source = format!("module descriptors\nstruct Record {{ amount: u128, flag: u64 }}\ncollections Work {{ limits {{ bytes: {bytes}, allocations: 8 }}\nvalues: Vec<Record> {{ items: 4 }}\ntotals: OrderedMap<u64, Record> {{ items: 6 }}\nseen: OrderedSet<Hash> {{ items: 5 }} }}\naction inspect(flag: bool) -> u64 {{ if flag {{ return 0 }}\nlet mut first = Work::new()\nlet mut second = Work::new()\nsecond.values.reserve(4)\nsecond.totals.reserve(6)\nsecond.seen.reserve(5)\nsecond.drop()\nfirst.drop()\nreturn 0 }}");
+            let valid = Fixture::from_result(
+                compile(
+                    &source,
+                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                )
+                .unwrap(),
+            );
+            let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+            let reject = |fixture: &Fixture| {
+                let error = check_bundle_values(
+                    &fixture.artifact,
+                    &fixture.metadata,
+                    &fixture.record,
+                    &fixture.source_map,
+                    &CheckerBudgets::default(),
+                )
+                .unwrap_err();
+                assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{error}");
+                assert!(error.message.contains("allocated allocation"), "{error}");
+            };
+            for prefix in [".Lallocated_reserve_", ".Lallocated_drop_"] {
+                let candidates = valid
+                    .record
+                    .blocks
+                    .iter()
+                    .flat_map(|block| block.allocated_lifecycle_labels.iter().map(move |label| (block, label)))
+                    .filter(|(_, label)| label.starts_with(prefix) && label.ends_with("_begin"))
+                    .collect::<Vec<_>>();
+                let owner = candidates
+                    .iter()
+                    .map(|(_, label)| label.strip_prefix(prefix).unwrap().split('_').next().unwrap().parse::<u32>().unwrap())
+                    .max()
+                    .unwrap();
+                let descriptor = owner + 32 + bytes + 32; // The second, differently shaped member.
+                let (begin, label) =
+                    candidates.into_iter().find(|(_, label)| label.starts_with(&format!("{prefix}{owner}_{descriptor}_"))).unwrap();
+                let end_label = format!("{}_end", label.strip_suffix("_begin").unwrap());
+                let end = valid
+                    .record
+                    .blocks
+                    .iter()
+                    .find(|block| block.allocated_lifecycle_labels.contains(&end_label))
+                    .unwrap()
+                    .range
+                    .start;
+                let child_prefix = if prefix.contains("reserve") { ".Lallocated_resize_" } else { ".Lallocated_release_" };
+                let (child, child_label) = valid
+                    .record
+                    .blocks
+                    .iter()
+                    .filter(|block| begin.range.start < block.range.start && block.range.start < end)
+                    .flat_map(|block| block.allocated_lifecycle_labels.iter().map(move |label| (block, label)))
+                    .find(|(_, label)| label.starts_with(child_prefix) && label.ends_with("_begin"))
+                    .unwrap();
+                let child_end_label = format!("{}_end", child_label.strip_suffix("_begin").unwrap());
+                let child_end = valid
+                    .record
+                    .blocks
+                    .iter()
+                    .find(|block| block.allocated_lifecycle_labels.contains(&child_end_label))
+                    .unwrap()
+                    .range
+                    .start;
+                let mut mutations = 0;
+                for instruction in elf.instructions.iter().filter(|i| {
+                    begin.range.start <= i.address && i.address < end && !(child.range.start..child_end).contains(&i.address)
+                }) {
+                    let word = instruction.word;
+                    let replacement = match word & 0x7f {
+                        0x63 => Some(word ^ (1 << 12)),
+                        0x03 => Some(word ^ (8 << 20)),
+                        0x23 => Some(word ^ (1 << 20)),
+                        0x13 | 0x1b | 0x33 => Some(word ^ (1 << 20)),
+                        0x37 => Some(word ^ (1 << 12)),
+                        _ => None,
+                    };
+                    if let Some(replacement) = replacement {
+                        let mut changed = valid.clone();
+                        changed.replace_machine_word(instruction.address, replacement);
+                        reject(&changed);
+                        mutations += 1;
+                    }
+                }
+                assert!(mutations >= 60, "descriptor checks and publication must both be exercised: {mutations}");
+                if bytes == 65536 {
+                    assert!(owner > 65536);
+                }
+                let mut missing = valid.clone();
+                for block in &mut missing.record.blocks {
+                    block.allocated_lifecycle_labels.retain(|candidate| candidate != label && candidate != &end_label);
+                }
+                missing.rebind_sidecars();
+                reject(&missing);
+                // Swap two valid member coordinates without changing the
+                // inventory counts or machine bytes. Equal entry widths must
+                // not erase their distinct declared item limits.
+                let mut swapped = valid.clone();
+                let left = format!("{prefix}{owner}_{descriptor}_");
+                let right = format!("{prefix}{owner}_{}_", descriptor + 32);
+                for block in &mut swapped.record.blocks {
+                    for label in &mut block.allocated_lifecycle_labels {
+                        if let Some(suffix) = label.strip_prefix(&left) {
+                            *label = format!("{right}{suffix}");
+                        } else if let Some(suffix) = label.strip_prefix(&right) {
+                            *label = format!("{left}{suffix}");
+                        }
+                    }
+                    block.allocated_lifecycle_labels.sort();
+                }
+                swapped.rebind_sidecars();
+                reject(&swapped);
+                let branch = elf
+                    .instructions
+                    .iter()
+                    .find(|i| begin.range.start <= i.address && i.address < child.range.start && i.word & 0x7f == 0x63)
+                    .unwrap();
+                let mut bypass = valid.clone();
+                bypass.redirect_conditional_branch(branch.address, child.range.start);
+                reject(&bypass);
+            }
+            let mut missing = valid.clone();
+            for block in &mut missing.record.blocks {
+                block
+                    .allocated_lifecycle_labels
+                    .retain(|label| !label.starts_with(".Lallocated_reserve_") && !label.starts_with(".Lallocated_drop_"));
+            }
+            missing.rebind_sidecars();
+            reject(&missing);
+            let tail = valid.record.blocks.iter().find(|block| block.machine_label.as_deref() == Some(".Linspect_epilogue")).unwrap();
+            let restore = elf.instructions.iter().find(|i| tail.range.contains(i.address) && i.word & 0x7fff == 0x3083).unwrap();
+            let mut skipped_restore = valid.clone();
+            skipped_restore.replace_machine_word(restore.address, restore.word ^ (1 << 7));
+            assert_code(&skipped_restore, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+        }
+    }
+}
+
+#[test]
+fn allocated_elements_bind_copy_direction_extent_and_length_transitions() {
+    for opt_level in [0, 3] {
+        for bytes in [512, 65536] {
+            let source = format!("module elements\nstruct Item {{ amount: u128, tag: u64 }}\ncollections Work {{ limits {{ bytes: {bytes}, allocations: 16 }}\nvalues: Vec<Item> {{ items: 4 }}\ntotals: OrderedMap<u64, u128> {{ items: 4 }}\nseen: OrderedSet<u64> {{ items: 4 }} }}\naction inspect(flag: bool) -> u64 {{ if flag {{ return 0 }}\nlet mut first = Work::new()\nlet mut second = Work::new()\nsecond.values.push(Item {{ amount: 3, tag: 4 }})\nsecond.values.insert(0, Item {{ amount: 5, tag: 6 }})\nsecond.values.set(1, Item {{ amount: 7, tag: 8 }})\nlet removed = second.values.remove(0)\nrequire removed.tag == 6\nlet popped = second.values.pop()\nrequire popped.tag == 8\nsecond.totals.insert(1, 2)\nsecond.totals.insert(1, 3)\nsecond.totals.remove(1)\nsecond.seen.insert(1)\nsecond.seen.remove(1)\nsecond.drop()\nfirst.drop()\nreturn 0 }}");
+            let valid = Fixture::from_result(
+                compile(
+                    &source,
+                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                )
+                .unwrap(),
+            );
+            let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+            let reject = |fixture: &Fixture| {
+                let error = check_bundle_values(
+                    &fixture.artifact,
+                    &fixture.metadata,
+                    &fixture.record,
+                    &fixture.source_map,
+                    &CheckerBudgets::default(),
+                )
+                .unwrap_err();
+                assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{error}");
+                assert!(error.message.contains("allocated allocation"), "{error}");
+            };
+            let prefixes = [".Lallocated_push_", ".Lallocated_insert_", ".Lallocated_set_", ".Lallocated_remove_"];
+            for prefix in prefixes {
+                let candidates = valid
+                    .record
+                    .blocks
+                    .iter()
+                    .flat_map(|block| block.allocated_lifecycle_labels.iter().map(move |label| (block, label)))
+                    .filter(|(_, label)| label.starts_with(prefix) && label.ends_with("_begin"))
+                    .collect::<Vec<_>>();
+                let owner = candidates
+                    .iter()
+                    .map(|(_, label)| label.strip_prefix(prefix).unwrap().split('_').next().unwrap().parse::<u32>().unwrap())
+                    .max()
+                    .unwrap();
+                let descriptor = owner + 32 + bytes;
+                let (begin, label) = candidates
+                    .into_iter()
+                    .filter(|(_, label)| label.starts_with(&format!("{prefix}{owner}_{descriptor}_")))
+                    .min_by_key(|(block, _)| block.range.start)
+                    .unwrap();
+                let end_label = format!("{}_end", label.strip_suffix("_begin").unwrap());
+                let end = valid
+                    .record
+                    .blocks
+                    .iter()
+                    .find(|block| block.allocated_lifecycle_labels.contains(&end_label))
+                    .unwrap()
+                    .range
+                    .start;
+                let body = valid
+                    .record
+                    .blocks
+                    .iter()
+                    .filter(|block| {
+                        begin.range.start <= block.range.start
+                            && block.range.start < end
+                            && block.machine_label.as_deref().is_some_and(|label| label.starts_with(".Lvalue_vector_checked_"))
+                    })
+                    .map(|block| block.range.start)
+                    .min()
+                    .unwrap();
+                let child = valid
+                    .record
+                    .blocks
+                    .iter()
+                    .filter(|block| begin.range.start < block.range.start && block.range.start < end)
+                    .flat_map(|block| block.allocated_lifecycle_labels.iter().map(move |label| (block, label)))
+                    .find(|(_, label)| label.starts_with(".Lallocated_reserve_") && label.ends_with("_begin"))
+                    .map(|(block, label)| {
+                        let finish = format!("{}_end", label.strip_suffix("_begin").unwrap());
+                        let end = valid
+                            .record
+                            .blocks
+                            .iter()
+                            .find(|block| block.allocated_lifecycle_labels.contains(&finish))
+                            .unwrap()
+                            .range
+                            .start;
+                        block.range.start..end
+                    });
+                let mut mutations = 0;
+                for instruction in elf.instructions.iter().filter(|i| {
+                    body <= i.address && i.address < end && !child.as_ref().is_some_and(|child| child.contains(&i.address))
+                }) {
+                    let word = instruction.word;
+                    let rd = word >> 7 & 31;
+                    let replacement = match word & 0x7f {
+                        0x63 => Some(word ^ (1 << 12)),
+                        0x03 if word >> 12 & 7 == 4 => Some(word ^ (1 << 15)),
+                        0x23 if word >> 12 & 7 == 0 || word >> 20 & 31 == 6 => Some(word ^ (1 << 20)),
+                        0x13 | 0x1b | 0x33 if matches!(rd, 5 | 6 | 7 | 11 | 14 | 28 | 29) => Some(word ^ (1 << 20)),
+                        0x37 => Some(word ^ (1 << 12)),
+                        _ => None,
+                    };
+                    if let Some(replacement) = replacement {
+                        let mut changed = valid.clone();
+                        changed.replace_machine_word(instruction.address, replacement);
+                        reject(&changed);
+                        mutations += 1;
+                    }
+                }
+                assert!(mutations >= 10, "missing element mutation coverage: {prefix} {mutations}");
+                if bytes == 65536 {
+                    assert!(owner > 65536);
+                }
+                let mut missing = valid.clone();
+                for block in &mut missing.record.blocks {
+                    block.allocated_lifecycle_labels.retain(|candidate| candidate != label && candidate != &end_label);
+                }
+                missing.rebind_sidecars();
+                reject(&missing);
+                if let Some(child) = child {
+                    let branch = elf
+                        .instructions
+                        .iter()
+                        .find(|i| begin.range.start <= i.address && i.address < child.start && i.word & 0x7f == 0x63)
+                        .unwrap();
+                    let mut bypass = valid.clone();
+                    bypass.redirect_conditional_branch(branch.address, child.start);
+                    reject(&bypass);
+                }
+            }
+            let mut missing = valid.clone();
+            for block in &mut missing.record.blocks {
+                block.allocated_lifecycle_labels.retain(|label| !prefixes.iter().any(|prefix| label.starts_with(prefix)));
+            }
+            missing.rebind_sidecars();
+            reject(&missing);
+        }
+    }
+}
+
+#[test]
+fn allocated_ordered_searches_bind_key_order_bounds_and_update_selection() {
+    for opt_level in [0, 3] {
+        for bytes in [512, 65536] {
+            let source = format!(
+                r#"module ordered_proof
+collections Work {{
+    limits {{ bytes: {bytes}, allocations: 16 }}
+    totals: OrderedMap<u64, u128> {{ items: 4 }}
+    seen: OrderedSet<Hash> {{ items: 4 }}
+}}
+fn lookup(view: &Work, key: u64) -> u128 {{
+    borrow view as alias {{ return alias.totals.get_or(key, 0) }}
+}}
+action inspect(flag: bool, hash: Hash) -> u64 {{
+    if flag {{ return 0 }}
+    let first = Work::new()
+    let mut second = Work::new()
+    let added = second.totals.insert(256, 3)
+    require added
+    let replaced = second.totals.insert(256, 5)
+    require !replaced
+    require second.totals.contains_key(256)
+    require second.totals.get(256) == 5
+    require second.totals.get_or(255, 8) == 8
+    borrow second as view {{
+        require view.totals.contains_key(256)
+        require lookup(view, 256) == 5
+    }}
+    let removed = second.totals.remove(256)
+    require removed
+    let missing = second.totals.remove(256)
+    require !missing
+    let fresh = second.seen.insert(hash)
+    require fresh
+    let duplicate = second.seen.insert(hash)
+    require !duplicate
+    require second.seen.contains(hash)
+    let erased = second.seen.remove(hash)
+    require erased
+    let absent = second.seen.remove(hash)
+    require !absent
+    second.drop()
+    first.drop()
+    return 0
+}}"#
+            );
+            let valid = Fixture::from_result(
+                compile(
+                    &source,
+                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                )
+                .unwrap(),
+            );
+            let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+            let reject = |fixture: &Fixture| {
+                let error = check_bundle_values(
+                    &fixture.artifact,
+                    &fixture.metadata,
+                    &fixture.record,
+                    &fixture.source_map,
+                    &CheckerBudgets::default(),
+                )
+                .unwrap_err();
+                assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{error}");
+                assert!(error.message.contains("allocated allocation"), "{error}");
+            };
+            let prefixes = [".Lallocated_find_", ".Lallocated_put_", ".Lallocated_erase_"];
+            // Both owners have the same contract. Rebinding the lexical loan
+            // to the other live owner must not certify reads from the old one.
+            let mut wrong_owner = valid.clone();
+            let entry = wrong_owner.record.typed_semantics.entries.iter_mut().find(|entry| entry.kind == "action").unwrap();
+            entry.borrows.iter_mut().find(|borrow| borrow.root == "second").unwrap().root = "first".into();
+            wrong_owner.rebind_typed_semantics();
+            reject(&wrong_owner);
+            for prefix in prefixes {
+                let mut first_per_member = std::collections::BTreeMap::new();
+                for block in &valid.record.blocks {
+                    for label in &block.allocated_lifecycle_labels {
+                        if let Some(suffix) = label.strip_prefix(prefix).filter(|_| label.ends_with("_begin")) {
+                            let parts = suffix.split('_').collect::<Vec<_>>();
+                            let descriptor = parts[1].parse::<u32>().unwrap();
+                            first_per_member.entry(descriptor).or_insert((block, label));
+                        }
+                    }
+                }
+                assert_eq!(first_per_member.len(), 2);
+                for (descriptor, (begin, label)) in first_per_member {
+                    if bytes == 65536 {
+                        assert!(descriptor > 131072);
+                    }
+                    let end_label = format!("{}_end", label.strip_suffix("_begin").unwrap());
+                    let end = valid
+                        .record
+                        .blocks
+                        .iter()
+                        .find(|block| block.allocated_lifecycle_labels.contains(&end_label))
+                        .unwrap()
+                        .range
+                        .start;
+                    let body = if prefix == ".Lallocated_find_" {
+                        valid
+                            .record
+                            .blocks
+                            .iter()
+                            .filter(|block| {
+                                begin.range.start <= block.range.start
+                                    && block.range.start < end
+                                    && block.machine_label.as_deref().is_some_and(|label| label.starts_with(".Lvalue_vector_checked_"))
+                            })
+                            .map(|block| block.range.start)
+                            .min()
+                            .unwrap()
+                    } else {
+                        begin.range.start
+                    };
+                    let mut children = Vec::new();
+                    if prefix != ".Lallocated_find_" {
+                        for block in &valid.record.blocks {
+                            if !(begin.range.start..end).contains(&block.range.start) {
+                                continue;
+                            }
+                            for label in &block.allocated_lifecycle_labels {
+                                if [".Lallocated_find_", ".Lallocated_set_", ".Lallocated_insert_", ".Lallocated_remove_"]
+                                    .iter()
+                                    .any(|prefix| label.starts_with(prefix))
+                                    && label.ends_with("_begin")
+                                {
+                                    let finish = format!("{}_end", label.strip_suffix("_begin").unwrap());
+                                    let child_end = valid
+                                        .record
+                                        .blocks
+                                        .iter()
+                                        .find(|block| block.allocated_lifecycle_labels.contains(&finish))
+                                        .unwrap()
+                                        .range
+                                        .start;
+                                    children.push(block.range.start..child_end);
+                                }
+                            }
+                        }
+                    }
+                    let mut mutations = 0;
+                    for instruction in elf
+                        .instructions
+                        .iter()
+                        .filter(|i| body <= i.address && i.address < end && !children.iter().any(|range| range.contains(&i.address)))
+                    {
+                        let word = instruction.word;
+                        let replacement = match word & 0x7f {
+                            0x63 => Some(word ^ (1 << 12)),
+                            0x03 => Some(word ^ (1 << 15)),
+                            0x13 | 0x1b | 0x33 => Some(word ^ (1 << 20)),
+                            0x37 => Some(word ^ (1 << 12)),
+                            _ => None,
+                        };
+                        if let Some(replacement) = replacement {
+                            let mut changed = valid.clone();
+                            changed.replace_machine_word(instruction.address, replacement);
+                            reject(&changed);
+                            mutations += 1;
+                        }
+                    }
+                    assert!(mutations >= if prefix == ".Lallocated_find_" { 25 } else { 2 });
+                    let mut missing = valid.clone();
+                    for block in &mut missing.record.blocks {
+                        block.allocated_lifecycle_labels.retain(|candidate| candidate != label && candidate != &end_label);
+                    }
+                    missing.rebind_sidecars();
+                    reject(&missing);
+                    if prefix != ".Lallocated_find_" {
+                        let find = children.iter().min_by_key(|range| range.start).unwrap();
+                        let branch = elf.instructions.iter().find(|i| i.address == find.end).unwrap();
+                        let update = children.iter().filter(|range| range.start > find.end).min_by_key(|range| range.start).unwrap();
+                        let mut bypass = valid.clone();
+                        let interior = valid
+                            .record
+                            .blocks
+                            .iter()
+                            .filter(|block| update.start < block.range.start && block.range.start < update.end)
+                            .map(|block| block.range.start)
+                            .min()
+                            .unwrap();
+                        bypass.redirect_conditional_branch(branch.address, interior);
+                        reject(&bypass);
+                    }
+                }
+            }
+            let mut missing = valid.clone();
+            for block in &mut missing.record.blocks {
+                block.allocated_lifecycle_labels.retain(|label| !prefixes.iter().any(|prefix| label.starts_with(prefix)));
+            }
+            missing.rebind_sidecars();
+            reject(&missing);
+        }
+    }
+}
+
+#[test]
+fn allocated_ordered_search_inventory_accepts_all_key_profiles_and_local_borrows() {
+    for key in ["u8", "u16", "u32", "u64", "Hash", "Address", "[u8; 1]", "[u8; 8]", "[u8; 32]"] {
+        for member in [format!("OrderedMap<{key}, u64>"), format!("OrderedSet<{key}>")] {
+            let args = if member.starts_with("OrderedMap") { "key, 7" } else { "key" };
+            let contains = if member.starts_with("OrderedMap") { "contains_key" } else { "contains" };
+            let source = format!(
+                r#"module key_profile
+collections Work {{
+    limits {{ bytes: 512, allocations: 4 }}
+    values: {member} {{ items: 4 }}
+}}
+action inspect(key: {key}) -> u64 {{
+    let mut work = Work::new()
+    let added = work.values.insert({args})
+    require added
+    borrow work as view {{ borrow view as nested {{ require nested.values.{contains}(key) }} }}
+    let removed = work.values.remove(key)
+    require removed
+    work.drop()
+    return 0
+}}"#
+            );
+            for opt_level in [0, 3] {
+                let valid = Fixture::from_result(
+                    compile(
+                        &source,
+                        CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    )
+                    .unwrap(),
+                );
+                let starts = valid
+                    .record
+                    .blocks
+                    .iter()
+                    .flat_map(|block| &block.allocated_lifecycle_labels)
+                    .filter(|label| label.starts_with(".Lallocated_find_") && label.ends_with("_begin"))
+                    .count();
+                assert_eq!(starts, 3, "{member} at O{opt_level}");
+            }
+        }
+    }
+}
+
+#[test]
+fn allocated_helper_parameters_bind_both_abi_words_and_preserve_slots() {
+    for padding in [0, 7, 8] {
+        let params = (0..padding).map(|i| format!("p{i}: u64, ")).collect::<String>();
+        let forwarded = (0..padding).map(|i| format!("p{i}, ")).collect::<String>();
+        let arguments = "0, ".repeat(padding);
+        let source = format!(
+            r#"module arena_parameters
+collections Work {{
+    limits {{ bytes: 512, allocations: 4 }}
+    values: Vec<u64> {{ items: 4 }}
+}}
+fn read({params}first: &Work, second: &Work, delta: u64) -> u64 {{
+    let adjusted = delta + 1
+    if adjusted <= delta {{ return 0 }}
+    return first.values.get(0) + second.values.get(0) + adjusted
+}}
+fn forward({params}first: &Work, second: &Work, delta: u64) -> u64 {{
+    borrow first as alias {{ borrow alias as nested {{
+        return read({forwarded}nested, second, delta)
+    }} }}
+}}
+action inspect(witness delta: u64) -> u64 {{
+    let mut first = Work::new()
+    let mut second = Work::new()
+    first.values.push(3)
+    second.values.push(7)
+    borrow first as a {{ borrow second as b {{
+        require forward({arguments}a, b, delta) > 0
+    }} }}
+    second.drop()
+    first.drop()
+    return 0
+}}"#
+        );
+        for opt_level in [0, 3] {
+            let valid = Fixture::from_result(
+                compile(
+                    &source,
+                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                )
+                .unwrap(),
+            );
+            let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+            for name in ["read", "forward"] {
+                let typed = valid.record.typed_semantics.entries.iter().find(|entry| entry.name.ends_with(name)).unwrap();
+                let entry = valid.record.entries.iter().find(|entry| entry.id == typed.id).unwrap();
+                let start = valid.record.blocks.iter().find(|block| block.id == entry.entry_block).unwrap().range.start;
+                let end = valid
+                    .record
+                    .blocks
+                    .iter()
+                    .filter(|block| block.owner_entry == typed.id && block.lowering_block_id.is_some())
+                    .map(|block| block.range.start)
+                    .min()
+                    .unwrap();
+                let spills = elf
+                    .instructions
+                    .iter()
+                    .filter(|instruction| {
+                        (start..end).contains(&instruction.address)
+                            && instruction.word & 0x707f == 0x3023
+                            && instruction.word >> 15 & 31 == 2
+                    })
+                    .collect::<Vec<_>>();
+                let offset = |word: u32| (word >> 7 & 31) | (word >> 25 << 5);
+                for param in &typed.params[padding..padding + 2] {
+                    let pointer = typed.locals.iter().find(|local| local.id == param.binding_id).unwrap().source_id as u32 * 8;
+                    let index = spills.iter().position(|instruction| offset(instruction.word) == pointer).unwrap();
+                    let length = offset(spills[index + 1].word);
+                    assert!(length > pointer && length < 2040);
+                    for spill in [spills[index], spills[index + 1]] {
+                        let mut changed = valid.clone();
+                        changed.replace_machine_word(spill.address, spill.word & !(31 << 20));
+                        assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                    }
+                    if name == "read" {
+                        let binary = typed.blocks.iter().flat_map(|block| &block.operations).find(|op| op.opcode == "binary").unwrap();
+                        let result =
+                            typed.locals.iter().find(|local| local.id == binary.destinations[0]).unwrap().source_id as u32 * 8;
+                        let store = elf
+                            .instructions
+                            .iter()
+                            .find(|instruction| {
+                                instruction.address >= end
+                                    && instruction.word & 0x707f == 0x3023
+                                    && instruction.word >> 15 & 31 == 2
+                                    && offset(instruction.word) == result
+                                    && valid
+                                        .record
+                                        .blocks
+                                        .iter()
+                                        .any(|block| block.owner_entry == typed.id && block.range.contains(instruction.address))
+                            })
+                            .unwrap();
+                        // Full stores and partial final-byte overlaps must not
+                        // replace either incoming word in the helper body.
+                        for slot in [pointer, length] {
+                            for width in 0..=3 {
+                                for destination in [slot, slot + 7] {
+                                    let word = (store.word & !((31 << 7) | (7 << 12) | (127 << 25)))
+                                        | ((destination & 31) << 7)
+                                        | (width << 12)
+                                        | ((destination >> 5) << 25);
+                                    let mut changed = valid.clone();
+                                    changed.replace_machine_word(store.address, word);
+                                    assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn allocated_borrowed_reads_bind_descriptors_searches_and_copied_results() {
+    let prefix = ".Lallocated_borrowed_";
+    for padding in [0, 7, 8] {
+        for bytes in [512, 65536] {
+            for opt_level in [0, 3] {
+                let valid = Fixture::from_result(
+                    compile(
+                        &borrowed_collection_reads::source(padding, bytes),
+                        CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    )
+                    .unwrap(),
+                );
+                let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+                let mut kinds = std::collections::BTreeSet::new();
+                let mut mutations = 0;
+                for block in &valid.record.blocks {
+                    for label in &block.allocated_lifecycle_labels {
+                        let Some(suffix) = label.strip_prefix(prefix).filter(|suffix| suffix.ends_with("_begin")) else { continue };
+                        let kind = suffix.split('_').next().unwrap();
+                        if !kinds.insert(kind) {
+                            continue;
+                        }
+                        let end_label = format!("{}_end", label.strip_suffix("_begin").unwrap());
+                        let end = valid
+                            .record
+                            .blocks
+                            .iter()
+                            .find(|block| block.allocated_lifecycle_labels.contains(&end_label))
+                            .unwrap()
+                            .range
+                            .start;
+                        let body =
+                            elf.instructions.iter().filter(|i| (block.range.start..end).contains(&i.address)).collect::<Vec<_>>();
+                        for opcode in [0x03, 0x13, 0x1b, 0x33, 0x37, 0x23, 0x63] {
+                            let candidates = body
+                                .iter()
+                                .filter(|i| i.word & 0x7f == opcode && (opcode == 0x23 || i.word >> 7 & 31 != 2))
+                                .collect::<Vec<_>>();
+                            for instruction in candidates.first().into_iter().chain(candidates.last()).copied() {
+                                let word = instruction.word;
+                                let replacement = word
+                                    ^ match opcode {
+                                        0x37 | 0x63 => 1 << 12,
+                                        0x03 => 8 << 20,
+                                        0x13 if word >> 12 & 7 == 3 => 1 << 15,
+                                        _ => 1 << 20,
+                                    };
+                                let mut changed = valid.clone();
+                                changed.replace_machine_word(instruction.address, replacement);
+                                let error = check_bundle_values(
+                                    &changed.artifact,
+                                    &changed.metadata,
+                                    &changed.record,
+                                    &changed.source_map,
+                                    &CheckerBudgets::default(),
+                                )
+                                .unwrap_err();
+                                assert_eq!(
+                                    error.code,
+                                    CheckerRejectionCode::V2420TypedMachineBindingInvalid,
+                                    "{kind} at {:#x}: {word:#x} -> {replacement:#x}: {error}",
+                                    instruction.address
+                                );
+                                mutations += 1;
+                            }
+                        }
+                        let mut missing = valid.clone();
+                        for block in &mut missing.record.blocks {
+                            block.allocated_lifecycle_labels.retain(|candidate| candidate != label && candidate != &end_label);
+                        }
+                        missing.rebind_sidecars();
+                        assert_code(&missing, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                        if kind == "read" {
+                            // Rebind the CFG as well: the extent check cannot
+                            // be redirected into an already checked read body.
+                            let branch = elf
+                                .instructions
+                                .iter()
+                                .rev()
+                                .find(|i| {
+                                    i.address < block.range.start
+                                        && block.range.start - i.address < 4096
+                                        && i.word & 0x7f == 0x63
+                                        && valid
+                                            .record
+                                            .blocks
+                                            .iter()
+                                            .any(|b| b.owner_entry == block.owner_entry && b.range.contains(i.address))
+                                })
+                                .unwrap();
+                            let target = valid
+                                .record
+                                .blocks
+                                .iter()
+                                .find(|b| b.range.start > block.range.start && b.range.start < end)
+                                .unwrap()
+                                .range
+                                .start;
+                            let mut changed = valid.clone();
+                            changed.redirect_conditional_branch(branch.address, target);
+                            assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                        }
+                    }
+                }
+                assert_eq!(
+                    kinds,
+                    std::collections::BTreeSet::from(["extent", "len", "capacity", "empty", "find", "read", "lookup", "required"])
+                );
+                assert!(mutations > 55);
+                let mut erased = valid.clone();
+                for block in &mut erased.record.blocks {
+                    block.allocated_lifecycle_labels.retain(|label| !label.starts_with(prefix));
+                }
+                erased.rebind_sidecars();
+                assert_code(&erased, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+            }
+        }
+    }
+}
+
+#[test]
+fn allocated_transport_binds_indices_results_and_adjacent_primitives() {
+    for bytes in [512, 65536] {
+        for opt_level in [0, 3] {
+            let source = format!(
+                r#"module collection_transport
+collections Work {{ limits {{ bytes: {bytes}, allocations: 8 }}
+    values: Vec<u64> {{ items: 4 }}
+    totals: OrderedMap<u64, u64> {{ items: 4 }}
+}}
+fn read(view: &Work, index: u64) -> u64 {{ return view.values.get(index) }}
+action inspect(witness index: u64, witness other: u64, witness flag: bool) -> u64 {{
+    if flag {{ return 0 }}
+    let mut work = Work::new()
+    work.values.reserve(4)
+    work.values.insert(index, 7)
+    work.values.set(other, 9)
+    if flag {{ return 0 }}
+    let copied = work.values.get(index)
+    require read(&work, other) == copied
+    let removed = work.values.remove(other)
+    work.values.push(removed)
+    let popped = work.values.pop()
+    work.totals.insert(3, popped)
+    require work.totals.get(3) == copied
+    require work.totals.get_or(4, 11) == 11
+    for (key, value) in work.totals {{ require key == 3
+        require value == copied }}
+    work.drop()
+    return 0
+}}"#
+            );
+            let valid = Fixture::from_result(
+                compile(
+                    &source,
+                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                )
+                .unwrap(),
+            );
+            let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+            let mut counts = [0, 0];
+            for (kind, prefix) in [".Lallocated_index_", ".Lallocated_result_"].iter().enumerate() {
+                let mut mutated_classes = std::collections::BTreeSet::new();
+                let mut bypass_checked = false;
+                for block in &valid.record.blocks {
+                    for label in &block.allocated_lifecycle_labels {
+                        if !label.starts_with(prefix) || !label.ends_with("_begin") {
+                            continue;
+                        }
+                        counts[kind] += 1;
+                        let end_label = format!("{}_end", label.strip_suffix("_begin").unwrap());
+                        let end = valid
+                            .record
+                            .blocks
+                            .iter()
+                            .find(|b| b.allocated_lifecycle_labels.contains(&end_label))
+                            .unwrap()
+                            .range
+                            .start;
+                        for instruction in elf.instructions.iter().filter(|i| (block.range.start..end).contains(&i.address)) {
+                            let word = instruction.word;
+                            let opcode = word & 0x7f;
+                            let class = (opcode, word >> 12 & 7);
+                            if !mutated_classes.insert(class) {
+                                continue;
+                            }
+                            let replacement = match opcode {
+                                0x03 => word ^ (8 << 20),
+                                0x23 => word ^ (8 << 7),
+                                0x37 => word ^ (1 << 12),
+                                _ => word ^ (1 << 20),
+                            };
+                            let mut changed = valid.clone();
+                            changed.replace_machine_word(instruction.address, replacement);
+                            let error = check_bundle_values(
+                                &changed.artifact,
+                                &changed.metadata,
+                                &changed.record,
+                                &changed.source_map,
+                                &CheckerBudgets::default(),
+                            )
+                            .unwrap_err();
+                            assert_eq!(
+                                error.code,
+                                CheckerRejectionCode::V2420TypedMachineBindingInvalid,
+                                "{prefix} O{opt_level} bytes={bytes} {word:#x}->{replacement:#x}: {error}"
+                            );
+                        }
+                        if counts[kind] == 1 {
+                            let mut missing = valid.clone();
+                            for block in &mut missing.record.blocks {
+                                block.allocated_lifecycle_labels.retain(|candidate| candidate != label && candidate != &end_label);
+                            }
+                            missing.rebind_sidecars();
+                            assert_code(&missing, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                            let mut forged = valid.clone();
+                            for block in &mut forged.record.blocks {
+                                for candidate in &mut block.allocated_lifecycle_labels {
+                                    if candidate != label && candidate != &end_label {
+                                        continue;
+                                    }
+                                    let mut parts =
+                                        candidate.strip_prefix(prefix).unwrap().split('_').map(str::to_owned).collect::<Vec<_>>();
+                                    // The owner source or result scratch coordinate
+                                    // cannot be changed by rebinding label evidence.
+                                    let field = if kind == 0 { 0 } else { 1 };
+                                    parts[field] = (parts[field].parse::<u64>().unwrap() + 8).to_string();
+                                    *candidate = format!("{prefix}{}", parts.join("_"));
+                                }
+                            }
+                            forged.rebind_sidecars();
+                            assert_code(&forged, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                        }
+                        // Rebind an earlier source branch to skip the index or
+                        // producer entirely, including all CFG/hash sidecars.
+                        if !bypass_checked
+                            && valid
+                                .record
+                                .typed_semantics
+                                .entries
+                                .iter()
+                                .any(|entry| entry.id == block.owner_entry && entry.kind == "action")
+                        {
+                            let target = if kind == 0 { end } else { block.range.start };
+                            let before = if kind == 0 {
+                                block.range.start
+                            } else {
+                                valid
+                                    .record
+                                    .blocks
+                                    .iter()
+                                    .filter(|b| {
+                                        b.owner_entry == block.owner_entry
+                                            && b.range.start < block.range.start
+                                            && b.allocated_lifecycle_labels
+                                                .iter()
+                                                .any(|label| label.starts_with(".Lallocated_index_") && label.ends_with("_begin"))
+                                    })
+                                    .map(|b| b.range.start)
+                                    .max()
+                                    .unwrap()
+                            };
+                            let branch = elf
+                                .instructions
+                                .iter()
+                                .rev()
+                                .find(|i| {
+                                    i.word & 0x7f == 0x63
+                                        && i.address < before
+                                        && target - i.address < 4096
+                                        && valid
+                                            .record
+                                            .blocks
+                                            .iter()
+                                            .any(|b| b.owner_entry == block.owner_entry && b.range.contains(i.address))
+                                })
+                                .unwrap();
+                            let mut bypass = valid.clone();
+                            bypass.redirect_conditional_branch(branch.address, target);
+                            assert_code(&bypass, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                            bypass_checked = true;
+                        }
+                    }
+                }
+                // O3 may forward every variable index with ADDI instead of LD.
+                assert!(
+                    mutated_classes.len() >= if kind == 0 { 1 } else { 5 },
+                    "missing transport instruction coverage: {prefix} O{opt_level}: {mutated_classes:?}"
+                );
+                assert!(bypass_checked, "missing transport bypass mutation");
+                let mut erased = valid.clone();
+                for block in &mut erased.record.blocks {
+                    block.allocated_lifecycle_labels.retain(|label| !label.starts_with(prefix));
+                }
+                erased.rebind_sidecars();
+                assert_code(&erased, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+            }
+            assert!(counts[0] >= 8 && counts[1] >= 8, "{counts:?}");
+        }
+    }
+}
+
+#[test]
+fn allocated_transport_checks_scalar_widths_and_signed_publication() {
+    for ty in ["bool", "u8", "u16", "u32", "i32", "u64"] {
+        for opt_level in [0, 3] {
+            let literal = if ty == "bool" { "true" } else { "7" };
+            let source = format!(
+                r#"module scalar_collection_transport
+collections Work {{ limits {{ bytes: 512, allocations: 4 }}
+    values: Vec<{ty}> {{ items: 4 }}
+}}
+fn read(view: &Work, index: u64) -> {ty} {{ return view.values.get(index) }}
+action inspect(witness index: u64) -> u64 {{
+    let value: {ty} = {literal}
+    let mut work = Work::new()
+    work.values.push(value)
+    require read(&work, index) == value
+    require work.values.get(index) == value
+    work.drop()
+    return 0
+}}"#
+            );
+            let valid = Fixture::from_result(
+                compile(
+                    &source,
+                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                )
+                .unwrap(),
+            );
+            let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+            let mut count = 0;
+            for block in &valid.record.blocks {
+                for label in &block.allocated_lifecycle_labels {
+                    if !label.starts_with(".Lallocated_result_") || !label.ends_with("_begin") {
+                        continue;
+                    }
+                    count += 1;
+                    let end_label = format!("{}_end", label.strip_suffix("_begin").unwrap());
+                    let end =
+                        valid.record.blocks.iter().find(|b| b.allocated_lifecycle_labels.contains(&end_label)).unwrap().range.start;
+                    let body = elf.instructions.iter().filter(|i| (block.range.start..end).contains(&i.address)).collect::<Vec<_>>();
+                    let store = body.iter().find(|i| i.word & 0x7f == 0x23).unwrap();
+                    let mut changed = valid.clone();
+                    changed.replace_machine_word(store.address, store.word ^ (8 << 7));
+                    assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                    if ty == "i32" {
+                        let sign = body.iter().find(|i| i.word & 0x7f == 0x13 && i.word >> 12 & 7 == 5).unwrap();
+                        let mut unsigned = valid.clone();
+                        unsigned.replace_machine_word(sign.address, sign.word ^ (1 << 30));
+                        assert_code(&unsigned, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                    }
+                }
+            }
+            assert_eq!(count, 2);
+        }
+    }
+}
+
+#[test]
+fn allocated_borrowed_reads_preserve_reborrowed_parameter_storage() {
+    let source = r#"module borrowed_alias_provenance
+collections Work { limits { bytes: 512, allocations: 4 }
+    values: Vec<u64> { items: 4 }
+}
+fn read(view: &Work, delta: u64) -> u64 {
+    borrow view as alias {
+        let noise = delta + 1
+        if noise <= delta { return 0 }
+        return alias.values.get(0)
+    }
+}
+action inspect(witness delta: u64) -> u64 {
+    let mut work = Work::new()
+    work.values.push(7)
+    require read(&work, delta) == 7
+    work.drop()
+    return 0
+}
+"#;
+    for opt_level in [0, 3] {
+        let valid = Fixture::from_result(
+            compile(
+                source,
+                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            )
+            .unwrap(),
+        );
+        let entry = valid.record.typed_semantics.entries.iter().find(|entry| entry.name == "read").unwrap();
+        let slot = |local| entry.locals.iter().find(|value| value.id == local).unwrap().source_id as u32 * 8;
+        let alias = entry.locals.iter().find(|value| value.name == "alias").unwrap();
+        let pointer = slot(alias.id);
+        let arithmetic = entry
+            .blocks
+            .iter()
+            .flat_map(|block| &block.operations)
+            .find(|op| matches!(&op.detail, TypedSemanticOperationDetail::BinaryOperator { operator } if operator == "add"))
+            .unwrap();
+        let result = slot(arithmetic.destinations[0]);
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let store = elf
+            .instructions
+            .iter()
+            .find(|instruction| {
+                instruction.word & 0x707f == 0x3023
+                    && instruction.word >> 15 & 31 == 2
+                    && ((instruction.word >> 7 & 31) | (instruction.word >> 25 << 5)) == result
+                    && valid
+                        .record
+                        .blocks
+                        .iter()
+                        .any(|block| block.owner_entry == entry.id && block.range.contains(instruction.address))
+            })
+            .unwrap();
+        for width in 0..=3 {
+            for destination in [pointer, pointer + 7] {
+                let word = (store.word & !((31 << 7) | (7 << 12) | (127 << 25)))
+                    | ((destination & 31) << 7)
+                    | (width << 12)
+                    | ((destination >> 5) << 25);
+                let mut changed = valid.clone();
+                changed.replace_machine_word(store.address, word);
+                let error = check_bundle_values(
+                    &changed.artifact,
+                    &changed.metadata,
+                    &changed.record,
+                    &changed.source_map,
+                    &CheckerBudgets::default(),
+                )
+                .unwrap_err();
+                assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+            }
+        }
+    }
+}
+
+#[test]
+fn allocated_helper_calls_bind_owner_identity_extent_and_intervening_writes() {
+    for padding in [0, 7, 8] {
+        let params = (0..padding).map(|i| format!("p{i}: u64, ")).collect::<String>();
+        let forwarded = (0..padding).map(|i| format!("p{i}, ")).collect::<String>();
+        let arguments = "0, ".repeat(padding);
+        for bytes in [512, 65536] {
+            let source = format!(
+                r#"module arena_call_provenance
+collections Work {{ limits {{ bytes: {bytes}, allocations: 4 }}
+    values: Vec<u64> {{ items: 4 }}
+}}
+fn read({params}first: &Work, second: &Work) -> u64 {{
+    return first.values.get(0) * 10 + second.values.get(0)
+}}
+fn forward({params}first: &Work, second: &Work) -> u64 {{
+    borrow first as alias {{ borrow alias as nested {{
+        return read({forwarded}nested, second)
+    }} }}
+}}
+action inspect(witness delta: u64) -> u64 {{
+    let mut first = Work::new()
+    let mut second = Work::new()
+    first.values.push(3)
+    second.values.push(7)
+    let mut noise = 0
+    if delta > 0 {{ noise = delta + 1 }} else {{ noise = delta + 2 }}
+    require noise > delta
+    require forward({arguments}&first, &second) == 37
+    second.drop()
+    first.drop()
+    return 0
+}}"#
+            );
+            for opt_level in [0, 3] {
+                let valid = Fixture::from_result(
+                    compile(
+                        &source,
+                        CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    )
+                    .unwrap(),
+                );
+                let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+                for (caller_name, callee_name) in [("inspect", "forward"), ("forward", "read")] {
+                    let typed = valid.record.typed_semantics.entries.iter().find(|entry| entry.name == caller_name).unwrap();
+                    let callee = valid.record.typed_semantics.entries.iter().find(|entry| entry.name == callee_name).unwrap();
+                    let lowering = valid.record.entries.iter().find(|entry| entry.id == callee.id).unwrap();
+                    let target = valid.record.blocks.iter().find(|block| block.id == lowering.entry_block).unwrap().range.start;
+                    let call = elf
+                        .control_flow
+                        .iter()
+                        .find(|flow| {
+                            flow.target == target
+                                && valid
+                                    .record
+                                    .blocks
+                                    .iter()
+                                    .any(|block| block.owner_entry == typed.id && block.range.contains(flow.address))
+                        })
+                        .unwrap()
+                        .address;
+                    let operation = typed
+                        .blocks
+                        .iter()
+                        .flat_map(|block| &block.operations)
+                        .find(|op| op.call.as_ref().is_some_and(|call| call.target == callee_name))
+                        .unwrap();
+                    let slot = |local| typed.locals.iter().find(|value| value.id == local).unwrap().source_id as u32 * 8;
+                    let pointers =
+                        [slot(operation.operands[padding].local.unwrap()), slot(operation.operands[padding + 1].local.unwrap())];
+                    let body_load = |offset| {
+                        elf.instructions
+                            .iter()
+                            .rev()
+                            .find(|instruction| {
+                                instruction.address < call
+                                    && instruction.word & 0x707f == 0x3003
+                                    && instruction.word >> 15 & 31 == 2
+                                    && instruction.word >> 20 == offset
+                                    && valid
+                                        .record
+                                        .blocks
+                                        .iter()
+                                        .any(|block| block.owner_entry == typed.id && block.range.contains(instruction.address))
+                            })
+                            .expect("arena argument reload")
+                    };
+                    let load = body_load(pointers[0]);
+                    let mut changed = valid.clone();
+                    changed.replace_machine_word(load.address, replace_i_immediate(load.word, pointers[1] as i32));
+                    assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                    if caller_name == "forward" {
+                        let lowering = valid.record.entries.iter().find(|entry| entry.id == typed.id).unwrap();
+                        let start = valid.record.blocks.iter().find(|block| block.id == lowering.entry_block).unwrap().range.start;
+                        let end = valid
+                            .record
+                            .blocks
+                            .iter()
+                            .filter(|block| block.owner_entry == typed.id && block.lowering_block_id.is_some())
+                            .map(|block| block.range.start)
+                            .min()
+                            .unwrap();
+                        let spills = elf
+                            .instructions
+                            .iter()
+                            .filter(|instruction| {
+                                (start..end).contains(&instruction.address)
+                                    && instruction.word & 0x707f == 0x3023
+                                    && instruction.word >> 15 & 31 == 2
+                            })
+                            .collect::<Vec<_>>();
+                        let offset = |word: u32| (word >> 7 & 31) | (word >> 25 << 5);
+                        let lengths = [padding, padding + 1].map(|position| {
+                            let pointer = slot(typed.params[position].binding_id);
+                            let index = spills.iter().position(|instruction| offset(instruction.word) == pointer).unwrap();
+                            offset(spills[index + 1].word)
+                        });
+                        let load = body_load(lengths[0]);
+                        for replacement in [replace_i_immediate(load.word, lengths[1] as i32), encode_addi(load.word >> 7 & 31, 0, 0)]
+                        {
+                            let mut changed = valid.clone();
+                            changed.replace_machine_word(load.address, replacement);
+                            assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                        }
+                    } else {
+                        let length_word = padding as u32 + 1;
+                        let (register, before) = if length_word < 8 {
+                            (10 + length_word, call)
+                        } else {
+                            let outgoing = ((padding as u32 + 4).saturating_sub(8) * 8).next_multiple_of(16);
+                            let offset = i64::from(length_word - 8) * 8 - i64::from(outgoing);
+                            let store =
+                                elf.instructions
+                                    .iter()
+                                    .rev()
+                                    .find(|instruction| {
+                                        let word = instruction.word;
+                                        let immediate = i64::from(((((word >> 7 & 31) | (word >> 25 << 5)) as i32) << 20) >> 20);
+                                        instruction.address < call
+                                            && word & 0x707f == 0x3023
+                                            && word >> 15 & 31 == 2
+                                            && immediate == offset
+                                            && valid.record.blocks.iter().any(|block| {
+                                                block.owner_entry == typed.id && block.range.contains(instruction.address)
+                                            })
+                                    })
+                                    .expect("owned extent outgoing stack word");
+                            (store.word >> 20 & 31, store.address)
+                        };
+                        let producer = elf
+                            .instructions
+                            .iter()
+                            .rev()
+                            .find(|instruction| {
+                                instruction.address < before
+                                    && instruction.word >> 7 & 31 == register
+                                    && matches!(instruction.word & 0x7f, 0x03 | 0x13 | 0x1b | 0x33 | 0x37)
+                                    && valid
+                                        .record
+                                        .blocks
+                                        .iter()
+                                        .any(|block| block.owner_entry == typed.id && block.range.contains(instruction.address))
+                            })
+                            .expect("owned extent constant producer");
+                        assert_ne!(register, 2);
+                        let mut changed = valid.clone();
+                        changed.replace_machine_word(producer.address, encode_addi(register, 0, 0));
+                        assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                        let binaries = typed.blocks.iter().flat_map(|block| &block.operations).filter(|op| {
+                            matches!(&op.detail, TypedSemanticOperationDetail::BinaryOperator { operator } if operator == "add")
+                        }).collect::<Vec<_>>();
+                        assert_eq!(binaries.len(), 2, "both normal predecessors must be exercised");
+                        let stores = binaries
+                            .iter()
+                            .map(|binary| {
+                                let result = slot(binary.destinations[0]);
+                                elf.instructions
+                                    .iter()
+                                    .find(|instruction| {
+                                        instruction.word & 0x707f == 0x3023
+                                            && instruction.word >> 15 & 31 == 2
+                                            && ((instruction.word >> 7 & 31) | (instruction.word >> 25 << 5)) == result
+                                            && valid.record.blocks.iter().any(|block| {
+                                                block.owner_entry == typed.id && block.range.contains(instruction.address)
+                                            })
+                                    })
+                                    .unwrap()
+                            })
+                            .collect::<Vec<_>>();
+                        let owner_use = typed
+                            .blocks
+                            .iter()
+                            .flat_map(|block| &block.operations)
+                            .find(|op| {
+                                matches!(
+                                    op.detail,
+                                    TypedSemanticOperationDetail::AllocatedValue {
+                                        operation: cellscript_artifact_checker::allocated_values::Operation::Push,
+                                        ..
+                                    }
+                                )
+                            })
+                            .unwrap();
+                        // Mutate the retained binding consumed by the call;
+                        // the constructor's initial temporary can already be dead.
+                        let pointer = slot(owner_use.operands[0].local.unwrap());
+                        for store in stores {
+                            for width in 0..=3 {
+                                for destination in [pointer, pointer + 7] {
+                                    let word = (store.word & !((31 << 7) | (7 << 12) | (127 << 25)))
+                                        | ((destination & 31) << 7)
+                                        | (width << 12)
+                                        | ((destination >> 5) << 25);
+                                    let mut changed = valid.clone();
+                                    changed.replace_machine_word(store.address, word);
+                                    assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn allocated_helper_calls_recheck_pointer_provenance_on_loop_backedges() {
+    for bytes in [512, 65536] {
+        let source = format!(
+            r#"module arena_call_backedge
+collections Work {{ limits {{ bytes: {bytes}, allocations: 4 }}
+    values: Vec<u64> {{ items: 4 }}
+}}
+fn read(work: &Work) -> u64 {{ return work.values.get(0) }}
+action inspect(witness delta: u64) -> u64 {{
+    let mut work = Work::new()
+    work.values.push(7)
+    for i in 0..2 {{
+        require read(&work) == 7
+        let noise = delta ^ i
+        require noise <= delta + 2
+    }}
+    work.drop()
+    return 0
+}}"#
+        );
+        for opt_level in [0, 3] {
+            let valid = Fixture::from_result(
+                compile(
+                    &source,
+                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                )
+                .unwrap(),
+            );
+            let entry = valid.record.typed_semantics.entries.iter().find(|entry| entry.name == "inspect").unwrap();
+            let slot = |local| entry.locals.iter().find(|value| value.id == local).unwrap().source_id as u32 * 8;
+            let operations = entry.blocks.iter().flat_map(|block| &block.operations).collect::<Vec<_>>();
+            let arithmetic = operations
+                .iter()
+                .find(|op| matches!(&op.detail, TypedSemanticOperationDetail::BinaryOperator { operator } if operator == "bit-xor"))
+                .unwrap();
+            let push = operations
+                .iter()
+                .find(|op| {
+                    matches!(
+                        op.detail,
+                        TypedSemanticOperationDetail::AllocatedValue {
+                            operation: cellscript_artifact_checker::allocated_values::Operation::Push,
+                            ..
+                        }
+                    )
+                })
+                .unwrap();
+            let result = slot(arithmetic.destinations[0]);
+            let pointer = slot(push.operands[0].local.unwrap());
+            let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+            let store = elf
+                .instructions
+                .iter()
+                .find(|instruction| {
+                    instruction.word & 0x707f == 0x3023
+                        && instruction.word >> 15 & 31 == 2
+                        && ((instruction.word >> 7 & 31) | (instruction.word >> 25 << 5)) == result
+                        && valid
+                            .record
+                            .blocks
+                            .iter()
+                            .any(|block| block.owner_entry == entry.id && block.range.contains(instruction.address))
+                })
+                .unwrap();
+            // The first helper call precedes this store and has valid facts.
+            // A poisoned retained binding must still invalidate the next call
+            // when its incoming state is merged through the loop backedge.
+            let helper = valid.record.typed_semantics.entries.iter().find(|entry| entry.name == "read").unwrap();
+            let call = elf
+                .control_flow
+                .iter()
+                .find(|flow| {
+                    valid.record.blocks.iter().any(|block| block.owner_entry == helper.id && block.range.start == flow.target)
+                })
+                .unwrap()
+                .address;
+            assert!(call < store.address);
+            assert!(elf.control_flow.iter().any(|flow| flow.address > store.address
+                && flow.target <= call
+                && valid.record.blocks.iter().any(|block| block.owner_entry == entry.id && block.range.contains(flow.address))));
+            for width in [0, 3] {
+                for destination in [pointer, pointer + 7] {
+                    let word = (store.word & !((31 << 7) | (7 << 12) | (127 << 25)))
+                        | ((destination & 31) << 7)
+                        | (width << 12)
+                        | ((destination >> 5) << 25);
+                    let mut changed = valid.clone();
+                    changed.replace_machine_word(store.address, word);
+                    assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn allocated_coordinate_calls_bind_guard_spills_bounds_and_restoration() {
+    for padding in [0, 5, 6] {
+        for bytes in [512, 65536] {
+            for opt_level in [0, 3] {
+                let valid = Fixture::from_result(
+                    compile(
+                        &collection_coordinate_helpers::source(padding, bytes),
+                        CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    )
+                    .unwrap(),
+                );
+                let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+                let words = elf
+                    .instructions
+                    .iter()
+                    .map(|instruction| (instruction.address, instruction.word))
+                    .collect::<std::collections::BTreeMap<_, _>>();
+                for name in ["inspect", "read"] {
+                    let typed = valid.record.typed_semantics.entries.iter().find(|entry| entry.name == name).unwrap();
+                    let guards = elf
+                        .instructions
+                        .iter()
+                        .filter(|instruction| {
+                            instruction.word == 0xfe010113
+                                && valid
+                                    .record
+                                    .blocks
+                                    .iter()
+                                    .any(|block| block.owner_entry == typed.id && block.range.contains(instruction.address))
+                                && (1..=3).all(|index| {
+                                    words.get(&(instruction.address + index * 4)).is_some_and(|word| word & 0x707f == 0x3023)
+                                })
+                        })
+                        .map(|instruction| instruction.address)
+                        .collect::<Vec<_>>();
+                    assert!(!guards.is_empty());
+                    for start in [guards[0], *guards.last().unwrap()] {
+                        let guard = (start + 16..start + 144)
+                            .step_by(4)
+                            .find(|pc| words.get(pc).is_some_and(|word| word & 0x7f == 0x63))
+                            .unwrap();
+                        let restore = guard + 12;
+                        assert_eq!(words[&(restore + 12)], 0x02010113);
+                        let mut mutations = vec![
+                            (start, encode_addi(2, 2, -16)),
+                            (guard, words[&guard] ^ (1 << 12)),
+                            (guard + 4, words[&(guard + 4)] ^ (1 << 12)),
+                            (guard + 8, words[&(guard + 8)] | (1 << 7)),
+                            (restore + 12, encode_addi(2, 2, 16)),
+                        ];
+                        if name == "inspect" {
+                            // Transport relies on exact restoration across the
+                            // sequence. The callee's separate isolation proof
+                            // may accept changes to otherwise dead scratch
+                            // registers; complete read-value proof is pending.
+                            for index in 0..3u64 {
+                                let spill = start + 4 + index * 4;
+                                mutations.push((spill, words[&spill] & !(31 << 20)));
+                                let load = restore + index * 4;
+                                mutations.push((load, words[&load] ^ (8 << 20)));
+                            }
+                        }
+                        // Bind the lower/upper bound registers too, not merely
+                        // the branch opcode and its error destination.
+                        mutations.push((guard, (words[&guard] & !(31 << 20)) | (2 << 20)));
+                        mutations.push((guard + 4, (words[&(guard + 4)] & !(31 << 15)) | (2 << 15)));
+                        for (pc, word) in mutations {
+                            let mut changed = valid.clone();
+                            changed.replace_machine_word(pc, word);
+                            let code = match changed.check() {
+                                Err(code) => code,
+                                Ok(()) => panic!("accepted {name} O{opt_level}, padding={padding}, bytes={bytes}, start={start:#x}, pc={pc:#x}, old={:#x}, new={word:#x}", words[&pc]),
+                            };
+                            assert!(
+                                matches!(
+                                    code,
+                                    CheckerRejectionCode::V2420TypedMachineBindingInvalid
+                                        | CheckerRejectionCode::V2407AbiOrStackInvalid
+                                ),
+                                "{name} at {pc:#x}, {word:#x}: {code:?}"
+                            );
+                        }
+                        // Coherently rebound control flow cannot jump into the
+                        // middle of a spill/restore sequence.
+                        let mut changed = valid.clone();
+                        changed.replace_machine_word(start + 4, encode_jal((guard - start - 4) as i32));
+                        assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                    }
+                }
+                let typed = valid.record.typed_semantics.entries.iter().find(|entry| entry.name == "inspect").unwrap();
+                let operation = typed
+                    .blocks
+                    .iter()
+                    .flat_map(|block| &block.operations)
+                    .find(|operation| operation.call.as_ref().is_some_and(|call| call.target == "forward"))
+                    .unwrap();
+                let local = operation.operands[padding + 1].local.unwrap();
+                let coordinate = typed.locals.iter().find(|value| value.id == local).unwrap().source_id as u32 * 8;
+                let callee = valid.record.typed_semantics.entries.iter().find(|entry| entry.name == "forward").unwrap();
+                let callee = valid.record.entries.iter().find(|entry| entry.id == callee.id).unwrap();
+                let target = valid.record.blocks.iter().find(|block| block.id == callee.entry_block).unwrap().range.start;
+                let call = elf.control_flow.iter().find(|flow| flow.target == target).unwrap().address;
+                let load = elf
+                    .instructions
+                    .iter()
+                    .rev()
+                    .find(|instruction| {
+                        instruction.address < call
+                            && instruction.word & 0x707f == 0x3003
+                            && instruction.word >> 15 & 31 == 2
+                            && instruction.word >> 20 == coordinate
+                            && valid
+                                .record
+                                .blocks
+                                .iter()
+                                .any(|block| block.owner_entry == typed.id && block.range.contains(instruction.address))
+                    })
+                    .expect("coordinate reload before the helper call");
+                let mut changed = valid.clone();
+                changed.replace_machine_word(load.address, load.word ^ (8 << 20));
+                assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+            }
+        }
+    }
+}
+
+#[test]
+fn allocated_helper_parameters_compose_with_nested_and_coordinate_decoders() {
+    let source = r#"module mixed_arena_parameters
+resource Token has store { amount: u64 }
+collections Work {
+    limits { bytes: 512, allocations: 4 }
+    values: Vec<u64> { items: 4 }
+}
+fn read(view: &Work, before: InputView<Token>, items: NestedValues<Vec<u8>, 2, 8, 32>) -> u64 {
+    if items.len() == 0 { return 0 }
+    return view.values.get(0) + before.capacity
+}
+fn forward(view: &Work, before: InputView<Token>, items: NestedValues<Vec<u8>, 2, 8, 32>) -> u64 {
+    return read(view, before, items)
+}
+action inspect(witness items: NestedValues<Vec<u8>, 2, 8, 32>) -> u64 {
+    verification
+    let mut work = Work::new()
+    work.values.push(3)
+    let before = ckb::input<Token>(0)
+    require forward(&work, before, items) > 0
+    return 0
+}"#;
+    for opt_level in [0, 3] {
+        let valid = Fixture::from_result(
+            compile(
+                source,
+                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            )
+            .unwrap(),
+        );
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        for name in ["read", "forward"] {
+            let typed = valid.record.typed_semantics.entries.iter().find(|entry| entry.name.ends_with(name)).unwrap();
+            let entry = valid.record.entries.iter().find(|entry| entry.id == typed.id).unwrap();
+            let start = valid.record.blocks.iter().find(|block| block.id == entry.entry_block).unwrap().range.start;
+            let end = valid
+                .record
+                .blocks
+                .iter()
+                .filter(|block| block.owner_entry == typed.id && block.lowering_block_id.is_some())
+                .map(|block| block.range.start)
+                .min()
+                .unwrap();
+            // The owner is the first ABI pair. Corrupt both incoming spills
+            // before the nested decoder, whose verified seed must retain them.
+            for register in [10, 11] {
+                let spill = elf
+                    .instructions
+                    .iter()
+                    .find(|instruction| {
+                        (start..end).contains(&instruction.address)
+                            && instruction.word & 0x707f == 0x3023
+                            && instruction.word >> 20 & 31 == register
+                    })
+                    .unwrap();
+                let mut changed = valid.clone();
+                changed.replace_machine_word(spill.address, spill.word & !(31 << 20));
+                assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+            }
+        }
+    }
+}
+
+#[test]
+fn allocated_reads_bind_copy_buffers_pop_and_missing_key_behavior() {
+    for opt_level in [0, 3] {
+        for bytes in [512, 65536] {
+            let source = format!(
+                r#"module read_proof
+struct Item {{ amount: u128, tag: u64 }}
+collections Work {{
+    limits {{ bytes: {bytes}, allocations: 16 }}
+    values: Vec<Item> {{ items: 4 }}
+    totals: OrderedMap<u64, u128> {{ items: 4 }}
+}}
+fn copied(view: &Work) -> Item {{ return view.values.get(0) }}
+action inspect(flag: bool) -> u64 {{
+    if flag {{ return 0 }}
+    let first = Work::new()
+    let mut second = Work::new()
+    second.values.push(Item {{ amount: 3, tag: 4 }})
+    second.values.push(Item {{ amount: 5, tag: 6 }})
+    let initial = second.values.get(0)
+    borrow second as view {{ require copied(view).tag == 4 }}
+    let removed = second.values.remove(0)
+    let popped = second.values.pop()
+    second.totals.insert(256, 9)
+    require second.totals.get(256) == 9
+    require second.totals.get_or(255, 17) == 17
+    require initial.tag == 4
+    require removed.tag == 4
+    require popped.tag == 6
+    second.drop()
+    first.drop()
+    return 0
+}}"#
+            );
+            let valid = Fixture::from_result(
+                compile(
+                    &source,
+                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                )
+                .unwrap(),
+            );
+            for (prefix, children, minimum) in [
+                (".Lallocated_read_", &[][..], 10),
+                (".Lallocated_pop_", &[".Lallocated_read_", ".Lallocated_remove_"][..], 1),
+                (".Lallocated_take_", &[".Lallocated_read_", ".Lallocated_remove_"][..], 0),
+                (".Lallocated_lookup_", &[".Lallocated_find_", ".Lallocated_read_"][..], 2),
+                (".Lallocated_required_", &[".Lallocated_lookup_"][..], 1),
+            ] {
+                allocated_body_mutations(&valid, prefix, children, minimum, false);
+            }
+        }
+    }
+}
+
+#[test]
+fn allocated_sorted_bodies_bind_counts_order_overlap_and_last_value_copy() {
+    for opt_level in [0, 3] {
+        for bytes in [512, 65536] {
+            let source = format!(
+                r#"module sorted_proof
+collections Work {{
+    limits {{ bytes: {bytes}, allocations: 8 }}
+    totals: OrderedMap<u64, u128> {{ items: 4 }}
+    seen: OrderedSet<Hash> {{ items: 4 }}
+}}
+action inspect(flag: bool, witness entries: [(u64, u128); 4], witness keys: [Hash; 4]) -> u64 {{
+    if flag {{ return 0 }}
+    let first = Work::new()
+    let mut second = Work::new()
+    second.totals.load_sorted(entries)
+    second.seen.load_sorted(keys)
+    require second.totals.len() <= 4
+    require second.seen.len() <= 4
+    second.drop()
+    first.drop()
+    return 0
+}}"#
+            );
+            let valid = Fixture::from_result(
+                compile(
+                    &source,
+                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                )
+                .unwrap(),
+            );
+            allocated_body_mutations(&valid, ".Lallocated_sorted_4_", &[".Lallocated_reserve_"], 45, true);
+            let mut wrong_count = valid.clone();
+            for block in &mut wrong_count.record.blocks {
+                for label in &mut block.allocated_lifecycle_labels {
+                    *label = label.replace(".Lallocated_sorted_4_", ".Lallocated_sorted_3_");
+                }
+            }
+            wrong_count.rebind_sidecars();
+            assert_code(&wrong_count, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+        }
+    }
+    for input in ["[]", "[(1, 7)]"] {
+        for opt_level in [0, 3] {
+            let source = format!("module short_sorted\ncollections Work {{ limits {{ bytes: 256, allocations: 2 }}\nvalues: OrderedMap<u64, u64> {{ items: 4 }} }}\naction inspect() -> u64 {{ let mut work = Work::new()\nwork.values.reserve(4)\nwork.values.load_sorted({input})\nreturn 0 }}");
+            let valid = Fixture::from_result(
+                compile(
+                    &source,
+                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                )
+                .unwrap(),
+            );
+            allocated_body_mutations(&valid, ".Lallocated_sorted_", &[".Lallocated_reserve_"], 1, true);
+        }
+    }
+}
+
+/// Mutate core instructions outside already-checked children. Guard spills are
+/// covered by dedicated tests; retain byte-store mutations inside those guards.
+fn allocated_body_mutations(valid: &Fixture, prefix: &str, children: &[&str], minimum: usize, all: bool) {
+    let ranges = |prefix: &str| {
+        valid
+            .record
+            .blocks
+            .iter()
+            .flat_map(|block| block.allocated_lifecycle_labels.iter().map(move |label| (block, label)))
+            .filter(|(_, label)| label.starts_with(prefix) && label.ends_with("_begin"))
+            .map(|(block, label)| {
+                let end_label = format!("{}_end", label.strip_suffix("_begin").unwrap());
+                let end = valid
+                    .record
+                    .blocks
+                    .iter()
+                    .find(|block| block.allocated_lifecycle_labels.contains(&end_label))
+                    .unwrap()
+                    .range
+                    .start;
+                (label.clone(), end_label, block.range.start..end)
+            })
+            .collect::<Vec<_>>()
+    };
+    let candidates = ranges(prefix);
+    assert!(!candidates.is_empty(), "{prefix}");
+    let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+    let reject = |fixture: &Fixture| {
+        let error = check_bundle_values(
+            &fixture.artifact,
+            &fixture.metadata,
+            &fixture.record,
+            &fixture.source_map,
+            &CheckerBudgets::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{error}");
+        assert!(error.message.contains("allocated allocation"), "{error}");
+    };
+    for (begin_label, end_label, range) in candidates.iter().take(if all { candidates.len() } else { 1 }) {
+        let child_ranges = children
+            .iter()
+            .flat_map(|prefix| ranges(prefix))
+            .map(|(_, _, range)| range)
+            .filter(|child| range.start <= child.start && child.end <= range.end)
+            .collect::<Vec<_>>();
+        let body = valid
+            .record
+            .blocks
+            .iter()
+            .filter(|block| {
+                range.contains(&block.range.start)
+                    && block.machine_label.as_deref().is_some_and(|label| label.starts_with(".Lvalue_vector_checked_"))
+            })
+            .map(|block| block.range.start)
+            .min()
+            .unwrap_or(range.start);
+        let mut in_guard = false;
+        let mut mutated = 0;
+        for instruction in elf
+            .instructions
+            .iter()
+            .filter(|i| body <= i.address && i.address < range.end && !child_ranges.iter().any(|child| child.contains(&i.address)))
+        {
+            let word = instruction.word;
+            if word == 0xfe010113 {
+                in_guard = true;
+            }
+            if word == 0x02010113 {
+                in_guard = false;
+                continue;
+            }
+            let replacement = if word & 0x707f == 0x23 {
+                Some(word ^ (1 << 20))
+            } else if in_guard {
+                None
+            } else {
+                match word & 0x7f {
+                    0x63 => Some(word ^ (1 << 12)),
+                    0x03 => Some(word ^ (1 << 15)),
+                    0x13 | 0x1b | 0x33 => Some(word ^ (1 << 20)),
+                    0x37 => Some(word ^ (1 << 12)),
+                    0x23 => Some(word ^ (1 << 20)),
+                    _ => None,
+                }
+            };
+            if let Some(replacement) = replacement {
+                let mut changed = valid.clone();
+                changed.replace_machine_word(instruction.address, replacement);
+                reject(&changed);
+                mutated += 1;
+            }
+        }
+        assert!(mutated >= minimum, "{prefix}: {mutated} mutations");
+        let mut missing = valid.clone();
+        for block in &mut missing.record.blocks {
+            block.allocated_lifecycle_labels.retain(|label| label != begin_label && label != end_label);
+        }
+        missing.rebind_sidecars();
+        reject(&missing);
+        if let Some(child) = child_ranges.iter().filter(|child| child.start > range.start).min_by_key(|child| child.start) {
+            let branch = elf
+                .instructions
+                .iter()
+                .find(|i| range.start <= i.address && i.address < child.start && i.word & 0x7f == 0x63)
+                .unwrap();
+            let interior = valid
+                .record
+                .blocks
+                .iter()
+                .filter(|block| child.start < block.range.start && block.range.start < child.end)
+                .map(|block| block.range.start)
+                .min()
+                .unwrap();
+            let mut bypass = valid.clone();
+            bypass.redirect_conditional_branch(branch.address, interior);
+            reject(&bypass);
+        }
+    }
+    let mut erased = valid.clone();
+    for block in &mut erased.record.blocks {
+        block.allocated_lifecycle_labels.retain(|label| !label.starts_with(prefix));
+    }
+    erased.rebind_sidecars();
+    reject(&erased);
+}
+
+#[test]
+fn allocated_initializers_bind_every_state_word_and_reject_rebound_bypasses() {
+    for opt_level in [0, 3] {
+        for bytes in [512, 65536] {
+            let source = format!("module initialization\ncollections Work {{ limits {{ bytes: {bytes}, allocations: 8 }}\nvalues: Vec<u64> {{ items: 4 }}\ntotals: OrderedMap<Hash, u128> {{ items: 4 }}\nseen: OrderedSet<u64> {{ items: 4 }} }}\naction inspect(flag: bool) -> u64 {{ if flag {{ return 0 }}\nlet mut first = Work::new()\nfirst.values.push(7)\nlet mut second = Work::new()\nsecond.values.push(8)\nrequire first.values.get(0) == 7\nrequire second.values.get(0) == 8\nreturn 0 }}");
+            let valid = Fixture::from_result(
+                compile(
+                    &source,
+                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                )
+                .unwrap(),
+            );
+            let begin = valid
+                .record
+                .blocks
+                .iter()
+                .filter(|block| block.allocated_init_labels.iter().any(|label| label.contains("_begin_")))
+                .min_by_key(|block| block.range.start)
+                .unwrap();
+            let label = begin.allocated_init_labels.iter().find(|label| label.contains("_begin_")).unwrap();
+            let prefix = format!("{}_end_", label.split("_begin_").next().unwrap());
+            let end = valid
+                .record
+                .blocks
+                .iter()
+                .find(|block| block.allocated_init_labels.iter().any(|label| label.starts_with(&prefix)))
+                .unwrap();
+            let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+            let stores = elf
+                .instructions
+                .iter()
+                .filter(|instruction| {
+                    begin.range.start <= instruction.address
+                        && instruction.address < end.range.start
+                        && instruction.word & 0x707f == 0x3023
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(stores.len(), 17); // Four state words, four per member, owner pointer.
+            for store in &stores {
+                let mut changed = valid.clone();
+                changed.replace_machine_word(store.address, 0x00000013);
+                let error = check_bundle_values(
+                    &changed.artifact,
+                    &changed.metadata,
+                    &changed.record,
+                    &changed.source_map,
+                    &CheckerBudgets::default(),
+                )
+                .unwrap_err();
+                assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{error}");
+                assert!(error.message.contains("allocated initialization"), "{error}");
+            }
+            for index in [7, 11, 15, 16] {
+                // Live flags and published owner pointer must not be zero.
+                let mut changed = valid.clone();
+                changed.replace_machine_word(stores[index].address, stores[index].word & !(31 << 20));
+                assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+            }
+            let mut missing = valid.clone();
+            for block in &mut missing.record.blocks {
+                block.allocated_init_labels.clear();
+            }
+            missing.rebind_sidecars();
+            assert_code(&missing, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+
+            // Rebind the machine CFG as well as all byte/outer hashes. A
+            // structurally valid branch must not enter after initialization.
+            let flow = elf
+                .control_flow
+                .iter()
+                .find(|flow| {
+                    flow.address < begin.range.start
+                        && valid
+                            .record
+                            .blocks
+                            .iter()
+                            .any(|block| block.owner_entry == begin.owner_entry && block.range.contains(flow.address))
+                        && elf
+                            .instructions
+                            .iter()
+                            .any(|instruction| instruction.address == flow.address && instruction.word & 0x7f == 0x63)
+                })
+                .unwrap();
+            let origin = valid.record.blocks.iter().find(|block| block.range.contains(flow.address)).unwrap();
+            let word = elf.instructions.iter().find(|instruction| instruction.address == flow.address).unwrap().word;
+            let offset = end.range.start as i64 - flow.address as i64;
+            assert!((-4096..4096).contains(&offset));
+            let immediate = offset as u32;
+            let branch = (word & 0x01fff07f)
+                | (((immediate >> 12) & 1) << 31)
+                | (((immediate >> 5) & 0x3f) << 25)
+                | (((immediate >> 1) & 15) << 8)
+                | (((immediate >> 11) & 1) << 7);
+            let mut bypass = valid.clone();
+            bypass
+                .record
+                .edges
+                .iter_mut()
+                .find(|edge| edge.from == origin.id && edge.kind == EdgeKind::ConditionalTaken)
+                .unwrap()
+                .to = end.id.clone();
+            let mut reachable = std::collections::BTreeSet::new();
+            let mut pending = bypass.record.entries.iter().map(|entry| entry.entry_block.clone()).collect::<Vec<_>>();
+            while let Some(id) = pending.pop() {
+                if reachable.insert(id.clone()) {
+                    pending.extend(bypass.record.edges.iter().filter(|edge| edge.from == id).map(|edge| edge.to.clone()));
+                }
+            }
+            for block in &mut bypass.record.blocks {
+                block.reachable = reachable.contains(&block.id);
+            }
+            bypass.record.canonicalize();
+            bypass.replace_machine_word(flow.address, branch);
+            let error = check_bundle_values(
+                &bypass.artifact,
+                &bypass.metadata,
+                &bypass.record,
+                &bypass.source_map,
+                &CheckerBudgets::default(),
+            )
+            .unwrap_err();
+            assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{error}");
+            assert!(error.message.contains("bypasses") || error.message.contains("bypass"), "{error}");
+        }
+    }
+}
+
+#[test]
+fn allocated_values_owner_lifetimes_reject_rebound_stale_and_borrowed_handles() {
+    use cellscript_artifact_checker::allocated_values::Operation as O;
+    let source = "module lifetime\ncollections Work { limits { bytes: 256, allocations: 4 }\nvalues: Vec<u64> { items: 8 } }\nfn count(view: &Work) -> u64 { return view.values.len() }\naction inspect() -> u64 { let mut original = Work::new()\noriginal.values.push(7)\nlet moved = original\nlet observed = count(&moved)\nmoved.drop()\nreturn observed }";
+    let reject = |mut fixture: Fixture, signature_rejection: bool| {
+        fixture.rebind_typed_semantics();
+        let error = check_bundle_values(
+            &fixture.artifact,
+            &fixture.metadata,
+            &fixture.record,
+            &fixture.source_map,
+            &CheckerBudgets::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid, "{error}");
+        let boundary = if signature_rejection { "invalid signature contract" } else { "allocated owner lifetime" };
+        assert!(error.to_string().contains(boundary), "mutation missed {boundary}: {error}");
+    };
+    for opt_level in [0, 3] {
+        let valid = Fixture::from_result(
+            compile(
+                source,
+                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            )
+            .unwrap(),
+        );
+        for mutation in 0..6 {
+            let mut changed = valid.clone();
+            let entry = changed.record.typed_semantics.entries.iter_mut().find(|entry| entry.name == "inspect").unwrap();
+            let original = entry.locals.iter().find(|local| local.name == "original").unwrap().id;
+            let constructor = entry
+                .blocks
+                .iter()
+                .flat_map(|block| &block.operations)
+                .find(|op| matches!(op.detail, TypedSemanticOperationDetail::AllocatedValue { operation: O::New, .. }))
+                .unwrap()
+                .destinations[0];
+            let reference = entry
+                .blocks
+                .iter()
+                .flat_map(|block| &block.operations)
+                .find(|op| matches!(&op.detail, TypedSemanticOperationDetail::UnaryOperator { operator } if operator == "ref"))
+                .unwrap()
+                .destinations[0];
+            let op = entry
+                .blocks
+                .iter_mut()
+                .flat_map(|block| &mut block.operations)
+                .find(|op| match mutation {
+                    0 | 3 => matches!(op.detail, TypedSemanticOperationDetail::AllocatedValue { operation: O::Push, .. }),
+                    1 | 4 => matches!(&op.detail, TypedSemanticOperationDetail::UnaryOperator { operator } if operator == "ref"),
+                    _ => matches!(op.detail, TypedSemanticOperationDetail::AllocatedValue { operation: O::Drop, .. }),
+                })
+                .unwrap();
+            match mutation {
+                0 => op.operands[0].local = Some(constructor), // Constructor result has moved into original.
+                1 | 2 => op.operands[0].local = Some(original), // Original has moved into moved.
+                3 => {
+                    // Retire original before the later move and read.
+                    let TypedSemanticOperationDetail::AllocatedValue { operation, member, .. } = &mut op.detail else {
+                        unreachable!()
+                    };
+                    *operation = O::Drop;
+                    *member = None;
+                    op.operands.truncate(1);
+                }
+                4 => {
+                    // Same canonical ABI type does not grant a read-only call an owned argument.
+                    op.opcode = "move".into();
+                    op.detail = TypedSemanticOperationDetail::None;
+                }
+                _ => op.operands[0].local = Some(reference), // Ref temporaries carry Work in the ABI, but cannot drop it.
+            }
+            reject(changed, mutation == 4);
+        }
+        let evaluation = source
+            .replace(
+                "fn count(view: &Work) -> u64 { return view.values.len() }",
+                "fn count(view: &Work, n: u64) -> u64 { return view.values.len() + n }",
+            )
+            .replace(
+                "let observed = count(&moved)",
+                "let mut other = Work::new()\nlet observed = count(&moved, { other.values.push(2)\n3 })",
+            );
+        let mut changed = Fixture::from_result(
+            compile(
+                &evaluation,
+                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            )
+            .unwrap(),
+        );
+        let entry = changed.record.typed_semantics.entries.iter_mut().find(|entry| entry.name == "inspect").unwrap();
+        let moved = entry.locals.iter().find(|local| local.name == "moved").unwrap().id;
+        let op = entry
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.operations)
+            .filter(|op| matches!(op.detail, TypedSemanticOperationDetail::AllocatedValue { operation: O::Push, .. }))
+            .nth(1)
+            .unwrap();
+        op.operands[0].local = Some(moved); // Invalidate the first argument while evaluating the second.
+        reject(changed, false);
+    }
+}
+
+#[test]
+fn allocated_values_lifetimes_follow_joins_backedges_and_lexical_loans() {
+    use cellscript_artifact_checker::allocated_values::Operation as O;
+    let prefix = "module lifetime_cfg\ncollections Work { limits { bytes: 256, allocations: 4 }\nvalues: Vec<u64> { items: 8 } }\n";
+    let bodies = [
+        "action inspect(flag: bool) -> u64 { let mut work = Work::new()\nif flag { work.values.reserve(1) } else { work.values.reserve(2) }\nreturn work.values.len() }",
+        "action inspect() -> u64 { let mut work = Work::new()\nfor i in 0..2 { work.values.reserve(i) }\nreturn work.values.len() }",
+        "action inspect() -> u64 { let work = Work::new()\nlet mut other = Work::new()\nborrow work as view { other.values.push(9)\nrequire view.values.len() == 0 }\nreturn 0 }",
+        "action inspect() -> u64 { let work = Work::new()\nlet mut other = Work::new()\nborrow work as view { borrow view as inner { other.values.push(9)\nrequire inner.values.len() == 0 } }\nreturn 0 }",
+        "action inspect(flag: bool) -> u64 { let mut work = Work::new()\nif flag { borrow work as view { require view.values.len() == 0 } }\nwork.values.push(1)\nreturn 0 }",
+    ];
+    for opt_level in [0, 3] {
+        for (case, body) in bodies.iter().enumerate() {
+            let source = format!("{prefix}{body}");
+            let mut changed = Fixture::from_result(
+                compile(
+                    &source,
+                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                )
+                .unwrap(),
+            );
+            let entry = changed.record.typed_semantics.entries.iter_mut().find(|entry| entry.name == "inspect").unwrap();
+            let work = entry.locals.iter().find(|local| local.name == "work").unwrap().id;
+            let (block_id, op) = entry
+                .blocks
+                .iter_mut()
+                .flat_map(|block| {
+                    let id = block.id;
+                    block.operations.iter_mut().map(move |op| (id, op))
+                })
+                .find(|(_, op)| {
+                    matches!(op.detail, TypedSemanticOperationDetail::AllocatedValue { operation: O::Reserve | O::Push, .. })
+                })
+                .unwrap();
+            if case < 2 {
+                let TypedSemanticOperationDetail::AllocatedValue { operation, member, .. } = &mut op.detail else { unreachable!() };
+                *operation = O::Drop;
+                *member = None;
+                op.operands.truncate(1);
+            } else if case < 4 {
+                op.operands[0].local = Some(work);
+            } else {
+                // Keep a lexical loan alive on only one predecessor. Joining
+                // available handles by intersection must not discard the loan.
+                let position = op.index + 1;
+                entry.borrows[0].end_block = Some(block_id);
+                entry.borrows[0].end_operation = Some(position);
+            }
+            changed.rebind_typed_semantics();
+            let error = check_bundle_values(
+                &changed.artifact,
+                &changed.metadata,
+                &changed.record,
+                &changed.source_map,
+                &CheckerBudgets::default(),
+            )
+            .unwrap_err();
+            assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid, "case {case}/O{opt_level}: {error}");
+            assert!(error.to_string().contains("allocated owner lifetime"), "case {case}/O{opt_level}: {error}");
+        }
+    }
+}
+
+#[test]
+fn allocated_values_keep_structured_contract_and_mandatory_proof_blocker_after_rebinding() {
+    let source = "module allocated_proof\ncollections Work { limits { bytes: 128, allocations: 2 }\nvalues: Vec<u64> { items: 8 } }\nfn count(view: &Work) -> u64 { return view.values.len() }\naction inspect() -> u64 { let mut work = Work::new()\nwork.values.push(9)\nrequire work.values.get(0) == 9\nrequire count(&work) == 1\nreturn 0 }";
+    let valid = Fixture::from_result(
+        compile(source, CompileOptions { edition: NEXT_EDITION, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+    );
+    valid.check().unwrap();
+    let mut missing = valid.clone();
+    missing.metadata["runtime"]["fail_closed_runtime_features"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|value| value != "allocated-values-artifact-proof");
+    missing.rebind_sidecars();
+    assert_code(&missing, CheckerRejectionCode::V2410MetadataBindingMismatch);
+    for mutation in 0..4 {
+        let mut changed = valid.clone();
+        let op = changed
+            .record
+            .typed_semantics
+            .entries
+            .iter_mut()
+            .flat_map(|entry| &mut entry.blocks)
+            .flat_map(|block| &mut block.operations)
+            .find(|op| matches!(op.detail, TypedSemanticOperationDetail::AllocatedValue { .. }))
+            .unwrap();
+        let TypedSemanticOperationDetail::AllocatedValue { contract, member, operation } = &mut op.detail else { unreachable!() };
+        match mutation {
+            0 => contract.bytes = 63,
+            1 => contract.allocations = 0,
+            2 => *member = Some(99),
+            _ => *operation = cellscript_artifact_checker::allocated_values::Operation::Drop,
+        }
+        changed.rebind_typed_semantics();
+        assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
+    }
+    let mut drift = valid.clone();
+    let op = drift
+        .record
+        .typed_semantics
+        .entries
+        .iter_mut()
+        .flat_map(|entry| &mut entry.blocks)
+        .flat_map(|block| &mut block.operations)
+        .find(|op| matches!(op.detail, TypedSemanticOperationDetail::AllocatedValue { .. }))
+        .unwrap();
+    if let TypedSemanticOperationDetail::AllocatedValue { contract, .. } = &mut op.detail {
+        contract.bytes = 256;
+    }
+    drift.rebind_typed_semantics();
+    assert_code(&drift, CheckerRejectionCode::V2419TypedSemanticsInvalid);
+    let mut callee_drift = valid;
+    let helper = callee_drift.record.typed_semantics.entries.iter_mut().find(|entry| entry.name == "count").unwrap();
+    for op in helper.blocks.iter_mut().flat_map(|block| &mut block.operations) {
+        if let TypedSemanticOperationDetail::AllocatedValue { contract, .. } = &mut op.detail {
+            contract.bytes = 256;
+        }
+    }
+    callee_drift.rebind_typed_semantics();
+    assert_code(&callee_drift, CheckerRejectionCode::V2419TypedSemanticsInvalid);
+}
+
+#[test]
+fn fixed_byte_result_contract_rejects_rebound_width_and_missing_copy() {
+    let source = "module byte_copy_proof\nfn bytes() -> [u8; 9] { return b\"constant!\" }\naction inspect() -> u64 { require bytes() == b\"constant!\"\nreturn 0 }";
+    let valid = Fixture::from_result(
+        compile(source, CompileOptions { edition: NEXT_EDITION, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+    );
+    valid.check().unwrap();
+    for mutation in 0..4 {
+        let mut changed = valid.clone();
+        let entry = changed.record.entries.iter_mut().find(|entry| entry.name == "bytes").unwrap();
+        match mutation {
+            0 => entry.fixed_result_abi = None,
+            1 => entry.fixed_result_abi.as_mut().unwrap().width_bytes = 8,
+            2 => entry.fixed_result_abi.as_mut().unwrap().copy_ranges.clear(),
+            _ => entry.fixed_result_abi.as_mut().unwrap().type_name = "[u8; 8]".into(),
+        }
+        changed.rebind_sidecars();
+        assert_code(&changed, CheckerRejectionCode::V2407AbiOrStackInvalid);
+    }
+}
+
+#[test]
 fn committed_state_typed_call_contracts_cannot_be_relabelled_after_rebinding() {
     let valid = Fixture::from_source(COMMITTED_STATE_SOURCE);
     let calls = valid
@@ -2604,6 +7125,610 @@ fn stable_rejection_codes_cover_elf_sections_instructions_flow_and_digests() {
 }
 
 #[test]
+fn named_data_shapes_retain_independent_codec_bounds_and_source_checks() {
+    let unused = Fixture::from_source("module unused_nested_schema\nresource Batch has store { entries: NestedValues<Vec<u8>, 3, 8, 128> }\naction inspect() -> u64 { verification return 0 }");
+    assert!(
+        !unused.metadata["runtime"]["fail_closed_runtime_features"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|feature| feature.as_str() == Some("nested-values-artifact-proof")),
+        "a declaration alone must not imply runtime nested decoding"
+    );
+    for source in [
+        NESTED_CELL_CODEC_SOURCE,
+        "module unused_nested_field\nresource Batch has store, consume { entries: NestedValues<Vec<u8>, 2, 3, 32> }\naction remove(input before: Batch) { verification consume before }",
+    ] {
+        let mut missing = Fixture::from_source(source);
+        let features = missing.metadata["runtime"]["fail_closed_runtime_features"].as_array_mut().unwrap();
+        assert!(features.iter().any(|feature| feature.as_str() == Some("nested-values-artifact-proof")));
+        features.retain(|feature| feature.as_str() != Some("nested-values-artifact-proof"));
+        missing.rebind_sidecars();
+        assert_code(&missing, CheckerRejectionCode::V2410MetadataBindingMismatch);
+    }
+    let source = include_str!("syntax_combo/seeds/named-data-shapes.cell");
+    for opt_level in [0, 3] {
+        let valid = Fixture::from_result(
+            compile(
+                source,
+                CompileOptions {
+                    edition: cellscript::NEXT_EDITION,
+                    opt_level,
+                    target: Some("riscv64-elf".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap(),
+        );
+        for old in ["NestedValues<Vec<u8>, 3, 8, 128>", "NestedValues<Entry, 3, 8, 128>"] {
+            for new in [old.replace(", 3,", ", 2,"), old.replace(", 8,", ", 7,"), old.replace("128", "127")] {
+                let mut changed = valid.clone();
+                let mut parameters_changed = 0;
+                for entry in &mut changed.record.typed_semantics.entries {
+                    for param in &mut entry.params {
+                        if param.ty == old {
+                            param.ty = new.clone();
+                            parameters_changed += 1;
+                        }
+                    }
+                    for local in &mut entry.locals {
+                        if local.ty == old {
+                            local.ty = new.clone();
+                        }
+                    }
+                    for operation in entry.blocks.iter_mut().flat_map(|block| &mut block.operations) {
+                        for operand in &mut operation.operands {
+                            if operand.ty == old {
+                                operand.ty = new.clone();
+                            }
+                        }
+                    }
+                }
+                assert!(parameters_changed > 0, "the resolved parameter shape must be present: {old}");
+                changed.rebind_typed_semantics();
+                assert!(changed.check().is_err(), "accepted changed resolved shape {new}");
+            }
+        }
+        let start = valid
+            .record
+            .blocks
+            .iter()
+            .find(|block| block.machine_label.as_deref().is_some_and(|label| label.starts_with(".Lnested_param_codec_")))
+            .unwrap()
+            .range
+            .start;
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let word = elf.instructions.iter().find(|instruction| instruction.address == start).unwrap().word;
+        let mut changed = valid.clone();
+        changed.replace_machine_word(start, word ^ (1 << 20));
+        assert!(changed.check().is_err(), "named shape must not bypass the codec instruction proof");
+        let mut missing = valid.clone();
+        missing.metadata["runtime"]["fail_closed_runtime_features"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|feature| feature.as_str() != Some("nested-values-artifact-proof"));
+        missing.rebind_sidecars();
+        assert_code(&missing, CheckerRejectionCode::V2410MetadataBindingMismatch);
+    }
+}
+
+#[test]
+fn nested_value_helpers_bind_validated_spans_through_calls() {
+    let source = include_str!("syntax_combo/seeds/named-nested-helpers.cell");
+    for opt_level in [0, 3] {
+        Fixture::from_result(
+            compile(
+                source,
+                CompileOptions {
+                    edition: cellscript::NEXT_EDITION,
+                    opt_level,
+                    target: Some("riscv64-elf".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap(),
+        );
+    }
+}
+
+#[test]
+fn nested_derived_helpers_bind_validated_elements_through_calls() {
+    let source = include_str!("syntax_combo/seeds/named-derived-helpers.cell");
+    for opt_level in 0..=3 {
+        Fixture::from_result(
+            compile(
+                source,
+                CompileOptions {
+                    edition: cellscript::NEXT_EDITION,
+                    opt_level,
+                    target: Some("riscv64-elf".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap(),
+        );
+    }
+}
+
+#[test]
+fn nested_value_helpers_bind_cell_fields_alongside_borrowed_cells() {
+    let shape = "NestedValues<Vec<u8>, 32, 256, 4096>";
+    for padding in [0, 5, 7, 9] {
+        let params = (0..padding).map(|i| format!("p{i}: u64, ")).collect::<String>();
+        let args = "0, ".repeat(padding);
+        let source = format!(
+            "module mixed_nested_helpers\nresource Document has store, consume {{ entries: {shape} }}\n#[effect(ReadOnly)]\nfn count({params}values: {shape}, document: &Document) -> u64 {{ let alias = values\nreturn alias.len() + document.entries.len() }}\n#[effect(ReadOnly)]\nfn forward(document: &Document) -> u64 {{ let values = document.entries\nreturn count({args}values, document) }}\naction inspect(input before: Document) {{ verification\nlet values = before.entries\nrequire count({args}values, &before) == 2\nrequire forward(&before) == 2\nconsume before }}"
+        );
+        for opt_level in [0, 3] {
+            Fixture::from_result(
+                compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            );
+        }
+    }
+}
+
+#[test]
+fn nested_value_helpers_reject_rebound_sources_spills_and_paired_arguments() {
+    for (shape, parameter, read, argument, declaration) in [
+        ("NestedValues<Vec<u8>, 2, 3, 32>", "NestedValues<Vec<u8>, 2, 3, 32>", "values[0][0]", "", ""),
+        ("NestedValues<Vec<u8>, 2, 3, 32>", "NestedBytesView<3>", "values[0]", "[0]", ""),
+        (
+            "NestedValues<Record, 2, 3, 64>",
+            "NestedRecordView<Record, 3>",
+            "values.id",
+            "[0]",
+            "struct Record { id: u8, payload: Vec<u8> }",
+        ),
+    ] {
+        for padding in [0, 7, 8] {
+            let params = (0..padding).map(|i| format!("p{i}: u64, ")).collect::<String>();
+            let args = "0, ".repeat(padding);
+            let source = format!("module nested_helper_binding\n{declaration}\nfn first({params}values: {parameter}) -> u64 {{ return {read} as u64 }}\nfn forward(a: {shape}, b: {shape}) -> u64 {{ let alias = a\nlet left_value = alias{argument}\nlet right_value = b{argument}\nlet left = first({args}left_value)\nlet right = first({args}right_value)\nreturn left + right }}\naction inspect(witness a: {shape}, witness b: {shape}, witness expected: u64) {{ verification require forward(a, b) == expected }}");
+            for opt_level in [0, 3] {
+                let valid = Fixture::from_result(
+                    compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+                );
+                let forward = valid.record.typed_semantics.entries.iter().find(|entry| entry.name.ends_with("forward")).unwrap();
+                let mut changed = valid.clone();
+                let mutated = changed.record.typed_semantics.entries.iter_mut().find(|entry| entry.id == forward.id).unwrap();
+                let calls = mutated
+                    .blocks
+                    .iter_mut()
+                    .flat_map(|block| &mut block.operations)
+                    .filter(|op| op.call.as_ref().is_some_and(|call| call.target.ends_with("first")))
+                    .collect::<Vec<_>>();
+                let [first, second]: [_; 2] = calls.try_into().unwrap();
+                assert_ne!(first.operands[padding].local, second.operands[padding].local);
+                first.operands[padding] = second.operands[padding].clone();
+                changed.rebind_typed_semantics();
+                assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+
+                let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+                let helper = valid.record.typed_semantics.entries.iter().find(|entry| entry.name.ends_with("first")).unwrap();
+                let parameter = helper.locals.iter().find(|local| local.id == helper.params[padding].binding_id).unwrap();
+                let slot = parameter.source_id as u32 * 8;
+                let entry = valid.record.entries.iter().find(|entry| entry.id == helper.id).unwrap();
+                let start = valid.record.blocks.iter().find(|block| block.id == entry.entry_block).unwrap().range.start;
+                let body = valid
+                    .record
+                    .blocks
+                    .iter()
+                    .filter(|block| block.owner_entry == helper.id && block.lowering_block_id.is_some())
+                    .map(|block| block.range.start)
+                    .min()
+                    .unwrap();
+                let spill = elf
+                    .instructions
+                    .iter()
+                    .find(|instruction| {
+                        let word = instruction.word;
+                        let offset = (word >> 7 & 31) | (word >> 25 << 5);
+                        (start..body).contains(&instruction.address)
+                            && word & 0x707f == 0x3023
+                            && word >> 15 & 31 == 2
+                            && offset == slot
+                    })
+                    .unwrap();
+                let mut changed = valid.clone();
+                changed.replace_machine_word(spill.address, spill.word & !(31 << 20));
+                assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+
+                // Widening a callee's element payload bound must fail even
+                // though its callers also validate their complete values.
+                let bound = elf
+                    .instructions
+                    .iter()
+                    .find(|instruction| (start..body).contains(&instruction.address) && instruction.word == (3 << 20 | 28 << 7 | 0x13))
+                    .unwrap();
+                let mut changed = valid.clone();
+                changed.replace_machine_word(bound.address, 4 << 20 | 28 << 7 | 0x13);
+                assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+
+                if padding == 0 {
+                    let calls = elf
+                        .control_flow
+                        .iter()
+                        .filter(|flow| {
+                            flow.target == start
+                                && valid
+                                    .record
+                                    .blocks
+                                    .iter()
+                                    .any(|block| block.owner_entry == forward.id && block.range.contains(flow.address))
+                        })
+                        .collect::<Vec<_>>();
+                    assert_eq!(calls.len(), 2);
+                    let mut calls = calls;
+                    calls.sort_by_key(|flow| flow.address);
+                    let forward_start = valid
+                        .record
+                        .blocks
+                        .iter()
+                        .filter(|block| block.owner_entry == forward.id && block.lowering_block_id.is_some())
+                        .map(|block| block.range.start)
+                        .min()
+                        .unwrap();
+                    let loads = |from, until, register| {
+                        elf.instructions
+                            .iter()
+                            .rev()
+                            .find(|instruction| {
+                                let word = instruction.word;
+                                (from..until).contains(&instruction.address)
+                                    && word & 0x707f == 0x3003
+                                    && word >> 7 & 31 == register
+                                    && word >> 15 & 31 == 2
+                            })
+                            .unwrap()
+                    };
+                    // Substitute both words from another completely valid value of
+                    // identical type and bounds. Revalidating the callee's codec
+                    // alone cannot detect that its caller selected the wrong root.
+                    let mut changed = valid.clone();
+                    for register in [10, 11] {
+                        let first = loads(forward_start, calls[0].address, register);
+                        let second = loads(calls[0].address + 4, calls[1].address, register);
+                        assert_ne!(first.word >> 20, second.word >> 20);
+                        changed.replace_machine_word(first.address, (first.word & 0x000f_ffff) | (second.word & 0xfff0_0000));
+                    }
+                    let error = check_bundle_values(
+                        &changed.artifact,
+                        &changed.metadata,
+                        &changed.record,
+                        &changed.source_map,
+                        &CheckerBudgets::default(),
+                    )
+                    .unwrap_err();
+                    assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                    assert!(error.to_string().contains("pointer/length do not match"), "{error}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn nested_witness_decoder_rejects_rehashed_instruction_and_marker_changes() {
+    for (element, declarations) in [
+        ("Vec<u8>", String::new()),
+        (
+            "Record",
+            format!(
+                "struct Record {{ {} payload: Vec<u8> }}",
+                (0..8).map(|index| format!("id{index}: [u8; 256], ")).collect::<String>()
+            ),
+        ),
+    ] {
+        let source = format!("module nested_machine\n{declarations}\naction inspect(witness values: NestedValues<{element}, 32, 256, 4096>) -> u64 {{ verification return 0 }}");
+        for opt_level in 0..=3 {
+            let valid = Fixture::from_result(
+                compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            );
+            let start = valid
+                .record
+                .blocks
+                .iter()
+                .find(|block| block.machine_label.as_deref().is_some_and(|label| label.starts_with(".Lnested_param_codec_")))
+                .unwrap();
+            let end = valid
+                .record
+                .blocks
+                .iter()
+                .filter(|block| {
+                    block.range.start > start.range.start
+                        && block.machine_label.as_deref().is_some_and(|label| label.starts_with(".Lnested_param_ready_"))
+                })
+                .map(|block| block.range.start)
+                .min()
+                .unwrap();
+            let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+            let mut count = 0;
+            for instruction in &elf.instructions {
+                if !(start.range.start..end).contains(&instruction.address) || instruction.word & 0x7f == 0x6f {
+                    continue;
+                }
+                let mut changed = valid.clone();
+                let word = instruction.word ^ if instruction.word & 0x7f == 0x63 { 1 << 12 } else { 1 << 20 };
+                changed.replace_machine_word(instruction.address, word);
+                assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                count += 1;
+            }
+            assert!(count >= 80, "complete decoder mutation coverage for {element} O{opt_level}");
+            let mut changed = valid.clone();
+            changed.record.blocks.iter_mut().find(|block| block.id == start.id).unwrap().machine_label = None;
+            changed.rebind_sidecars();
+            assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+        }
+    }
+}
+
+#[test]
+fn nested_witness_machine_contract_covers_zero_bounds_and_multiple_parameters() {
+    let source = "module nested_multiple\naction inspect(witness empty: NestedValues<Vec<u8>, 0, 0, 4>, witness nonempty: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 { verification return 0 }";
+    for opt_level in 0..=3 {
+        Fixture::from_result(
+            compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+        );
+    }
+}
+
+#[test]
+fn nested_witness_inputs_bind_register_stack_and_mixed_width_arguments() {
+    let prefixes = [
+        String::new(),
+        (0..7).map(|index| format!("witness p{index}: u64, ")).collect(),
+        (0..9).map(|index| format!("witness p{index}: u64, ")).collect(),
+        "witness hash: Hash, witness wide: u128, witness tag: [u8; 17], witness flag: u64, ".into(),
+        "witness flag: bool, witness delta: i32, witness empty: (), witness small: [u8; 3], ".into(),
+    ];
+    for prefix in prefixes {
+        let source = format!("module nested_abi\naction inspect({prefix}witness first: NestedValues<Vec<u8>, 2, 3, 32>, witness second: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 {{ verification return 0 }}");
+        for opt_level in 0..=3 {
+            let valid = Fixture::from_result(
+                compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            );
+            let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+            let decoders = valid
+                .record
+                .blocks
+                .iter()
+                .filter(|block| block.machine_label.as_deref().is_some_and(|label| label.starts_with(".Lnested_param_codec_")))
+                .collect::<Vec<_>>();
+            assert_eq!(decoders.len(), 2);
+            for decoder in &decoders {
+                // The two final reloads supply the pointer and length. Changing
+                // either to an adjacent initialized slot keeps the CFG and all
+                // hashes valid but changes which incoming ABI word is checked.
+                for distance in [4, 8] {
+                    let at = decoder.range.start - distance;
+                    let instruction = elf.instructions.iter().find(|instruction| instruction.address == at).unwrap();
+                    assert_eq!(instruction.word & 0x707f, 0x3003);
+                    let mut changed = valid.clone();
+                    changed.replace_machine_word(at, replace_i_immediate(instruction.word, ((instruction.word as i32) >> 20) + 8));
+                    assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                }
+            }
+            // Equal codec bounds do not make two parameter identities fungible.
+            let mut changed = valid.clone();
+            let left = decoders[0].machine_label.clone();
+            let right = decoders[1].machine_label.clone();
+            changed.record.blocks.iter_mut().find(|block| block.id == decoders[0].id).unwrap().machine_label = right;
+            changed.record.blocks.iter_mut().find(|block| block.id == decoders[1].id).unwrap().machine_label = left;
+            changed.rebind_sidecars();
+            assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+
+            // Redirect the real caller past the complete decoder prefix, and
+            // update both its machine target and declared CFG edge together.
+            let entry = valid.record.entries.iter().find(|entry| entry.id == "action:inspect").unwrap();
+            let entry_block = valid.record.blocks.iter().find(|block| block.id == entry.entry_block).unwrap();
+            let caller = elf.control_flow.iter().find(|flow| flow.target == entry_block.range.start).unwrap();
+            let caller_block = valid.record.blocks.iter().find(|block| block.range.contains(caller.address)).unwrap();
+            let ready = valid
+                .record
+                .blocks
+                .iter()
+                .filter(|block| {
+                    block.owner_entry == entry.id
+                        && block.machine_label.as_deref().is_some_and(|label| label.starts_with(".Lnested_param_ready_"))
+                })
+                .max_by_key(|block| block.range.start)
+                .unwrap();
+            let old_word = elf.instructions.iter().find(|instruction| instruction.address == caller.address).unwrap().word;
+            let mut changed = valid.clone();
+            for edge in &mut changed.record.edges {
+                if edge.from == caller_block.id && edge.to == entry_block.id {
+                    edge.to = ready.id.clone();
+                }
+            }
+            changed.record.canonicalize();
+            if old_word & 0x7f == 0x6f {
+                let jump = encode_jal((ready.range.start as i64 - caller.address as i64) as i32) | (old_word & (31 << 7));
+                changed.replace_machine_word(caller.address, jump);
+            } else {
+                assert_eq!(old_word & 0x7f, 0x67);
+                let high_address = caller.address - 4;
+                let high_word = elf.instructions.iter().find(|instruction| instruction.address == high_address).unwrap().word;
+                assert_eq!(high_word & 0x7f, 0x17);
+                let offset = ready.range.start as i64 - high_address as i64;
+                let high = (offset + 0x800) >> 12;
+                let low = offset - (high << 12);
+                changed.replace_machine_words(&[
+                    (high_address, (high_word & 0xfff) | ((high as u32) << 12)),
+                    (caller.address, replace_i_immediate(old_word, low as i32)),
+                ]);
+            }
+            // The general ABI boundary already rejects a call into an entry's
+            // interior before the feature-specific prefix checker runs.
+            assert_code(&changed, CheckerRejectionCode::V2407AbiOrStackInvalid);
+        }
+    }
+}
+
+#[test]
+fn nested_witness_transport_rejects_rehashed_envelope_and_argument_mutations() {
+    let source = "module nested_transport\naction inspect(witness salt: u64, witness values: NestedValues<Vec<u8>, 2, 3, 32>, witness tail: Hash) -> u64 { verification return 0 }";
+    for opt_level in 0..=3 {
+        let valid = Fixture::from_result(
+            compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+        );
+        let wrapper = valid.record.entries.iter().find(|entry| entry.name == "_cellscript_entry").unwrap();
+        let blocks = valid.record.blocks.iter().filter(|block| block.owner_entry == wrapper.id).collect::<Vec<_>>();
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let mut mutations = 0;
+        for instruction in &elf.instructions {
+            if !blocks.iter().any(|block| block.range.contains(instruction.address)) {
+                continue;
+            }
+            let word = instruction.word;
+            let opcode = word & 0x7f;
+            let rd = (word >> 7) & 31;
+            // Invert each conditional without changing its two CFG successors;
+            // shift each byte read; change each register argument's origin.
+            let changed_word = if opcode == 0x63 {
+                word ^ (1 << 12)
+            } else if word & 0x707f == 0x4003 {
+                replace_i_immediate(word, ((word as i32) >> 20) + 1)
+            } else if word & 0x707f == 0x13 && (10..=17).contains(&rd) && ((word >> 15) & 31) != 0 {
+                word ^ (1 << 15)
+            } else {
+                continue;
+            };
+            let mut changed = valid.clone();
+            changed.replace_machine_word(instruction.address, changed_word);
+            assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+            mutations += 1;
+        }
+        assert!(mutations >= 60, "complete envelope and positional source checks at O{opt_level}");
+    }
+}
+
+#[test]
+fn nested_mixed_script_args_transport_binds_disjoint_buffers_and_live_cursors() {
+    let source = "module mixed_transport\nlock inspect(lock_args domain: u64, witness a: u64, witness b: u64, witness c: u64, witness d: u64, witness e: u64, witness f: u64, witness values: NestedValues<Vec<u8>, 2, 3, 32>, lock_args owner: Hash, lock_args nonce: u16, lock_args delta: i32) -> bool { verification true }";
+    for opt_level in 0..=3 {
+        let valid = Fixture::from_result(
+            compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+        );
+        let wrapper = valid.record.entries.iter().find(|entry| entry.name == "_cellscript_entry").unwrap();
+        let blocks = valid.record.blocks.iter().filter(|block| block.owner_entry == wrapper.id).collect::<Vec<_>>();
+        let fail = blocks
+            .iter()
+            .find(|block| block.machine_label.as_deref().is_some_and(|label| label.starts_with(".Lentry_witness_fail_")))
+            .unwrap()
+            .range
+            .start;
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let mut mutations = 0;
+        for instruction in &elf.instructions {
+            if instruction.address >= fail || !blocks.iter().any(|block| block.range.contains(instruction.address)) {
+                continue;
+            }
+            let word = instruction.word;
+            let kind = word & 0x707f;
+            let rd = (word >> 7) & 31;
+            // Disturb Script buffer/size/cursor constants, real byte reads,
+            // cursor guards and outgoing argument sources after rebinding.
+            let changed_word = if word & 0x7f == 0x63 {
+                word ^ (1 << 12)
+            } else if kind == 0x4003 || (kind == 0x13 && (5..=31).contains(&rd) && ((word as i32) >> 20) >= 8) {
+                replace_i_immediate(word, ((word as i32) >> 20) + 1)
+            } else if kind == 0x3023 && decode_s_immediate(word) < 0 {
+                word ^ (1 << 20)
+            } else {
+                continue;
+            };
+            let mut changed = valid.clone();
+            changed.replace_machine_word(instruction.address, changed_word);
+            assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+            mutations += 1;
+        }
+        assert!(mutations >= 100, "mixed transport mutations at O{opt_level}");
+        // Rewrite all uses of one address-helper scratch register together.
+        // Its address calculation remains internally consistent, but t3 still
+        // owns the Script total length and must survive the args-offset read.
+        let header = blocks
+            .iter()
+            .find(|block| block.machine_label.as_deref().is_some_and(|label| label.starts_with(".Lentry_script_table_header_ok_")))
+            .unwrap();
+        let helper = header.range.start + 4;
+        let words = (0..4)
+            .map(|index| elf.instructions.iter().find(|instruction| instruction.address == helper + index * 4).unwrap().word)
+            .collect::<Vec<_>>();
+        assert_eq!(words[0] & 0x7f, 0x37);
+        assert_eq!(words[1] & 0x707f, 0x13);
+        assert_eq!(words[2] & 0x7f, 0x33);
+        assert_eq!(words[3] & 0x707f, 0x4003);
+        let mut changed = valid.clone();
+        changed.replace_machine_words(&[
+            (helper, (words[0] & !(31 << 7)) | (28 << 7)),
+            (helper + 4, (words[1] & !((31 << 7) | (31 << 15))) | (28 << 7) | (28 << 15)),
+            (helper + 8, (words[2] & !((31 << 7) | (31 << 20))) | (28 << 7) | (28 << 20)),
+            (helper + 12, (words[3] & !(31 << 15)) | (28 << 15)),
+        ]);
+        assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+    }
+}
+
+#[test]
+fn nested_view_type_rules_reject_rehashed_mutation_and_pointer_operations() {
+    let valid = Fixture::from_source(
+        r#"
+module checked_nested_views
+struct Record { id: u64, payload: Vec<u8> }
+action inspect(witness values: NestedValues<Record, 3, 8, 128>) -> u64 {
+    verification
+        require values.len() == 1
+        let record = values[0]
+        require record.id == 42
+        require record.payload.len() == 1
+        require record.payload[0] == 7
+        return 0
+}
+"#,
+    );
+    for opcode in ["collection-clear", "collection-reverse", "collection-capacity", "type-hash", "return"] {
+        let mut changed = valid.clone();
+        let operation = changed
+            .record
+            .typed_semantics
+            .entries
+            .iter_mut()
+            .flat_map(|entry| &mut entry.blocks)
+            .flat_map(|block| &mut block.operations)
+            .find(|operation| operation.opcode == "length")
+            .unwrap();
+        operation.opcode = opcode.into();
+        if matches!(opcode, "collection-clear" | "collection-reverse" | "return") {
+            operation.destinations.clear();
+        }
+        changed.rebind_typed_semantics();
+        assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
+    }
+
+    for replacement in ["NestedRecordView<Record, 9>", "NestedBytesView<8>", "Record"] {
+        let mut changed = valid.clone();
+        // Rebind every use and declaration of the derived value together so
+        // rejection must enforce the owner's declared element/payload shape.
+        for entry in &mut changed.record.typed_semantics.entries {
+            for local in &mut entry.locals {
+                if local.ty == "NestedRecordView<Record, 8>" {
+                    local.ty = replacement.into();
+                }
+            }
+            for operation in entry.blocks.iter_mut().flat_map(|block| &mut block.operations) {
+                for operand in &mut operation.operands {
+                    if operand.ty == "NestedRecordView<Record, 8>" {
+                        operand.ty = replacement.into();
+                    }
+                }
+            }
+        }
+        changed.rebind_typed_semantics();
+        assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
+    }
+}
+
+#[test]
 fn typed_semantics_rejects_operator_and_constant_mutations_after_rebinding() {
     let valid = Fixture::new();
 
@@ -3368,4 +8493,1768 @@ fn decode_s_immediate(word: u32) -> i32 {
 fn replace_s_immediate(word: u32, immediate: i32) -> u32 {
     let immediate = immediate as u32 & 0x0fff;
     (word & !((0x7f << 25) | (0x1f << 7))) | ((immediate >> 5) << 25) | ((immediate & 0x1f) << 7)
+}
+
+#[test]
+fn nested_policy_transport_binds_each_selected_record_and_outgoing_argument() {
+    use cellscript::artifact::{compile_artifact, ArtifactAction, ArtifactContext, ArtifactDeclaration, ArtifactDispatch};
+    let source = r#"
+module nested_policy_transport
+resource Token has store, consume { amount: u64 }
+action first(input token: Token, witness a: u64, witness b: u64, witness c: u64, witness d: u64, witness e: u64, witness values: NestedValues<Vec<u8>, 2, 3, 32>, witness tail: Hash) {
+    verification
+    require values.len() == 1
+    require token.amount == a
+    consume token
+}
+action second(input token: Token, witness values: NestedValues<Vec<u8>, 3, 5, 64>, witness other: NestedValues<Vec<u8>, 2, 3, 32>, witness nonce: u16) {
+    verification
+    require values.len() == 2
+    require other.len() == 1
+    consume token
+}
+"#;
+    for opt_level in 0..=3 {
+        let valid = Fixture::from_result(
+            compile_artifact(
+                source,
+                CompileOptions {
+                    opt_level,
+                    target: Some("riscv64-elf".into()),
+                    target_profile: Some("ckb".into()),
+                    ..Default::default()
+                },
+                ArtifactDeclaration {
+                    name: "nested-policy".into(),
+                    context: ArtifactContext::TypeGroup { resource: "Token".into() },
+                    dispatch: ArtifactDispatch::PolicyWitnessV1,
+                    actions: vec![
+                        ArtifactAction { tag: 40, action: "first".into() },
+                        ArtifactAction { tag: 10, action: "second".into() },
+                    ],
+                    common_checks: vec![],
+                },
+                cellscript::ExecutableSurfacePolicy::AllowFailClosed,
+            )
+            .unwrap(),
+        );
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let adapters =
+            valid.record.entries.iter().filter(|entry| entry.name.starts_with(".Lpolicy_action_adapter_")).collect::<Vec<_>>();
+        assert_eq!(adapters.len(), 2);
+        for adapter in adapters {
+            let blocks = valid.record.blocks.iter().filter(|block| block.owner_entry == adapter.id).collect::<Vec<_>>();
+            let label = |prefix: &str| {
+                blocks
+                    .iter()
+                    .find(|block| block.machine_label.as_deref().is_some_and(|label| label.starts_with(prefix)))
+                    .unwrap()
+                    .range
+                    .start
+            };
+            let copied = label(".Lpolicy_args_copied_");
+            let fail = label(".Lentry_witness_fail_");
+            let mut mutations = 0;
+            for instruction in &elf.instructions {
+                if instruction.address < copied
+                    || instruction.address >= fail
+                    || !blocks.iter().any(|block| block.range.contains(instruction.address))
+                {
+                    continue;
+                }
+                let word = instruction.word;
+                let kind = word & 0x707f;
+                let rd = word >> 7 & 31;
+                let changed_word = if word & 0x7f == 0x63 {
+                    word ^ (1 << 12)
+                } else if kind == 0x4003 {
+                    replace_i_immediate(word, ((word as i32) >> 20) + 1)
+                } else if (kind == 0x13 || kind == 0x33) && (10..=17).contains(&rd) {
+                    word ^ (1 << 15)
+                } else if kind == 0x3023 && decode_s_immediate(word) < 0 {
+                    word ^ (1 << 20)
+                } else {
+                    continue;
+                };
+                let mut changed = valid.clone();
+                changed.replace_machine_word(instruction.address, changed_word);
+                assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                mutations += 1;
+            }
+            assert!(mutations >= 35, "selected adapter mutations at O{opt_level}: {mutations}");
+        }
+    }
+}
+
+#[test]
+fn nested_read_operations_reject_rebound_ranges_fields_and_aliases() {
+    let source = r#"
+module nested_read_contract
+struct Row { a: u8, b: u16, c: u32, d: u64, big: u128, hash: Hash, pad: [u8; 17], payload: Vec<u8> }
+action inspect(witness values: NestedValues<Row, 3, 8, 512>, witness at: u64, witness big: u128, witness hash: Hash, witness pad: [u8; 17]) -> u64 {
+    verification
+    let row = values[at]
+    let alias = row
+    require row.a == 1
+    require alias.b == 2
+    require row.c == 3
+    require row.d == 4
+    require alias.big == big
+    require row.hash == hash
+    require alias.pad == pad
+    let bytes = alias.payload
+    require !bytes.is_empty()
+    require bytes[at] == 171
+    return values.len()
+}
+"#;
+    for opt_level in 0..=3 {
+        let valid = Fixture::from_result(
+            compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+        );
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let mut mutations = 0;
+        let mut sites = 0;
+        for block in &valid.record.blocks {
+            for label in block.nested_read_labels.iter().filter(|label| !label.ends_with("_done")) {
+                sites += 1;
+                let end_name = format!("{label}_done");
+                let end = valid.record.blocks.iter().find(|block| block.nested_read_labels.contains(&end_name)).unwrap().range.start;
+                for instruction in
+                    elf.instructions.iter().filter(|instruction| block.range.start <= instruction.address && instruction.address < end)
+                {
+                    let word = instruction.word;
+                    let changed_word = match word & 0x7f {
+                        0x63 => word ^ (1 << 12),
+                        0x03 => replace_i_immediate(word, ((word as i32) >> 20) + 1),
+                        0x13 | 0x33 => word ^ (1 << 15),
+                        0x23 => word ^ (1 << 20),
+                        _ => continue,
+                    };
+                    let mut changed = valid.clone();
+                    changed.replace_machine_word(instruction.address, changed_word);
+                    assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                    mutations += 1;
+                }
+                let mut missing = valid.clone();
+                missing
+                    .record
+                    .blocks
+                    .iter_mut()
+                    .find(|candidate| candidate.id == block.id)
+                    .unwrap()
+                    .nested_read_labels
+                    .retain(|candidate| candidate != label);
+                missing.rebind_sidecars();
+                assert_code(&missing, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+            }
+        }
+        assert!(sites >= 12, "nested read coverage at O{opt_level}: {sites}");
+        assert!(mutations >= 100, "nested read mutations at O{opt_level}: {mutations}");
+    }
+}
+
+#[test]
+fn nested_read_contract_preserves_large_offsets_and_high_unsigned_indexes() {
+    let fields = (0..8).map(|index| format!("f{index}: [u8; 256]")).collect::<Vec<_>>().join(", ");
+    let source = format!("module wide_nested_read\nstruct Row {{ {fields}, payload: Vec<u8> }}\naction inspect(witness values: NestedValues<Row, 1, 3, 4096>, witness expected: [u8; 256]) -> u64 {{ verification\nlet row = values[0]\nrequire row.f7 == expected\nlet payload = row.payload\nreturn payload.len() }}");
+    for opt_level in 0..=3 {
+        Fixture::from_result(
+            compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+        );
+        for index in [305419896u64, u64::MAX] {
+            let source = format!("module high_nested_index\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 {{ verification\nlet item = values[{index}]\nreturn item.len() }}");
+            Fixture::from_result(
+                compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            );
+        }
+    }
+}
+
+#[test]
+fn nested_independent_views_cannot_share_a_coherently_rewritten_length_slot() {
+    let source = "module nested_view_slots\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 { verification\nlet first = values[0]\nlet second = values[1]\nreturn first.len() + second.len() }";
+    for opt_level in 0..=3 {
+        let valid = Fixture::from_result(
+            compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+        );
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let indexes = valid
+            .record
+            .blocks
+            .iter()
+            .flat_map(|block| {
+                block
+                    .nested_read_labels
+                    .iter()
+                    .filter(|label| label.starts_with(".Lnested_use_index_") && !label.ends_with("_done"))
+                    .map(move |label| (block, label))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(indexes.len(), 2);
+        let size_slot = |block: &cellscript_artifact_checker::LoweringBlock, label: &str| {
+            let done = format!("{label}_done");
+            let end = valid.record.blocks.iter().find(|block| block.nested_read_labels.contains(&done)).unwrap().range.start;
+            let store = elf
+                .instructions
+                .iter()
+                .find(|instruction| {
+                    block.range.start <= instruction.address
+                        && instruction.address < end
+                        && instruction.word & 0x707f == 0x3023
+                        && instruction.word >> 15 & 31 == 2
+                        && instruction.word >> 20 & 31 == 29
+                })
+                .unwrap();
+            decode_s_immediate(store.word)
+        };
+        let first = size_slot(indexes[0].0, indexes[0].1);
+        let second = size_slot(indexes[1].0, indexes[1].1);
+        assert_ne!(first, second);
+        let owned = valid.record.blocks.iter().filter(|block| block.owner_entry == indexes[0].0.owner_entry).collect::<Vec<_>>();
+        let changes = elf
+            .instructions
+            .iter()
+            .filter(|instruction| owned.iter().any(|block| block.range.contains(instruction.address)))
+            .filter_map(|instruction| {
+                let word = instruction.word;
+                if word >> 15 & 31 != 2 {
+                    return None;
+                }
+                if word & 0x707f == 0x3003 && (word as i32) >> 20 == second {
+                    Some((instruction.address, replace_i_immediate(word, first)))
+                } else if word & 0x707f == 0x3023 && decode_s_immediate(word) == second {
+                    let changed = (word & !0xfe000f80) | ((first as u32 & 0xfe0) << 20) | ((first as u32 & 31) << 7);
+                    Some((instruction.address, changed))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        assert!(changes.len() >= 2, "rewrite both producer and consumer");
+        let mut changed = valid.clone();
+        changed.replace_machine_words(&changes);
+        assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+    }
+}
+
+#[test]
+fn nested_lifetime_rejects_ordinary_full_partial_and_aliased_stack_clobbers() {
+    let source = "module nested_lifetime\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>, witness at: u64) -> u64 { verification\nlet bytes = values[at]\nlet marker = at + 7\nrequire marker > at\nreturn bytes.len() + values.len() }";
+    for opt_level in 0..=3 {
+        let valid = Fixture::from_result(
+            compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+        );
+        let typed = valid.record.typed_semantics.entries.iter().find(|entry| entry.name == "inspect").unwrap();
+        let frame = valid.record.entries.iter().find(|entry| entry.id == typed.id).unwrap().frame_size_bytes as i32;
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let sites = valid
+            .record
+            .blocks
+            .iter()
+            .flat_map(|block| {
+                block.nested_read_labels.iter().filter(|label| !label.ends_with("_done")).map(|label| {
+                    let done = format!("{label}_done");
+                    let end = valid.record.blocks.iter().find(|block| block.nested_read_labels.contains(&done)).unwrap().range.start;
+                    (block.range.start, end)
+                })
+            })
+            .collect::<Vec<_>>();
+        let first_end = sites.iter().min_by_key(|site| site.0).unwrap().1;
+        let store = elf
+            .instructions
+            .iter()
+            .find(|instruction| {
+                instruction.address >= first_end
+                    && valid
+                        .record
+                        .blocks
+                        .iter()
+                        .any(|block| block.owner_entry == typed.id && block.range.contains(instruction.address))
+                    && !sites.iter().any(|(start, end)| *start <= instruction.address && instruction.address < *end)
+                    && instruction.word & 0x707f == 0x3023
+                    && instruction.word >> 15 & 31 == 2
+            })
+            .unwrap();
+        let mut slots = typed
+            .locals
+            .iter()
+            .filter(|local| local.ty.starts_with("Nested"))
+            .map(|local| local.source_id as i32 * 8)
+            .collect::<std::collections::BTreeSet<_>>();
+        slots.extend(
+            elf.instructions
+                .iter()
+                .filter(|instruction| {
+                    sites.iter().any(|(start, end)| *start <= instruction.address && instruction.address < *end)
+                        && instruction.word & 0x707f == 0x3003
+                        && instruction.word >> 15 & 31 == 2
+                        && instruction.word >> 7 & 31 == 11
+                })
+                .map(|instruction| (instruction.word as i32) >> 20),
+        );
+        assert!(slots.len() >= 4, "root/derived pointers and independent sizes");
+        for slot in slots {
+            for (base, offset, kind) in [(2, slot, 3), (2, slot + 7, 0), (8, slot - frame, 3)] {
+                assert!((-2048..2048).contains(&offset));
+                let word = (store.word & !0xfe0fff80)
+                    | ((offset as u32 & 0xfe0) << 20)
+                    | ((offset as u32 & 31) << 7)
+                    | (base << 15)
+                    | (kind << 12);
+                let mut changed = valid.clone();
+                changed.replace_machine_word(store.address, word);
+                let error = check_bundle_values(
+                    &changed.artifact,
+                    &changed.metadata,
+                    &changed.record,
+                    &changed.source_map,
+                    &CheckerBudgets::default(),
+                )
+                .unwrap_err();
+                assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{error}");
+                assert!(error.to_string().contains("unverified write overlaps"), "{error}");
+            }
+        }
+    }
+}
+
+#[test]
+fn nested_lifetime_rejects_a_rebound_branch_that_skips_the_view_definition() {
+    let source = "module nested_dominance\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>, witness at: u64) -> u64 { verification\nrequire at < 2\nlet bytes = values[at]\nrequire bytes.len() > 0\nreturn bytes.len() }";
+    let cell_source =
+        NESTED_CELL_CODEC_SOURCE.replace("let values = before.entries", "require before.id == 42\nlet values = before.entries");
+    for (source, producer_prefix) in [(source, ".Lnested_use_index_"), (cell_source.as_str(), ".Lnested_use_cellfield_")] {
+        for opt_level in 0..=3 {
+            let valid = Fixture::from_result(
+                compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            );
+            let producer = valid
+                .record
+                .blocks
+                .iter()
+                .find(|block| {
+                    block.nested_read_labels.iter().any(|label| label.starts_with(producer_prefix) && !label.ends_with("_done"))
+                })
+                .unwrap();
+            let consumer = valid
+                .record
+                .blocks
+                .iter()
+                .find(|block| {
+                    block.nested_read_labels.iter().any(|label| label.starts_with(".Lnested_use_length_") && !label.ends_with("_done"))
+                })
+                .unwrap();
+            let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+            let flow = elf
+                .control_flow
+                .iter()
+                .find(|flow| {
+                    flow.address < producer.range.start
+                        && valid
+                            .record
+                            .blocks
+                            .iter()
+                            .any(|block| block.owner_entry == producer.owner_entry && block.range.contains(flow.address))
+                        && valid.record.verifier_failure_exits.iter().any(|exit| exit.code == 5 && exit.address == flow.target)
+                })
+                .unwrap();
+            let block = valid.record.blocks.iter().find(|block| block.range.contains(flow.address)).unwrap();
+            let word = elf.instructions.iter().find(|instruction| instruction.address == flow.address).unwrap().word;
+            assert_eq!(word & 0x7f, 0x63);
+            let offset = consumer.range.start as i64 - flow.address as i64;
+            assert!((-4096..4096).contains(&offset));
+            let immediate = offset as u32;
+            let branch = (word & 0x01fff07f)
+                | (((immediate >> 12) & 1) << 31)
+                | (((immediate >> 5) & 0x3f) << 25)
+                | (((immediate >> 1) & 15) << 8)
+                | (((immediate >> 11) & 1) << 7);
+            let mut changed = valid.clone();
+            let edge =
+                changed.record.edges.iter_mut().find(|edge| edge.from == block.id && edge.kind == EdgeKind::ConditionalTaken).unwrap();
+            edge.to = consumer.id.clone();
+            // Rebind graph reachability too: the test must reach the independent
+            // definition proof rather than fail on stale producer bookkeeping.
+            let mut reachable = std::collections::BTreeSet::new();
+            let mut pending = changed.record.entries.iter().map(|entry| entry.entry_block.clone()).collect::<Vec<_>>();
+            while let Some(id) = pending.pop() {
+                if reachable.insert(id.clone()) {
+                    pending.extend(changed.record.edges.iter().filter(|edge| edge.from == id).map(|edge| edge.to.clone()));
+                }
+            }
+            for block in &mut changed.record.blocks {
+                block.reachable = reachable.contains(&block.id);
+            }
+            changed.record.canonicalize();
+            changed.replace_machine_word(flow.address, branch);
+            let error = check_bundle_values(
+                &changed.artifact,
+                &changed.metadata,
+                &changed.record,
+                &changed.source_map,
+                &CheckerBudgets::default(),
+            )
+            .unwrap_err();
+            assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{error}");
+            assert!(error.to_string().contains("before its source definition"), "{error}");
+        }
+    }
+}
+
+#[test]
+fn nested_lifetime_accepts_caller_owned_fixed_results() {
+    for count in [0, 1, 7, 8, 9] {
+        let params = (0..count).map(|i| format!("p{i}: u64")).collect::<Vec<_>>().join(", ");
+        let args = vec!["at"; count].join(", ");
+        let value = if count == 0 { "0".to_string() } else { format!("p{}", count - 1) };
+        let source = format!("module nested_result\nstruct Pair {{ left: u64, right: u64 }}\nfn make({params}) -> Pair {{ Pair {{ left: {value}, right: {value} + 1 }} }}\nfn wrap(at: u64) -> Pair {{ make({args}) }}\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 {{ verification\nlet bytes = values[0]\nlet pair = wrap(bytes.len())\nrequire pair.right > pair.left\nreturn bytes.len() }}");
+        let direct = source.replace("wrap(bytes.len())", &format!("make({})", vec!["bytes.len()"; count].join(", ")));
+        for source in [source, direct] {
+            for opt_level in 0..=3 {
+                let valid = Fixture::from_result(
+                    compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
+                        .unwrap_or_else(|error| panic!("{count} args, O{opt_level}: {error}")),
+                );
+                if count == 9 && opt_level == 0 {
+                    let mut unsorted = valid.clone();
+                    let block = unsorted.record.blocks.iter_mut().find(|block| block.nested_read_labels.len() > 1).unwrap();
+                    block.nested_read_labels.swap(0, 1);
+                    unsorted.rebind_sidecars();
+                    assert_code(&unsorted, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                }
+            }
+        }
+    }
+}
+
+const NESTED_CELL_CODEC_SOURCE: &str = r#"
+module nested_cell_codec
+resource Document has store, consume, create {
+    id: u64,
+    entries: NestedValues<Vec<u8>, 2, 3, 32>,
+}
+action roll(input before: Document, witness recipient: Address) -> after: Document {
+    verification
+    let values = before.entries
+    require values.len() == 1
+    let id = before.id
+    consume before
+    create after = Document { id: id, entries: values } with_lock(recipient)
+}
+"#;
+
+fn nested_cell_two_fields_source() -> String {
+    NESTED_CELL_CODEC_SOURCE
+        .replace(
+            "entries: NestedValues<Vec<u8>, 2, 3, 32>,",
+            "entries: NestedValues<Vec<u8>, 2, 3, 32>, spare: NestedValues<Vec<u8>, 2, 3, 32>,",
+        )
+        .replace("let id = before.id", "let spare = before.spare\nrequire spare.len() == 1\nlet id = before.id")
+        .replace("entries: values }", "entries: values, spare: spare }")
+}
+
+#[test]
+fn nested_output_comparisons_bind_spans_expected_values_and_byte_loops() {
+    for opt_level in 0..=3 {
+        let valid = Fixture::from_result(
+            compile(
+                &nested_cell_two_fields_source(),
+                CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            )
+            .unwrap(),
+        );
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let mut mutations = 0;
+        let mut sites = 0;
+        for block in &valid.record.blocks {
+            for label in block.nested_output_labels.iter().filter(|label| !label.ends_with("_done")) {
+                sites += 1;
+                let end_name = format!("{label}_done");
+                let end = valid.record.blocks.iter().find(|block| block.nested_output_labels.contains(&end_name)).unwrap().range.start;
+                for instruction in elf.instructions.iter().filter(|i| (block.range.start..end).contains(&i.address)) {
+                    let word = instruction.word;
+                    let changed_word = match word & 0x7f {
+                        0x63 => word ^ (1 << 12),
+                        0x03 => replace_i_immediate(word, ((word as i32) >> 20) + 1),
+                        0x13 | 0x33 => word ^ (1 << 15),
+                        _ => continue,
+                    };
+                    let mut changed = valid.clone();
+                    changed.replace_machine_word(instruction.address, changed_word);
+                    assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                    mutations += 1;
+                }
+            }
+        }
+        assert_eq!(sites, 3);
+        assert!(mutations > 70);
+        let mut missing = valid.clone();
+        for block in &mut missing.record.blocks {
+            block.nested_output_labels.clear();
+        }
+        missing.rebind_sidecars();
+        assert_code(&missing, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+    }
+}
+
+#[test]
+fn nested_output_fixed_fields_bind_all_widths_and_literal_bytes() {
+    let types = ["u8", "u16", "u32", "u64", "u128", "Hash", "Address", "[u8; 1]", "[u8; 8]", "[u8; 9]", "[u8; 256]"];
+    let declarations = types.iter().enumerate().map(|(index, ty)| format!("f{index}: {ty}, ")).collect::<String>();
+    let assignments = types.iter().enumerate().map(|(index, _)| format!("f{index}: before.f{index}, ")).collect::<String>();
+    let copied = NESTED_CELL_CODEC_SOURCE
+        .replace("id: u64,", &format!("id: u64, {declarations}"))
+        .replace("id: id, entries: values", &format!("id: id, {assignments}entries: values"));
+    let literals = NESTED_CELL_CODEC_SOURCE
+        .replace("id: u64,", "id: u64, big: u128, hash: Hash, owner: Address, pad: [u8; 9],")
+        .replace(
+        "id: id, entries: values",
+        "id: 18446744073709551615, big: 0 as u128, hash: Hash::zero(), owner: Address::zero(), pad: b\"abcdefghi\", entries: values",
+    );
+    for source in [copied, literals] {
+        for opt_level in 0..=3 {
+            let valid = Fixture::from_result(
+                compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            );
+            let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+            let mut mutations = 0;
+            for block in &valid.record.blocks {
+                for label in block.nested_output_labels.iter().filter(|label| !label.ends_with("_done")) {
+                    let end_name = format!("{label}_done");
+                    let end =
+                        valid.record.blocks.iter().find(|block| block.nested_output_labels.contains(&end_name)).unwrap().range.start;
+                    let body = elf.instructions.iter().filter(|i| (block.range.start..end).contains(&i.address)).collect::<Vec<_>>();
+                    // Both ends of each field's reads, expected-slot load and
+                    // width constant; include high-byte and full-u64 paths.
+                    let mut selected = std::collections::BTreeMap::new();
+                    for instruction in body
+                        .iter()
+                        .filter(|i| matches!(i.word & 0x7f, 0x03 | 0x13 | 0x33 | 0x63))
+                        .take(4)
+                        .chain(body.iter().rev().filter(|i| matches!(i.word & 0x7f, 0x03 | 0x13 | 0x33 | 0x63)).take(8))
+                        .chain(
+                            body.iter().filter(|i| matches!(i.word & 0x7f, 0x03 | 0x13 | 0x33) && matches!(i.word >> 7 & 31, 11 | 13)),
+                        )
+                    {
+                        selected.insert(instruction.address, instruction.word);
+                    }
+                    for (address, word) in selected {
+                        let replacement = match word & 0x7f {
+                            0x63 => word ^ (1 << 12),
+                            0x03 => replace_i_immediate(word, ((word as i32) >> 20) + 1),
+                            _ => word ^ (1 << 15),
+                        };
+                        let mut changed = valid.clone();
+                        changed.replace_machine_word(address, replacement);
+                        assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+                        mutations += 1;
+                    }
+                }
+            }
+            assert!(mutations > 50);
+        }
+    }
+}
+
+#[test]
+fn nested_output_small_byte_arguments_keep_inline_abi_through_aliases() {
+    for width in [1, 8] {
+        for alias in [false, true] {
+            let source = NESTED_CELL_CODEC_SOURCE
+                .replace("id: u64,", &format!("id: u64, tiny: [u8; {width}],"))
+                .replace("witness recipient: Address", &format!("witness recipient: Address, witness bytes: [u8; {width}]"))
+                .replace("consume before", if alias { "let copy = bytes\nconsume before" } else { "consume before" })
+                .replace(
+                    "id: id, entries: values",
+                    if alias { "id: id, tiny: copy, entries: values" } else { "id: id, tiny: bytes, entries: values" },
+                );
+            for opt_level in 0..=3 {
+                let valid = Fixture::from_result(
+                    compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+                );
+                let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+                let start = valid
+                    .record
+                    .blocks
+                    .iter()
+                    .find(|block| {
+                        block.nested_output_labels.iter().any(|label| {
+                            !label.ends_with("_done")
+                                && label.strip_prefix(".Lnested_output_check_").unwrap().split('_').nth(1) == Some("1")
+                        })
+                    })
+                    .unwrap();
+                let label = start.nested_output_labels.iter().find(|label| !label.ends_with("_done")).unwrap();
+                let end = valid
+                    .record
+                    .blocks
+                    .iter()
+                    .find(|block| block.nested_output_labels.contains(&format!("{label}_done")))
+                    .unwrap()
+                    .range
+                    .start;
+                let pointer = elf
+                    .instructions
+                    .iter()
+                    .find(|i| {
+                        (start.range.start..end).contains(&i.address)
+                            && i.word & 0x707f == 0x13
+                            && i.word >> 7 & 31 == 11
+                            && i.word >> 15 & 31 == 2
+                    })
+                    .unwrap();
+                let mut changed = valid.clone();
+                changed.replace_machine_word(pointer.address, (pointer.word & !0x707f) | 0x3003);
+                assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+            }
+        }
+    }
+}
+
+#[test]
+fn nested_output_comparisons_cannot_be_bypassed_on_a_rebound_success_path() {
+    let standalone = NESTED_CELL_CODEC_SOURCE
+        .replace("-> after: Document", "-> u64")
+        .replace("create after = Document", "create Document")
+        .replace("with_lock(recipient)", "with_lock(recipient)\nreturn 0");
+    for (source, skip_comparison, message) in [
+        (NESTED_CELL_CODEC_SOURCE, true, "bypasses a declared nested successor comparison"),
+        (standalone.as_str(), false, "precedes its loaded Cell or expected value definition"),
+    ] {
+        for opt_level in 0..=3 {
+            let valid = Fixture::from_result(
+                compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            );
+            let end = valid
+                .record
+                .blocks
+                .iter()
+                .find(|block| block.nested_output_labels.iter().any(|label| label.ends_with("_done") == skip_comparison))
+                .unwrap();
+            let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+            let flow = elf
+                .control_flow
+                .iter()
+                .find(|flow| {
+                    flow.address < end.range.start
+                        && valid
+                            .record
+                            .blocks
+                            .iter()
+                            .any(|block| block.owner_entry == end.owner_entry && block.range.contains(flow.address))
+                        && valid.record.verifier_failure_exits.iter().any(|exit| exit.code == 5 && exit.address == flow.target)
+                })
+                .unwrap();
+            let block = valid.record.blocks.iter().find(|block| block.range.contains(flow.address)).unwrap();
+            let word = elf.instructions.iter().find(|i| i.address == flow.address).unwrap().word;
+            assert_eq!(word & 0x7f, 0x63);
+            let offset = end.range.start as i64 - flow.address as i64;
+            assert!((-4096..4096).contains(&offset));
+            let immediate = offset as u32;
+            let branch = (word & 0x01fff07f)
+                | (((immediate >> 12) & 1) << 31)
+                | (((immediate >> 5) & 0x3f) << 25)
+                | (((immediate >> 1) & 15) << 8)
+                | (((immediate >> 11) & 1) << 7);
+            let mut changed = valid.clone();
+            changed
+                .record
+                .edges
+                .iter_mut()
+                .find(|edge| edge.from == block.id && edge.kind == EdgeKind::ConditionalTaken)
+                .unwrap()
+                .to = end.id.clone();
+            let mut reachable = std::collections::BTreeSet::new();
+            let mut pending = changed.record.entries.iter().map(|entry| entry.entry_block.clone()).collect::<Vec<_>>();
+            while let Some(id) = pending.pop() {
+                if reachable.insert(id.clone()) {
+                    pending.extend(changed.record.edges.iter().filter(|edge| edge.from == id).map(|edge| edge.to.clone()));
+                }
+            }
+            for block in &mut changed.record.blocks {
+                block.reachable = reachable.contains(&block.id);
+            }
+            changed.record.canonicalize();
+            changed.replace_machine_word(flow.address, branch);
+            let error = check_bundle_values(
+                &changed.artifact,
+                &changed.metadata,
+                &changed.record,
+                &changed.source_map,
+                &CheckerBudgets::default(),
+            )
+            .unwrap_err();
+            assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{error}");
+            assert!(error.to_string().contains(message), "{error}");
+        }
+    }
+}
+
+#[test]
+fn nested_cell_borrow_calls_bind_register_stack_and_forwarded_views() {
+    for count in [0, 1, 6, 7, 8, 9] {
+        let params = (0..count).map(|i| format!("p{i}: u64, ")).collect::<String>();
+        let arguments = "0, ".repeat(count);
+        let forwarded = (0..count).map(|i| format!("p{i}, ")).collect::<String>();
+        let source = format!("{}\n#[effect(ReadOnly)]\nfn count({params}document: &Document) -> u64 {{ return document.entries.len() }}\n#[effect(ReadOnly)]\nfn wrap({params}document: &Document) -> u64 {{ return count({forwarded}document) }}\n",
+            NESTED_CELL_CODEC_SOURCE.replace("require values.len() == 1", &format!("require wrap({arguments}&before) == 1\nrequire count({arguments}&before) == 1")));
+        for opt_level in 0..=3 {
+            let valid = Fixture::from_result(
+                compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            );
+            if count > 0 {
+                let mut changed = valid.clone();
+                let helper = changed.record.typed_semantics.entries.iter_mut().find(|entry| entry.name == "wrap").unwrap();
+                let scalar = helper.locals.iter().find(|local| local.id == helper.params[0].binding_id).unwrap().source_id;
+                let borrowed = helper.params.last().unwrap().binding_id;
+                helper.locals.iter_mut().find(|local| local.id == borrowed).unwrap().source_id = scalar;
+                changed.rebind_typed_semantics();
+                let error = check_bundle_values(
+                    &changed.artifact,
+                    &changed.metadata,
+                    &changed.record,
+                    &changed.source_map,
+                    &CheckerBudgets::default(),
+                )
+                .unwrap_err();
+                assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{error}");
+                assert!(error.to_string().contains("borrowed Cell parameter aliases"), "{error}");
+            }
+            let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+            let helpers =
+                valid.record.entries.iter().filter(|entry| ["count", "wrap"].contains(&entry.name.as_str())).collect::<Vec<_>>();
+            let mut mutations = std::collections::BTreeSet::new();
+            for helper in helpers {
+                let start = valid.record.blocks.iter().find(|block| block.id == helper.entry_block).unwrap().range.start;
+                for flow in elf.control_flow.iter().filter(|flow| flow.target == start) {
+                    let owner =
+                        valid.record.blocks.iter().find(|block| block.range.contains(flow.address)).unwrap().owner_entry.as_str();
+                    // The latest ABI-register definitions include optimized
+                    // register moves. Stack arguments share t0, so inspect both.
+                    for register in if count < 7 {
+                        vec![10 + count, 11 + count]
+                    } else if count == 7 {
+                        vec![17, 5]
+                    } else {
+                        vec![5]
+                    } {
+                        let loads = elf
+                            .instructions
+                            .iter()
+                            .rev()
+                            .filter(|i| {
+                                i.address < flow.address
+                                    && matches!(i.word & 0x7f, 0x03 | 0x13 | 0x33 | 0x37 | 0x1b | 0x3b)
+                                    && i.word >> 7 & 31 == register as u32
+                                    && valid
+                                        .record
+                                        .blocks
+                                        .iter()
+                                        .any(|block| block.owner_entry == owner && block.range.contains(i.address))
+                            })
+                            .take(if register == 5 && count >= 8 { 2 } else { 1 })
+                            .collect::<Vec<_>>();
+                        assert!(!loads.is_empty(), "caller O{opt_level}, {count} args");
+                        for load in loads {
+                            mutations.insert((load.address, ((register as u32) << 7) | 0x13));
+                        }
+                    }
+                }
+                let first_use = valid
+                    .record
+                    .blocks
+                    .iter()
+                    .filter(|block| {
+                        block.owner_entry == helper.id && (!block.nested_read_labels.is_empty() || block.lowering_block_id.is_some())
+                    })
+                    .map(|block| block.range.start)
+                    .filter(|address| *address > start)
+                    .min()
+                    .unwrap();
+                for i in elf.instructions.iter().filter(|i| i.address >= start && i.address < first_use) {
+                    let word = i.word;
+                    let register = word >> 20 & 31;
+                    if word & 0x707f == 0x3023
+                        && ((count < 8 && register == 10 + count as u32) || (count < 7 && register == 11 + count as u32))
+                    {
+                        mutations.insert((i.address, word & !(31 << 20)));
+                    } else if word & 0x707f == 0x3003
+                        && word >> 15 & 31 == 8
+                        && [count, count + 1]
+                            .into_iter()
+                            .filter(|index| *index >= 8)
+                            .any(|index| ((word as i32) >> 20) == ((index - 8) * 8) as i32)
+                    {
+                        mutations.insert((i.address, word ^ (8 << 20)));
+                    }
+                }
+            }
+            assert!(mutations.len() >= 6, "O{opt_level}, {count} args: {}", mutations.len());
+            for (address, word) in mutations {
+                let mut changed = valid.clone();
+                changed.replace_machine_word(address, word);
+                let error = check_bundle_values(
+                    &changed.artifact,
+                    &changed.metadata,
+                    &changed.record,
+                    &changed.source_map,
+                    &CheckerBudgets::default(),
+                )
+                .unwrap_err();
+                assert_eq!(
+                    error.code,
+                    CheckerRejectionCode::V2420TypedMachineBindingInvalid,
+                    "O{opt_level}, {count} args, {address:#x}: {error}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn nested_cell_lifetime_rejects_buffer_pointer_and_size_clobbers() {
+    for opt_level in 0..=3 {
+        let valid = Fixture::from_result(
+            compile(NESTED_CELL_CODEC_SOURCE, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
+                .unwrap(),
+        );
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let projection = valid
+            .record
+            .blocks
+            .iter()
+            .find(|block| {
+                block.nested_read_labels.iter().any(|label| label.starts_with(".Lnested_use_cellfield_") && !label.ends_with("_done"))
+            })
+            .unwrap();
+        let codec = valid
+            .record
+            .blocks
+            .iter()
+            .flat_map(|block| &block.nested_cell_labels)
+            .filter(|label| !label.ends_with("_done") && !label.ends_with("_validate"))
+            .min_by_key(|label| label.strip_prefix(".Lnested_cell_codec_").unwrap().split('_').next().unwrap().parse::<u32>().unwrap())
+            .unwrap();
+        let coordinates = codec
+            .strip_prefix(".Lnested_cell_codec_")
+            .unwrap()
+            .split('_')
+            .map(|value| value.parse::<i32>().unwrap())
+            .collect::<Vec<_>>();
+        let [root, size, buffer, _] = coordinates.as_slice() else { unreachable!() };
+        let ranges = valid
+            .record
+            .blocks
+            .iter()
+            .flat_map(|block| {
+                block.nested_read_labels.iter().filter(|label| !label.ends_with("_done")).map(|label| {
+                    let done = format!("{label}_done");
+                    (
+                        block.range.start,
+                        valid.record.blocks.iter().find(|block| block.nested_read_labels.contains(&done)).unwrap().range.start,
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        let store = elf
+            .instructions
+            .iter()
+            .find(|i| {
+                i.address > projection.range.start
+                    && valid
+                        .record
+                        .blocks
+                        .iter()
+                        .any(|block| block.owner_entry == projection.owner_entry && block.range.contains(i.address))
+                    && !ranges.iter().any(|(start, end)| *start <= i.address && i.address < *end)
+                    && i.word & 0x707f == 0x3023
+                    && i.word >> 15 & 31 == 2
+            })
+            .unwrap();
+        // The first ordinary scalar store after projection is redirected to
+        // each protected region, including one-byte corruption at its edge.
+        for offset in [root * 8, *size, *buffer, buffer + 511] {
+            for kind in [0, 3] {
+                assert!((0..2048).contains(&offset));
+                let word = (store.word & !0xfe007f80) | ((offset as u32 & 0xfe0) << 20) | ((offset as u32 & 31) << 7) | (kind << 12);
+                let mut changed = valid.clone();
+                changed.replace_machine_word(store.address, word);
+                let error = check_bundle_values(
+                    &changed.artifact,
+                    &changed.metadata,
+                    &changed.record,
+                    &changed.source_map,
+                    &CheckerBudgets::default(),
+                )
+                .unwrap_err();
+                assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{error}");
+                assert!(error.to_string().contains("unverified write overlaps"), "{error}");
+            }
+        }
+    }
+}
+
+#[test]
+fn nested_cell_borrow_rejects_another_valid_cell_with_the_same_layout() {
+    let source = format!(
+        "{}\n#[effect(ReadOnly)]\nfn count(document: &Document) -> u64 {{ return document.entries.len() }}\n",
+        NESTED_CELL_CODEC_SOURCE
+            .replace("input before: Document", "input before: Document, input peer: Document")
+            .replace("require values.len() == 1", "require count(&before) == 1")
+            .replace("consume before", "consume peer\nconsume before")
+    );
+    for opt_level in 0..=3 {
+        let valid = Fixture::from_result(
+            compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+        );
+        let typed = valid.record.typed_semantics.entries.iter().find(|entry| entry.name == "roll").unwrap();
+        let peer = typed.params.iter().find(|param| param.name == "peer").unwrap();
+        let peer_id = typed.locals.iter().find(|local| local.id == peer.binding_id).unwrap().source_id;
+        let label = valid
+            .record
+            .blocks
+            .iter()
+            .filter(|block| block.owner_entry == typed.id)
+            .flat_map(|block| &block.nested_cell_labels)
+            .find(|label| {
+                label.starts_with(&format!(".Lnested_cell_codec_{peer_id}_"))
+                    && !label.ends_with("_done")
+                    && !label.ends_with("_validate")
+            })
+            .unwrap();
+        let size = label.strip_prefix(".Lnested_cell_codec_").unwrap().split('_').nth(1).unwrap().parse::<i32>().unwrap();
+        let helper = valid.record.entries.iter().find(|entry| entry.name == "count").unwrap();
+        let start = valid.record.blocks.iter().find(|block| block.id == helper.entry_block).unwrap().range.start;
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let call = elf.control_flow.iter().find(|flow| flow.target == start).unwrap();
+        let mut changes = Vec::new();
+        for (register, offset) in [(10, (peer_id * 8) as i32), (11, size)] {
+            let load = elf
+                .instructions
+                .iter()
+                .rev()
+                .find(|i| {
+                    i.address < call.address
+                        && matches!(i.word & 0x7f, 0x03 | 0x13 | 0x33 | 0x37 | 0x1b | 0x3b)
+                        && i.word >> 7 & 31 == register
+                })
+                .unwrap();
+            assert!((-2048..2048).contains(&offset));
+            changes.push((load.address, ((offset as u32 & 0xfff) << 20) | (2 << 15) | (3 << 12) | (register << 7) | 3));
+        }
+        // Both buffers have already passed their own complete codec. Swapping
+        // pointer AND length must still reject the wrong declared Cell source.
+        let mut changed = valid.clone();
+        changed.replace_machine_words(&changes);
+        let error = check_bundle_values(
+            &changed.artifact,
+            &changed.metadata,
+            &changed.record,
+            &changed.source_map,
+            &CheckerBudgets::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{error}");
+        assert!(error.to_string().contains("do not match their typed source"), "{error}");
+    }
+}
+
+#[test]
+fn nested_cell_field_views_bind_spans_lengths_and_load_initialization() {
+    for opt_level in 0..=3 {
+        let valid = Fixture::from_result(
+            compile(
+                &nested_cell_two_fields_source(),
+                CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            )
+            .unwrap(),
+        );
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let mut mutations = std::collections::BTreeSet::new();
+        let mut projections = 0;
+        for block in &valid.record.blocks {
+            for label in &block.nested_read_labels {
+                if !label.starts_with(".Lnested_use_cellfield_") || label.ends_with("_done") {
+                    continue;
+                }
+                projections += 1;
+                let end = valid
+                    .record
+                    .blocks
+                    .iter()
+                    .find(|block| block.nested_read_labels.contains(&format!("{label}_done")))
+                    .unwrap()
+                    .range
+                    .start;
+                for instruction in elf.instructions.iter().filter(|i| i.address >= block.range.start && i.address < end) {
+                    let word = instruction.word;
+                    let replacement = match word & 0x7f {
+                        3 => Some(word ^ (1 << 23)),    // Different byte/word displacement.
+                        0x23 => Some(word ^ (1 << 10)), // Different scalar or size slot.
+                        0x63 | 0x33 => Some(word ^ (1 << 15)),
+                        _ => None,
+                    };
+                    if let Some(word) = replacement {
+                        mutations.insert((instruction.address, word));
+                    }
+                }
+            }
+        }
+        assert_eq!(projections, 2);
+        let done = valid
+            .record
+            .blocks
+            .iter()
+            .find(|block| block.nested_cell_labels.iter().any(|label| label.ends_with("_done")))
+            .unwrap()
+            .range
+            .start;
+        let status = elf.instructions.iter().find(|i| i.address == done).unwrap();
+        mutations.insert((done, status.word ^ (1 << 12)));
+        let initialization = elf.instructions.iter().find(|i| i.address > done && i.word & 0x7f == 0x23).unwrap();
+        mutations.insert((initialization.address, initialization.word ^ (1 << 10)));
+        for (address, word) in mutations {
+            let mut changed = valid.clone();
+            changed.replace_machine_word(address, word);
+            let error = check_bundle_values(
+                &changed.artifact,
+                &changed.metadata,
+                &changed.record,
+                &changed.source_map,
+                &CheckerBudgets::default(),
+            )
+            .unwrap_err();
+            assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "O{opt_level} at {address:#x}: {error}");
+        }
+    }
+}
+
+#[test]
+fn nested_cell_field_order_is_explicit_and_authenticated() {
+    for opt_level in 0..=3 {
+        let valid = Fixture::from_result(
+            compile(
+                &nested_cell_two_fields_source(),
+                CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            )
+            .unwrap(),
+        );
+        let definition = valid.record.typed_semantics.types.iter().find(|ty| ty.name == "Document").unwrap();
+        for (name, index) in [("id", 0), ("entries", 1), ("spare", 2)] {
+            assert_eq!(definition.fields.iter().find(|field| field.name == name).unwrap().molecule_field_index, Some(index));
+        }
+        for mutation in 0..3 {
+            let mut changed = valid.clone();
+            let ty = changed.record.typed_semantics.types.iter_mut().find(|ty| ty.name == "Document").unwrap();
+            for field in &mut ty.fields {
+                field.molecule_field_index = match mutation {
+                    0 => None,
+                    1 => Some(0),
+                    _ => field.molecule_field_index.map(|index| if index == 0 { 0 } else { 3 - index }),
+                };
+            }
+            ty.layout_hash = canonical_hash(
+                "cellscript-typed-layout-v2",
+                &(
+                    ty.kind.as_str(),
+                    ty.encoded_size,
+                    &ty.fields,
+                    ty.tag_width_bytes,
+                    &ty.variants,
+                    &ty.capabilities,
+                    &ty.identity_policy,
+                ),
+            )
+            .unwrap();
+            let layout_hash = ty.layout_hash.clone();
+            // Rebind schema-dependent roles and their source-map identities as
+            // well; swapped field indices must reach the machine proof.
+            for role in changed.record.typed_semantics.foundation.roles.iter_mut().filter(|role| role.ty == "Document") {
+                let old_node = role.semantic_node_id.clone();
+                role.schema_identity.clone_from(&layout_hash);
+                role.semantic_node_id = canonical_hash(
+                    "cellscript-semantic-node-role-v1",
+                    &(
+                        role.role_id.as_str(),
+                        role.entry_id.as_str(),
+                        role.binding.as_str(),
+                        role.ty.as_str(),
+                        role.direction.as_str(),
+                        role.source.as_str(),
+                        role.selector.as_str(),
+                        role.cardinality.as_str(),
+                        role.lock_or_type_role.as_str(),
+                        role.script_identity_policy.as_str(),
+                        role.schema_identity.as_str(),
+                        role.correspondence_policy.as_str(),
+                    ),
+                )
+                .unwrap();
+                for mapping in &mut changed.source_map.semantic_mappings {
+                    if mapping.semantic_node_id == old_node {
+                        mapping.semantic_node_id.clone_from(&role.semantic_node_id);
+                    }
+                }
+            }
+            changed.source_map.canonicalize();
+            changed.rebind_layered_identities();
+            let error = check_bundle_values(
+                &changed.artifact,
+                &changed.metadata,
+                &changed.record,
+                &changed.source_map,
+                &CheckerBudgets::default(),
+            )
+            .unwrap_err();
+            assert_eq!(
+                error.code,
+                if mutation < 2 {
+                    CheckerRejectionCode::V2419TypedSemanticsInvalid
+                } else {
+                    CheckerRejectionCode::V2420TypedMachineBindingInvalid
+                },
+                "{error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn nested_cell_codec_rejects_rehashed_load_table_and_decoder_mutations() {
+    for opt_level in 0..=3 {
+        let valid = Fixture::from_result(
+            compile(NESTED_CELL_CODEC_SOURCE, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
+                .unwrap(),
+        );
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let mut mutations = std::collections::BTreeSet::new();
+        let mut sites = 0;
+        for block in &valid.record.blocks {
+            for label in &block.nested_cell_labels {
+                if label.ends_with("_done") || label.ends_with("_validate") {
+                    continue;
+                }
+                sites += 1;
+                let validation = valid
+                    .record
+                    .blocks
+                    .iter()
+                    .find(|block| block.nested_cell_labels.contains(&format!("{label}_validate")))
+                    .unwrap()
+                    .range
+                    .start;
+                let end = valid
+                    .record
+                    .blocks
+                    .iter()
+                    .find(|block| block.nested_cell_labels.contains(&format!("{label}_done")))
+                    .unwrap()
+                    .range
+                    .start;
+                for instruction in elf.instructions.iter().filter(|i| i.address >= block.range.start && i.address < end) {
+                    let word = instruction.word;
+                    let rd = word >> 7 & 31;
+                    // Every table/element condition and byte load; transport
+                    // constants bind the capacity, source and ordinal too.
+                    let changed = if word & 0x7f == 0x63 {
+                        Some(word ^ (1 << 15))
+                    } else if word & 0x707f == 0x4003
+                        || (instruction.address < validation && word & 0x707f == 0x13 && [5, 10, 11, 13, 14].contains(&rd))
+                    {
+                        Some(word ^ (1 << 20))
+                    } else {
+                        None
+                    };
+                    if let Some(changed) = changed {
+                        mutations.insert((instruction.address, changed));
+                    }
+                    if instruction.address < validation && word & 0x707f == 0x13 && word >> 15 & 31 == 0 && [5, 13, 14].contains(&rd) {
+                        mutations.insert((instruction.address, word | (rd << 15)));
+                    }
+                }
+            }
+        }
+        assert!(sites >= 2, "input and output codecs must both be bound");
+        assert!(mutations.len() > 100);
+        for (address, word) in mutations {
+            let mut changed = valid.clone();
+            changed.replace_machine_word(address, word);
+            let error = check_bundle_values(
+                &changed.artifact,
+                &changed.metadata,
+                &changed.record,
+                &changed.source_map,
+                &CheckerBudgets::default(),
+            )
+            .unwrap_err();
+            assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "O{opt_level}, {address:#x}: {error}");
+        }
+    }
+}
+
+#[test]
+fn nested_cell_codec_requires_markers_for_unused_fields_and_group_roles() {
+    use cellscript::artifact::{compile_artifact, ArtifactAction, ArtifactContext, ArtifactDeclaration, ArtifactDispatch};
+    let source = "module unused_nested_cell\nresource Document has store, consume { id: u64, entries: NestedValues<Vec<u8>, 2, 3, 32> }\naction remove(input before: Document) { verification\nconsume before }";
+    for opt_level in 0..=3 {
+        let valid = Fixture::from_result(
+            compile_artifact(
+                source,
+                CompileOptions {
+                    opt_level,
+                    target: Some("riscv64-elf".into()),
+                    target_profile: Some("ckb".into()),
+                    ..Default::default()
+                },
+                ArtifactDeclaration {
+                    name: "nested-document".into(),
+                    context: ArtifactContext::TypeGroup { resource: "Document".into() },
+                    dispatch: ArtifactDispatch::PolicyWitnessV1,
+                    actions: vec![ArtifactAction { tag: 1, action: "remove".into() }],
+                    common_checks: vec![],
+                },
+                cellscript::ExecutableSurfacePolicy::AllowFailClosed,
+            )
+            .unwrap(),
+        );
+        assert!(valid.record.blocks.iter().any(|block| !block.nested_cell_labels.is_empty()));
+        let mut changed = valid.clone();
+        for block in &mut changed.record.blocks {
+            block.nested_cell_labels.clear();
+        }
+        // Rebind the complete sidecar envelope without changing ELF bytes.
+        let elf = parse_elf(&changed.artifact, CheckerBudgets::default().instructions).unwrap();
+        let instruction = &elf.instructions[0];
+        changed.replace_machine_word(instruction.address, instruction.word);
+        let error = check_bundle_values(
+            &changed.artifact,
+            &changed.metadata,
+            &changed.record,
+            &changed.source_map,
+            &CheckerBudgets::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{error}");
+        assert!(error.to_string().contains("lacks a complete load codec"), "{error}");
+    }
+}
+
+#[test]
+fn nested_cell_codec_rejects_a_rebound_entry_after_the_syscall() {
+    for opt_level in 0..=3 {
+        let valid = Fixture::from_result(
+            compile(NESTED_CELL_CODEC_SOURCE, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
+                .unwrap(),
+        );
+        let target = valid
+            .record
+            .blocks
+            .iter()
+            .find(|block| block.nested_cell_labels.iter().any(|label| label.ends_with("_validate")))
+            .unwrap();
+        let label = target.nested_cell_labels.iter().find(|label| label.ends_with("_validate")).unwrap();
+        let done_label = label.replace("_validate", "_done");
+        let done = valid.record.blocks.iter().find(|block| block.nested_cell_labels.contains(&done_label)).unwrap().range.start;
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let flow = elf
+            .control_flow
+            .iter()
+            .find(|flow| {
+                flow.address >= done
+                    && valid
+                        .record
+                        .blocks
+                        .iter()
+                        .any(|block| block.owner_entry == target.owner_entry && block.range.contains(flow.address))
+                    && valid.record.verifier_failure_exits.iter().any(|exit| exit.code == 5 && exit.address == flow.target)
+            })
+            .unwrap();
+        let block = valid.record.blocks.iter().find(|block| block.range.contains(flow.address)).unwrap();
+        let word = elf.instructions.iter().find(|instruction| instruction.address == flow.address).unwrap().word;
+        assert_eq!(word & 0x7f, 0x63);
+        let offset = target.range.start as i64 - flow.address as i64;
+        assert!((-4096..4096).contains(&offset));
+        let immediate = offset as u32;
+        let branch = (word & 0x01fff07f)
+            | (((immediate >> 12) & 1) << 31)
+            | (((immediate >> 5) & 0x3f) << 25)
+            | (((immediate >> 1) & 15) << 8)
+            | (((immediate >> 11) & 1) << 7);
+        let mut changed = valid.clone();
+        changed.record.edges.iter_mut().find(|edge| edge.from == block.id && edge.kind == EdgeKind::ConditionalTaken).unwrap().to =
+            target.id.clone();
+        let mut reachable = std::collections::BTreeSet::new();
+        let mut pending = changed.record.entries.iter().map(|entry| entry.entry_block.clone()).collect::<Vec<_>>();
+        while let Some(id) = pending.pop() {
+            if reachable.insert(id.clone()) {
+                pending.extend(changed.record.edges.iter().filter(|edge| edge.from == id).map(|edge| edge.to.clone()));
+            }
+        }
+        for block in &mut changed.record.blocks {
+            block.reachable = reachable.contains(&block.id);
+        }
+        changed.record.canonicalize();
+        changed.replace_machine_word(flow.address, branch);
+        let error = check_bundle_values(
+            &changed.artifact,
+            &changed.metadata,
+            &changed.record,
+            &changed.source_map,
+            &CheckerBudgets::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{error}");
+        assert!(error.to_string().contains("external control flow bypasses Cell load"), "{error}");
+    }
+}
+
+#[test]
+fn nested_lifetime_preserves_hidden_result_pointer_provenance() {
+    let source = "module nested_result_write\nstruct Pair { left: u64, right: u64 }\nfn make(at: u64) -> Pair { Pair { left: at, right: at + 1 } }\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 { verification\nlet bytes = values[0]\nlet pair = make(bytes.len())\nrequire pair.right > pair.left\nreturn bytes.len() }";
+    for opt_level in 0..=3 {
+        let valid = Fixture::from_result(
+            compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+        );
+        let callee = valid.record.entries.iter().find(|entry| entry.name == "make").unwrap();
+        assert_eq!(callee.fixed_result_abi.as_ref().unwrap().hidden_argument_index, 1);
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let spill = elf
+            .instructions
+            .iter()
+            .find(|instruction| {
+                valid.record.blocks.iter().any(|block| block.owner_entry == callee.id && block.range.contains(instruction.address))
+                    && instruction.word & 0x707f == 0x3023
+                    && instruction.word >> 20 & 31 == 10
+            })
+            .unwrap();
+        let mut changed = valid.clone();
+        // Replace the ordinary parameter spill with sd a0, 0(a1). The incoming
+        // a1 is a valid result capability, but only the checked return copy may
+        // exercise it. Rebinding hashes must not turn it into arbitrary writes.
+        changed.replace_machine_word(spill.address, (10 << 20) | (11 << 15) | 0x3023);
+        let error = check_bundle_values(
+            &changed.artifact,
+            &changed.metadata,
+            &changed.record,
+            &changed.source_map,
+            &CheckerBudgets::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{error}");
+        assert!(error.to_string().contains("private stack provenance"), "{error}");
+
+        let abi = callee.fixed_result_abi.as_ref().unwrap();
+        let body_store = elf
+            .instructions
+            .iter()
+            .find(|instruction| {
+                valid.record.blocks.iter().any(|block| block.owner_entry == callee.id && block.range.contains(instruction.address))
+                    && instruction.address >= abi.save_range.end
+                    && instruction.word & 0x707f == 0x3023
+            })
+            .unwrap();
+        // Corrupt the final byte of the saved hidden pointer through FP. The
+        // copy range still contains its original load and exact width; only a
+        // lifetime proof notices that the loaded capability was invalidated.
+        let offset = (i64::from(abi.saved_pointer_offset) + 7 - i64::from(abi.owned_frame_bytes)) as u32 & 0xfff;
+        let byte_store = ((offset >> 5) << 25) | (body_store.word & (31 << 20)) | (8 << 15) | ((offset & 31) << 7) | 0x23;
+        let mut changed = valid.clone();
+        changed.replace_machine_word(body_store.address, byte_store);
+        let error = check_bundle_values(
+            &changed.artifact,
+            &changed.metadata,
+            &changed.record,
+            &changed.source_map,
+            &CheckerBudgets::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{error}");
+        assert!(error.to_string().contains("private stack provenance"), "{error}");
+    }
+}
+
+#[test]
+fn nested_lifetime_checks_transitive_callee_memory_effects() {
+    let source = "module nested_callee\nfn bump(at: u64) -> u64 { return at + 1 }\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>, witness at: u64) -> u64 { verification\nlet bytes = values[at]\nrequire bump(at) > at\nreturn bytes.len() }";
+    let valid = Fixture::from_result(
+        compile(source, CompileOptions { opt_level: 0, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+    );
+    let callee = valid.record.entries.iter().find(|entry| entry.name == "bump").unwrap();
+    let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+    let store = elf
+        .instructions
+        .iter()
+        .find(|instruction| {
+            valid.record.blocks.iter().any(|block| block.owner_entry == callee.id && block.range.contains(instruction.address))
+                && instruction.word & 0x707f == 0x3023
+        })
+        .unwrap();
+    let mut changed = valid.clone();
+    // An argument-derived write has no proof that it stays in the helper's own frame.
+    changed.replace_machine_word(store.address, (store.word & !(31 << 15)) | (10 << 15));
+    let error =
+        check_bundle_values(&changed.artifact, &changed.metadata, &changed.record, &changed.source_map, &CheckerBudgets::default())
+            .unwrap_err();
+    assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{error}");
+    assert!(error.to_string().contains("private stack provenance"), "{error}");
+}
+
+#[test]
+fn nested_lifetime_checks_fixed_copy_destinations_after_hash_rebinding() {
+    use cellscript::artifact::{compile_artifact, ArtifactAction, ArtifactContext, ArtifactDeclaration, ArtifactDispatch};
+    let source = "module nested_copy_effects\nresource Token has store, consume { expected: Hash }\naction inspect(input token: Token, witness values: NestedValues<Vec<u8>, 2, 3, 32>, witness expected: Hash) { verification\nrequire values.len() > 0\nrequire token.expected == expected\nconsume token }";
+    for opt_level in 0..=3 {
+        let valid = Fixture::from_result(
+            compile_artifact(
+                source,
+                CompileOptions {
+                    opt_level,
+                    target: Some("riscv64-elf".into()),
+                    target_profile: Some("ckb".into()),
+                    ..Default::default()
+                },
+                ArtifactDeclaration {
+                    name: "nested-copy".into(),
+                    context: ArtifactContext::TypeGroup { resource: "Token".into() },
+                    dispatch: ArtifactDispatch::PolicyWitnessV1,
+                    actions: vec![ArtifactAction { tag: 1, action: "inspect".into() }],
+                    common_checks: vec![],
+                },
+                cellscript::ExecutableSurfacePolicy::AllowFailClosed,
+            )
+            .unwrap(),
+        );
+        let typed = valid.record.typed_semantics.entries.iter().find(|entry| entry.name == "inspect").unwrap();
+        let pointer = typed.locals.iter().find(|local| local.ty.starts_with("NestedValues<")).unwrap().source_id as i32 * 8;
+        let copy = valid.record.entries.iter().find(|entry| entry.name == "__cellscript_memcpy_fixed").unwrap();
+        let target = valid.record.blocks.iter().find(|block| block.id == copy.entry_block).unwrap().range.start;
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let call = elf
+            .control_flow
+            .iter()
+            .find(|flow| {
+                flow.target == target
+                    && valid.record.blocks.iter().any(|block| block.owner_entry == typed.id && block.range.contains(flow.address))
+            })
+            .unwrap();
+        let destination = elf
+            .instructions
+            .iter()
+            .rev()
+            .find(|instruction| {
+                instruction.address < call.address
+                    && instruction.address + 32 >= call.address
+                    && instruction.word & 0x707f == 0x13
+                    && instruction.word >> 7 & 31 == 11
+                    && instruction.word >> 15 & 31 == 2
+            })
+            .unwrap();
+        let mut changed = valid.clone();
+        changed.replace_machine_word(destination.address, replace_i_immediate(destination.word, pointer));
+        let error = check_bundle_values(
+            &changed.artifact,
+            &changed.metadata,
+            &changed.record,
+            &changed.source_map,
+            &CheckerBudgets::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{error}");
+        assert!(error.to_string().contains("unverified write overlaps"), "{error}");
+        let mut changed = valid.clone();
+        let helper_store = elf.instructions.iter().find(|instruction| instruction.address == target + 8).unwrap();
+        changed.replace_machine_word(helper_store.address, helper_store.word ^ (1 << 15));
+        let error = check_bundle_values(
+            &changed.artifact,
+            &changed.metadata,
+            &changed.record,
+            &changed.source_map,
+            &CheckerBudgets::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{error}");
+        assert!(error.to_string().contains("copy effects"), "{error}");
+    }
+}
+
+#[test]
+fn nested_lifetime_rejects_coherent_derived_pointer_aliasing_of_a_root_slot() {
+    let source = "module nested_physical_alias\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 { verification\nlet bytes = values[0]\nreturn bytes.len() + values.len() }";
+    for opt_level in 0..=3 {
+        let valid = Fixture::from_result(
+            compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+        );
+        let typed = valid.record.typed_semantics.entries.iter().find(|entry| entry.name == "inspect").unwrap();
+        let root = typed.locals.iter().find(|local| local.id == typed.params[0].binding_id).unwrap().source_id;
+        let destination = typed
+            .blocks
+            .iter()
+            .flat_map(|block| &block.operations)
+            .find(|operation| operation.opcode == "index")
+            .unwrap()
+            .destinations[0];
+        let old = typed.locals.iter().find(|local| local.id == destination).unwrap().source_id;
+        assert_ne!(old, root);
+        let mut changed = valid.clone();
+        changed
+            .record
+            .typed_semantics
+            .entries
+            .iter_mut()
+            .find(|entry| entry.id == typed.id)
+            .unwrap()
+            .locals
+            .iter_mut()
+            .find(|local| local.id == destination)
+            .unwrap()
+            .source_id = root;
+        let prefix = format!(".Lnested_use_index_{old}_");
+        for block in changed.record.blocks.iter_mut().filter(|block| block.owner_entry == typed.id) {
+            for label in &mut block.nested_read_labels {
+                if let Some(suffix) = label.strip_prefix(&prefix) {
+                    *label = format!(".Lnested_use_index_{root}_{suffix}");
+                }
+            }
+        }
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let replacements = elf
+            .instructions
+            .iter()
+            .filter(|instruction| {
+                valid.record.blocks.iter().any(|block| block.owner_entry == typed.id && block.range.contains(instruction.address))
+            })
+            .filter_map(|instruction| {
+                let word = instruction.word;
+                if word >> 15 & 31 != 2 {
+                    return None;
+                }
+                if word & 0x707f == 0x3003 && (word as i32) >> 20 == old as i32 * 8 {
+                    Some((instruction.address, replace_i_immediate(word, root as i32 * 8)))
+                } else if word & 0x707f == 0x3023 && decode_s_immediate(word) == old as i32 * 8 {
+                    let offset = root as u32 * 8;
+                    Some((instruction.address, (word & !0xfe000f80) | ((offset & 0xfe0) << 20) | ((offset & 31) << 7)))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        assert!(replacements.len() >= 2, "rewrite both derived pointer producer and consumer");
+        changed.record.canonicalize();
+        changed.rebind_typed_semantics();
+        changed.replace_machine_words(&replacements);
+        let error = check_bundle_values(
+            &changed.artifact,
+            &changed.metadata,
+            &changed.record,
+            &changed.source_map,
+            &CheckerBudgets::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{error}");
+        assert!(error.to_string().contains("nested pointer slot aliases another typed local"), "{error}");
+    }
+}
+
+#[test]
+fn allocated_values_sorted_arrays_reject_rebound_shapes_and_missing_blocker() {
+    let source = "module sorted_proof\ncollections Work { limits { bytes: 128, allocations: 2 }\ntotals: OrderedMap<u8, u16> { items: 4 } }\naction inspect() -> u64 { let mut work = Work::new()\nwork.totals.load_sorted([(1, 7), (1, 11), (2, 13)])\nreturn 0 }";
+    let valid = Fixture::from_result(
+        compile(source, CompileOptions { edition: NEXT_EDITION, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+    );
+    valid.check().unwrap();
+    for mutation in 0..6 {
+        let mut changed = valid.clone();
+        let op = changed
+            .record
+            .typed_semantics
+            .entries
+            .iter_mut()
+            .flat_map(|entry| &mut entry.blocks)
+            .flat_map(|block| &mut block.operations)
+            .find(|op| {
+                matches!(
+                    op.detail,
+                    TypedSemanticOperationDetail::AllocatedValue {
+                        operation: cellscript_artifact_checker::allocated_values::Operation::LoadSorted,
+                        ..
+                    }
+                )
+            })
+            .unwrap();
+        match mutation {
+            0 => op.operands[1].ty = "[(u16, u8); 3]".into(),
+            1 => op.operands[1].ty = "[(u8, u16); 1025]".into(),
+            2 => op.operands[1].ty = "[(u8, u16); 2]".into(),
+            3 => op.operands[0].ty = "&Work".into(),
+            4 => {
+                op.operands.pop();
+            }
+            _ => op.operands.push(op.operands[1].clone()),
+        }
+        changed.rebind_typed_semantics();
+        assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
+    }
+    for mutation in 0..3 {
+        let mut changed = valid.clone();
+        let op = changed
+            .record
+            .typed_semantics
+            .entries
+            .iter_mut()
+            .flat_map(|entry| &mut entry.blocks)
+            .flat_map(|block| &mut block.operations)
+            .find(|op| op.opcode == "tuple" && op.operands.len() == 3)
+            .unwrap();
+        match mutation {
+            0 => {
+                op.operands.pop();
+            }
+            1 => op.operands.push(op.operands[0].clone()),
+            _ => op.operands[0].ty = "(u16, u8)".into(),
+        }
+        changed.rebind_typed_semantics();
+        assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
+    }
+    let mut missing = valid.clone();
+    missing.metadata["runtime"]["fail_closed_runtime_features"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|value| value != "allocated-values-artifact-proof");
+    missing.rebind_sidecars();
+    assert_code(&missing, CheckerRejectionCode::V2410MetadataBindingMismatch);
+}
+
+#[test]
+fn allocated_writes_preserve_retained_cell_views_after_guard_mutations() {
+    let source = r#"
+module guarded_collections
+resource Note has store { amount: u64 }
+collections Work { limits { bytes: 128, allocations: 2 }
+    values: Vec<u64> { items: 4 }
+}
+action inspect() -> u64 {
+    verification
+    let note = ckb::group_input<Note>(0).data
+    let mut work = Work::new()
+    work.values.push(note.amount)
+    require work.values.get(0) == note.amount
+    return 0
+}
+"#;
+    for opt_level in [0, 3] {
+        let valid = Fixture::from_result(
+            compile(
+                source,
+                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            )
+            .unwrap(),
+        );
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        let words = elf
+            .instructions
+            .iter()
+            .map(|instruction| (instruction.address, instruction.word))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let guards = elf
+            .instructions
+            .iter()
+            .filter_map(|instruction| {
+                let pc = instruction.address;
+                let word = instruction.word;
+                let upper = *words.get(&(pc + 4))?;
+                let store = *words.get(&(pc + 8))?;
+                (word & 0x707f == 0x6063
+                    && upper & 0x707f == 0x6063
+                    && store & 0x7f == 0x23
+                    && word >> 15 & 31 == upper >> 20 & 31
+                    && word >> 15 & 31 == store >> 15 & 31)
+                    .then_some((pc, word, upper, store))
+            })
+            .collect::<Vec<_>>();
+        assert!(guards.len() >= 4);
+        for mutation in 0..8 {
+            let replacements = guards
+                .iter()
+                .map(|&(pc, lower, upper, store)| match mutation {
+                    0 => (pc, lower & !0x7000),                        // equality is not an unsigned lower bound
+                    1 => (pc + 4, upper & !0x7000),                    // equality is not an unsigned upper bound
+                    2 => (pc + 8, (store & !0xfe000f80) | 0xfe000f80), // unchecked -1 address displacement
+                    3 => (pc + 4, upper & !(31 << 15)),                // x0 is not a private-stack upper bound
+                    4 => (pc + 8, (store & !(0xfe000f80 | (31 << 15))) | 0xfe000c00 | (2 << 15)), // spill below the allowed subframe
+                    5 => (pc, encode_jal(8)),                          // bypass both guards and enter the store
+                    6 => (pc - 4, 0xfff10013 | ((upper >> 15 & 31) << 7)), // upper bound below private frame
+                    7 => (pc + 24, 0x01010113),                        // restore only half the temporary subframe
+                    _ => unreachable!(),
+                })
+                .collect::<Vec<_>>();
+            let mut changed = valid.clone();
+            changed.replace_machine_words(&replacements);
+            assert_eq!(
+                changed.check(),
+                Err(match mutation {
+                    5 => CheckerRejectionCode::V2414ControlFlowInvalid,
+                    7 => CheckerRejectionCode::V2407AbiOrStackInvalid,
+                    _ => CheckerRejectionCode::V2420TypedMachineBindingInvalid,
+                }),
+                "O{opt_level}/guard mutation {mutation} did not fail independent machine binding"
+            );
+        }
+    }
+}
+
+#[test]
+fn mixed_settlement_shared_return_tails_reject_skipped_restores_and_field_checks() {
+    let source = include_str!("../examples/language/batches/mixed_settlement.cell");
+    for opt_level in [0, 3] {
+        let valid = Fixture::from_result(
+            compile(
+                source,
+                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            )
+            .unwrap(),
+        );
+        valid.check().unwrap();
+        let helper = valid.record.entries.iter().find(|entry| entry.name.ends_with("transfer_leg")).unwrap();
+        let tail = valid
+            .record
+            .blocks
+            .iter()
+            .find(|block| {
+                block.owner_entry == helper.id && block.machine_label.as_ref().is_some_and(|label| label.ends_with("_epilogue"))
+            })
+            .unwrap();
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        for instruction in elf.instructions.iter().filter(|instruction| tail.range.contains(instruction.address)) {
+            let mut changed = valid.clone();
+            changed.replace_machine_word(instruction.address, instruction.word ^ (1 << 7));
+            assert!(changed.check().is_err(), "altered return restoration at {:#x}", instruction.address);
+        }
+        let edge = elf
+            .control_flow
+            .iter()
+            .find(|edge| {
+                edge.target == tail.range.start
+                    && elf
+                        .instructions
+                        .iter()
+                        .any(|instruction| instruction.address == edge.address && instruction.word & 0xfff == 0x6f)
+            })
+            .unwrap();
+        let mut changed = valid.clone();
+        changed.replace_machine_word(edge.address, encode_jal((tail.range.start as i64 + 4 - edge.address as i64) as i32));
+        assert!(changed.check().is_err(), "entry into the middle of a return tail");
+        let read = valid
+            .record
+            .blocks
+            .iter()
+            .find(|block| {
+                block.owner_entry == helper.id
+                    && block.exact_role_labels.iter().any(|label| label.starts_with(".Lexact_role_data_") && !label.ends_with("_done"))
+            })
+            .unwrap();
+        let mut changed = valid.clone();
+        changed.replace_machine_word(read.range.start, encode_jal((tail.range.start as i64 - read.range.start as i64) as i32));
+        assert!(changed.check().is_err(), "return-tail recognition must not bypass a field check");
+    }
 }

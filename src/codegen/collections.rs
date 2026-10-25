@@ -2,6 +2,9 @@ use super::*;
 
 impl CodeGenerator {
     pub(super) fn emit_index(&mut self, dest: &IrVar, arr: &IrOperand, idx: &IrOperand) -> Result<()> {
+        if self.emit_nested_index(dest, arr, idx) {
+            return Ok(());
+        }
         if self.emit_fixed_aggregate_index(dest, arr, idx) {
             return Ok(());
         }
@@ -227,6 +230,9 @@ impl CodeGenerator {
 
     pub(super) fn emit_length(&mut self, dest: &IrVar, operand: &IrOperand) -> Result<()> {
         self.emit("# length");
+        if self.emit_nested_length_result(dest, operand) {
+            return Ok(());
+        }
         if let Some(static_len) = self.static_length(operand) {
             self.emit(format!("li t0, {}", static_len));
         } else if self.emit_stack_collection_length(operand) || self.emit_dynamic_molecule_vector_length(operand) {

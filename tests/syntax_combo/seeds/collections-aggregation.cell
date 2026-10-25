@@ -1,0 +1,48 @@
+// audit: edition=2027
+// audit: phase=accept
+// Experimental local runtime and read-only helpers; independent proof pending.
+module collections_aggregation
+
+collections Work {
+    limits { bytes: 2048, allocations: 16 }
+    totals: OrderedMap<Hash, u64> { items: 4 }
+    amounts: Vec<u64> { items: 4 }
+}
+
+fn summed(work: &Work) -> u64 {
+    let mut sum = 0
+    for (asset, amount) in work.totals {
+        // Fixture amounts are checked against the aggregate before insertion.
+        sum = sum + amount
+    }
+    return sum
+}
+
+action aggregate(witness assets: [Hash; 4], witness amounts: [u64; 4], witness expected_total: u64) -> u64 {
+    let mut work = Work::new()
+    work.totals.reserve(4)
+    work.amounts.reserve(4)
+    let mut expected = 0
+    for i in 0..4 {
+        require expected <= 18446744073709551615 - amounts[i]
+        expected = expected + amounts[i]
+        let previous = work.totals.get_or(assets[i], 0)
+        require previous <= 18446744073709551615 - amounts[i]
+        work.totals.insert(assets[i], previous + amounts[i])
+        work.amounts.push(amounts[i])
+    }
+    let mut sum = 0
+    for (asset, amount) in work.totals {
+        require work.totals.contains_key(asset)
+        require sum <= 18446744073709551615 - amount
+        sum = sum + amount
+    }
+    borrow work as view {
+        require view.amounts.len() == 4
+        require view.totals.len() <= 4
+        require summed(view) == expected
+    }
+    require summed(&work) == sum
+    require sum == expected_total
+    return 0
+}

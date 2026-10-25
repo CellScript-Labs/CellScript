@@ -222,7 +222,7 @@ pub fn build(ast: &ast::Module, metadata: &CompileMetadata) -> PackageInterface 
                     builder_contract_hash,
                 });
             }
-            Item::Flow(_) | Item::Invariant(_) | Item::Use(_) => {}
+            Item::Collections(_) | Item::DataShape(_) | Item::CellRoles(_) | Item::Flow(_) | Item::Invariant(_) | Item::Use(_) => {}
         }
     }
 
@@ -679,6 +679,30 @@ mod tests {
 
     fn interface(source: &str) -> PackageInterface {
         interface_for_edition(source, CellScriptEdition::Edition2026)
+    }
+
+    #[test]
+    fn named_data_shapes_preserve_interface_codec_and_builder_contracts() {
+        let source = include_str!("../tests/syntax_combo/seeds/named-data-shapes.cell");
+        let named = interface_for_edition(source, CellScriptEdition::Edition2027);
+        assert!(named.types.iter().any(|ty| ty.name == "Batch"));
+        assert!(named.callables.iter().any(|callable| callable.name == "inspect"));
+        let ast = crate::frontend::parse(source, CellScriptEdition::Edition2027).unwrap();
+        let mut concrete = crate::generics::monomorphize_for_edition(&ast, CellScriptEdition::Edition2027).unwrap();
+        concrete.items.retain(|item| !matches!(item, Item::DataShape(_)));
+        let concrete_source = crate::fmt::format_default(&concrete).unwrap();
+        assert_eq!(named, interface_for_edition(&concrete_source, CellScriptEdition::Edition2027));
+        let renamed = source.replace("Messages", "MessageBatch").replace("Entries", "RecordBatch");
+        assert_eq!(named, interface_for_edition(&renamed, CellScriptEdition::Edition2027));
+        for changed in [
+            source.replace("items: 3", "items: 2"),
+            source.replace("payload_bytes: 8", "payload_bytes: 7"),
+            source.replace("encoded_bytes: 128", "encoded_bytes: 127"),
+        ] {
+            let changed = interface_for_edition(&changed, CellScriptEdition::Edition2027);
+            assert_ne!(hash(&named), hash(&changed));
+            assert_ne!(named.builder_contract_hash, changed.builder_contract_hash);
+        }
     }
 
     #[test]

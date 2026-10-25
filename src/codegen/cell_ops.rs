@@ -1884,6 +1884,9 @@ impl CodeGenerator {
         let IrOperand::Var(var) = value else {
             return false;
         };
+        if matches!(Self::nested_type(&layout.ty), Some(crate::nested_values::NestedType::Values(_))) {
+            return layout.ty == var.ty && self.nested_size_offset(var).is_some();
+        }
         (self.schema_pointer_vars.contains(&var.id) && self.schema_pointer_size_offsets.contains_key(&var.id))
             || self.constructed_byte_vectors.contains_key(&var.id)
             || (self.empty_molecule_vector_vars.contains(&var.id)
@@ -1973,6 +1976,9 @@ impl CodeGenerator {
         field_count: usize,
         expected: &IrOperand,
     ) -> bool {
+        if self.nested_cell_buffer_layout(output_buffer_offset).is_some() {
+            return self.emit_nested_fixed_output_field(output_size_offset, output_buffer_offset, layout, field_count, expected);
+        }
         let Some(width) = layout_fixed_byte_width(layout).or_else(|| self.fixed_named_type_width(&layout.ty)) else {
             return false;
         };
@@ -2046,6 +2052,11 @@ impl CodeGenerator {
         let IrOperand::Var(var) = expected else {
             return false;
         };
+        if matches!(Self::nested_type(&layout.ty), Some(crate::nested_values::NestedType::Values(_))) && layout.ty == var.ty {
+            let Some(expected_size) = self.nested_size_offset(var) else { return false };
+            self.emit_nested_output_field(output_size_offset, output_buffer_offset, layout.index, field_count, var, expected_size);
+            return true;
+        }
         let output_start_offset = self.runtime_expr_temp_offset(0);
         let output_len_offset = self.runtime_expr_temp_offset(1);
         self.emit_dynamic_table_field_span_to_stack(

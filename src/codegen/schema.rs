@@ -601,6 +601,7 @@ impl CodeGenerator {
                 }
                 if expected_width <= 8
                     && (fixed_scalar_width(&var.ty, type_static_length(&var.ty)).is_some()
+                        || (var_width == expected_width && matches!(var.ty, IrType::Array(_, _) | IrType::Tuple(_)))
                         || (var_width == expected_width && fixed_byte_width(&var.ty, type_static_length(&var.ty)).is_some()))
                     && expected_width <= var_width
                 {

@@ -22,8 +22,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
+mod selection;
+
+const PROTOCOL_BUNDLE_SELECTION_SCHEMA: &str = "cellscript-protocol-bundle-v2";
+const PROTOCOL_BUNDLE_SELECTION_REPORT_SCHEMA: &str = "cellscript-protocol-bundle-report-v2";
 const PROTOCOL_BUNDLE_REPORT_SCHEMA: &str = "cellscript-protocol-bundle-report-v1";
 const PROTOCOL_BUNDLE_SCHEMA: &str = "cellscript-protocol-bundle-v1";
+#[cfg(test)]
 const PROTOCOL_BUNDLE_HASH_DOMAIN: &str = "cellscript-protocol-bundle-v1";
 const PROTOCOL_BUNDLE_MATERIALIZATION_SCHEMA: &str = "cellscript-protocol-bundle-materialization-v1";
 const DEPLOYMENT_LINE_ADMISSION_EVIDENCE_SCHEMA: &str = "cellscript-deployment-line-admission-evidence-v1";
@@ -97,6 +102,9 @@ pub struct ProtocolBundleDeploymentLineCellExpectation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProtocolBundleMaterializationEvidence {
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub exact_role_selections:
+        std::collections::BTreeMap<String, Vec<cellscript_artifact_checker::cell_selection::transaction::Selection>>,
     pub schema: &'static str,
     pub state: &'static str,
     pub bundle_hash: String,
@@ -414,6 +422,8 @@ struct NetworkWire {
 
 #[derive(Debug, Deserialize)]
 struct ArtifactWire {
+    #[serde(default)]
+    exact_role_contracts: Option<cellscript_artifact_checker::cell_selection::transaction::Catalog>,
     id: String,
     entry: EntryWire,
     script_role: ScriptRoleWire,
@@ -545,14 +555,19 @@ pub fn materialize_protocol_bundle_report(bytes: &[u8]) -> Result<(TransactionVi
     }
     let report: ReportWire = serde_json::from_slice(bytes).context("failed to parse ProtocolBundle report")?;
     validate_report_boundary(&report)?;
-    let expected_hash = canonical_hash(PROTOCOL_BUNDLE_HASH_DOMAIN, &report.bundle)
+    let bundle_schema = if report.schema == PROTOCOL_BUNDLE_SELECTION_REPORT_SCHEMA {
+        PROTOCOL_BUNDLE_SELECTION_SCHEMA
+    } else {
+        PROTOCOL_BUNDLE_SCHEMA
+    };
+    let expected_hash = canonical_hash(bundle_schema, &report.bundle)
         .map_err(|error| anyhow::anyhow!("failed to recompute ProtocolBundle hash: {error}"))?;
     if expected_hash != report.bundle_hash {
         bail!("ProtocolBundle report bundle_hash does not match the canonical resolved bundle");
     }
 
     let bundle: BundleWire = serde_json::from_value(report.bundle).context("failed to parse resolved ProtocolBundle")?;
-    if bundle.schema != PROTOCOL_BUNDLE_SCHEMA {
+    if bundle.schema != bundle_schema {
         bail!("unsupported resolved ProtocolBundle schema {}", bundle.schema);
     }
     if bundle.artifacts.len() < 2 {
@@ -568,6 +583,7 @@ pub fn materialize_protocol_bundle_report(bytes: &[u8]) -> Result<(TransactionVi
     }
     require_hash32("ProtocolBundle network genesis_hash", &bundle.network.genesis_hash)?;
     let (tx, capacities) = materialize_transaction(&bundle.transaction)?;
+    let exact_role_selections = selection::verify(&bundle, &report.evidence, &tx)?;
     let packed_transaction = tx.data();
     let serialized = packed_transaction.as_slice();
     let serialized_transaction_hash = hash_hex(serialized);
@@ -580,6 +596,7 @@ pub fn materialize_protocol_bundle_report(bytes: &[u8]) -> Result<(TransactionVi
     Ok((
         tx,
         ProtocolBundleMaterializationEvidence {
+            exact_role_selections,
             schema: PROTOCOL_BUNDLE_MATERIALIZATION_SCHEMA,
             state: "MaterializedProtocolBundleTx",
             bundle_hash: report.bundle_hash,
@@ -1642,7 +1659,7 @@ fn dep_type_name(dep_type: ckb_types::packed::Byte) -> Result<&'static str> {
 }
 
 fn validate_report_boundary(report: &ReportWire) -> Result<()> {
-    if report.schema != PROTOCOL_BUNDLE_REPORT_SCHEMA {
+    if report.schema != PROTOCOL_BUNDLE_REPORT_SCHEMA && report.schema != PROTOCOL_BUNDLE_SELECTION_REPORT_SCHEMA {
         bail!("unsupported ProtocolBundle report schema {}", report.schema);
     }
     if report.status != "ok" || !report.conflicts.is_empty() {

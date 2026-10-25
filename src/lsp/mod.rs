@@ -5,6 +5,9 @@ use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+mod cell_views;
+mod collection_budgets;
+
 #[cfg(not(feature = "wasm"))]
 pub mod server;
 
@@ -266,6 +269,30 @@ impl LspServer {
     }
 
     pub fn completion(&self, uri: &str, position: Position) -> Vec<CompletionItem> {
+        // Member completion commonly runs on a temporarily unfinished `view.`.
+        // Recover only a missing field token; keep the document and its actual
+        // diagnostics intact, and use the repaired AST for this request alone.
+        if !self.ast_cache.contains_key(uri)
+            && let Some(source) = self.documents.get(uri).filter(|source| source.len() <= crate::MAX_SOURCE_BYTES)
+            && let Some(offset) = position_to_offset(source, position)
+            && source[..offset].ends_with('.')
+        {
+            let repaired = format!("{}__completion{}", &source[..offset], &source[offset..]);
+            if let Ok(module) = crate::frontend::parse_diagnostics(&repaired, self.document_edition(uri)) {
+                // Keep imported schemas from other open buffers. A fresh
+                // server would silently fall back to their older disk copies.
+                let mut temporary = Self {
+                    documents: self.documents.clone(),
+                    ast_cache: self.ast_cache.clone(),
+                    diagnostics: HashMap::new(),
+                    edition_overrides: self.edition_overrides.clone(),
+                };
+                temporary.documents.insert(uri.into(), repaired);
+                temporary.ast_cache.insert(uri.into(), module);
+                temporary.edition_overrides.insert(uri.into(), self.document_edition(uri));
+                return temporary.completion(uri, position);
+            }
+        }
         let mut items = Vec::new();
 
         let ctx = self.completion_context(uri, position);
@@ -331,7 +358,9 @@ impl LspServer {
         if let Some(dot_pos) = prefix.rfind('.') {
             // We want the identifier before the dot.
             let before_dot = &prefix[..dot_pos];
-            let type_name = word_before_offset(before_dot, before_dot.len()).unwrap_or_default();
+            let type_name = self
+                .cell_view_completion_type(uri, position, before_dot)
+                .unwrap_or_else(|| word_before_offset(before_dot, before_dot.len()).unwrap_or_default());
             return CompletionContext::Member { type_name };
         }
 
@@ -399,6 +428,9 @@ impl LspServer {
                 "lock_script ${1:Name} on lock_group {\n    entry ${2:unlock}(\n        protected ${3:cell}: ${4:CellType} from group_input[0],\n        lock_args ${5:owner}: Address from current_script.args,\n        witness ${6:claimed_owner}: Address from group_witness.input_type,\n    ) {\n        verify {\n            enforce ${3:cell}.${7:owner} == ${5:owner}\n            enforce ${6:claimed_owner} == ${5:owner}\n        }\n    }\n}",
             ));
         }
+        if self.named_runtime_authoring(uri) {
+            declarations.extend_from_slice(cell_views::NAMED_RUNTIME_DECLARATIONS);
+        }
         declarations
             .into_iter()
             .map(|(label, insert)| CompletionItem {
@@ -416,6 +448,7 @@ impl LspServer {
         let mut items = Vec::new();
         for item in &module.items {
             let (name, kind_label) = match item {
+                Item::DataShape(def) => (&def.name, "data_shape"),
                 Item::Resource(r) => (&r.name, "resource"),
                 Item::Shared(s) => (&s.name, "shared"),
                 Item::Receipt(r) => (&r.name, "receipt"),
@@ -438,6 +471,15 @@ impl LspServer {
         let mut items = Vec::new();
         for item in &module.items {
             match item {
+                Item::DataShape(def) if def.name == type_name => {
+                    items.extend(["Item", "Payload"].map(|member| CompletionItem {
+                        label: member.into(),
+                        kind: CompletionItemKind::Class,
+                        detail: Some(format!("read-only {}::{member}", def.name)),
+                        documentation: Some("Derived view with this shape's payload bound; immutable helper parameters only, no ownership or escape.".into()),
+                        insert_text: Some(member.into()),
+                    }));
+                }
                 Item::Enum(enum_def) if enum_def.name == type_name => {
                     items.extend(enum_def.variants.iter().map(|variant| {
                         let payload = variant.fields.iter().map(type_to_string).collect::<Vec<_>>();
@@ -542,6 +584,112 @@ impl LspServer {
     /// Member completions for a given type name (after `.`).
     fn member_completions(&self, uri: &str, type_name: &str) -> Vec<CompletionItem> {
         let mut items = Vec::new();
+
+        if let Some(nested) = crate::nested_values::parsed(type_name) {
+            match nested {
+                crate::nested_values::NestedType::Values(_) | crate::nested_values::NestedType::BytesView { .. } => {
+                    for method in ["len", "is_empty"] {
+                        items.push(CompletionItem {
+                            label: method.into(),
+                            kind: CompletionItemKind::Method,
+                            detail: Some(format!("{type_name}.{method}()")),
+                            documentation: Some("Read-only bounded view; mutation and escape remain forbidden.".into()),
+                            insert_text: Some(format!("{method}()")),
+                        });
+                    }
+                }
+                crate::nested_values::NestedType::RecordView { element, max_payload_bytes } => {
+                    if let Some(fields) = self.completion_record_fields(uri, &element) {
+                        for (index, field) in fields.iter().enumerate() {
+                            let ty = if index + 1 == fields.len() {
+                                crate::nested_values::bytes_view_type(max_payload_bytes)
+                            } else {
+                                type_to_string(&field.ty)
+                            };
+                            items.push(CompletionItem {
+                                label: field.name.clone(),
+                                kind: CompletionItemKind::Field,
+                                detail: Some(ty),
+                                documentation: None,
+                                insert_text: Some(field.name.clone()),
+                            });
+                        }
+                    }
+                }
+            }
+            return items;
+        }
+
+        if let Some(selection) = crate::cell_selection::parse_selection_type(type_name) {
+            if let Some(role) = selection.selected {
+                for method in ["input_count", "output_count", "input", "output", "successor"] {
+                    let read = crate::cell_selection::method(method).unwrap();
+                    items.push(CompletionItem {
+                        label: method.into(),
+                        kind: CompletionItemKind::Function,
+                        detail: Some(format!(
+                            "({}) -> {}",
+                            if read.indexed() { "ordinal: u64" } else { "" },
+                            read.result_type(&selection.schemas[role as usize])
+                        )),
+                        documentation: Some(
+                            "Experimental checked role read; ordinals are local to this role, not global transaction indices.".into(),
+                        ),
+                        insert_text: Some(method.into()),
+                    });
+                }
+            } else {
+                for (name, schema) in selection.names.iter().zip(&selection.schemas) {
+                    items.push(CompletionItem {
+                        label: name.clone(),
+                        kind: CompletionItemKind::Field,
+                        detail: Some(format!("Immutable selected role of {schema}")),
+                        documentation: None,
+                        insert_text: Some(name.clone()),
+                    });
+                }
+            }
+            return items;
+        }
+
+        if crate::cell_data_view::transaction_schema(type_name).is_some() {
+            for field in [
+                "capacity",
+                "occupied_capacity",
+                "unoccupied_capacity",
+                "data_size",
+                "data_hash",
+                "lock_hash",
+                "type_hash",
+                "lock",
+                "type_script",
+                "data",
+            ] {
+                items.push(CompletionItem {
+                    label: field.into(),
+                    kind: CompletionItemKind::Field,
+                    detail: Some(if field == "data" {
+                        "Read-only fixed Cell data; exact schema length checked at each field read".into()
+                    } else {
+                        format!("{type_name}.{field}")
+                    }),
+                    documentation: None,
+                    insert_text: Some(field.into()),
+                });
+            }
+            let fields: &[&str] = if type_name.starts_with("InputView<") { &["out_point", "since"] } else { &["output_index"] };
+            for field in fields {
+                items.push(CompletionItem {
+                    label: (*field).into(),
+                    kind: CompletionItemKind::Field,
+                    detail: Some(format!("{type_name}.{field}")),
+                    documentation: None,
+                    insert_text: Some((*field).into()),
+                });
+            }
+            return items;
+        }
+        let type_name = crate::cell_data_view::schema(type_name).unwrap_or(type_name);
 
         // Built-in namespace methods.
         match type_name {
@@ -892,6 +1040,14 @@ impl LspServer {
                     ),
                     ("cell_data_size", "ckb::cell_data_size(${1:source::group_input(0)})"),
                     ("cell_count", "ckb::cell_count(${1:source::input(0)})"),
+                    ("verify_cell_roles", "ckb::verify_cell_roles(${1:64}, ${2:64}, ${3:32}, ${4:32768}, ${5:roles})"),
+                    ("select_cell_roles", "ckb::select_cell_roles(${1:64}, ${2:64}, ${3:32}, ${4:32768}, ${5:roles})"),
+                    ("selected_input_count", "ckb::selected_input_count<${1:CellType}>(${2:selection}, ${3:0})"),
+                    ("selected_output_count", "ckb::selected_output_count<${1:CellType}>(${2:selection}, ${3:0})"),
+                    ("selected_input", "ckb::selected_input<${1:CellType}>(${2:selection}, ${3:0}, ${4:0})"),
+                    ("selected_output", "ckb::selected_output<${1:CellType}>(${2:selection}, ${3:0}, ${4:0})"),
+                    ("selected_successor", "ckb::selected_successor<${1:CellType}>(${2:selection}, ${3:0}, ${4:0})"),
+                    ("exact_cell_role", "ckb::exact_cell_role<${1:CellType}>(\"${2:complete_type_hash}\", \"${3:complete_lock_hash}\", \"${4:id}\", \"${5:observe}\", \"${6:preserve}\", ${7:0}, ${8:32}, ${9:0}, ${10:32})"),
                     ("cell_has_type", "ckb::cell_has_type(${1:source::input(0)})"),
                     ("cell_data_u8", "ckb::cell_data_u8(${1:source::group_input(0)}, ${2:0})"),
                     ("cell_lock_size", "ckb::cell_lock_size(${1:source::group_input(0)})"),
@@ -916,6 +1072,7 @@ impl LspServer {
                         insert_text: Some(insert.to_string()),
                     });
                 }
+                self.named_role_call_completions(uri, &mut items);
                 return items;
             }
             "zk" => {
@@ -1077,30 +1234,23 @@ impl LspServer {
             _ => {}
         }
 
-        // User-defined type fields.
-        let mut search_modules: Vec<&Module> = Vec::new();
-        if let Some(ast) = self.ast_cache.get(uri) {
-            search_modules.push(ast);
-        }
-        for module in &search_modules {
-            for item in &module.items {
-                let fields: &[Field] = match item {
-                    Item::Resource(r) if r.name == type_name => &r.fields,
-                    Item::Shared(s) if s.name == type_name => &s.fields,
-                    Item::Receipt(r) if r.name == type_name => &r.fields,
-                    Item::Struct(s) if s.name == type_name => &s.fields,
-                    _ => continue,
-                };
-                for field in fields {
-                    items.push(CompletionItem {
-                        label: field.name.clone(),
-                        kind: CompletionItemKind::Field,
-                        detail: Some(format!("{}: {}", field.name, type_to_string(&field.ty))),
-                        documentation: None,
-                        insert_text: Some(field.name.clone()),
-                    });
-                }
-                break;
+        if let Some(definition) = self.completion_type_definition(uri, type_name) {
+            use crate::resolve::TypeDef;
+            let fields = match definition {
+                TypeDef::Resource(def) => def.fields,
+                TypeDef::Shared(def) => def.fields,
+                TypeDef::Receipt(def) => def.fields,
+                TypeDef::Struct(def) => def.fields,
+                TypeDef::Enum(_) => Vec::new(),
+            };
+            for field in fields {
+                items.push(CompletionItem {
+                    label: field.name.clone(),
+                    kind: CompletionItemKind::Field,
+                    detail: Some(format!("{}: {}", field.name, type_to_string(&field.ty))),
+                    documentation: None,
+                    insert_text: Some(field.name),
+                });
             }
         }
 
@@ -1231,6 +1381,9 @@ impl LspServer {
                 ("lock_script", "lock_script ${1:Name} on lock_group {\n    $0\n}"),
             ]);
         }
+        if self.named_runtime_authoring(uri) {
+            keywords.extend_from_slice(cell_views::NAMED_RUNTIME_DECLARATIONS);
+        }
         if edition == crate::NEXT_EDITION && self.documents.get(uri).is_some_and(|source| crate::frontend::uses_native_preview(source))
         {
             keywords.retain(|(label, _)| !matches!(*label, "consume" | "consume_each"));
@@ -1305,6 +1458,9 @@ impl LspServer {
             "Vec",
             "BoundedCellSet",
             "BoundedList",
+            "NestedValues",
+            "NestedBytesView",
+            "NestedRecordView",
         ];
 
         types
@@ -1314,6 +1470,9 @@ impl LspServer {
                 kind: CompletionItemKind::TypeParameter,
                 detail: Some(format!("{} type", ty)),
                 documentation: match ty {
+                    "NestedValues" => Some("Experimental NestedValues<T, N, P, B>: immutable bounded lists for explicit witnesses or direct Cell fields, containing Vec<u8> or records with a trailing byte payload. Bounds: N <= 32, P <= 256, 4 <= B <= 4096. The complete entry witness also has a 4096-byte budget. Stable artifact admission and generated-builder parity remain pending.".into()),
+                    "NestedBytesView" => Some("NestedBytesView<P>: invocation-local read-only payload derived by indexing NestedValues. Supports len, is_empty, iteration and checked byte indexing. Cannot be constructed, mutated, stored, passed or returned.".into()),
+                    "NestedRecordView" => Some("NestedRecordView<T, P>: invocation-local read-only record derived by indexing NestedValues. Fixed fields retain their declared value types; the trailing payload is NestedBytesView<P>. Cannot cross callable or storage boundaries.".into()),
                     "ScriptHandle" => Some("ScriptHandle<I>: a 656-byte nominal imported-interface selection for a checked Lock/Type participant; accepted as an action or Lock witness. Membership does not prove peer acceptance.".into()),
                     "InstanceScriptHandle" => Some("InstanceScriptHandle<I>: a versioned 1768-byte selection combining implementation membership with bounded Script-args constraints. Its consumer commits a policy, concrete subject and configuration in 208-byte CSINCv1 args. Observation grants no ownership or peer-execution authority.".into()),
                     "VerifierHandle" => Some("VerifierHandle<I>: a 656-byte nominal imported-interface selection. Native admission requires the parameterless child profile and unconditional checked SPAWN/WAIT after committed-args membership.".into()),
@@ -1329,6 +1488,24 @@ impl LspServer {
 
         for item in &module.items {
             match item {
+                Item::Collections(def) => items.push(CompletionItem {
+                    label: def.name.clone(), kind: CompletionItemKind::Struct,
+                    detail: Some(format!("collections {} (proof pending)", def.name)),
+                    documentation: Some("Shared named allocation policy with local owner and read-only helper typing. Local operations and read-only helpers execute experimentally; independent allocation proof remains pending.".into()),
+                    insert_text: Some(def.name.clone()),
+                }),
+                Item::DataShape(def) => items.push(CompletionItem {
+                    label: def.name.clone(), kind: CompletionItemKind::Struct,
+                    detail: Some(format!("data_shape {}", def.name)),
+                    documentation: Some(format!("Experimental bounded codec shape: {} items, {} bytes per payload, {} encoded bytes. Entry-witness budget is separate.", def.limits.items, def.limits.payload_bytes, def.limits.encoded_bytes)),
+                    insert_text: Some(def.name.clone()),
+                }),
+                Item::CellRoles(def) => items.push(CompletionItem {
+                    label: def.name.clone(), kind: CompletionItemKind::Constant,
+                    detail: Some(format!("cell_roles {}", def.name)),
+                    documentation: Some("Experimental exact-role catalog. Verify with ckb::verify_cell_roles<Catalog>() or select with ckb::select_cell_roles<Catalog>() and read named roles. Stable artifact admission remains pending.".into()),
+                    insert_text: Some(def.name.clone()),
+                }),
                 Item::Resource(r) => {
                     items.push(CompletionItem {
                         label: r.name.clone(),
@@ -1401,6 +1578,9 @@ impl LspServer {
 
     pub fn goto_definition(&self, uri: &str, position: Position) -> Option<Location> {
         let symbol = self.symbol_at_position(uri, position)?;
+        if let Some(location) = self.named_role_definition(uri, position, &symbol) {
+            return Some(location);
+        }
 
         // 1. Try top-level symbol in the current file.
         if let Some(loc) = self.find_top_level_symbol(uri, &symbol) {
@@ -1508,6 +1688,9 @@ impl LspServer {
         let Some(symbol) = self.symbol_at_position(uri, position) else {
             return Vec::new();
         };
+        if let Some(references) = self.named_role_references(uri, position, &symbol) {
+            return references;
+        }
         let mut refs = Vec::new();
 
         let workspace_modules = self.workspace_modules(uri);
@@ -1543,6 +1726,16 @@ impl LspServer {
 
         // 1. Try top-level item hover (existing logic).
         if let (Some(ast), Some(source)) = (self.ast_cache.get(uri), self.documents.get(uri)) {
+            if let Some(item @ Item::Collections(def)) = ast.items.iter().find(|item| item_name(item) == Some(symbol.as_str())) {
+                let mut hover = self.item_hover(source, item, None)?;
+                match self.collection_budget_hover(uri, &def.name) {
+                    Ok(explanation) => hover.contents.push_str(&explanation),
+                    Err(_) => hover.contents.push_str(
+                        "\n\nBudget estimate unavailable: resolve declaration/type diagnostics first. No capacity fit is assumed.",
+                    ),
+                }
+                return Some(hover);
+            }
             let edition = self.document_edition(uri);
             let metadata = crate::compile_metadata(source, edition, None).ok();
             if let Some(hover) = ast.items.iter().find_map(|item| {
@@ -1696,6 +1889,18 @@ impl LspServer {
     fn item_hover(&self, source: &str, item: &Item, metadata: Option<&crate::CompileMetadata>) -> Option<Hover> {
         let range = span_to_range(source, item_span(item));
         match item {
+            Item::Collections(def) => Some(Hover {
+                contents: format!("collections {}\n\nShared arena: {} bytes and {} allocation events; {} named members; local operations and read-only helpers are experimental; independent allocation proof remains pending.", def.name, def.bytes, def.allocations, def.members.len()),
+                range: Some(range),
+            }),
+            Item::DataShape(def) => Some(Hover {
+                contents: format!("data_shape {}\n\nElement: {}. Limits: {} items, {} payload bytes, {} encoded bytes. Experimental read-only codec shape; no new wire format or entry-witness budget.", def.name, type_to_string(&def.element), def.limits.items, def.limits.payload_bytes, def.limits.encoded_bytes),
+                range: Some(span_to_range(source, def.span)),
+            }),
+            Item::CellRoles(def) => Some(Hover {
+                contents: format!("cell_roles {}\n\n{} named roles; exact identities, authority, correspondence and bounded scans. Experimental verification and immutable named-role selection; stable artifact admission remains pending.", def.name, def.roles.len()),
+                range: Some(range),
+            }),
             Item::Resource(r) => Some(Hover {
                 contents: format!(
                     "```cellscript\nresource {}\n```{}{}",
@@ -1789,6 +1994,24 @@ impl LspServer {
 
     fn item_symbol(&self, source: &str, item: &Item, uri: &str) -> Option<SymbolInformation> {
         match item {
+            Item::Collections(def) => Some(SymbolInformation {
+                name: def.name.clone(),
+                kind: SymbolKind::Struct,
+                location: Location { uri: uri.to_string(), range: span_to_range(source, def.span) },
+                container_name: None,
+            }),
+            Item::DataShape(def) => Some(SymbolInformation {
+                name: def.name.clone(),
+                kind: SymbolKind::Struct,
+                location: Location { uri: uri.to_string(), range: span_to_range(source, def.span) },
+                container_name: None,
+            }),
+            Item::CellRoles(def) => Some(SymbolInformation {
+                name: def.name.clone(),
+                kind: SymbolKind::Constant,
+                location: Location { uri: uri.to_string(), range: span_to_range(source, def.span) },
+                container_name: None,
+            }),
             Item::Resource(r) => Some(SymbolInformation {
                 name: r.name.clone(),
                 kind: SymbolKind::Struct,
@@ -1856,6 +2079,17 @@ impl LspServer {
     pub fn rename(&self, uri: &str, position: Position, new_name: String) -> HashMap<String, Vec<TextEdit>> {
         let mut changes = HashMap::new();
         if !is_valid_rename_identifier(&new_name) {
+            return changes;
+        }
+        if let Some(symbol) = self.symbol_at_position(uri, position)
+            && let Some(definition) = self.named_role_definition(uri, position, &symbol)
+            && let (Some(module), Some(source)) = (self.ast_cache.get(uri), self.documents.get(uri))
+            && module.items.iter().any(|item| {
+                matches!(item, Item::CellRoles(catalog)
+                if catalog.roles.iter().any(|role| offset_to_position(source, role.span.start) == definition.range.start)
+                    && catalog.roles.iter().any(|role| role.name == new_name && role.name != symbol))
+            })
+        {
             return changes;
         }
         let refs = self.find_references(uri, position);
@@ -2269,6 +2503,26 @@ impl LspServer {
 
         let mut modules = crate::load_modules_for_input(&path).unwrap_or_default();
 
+        // An imported schema may have unsaved changes in another open buffer.
+        // Keep its source and AST together so completion/navigation agree.
+        let opened = self
+            .ast_cache
+            .iter()
+            .filter_map(|(open_uri, ast)| {
+                let path = file_uri_to_utf8_path(open_uri)?;
+                let content = self.documents.get(open_uri)?;
+                let canonical = std::fs::canonicalize(&path).unwrap_or_else(|_| path.as_std_path().to_path_buf());
+                Some((canonical, (content, ast)))
+            })
+            .collect::<HashMap<_, _>>();
+        for module in &mut modules {
+            let path = std::fs::canonicalize(&module.path).unwrap_or_else(|_| module.path.as_std_path().to_path_buf());
+            if let Some((content, ast)) = opened.get(&path) {
+                module.source = (*content).clone();
+                module.ast = (*ast).clone();
+            }
+        }
+
         if let (Some(content), Some(ast)) = (self.documents.get(uri), self.ast_cache.get(uri)) {
             if let Some(module) = modules.iter_mut().find(|module| same_workspace_path(&module.path, &path)) {
                 module.source = content.clone();
@@ -2468,7 +2722,7 @@ fn lowering_diagnostics(source: &str, module: &Module, metadata: &crate::Compile
             message: format!(
                 "action '{}' {}; fail-closed runtime features: {}; CKB runtime features: {}; CKB accesses: {}",
                 action.name,
-                if action.elf_compatible { "emits fail-closed runtime traps" } else { "is not currently ELF-compatible" },
+                lowering_status(action.elf_compatible, &action.fail_closed_runtime_features),
                 diagnostic_fail_closed_features(&action.fail_closed_runtime_features, &action.verifier_obligations),
                 diagnostic_list(&action.ckb_runtime_features),
                 diagnostic_access_list(&action.ckb_runtime_accesses)
@@ -2497,7 +2751,7 @@ fn lowering_diagnostics(source: &str, module: &Module, metadata: &crate::Compile
             message: format!(
                 "lock '{}' {}; fail-closed runtime features: {}; CKB runtime features: {}; CKB accesses: {}",
                 lock.name,
-                if lock.elf_compatible { "emits fail-closed runtime traps" } else { "is not currently ELF-compatible" },
+                lowering_status(lock.elf_compatible, &lock.fail_closed_runtime_features),
                 diagnostic_fail_closed_features(&lock.fail_closed_runtime_features, &lock.verifier_obligations),
                 diagnostic_list(&lock.ckb_runtime_features),
                 diagnostic_access_list(&lock.ckb_runtime_accesses)
@@ -2526,7 +2780,7 @@ fn lowering_diagnostics(source: &str, module: &Module, metadata: &crate::Compile
             message: format!(
                 "fn '{}' {}; fail-closed runtime features: {}; CKB runtime features: {}; CKB accesses: {}",
                 function.name,
-                if function.elf_compatible { "emits fail-closed runtime traps" } else { "is not currently ELF-compatible" },
+                lowering_status(function.elf_compatible, &function.fail_closed_runtime_features),
                 diagnostic_fail_closed_features(&function.fail_closed_runtime_features, &function.verifier_obligations),
                 diagnostic_list(&function.ckb_runtime_features),
                 diagnostic_access_list(&function.ckb_runtime_accesses)
@@ -2536,6 +2790,18 @@ fn lowering_diagnostics(source: &str, module: &Module, metadata: &crate::Compile
     }
 
     diagnostics
+}
+
+fn lowering_status(elf_compatible: bool, features: &[String]) -> &'static str {
+    if !elf_compatible {
+        "is not currently ELF-compatible"
+    } else if !features.is_empty()
+        && features.iter().all(|feature| crate::executable_surface::experimental_artifact_admission_detail(feature).is_some())
+    {
+        "requires experimental artifact admission"
+    } else {
+        "emits fail-closed runtime traps"
+    }
 }
 
 fn diagnostic_fail_closed_features(features: &[String], obligations: &[crate::VerifierObligationMetadata]) -> String {
@@ -2581,6 +2847,9 @@ fn diagnostic_access_list(accesses: &[crate::CkbRuntimeAccessMetadata]) -> Strin
 
 fn item_name(item: &Item) -> Option<&str> {
     match item {
+        Item::DataShape(def) => Some(&def.name),
+        Item::Collections(def) => Some(&def.name),
+        Item::CellRoles(def) => Some(&def.name),
         Item::Resource(r) => Some(&r.name),
         Item::Shared(s) => Some(&s.name),
         Item::Receipt(r) => Some(&r.name),
@@ -2598,6 +2867,9 @@ fn item_name(item: &Item) -> Option<&str> {
 
 fn item_span(item: &Item) -> Span {
     match item {
+        Item::DataShape(def) => def.span,
+        Item::Collections(def) => def.span,
+        Item::CellRoles(def) => def.span,
         Item::Resource(r) => r.span,
         Item::Shared(s) => s.span,
         Item::Receipt(r) => r.span,
@@ -3157,6 +3429,358 @@ mod tests {
     }
 
     #[test]
+    fn named_cell_roles_catalogs_have_completion_definition_and_hover() {
+        let source = include_str!("../../tests/syntax_combo/seeds/named-role-verification.cell");
+        let uri = "file:///named_roles.cell";
+        let mut server = LspServer::new();
+        server.open_document_with_edition(uri.into(), source.into(), crate::NEXT_EDITION);
+        let diagnostics = server.get_diagnostics(uri);
+        assert!(diagnostics.iter().all(|diagnostic| diagnostic.severity != DiagnosticSeverity::Error), "{diagnostics:?}");
+        let call = source.rfind("Settlement").unwrap();
+        let position = offset_to_position(source, call + 1);
+        let completion = server.completion(uri, position);
+        assert!(completion
+            .iter()
+            .any(|item| item.label == "Settlement" && item.documentation.as_deref().is_some_and(|doc| doc.contains("Experimental"))));
+        let definition = server.goto_definition(uri, position).unwrap();
+        assert_eq!(definition.range.start, offset_to_position(source, source.find("Settlement").unwrap()));
+        assert!(server.hover(uri, position).unwrap().contents.contains("named roles"));
+        assert!(server.document_symbols(uri).iter().any(|symbol| symbol.name == "Settlement"));
+        let renamed = server.rename(uri, position, "SettlementRules".into());
+        assert_eq!(renamed.get(uri).unwrap().len(), 2, "rename the declaration and catalog reference together");
+    }
+
+    #[test]
+    fn mixed_settlement_has_named_role_navigation_and_helper_diagnostics() {
+        let source = include_str!("../../examples/language/batches/mixed_settlement.cell");
+        let uri = "file:///mixed_settlement.cell";
+        let mut server = LspServer::new();
+        server.open_document_with_edition(uri.into(), source.into(), crate::NEXT_EDITION);
+        let diagnostics = server.get_diagnostics(uri);
+        assert!(diagnostics.iter().all(|item| item.severity != DiagnosticSeverity::Error), "{diagnostics:?}");
+        let offset = source.find("selected.quote.input_count").unwrap() + "selected.".len();
+        let definition = server.goto_definition(uri, offset_to_position(source, offset + 1)).unwrap();
+        assert_eq!(definition.range.start, offset_to_position(source, source.find("quote: Balance").unwrap()));
+        let declaration = &source[source.find("cell_roles Settlement").unwrap()..source.find("#[effect").unwrap()];
+        let augmented =
+            format!("{source}\n{}\nfn unrelated(quote: u64) -> u64 {{ return quote }}", declaration.replace("Settlement", "Other"));
+        server.open_document_with_edition(uri.into(), augmented, crate::NEXT_EDITION);
+        assert!(server.rename(uri, offset_to_position(source, offset + 1), "base".into()).is_empty());
+        let renamed = server.rename(uri, offset_to_position(source, offset + 1), "payments".into());
+        let edits = renamed.get(uri).unwrap();
+        assert_eq!(edits.len(), 1 + source.matches("selected.quote.").count());
+        assert!(edits.iter().all(|edit| edit.range.start.line < source.lines().count() as u32));
+        let invalid = source.replace("order.data.give", "order.data.missing");
+        server.open_document_with_edition(uri.into(), invalid, crate::NEXT_EDITION);
+        assert!(server.get_diagnostics(uri).iter().any(|item| item.severity == DiagnosticSeverity::Error));
+    }
+
+    #[test]
+    fn named_runtime_snippets_use_declarations_and_respect_source_modes() {
+        fn expand_defaults(snippet: &str) -> String {
+            let mut expanded = snippet.to_string();
+            while let Some(start) = expanded.find("${") {
+                let end = start + expanded[start..].find('}').unwrap();
+                let (_, value) = expanded[start + 2..end].split_once(':').unwrap();
+                let value = value.to_string();
+                expanded.replace_range(start..=end, &value);
+            }
+            expanded
+        }
+        let uri = "file:///named_snippets.cell";
+        let mut server = LspServer::new();
+        server.open_document_with_edition(uri.into(), "module snippets\n".into(), crate::NEXT_EDITION);
+        let declarations = server.declaration_keyword_completions(uri);
+        let mut source = "module snippets\nresource Order has store { id: u64 }\n".to_string();
+        for name in ["cell_roles", "data_shape", "collections"] {
+            let item = declarations.iter().find(|item| item.label == name).unwrap();
+            source.push_str(&expand_defaults(item.insert_text.as_ref().unwrap()));
+            source.push('\n');
+            assert!(server.keyword_completions(uri).iter().any(|item| item.label == name));
+        }
+        server.open_document_with_edition(uri.into(), source.clone(), crate::NEXT_EDITION);
+        let calls = server.member_completions(uri, "ckb");
+        let call = |name: &str| {
+            let snippet = calls.iter().find(|item| item.label == name).unwrap().insert_text.as_ref().unwrap();
+            assert_eq!(snippet, &format!("ckb::{name}<${{1:Settlement}}>()"));
+            expand_defaults(snippet)
+        };
+        source.push_str(&format!("action inspect(witness messages: Messages) -> u64 {{\n{}\nlet selected = {}\nrequire selected.orders.input_count() <= 32\nrequire messages.len() <= 32\nreturn 0\n}}",
+            call("verify_cell_roles"), call("select_cell_roles")));
+        crate::compile_metadata(&source, crate::NEXT_EDITION, None).unwrap();
+
+        for (edition, source) in [
+            (crate::CellScriptEdition::Edition2026, "module legacy\n"),
+            (crate::NEXT_EDITION, "module native\nresource Order { id: u64 }\ntype_script Inspect on type_group<Order> {}"),
+        ] {
+            server.open_document_with_edition(uri.into(), source.into(), edition);
+            for items in [server.declaration_keyword_completions(uri), server.keyword_completions(uri)] {
+                assert!(!items.iter().any(|item| matches!(item.label.as_str(), "cell_roles" | "data_shape" | "collections")));
+            }
+            assert!(server
+                .member_completions(uri, "ckb")
+                .iter()
+                .find(|item| item.label == "select_cell_roles")
+                .unwrap()
+                .insert_text
+                .as_ref()
+                .unwrap()
+                .contains("${1:64}"));
+        }
+    }
+
+    #[test]
+    fn collection_budget_hover_explains_shared_fit_and_growth_without_reserving() {
+        let source = include_str!("../../examples/language/batches/multi_asset_transfer.cell");
+        let uri = "untitled:budget-hover";
+        let mut server = LspServer::new();
+        server.open_document_with_edition(uri.into(), source.into(), crate::NEXT_EDITION);
+        let position = offset_to_position(source, source.find("collections Totals").unwrap() + 13);
+        let hover = server.hover(uri, position).unwrap().contents;
+        for expected in [
+            "items` is a capacity limit, not an initial reservation",
+            "Reserve all members once: 3712 bytes / 4 allocations — fits",
+            "Grow all members incrementally: 7840 bytes / 24 allocations — does not fit",
+            "shortfall: 3744 bytes / 20 allocation events",
+            "not a program-path or worst-case proof",
+        ] {
+            assert!(hover.contains(expected), "missing {expected}: {hover}");
+        }
+        let generic = "module budgets\nstruct Pair<T: fixed_value> { left: T, right: T }\ncollections Work { limits { bytes: 256, allocations: 3 }\nrows: Vec<Pair<u64>> { items: 3 }\n}\naction inspect() -> u64 { return 0 }";
+        server.open_document_with_edition(uri.into(), generic.into(), crate::NEXT_EDITION);
+        let position = offset_to_position(generic, generic.find("collections Work").unwrap() + 13);
+        let hover = server.hover(uri, position).unwrap().contents;
+        assert!(hover.contains("rows: 3 items x 16 bytes"), "{hover}");
+        assert!(hover.contains("Reserve all members once: 80 bytes / 1 allocations — fits"), "{hover}");
+        server.open_document_with_edition(uri.into(), generic.replace("Pair<u64>", "Unknown"), crate::NEXT_EDITION);
+        let hover = server.hover(uri, position).unwrap().contents;
+        assert!(hover.contains("Budget estimate unavailable"), "{hover}");
+        assert!(!hover.contains("Reserve all members once"), "{hover}");
+    }
+
+    #[test]
+    fn named_collections_have_navigation_and_explicit_proof_pending_status() {
+        let source = include_str!("../../tests/syntax_combo/seeds/named-collections.cell");
+        let uri = "file:///named_collections.cell";
+        let mut server = LspServer::new();
+        server.open_document_with_edition(uri.into(), source.into(), crate::NEXT_EDITION);
+        assert!(server.get_diagnostics(uri).iter().all(|item| item.severity != DiagnosticSeverity::Error));
+        let offset = source.find("Scratch").unwrap();
+        let position = offset_to_position(source, offset + 1);
+        assert!(server.hover(uri, position).unwrap().contents.contains("local operations and read-only helpers"));
+        assert!(server.document_symbols(uri).iter().any(|symbol| symbol.name == "Scratch"));
+        assert_eq!(server.goto_definition(uri, position).unwrap().range.start, offset_to_position(source, offset));
+        assert_eq!(server.rename(uri, position, "ScratchValues".into()).get(uri).unwrap().len(), 1);
+        assert!(server.keyword_completions(uri).iter().any(|item| item.label == "collections"));
+        assert!(server
+            .symbol_completions(server.ast_cache.get(uri).unwrap())
+            .iter()
+            .any(|item| item.label == "Scratch" && item.detail.as_deref().is_some_and(|detail| detail.contains("proof pending"))));
+        let constructed = source.replace("return 0", "let scratch = Scratch::new()\nreturn 0");
+        server.open_document_with_edition(uri.into(), constructed, crate::NEXT_EDITION);
+        assert!(server.get_diagnostics(uri).iter().all(|item| item.severity != DiagnosticSeverity::Error));
+        let invalid = format!("{source}\nfn count(view: &Scratch) -> u64 {{ view.pending.push(1)\nreturn 0 }}");
+        server.open_document_with_edition(uri.into(), invalid, crate::NEXT_EDITION);
+        assert!(server.get_diagnostics(uri).iter().any(|item| item.severity == DiagnosticSeverity::Error));
+        let sorted = include_str!("../../tests/syntax_combo/seeds/collections-sorted.cell");
+        server.open_document_with_edition(uri.into(), sorted.into(), crate::NEXT_EDITION);
+        assert!(server.get_diagnostics(uri).iter().all(|item| item.severity != DiagnosticSeverity::Error));
+        let records = include_str!("../../tests/syntax_combo/seeds/collections-records.cell");
+        server.open_document_with_edition(uri.into(), records.into(), crate::NEXT_EDITION);
+        let diagnostics = server.get_diagnostics(uri);
+        assert!(diagnostics.iter().all(|item| item.severity != DiagnosticSeverity::Error), "{diagnostics:?}");
+        let reference = records.find("Vec<Pair<u64>>").unwrap() + "Vec<".len();
+        assert_eq!(
+            server.goto_definition(uri, offset_to_position(records, reference + 1)).unwrap().range.start,
+            offset_to_position(records, records.find("Pair<T").unwrap())
+        );
+    }
+
+    #[test]
+    fn multi_asset_transfer_navigates_collections_and_checks_borrowed_helpers() {
+        let source = include_str!("../../examples/language/batches/multi_asset_transfer.cell");
+        let uri = "file:///multi_asset_transfer.cell";
+        let mut server = LspServer::new();
+        server.open_document_with_edition(uri.into(), source.into(), crate::NEXT_EDITION);
+        let diagnostics = server.get_diagnostics(uri);
+        assert!(diagnostics.iter().all(|item| item.severity != DiagnosticSeverity::Error), "{diagnostics:?}");
+        let position = offset_to_position(source, source.find("Totals::new").unwrap() + 1);
+        let definition = server.goto_definition(uri, position).unwrap();
+        assert_eq!(definition.range.start, offset_to_position(source, source.find("Totals {").unwrap()));
+        let renamed = server.rename(uri, position, "TransferTotals".into());
+        assert_eq!(renamed.get(uri).unwrap().len(), 3);
+        let invalid = source.replace("return true", "totals.incoming.reserve(32)\nreturn true");
+        server.open_document_with_edition(uri.into(), invalid, crate::NEXT_EDITION);
+        assert!(server.get_diagnostics(uri).iter().any(|item| item.severity == DiagnosticSeverity::Error));
+    }
+
+    #[test]
+    fn named_data_shapes_have_navigation_rename_and_inferred_view_completion() {
+        let source = include_str!("../../tests/syntax_combo/seeds/named-data-shapes.cell");
+        let uri = "file:///named_shapes.cell";
+        let mut server = LspServer::new();
+        server.open_document_with_edition(uri.into(), source.into(), crate::NEXT_EDITION);
+        let diagnostics = server.get_diagnostics(uri);
+        assert!(diagnostics.iter().all(|item| item.severity != DiagnosticSeverity::Error), "{diagnostics:?}");
+        let reference = source.rfind("Messages").unwrap();
+        let position = offset_to_position(source, reference + 1);
+        assert!(server.completion(uri, position).iter().any(|item| item.label == "Messages"));
+        let type_position = source.find("witness messages:").unwrap() + "witness messages:".len();
+        assert!(server.completion(uri, offset_to_position(source, type_position)).iter().any(|item| item.label == "Messages"));
+        assert!(server.keyword_completions(uri).iter().any(|item| item.label == "data_shape"));
+        assert!(server.hover(uri, position).unwrap().contents.contains("encoded bytes"));
+        assert_eq!(
+            server.goto_definition(uri, position).unwrap().range.start,
+            offset_to_position(source, source.find("Messages").unwrap())
+        );
+        assert_eq!(server.rename(uri, position, "MessageBatch".into()).get(uri).unwrap().len(), 2);
+        for (needle, expected) in [("entry.id", "id"), ("entry.payload.len", "len")] {
+            let offset = source.find(needle).unwrap() + needle.rfind('.').unwrap() + 1;
+            let items = server.completion(uri, offset_to_position(source, offset));
+            assert!(items.iter().any(|item| item.label == expected), "{needle}: {items:?}");
+        }
+    }
+
+    #[test]
+    fn named_nested_helpers_complete_views_inside_predicate_bodies() {
+        let source = include_str!("../../tests/syntax_combo/seeds/named-nested-helpers.cell");
+        let uri = "file:///nested_helpers.cell";
+        let mut server = LspServer::new();
+        server.open_document_with_edition(uri.into(), source.into(), crate::NEXT_EDITION);
+        assert!(server.get_diagnostics(uri).iter().all(|item| item.severity != DiagnosticSeverity::Error));
+        let position = source.find("entry.payload").unwrap() + "entry.".len();
+        assert!(server.completion(uri, offset_to_position(source, position)).iter().any(|item| item.label == "payload"));
+        let parameter = source.find("values: Messages").unwrap() + "values: ".len() + 1;
+        assert_eq!(
+            server.goto_definition(uri, offset_to_position(source, parameter)).unwrap().range.start,
+            offset_to_position(source, source.find("Messages").unwrap())
+        );
+    }
+
+    #[test]
+    fn named_derived_helpers_complete_types_fields_and_shape_rename() {
+        let source = include_str!("../../tests/syntax_combo/seeds/named-derived-helpers.cell");
+        let uri = "file:///derived_helpers.cell";
+        let mut server = LspServer::new();
+        server.open_document_with_edition(uri.into(), source.into(), crate::NEXT_EDITION);
+        assert!(server.get_diagnostics(uri).iter().all(|item| item.severity != DiagnosticSeverity::Error));
+        let at = source.find("Entries::Payload").unwrap() + "Entries::".len();
+        let items = server.completion(uri, offset_to_position(source, at));
+        for expected in ["Item", "Payload"] {
+            assert!(items.iter().any(|item| item.label == expected), "{items:?}");
+        }
+        let at = source.find("entry.payload").unwrap() + "entry.".len();
+        assert!(server.completion(uri, offset_to_position(source, at)).iter().any(|item| item.label == "payload"));
+        let at = source.find("Entries::Payload").unwrap() + 1;
+        assert_eq!(
+            server.goto_definition(uri, offset_to_position(source, at)).unwrap().range.start,
+            offset_to_position(source, source.find("Entries {").unwrap())
+        );
+        assert_eq!(server.rename(uri, offset_to_position(source, at), "Records".into()).get(uri).unwrap().len(), 5);
+    }
+
+    #[test]
+    fn named_cell_roles_complete_role_aliases_methods_and_data() {
+        let source = include_str!("../../tests/syntax_combo/seeds/named-role-selection.cell");
+        let uri = "file:///named_selection.cell";
+        let mut server = LspServer::new();
+        server.open_document_with_edition(uri.into(), source.into(), crate::NEXT_EDITION);
+        assert!(server.get_diagnostics(uri).iter().all(|item| item.severity != DiagnosticSeverity::Error));
+        for (needle, expected) in [("selected.orders", "orders"), ("alias.input(count", "input"), ("before.data.amount", "amount")] {
+            let last_dot = needle.rfind('.').unwrap();
+            let offset = source.find(needle).unwrap() + last_dot + 1;
+            let items = server.completion(uri, offset_to_position(source, offset));
+            assert!(items.iter().any(|item| item.label == expected), "{needle}: {items:?}");
+        }
+    }
+
+    #[test]
+    fn record_migration_completes_fields_and_renames_shape_across_helpers() {
+        let source = include_str!("../../examples/language/batches/record_migration.cell");
+        let uri = "file:///record_migration.cell";
+        let mut server = LspServer::new();
+        server.open_document_with_edition(uri.into(), source.into(), crate::NEXT_EDITION);
+        let diagnostics = server.get_diagnostics(uri);
+        assert!(diagnostics.iter().all(|item| item.severity != DiagnosticSeverity::Error), "{diagnostics:?}");
+        let at = source.find("before.payload").unwrap() + "before.".len();
+        let items = server.completion(uri, offset_to_position(source, at));
+        for field in ["revision", "payload"] {
+            assert!(items.iter().any(|item| item.label == field), "{items:?}");
+        }
+        let at = source.find("Messages::Payload").unwrap() + 1;
+        assert_eq!(
+            server.goto_definition(uri, offset_to_position(source, at)).unwrap().range.start,
+            offset_to_position(source, source.find("Messages {").unwrap())
+        );
+        let changes = server.rename(uri, offset_to_position(source, at), "Entries".into());
+        let mut edits = changes[uri]
+            .iter()
+            .map(|edit| {
+                (
+                    position_to_offset(source, edit.range.start).unwrap(),
+                    position_to_offset(source, edit.range.end).unwrap(),
+                    edit.new_text.as_str(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(edits.len(), source.matches("Messages").count());
+        edits.sort_by_key(|edit| std::cmp::Reverse(edit.0));
+        let mut renamed = source.to_string();
+        for (start, end, replacement) in edits {
+            renamed.replace_range(start..end, replacement);
+        }
+        crate::compile_metadata(&renamed, crate::NEXT_EDITION, None).unwrap();
+        server.open_document_with_edition(
+            uri.into(),
+            source.replace("before.revision != after.revision", "before.missing != after.revision"),
+            crate::NEXT_EDITION,
+        );
+        assert!(server.get_diagnostics(uri).iter().any(|item| item.severity == DiagnosticSeverity::Error));
+    }
+
+    #[test]
+    fn named_nested_data_views_complete_fields_and_keep_read_only_diagnostics() {
+        let source = include_str!("../../tests/syntax_combo/seeds/named-nested-data-views.cell");
+        let uri = "file:///nested_data_views.cell";
+        let mut server = LspServer::new();
+        server.open_document_with_edition(uri.into(), source.into(), crate::NEXT_EDITION);
+        assert!(server.get_diagnostics(uri).iter().all(|item| item.severity != DiagnosticSeverity::Error));
+        let offset = source.find("input.messages").unwrap() + "input.".len();
+        let items = server.completion(uri, offset_to_position(source, offset));
+        for expected in ["messages", "id", "owner", "entries"] {
+            assert!(items.iter().any(|item| item.label == expected), "{items:?}");
+        }
+        server.open_document_with_edition(
+            uri.into(),
+            source.replace("let messages = input.messages", "let mut messages = input.messages"),
+            crate::NEXT_EDITION,
+        );
+        assert!(server.get_diagnostics(uri).iter().any(|item| item.severity == DiagnosticSeverity::Error));
+    }
+
+    #[test]
+    fn named_nested_selection_has_diagnostics_and_coordinate_completions() {
+        let source = include_str!("../../tests/syntax_combo/seeds/named-nested-selection.cell");
+        let uri = "file:///named_nested_selection.cell";
+        let mut server = LspServer::new();
+        server.open_document_with_edition(uri.into(), source.into(), crate::NEXT_EDITION);
+        assert!(server.get_diagnostics(uri).iter().all(|item| item.severity != DiagnosticSeverity::Error));
+        for (needle, expected) in
+            [("selected.orders", "orders"), ("orders.input(count", "input"), ("after.output_index", "output_index")]
+        {
+            let offset = source.find(needle).unwrap() + needle.rfind('.').unwrap() + 1;
+            let items = server.completion(uri, offset_to_position(source, offset));
+            assert!(items.iter().any(|item| item.label == expected), "{needle}: {items:?}");
+        }
+        server.open_document_with_edition(
+            uri.into(),
+            source.replace("return after.output_index", "return after.data.absent"),
+            crate::NEXT_EDITION,
+        );
+        assert!(server.get_diagnostics(uri).iter().any(|item| item.severity == DiagnosticSeverity::Error));
+    }
+
+    #[test]
     fn test_incremental_change_applies_utf16_ranges_after_non_bmp_text() {
         let source = "module demo\n// 😀 marker\n";
         let start = source.find("marker").expect("marker start");
@@ -3258,6 +3882,14 @@ mod tests {
         let types = server.type_completions();
         assert!(types.iter().any(|item| item.label == "BoundedCellSet"));
         assert!(types.iter().any(|item| item.label == "BoundedList"));
+        assert!(
+            types
+                .iter()
+                .any(|item| item.label == "NestedValues"
+                    && item.documentation.as_deref().is_some_and(|doc| doc.contains("Experimental")))
+        );
+        assert!(types.iter().any(|item| item.label == "NestedBytesView"));
+        assert!(types.iter().any(|item| item.label == "NestedRecordView"));
         assert!(types.iter().any(|item| item.label == "DecodedSince"));
         assert!(types.iter().any(|item| item.label == "SighashAllDigest"));
         assert!(types.iter().any(|item| item.label == "AbsoluteBlockSince"));
@@ -3357,6 +3989,80 @@ mod tests {
 
         let dao = server.member_completions("file:///test.cell", "dao");
         assert!(dao.iter().any(|item| item.label == "require_input_relative_epoch_since_at_least"));
+    }
+
+    #[test]
+    fn test_fixed_cell_data_view_editor_contract() {
+        let uri = "file:///cell-data-view.cell";
+        let mut server = LspServer::new();
+        server.open_document(uri.into(), include_str!("../../examples/language/ckb/typed_cell_data.cell").into());
+        let diagnostics = server.get_diagnostics(uri);
+        assert!(diagnostics.iter().all(|item| item.severity != DiagnosticSeverity::Error), "{diagnostics:?}");
+        assert!(diagnostics.iter().any(|item| item.message.contains("cell-data-view-artifact-proof")));
+        assert!(diagnostics.iter().any(|item| item.message.contains("requires experimental artifact admission")));
+        assert!(diagnostics.iter().all(|item| !item.message.contains("emits fail-closed runtime traps")));
+        let input = server.member_completions(uri, "InputView<Token>");
+        assert!(input.iter().any(|field| field.label == "data"));
+        assert!(input.iter().any(|field| field.label == "out_point"));
+        let output = server.member_completions(uri, "OutputView<Token>");
+        assert!(output.iter().any(|field| field.label == "output_index"));
+        assert!(!output.iter().any(|field| field.label == "out_point"));
+        let data = server.member_completions(uri, "CellDataView<Token>");
+        assert_eq!(data.iter().map(|field| field.label.as_str()).collect::<Vec<_>>(), ["id", "amount", "owner", "large", "bytes"]);
+        let source = include_str!("../../examples/language/ckb/typed_cell_data.cell");
+        for (prefix, expected) in [("input.", "data"), ("alias.", "amount"), ("output.data.", "owner")] {
+            let offset = source.find(prefix).unwrap() + prefix.len();
+            let completion = server.completion(uri, offset_to_position(source, offset));
+            assert!(completion.iter().any(|item| item.label == expected), "{prefix}: {completion:?}");
+        }
+    }
+
+    #[test]
+    fn test_cell_view_helper_parameter_completions_keep_nominal_fields() {
+        let uri = "file:///cell-helper-completion.cell";
+        let mut server = LspServer::new();
+        for (parameter, expression, expected) in [
+            ("InputView<Token>", "view.data.", "owner"),
+            ("OutputView<Token>", "view.data.", "owner"),
+            ("InputView<Token>", "view.", "out_point"),
+            ("OutputView<Token>", "view.", "capacity"),
+        ] {
+            let marked = format!("module helper_completion\nresource Token has store {{ id: u64, owner: Hash }}\n#[effect(ReadOnly)]\nfn inspect(view: {parameter}) -> u64 {{ return {expression}| }}");
+            let offset = marked.find('|').unwrap();
+            let source = marked.replace('|', "");
+            let position = offset_to_position(&source, offset);
+            server.open_document(uri.into(), source);
+            let completion = server.completion(uri, position);
+            assert!(completion.iter().any(|item| item.label == expected), "{parameter}: {completion:?}");
+        }
+    }
+
+    #[test]
+    fn test_cell_view_completions_recover_trailing_dot_and_preserve_scope() {
+        let uri = "file:///cell-data-completion.cell";
+        let mut server = LspServer::new();
+        for (body, expected) in [
+            ("let view = ckb::input<Token>(0)\nreturn view.data.|", Some("owner")),
+            ("let view = ckb::selected_successor<Token>(selection, 0, 0)\nlet alias = view.data\nreturn alias.|", Some("owner")),
+            ("if true { let view = ckb::output<Token>(0)\nreturn view.| }\nreturn 0", Some("output_index")),
+            ("if true { let view = ckb::output<Token>(0) }\nreturn view.|", None),
+            ("let view = ckb::input<Token>(0)\nif true { let view = 7\nreturn view.| }\nreturn 0", None),
+            ("let view = ckb::input<Token>(0)\nreturn later.|\nlet later = view.data", None),
+        ] {
+            let marked = format!("module data_completion\nresource Token has store {{ id: u64, owner: Hash }}\naction inspect() -> u64 {{ verification\n{body}\n}}");
+            let offset = marked.find('|').unwrap();
+            let source = marked.replace('|', "");
+            let position = offset_to_position(&source, offset);
+            server.open_document(uri.into(), source);
+            let before = server.get_diagnostics(uri);
+            let completion = server.completion(uri, position);
+            if let Some(expected) = expected {
+                assert!(completion.iter().any(|item| item.label == expected), "{body}: {completion:?}");
+            } else {
+                assert!(completion.is_empty(), "out-of-scope view: {body}: {completion:?}");
+            }
+            assert_eq!(serde_json::to_value(server.get_diagnostics(uri)).unwrap(), serde_json::to_value(before).unwrap());
+        }
     }
 
     #[test]

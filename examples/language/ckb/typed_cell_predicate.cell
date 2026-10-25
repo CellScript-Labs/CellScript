@@ -1,0 +1,25 @@
+// Experimental read-only helper composition. The caller selects transaction
+// coordinates; helpers observe data without obtaining Cell lifecycle authority.
+// This is a field predicate, not a complete settlement or identity policy.
+module cellscript::examples::typed_cell_predicate
+
+resource Token has store {
+    id: u64,
+    owner: Hash,
+}
+
+#[effect(ReadOnly)]
+fn matches(before: InputView<Token>, after: OutputView<Token>) -> bool {
+    return before.data.id == after.data.id && before.data.owner == after.data.owner
+}
+
+#[effect(ReadOnly)]
+fn forward(before: InputView<Token>, after: OutputView<Token>) -> bool {
+    return matches(before, after)
+}
+
+action inspect() -> u64 {
+    verification
+    require forward(ckb::input<Token>(1), ckb::output<Token>(0))
+    return 0
+}

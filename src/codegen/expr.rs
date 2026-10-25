@@ -685,14 +685,17 @@ impl CodeGenerator {
     }
 
     pub(super) fn emit_unary(&mut self, dest: &IrVar, op: UnaryOp, operand: &IrOperand) -> Result<()> {
-        match operand {
-            IrOperand::Const(IrConst::U64(n)) => self.emit(format!("li t0, {}", n)),
-            IrOperand::Var(v) => self.emit_stack_load("t0", self.scalar_slot_offset(v.id)),
-            _ => self.emit("li t0, 0"),
+        if op == UnaryOp::Neg {
+            // Negation retains the operand width, including both u128 limbs
+            // and signed i32 normalization. Reuse the checked arithmetic path
+            // instead of negating a pointer or an unnormalized narrow scalar.
+            let zero = if dest.ty == IrType::U128 { IrConst::U128(0) } else { IrConst::U64(0) };
+            return self.emit_binary(dest, BinaryOp::Sub, &IrOperand::Const(zero), operand);
         }
+        self.emit_operand_to_register("t0", operand);
 
         match op {
-            UnaryOp::Neg => self.emit("neg t0, t0"),
+            UnaryOp::Neg => unreachable!("negation handled by width-preserving subtraction"),
             UnaryOp::Not => self.emit("xori t0, t0, 1"),
             UnaryOp::Ref | UnaryOp::Deref => self.emit("# reference conversion (no-op in asm backend)"),
         }
@@ -702,6 +705,21 @@ impl CodeGenerator {
     }
 
     pub(super) fn emit_field_access(&mut self, dest: &IrVar, obj: &IrOperand, field: &str) -> Result<()> {
+        if let IrOperand::Var(source) = obj
+            && let IrType::Named(owner) = &source.ty
+            && let Some(projected) = crate::cell_selection::project_role_type(owner, field)
+            && dest.ty == IrType::Named(projected)
+        {
+            self.emit_stack_load("t0", self.scalar_slot_offset(source.id));
+            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
+            return Ok(());
+        }
+        if self.emit_cell_data_view_field(dest, obj, field)? {
+            return Ok(());
+        }
+        if self.emit_nested_field(dest, obj, field)? {
+            return Ok(());
+        }
         // A tuple call returns register payloads, not the address of its
         // allocated (but uninitialized) fixed-byte local buffer.
         if self.emit_tuple_call_return_field_access(dest, obj, field) {
@@ -891,7 +909,12 @@ impl CodeGenerator {
         field: &str,
         layout: &SchemaFieldLayout,
     ) -> bool {
-        if molecule_vector_element_fixed_width(&layout.ty, &self.type_fixed_sizes, &self.enum_fixed_sizes).is_none() {
+        if molecule_vector_element_fixed_width(&layout.ty, &self.type_fixed_sizes, &self.enum_fixed_sizes).is_none()
+            && !matches!(
+                named_type_name(&layout.ty).and_then(crate::nested_values::parsed),
+                Some(crate::nested_values::NestedType::Values(_))
+            )
+        {
             return false;
         }
         let Some(size_offset) = self.schema_pointer_size_offsets.get(&obj.id).copied() else {
@@ -903,6 +926,11 @@ impl CodeGenerator {
         let Some(field_count) = self.type_layouts.get(type_name).map(|fields| fields.len()) else {
             return false;
         };
+
+        if matches!(Self::nested_type(&layout.ty), Some(crate::nested_values::NestedType::Values(_))) {
+            self.emit_nested_cell_field(dest, obj, size_offset, dest_size_offset, layout.index, field_count);
+            return true;
+        }
 
         let context = format!("{}.{}", type_name, field);
         self.emit(format!("# field access .{}", field));

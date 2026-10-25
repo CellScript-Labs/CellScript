@@ -6,6 +6,10 @@ use crate::ast::*;
 use crate::error::Result;
 use std::fmt::Write;
 
+mod cell_roles;
+mod collections;
+mod data_shape;
+
 /// Formatter configuration.
 #[derive(Debug, Clone)]
 pub struct FormatConfig {
@@ -76,6 +80,9 @@ impl Formatter {
 
     fn format_item(&mut self, item: &Item) -> Result<()> {
         match item {
+            Item::DataShape(def) => self.format_data_shape(def),
+            Item::Collections(def) => self.format_collections(def),
+            Item::CellRoles(def) => self.format_cell_roles(def),
             Item::Resource(resource) => {
                 self.format_type_id_attr(resource.type_id.as_ref());
                 self.format_type_def(

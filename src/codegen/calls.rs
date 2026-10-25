@@ -1985,7 +1985,9 @@ impl CodeGenerator {
     ) -> bool {
         let register = self.call_abi_register(*abi_index);
         self.emit(format!("# cellscript abi: call {} scalar {} -> {}", func, label, register));
-        self.emit_operand_to_register(&register, arg);
+        if !self.emit_small_byte_array_register(&register, arg) {
+            self.emit_operand_to_register(&register, arg);
+        }
         self.emit_outgoing_call_stack_arg_store(&register, *abi_index, outgoing_stack_arg_bytes);
         *abi_index += 1;
         true
@@ -2026,12 +2028,17 @@ impl CodeGenerator {
     ) -> bool {
         let register = self.call_abi_register(*abi_index);
         let size_offset = match (arg, kind) {
+            (IrOperand::Var(var), CallLengthKind::Schema) if Self::nested_type(&var.ty).is_some() => self.nested_size_offset(var),
             (IrOperand::Var(var), CallLengthKind::Schema) => self.schema_pointer_size_offsets.get(&var.id).copied(),
             (IrOperand::Var(var), CallLengthKind::FixedBytes) => self.fixed_byte_param_size_offsets.get(&var.id).copied(),
             _ => None,
         };
         if let Some(size_offset) = size_offset {
             self.emit_stack_load(&register, size_offset);
+        } else if let (IrOperand::Var(var), CallLengthKind::Schema) = (arg, kind)
+            && let Some(width) = self.allocated_owner_extents.get(&var.id)
+        {
+            self.emit(format!("li {}, {}", register, width));
         } else if let (IrOperand::Var(var), CallLengthKind::Schema) = (arg, kind)
             && let Some(width) = self.local_schema_value_widths.get(&var.id).copied()
         {

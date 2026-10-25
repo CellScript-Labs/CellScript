@@ -648,6 +648,10 @@ pub struct TypedSemanticField {
     pub ty: String,
     pub offset: u32,
     pub width_bytes: Option<u32>,
+    /// Explicit table order for the experimental nested Cell codec. Byte
+    /// offsets cannot order multiple dynamically sized fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub molecule_field_index: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -857,6 +861,18 @@ pub struct TypedSemanticOperand {
 pub enum TypedSemanticOperationDetail {
     #[default]
     None,
+    AllocatedValue {
+        contract: crate::allocated_values::Contract,
+        member: Option<u32>,
+        operation: crate::allocated_values::Operation,
+    },
+    ExactRoleSelection {
+        contract: crate::cell_selection::Contract,
+    },
+    ExactRoleRead {
+        role: u32,
+        read: crate::cell_selection::Read,
+    },
     Constant {
         value: TypedSemanticConstant,
     },
@@ -1163,6 +1179,36 @@ pub struct LoweringBlock {
     pub lowering_block_id: Option<u32>,
     pub typed_block_hash: Option<String>,
     pub machine_label: Option<String>,
+    /// Co-located nested read boundaries that would otherwise be hidden by
+    /// the primary CFG label. Names locate code; the checker verifies bytes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nested_read_labels: Vec<String>,
+    /// Complete typed Cell-table decoder boundaries, including co-located ends.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nested_cell_labels: Vec<String>,
+    /// Exact nested/fixed successor field comparisons, including co-located ends.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nested_output_labels: Vec<String>,
+    /// Exact-role verification, handle move and read extents. Markers locate
+    /// candidate bytes only; typed roles and operands determine the contract.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exact_role_labels: Vec<String>,
+    /// Experimental allocated owner initialization boundaries. Names locate
+    /// candidate bytes; typed constructors determine the required writes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allocated_init_labels: Vec<String>,
+    /// Experimental allocation primitive boundaries. Typed operation inventory
+    /// and checked constructor storage determine the required bounded routines.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allocated_allocation_labels: Vec<String>,
+    /// Experimental arena, descriptor, element and ordered boundaries. These locate candidate
+    /// instructions, not evidence that a lifecycle operation is implemented.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allocated_lifecycle_labels: Vec<String>,
+    /// Typed transaction-view constructors and aliases, including co-located
+    /// boundaries. Actual instructions and typed operands establish provenance.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cell_view_value_labels: Vec<String>,
     pub terminator: MachineTerminator,
     pub range: MachineRange,
     pub byte_digest: String,

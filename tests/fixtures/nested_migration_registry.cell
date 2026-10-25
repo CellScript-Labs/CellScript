@@ -1,0 +1,13 @@
+module registry_peer
+resource Registry has store { id: u64, revision: u64 }
+action verify() -> u64 {
+    verification
+    let before = ckb::group_input<Registry>(0)
+    let after = ckb::group_output<Registry>(0)
+    require ckb::cell_count(before) == 1
+    require ckb::cell_count(after) == 1
+    require before.data.id == after.data.id
+    require before.data.revision < 18446744073709551615
+    require after.data.revision == before.data.revision + 1
+    return 0
+}

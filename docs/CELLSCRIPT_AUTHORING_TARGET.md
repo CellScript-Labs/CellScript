@@ -79,6 +79,29 @@ data {
 The comparison must establish a canonical form without accumulating redundant
 spellings. It must also test ordinary updates, branches, and schema changes.
 
+## Bounded runtime authoring: #47–#49
+
+The maintainer's 2026-10-19 decision extends this authoring direction to
+allocated collections, nested data and heterogeneous Cell selection. Current
+experimental APIs are implementation references, not a stable grammar freeze.
+Use named roles, reusable named bounds and familiar collection operations;
+declare storage and policy choices once and keep business predicates readable.
+Retain `.data` to distinguish schema values from transaction properties.
+
+Keep explicit `borrow root as view { ... }` regions where their lifetime is
+useful, without requiring them for every ordinary field read. Establish checked,
+non-escaping read-only helper composition while preserving the distinct roots,
+lifetimes and authority of resource, transaction, nested and allocated views.
+Current proof limitations are not permanent authoring requirements.
+
+Before freezing public APIs, review complete mixed-role settlement, nested batch
+migration, asset aggregation and identifier-deduplication examples, including
+helper extraction and negative cases. The detailed
+[bounded runtime authoring contract](CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md#authoring-direction-adopted-on-2026-10-19)
+preserves all numeric bounds, existing wire/capacity contracts, independent
+checking and full transaction acceptance. No proposed spelling is executable
+merely because this direction has been adopted.
+
 ## Direct semantic elaboration
 
 The authoring frontend must lower directly into structured, versioned semantic

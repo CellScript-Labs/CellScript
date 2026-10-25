@@ -175,6 +175,7 @@ fn resolve_moves<'a>(operand: &'a IrOperand, instructions: &'a [IrInstruction], 
 
 fn definition_for(var_id: usize, instructions: &[IrInstruction]) -> Option<&IrInstruction> {
     instructions.iter().rev().find(|instruction| match instruction {
+        IrInstruction::AllocatedValue(op) => op.dest.as_ref().is_some_and(|dest| dest.id == var_id),
         IrInstruction::LoadConst { dest, .. }
         | IrInstruction::LoadVar { dest, .. }
         | IrInstruction::Binary { dest, .. }
@@ -190,6 +191,8 @@ fn definition_for(var_id: usize, instructions: &[IrInstruction]) -> Option<&IrIn
         | IrInstruction::CollectionRemove { dest, .. }
         | IrInstruction::BoundedCellLoad { dest, .. }
         | IrInstruction::BoundedPlanLoad { dest, .. }
+        | IrInstruction::ReadExactCellRole { dest, .. }
+        | IrInstruction::VerifyExactCellRoles { dest: Some(dest), .. }
         | IrInstruction::Call { dest: Some(dest), .. }
         | IrInstruction::ReadRef { dest, .. }
         | IrInstruction::Move { dest, .. }
@@ -214,6 +217,7 @@ fn definition_for(var_id: usize, instructions: &[IrInstruction]) -> Option<&IrIn
         | IrInstruction::CollectionSet { .. }
         | IrInstruction::BoundedOutputVerify { .. }
         | IrInstruction::BoundedOutputEnd { .. }
+        | IrInstruction::VerifyExactCellRoles { dest: None, .. }
         | IrInstruction::CellMetadataEquality { .. }
         | IrInstruction::Consume { .. }
         | IrInstruction::Destroy { .. }

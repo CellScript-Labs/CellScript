@@ -1,0 +1,126 @@
+// Fixed stack arrays implement the same transfer-only acceptance rule.
+// Copy up to 32 real Cells per side; unused array slots are never inspected.
+module cellscript::language::batches::multi_asset_transfer_stack
+resource Note has store { asset: Hash, serial: u64, amount: u64 }
+struct CopyNote { asset: Hash, serial: u64, amount: u64 }
+
+fn input_at(index: u64, count: u64) -> CopyNote {
+    if index >= count { return CopyNote { asset: Hash::from_bytes(b"00000000000000000000000000000000"), serial: 0, amount: 0 } }
+    let note = ckb::group_input<Note>(index).data
+    return CopyNote { asset: note.asset, serial: note.serial, amount: note.amount }
+}
+fn output_at(index: u64, count: u64) -> CopyNote {
+    if index >= count { return CopyNote { asset: Hash::from_bytes(b"00000000000000000000000000000000"), serial: 0, amount: 0 } }
+    let note = ckb::group_output<Note>(index).data
+    return CopyNote { asset: note.asset, serial: note.serial, amount: note.amount }
+}
+
+fn conserved_arrays(before_asset: [Hash; 32], before_serial: [u64; 32], before_amount: [u64; 32],
+    after_asset: [Hash; 32], after_serial: [u64; 32], after_amount: [u64; 32], inputs: u64, outputs: u64) -> bool {
+    for i in 0..inputs { if before_amount[i] == 0 { return false } }
+    for i in 0..outputs { if after_amount[i] == 0 { return false } }
+    for i in 0..inputs {
+        let mut received: u128 = 0
+        let mut sent: u128 = 0
+        for j in 0..inputs {
+            if j > i && before_serial[i] == before_serial[j] { return false }
+            if before_asset[i] == before_asset[j] { received = received + (before_amount[j] as u128) }
+        }
+        for j in 0..outputs {
+            if before_asset[i] == after_asset[j] { sent = sent + (after_amount[j] as u128) }
+        }
+        if received != sent { return false }
+    }
+    // Output-only asset labels must not disappear from an input-keyed scan.
+    for i in 0..outputs {
+        let mut found = false
+        for j in 0..inputs { if after_asset[i] == before_asset[j] { found = true } }
+        if !found { return false }
+        for j in i+1..outputs { if after_serial[i] == after_serial[j] { return false } }
+    }
+    return true
+}
+
+action transfer() -> u64 {
+    verification
+    let inputs = ckb::cell_count(ckb::group_input<Note>(0))
+    let outputs = ckb::cell_count(ckb::group_output<Note>(0))
+    require inputs >= 1 && inputs <= 32
+    require outputs >= 1 && outputs <= 32
+    let before0 = input_at(0, inputs)
+    let before1 = input_at(1, inputs)
+    let before2 = input_at(2, inputs)
+    let before3 = input_at(3, inputs)
+    let before4 = input_at(4, inputs)
+    let before5 = input_at(5, inputs)
+    let before6 = input_at(6, inputs)
+    let before7 = input_at(7, inputs)
+    let before8 = input_at(8, inputs)
+    let before9 = input_at(9, inputs)
+    let before10 = input_at(10, inputs)
+    let before11 = input_at(11, inputs)
+    let before12 = input_at(12, inputs)
+    let before13 = input_at(13, inputs)
+    let before14 = input_at(14, inputs)
+    let before15 = input_at(15, inputs)
+    let before16 = input_at(16, inputs)
+    let before17 = input_at(17, inputs)
+    let before18 = input_at(18, inputs)
+    let before19 = input_at(19, inputs)
+    let before20 = input_at(20, inputs)
+    let before21 = input_at(21, inputs)
+    let before22 = input_at(22, inputs)
+    let before23 = input_at(23, inputs)
+    let before24 = input_at(24, inputs)
+    let before25 = input_at(25, inputs)
+    let before26 = input_at(26, inputs)
+    let before27 = input_at(27, inputs)
+    let before28 = input_at(28, inputs)
+    let before29 = input_at(29, inputs)
+    let before30 = input_at(30, inputs)
+    let before31 = input_at(31, inputs)
+    let before_asset = [before0.asset, before1.asset, before2.asset, before3.asset, before4.asset, before5.asset, before6.asset, before7.asset, before8.asset, before9.asset, before10.asset, before11.asset, before12.asset, before13.asset, before14.asset, before15.asset, before16.asset, before17.asset, before18.asset, before19.asset, before20.asset, before21.asset, before22.asset, before23.asset, before24.asset, before25.asset, before26.asset, before27.asset, before28.asset, before29.asset, before30.asset, before31.asset]
+    let before_serial = [before0.serial, before1.serial, before2.serial, before3.serial, before4.serial, before5.serial, before6.serial, before7.serial, before8.serial, before9.serial, before10.serial, before11.serial, before12.serial, before13.serial, before14.serial, before15.serial, before16.serial, before17.serial, before18.serial, before19.serial, before20.serial, before21.serial, before22.serial, before23.serial, before24.serial, before25.serial, before26.serial, before27.serial, before28.serial, before29.serial, before30.serial, before31.serial]
+    let before_amount = [before0.amount, before1.amount, before2.amount, before3.amount, before4.amount, before5.amount, before6.amount, before7.amount, before8.amount, before9.amount, before10.amount, before11.amount, before12.amount, before13.amount, before14.amount, before15.amount, before16.amount, before17.amount, before18.amount, before19.amount, before20.amount, before21.amount, before22.amount, before23.amount, before24.amount, before25.amount, before26.amount, before27.amount, before28.amount, before29.amount, before30.amount, before31.amount]
+    let after0 = output_at(0, outputs)
+    let after1 = output_at(1, outputs)
+    let after2 = output_at(2, outputs)
+    let after3 = output_at(3, outputs)
+    let after4 = output_at(4, outputs)
+    let after5 = output_at(5, outputs)
+    let after6 = output_at(6, outputs)
+    let after7 = output_at(7, outputs)
+    let after8 = output_at(8, outputs)
+    let after9 = output_at(9, outputs)
+    let after10 = output_at(10, outputs)
+    let after11 = output_at(11, outputs)
+    let after12 = output_at(12, outputs)
+    let after13 = output_at(13, outputs)
+    let after14 = output_at(14, outputs)
+    let after15 = output_at(15, outputs)
+    let after16 = output_at(16, outputs)
+    let after17 = output_at(17, outputs)
+    let after18 = output_at(18, outputs)
+    let after19 = output_at(19, outputs)
+    let after20 = output_at(20, outputs)
+    let after21 = output_at(21, outputs)
+    let after22 = output_at(22, outputs)
+    let after23 = output_at(23, outputs)
+    let after24 = output_at(24, outputs)
+    let after25 = output_at(25, outputs)
+    let after26 = output_at(26, outputs)
+    let after27 = output_at(27, outputs)
+    let after28 = output_at(28, outputs)
+    let after29 = output_at(29, outputs)
+    let after30 = output_at(30, outputs)
+    let after31 = output_at(31, outputs)
+    let after_asset = [after0.asset, after1.asset, after2.asset, after3.asset, after4.asset, after5.asset, after6.asset, after7.asset, after8.asset, after9.asset, after10.asset, after11.asset, after12.asset, after13.asset, after14.asset, after15.asset, after16.asset, after17.asset, after18.asset, after19.asset, after20.asset, after21.asset, after22.asset, after23.asset, after24.asset, after25.asset, after26.asset, after27.asset, after28.asset, after29.asset, after30.asset, after31.asset]
+    let after_serial = [after0.serial, after1.serial, after2.serial, after3.serial, after4.serial, after5.serial, after6.serial, after7.serial, after8.serial, after9.serial, after10.serial, after11.serial, after12.serial, after13.serial, after14.serial, after15.serial, after16.serial, after17.serial, after18.serial, after19.serial, after20.serial, after21.serial, after22.serial, after23.serial, after24.serial, after25.serial, after26.serial, after27.serial, after28.serial, after29.serial, after30.serial, after31.serial]
+    let after_amount = [after0.amount, after1.amount, after2.amount, after3.amount, after4.amount, after5.amount, after6.amount, after7.amount, after8.amount, after9.amount, after10.amount, after11.amount, after12.amount, after13.amount, after14.amount, after15.amount, after16.amount, after17.amount, after18.amount, after19.amount, after20.amount, after21.amount, after22.amount, after23.amount, after24.amount, after25.amount, after26.amount, after27.amount, after28.amount, after29.amount, after30.amount, after31.amount]
+    for i in 0..outputs {
+        let cell = ckb::group_output<Note>(i)
+        require cell.capacity >= ckb::cell_occupied_capacity(cell)
+    }
+    require conserved_arrays(before_asset, before_serial, before_amount, after_asset, after_serial, after_amount, inputs, outputs)
+    return 0
+}

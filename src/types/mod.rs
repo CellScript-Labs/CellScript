@@ -2,6 +2,9 @@ use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
 use crate::resolve::{FunctionDef, ModuleResolver, TypeDef};
 use std::collections::{HashMap, HashSet};
+mod allocated;
+mod cell_selection;
+mod nested;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CallableKind {
@@ -64,6 +67,7 @@ pub struct TypeEnv {
     vars: HashMap<String, Type>,
     mutability: HashMap<String, bool>,
     linear_states: HashMap<String, LinearState>,
+    affine_owners: HashSet<String>,
     parent: Option<Box<TypeEnv>>,
 }
 
@@ -83,11 +87,23 @@ impl Default for TypeEnv {
 
 impl TypeEnv {
     pub fn new() -> Self {
-        Self { vars: HashMap::new(), mutability: HashMap::new(), linear_states: HashMap::new(), parent: None }
+        Self {
+            vars: HashMap::new(),
+            mutability: HashMap::new(),
+            linear_states: HashMap::new(),
+            affine_owners: HashSet::new(),
+            parent: None,
+        }
     }
 
     pub fn child(&self) -> Self {
-        Self { vars: HashMap::new(), mutability: HashMap::new(), linear_states: HashMap::new(), parent: Some(Box::new(self.clone())) }
+        Self {
+            vars: HashMap::new(),
+            mutability: HashMap::new(),
+            linear_states: HashMap::new(),
+            affine_owners: HashSet::new(),
+            parent: Some(Box::new(self.clone())),
+        }
     }
 
     pub fn lookup(&self, name: &str) -> Option<&Type> {
@@ -99,6 +115,7 @@ impl TypeEnv {
     }
 
     pub fn insert(&mut self, name: String, ty: Type, is_linear: bool, is_mut: bool) {
+        self.affine_owners.remove(&name);
         self.vars.insert(name.clone(), ty);
         self.mutability.insert(name.clone(), is_mut);
         if is_linear {
@@ -206,6 +223,14 @@ impl TypeEnv {
         }
     }
 
+    fn is_affine_owner(&self, name: &str) -> bool {
+        if self.vars.contains_key(name) {
+            self.affine_owners.contains(name)
+        } else {
+            self.parent.as_ref().is_some_and(|parent| parent.is_affine_owner(name))
+        }
+    }
+
     fn merge_branch_linear_states(
         &mut self,
         then_env: &TypeEnv,
@@ -220,6 +245,10 @@ impl TypeEnv {
             let else_state = else_env.and_then(|env| env.linear_state(&name)).unwrap_or(before);
 
             let merged = match (then_returns, else_env.is_some(), else_returns) {
+                // A returning branch releases invocation-local owner storage.
+                // Only the implicit fallthrough path reaches subsequent code;
+                // Cell resources retain their explicit lifecycle obligations.
+                (true, false, _) if self.is_affine_owner(&name) => before,
                 (true, _, true) if then_state == else_state => then_state,
                 (true, true, false) => else_state,
                 (false, true, true) => then_state,
@@ -273,7 +302,7 @@ impl TypeEnv {
 
     pub fn check_linear_complete(&self) -> Result<()> {
         for (name, state) in &self.linear_states {
-            if *state == LinearState::Available {
+            if *state == LinearState::Available && !self.affine_owners.contains(name) {
                 return Err(CompileError::new(
                     format!("linear resource '{}' was not consumed, transferred, or destroyed", name),
                     Span::default(),
@@ -290,6 +319,7 @@ impl Clone for TypeEnv {
             vars: self.vars.clone(),
             mutability: self.mutability.clone(),
             linear_states: self.linear_states.clone(),
+            affine_owners: self.affine_owners.clone(),
             parent: self.parent.as_ref().map(|p| Box::new((**p).clone())),
         }
     }
@@ -298,6 +328,10 @@ impl Clone for TypeEnv {
 pub struct TypeChecker<'a> {
     env: TypeEnv,
     type_fields: HashMap<String, HashMap<String, Type>>,
+    nested_record_fields: HashMap<String, Vec<(String, Type)>>,
+    cell_role_catalogs: HashMap<String, CellRolesDef>,
+    collection_pools: HashMap<String, CollectionsDef>,
+    collection_constraint: bool,
     enum_variants: HashMap<String, Vec<String>>,
     enum_payload_variants: HashMap<String, HashSet<String>>,
     enum_variant_fields: HashMap<String, HashMap<String, Vec<Type>>>,
@@ -455,6 +489,10 @@ impl<'a> TypeChecker<'a> {
         Self {
             env: TypeEnv::new(),
             type_fields: HashMap::new(),
+            nested_record_fields: HashMap::new(),
+            cell_role_catalogs: HashMap::new(),
+            collection_pools: HashMap::new(),
+            collection_constraint: false,
             enum_variants: HashMap::new(),
             enum_payload_variants: HashMap::new(),
             enum_variant_fields: HashMap::new(),
@@ -555,6 +593,10 @@ impl<'a> TypeChecker<'a> {
                     );
                 }
                 Item::Struct(struct_def) => {
+                    self.nested_record_fields.insert(
+                        struct_def.name.clone(),
+                        struct_def.fields.iter().map(|field| (field.name.clone(), field.ty.clone())).collect(),
+                    );
                     if let Err(error) = register_type_id(&mut seen_type_ids, &struct_def.name, struct_def.type_id.as_ref()) {
                         diagnostics.push(error);
                     }
@@ -562,6 +604,13 @@ impl<'a> TypeChecker<'a> {
                         struct_def.name.clone(),
                         struct_def.fields.iter().map(|field| (field.name.clone(), field.ty.clone())).collect(),
                     );
+                }
+                Item::DataShape(_) => {}
+                Item::Collections(def) => {
+                    self.collection_pools.insert(def.name.clone(), def.clone());
+                }
+                Item::CellRoles(def) => {
+                    self.cell_role_catalogs.insert(def.name.clone(), def.clone());
                 }
                 Item::Invariant(_) => {}
                 Item::Enum(enum_def) => {
@@ -937,6 +986,16 @@ impl<'a> TypeChecker<'a> {
 
     fn check_item(&mut self, item: &Item) -> Result<()> {
         match item {
+            Item::Collections(def) => {
+                crate::allocated_values::validate_resolved_declaration(def, |ty| self.allocated_value_width(ty, &mut HashSet::new()))
+            }
+            Item::DataShape(def) => self
+                .validate_nested_type(&crate::nested_values::NestedType::Values(crate::nested_values::declared_values(def)?))
+                .map_err(|mut error| {
+                    error.span = def.span;
+                    error
+                }),
+            Item::CellRoles(def) => self.validate_cell_role_contract(&crate::cell_selection::named_contract(def)?, def.span),
             Item::Resource(r) => self.check_resource(r),
             Item::Shared(s) => self.check_shared(s),
             Item::Receipt(r) => self.check_receipt(r),
@@ -1488,6 +1547,10 @@ impl<'a> TypeChecker<'a> {
 
     fn validate_schema_fields(&self, fields: &[Field], item_kind: &str, item_name: &str) -> Result<()> {
         let mut seen = HashSet::new();
+        let has_nested_values = fields.iter().any(|field| {
+            matches!(&field.ty, Type::Named(name)
+            if matches!(crate::nested_values::parsed(name), Some(crate::nested_values::NestedType::Values(_))))
+        });
         for field in fields {
             if field.name == "_" {
                 return Err(CompileError::new(
@@ -1504,7 +1567,25 @@ impl<'a> TypeChecker<'a> {
                     field.span,
                 ));
             }
+            self.reject_collection_container(&field.ty, field.span)?;
             self.validate_type(&field.ty)?;
+            if crate::cell_data_view::invocation_local(&field.ty) {
+                return Err(CompileError::new(
+                    "ExactCellSelection and CellDataView cannot be stored in a field or serialized",
+                    field.span,
+                ));
+            }
+            let direct_nested = matches!(&field.ty, Type::Named(name)
+                if matches!(crate::nested_values::parsed(name), Some(crate::nested_values::NestedType::Values(_))));
+            if nested::contains_nested_type(&field.ty) && !(matches!(item_kind, "resource" | "shared" | "receipt") && direct_nested) {
+                return Err(CompileError::new("only a direct NestedValues field may be encoded in a Cell; derived views and nested view containers cannot be stored", field.span));
+            }
+            if has_nested_values && !direct_nested && crate::nested_values::fixed_field_width(&field.ty).is_none() {
+                return Err(CompileError::new(
+                    "a Cell containing NestedValues requires bounded nested fields or fixed unsigned/Hash/Address/byte-array fields",
+                    field.span,
+                ));
+            }
             self.reject_open_handle_value_type(
                 &field.ty,
                 &format!("{} '{}' field '{}'", item_kind, item_name, field.name),
@@ -1544,6 +1625,7 @@ impl<'a> TypeChecker<'a> {
                 return Err(CompileError::new(format!("duplicate enum variant '{}::{}'", enum_def.name, variant.name), variant.span));
             }
             for field_ty in &variant.fields {
+                self.reject_collection_container(field_ty, variant.span)?;
                 self.validate_type(field_ty)?;
                 self.validate_stored_type_has_no_references(
                     field_ty,
@@ -1652,6 +1734,7 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn check_const(&mut self, const_def: &ConstDef) -> Result<()> {
+        self.reject_collection_container(&const_def.ty, const_def.span)?;
         let mut env = self.env.clone();
         let value_ty = self.infer_expr_with_expected_type(&mut env, &const_def.value, &const_def.ty, const_def.span)?;
         if !self.types_equal(&value_ty, &const_def.ty) {
@@ -2355,12 +2438,14 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn check_function(&mut self, function: &FnDef) -> Result<()> {
+        let borrow_depth = self.active_borrows.len();
         let previous_callable = self.current_callable.replace(CallableKind::Function);
         let previous_return_type = self.current_return_type.replace(function.return_type.clone());
         let result = (|| {
             let mut env = self.env.child();
 
             self.bind_callable_params(&mut env, &function.params, "function", &function.name)?;
+            self.bind_collection_helper_borrows(&mut env, &function.params);
             if let Some(return_type) = &function.return_type {
                 self.validate_callable_return_type("function", &function.name, return_type, function.span)?;
             }
@@ -2388,16 +2473,19 @@ impl<'a> TypeChecker<'a> {
         })();
         self.current_callable = previous_callable;
         self.current_return_type = previous_return_type;
+        self.active_borrows.truncate(borrow_depth);
         result
     }
 
     fn check_function_diagnostics(&mut self, function: &FnDef) -> Vec<CompileError> {
+        let borrow_depth = self.active_borrows.len();
         let previous_callable = self.current_callable.replace(CallableKind::Function);
         let previous_return_type = self.current_return_type.replace(function.return_type.clone());
         let mut diagnostics = Vec::new();
         let mut env = self.env.child();
 
         push_diagnostic(&mut diagnostics, self.bind_callable_params(&mut env, &function.params, "function", &function.name));
+        self.bind_collection_helper_borrows(&mut env, &function.params);
         if let Some(return_type) = &function.return_type {
             push_diagnostic(
                 &mut diagnostics,
@@ -2433,6 +2521,7 @@ impl<'a> TypeChecker<'a> {
 
         self.current_callable = previous_callable;
         self.current_return_type = previous_return_type;
+        self.active_borrows.truncate(borrow_depth);
         diagnostics
     }
 
@@ -2518,7 +2607,17 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn validate_callable_return_type(&self, callable_kind: &str, callable_name: &str, return_type: &Type, span: Span) -> Result<()> {
+        self.reject_collection_container(return_type, span)?;
         self.validate_type(return_type)?;
+        if crate::cell_data_view::invocation_local(return_type) {
+            return Err(CompileError::new("ExactCellSelection and CellDataView cannot escape their invocation", span));
+        }
+        if nested::contains_nested_type(return_type) {
+            return Err(CompileError::new(
+                "nested values and derived views cannot escape their invocation through a return value",
+                span,
+            ));
+        }
         if self.type_contains_opening(return_type) {
             return Err(CompileError::new(
                 format!(
@@ -2715,7 +2814,12 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn named_type_contains_reference(&self, name: &str) -> bool {
-        name.contains("read_ref ") || name.contains('&')
+        name.contains("read_ref ")
+            || name.contains('&')
+            || matches!(
+                crate::nested_values::parsed(name),
+                Some(crate::nested_values::NestedType::BytesView { .. } | crate::nested_values::NestedType::RecordView { .. })
+            )
     }
 
     fn named_type_generic_payload<'b>(&self, name: &'b str) -> Option<&'b str> {
@@ -2820,6 +2924,37 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn validate_callable_param_source(&self, param: &Param, callable_kind: &str, callable_name: &str) -> Result<()> {
+        if self.contains_collection_owner(&param.ty)
+            && !(callable_kind == "function"
+                && self.collection_reference(&param.ty).is_some()
+                && param.source == ParamSource::Default
+                && !param.is_mut
+                && self.nested_readonly_helper(callable_name))
+        {
+            return Err(CompileError::new(
+                "collection parameters require an immutable &Owner in a Pure/ReadOnly helper; owners cannot cross entry boundaries",
+                param.span,
+            ));
+        }
+        if crate::cell_data_view::invocation_local(&param.ty) {
+            return Err(CompileError::new(
+                "ExactCellSelection and CellDataView must be constructed locally, never supplied through a callable parameter",
+                param.span,
+            ));
+        }
+        if nested::contains_nested_type(&param.ty)
+            && !(!param.is_mut
+                && !param.is_ref
+                && ((nested::whole_values(&param.ty)
+                    && param.source == ParamSource::Witness
+                    && matches!(callable_kind, "action" | "lock"))
+                    || (param.source == ParamSource::Default
+                        && nested::direct_view(&param.ty)
+                        && callable_kind == "function"
+                        && self.nested_readonly_helper(callable_name))))
+        {
+            return Err(CompileError::new("nested parameters require an immutable value binding on a Pure/ReadOnly helper; only complete NestedValues may enter through an explicit action or lock witness binding", param.span));
+        }
         if self.type_contains_opening(&param.ty)
             && !matches!(&param.ty, Type::Named(name) if crate::commitment_contract::opening_inner_type(name).is_some())
         {
@@ -3040,7 +3175,7 @@ impl<'a> TypeChecker<'a> {
             Type::Ref(inner) | Type::MutRef(inner) => self.type_contains_reference(inner),
             ty => self.type_contains_reference(ty),
         };
-        if nested_reference {
+        if nested_reference && !nested::direct_view(&param.ty) {
             return Err(CompileError::new(
                 format!(
                     "parameter '{}' in {} '{}' cannot contain nested reference type {}; references are only supported as top-level callable parameter types",
@@ -3070,6 +3205,21 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn validate_callable_param_state_authority(&self, param: &Param, callable_kind: &str, callable_name: &str) -> Result<()> {
+        // A typed transaction view carries a source/index word, not the Cell
+        // itself. Permit that word through immutable read-only helpers without
+        // exempting containers, references or public entry ABI parameters from
+        // the ordinary Cell-ownership checks below.
+        if callable_kind == "function"
+            && param.source == ParamSource::Default
+            && !param.is_mut
+            && matches!(&param.ty, Type::Named(name) if crate::cell_data_view::transaction_schema(name).is_some())
+            && self
+                .functions
+                .get(callable_name)
+                .is_some_and(|signature| matches!(signature.effect, EffectClass::Pure | EffectClass::ReadOnly))
+        {
+            return Ok(());
+        }
         if callable_kind != "action" && matches!(param.ty, Type::MutRef(_)) {
             return Err(CompileError::new(
                 format!(
@@ -3161,6 +3311,16 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn check_stmt_diagnostics(&mut self, env: &mut TypeEnv, stmt: &Stmt, diagnostics: &mut Vec<CompileError>) {
+        if let Stmt::For(stmt) = stmt {
+            match self.check_collection_for(env, stmt) {
+                Ok(true) => return,
+                Err(error) => {
+                    diagnostics.push(error);
+                    return;
+                }
+                Ok(false) => {}
+            }
+        }
         match stmt {
             Stmt::Let(let_stmt) => {
                 if let Err(error) = self.check_stmt(env, stmt) {
@@ -3569,10 +3729,35 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn check_stmt(&mut self, env: &mut TypeEnv, stmt: &Stmt) -> Result<()> {
+        if let Stmt::For(stmt) = stmt
+            && self.check_collection_for(env, stmt)?
+        {
+            return Ok(());
+        }
         match stmt {
             Stmt::Let(let_stmt) => {
                 self.reject_direct_borrow_escape(&let_stmt.value, let_stmt.span)?;
                 let ty = self.infer_let_value_type(env, let_stmt)?;
+                if crate::cell_data_view::invocation_local(&ty)
+                    && !matches!(&ty, Type::Named(name) if name.starts_with("ExactCellSelection<") || crate::cell_data_view::schema(name).is_some())
+                {
+                    return Err(CompileError::new(
+                        "ExactCellSelection and CellDataView cannot be wrapped in a reference or container",
+                        let_stmt.span,
+                    ));
+                }
+                if let_stmt.is_mut && crate::cell_data_view::invocation_local(&ty) {
+                    return Err(CompileError::new(
+                        "ExactCellSelection and CellDataView are immutable; mutable aliases are not permitted",
+                        let_stmt.span,
+                    ));
+                }
+                if let_stmt.is_mut && nested::contains_nested_type(&ty) {
+                    return Err(CompileError::new(
+                        "nested values and derived views are read-only; a mutable alias is not permitted",
+                        let_stmt.span,
+                    ));
+                }
                 if let Some(ref declared_ty) = let_stmt.ty {
                     self.validate_type(declared_ty)?;
                     if !self.types_equal(&ty, declared_ty) {
@@ -3730,7 +3915,8 @@ impl<'a> TypeChecker<'a> {
                 (borrow_stmt.root.clone(), root_ty)
             }
         };
-        if env.linear_state(&linear_root) != Some(LinearState::Available) {
+        let collection_parameter = env.lookup(&linear_root).is_some_and(|ty| self.collection_reference(ty).is_some());
+        if !collection_parameter && env.linear_state(&linear_root) != Some(LinearState::Available) {
             return Err(CompileError::new(format!("borrow root '{}' is no longer available", linear_root), borrow_stmt.span));
         }
         for field in &borrow_stmt.path {
@@ -3870,6 +4056,20 @@ impl<'a> TypeChecker<'a> {
                 ) && self.is_numeric_type(expected_ty) =>
             {
                 self.infer_numeric_binary_with_expected_type(env, binary, expected_ty, span)
+            }
+            Expr::Tuple(elems) if matches!(expected_ty, Type::Tuple(_)) => {
+                self.reject_direct_borrow_escape(expr, span)?;
+                let Type::Tuple(expected) = expected_ty else { unreachable!() };
+                if elems.len() != expected.len() {
+                    return Err(CompileError::new("tuple literal arity differs from its expected type", span));
+                }
+                for (elem, ty) in elems.iter().zip(expected) {
+                    let actual = self.infer_expr_with_expected_type(env, elem, ty, expr_span(elem))?;
+                    if !self.initializer_types_equal(&actual, ty) {
+                        return Err(CompileError::new("tuple literal field differs from its expected type", span));
+                    }
+                }
+                Ok(expected_ty.clone())
             }
             Expr::Array(elems) => self.infer_array_literal_with_expected_type(env, elems, expected_ty, span),
             Expr::Block(stmts) => self.infer_tail_block_value_with_expected_type(env, stmts, expected_ty, span),
@@ -4025,6 +4225,25 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn infer_expr(&mut self, env: &mut TypeEnv, expr: &Expr) -> Result<Type> {
+        let previous = self.collection_constraint;
+        if matches!(expr, Expr::Require(_) | Expr::RequireBlock(_) | Expr::Assert(_)) {
+            self.collection_constraint = true;
+        }
+        let result = self.infer_expr_inner(env, expr);
+        self.collection_constraint = previous;
+        if let Ok(ty) = &result
+            && self.contains_collection_owner(ty)
+            && !(self.collection_owner(ty).is_some() && matches!(expr, Expr::Identifier(_) | Expr::Call(_)))
+        {
+            return Err(CompileError::new(
+                "collection owners and references cannot be wrapped or escape a local owner binding",
+                expr_span(expr),
+            ));
+        }
+        result
+    }
+
+    fn infer_expr_inner(&mut self, env: &mut TypeEnv, expr: &Expr) -> Result<Type> {
         self.validate_expr_allowed_in_current_callable(expr)?;
         match expr {
             Expr::Integer(value) => Ok(if *value <= u64::MAX as u128 { Type::U64 } else { Type::U128 }),
@@ -4033,6 +4252,9 @@ impl<'a> TypeChecker<'a> {
             Expr::ByteString(bytes) => Ok(Type::Array(Box::new(Type::U8), bytes.len())),
             Expr::Identifier(name) => {
                 if let Some(ty) = env.lookup(name).cloned() {
+                    if self.collection_owner(&ty).is_some() && env.linear_state(name) != Some(LinearState::Available) {
+                        return Err(CompileError::new(format!("collection owner '{name}' was moved or dropped"), expr_span(expr)));
+                    }
                     if matches!(&ty, Type::Named(opening) if crate::commitment_contract::opening_inner_type(opening).is_some()) {
                         return Err(CompileError::new(
                             format!(
@@ -4050,6 +4272,9 @@ impl<'a> TypeChecker<'a> {
                 } else if let Some(ty) = self.flow_state_expr_type(name, expr_span(expr))? {
                     Ok(ty)
                 } else if let Some((prefix, _)) = name.split_once("::") {
+                    if self.collection_pools.contains_key(prefix) {
+                        return Err(CompileError::new("collection owner values must originate from Owner::new()", expr_span(expr)));
+                    }
                     Ok(Type::Named(prefix.to_string()))
                 } else {
                     Err(CompileError::new(format!("undefined variable '{}'", name), Span::default()))
@@ -4060,6 +4285,18 @@ impl<'a> TypeChecker<'a> {
                 self.reject_direct_borrow_escape(expr, bin.span)?;
                 let left_ty = self.infer_expr(env, &bin.left)?;
                 let right_ty = self.infer_expr(env, &bin.right)?;
+                if self.contains_collection_owner(&left_ty) || self.contains_collection_owner(&right_ty) {
+                    return Err(CompileError::new(
+                        "collection owners have no pointer identity, comparison or arithmetic operations",
+                        bin.span,
+                    ));
+                }
+                if crate::cell_data_view::invocation_local(&left_ty) || crate::cell_data_view::invocation_local(&right_ty) {
+                    return Err(CompileError::new(
+                        "ExactCellSelection and CellDataView have no scalar, pointer-identity or arithmetic operations",
+                        bin.span,
+                    ));
+                }
 
                 match bin.op {
                     BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
@@ -4069,6 +4306,12 @@ impl<'a> TypeChecker<'a> {
                         self.numeric_binary_result_type(&bin.left, &left_ty, &bin.right, &right_ty, bin.span)
                     }
                     BinaryOp::Eq | BinaryOp::Ne => {
+                        if nested::contains_nested_type(&left_ty) || nested::contains_nested_type(&right_ty) {
+                            return Err(CompileError::new(
+                                "nested views cannot be compared as pointers; compare their declared fields or indexed bytes",
+                                bin.span,
+                            ));
+                        }
                         if !self.binary_operand_types_compatible(&bin.left, &left_ty, &bin.right, &right_ty, bin.span)? {
                             return Err(CompileError::new("comparison requires matching types", bin.span));
                         }
@@ -4155,6 +4398,15 @@ impl<'a> TypeChecker<'a> {
                 }
             }
             Expr::Call(call) => {
+                if let Some(ty) = self.infer_collection_call(env, call)? {
+                    return Ok(ty);
+                }
+                if let Some(ty) = self.infer_collection_helper_call(env, call)? {
+                    return Ok(ty);
+                }
+                if let Some(result) = self.infer_exact_role_verification(env, call)? {
+                    return Ok(result);
+                }
                 if let Some(result) = self.infer_commitment_open_call(env, call)? {
                     return Ok(result);
                 }
@@ -4170,6 +4422,27 @@ impl<'a> TypeChecker<'a> {
                 for arg in &call.args {
                     arg_types.push(self.infer_expr(env, arg)?);
                 }
+                if arg_types.iter().any(|ty| self.contains_collection_owner(ty)) {
+                    return Err(CompileError::new(
+                        "collection owners cannot cross a call boundary; pass &owner to a declared read-only helper",
+                        call.span,
+                    ));
+                }
+                if arg_types.iter().any(crate::cell_data_view::invocation_local) {
+                    return Err(CompileError::new(
+                        "ExactCellSelection and CellDataView cannot cross a call boundary; read their fields in the owning invocation",
+                        call.span,
+                    ));
+                }
+                if arg_types.iter().any(nested::contains_nested_type)
+                    && !(arg_types.iter().filter(|ty| nested::contains_nested_type(ty)).all(nested::direct_view)
+                        && matches!(call.func.as_ref(), Expr::Identifier(name) if self.nested_readonly_helper(name)))
+                {
+                    return Err(CompileError::new(
+                        "nested values and views require a Pure/ReadOnly helper with the same declared bounds and no reference wrapper",
+                        call.span,
+                    ));
+                }
                 let return_type = self.infer_call_type(env, call, &arg_types)?;
                 for arg in &call.args {
                     self.mark_expr_as_moved(env, arg)?;
@@ -4177,6 +4450,7 @@ impl<'a> TypeChecker<'a> {
                 Ok(return_type)
             }
             Expr::FieldAccess(field) => {
+                self.reject_collection_member_escape(env, expr)?;
                 let expr_ty = self.infer_expr(env, &field.expr)?;
                 let field_ty = self.lookup_field_type(&expr_ty, &field.field, field.span)?;
                 if self.is_linear_type(&field_ty) {
@@ -4188,9 +4462,15 @@ impl<'a> TypeChecker<'a> {
                 Ok(field_ty)
             }
             Expr::Index(index) => {
+                if let Some(ty) = self.infer_collection_index(env, index)? {
+                    return Ok(ty);
+                }
                 self.reject_direct_borrow_escape(expr, index.span)?;
                 let expr_ty = self.infer_expr(env, &index.expr)?;
                 let index_ty = self.infer_expr(env, &index.index)?;
+                if nested::contains_nested_type(&expr_ty) && !matches!(index_ty, Type::U8 | Type::U16 | Type::U32 | Type::U64) {
+                    return Err(CompileError::new("nested view indexes require u8, u16, u32 or u64", index.span));
+                }
                 if !self.is_numeric_type(&index_ty) {
                     return Err(CompileError::new("index expression requires a numeric index", index.span));
                 }
@@ -4799,7 +5079,7 @@ impl<'a> TypeChecker<'a> {
 
     fn require_named_cell_identifier(&mut self, env: &mut TypeEnv, expr: &Expr, operation: &str, role: &str) -> Result<Type> {
         let ty = self.infer_expr(env, expr)?;
-        if !self.is_linear_type(&ty) {
+        if !self.is_linear_type(&ty) || self.contains_collection_owner(&ty) {
             return Err(CompileError::new(format!("{} {} must be a cell-backed value", operation, role), expr_span(expr)));
         }
         if !matches!(expr, Expr::Identifier(_)) {
@@ -5828,6 +6108,9 @@ impl<'a> TypeChecker<'a> {
                 }
                 let is_linear = self.is_linear_type(ty);
                 env.bind_new(name.clone(), ty.clone(), is_linear, is_mut, span)?;
+                if self.collection_owner(ty).is_some() {
+                    env.affine_owners.insert(name.clone());
+                }
                 Ok(())
             }
             BindingPattern::Wildcard => {
@@ -6099,12 +6382,21 @@ impl<'a> TypeChecker<'a> {
         callee_kind: CallableKind,
         callee_effect: EffectClass,
         params: &[Type],
+        arg_types: &[Type],
         call: &CallExpr,
     ) -> Result<()> {
         for (index, arg) in call.args.iter().enumerate() {
             let Some(borrow) = self.active_borrow_used_by_expr(arg) else {
                 continue;
             };
+            // Collection reads return copies. A scalar/tuple computed from a
+            // borrow does not retain it; the argument has already been checked
+            // without allowing owner or member-handle materialization.
+            if self.collection_owner(&borrow.root_ty).is_some()
+                && arg_types.get(index).is_some_and(|ty| !self.contains_collection_owner(ty) && !self.type_contains_reference(ty))
+            {
+                continue;
+            }
             if !matches!(arg, Expr::Identifier(name) if name == &borrow.binding) {
                 return Err(CompileError::new(
                     format!("borrow '{}' cannot escape borrow block rooted at linear value '{}'", borrow.binding, borrow.root),
@@ -6340,6 +6632,13 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn index_result_type(&self, ty: &Type, span: Span) -> Result<Type> {
+        if let Type::Named(name) = ty {
+            match crate::nested_values::parsed(name) {
+                Some(crate::nested_values::NestedType::Values(values)) => return Ok(Type::Named(values.item_type())),
+                Some(crate::nested_values::NestedType::BytesView { .. }) => return Ok(Type::U8),
+                _ => {}
+            }
+        }
         match ty {
             Type::Array(elem, _) => Ok((**elem).clone()),
             Type::Ref(inner) | Type::MutRef(inner) => self.index_result_type(inner, span),
@@ -6351,6 +6650,10 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn iter_item_type(&self, ty: &Type, span: Span) -> Result<Type> {
+        if matches!(ty, Type::Named(name) if matches!(crate::nested_values::parsed(name), Some(crate::nested_values::NestedType::Values(_) | crate::nested_values::NestedType::BytesView { .. })))
+        {
+            return self.index_result_type(ty, span);
+        }
         match ty {
             Type::Array(elem, _) => Ok((**elem).clone()),
             Type::Ref(inner) => Ok(Type::Ref(Box::new(self.iter_item_type(inner, span)?))),
@@ -6374,7 +6677,14 @@ impl<'a> TypeChecker<'a> {
         match ty {
             Type::Array(_, _) => true,
             Type::Ref(inner) | Type::MutRef(inner) => self.supports_collection_len(inner),
-            Type::Named(name) => name == "Vec" || self.parse_named_collection_item_type(name).is_some(),
+            Type::Named(name) => {
+                name == "Vec"
+                    || self.parse_named_collection_item_type(name).is_some()
+                    || matches!(
+                        crate::nested_values::parsed(name),
+                        Some(crate::nested_values::NestedType::Values(_) | crate::nested_values::NestedType::BytesView { .. })
+                    )
+            }
             _ => false,
         }
     }
@@ -6410,6 +6720,19 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn lookup_field_type(&self, ty: &Type, field: &str, span: Span) -> Result<Type> {
+        if let Type::Named(owner) = ty
+            && owner.starts_with("ExactCellSelection<")
+        {
+            return crate::cell_selection::project_role_type(owner, field)
+                .map(Type::Named)
+                .ok_or_else(|| CompileError::new(format!("selection has no available named role '{field}'"), span));
+        }
+        if let Some(ty) = self.cell_data_view_field_type(ty, field, span)? {
+            return Ok(ty);
+        }
+        if let Some(ty) = self.nested_field_type(ty, field)? {
+            return Ok(ty);
+        }
         match ty {
             Type::U64 if field == "lock" => Ok(Type::Named(CKB_LOCK_SCRIPT_REF_TYPE.to_string())),
             Type::U64 if field == "type" || field == "type_script" => Ok(Type::Named(CKB_TYPE_SCRIPT_REF_TYPE.to_string())),
@@ -6911,7 +7234,7 @@ impl<'a> TypeChecker<'a> {
                 }
                 if let Some(signature) = self.functions.get(name).cloned() {
                     self.validate_call_allowed(name, signature.kind, signature.effect, call.span)?;
-                    self.validate_borrow_call(name, signature.kind, signature.effect, &signature.params, call)?;
+                    self.validate_borrow_call(name, signature.kind, signature.effect, &signature.params, arg_types, call)?;
                     self.validate_call_args(name, &signature.params, arg_types, &call.args, call.span)?;
                     return Ok(signature.return_type.unwrap_or(Type::Unit));
                 }
@@ -6920,7 +7243,7 @@ impl<'a> TypeChecker<'a> {
                     let effect = function_def_effect(&function);
                     self.validate_call_allowed(name, kind, effect, call.span)?;
                     let params = function_def_param_types(&function);
-                    self.validate_borrow_call(name, kind, effect, &params, call)?;
+                    self.validate_borrow_call(name, kind, effect, &params, arg_types, call)?;
                     self.validate_call_args(name, &params, arg_types, &call.args, call.span)?;
                     return Ok(self.function_return_type(&function).unwrap_or(Type::Unit));
                 }
@@ -6929,7 +7252,7 @@ impl<'a> TypeChecker<'a> {
                         && let Some(signature) = self.functions.get(suffix).cloned()
                     {
                         self.validate_call_allowed(name, signature.kind, signature.effect, call.span)?;
-                        self.validate_borrow_call(name, signature.kind, signature.effect, &signature.params, call)?;
+                        self.validate_borrow_call(name, signature.kind, signature.effect, &signature.params, arg_types, call)?;
                         self.validate_call_args(name, &signature.params, arg_types, &call.args, call.span)?;
                         return Ok(signature.return_type.unwrap_or(Type::Unit));
                     }
@@ -8144,6 +8467,15 @@ impl<'a> TypeChecker<'a> {
             }
             Expr::FieldAccess(field) => {
                 let receiver_ty = self.infer_expr(env, &field.expr)?;
+                if let Some(result) = self.infer_named_role_method(&receiver_ty, call, arg_types)? {
+                    return Ok(result);
+                }
+                if nested::contains_nested_type(&receiver_ty) && !matches!(field.field.as_str(), "len" | "is_empty") {
+                    return Err(CompileError::new(
+                        "nested values and derived views are read-only; only len/is_empty and indexed or field reads are supported",
+                        call.span,
+                    ));
+                }
                 match field.field.as_str() {
                     "type_hash" => {
                         self.validate_builtin_arity(&field.field, 0, arg_types, call.span)?;
@@ -8730,6 +9062,32 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn validate_named_type(&self, name: &str) -> Result<()> {
+        if self.collection_pools.contains_key(name) {
+            return Ok(());
+        }
+        if crate::cell_selection::contains_selection(&Type::Named(name.to_string())) {
+            let Some(selection) = crate::cell_selection::parse_selection_type(name) else {
+                return Err(CompileError::new("ExactCellSelection cannot be nested in a container", Span::default()));
+            };
+            if selection.schemas.iter().any(|role| self.resolve_cell_type_kind(role).is_none()) {
+                return Err(CompileError::new("ExactCellSelection requires 1–8 nominal Cell types", Span::default()));
+            }
+            if let Some(catalog) = &selection.catalog {
+                let declaration = self
+                    .cell_role_catalogs
+                    .get(catalog)
+                    .ok_or_else(|| CompileError::new("selection refers to an unknown local catalog", Span::default()))?;
+                let mut root = selection;
+                root.selected = None;
+                if root.encode() != crate::cell_selection::selection_type(&crate::cell_selection::named_contract(declaration)?) {
+                    return Err(CompileError::new("selection role names or schemas differ from their catalog", Span::default()));
+                }
+            }
+            return Ok(());
+        }
+        if let Some(nested) = crate::nested_values::parse(name)? {
+            return self.validate_nested_type(&nested);
+        }
         let base_name = name.split('<').next().unwrap_or(name);
         match base_name {
             "Option" | "Result" => {
@@ -8823,7 +9181,7 @@ impl<'a> TypeChecker<'a> {
             ));
         }
 
-        if matches!(base_name, CKB_INPUT_VIEW_TYPE | CKB_OUTPUT_VIEW_TYPE) {
+        if matches!(base_name, CKB_INPUT_VIEW_TYPE | CKB_OUTPUT_VIEW_TYPE | "CellDataView") {
             let inner = name
                 .split_once('<')
                 .and_then(|(_, rest)| rest.strip_suffix('>'))
@@ -9080,7 +9438,7 @@ impl<'a> TypeChecker<'a> {
         span: Span,
     ) -> Result<(Type, String)> {
         let ty = self.infer_expr(env, expr)?;
-        if !self.is_linear_type(&ty) {
+        if !self.is_linear_type(&ty) || self.contains_collection_owner(&ty) {
             return Err(CompileError::new(format!("{} requires a cell-backed linear value", operation), span));
         }
         match expr {
@@ -9201,7 +9559,7 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn is_linear_type(&self, ty: &Type) -> bool {
-        self.is_linear_type_with_seen(ty, &mut HashSet::new())
+        self.collection_owner(ty).is_some() || self.is_linear_type_with_seen(ty, &mut HashSet::new())
     }
 
     fn is_linear_type_with_seen(&self, ty: &Type, visiting: &mut HashSet<String>) -> bool {
@@ -9813,6 +10171,9 @@ fn lock_args_static_type_len(ty: &Type) -> Option<usize> {
 
 fn item_symbol_name_and_span(item: &Item) -> Option<(&str, Span)> {
     match item {
+        Item::DataShape(def) => Some((&def.name, def.span)),
+        Item::Collections(def) => Some((&def.name, def.span)),
+        Item::CellRoles(def) => Some((&def.name, def.span)),
         Item::Resource(def) => Some((&def.name, def.span)),
         Item::Shared(def) => Some((&def.name, def.span)),
         Item::Receipt(def) => Some((&def.name, def.span)),

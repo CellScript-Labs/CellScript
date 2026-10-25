@@ -936,6 +936,20 @@ fn escape_markdown_table_cell(input: &str) -> String {
 
 fn item_doc(item: &Item) -> Option<ItemDoc> {
     match item {
+        Item::Collections(def) => Some(ItemDoc {
+            kind: "collections".into(), name: def.name.clone(), signature: format!("collections {}", def.name),
+            summary: format!("Experimental owned collection declaration: {} shared arena bytes, {} allocation events, {} members; local operations and read-only helpers are experimental; independent allocation proof remains pending.", def.bytes, def.allocations, def.members.len()),
+        }),
+        Item::DataShape(def) => Some(ItemDoc {
+            kind: "data_shape".into(), name: def.name.clone(), signature: format!("data_shape {}", def.name),
+            summary: format!("Experimental bounded codec shape: element {}; items <= {}, payload bytes <= {}, encoded bytes <= {}. Entry-witness budget is separate.", crate::generics::render_type(&def.element), def.limits.items, def.limits.payload_bytes, def.limits.encoded_bytes),
+        }),
+        Item::CellRoles(def) => Some(ItemDoc {
+            kind: "cell_roles".into(),
+            name: def.name.clone(),
+            signature: format!("cell_roles {}", def.name),
+            summary: "Experimental named exact-role policy with immutable role projections and typed reads; stable artifact admission is pending.".into(),
+        }),
         Item::Use(_) => None,
         Item::Resource(resource) => Some(ItemDoc {
             kind: "resource".to_string(),
@@ -1232,6 +1246,9 @@ fn escape_html(input: &str) -> String {
 /// Extract a documentable name from an AST item for cross-reference indexing.
 fn item_name_for_xref(item: &Item) -> Option<String> {
     match item {
+        Item::DataShape(def) => Some(def.name.clone()),
+        Item::Collections(def) => Some(def.name.clone()),
+        Item::CellRoles(def) => Some(def.name.clone()),
         Item::Resource(r) => Some(r.name.clone()),
         Item::Shared(s) => Some(s.name.clone()),
         Item::Receipt(r) => Some(r.name.clone()),
@@ -1251,6 +1268,18 @@ fn item_name_for_xref(item: &Item) -> Option<String> {
 mod tests {
     use super::*;
     use crate::{lexer, parser};
+
+    #[test]
+    fn named_collections_docs_state_the_source_admission_boundary() {
+        let source = include_str!("../../tests/syntax_combo/seeds/named-collections.cell");
+        let ast = crate::frontend::parse(source, crate::NEXT_EDITION).unwrap();
+        let doc = item_doc(&ast.items[0]).unwrap();
+        assert_eq!(doc.kind, "collections");
+        assert!(doc.summary.contains("8192 shared arena bytes"));
+        assert!(doc
+            .summary
+            .contains("local operations and read-only helpers are experimental; independent allocation proof remains pending"));
+    }
 
     #[test]
     fn docgen_emits_markdown_for_action() {

@@ -1,0 +1,41 @@
+// audit:edition=2027
+// audit:phase=accept
+
+module named_nested_helpers
+
+struct Entry { id: u8, payload: Vec<u8> }
+data_shape Messages {
+    element: Vec<u8>,
+    limits { items: 3, payload_bytes: 8, encoded_bytes: 128 }
+}
+data_shape Entries {
+    element: Entry,
+    limits { items: 3, payload_bytes: 8, encoded_bytes: 128 }
+}
+
+fn message_total(values: Messages) -> u64 {
+    let mut total = 0
+    for message in values {
+        for byte in message { total = total + (byte as u64) }
+    }
+    return total
+}
+
+fn record_total(values: Entries) -> u64 {
+    let mut total = 0
+    for entry in values {
+        total = total + (entry.id as u64)
+        for byte in entry.payload { total = total + (byte as u64) }
+    }
+    return total
+}
+
+fn total(messages: Messages, entries: Entries) -> u64 {
+    let alias = messages
+    return message_total(alias) + record_total(entries)
+}
+
+action inspect(witness messages: Messages, witness entries: Entries, witness expected: u64) -> u64 {
+    require total(messages, entries) == expected
+    return 0
+}

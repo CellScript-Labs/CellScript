@@ -1,0 +1,47 @@
+// audit:edition=2027
+// audit:phase=accept
+
+module named_selection
+resource Order has store { id: u64, amount: u64 }
+cell_roles Settlement {
+    limits {
+        input_scan: 64,
+        output_scan: 64,
+        selected_per_side: 32,
+        aggregate_bytes: 32768,
+    }
+    orders: Order {
+        type_hash: "0x1111111111111111111111111111111111111111111111111111111111111111",
+        lock_hash: "0x2222222222222222222222222222222222222222222222222222222222222222",
+        identity: id,
+        authority: observe,
+        correspondence: preserve,
+        inputs: 1..=16,
+        outputs: 1..=16,
+    }
+    refunds: Order {
+        type_hash: "0x3333333333333333333333333333333333333333333333333333333333333333",
+        lock_hash: "0x2222222222222222222222222222222222222222222222222222222222222222",
+        identity: id,
+        authority: observe,
+        correspondence: preserve,
+        inputs: 0..=16,
+        outputs: 0..=16,
+    }
+}
+action inspect() -> u64 {
+    let selected = ckb::select_cell_roles<Settlement>()
+    let orders = selected.orders
+    let alias = orders
+    let other = ckb::select_cell_roles<Settlement>()
+    require selected.refunds.input_count() == other.refunds.output_count()
+    let count = alias.input_count()
+    require count == orders.output_count()
+    let before = alias.input(count - 1)
+    let after = orders.successor(count - 1)
+    let first = selected.orders.output(0)
+    require before.data.id == after.data.id
+    require before.data.amount == after.data.amount
+    require first.type_hash == before.type_hash
+    return 0
+}

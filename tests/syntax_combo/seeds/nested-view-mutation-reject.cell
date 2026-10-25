@@ -1,0 +1,9 @@
+// audit: phase=reject_compile
+// audit: contains=nested values and derived views are read-only
+module cellscript::audit::seed_nested_view_mutation_reject
+
+action inspect(witness values: NestedValues<Vec<u8>, 3, 8, 128>) -> u64 {
+    verification
+    let mut alias = values[0]
+    return 0
+}

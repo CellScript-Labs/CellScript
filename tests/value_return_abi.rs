@@ -1,4 +1,4 @@
-//! Execute fixed ordinary struct returns with caller-owned result storage.
+//! Execute fixed ordinary struct and bounded byte-value returns with caller-owned result storage.
 use cellscript::{compile_with_executable_surface_policy, CompileOptions, EntryWitnessArg, ExecutableSurfacePolicy};
 use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
 
@@ -19,11 +19,64 @@ action verify(witness value: Envelope, witness expected: Pair) {
     require result.left == expected.left
     require result.right == expected.right
 }
+
 "#;
     for opt_level in 0..=3 {
         let value = [99u64.to_le_bytes(), 11u64.to_le_bytes(), 23u64.to_le_bytes()].concat();
         let expected = [11u64.to_le_bytes(), 23u64.to_le_bytes()].concat();
         execute(source, opt_level, &[EntryWitnessArg::Bytes(value), EntryWitnessArg::Bytes(expected)], 0);
+    }
+}
+
+#[test]
+fn fixed_byte_results_survive_forwarding_and_later_calls() {
+    for (ty, width) in
+        [("[u8; 1]", 1), ("[u8; 3]", 3), ("[u8; 8]", 8), ("[u8; 9]", 9), ("[u8; 64]", 64), ("Hash", 32), ("Address", 32)]
+    {
+        let source = format!(
+            r#"
+module byte_results
+fn copy(value: {ty}) -> {ty} {{ return value }}
+fn relay(value: {ty}) -> {ty} {{ return copy(value) }}
+action verify(witness first: {ty}, witness second: {ty}) {{
+    verification
+    let retained = relay(first)
+    let later = relay(second)
+    require retained == first
+    require later == second
+}}
+"#
+        );
+        for opt in [0, 3] {
+            execute(&source, opt, &[EntryWitnessArg::Bytes(vec![17; width]), EntryWitnessArg::Bytes(vec![29; width])], 0);
+        }
+    }
+    let source = "module byte_literal\nfn value() -> [u8; 9] { return b\"constant!\" }\naction verify() { verification\nrequire value() == b\"constant!\" }";
+    for opt in [0, 3] {
+        execute(source, opt, &[], 0);
+    }
+}
+
+#[test]
+fn short_byte_results_and_fields_preserve_register_and_stack_arguments() {
+    let source = r#"
+module short_arguments
+struct Packet { prefix: u64, bytes: [u8; 3] }
+fn word(value: [u8; 3]) -> [u8; 3] { value }
+fn stacked(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64, g: u64, h: u64, value: [u8; 3]) -> [u8; 3] {
+    if a + b + c + d + e + f + g + h != 36 { return b"bad" }
+    return word(value)
+}
+action verify(witness packet: Packet) {
+    verification
+    require stacked(1, 2, 3, 4, 5, 6, 7, 8, packet.bytes) == b"yes"
+    require stacked(1, 2, 3, 4, 5, 6, 7, 8, word(b"yes")) == b"yes"
+}
+"#;
+    for opt in [0, 3] {
+        for (bytes, expected) in [(b"yes", 0), (b"no!", 5)] {
+            execute(source, opt, &[EntryWitnessArg::Bytes([99u64.to_le_bytes().as_slice(), bytes].concat())], expected);
+        }
     }
 }
 
@@ -33,7 +86,7 @@ fn execute(source: &str, opt_level: u8, args: &[EntryWitnessArg], expected: i64)
         CompileOptions { target: Some("riscv64-elf".into()), opt_level, ..CompileOptions::default() },
         ExecutableSurfacePolicy::DenyFailClosed,
     )
-    .unwrap();
+    .unwrap_or_else(|error| panic!("O{opt_level}: {error}\n{source}"));
     cellscript_artifact_checker::check_bundle_values(
         &compiled.artifact_bytes,
         &serde_json::to_value(&compiled.metadata).unwrap(),

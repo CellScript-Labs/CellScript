@@ -13,7 +13,7 @@ use crate::{
 use serde::Serialize;
 use std::collections::BTreeMap;
 mod single;
-pub(crate) use single::verify_spawn;
+pub(crate) use single::{verify_nested, verify_spawn};
 
 const SCHEMA: &str = "cellscript-fixed-policy-parameter-decoder-v1";
 const MAX_PAYLOAD: u32 = 1536;

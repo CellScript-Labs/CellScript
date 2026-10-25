@@ -125,6 +125,7 @@ impl RewriteContext {
 }
 
 struct Monomorphizer {
+    data_shapes: HashMap<String, DataShapeDef>,
     structs: HashMap<String, StructDef>,
     enums: HashMap<String, EnumDef>,
     functions: HashMap<String, FnDef>,
@@ -299,6 +300,7 @@ fn guaranteed_template_type_abilities(ty: &Type, constraints: &HashMap<&str, Has
 impl Monomorphizer {
     fn new(module: &Module, edition: crate::CellScriptEdition) -> Result<Self> {
         let mut this = Self {
+            data_shapes: HashMap::new(),
             structs: HashMap::new(),
             enums: HashMap::new(),
             functions: HashMap::new(),
@@ -340,6 +342,19 @@ impl Monomorphizer {
                 ));
             }
             match item {
+                Item::DataShape(def) => {
+                    if primitive_type_name(&def.name).is_some()
+                        || matches!(
+                            def.name.as_str(),
+                            "Vec" | "Map" | "Set" | "Option" | "Result" | "NestedValues" | "NestedBytesView" | "NestedRecordView"
+                        )
+                    {
+                        return Err(CompileError::new("data_shape name is reserved by the prelude", def.span));
+                    }
+                    if this.data_shapes.insert(def.name.clone(), def.clone()).is_some() {
+                        return Err(CompileError::new(format!("duplicate data_shape '{}'", def.name), def.span));
+                    }
+                }
                 Item::Resource(def) => {
                     this.cell_types.insert(def.name.clone());
                 }
@@ -405,6 +420,29 @@ impl Monomorphizer {
             }
         }
 
+        let mut shape_symbols = HashSet::new();
+        for item in &module.items {
+            let names = match item {
+                Item::Use(import) => import.imports.iter().map(|item| item.alias.as_deref().unwrap_or(&item.name)).collect(),
+                item => item_decl_name(item).into_iter().collect::<Vec<_>>(),
+            };
+            for name in names {
+                if this.data_shapes.contains_key(name) && !shape_symbols.insert(name) {
+                    return Err(CompileError::new(
+                        format!("duplicate symbol '{name}' conflicts with a data_shape declaration"),
+                        item_span(item),
+                    ));
+                }
+            }
+        }
+        for def in this.data_shapes.values() {
+            if this.data_shapes.keys().any(|name| type_contains_shape(&def.element, name)) {
+                return Err(CompileError::new(
+                    "data_shape elements cannot recursively contain named data shapes; use Vec<u8> or a record with one payload",
+                    def.span,
+                ));
+            }
+        }
         Ok(this)
     }
 
@@ -1067,6 +1105,31 @@ impl Monomorphizer {
     fn rewrite_item(&mut self, item: Item, substitution: &HashMap<String, Type>) -> Result<Item> {
         let mut context = RewriteContext::default();
         match item {
+            Item::Collections(mut def) => {
+                for member in &mut def.members {
+                    match &mut member.kind {
+                        ValueCollectionKind::Vec(value) | ValueCollectionKind::OrderedSet(value) => {
+                            *value = self.rewrite_type(value, substitution, member.span, &mut context)?;
+                        }
+                        ValueCollectionKind::OrderedMap { key, value } => {
+                            *key = self.rewrite_type(key, substitution, member.span, &mut context)?;
+                            *value = self.rewrite_type(value, substitution, member.span, &mut context)?;
+                        }
+                    }
+                }
+                crate::allocated_values::validate_declaration(&def)?;
+                Ok(Item::Collections(def))
+            }
+            Item::DataShape(mut def) => {
+                def.element = self.rewrite_type(&def.element, substitution, def.span, &mut context)?;
+                Ok(Item::DataShape(def))
+            }
+            Item::CellRoles(mut def) => {
+                for role in &mut def.roles {
+                    role.schema = self.rewrite_type(&role.schema, substitution, role.span, &mut context)?;
+                }
+                Ok(Item::CellRoles(def))
+            }
             Item::Resource(mut def) => {
                 self.rewrite_fields_and_validity(&mut def.fields, &mut def.validity, substitution, &mut context, def.span)?;
                 Ok(Item::Resource(def))
@@ -1255,6 +1318,24 @@ impl Monomorphizer {
             return match self.rewrite_type(actual, &HashMap::new(), span, context)? {
                 Type::Named(name) => Ok(name),
                 other => Ok(render_type(&other)),
+            };
+        }
+        if let Some(mut def) = self.data_shapes.get(name).cloned() {
+            // Resolve the declaration in its own scope, never against a
+            // caller's generic substitutions. The shape has no type parameters.
+            def.element = self.rewrite_type(&def.element, &HashMap::new(), def.span, context)?;
+            return Ok(render_type(&crate::nested_values::declared_values(&def)?.source_type()));
+        }
+        if let Some((shape, member)) = name.rsplit_once("::")
+            && !substitution.contains_key(shape)
+            && let Some(mut def) = self.data_shapes.get(shape).cloned()
+        {
+            def.element = self.rewrite_type(&def.element, &HashMap::new(), def.span, context)?;
+            let values = crate::nested_values::declared_values(&def)?;
+            return match member {
+                "Item" => Ok(values.item_type()),
+                "Payload" => Ok(crate::nested_values::bytes_view_type(values.max_payload_bytes)),
+                _ => Err(CompileError::new("data_shape view types are Shape::Item and Shape::Payload", span)),
             };
         }
         let Some((base, arg_texts)) = applied_type(name) else {
@@ -1770,6 +1851,9 @@ fn substitute_type_pure(ty: &Type, substitution: &HashMap<String, Type>) -> Opti
 
 fn item_decl_name(item: &Item) -> Option<&str> {
     match item {
+        Item::DataShape(def) => Some(&def.name),
+        Item::Collections(def) => Some(&def.name),
+        Item::CellRoles(def) => Some(&def.name),
         Item::Resource(def) => Some(&def.name),
         Item::Shared(def) => Some(&def.name),
         Item::Receipt(def) => Some(&def.name),
@@ -1786,6 +1870,9 @@ fn item_decl_name(item: &Item) -> Option<&str> {
 
 fn item_span(item: &Item) -> Span {
     match item {
+        Item::DataShape(def) => def.span,
+        Item::Collections(def) => def.span,
+        Item::CellRoles(def) => def.span,
         Item::Resource(def) => def.span,
         Item::Shared(def) => def.span,
         Item::Receipt(def) => def.span,
@@ -1950,7 +2037,7 @@ fn split_top_level(input: &str, separator: char) -> Option<Vec<String>> {
     Some(parts)
 }
 
-fn parse_type_repr(input: &str) -> Option<Type> {
+pub(crate) fn parse_type_repr(input: &str) -> Option<Type> {
     let input = input.trim();
     if let Some(primitive) = primitive_type_name(input) {
         return Some(primitive);
@@ -1977,6 +2064,17 @@ fn parse_type_repr(input: &str) -> Option<Type> {
         return Some(Type::Tuple(split_top_level(body, ',')?.iter().map(|part| parse_type_repr(part)).collect::<Option<Vec<_>>>()?));
     }
     Some(Type::Named(input.to_string()))
+}
+
+fn type_contains_shape(ty: &Type, shape: &str) -> bool {
+    match ty {
+        Type::Named(name) if name == shape || name.strip_prefix(shape).is_some_and(|suffix| suffix.starts_with("::")) => true,
+        Type::Named(name) => applied_type(name)
+            .is_some_and(|(_, args)| args.iter().filter_map(|arg| parse_type_repr(arg)).any(|arg| type_contains_shape(&arg, shape))),
+        Type::Array(inner, _) | Type::Ref(inner) | Type::MutRef(inner) => type_contains_shape(inner, shape),
+        Type::Tuple(items) => items.iter().any(|item| type_contains_shape(item, shape)),
+        _ => false,
+    }
 }
 
 fn type_contains_param(ty: &Type, param: &str) -> bool {

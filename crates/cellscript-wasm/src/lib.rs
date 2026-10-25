@@ -452,6 +452,241 @@ action verify() -> u64 {
     }
 
     #[test]
+    fn wasm_named_cell_roles_keep_checked_limits_and_admission_status() {
+        let source = include_str!("../../../tests/syntax_combo/seeds/named-role-verification.cell");
+        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
+        assert!(result.get("error").is_none(), "{result}");
+        assert!(result["runtime"]["fail_closed_runtime_features"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|feature| feature == "exact-role-selection-artifact-proof"));
+        for invalid in [source.replace("identity: id", "identity: absent"), source.replace("input_scan: 64", "input_scan: 65")] {
+            let report: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(&invalid, "2027", None)).unwrap();
+            assert!(report["error_count"].as_u64().unwrap() > 0, "{report}");
+        }
+        let legacy: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2026", None)).unwrap();
+        assert!(legacy.get("error").is_some(), "{legacy}");
+    }
+
+    #[test]
+    fn wasm_named_cell_roles_select_and_read_typed_aliases() {
+        let source = include_str!("../../../tests/syntax_combo/seeds/named-role-selection.cell");
+        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
+        assert!(result.get("error").is_none(), "{result}");
+        for blocker in ["exact-role-selection-artifact-proof", "cell-data-view-artifact-proof"] {
+            assert!(result["runtime"]["fail_closed_runtime_features"].as_array().unwrap().iter().any(|value| value == blocker));
+        }
+        let invalid = source.replace("selected.orders", "selected.absent");
+        let report: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(&invalid, "2027", None)).unwrap();
+        assert!(report["error_count"].as_u64().unwrap() > 0, "{report}");
+    }
+
+    #[test]
+    fn wasm_named_nested_data_views_preserve_bounds_and_read_only_diagnostics() {
+        let source = include_str!("../../../tests/syntax_combo/seeds/named-nested-data-views.cell");
+        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
+        assert!(result.get("error").is_none(), "{result}");
+        for blocker in ["nested-values-artifact-proof", "cell-data-view-artifact-proof"] {
+            assert!(result["runtime"]["fail_closed_runtime_features"].as_array().unwrap().iter().any(|value| value == blocker));
+        }
+        assert!(result.get("typed_semantics").is_none());
+        let invalid = source.replace("let messages = input.messages", "let mut messages = input.messages");
+        let report: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(&invalid, "2027", None)).unwrap();
+        assert!(report["error_count"].as_u64().unwrap() > 0, "{report}");
+    }
+
+    #[test]
+    fn wasm_named_nested_selection_preserves_schema_and_proof_blockers() {
+        let source = include_str!("../../../tests/syntax_combo/seeds/named-nested-selection.cell");
+        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
+        assert!(result.get("error").is_none(), "{result}");
+        for blocker in ["exact-role-selection-artifact-proof", "nested-values-artifact-proof"] {
+            assert!(result["runtime"]["fail_closed_runtime_features"].as_array().unwrap().iter().any(|value| value == blocker));
+        }
+        // Browser summaries intentionally omit native operations and fields.
+        // Preserve the dynamic/fixed size distinction without those records.
+        assert!(result.get("typed_semantics").is_none());
+        let types = result["types"].as_array().unwrap();
+        assert!(types.iter().find(|ty| ty["name"] == "Order").unwrap()["encoded_size"].is_null());
+        assert_eq!(types.iter().find(|ty| ty["name"] == "Refund").unwrap()["encoded_size"], 16);
+        let invalid = source.replace("return after.output_index", "return after.data.absent");
+        let report: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(&invalid, "2027", None)).unwrap();
+        assert!(report["error_count"].as_u64().unwrap() > 0, "{report}");
+    }
+
+    #[test]
+    fn wasm_mixed_settlement_preserves_named_roles_and_authority_boundary() {
+        let source = include_str!("../../../examples/language/batches/mixed_settlement.cell");
+        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
+        assert!(result.get("error").is_none(), "{result}");
+        for blocker in ["exact-role-selection-artifact-proof", "cell-data-view-artifact-proof"] {
+            assert!(result["runtime"]["fail_closed_runtime_features"].as_array().unwrap().iter().any(|value| value == blocker));
+        }
+        let invalid = source.replace("selected.quote.input_count()", "selected.unknown.input_count()");
+        let report: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(&invalid, "2027", None)).unwrap();
+        assert!(report["error_count"].as_u64().unwrap() > 0, "{report}");
+    }
+
+    #[test]
+    #[cfg(feature = "language-service")]
+    fn wasm_collection_budget_hover_matches_native_scenarios() {
+        let source = include_str!("../../../examples/language/batches/multi_asset_transfer.cell");
+        let prefix = &source[..source.find("collections Totals").unwrap() + 13];
+        let line = prefix.bytes().filter(|byte| *byte == b'\n').count() as u32;
+        let character = prefix.rsplit('\n').next().unwrap().encode_utf16().count() as u32;
+        let result: serde_json::Value =
+            serde_json::from_str(&language_service_json_for_edition(source, "2027", line, character)).unwrap();
+        let hover = result["hover"]["contents"].as_str().unwrap();
+        assert!(hover.contains("Reserve all members once: 3712 bytes / 4 allocations — fits"), "{hover}");
+        assert!(hover.contains("Grow all members incrementally: 7840 bytes / 24 allocations — does not fit"), "{hover}");
+        assert!(hover.contains("not a program-path or worst-case proof"), "{hover}");
+        let metadata: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
+        assert!(metadata.get("owners").is_none(), "budget explanations must not inflate ordinary metadata");
+    }
+
+    #[test]
+    fn wasm_named_collections_validate_declarations_and_report_allocation_proof_boundary() {
+        let source = include_str!("../../../tests/syntax_combo/seeds/named-collections.cell");
+        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
+        assert!(result.get("error").is_none(), "{result}");
+        assert_eq!(result["actions"][0]["name"], "inspect");
+        let invalid = source.replace("bytes: 8192", "bytes: 63");
+        let report: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(&invalid, "2027", None)).unwrap();
+        assert!(report["error_count"].as_u64().unwrap() > 0, "{report}");
+        for executable in [
+            source.replace("return 0", "let scratch = Scratch::new()\nreturn 0"),
+            include_str!("../../../tests/syntax_combo/seeds/collections-deduplication.cell").into(),
+            include_str!("../../../tests/syntax_combo/seeds/collections-aggregation.cell").into(),
+            include_str!("../../../tests/syntax_combo/seeds/collections-records.cell").into(),
+            include_str!("../../../tests/syntax_combo/seeds/collections-sorted.cell").into(),
+            format!("{source}\nfn count(view: &Scratch) -> u64 {{ return view.pending.len() }}"),
+        ] {
+            let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(&executable, "2027", None)).unwrap();
+            assert!(result.get("error").is_none(), "{result}");
+            assert!(result["runtime"]["fail_closed_runtime_features"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|feature| feature == "allocated-values-artifact-proof"));
+        }
+    }
+
+    #[test]
+    fn wasm_named_data_shapes_bind_resolved_bounds_and_keep_admission_blocker() {
+        let source = include_str!("../../../tests/syntax_combo/seeds/named-data-shapes.cell");
+        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
+        assert!(result.get("error").is_none(), "{result}");
+        assert_eq!(result["actions"][0]["params"][0]["ty"], "NestedValues<Vec<u8>, 3, 8, 128>");
+        assert!(result["runtime"]["fail_closed_runtime_features"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "nested-values-artifact-proof"));
+        let invalid = source.replace("payload_bytes: 8", "payload_bytes: 257");
+        let report: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(&invalid, "2027", None)).unwrap();
+        assert!(report["error_count"].as_u64().unwrap() > 0, "{report}");
+    }
+
+    #[test]
+    fn wasm_nested_helpers_keep_bounds_and_fail_closed_admission() {
+        for source in [
+            include_str!("../../../tests/syntax_combo/seeds/named-nested-helpers.cell"),
+            include_str!("../../../tests/syntax_combo/seeds/named-derived-helpers.cell"),
+        ] {
+            let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
+            assert!(result.get("error").is_none(), "{result}");
+            assert_eq!(result["actions"][0]["params"][0]["ty"], "NestedValues<Vec<u8>, 3, 8, 128>");
+            assert!(result["runtime"]["fail_closed_runtime_features"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|feature| feature == "nested-values-artifact-proof"));
+            let invalid = source.replace("fn total(", "#[effect(Mutating)]\nfn total(");
+            let report: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(&invalid, "2027", None)).unwrap();
+            assert!(report["error_count"].as_u64().unwrap() > 0, "{report}");
+        }
+    }
+
+    #[test]
+    fn wasm_record_migration_preserves_record_bounds_and_readonly_helpers() {
+        let source = include_str!("../../../examples/language/batches/record_migration.cell");
+        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
+        assert!(result.get("error").is_none(), "{result}");
+        assert_eq!(result["actions"][0]["params"][0]["ty"], "NestedValues<Message, 8, 256, 2280>");
+        for blocker in ["nested-values-artifact-proof", "cell-data-view-artifact-proof", "exact-role-selection-artifact-proof"] {
+            assert!(result["runtime"]["fail_closed_runtime_features"].as_array().unwrap().iter().any(|feature| feature == blocker));
+        }
+        for invalid in [
+            source.replace("payload_bytes: 256", "payload_bytes: 257"),
+            source.replace("fn same_payload", "#[effect(Mutating)]\nfn same_payload"),
+        ] {
+            let report: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(&invalid, "2027", None)).unwrap();
+            assert!(report["error_count"].as_u64().unwrap() > 0, "{report}");
+        }
+    }
+
+    #[test]
+    fn wasm_cell_view_helpers_keep_source_types_and_experimental_status() {
+        let source = include_str!("../../../examples/language/ckb/typed_cell_predicate.cell");
+        for edition in ["2026", "2027"] {
+            let source = if edition == "2027" { source.replace("verification", "") } else { source.to_owned() };
+            let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(&source, edition, None)).unwrap();
+            assert!(result.get("error").is_none(), "{result}");
+            assert!(result["runtime"]["fail_closed_runtime_features"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|feature| { feature == "cell-data-view-artifact-proof" }));
+            let invalid = source.replace("ckb::input<Token>(1)", "ckb::output<Token>(1)");
+            let report: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(&invalid, edition, None)).unwrap();
+            assert!(report["error_count"].as_u64().unwrap() > 0, "{report}");
+        }
+    }
+
+    #[test]
+    fn wasm_multi_asset_transfer_retains_allocation_and_cell_read_boundaries() {
+        let source = include_str!("../../../examples/language/batches/multi_asset_transfer.cell");
+        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
+        assert!(result.get("error").is_none(), "{result}");
+        assert_eq!(result["actions"][0]["name"], "transfer");
+        for blocker in ["allocated-values-artifact-proof", "cell-data-view-artifact-proof"] {
+            assert!(result["runtime"]["fail_closed_runtime_features"].as_array().unwrap().iter().any(|feature| feature == blocker));
+        }
+        let invalid = source.replace("return true", "totals.incoming.reserve(32)\nreturn true");
+        let report: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(&invalid, "2027", None)).unwrap();
+        assert!(report["error_count"].as_u64().unwrap() > 0, "{report}");
+    }
+
+    #[test]
+    fn wasm_cell_data_views_preserve_experimental_admission_and_diagnostics() {
+        let source = include_str!("../../../examples/language/ckb/typed_cell_data.cell");
+        for edition in ["2026", "2027"] {
+            let source = if edition == "2027" { source.replace("verification", "") } else { source.to_owned() };
+            let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(&source, edition, None)).unwrap();
+            assert!(result.get("error").is_none(), "{result}");
+            let features = result["runtime"]["fail_closed_runtime_features"].as_array().unwrap();
+            assert!(features.iter().any(|feature| feature == "cell-data-view-artifact-proof"));
+            assert!(!features.iter().any(|feature| feature == "field-access"));
+            assert!(
+                result["runtime"]["fail_closed_obligations"].as_array().unwrap().iter().any(|reason| {
+                    reason["feature"] == "cell-data-view-artifact-proof"
+                        && reason["detail"].as_str().is_some_and(|detail| detail.contains("strict executable-surface admission"))
+                }),
+                "{}",
+                result["runtime"]["fail_closed_obligations"]
+            );
+            assert!(result.get("typed_semantics").is_none(), "browser summary must retain its size boundary");
+            let invalid = source.replace("let data = input.data", "let mut data = input.data");
+            let report: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(&invalid, edition, None)).unwrap();
+            assert!(report["error_count"].as_u64().unwrap() > 0);
+            assert!(report["diagnostics"].as_array().unwrap().iter().any(|diagnostic| {
+                diagnostic["message"].as_str().is_some_and(|message| message.contains("mutable aliases are not permitted"))
+            }));
+        }
+    }
+
+    #[test]
     fn wasm_summary_exposes_deferred_runtime_in_locks_and_helpers() {
         let fixtures = [
             (

@@ -15,7 +15,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 mod abi;
 mod assembler;
 mod calls;
+mod cell_data_view;
 mod cell_ops;
+mod cell_scan;
+mod cell_selection;
 mod collections;
 mod expr;
 mod frame;
@@ -26,6 +29,7 @@ mod runtime;
 mod runtime_gather;
 mod scalar_slots;
 mod schema;
+mod value_arena;
 mod value_returns;
 mod zk;
 #[cfg(not(feature = "wasm"))]
@@ -119,7 +123,6 @@ const RUNTIME_EXPR_TEMP_SLOTS: usize = 16;
 const RUNTIME_EXPR_TEMP_SIZE: usize = RUNTIME_EXPR_TEMP_SLOTS * 8;
 const _: () = assert!(RUNTIME_EXPR_TEMP_SLOTS >= 4);
 const RUNTIME_CELL_BUFFER_SIZE: usize = 512;
-const RUNTIME_CELL_SLOT_SIZE: usize = 8 + RUNTIME_CELL_BUFFER_SIZE;
 const RUNTIME_COLLECTION_BUFFER_SIZE: usize = 256;
 const ENTRY_WITNESS_LABEL: &str = "_cellscript_entry";
 const ENTRY_WITNESS_MAGIC: &[u8; 8] = ENTRY_WITNESS_ABI_MAGIC;
@@ -861,6 +864,9 @@ fn create_pattern_var_use_count(pattern: &CreatePattern, var_id: usize) -> usize
 
 fn instruction_var_use_count(instruction: &IrInstruction, var_id: usize) -> usize {
     match instruction {
+        IrInstruction::AllocatedValue(op) => {
+            op.owner.iter().chain(&op.args).map(|operand| operand_var_use_count(operand, var_id)).sum()
+        }
         IrInstruction::LoadConst { .. } | IrInstruction::LoadVar { .. } | IrInstruction::ReadRef { .. } => 0,
         IrInstruction::StoreVar { src, .. }
         | IrInstruction::Unary { operand: src, .. }
@@ -911,6 +917,10 @@ fn instruction_var_use_count(instruction: &IrInstruction, var_id: usize) -> usiz
             operand_var_use_count(operand, var_id) + create_pattern_var_use_count(pattern, var_id)
         }
         IrInstruction::BoundedOutputEnd { index } => operand_var_use_count(index, var_id),
+        IrInstruction::VerifyExactCellRoles { .. } => 0,
+        IrInstruction::ReadExactCellRole { selection, index, .. } => {
+            operand_var_use_count(selection, var_id) + index.as_ref().map_or(0, |index| operand_var_use_count(index, var_id))
+        }
     }
 }
 
@@ -1176,6 +1186,10 @@ pub struct CodeGenerator {
     next_virtual_output: usize,
     /// Stack-frame start offset for runtime collection buffers.
     collection_region_start: usize,
+    allocated_owner_frames: HashMap<usize, usize>,
+    allocated_owner_extents: HashMap<usize, usize>,
+    allocated_borrow_scratch: Option<usize>,
+    allocated_write_guard: Option<value_arena::WriteGuard>,
     /// Runtime collection buffer allocator for the current function.
     next_collection_slot: usize,
     /// Named schema field layouts, keyed by type name then field name.
@@ -1257,6 +1271,12 @@ pub struct CodeGenerator {
     pure_const_returns: HashMap<String, IrConst>,
     /// Per-CKB-runtime cell data buffers keyed by IR variable id.
     cell_buffer_offsets: HashMap<usize, usize>,
+    exact_selection_offset: Option<usize>,
+    exact_selection_offsets: HashMap<usize, usize>,
+    /// Per-field complete table storage for transaction data views.
+    cell_data_view_buffers: HashMap<usize, usize>,
+    exact_selection_schema_hashes: HashMap<String, [u8; 32]>,
+    nested_cell_buffers: HashMap<usize, nested::NestedCellLayout>,
     /// Per-CKB-runtime cell size words keyed by IR variable id.
     cell_buffer_size_offsets: HashMap<usize, usize>,
     /// Entry-owned source-bound read window shared by nested exact Cell-data,
@@ -1363,6 +1383,7 @@ impl CodeGenerator {
     fn fixed_byte_like_width(&self, ty: &IrType) -> Option<usize> {
         fixed_byte_width(ty, type_static_length(ty))
             .or_else(|| fixed_aggregate_pointer_param_width(ty))
+            .or_else(|| matches!(ty, IrType::Tuple(_) | IrType::Array(_, _)).then(|| type_static_length(ty)).flatten())
             .or_else(|| self.fixed_named_type_width(ty))
     }
 
@@ -1429,6 +1450,10 @@ impl CodeGenerator {
             frame_size: 16,
             next_virtual_output: 0,
             collection_region_start: 0,
+            allocated_owner_frames: HashMap::new(),
+            allocated_owner_extents: HashMap::new(),
+            allocated_borrow_scratch: None,
+            allocated_write_guard: None,
             next_collection_slot: 0,
             type_layouts: HashMap::new(),
             enum_fixed_sizes: HashMap::new(),
@@ -1468,6 +1493,11 @@ impl CodeGenerator {
             const_data_entries: Vec::new(),
             pure_const_returns: HashMap::new(),
             cell_buffer_offsets: HashMap::new(),
+            exact_selection_offset: None,
+            exact_selection_offsets: HashMap::new(),
+            cell_data_view_buffers: HashMap::new(),
+            exact_selection_schema_hashes: HashMap::new(),
+            nested_cell_buffers: HashMap::new(),
             cell_buffer_size_offsets: HashMap::new(),
             exact_read_cache_offset: None,
             cell_bindings: Vec::new(),
@@ -1579,6 +1609,42 @@ impl CodeGenerator {
         for type_def in &ir.external_type_defs {
             self.register_type_def(type_def);
         }
+        let selection_types = ir
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                IrItem::Action(entry) => Some(&entry.body),
+                IrItem::Lock(entry) => Some(&entry.body),
+                IrItem::PureFn(entry) => Some(&entry.body),
+                _ => None,
+            })
+            .flat_map(|body| &body.blocks)
+            .flat_map(|block| &block.instructions)
+            .filter_map(|instruction| match instruction {
+                IrInstruction::VerifyExactCellRoles { contract, .. } => Some(&contract.roles),
+                _ => None,
+            })
+            .flatten()
+            .map(|role| role.type_name.as_str())
+            .collect::<BTreeSet<_>>();
+        if !selection_types.is_empty() {
+            let definitions = ir
+                .external_type_defs
+                .iter()
+                .chain(ir.items.iter().filter_map(|item| match item {
+                    IrItem::TypeDef(definition) => Some(definition),
+                    _ => None,
+                }))
+                .map(|definition| (definition.name.clone(), definition))
+                .collect::<BTreeMap<_, _>>();
+            for name in selection_types {
+                if let Some(schema) =
+                    definitions.get(name).and_then(|definition| crate::type_molecule_schema_metadata(definition, &definitions))
+                {
+                    self.exact_selection_schema_hashes.insert(name.to_string(), crate::ckb_blake2b256(schema.schema.as_bytes()));
+                }
+            }
+        }
         self.register_callable_abis(ir);
 
         self.emit_header();
@@ -1682,6 +1748,15 @@ impl CodeGenerator {
 
     fn emit(&mut self, instruction: impl Into<String>) {
         let instruction = instruction.into();
+        // The nested emission must not recursively guard its own spills or
+        // expand a known SP-relative access into an apparently dynamic store.
+        if let Some(guard) = self.allocated_write_guard.take() {
+            if !self.emit_allocated_guarded_store(&instruction, &guard) {
+                self.emit(&instruction);
+            }
+            self.allocated_write_guard = Some(guard);
+            return;
+        }
         if self.emit_large_immediate_access_if_needed(&instruction) {
             return;
         }
@@ -1900,7 +1975,7 @@ impl CodeGenerator {
         self.current_state_transition_edges = action.state_transition_edges.clone();
         self.bind_readonly_schema_params = true;
         self.fail_handler_codes.clear();
-        self.prepare_function_layout(&action.body, &action.params);
+        self.prepare_function_layout(&action.body, &action.params)?;
         self.entry_frame_sizes
             .entry(action.name.clone())
             .and_modify(|size| *size = (*size).max(self.frame_size as u32))
@@ -1984,7 +2059,7 @@ impl CodeGenerator {
         self.current_function_owns_exact_read_cache = false;
         self.bind_readonly_schema_params = false;
         self.fail_handler_codes.clear();
-        self.prepare_function_layout(&function.body, &function.params);
+        self.prepare_function_layout(&function.body, &function.params)?;
         self.entry_frame_sizes.insert(function.name.clone(), self.frame_size as u32);
         self.next_virtual_output = 0;
         self.set_schema_pointer_params(&function.params);
@@ -2039,7 +2114,7 @@ impl CodeGenerator {
         self.bind_readonly_schema_params = true;
         self.current_lock_entry = true;
         self.fail_handler_codes.clear();
-        self.prepare_function_layout(&lock.body, &lock.params);
+        self.prepare_function_layout(&lock.body, &lock.params)?;
         self.entry_frame_sizes
             .entry(lock.name.clone())
             .and_modify(|size| *size = (*size).max(self.frame_size as u32))
@@ -3104,7 +3179,23 @@ impl CodeGenerator {
             self.emit_fail(CellScriptRuntimeError::AssertionFailed);
             return Ok(());
         }
-        self.emit_load_cell_data_syscall(&pattern.operation, source, index);
+        let nested_output = self
+            .cell_bindings
+            .iter()
+            .find(|binding| binding.role == IrCellBindingRole::Output && binding.binding == pattern.binding)
+            .and_then(|binding| binding.local_id)
+            .filter(|id| self.nested_cell_buffers.contains_key(id))
+            .and_then(|id| {
+                self.cell_buffer_size_offsets
+                    .get(&id)
+                    .zip(self.cell_buffer_offsets.get(&id))
+                    .map(|(size, buffer)| (*size, *buffer, self.cell_buffer_capacity(id)))
+            });
+        if let Some((size, buffer, capacity)) = nested_output {
+            self.emit_load_cell_data_syscall_to_offsets(&pattern.operation, source, index, size, buffer, capacity);
+        } else {
+            self.emit_load_cell_data_syscall(&pattern.operation, source, index);
+        }
         self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
 
         if pattern.lock.is_some() {
@@ -3112,7 +3203,11 @@ impl CodeGenerator {
         }
 
         if self.can_verify_create_output_fields(pattern) {
-            self.emit_create_output_checks(pattern);
+            if let Some((size, buffer, _)) = nested_output {
+                self.emit_create_output_checks_at(pattern, size, buffer);
+            } else {
+                self.emit_create_output_checks(pattern);
+            }
         } else {
             self.emit("# cellscript abi: output field verification incomplete for this create pattern");
             self.emit("# cellscript abi: fail closed because the output state is not fully verified");
@@ -3193,8 +3288,50 @@ impl CodeGenerator {
 
         let fused = block.instructions.last().is_some_and(|instruction| self.can_fuse_branch(instruction, &block.terminator));
         let instruction_count = block.instructions.len().saturating_sub(usize::from(fused));
-        for instruction in &block.instructions[..instruction_count] {
+        for (index, instruction) in block.instructions[..instruction_count].iter().enumerate() {
+            let selection_marker = if let IrInstruction::VerifyExactCellRoles { dest, .. } = instruction {
+                let offset = self.selection_frame(dest.as_ref())?;
+                let marker = self.fresh_label(&format!("exact_role_check_{}_{}_{}", block.id.0, index, offset));
+                self.emit_label(&marker);
+                Some(marker)
+            } else if matches!(instruction, IrInstruction::ReadExactCellRole { .. })
+                || matches!(instruction, IrInstruction::Move { dest, .. } if matches!(&dest.ty, IrType::Named(name) if name.starts_with("ExactCellSelection<")))
+                || matches!(instruction, IrInstruction::FieldAccess { dest, .. } if matches!(&dest.ty, IrType::Named(name) if name.starts_with("ExactCellSelection<")))
+            {
+                let marker = self.fresh_label(&format!("exact_role_use_{}_{}_0", block.id.0, index));
+                self.emit_label(&marker);
+                Some(marker)
+            } else if matches!(instruction, IrInstruction::FieldAccess { obj: IrOperand::Var(view), field, .. }
+                if matches!(&view.ty, IrType::Named(name) if crate::cell_data_view::schema(name).is_some()
+                    || (field == "data" && crate::cell_data_view::transaction_schema(name).is_some())))
+            {
+                let IrInstruction::FieldAccess { dest, .. } = instruction else { unreachable!() };
+                let output = self.fixed_byte_local_offsets.get(&dest.id).copied().unwrap_or(0);
+                let marker = if let Some(size) = self.cell_data_view_buffers.get(&dest.id) {
+                    let length = self.nested_size_offset(dest).unwrap_or(0);
+                    self.fresh_label(&format!("exact_role_data_{}_{}_{}_{}_{}", block.id.0, index, output, size, length))
+                } else {
+                    self.fresh_label(&format!("exact_role_data_{}_{}_{}", block.id.0, index, output))
+                };
+                self.emit_label(&marker);
+                Some(marker)
+            } else if matches!(instruction, IrInstruction::Call { dest: Some(dest), .. } | IrInstruction::Move { dest, .. }
+                if matches!(&dest.ty, IrType::Named(name) if crate::cell_data_view::transaction_schema(name).is_some() || crate::cell_data_view::schema(name).is_some()))
+            {
+                let marker = self.fresh_label(&format!("cell_view_value_{}_{}", block.id.0, index));
+                self.emit_label(&marker);
+                Some(marker)
+            } else {
+                None
+            };
             self.generate_instruction(instruction)?;
+            if let Some(marker) = selection_marker {
+                if let IrInstruction::VerifyExactCellRoles { dest: Some(dest), .. } = instruction {
+                    self.emit_sp_addi("t0", self.selection_frame(Some(dest))?);
+                    self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
+                }
+                self.emit_label(&format!("{marker}_done"));
+            }
         }
         if fused {
             self.try_emit_fused_branch(
@@ -3303,6 +3440,7 @@ impl CodeGenerator {
             IrInstruction::TypeHash { dest, operand } => {
                 self.emit_type_hash(dest, operand)?;
             }
+            IrInstruction::AllocatedValue(operation) => self.emit_allocated_value(operation)?,
             IrInstruction::CollectionNew { dest, ty, capacity } => {
                 self.emit_collection_new(dest, ty, capacity.as_ref())?;
             }
@@ -3352,6 +3490,12 @@ impl CodeGenerator {
                 self.emit_bounded_output_verify(index, pattern, *capacity_floor_shannons);
             }
             IrInstruction::BoundedOutputEnd { index } => self.emit_bounded_output_end(index),
+            IrInstruction::VerifyExactCellRoles { dest, contract } => {
+                self.emit_source_exact_role_verification(dest.as_ref(), contract)?
+            }
+            IrInstruction::ReadExactCellRole { dest, selection, role, read, index } => {
+                self.emit_selected_role_read(dest, selection, *role, *read, index.as_ref())?
+            }
             IrInstruction::Call { dest, func, args } => {
                 self.emit_call(dest.as_ref(), func, args)?;
             }
@@ -3412,6 +3556,10 @@ impl CodeGenerator {
             }
             IrTerminator::Return(Some(operand)) => {
                 if self.emit_value_return(operand)? {
+                    return Ok(());
+                }
+                if self.emit_small_byte_array_register("a0", operand) {
+                    self.emit_epilogue();
                     return Ok(());
                 }
                 if !self.current_lock_entry && self.operand_is_u128_like(operand) {
@@ -3545,6 +3693,13 @@ impl CodeGenerator {
     }
 
     fn emit_move(&mut self, dest: &IrVar, src: &IrOperand) -> Result<()> {
+        if Self::nested_type(&dest.ty).is_some() {
+            let done = self.emit_nested_use_marker("move", dest);
+            self.emit_operand_to_register("t0", src);
+            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
+            self.emit_label(&done);
+            return Ok(());
+        }
         if dest.ty == IrType::U128 {
             self.emit_materialize_u128_operand_to_var(dest, src);
             return Ok(());
@@ -3599,11 +3754,16 @@ impl CodeGenerator {
         if !matches!(dest.ty, IrType::Tuple(_) | IrType::Array(_, _)) {
             return false;
         }
-        let Some(width) = type_static_length(&dest.ty).filter(|width| *width > 8) else {
+        let Some(width) = type_static_length(&dest.ty).filter(|width| *width > 0) else {
             return false;
         };
-        let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else {
-            return false;
+        let dest_offset = if width <= 8 {
+            let offset = self.scalar_slot_offset(dest.id);
+            self.emit_stack_store("zero", offset);
+            offset
+        } else {
+            let Some(offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else { return false };
+            offset
         };
         self.emit(format!("# cellscript abi: materialize fixed {} var{} size={}", aggregate_type_label(&dest.ty), dest.id, width));
         for (index, field) in fields.iter().enumerate() {
@@ -3628,8 +3788,10 @@ impl CodeGenerator {
             self.emit(format!("li a2, {}", field_width));
             self.emit("call __cellscript_memcpy_fixed");
         }
-        self.emit_sp_addi("t0", dest_offset);
-        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
+        if width > 8 {
+            self.emit_sp_addi("t0", dest_offset);
+            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
+        }
         true
     }
 
@@ -4414,16 +4576,30 @@ impl CodeGenerator {
 }
 
 /// Preserve the authoritative stack value while avoiding an immediately
-/// redundant memory read. This deliberately crosses comments only, never a
-/// label, directive, branch, call, or other instruction.
+/// redundant memory read. Cross comments and unreferenced transport evidence
+/// markers only; addressable labels, directives and instructions remain barriers.
 fn eliminate_immediate_stack_reloads(assembly: &mut [String]) {
+    // These source-only markers must not change executable bytes. A reference
+    // anywhere in the assembly makes even such a marker an ordinary barrier.
+    let evidence_marker = |label: &str| {
+        [".Lcell_view_value_", ".Lallocated_index_", ".Lallocated_result_"].iter().any(|prefix| label.starts_with(prefix))
+    };
+    let referenced_markers = assembly
+        .iter()
+        .filter_map(|line| strip_comment(line))
+        .filter(|line| !line.ends_with(':'))
+        .flat_map(|line| line.split(|c: char| c.is_whitespace() || c == ','))
+        .filter(|token| evidence_marker(token))
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
     for store_index in 0..assembly.len() {
         let Some((source, offset)) = stack_slot_access(&assembly[store_index], "sd") else {
             continue;
         };
         let Some(load_index) = ((store_index + 1)..assembly.len()).find(|index| {
             let line = assembly[*index].trim();
-            !line.is_empty() && !line.starts_with('#')
+            let evidence = line.strip_suffix(':').is_some_and(|label| evidence_marker(label) && !referenced_markers.contains(label));
+            !line.is_empty() && !line.starts_with('#') && !evidence
         }) else {
             continue;
         };
@@ -4561,5 +4737,44 @@ fn consumed_operand_var(instruction: &IrInstruction) -> Option<&IrVar> {
     match operand {
         IrOperand::Var(var) if named_type_name(&var.ty).is_some() => Some(var),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod stack_reload_tests {
+    use super::eliminate_immediate_stack_reloads;
+
+    #[test]
+    fn transport_evidence_preserves_forwarding_but_addressable_labels_do_not() {
+        for (label, target) in [
+            (".Lcell_view_value_0_0_1", None),
+            (".Lcell_view_value_0_0_1", Some("j .Lcell_view_value_0_0_1")),
+            (".Lcell_view_value_0_0_1", Some("beq t1, t2, .Lcell_view_value_0_0_1")),
+            (".Lallocated_index_0_0_1_begin", None),
+            (".Lallocated_index_0_0_1_begin", Some("j .Lallocated_index_0_0_1_begin")),
+            (".Lallocated_result_0_0_8_1_end", None),
+            (".Lallocated_result_0_0_8_1_end", Some("beq t1, t2, .Lallocated_result_0_0_8_1_end")),
+            (".Lordinary", None),
+        ] {
+            for destination in ["t0", "a0"] {
+                let load = format!("ld {destination}, 16(sp)");
+                let mut assembly = vec!["sd t0, 16(sp)".into(), format!("{label}:"), load.clone()];
+                if let Some(target) = target {
+                    assembly.push(target.into());
+                }
+                eliminate_immediate_stack_reloads(&mut assembly);
+                let expected = if target.is_none() && label != ".Lordinary" {
+                    if destination == "t0" {
+                        String::new()
+                    } else {
+                        format!("    mv {destination}, t0")
+                    }
+                } else {
+                    load
+                };
+                assert_eq!(assembly[2], expected);
+                assert_eq!(assembly[1], format!("{label}:"));
+            }
+        }
     }
 }

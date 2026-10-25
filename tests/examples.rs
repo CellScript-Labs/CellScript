@@ -480,7 +480,7 @@ fn all_checked_in_cell_examples_compile() {
     let files = checked_in_example_cell_files();
     assert_eq!(
         files.len(),
-        BUNDLED_EXAMPLES.len() + 1 + 22,
+        BUNDLED_EXAMPLES.len() + 1 + 23,
         "expected bundled examples, top-level registry.cell, and language examples"
     );
 

@@ -327,6 +327,7 @@ mod tests {
                     ty: (*ty).into(),
                     offset: *offset,
                     width_bytes: Some(*width),
+                    ..Default::default()
                 })
                 .collect(),
             ..TypedSemanticType::default()

@@ -1,6 +1,46 @@
 {
   "entries": [
     {
+      "conditions": "Experimental invocation-local collections; complete independent allocation, initialization, ownership and source contracts remain required.",
+      "fail_closed_features": [
+        "allocated-values-artifact-proof"
+      ],
+      "id": "ir:allocated-value",
+      "layer": "instruction",
+      "production_policy": "accepted only when the shape classifier reports no fail-closed feature",
+      "status": "shape-gated"
+    },
+    {
+      "conditions": "Experimental immutable fixed and bounded nested Cell data views have independently checked complete field-load/codec instructions and retained-buffer write effects. Helper-carried transaction views retain this blocker even without data reads; complete caller/source/value provenance and builder binding remain required before stable admission.",
+      "fail_closed_features": [
+        "cell-data-view-artifact-proof"
+      ],
+      "id": "artifact:cell-data-view-proof",
+      "layer": "artifact-policy",
+      "production_policy": "accepted only when the shape classifier reports no fail-closed feature",
+      "status": "shape-gated"
+    },
+    {
+      "conditions": "Experimental complete fixed/bounded-table selection, immutable role counts and typed transaction coordinates have retained-table lifetime checks. Edition 2027 module-local named catalogs bind role names and schemas through immutable projections, aliases and reads; bounded nested data reads retain separate owned buffers; complete aggregate/source proof and builder binding remain required.",
+      "fail_closed_features": [
+        "exact-role-selection-artifact-proof"
+      ],
+      "id": "ir:verify-exact-cell-roles",
+      "layer": "instruction",
+      "production_policy": "accepted only when the shape classifier reports no fail-closed feature",
+      "status": "shape-gated"
+    },
+    {
+      "conditions": "Experimental bounded nested witness and Cell views validate canonical bytes. Edition 2027 data_shape declarations and Item/Payload view types resolve reusable bounds. Whole and derived views support immutable read-only helpers with per-call list/element validation and checked pointer/length source binding; complete source, codec and output evidence remain pending.",
+      "fail_closed_features": [
+        "nested-values-artifact-proof"
+      ],
+      "id": "artifact:nested-values-proof",
+      "layer": "artifact-policy",
+      "production_policy": "accepted only when the shape classifier reports no fail-closed feature",
+      "status": "shape-gated"
+    },
+    {
       "conditions": "Experimental gathered hashes require proven local byte/offset vectors and checked transaction span bounds.",
       "fail_closed_features": [
         "gather-hash-materialization"

@@ -290,6 +290,9 @@ pub fn check_bundle_values(
     validate_bounded_group_input_machine_contract(record, &elf)?;
     validate_bounded_output_plan_machine_contract(metadata, record, &elf)?;
     validate_policy_dispatch_machine_contract(record, &elf)?;
+    let selections = crate::cell_selection::machine::validate(record, &elf, terminal_sink)?;
+    let allocated = crate::allocated_values::machine::validate(record, &elf, terminal_sink)?;
+    crate::nested_machine::validate(record, &elf, terminal_sink, &selections, &allocated)?;
     crate::code_origin::validate_open_verifier_claims(record, &elf)?;
     validate_source_map(source_map, record, artifact, &elf)?;
 
@@ -413,6 +416,10 @@ fn validate_metadata_binding(
     source_map: &SourceArtifactMap,
 ) -> Result<(), CheckerError> {
     crate::policy::validate_policy_metadata(metadata, &record.typed_semantics)?;
+    crate::cell_selection::validate_metadata(metadata, &record.typed_semantics)?;
+    crate::cell_data_view::validate_metadata(metadata, &record.typed_semantics)?;
+    crate::bounded_nested::validate_metadata(metadata, &record.typed_semantics)?;
+    crate::allocated_values::validate_metadata(metadata, &record.typed_semantics)?;
     validate_ckb_vm2_target_contract(metadata)?;
     validate_runtime_access_provenance_metadata(metadata, &record.typed_semantics)?;
     let artifact_hash = hex_encode(&ckb_blake2b256(artifact));
@@ -872,6 +879,7 @@ fn validate_runtime_transaction_view_handle(prefix: &str, handle: &RuntimeTransa
         base_type,
         "InputView"
             | "OutputView"
+            | "CellDataView"
             | "CellDepView"
             | "HeaderDepView"
             | "WitnessArgsView"
@@ -1702,6 +1710,7 @@ fn validate_typed_semantics(record: &VerifiedLoweringRecord) -> Result<(), Check
     let lowering_entries = record.entries.iter().map(|entry| (entry.id.as_str(), entry)).collect::<BTreeMap<_, _>>();
     let typed_types = typed.types.iter().map(|ty| (ty.name.as_str(), ty)).collect::<BTreeMap<_, _>>();
     let typed_entries_by_name = typed.entries.iter().map(|entry| (entry.name.as_str(), entry)).collect::<BTreeMap<_, _>>();
+    let allocated_owner_types = crate::allocated_values::owner_types(typed);
     let called_targets = typed
         .entries
         .iter()
@@ -1849,6 +1858,7 @@ fn validate_typed_semantics(record: &VerifiedLoweringRecord) -> Result<(), Check
             }
         }
         validate_typed_cfg_and_dataflow(entry, &locals)?;
+        crate::allocated_values::validate_lifetimes(entry, &allocated_owner_types)?;
         validate_typed_effect(entry)?;
         for borrow in &entry.borrows {
             let root_matches =
@@ -2640,6 +2650,14 @@ fn bounded_collection_element(ty: &str) -> Option<&str> {
 }
 
 fn validate_typed_type(ty: &TypedSemanticType) -> Result<(), CheckerError> {
+    let nested_cell = matches!(ty.kind.as_str(), "resource" | "shared" | "receipt")
+        && ty.fields.iter().any(|field| nested_source_parts(&field.ty, "NestedValues", 4).is_some());
+    let order = ty.fields.iter().filter_map(|field| field.molecule_field_index).collect::<BTreeSet<_>>();
+    if (nested_cell && (order.len() != ty.fields.len() || order.iter().copied().ne(0..ty.fields.len() as u32)))
+        || (!nested_cell && !order.is_empty())
+    {
+        return typed_error(format!("typed type '{}' has missing, duplicate or unsupported Molecule field indices", ty.name));
+    }
     if ty.name.is_empty()
         || ty.layout_hash.is_empty()
         || !matches!(ty.kind.as_str(), "resource" | "shared" | "receipt" | "struct" | "enum")
@@ -2761,6 +2779,36 @@ fn validate_typed_operation(
     let none_detail = matches!(operation.detail, TypedSemanticOperationDetail::None);
     let fail = || typed_error(format!("typed operation '{}' has an invalid shape, detail, or type rule", operation.opcode));
 
+    // Nested values are borrowed immutable spans. A matching pointer-sized
+    // representation does not authorize collection mutation, construction,
+    // pointer equality, calls or returning the view from its invocation.
+    let has_nested_value = operation.operands.iter().any(|operand| is_nested_source_type(&operand.ty))
+        || operation.destinations.iter().any(|id| locals.get(id).is_some_and(|local| is_nested_source_type(&local.ty)));
+    let nested_cell_create = matches!(operation.opcode.as_str(), "create" | "create-unique" | "replace-unique")
+        && operation.operands.iter().filter(|operand| is_nested_source_type(&operand.ty)).all(|operand| {
+            nested_source_parts(&operand.ty, "NestedValues", 4).is_some() && nested_index_type(&operand.ty, types).is_some()
+        });
+    let nested_helper_call = operation.opcode == "call"
+        && operation.call.as_ref().is_some_and(|call| {
+            call.contract == "typed-local"
+                && entries.get(call.target.as_str()).is_some_and(|callee| {
+                    callee.kind == "helper" && matches!(normalize_effect(&callee.effect).as_str(), "pure" | "readonly")
+                })
+        })
+        && operation
+            .operands
+            .iter()
+            .filter(|operand| is_nested_source_type(&operand.ty))
+            .all(|operand| !canonical_abi_type(&operand.ty).starts_with('&'))
+        && operation.destinations.iter().all(|id| locals.get(id).is_some_and(|local| !is_nested_source_type(&local.ty)));
+    if has_nested_value
+        && !nested_cell_create
+        && !nested_helper_call
+        && !matches!(operation.opcode.as_str(), "load-var" | "store-var" | "move" | "index" | "field-access" | "length")
+    {
+        return fail();
+    }
+
     match operation.opcode.as_str() {
         "load-const" => {
             let TypedSemanticOperationDetail::Constant { value } = &operation.detail else { return fail() };
@@ -2774,9 +2822,18 @@ fn validate_typed_operation(
             });
             let context_typed_empty_array = matches!(value, TypedSemanticConstant::Array(values) if values.is_empty())
                 && destination_type.is_some_and(is_zero_length_array_type);
+            // IR stores nonnegative i32 literals in the U32 constant variant.
+            // Only values representable without changing sign may acquire the
+            // contextual signed type; arbitrary u32 bit patterns are not i32
+            // literals. Negative values are produced by a typed unary operation.
+            let context_typed_i32 = destination_type == Some("i32")
+                && matches!(value, TypedSemanticConstant::U32(value) if value.parse::<u32>().ok().is_some_and(|value| value <= i32::MAX as u32));
             if !shape(1, 0)
                 || operation.call.is_some()
-                || (constant_type.as_deref() != destination_type && !encoded_unit_enum && !context_typed_empty_array)
+                || (constant_type.as_deref() != destination_type
+                    && !encoded_unit_enum
+                    && !context_typed_empty_array
+                    && !context_typed_i32)
             {
                 return typed_error(format!(
                     "typed load-const has an invalid shape or type: constant type {:?}, destination type {:?}",
@@ -2842,23 +2899,38 @@ fn validate_typed_operation(
             let tuple_field_type = tuple_field_type(owner_type, name);
             let builtin_bytes_field_type =
                 (name == "0" && matches!(canonical_abi_type(owner_type).as_str(), "address" | "hash")).then_some("[u8; 32]");
-            let field_type = named_field_type.or(tuple_field_type.as_deref()).or(builtin_bytes_field_type);
+            let nested_field = nested_record_field_type(owner_type, name, types);
+            let data_field = crate::cell_data_view::field_type(owner_type, name, types);
+            let selected_role = crate::cell_selection::project_role_type(owner_type, name);
+            let field_type = named_field_type
+                .or(tuple_field_type.as_deref())
+                .or(builtin_bytes_field_type)
+                .or(nested_field.as_deref())
+                .or(data_field.as_deref())
+                .or(selected_role.as_deref());
             if !shape(1, 1) || !optional_types_equivalent(field_type, destination_type(0)) || operation.call.is_some() {
                 return fail();
             }
         }
         "index" => {
-            let element = collection_element_type(operand_type(0).unwrap_or_default());
+            let owner = operand_type(0).unwrap_or_default();
+            let element = collection_element_type(owner).or_else(|| nested_index_type(owner, types));
             if !shape(1, 2)
                 || !none_detail
                 || operation.call.is_some()
                 || !is_integer_type(operand_type(1).unwrap_or_default())
+                || (is_nested_source_type(owner) && !matches!(operand_type(1), Some("u8" | "u16" | "u32" | "u64")))
                 || !optional_types_equivalent(element.as_deref(), destination_type(0))
             {
                 return fail();
             }
         }
         "length" | "collection-capacity" => {
+            if operand_type(0).is_some_and(is_nested_source_type)
+                && (operation.opcode != "length" || nested_index_type(operand_type(0).unwrap(), types).is_none())
+            {
+                return fail();
+            }
             if !shape(1, 1) || !none_detail || destination_type(0) != Some("u64") || operation.call.is_some() {
                 return fail();
             }
@@ -2866,6 +2938,14 @@ fn validate_typed_operation(
         "type-hash" => {
             if !shape(1, 1) || !none_detail || destination_type(0) != Some("hash") || operation.call.is_some() {
                 return fail();
+            }
+        }
+        "allocated-value" => {
+            if !crate::allocated_values::valid_operation(operation, destination_type(0), types) {
+                return typed_error(format!(
+                    "allocated operation has invalid declaration, arguments or result: {:?}",
+                    operation.detail
+                ));
             }
         }
         "collection-new" => {
@@ -2977,6 +3057,40 @@ fn validate_typed_operation(
                 || !declared_contract
                 || !fixed_resource
                 || operation.call.is_some()
+            {
+                return fail();
+            }
+        }
+        "verify-exact-cell-roles" => {
+            let TypedSemanticOperationDetail::ExactRoleSelection { contract } = &operation.detail else { return fail() };
+            let result = crate::cell_selection::selection_type(contract);
+            if !(shape(0, 0) || shape(1, 0) && destination_type(0) == Some(result.as_str()))
+                || operation.call.is_some()
+                || contract.validate().is_err()
+            {
+                return fail();
+            }
+            if crate::cell_selection::layout::derive(contract, types).is_err() {
+                return fail();
+            }
+        }
+        "read-exact-cell-role" => {
+            let TypedSemanticOperationDetail::ExactRoleRead { role, read } = &operation.detail else { return fail() };
+            let Some(selection) = operand_type(0).and_then(crate::cell_selection::parse_selection_type) else {
+                return fail();
+            };
+            let roles = &selection.schemas;
+            let Some(element) = roles.get(*role as usize) else { return fail() };
+            let result = read.result_type(element);
+            if !(1..=8).contains(&roles.len())
+                || !shape(1, if read.indexed() { 2 } else { 1 })
+                || destination_type(0) != Some(result.as_str())
+                || operation.call.is_some()
+                || (selection.catalog.is_some() && selection.selected != Some(*role))
+                || (read.indexed() && operand_type(1) != Some("u64"))
+                || roles.iter().any(|role| {
+                    !types.get(role.as_str()).is_some_and(|ty| matches!(ty.kind.as_str(), "resource" | "shared" | "receipt"))
+                })
             {
                 return fail();
             }
@@ -3342,9 +3456,18 @@ fn validate_typed_operation(
             });
             let builtin_layout_matches =
                 destination_type(0).is_some_and(|destination| builtin_tuple_contract_matches(destination, &operation.operands));
+            let array_layout_matches = destination_type(0)
+                .and_then(|ty| ty.strip_prefix('[')?.strip_suffix(']')?.rsplit_once("; "))
+                .is_some_and(|(element, count)| {
+                    count.parse::<usize>().ok() == Some(operation.operands.len())
+                        && operation.operands.iter().all(|operand| operand.ty == element)
+                });
             if operation.destinations.len() != 1
                 || !none_detail
-                || (destination_type(0) != Some(expected.as_str()) && !named_layout_matches && !builtin_layout_matches)
+                || (destination_type(0) != Some(expected.as_str())
+                    && !named_layout_matches
+                    && !builtin_layout_matches
+                    && !array_layout_matches)
                 || operation.call.is_some()
             {
                 return fail();
@@ -3623,6 +3746,128 @@ fn is_ckb_temporal_ordered_type(ty: &str) -> bool {
 
 fn strip_reference(ty: &str) -> &str {
     ty.strip_prefix("&mut ").or_else(|| ty.strip_prefix('&')).unwrap_or(ty)
+}
+
+// Independently derive the view type from the declared finite source shape.
+// These rules do not claim to prove the emitted decoder or Cell authority.
+pub(crate) fn is_nested_source_type(ty: &str) -> bool {
+    let ty = canonical_abi_type(strip_reference(ty));
+    matches!(ty.split('<').next(), Some("NestedValues" | "NestedBytesView" | "NestedRecordView"))
+}
+
+pub(crate) fn nested_source_parts(ty: &str, name: &str, count: usize) -> Option<Vec<String>> {
+    let canonical = canonical_abi_type(ty);
+    let inner = canonical.strip_prefix(name)?.strip_prefix('<')?.strip_suffix('>')?;
+    let parts = split_top_level(inner, ',');
+    (parts.len() == count).then(|| parts.into_iter().map(str::to_string).collect())
+}
+
+fn nested_bound(text: &str, maximum: u32) -> Option<u32> {
+    (!text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit()))
+        .then(|| text.parse::<u32>().ok())
+        .flatten()
+        .filter(|value| *value <= maximum)
+}
+
+fn nested_record_type<'a>(name: &str, types: &BTreeMap<&str, &'a TypedSemanticType>) -> Option<&'a TypedSemanticType> {
+    let record = *types.get(name)?;
+    if record.kind != "struct" || !(2..=9).contains(&record.fields.len()) || canonical_abi_type(&record.fields.last()?.ty) != "Vec<u8>"
+    {
+        return None;
+    }
+    for field in &record.fields[..record.fields.len() - 1] {
+        let ty = canonical_abi_type(&field.ty);
+        if matches!(ty.as_str(), "u8" | "u16" | "u32" | "u64" | "u128" | "hash" | "address") {
+            continue;
+        }
+        let len = ty.strip_prefix("[u8;")?.strip_suffix(']')?.parse::<u16>().ok()?;
+        if !(1..=256).contains(&len) {
+            return None;
+        }
+    }
+    Some(record)
+}
+
+fn nested_index_type(ty: &str, types: &BTreeMap<&str, &TypedSemanticType>) -> Option<String> {
+    if let Some(parts) = nested_source_parts(ty, "NestedBytesView", 1) {
+        nested_bound(&parts[0], crate::bounded_nested::MAX_PAYLOAD_BYTES)?;
+        return Some("u8".into());
+    }
+    let parts = nested_source_parts(ty, "NestedValues", 4)?;
+    nested_bound(&parts[1], crate::bounded_nested::MAX_ITEMS)?;
+    let payload = nested_bound(&parts[2], crate::bounded_nested::MAX_PAYLOAD_BYTES)?;
+    if nested_bound(&parts[3], crate::bounded_nested::MAX_TOTAL_BYTES)? < 4 {
+        return None;
+    }
+    if parts[0] == "Vec<u8>" {
+        return Some(format!("NestedBytesView<{payload}>"));
+    }
+    nested_record_type(&parts[0], types)?;
+    Some(format!("NestedRecordView<{}, {payload}>", parts[0]))
+}
+
+pub(crate) fn nested_value_contract(
+    ty: &str,
+    types: &BTreeMap<&str, &TypedSemanticType>,
+) -> Option<crate::bounded_nested::NestedValueContract> {
+    use crate::bounded_nested::{ElementShape, NestedValueContract, PROFILE};
+    let parts = nested_source_parts(ty, "NestedValues", 4)?;
+    let element = if parts[0] == "Vec<u8>" {
+        ElementShape::Bytes {}
+    } else {
+        let record = nested_record_type(&parts[0], types)?;
+        let widths = record.fields[..record.fields.len() - 1]
+            .iter()
+            .map(|field| {
+                let ty = canonical_abi_type(&field.ty);
+                match ty.as_str() {
+                    "u8" => Some(1),
+                    "u16" => Some(2),
+                    "u32" => Some(4),
+                    "u64" => Some(8),
+                    "u128" => Some(16),
+                    "hash" | "address" => Some(32),
+                    _ => ty.strip_prefix("[u8;")?.strip_suffix(']')?.parse::<u16>().ok(),
+                }
+            })
+            .collect::<Option<Vec<_>>>()?;
+        ElementShape::Record { fixed_field_widths: widths }
+    };
+    let contract = NestedValueContract {
+        profile: PROFILE.into(),
+        element,
+        max_items: nested_bound(&parts[1], 32)?,
+        max_payload_bytes: nested_bound(&parts[2], 256)?,
+        max_total_bytes: nested_bound(&parts[3], 4096)?,
+    };
+    contract.validate().ok()?;
+    Some(contract)
+}
+
+/// A derived view has one element's codec, never the surrounding list codec.
+/// The synthetic list contract reuses only independent shape/bound validation.
+pub(crate) fn nested_parameter_contract(
+    ty: &str,
+    types: &BTreeMap<&str, &TypedSemanticType>,
+) -> Option<(crate::bounded_nested::NestedValueContract, bool)> {
+    if let Some(contract) = nested_value_contract(ty, types) {
+        return Some((contract, false));
+    }
+    let (element, payload) = if let Some(parts) = nested_source_parts(ty, "NestedBytesView", 1) {
+        ("Vec<u8>".to_string(), parts[0].clone())
+    } else {
+        let parts = nested_source_parts(ty, "NestedRecordView", 2)?;
+        (parts[0].clone(), parts[1].clone())
+    };
+    nested_value_contract(&format!("NestedValues<{element}, 1, {payload}, 4096>"), types).map(|contract| (contract, true))
+}
+
+fn nested_record_field_type(ty: &str, field: &str, types: &BTreeMap<&str, &TypedSemanticType>) -> Option<String> {
+    let parts = nested_source_parts(ty, "NestedRecordView", 2)?;
+    let payload = nested_bound(&parts[1], crate::bounded_nested::MAX_PAYLOAD_BYTES)?;
+    let record = nested_record_type(&parts[0], types)?;
+    let (index, definition) = record.fields.iter().enumerate().find(|(_, definition)| definition.name == field)?;
+    Some(if index + 1 == record.fields.len() { format!("NestedBytesView<{payload}>") } else { definition.ty.clone() })
 }
 
 fn collection_element_type(ty: &str) -> Option<String> {
@@ -4121,7 +4366,7 @@ fn validate_ownership_bindings(entry: &TypedSemanticEntry, locals: &BTreeMap<u32
     Ok(())
 }
 
-fn normalize_effect(effect: &str) -> String {
+pub(crate) fn normalize_effect(effect: &str) -> String {
     effect.chars().filter(|character| character.is_ascii_alphanumeric()).flat_map(char::to_lowercase).collect()
 }
 
@@ -4339,6 +4584,82 @@ fn validate_block_abi(
     proofs: &BTreeMap<&str, &ProofRecord>,
     budgets: &CheckerBudgets,
 ) -> Result<(), CheckerError> {
+    if block.allocated_init_labels.len() > 16
+        || !strictly_sorted(&block.allocated_init_labels)
+        || block.allocated_init_labels.iter().any(|label| label.len() > 128 || !label.starts_with(".Lallocated_init_"))
+    {
+        return Err(CheckerError::new(
+            CheckerRejectionCode::V2420TypedMachineBindingInvalid,
+            "invalid or excessive allocated initialization labels",
+        ));
+    }
+    if block.allocated_allocation_labels.len() > 16
+        || !strictly_sorted(&block.allocated_allocation_labels)
+        || block.allocated_allocation_labels.iter().any(|label| label.len() > 128 || !label.starts_with(".Lallocated_allocation_"))
+    {
+        return Err(CheckerError::new(
+            CheckerRejectionCode::V2420TypedMachineBindingInvalid,
+            "invalid or excessive allocated allocation labels",
+        ));
+    }
+    if block.allocated_lifecycle_labels.len() > 16
+        || !strictly_sorted(&block.allocated_lifecycle_labels)
+        || block.allocated_lifecycle_labels.iter().any(|label| {
+            label.len() > 128
+                || ![
+                    ".Lallocated_resize_",
+                    ".Lallocated_release_",
+                    ".Lallocated_reserve_",
+                    ".Lallocated_drop_",
+                    ".Lallocated_push_",
+                    ".Lallocated_insert_",
+                    ".Lallocated_set_",
+                    ".Lallocated_remove_",
+                    ".Lallocated_find_",
+                    ".Lallocated_put_",
+                    ".Lallocated_erase_",
+                    ".Lallocated_read_",
+                    ".Lallocated_lookup_",
+                    ".Lallocated_take_",
+                    ".Lallocated_pop_",
+                    ".Lallocated_required_",
+                    ".Lallocated_sorted_",
+                    ".Lallocated_borrowed_",
+                    ".Lallocated_index_",
+                    ".Lallocated_result_",
+                ]
+                .iter()
+                .any(|prefix| label.starts_with(prefix))
+        })
+    {
+        return Err(CheckerError::new(
+            CheckerRejectionCode::V2420TypedMachineBindingInvalid,
+            "invalid or excessive allocated lifecycle labels",
+        ));
+    }
+    if block.cell_view_value_labels.len() > 16
+        || !strictly_sorted(&block.cell_view_value_labels)
+        || block.cell_view_value_labels.iter().any(|label| label.len() > 128 || !label.starts_with(".Lcell_view_value_"))
+    {
+        return Err(CheckerError::new(
+            CheckerRejectionCode::V2420TypedMachineBindingInvalid,
+            "invalid or excessive Cell view value labels",
+        ));
+    }
+    if block.exact_role_labels.len() > 16
+        || !strictly_sorted(&block.exact_role_labels)
+        || block.exact_role_labels.iter().any(|label| {
+            label.len() > 128
+                || !(label.starts_with(".Lexact_role_check_")
+                    || label.starts_with(".Lexact_role_use_")
+                    || label.starts_with(".Lexact_role_data_"))
+        })
+    {
+        return Err(CheckerError::new(
+            CheckerRejectionCode::V2420TypedMachineBindingInvalid,
+            "invalid or excessive exact-role verification labels",
+        ));
+    }
     if block.frame_size_bytes != entry.frame_size_bytes
         || block.outgoing_argument_bytes != entry.outgoing_argument_bytes
         || block.effect != entry.effect
@@ -4349,6 +4670,33 @@ fn validate_block_abi(
         return Err(CheckerError::new(
             CheckerRejectionCode::V2407AbiOrStackInvalid,
             format!("block '{}' frame contract disagrees with owner entry", block.id),
+        ));
+    }
+    if block.nested_read_labels.len() > 16
+        || !strictly_sorted(&block.nested_read_labels)
+        || block.nested_read_labels.iter().any(|label| label.len() > 128 || !label.starts_with(".Lnested_use_"))
+    {
+        return Err(CheckerError::new(
+            CheckerRejectionCode::V2420TypedMachineBindingInvalid,
+            "invalid or excessive nested read boundary labels",
+        ));
+    }
+    if block.nested_cell_labels.len() > 16
+        || !strictly_sorted(&block.nested_cell_labels)
+        || block.nested_cell_labels.iter().any(|label| label.len() > 128 || !label.starts_with(".Lnested_cell_codec_"))
+    {
+        return Err(CheckerError::new(
+            CheckerRejectionCode::V2420TypedMachineBindingInvalid,
+            "invalid or excessive nested Cell decoder labels",
+        ));
+    }
+    if block.nested_output_labels.len() > 16
+        || !strictly_sorted(&block.nested_output_labels)
+        || block.nested_output_labels.iter().any(|label| label.len() > 128 || !label.starts_with(".Lnested_output_check_"))
+    {
+        return Err(CheckerError::new(
+            CheckerRejectionCode::V2420TypedMachineBindingInvalid,
+            "invalid or excessive nested output comparison labels",
         ));
     }
     let valid_registers = [
@@ -8282,10 +8630,34 @@ mod tests {
                 kind: "struct".into(),
                 encoded_size: Some(8),
                 fields: vec![
-                    crate::TypedSemanticField { name: "z".into(), ty: "unit".into(), offset: 0, width_bytes: Some(0) },
-                    crate::TypedSemanticField { name: "a".into(), ty: "unit".into(), offset: 0, width_bytes: Some(0) },
-                    crate::TypedSemanticField { name: "value".into(), ty: "u64".into(), offset: 0, width_bytes: Some(8) },
-                    crate::TypedSemanticField { name: "tail".into(), ty: "unit".into(), offset: 8, width_bytes: Some(0) },
+                    crate::TypedSemanticField {
+                        name: "z".into(),
+                        ty: "unit".into(),
+                        offset: 0,
+                        width_bytes: Some(0),
+                        ..Default::default()
+                    },
+                    crate::TypedSemanticField {
+                        name: "a".into(),
+                        ty: "unit".into(),
+                        offset: 0,
+                        width_bytes: Some(0),
+                        ..Default::default()
+                    },
+                    crate::TypedSemanticField {
+                        name: "value".into(),
+                        ty: "u64".into(),
+                        offset: 0,
+                        width_bytes: Some(8),
+                        ..Default::default()
+                    },
+                    crate::TypedSemanticField {
+                        name: "tail".into(),
+                        ty: "unit".into(),
+                        offset: 8,
+                        width_bytes: Some(0),
+                        ..Default::default()
+                    },
                 ],
                 identity_policy: "none".into(),
                 ..Default::default()
@@ -8327,6 +8699,7 @@ mod tests {
                     ty: "u64".into(),
                     offset: 0,
                     width_bytes: Some(8),
+                    ..Default::default()
                 });
             }
             changed.canonicalize();

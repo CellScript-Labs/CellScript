@@ -448,7 +448,7 @@ fn validate_stack_pointer_write(
     }
     let rs2 = (word >> 20) & 0x1f;
     if opcode == 0x33 && funct3 == 0 && (word >> 25) & 0x7f == 0 && rs1 == 2 {
-        let delta = preceding_lui_addi_constant(bytes, index, rs2).ok_or_else(|| {
+        let delta = preceding_frame_constant(bytes, index, rs2).ok_or_else(|| {
             ElfParseError::new(
                 ElfErrorKind::InvalidInstruction,
                 format!("stack adjustment at {address:#x} does not use an immediately materialised bounded constant"),
@@ -463,11 +463,19 @@ fn validate_stack_pointer_write(
     ))
 }
 
-fn preceding_lui_addi_constant(bytes: &[u8], index: usize, register: u32) -> Option<i64> {
-    if index < 2 {
+fn preceding_frame_constant(bytes: &[u8], index: usize, register: u32) -> Option<i64> {
+    if index == 0 || matches!(register, 0 | 2) {
         return None;
     }
     let addi = instruction_word(bytes, index - 1).ok()?;
+    // The assembler omits the trailing ADDI when a frame displacement has
+    // zero low bits. LUI alone still defines the complete signed RV64 value.
+    if addi & 0x7f == 0x37 && (addi >> 7) & 0x1f == register {
+        return Some(sign_extend(addi & 0xffff_f000, 32));
+    }
+    if index < 2 {
+        return None;
+    }
     let lui = instruction_word(bytes, index - 2).ok()?;
     if addi & 0x7f != 0x13
         || (addi >> 12) & 0x7 != 0
@@ -625,6 +633,28 @@ fn read_u64(bytes: &[u8], offset: usize) -> Result<u64, ElfParseError> {
 #[cfg(test)]
 mod tests {
     use super::instruction_is_allowed;
+
+    #[test]
+    fn frame_adjustments_accept_complete_lui_values_and_reject_runtime_sources() {
+        // Large nested Cell buffers can make an entry frame exactly 19 pages.
+        for (upper, expected) in [(0x0001_3000, 77_824), (0xfffe_d000, -77_824)] {
+            let lui = upper | (31 << 7) | 0x37;
+            let adjust = (31 << 20) | (2 << 15) | (2 << 7) | 0x33;
+            let bytes: Vec<_> = [lui, adjust].into_iter().flat_map(u32::to_le_bytes).collect();
+            let mut adjustments = Vec::new();
+            super::validate_stack_pointer_write(&bytes, 1, adjust, 4, &mut adjustments).unwrap();
+            assert_eq!(adjustments[0].delta, expected);
+            // Changing the source register must not inherit the preceding LUI.
+            let changed = adjust ^ (1 << 20);
+            assert!(super::validate_stack_pointer_write(&bytes, 1, changed, 4, &mut Vec::new()).is_err());
+            // A load is runtime-dependent even if it writes the same register.
+            let load = (2 << 15) | (3 << 12) | (31 << 7) | 0x03;
+            let bytes: Vec<_> = [load, adjust].into_iter().flat_map(u32::to_le_bytes).collect();
+            assert!(super::validate_stack_pointer_write(&bytes, 1, adjust, 4, &mut Vec::new()).is_err());
+        }
+        assert_eq!(super::preceding_frame_constant(&0x0000_0137u32.to_le_bytes(), 1, 2), None);
+        assert_eq!(super::preceding_frame_constant(&0x0000_0037u32.to_le_bytes(), 1, 0), None);
+    }
 
     #[test]
     fn allowlist_accepts_only_the_emitted_sltiu_seqz_form() {

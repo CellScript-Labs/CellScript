@@ -2,6 +2,10 @@ use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
 use crate::lexer::token::{Token, TokenKind};
 
+mod cell_roles;
+mod collections;
+mod data_shape;
+
 const MAX_PARSE_RECURSION_DEPTH: usize = 32;
 
 /// Entry-body grammar is selected by a frontend, not inferred from source
@@ -154,7 +158,7 @@ impl<'a> Parser<'a> {
                 | TokenKind::Action
                 | TokenKind::Fn
                 | TokenKind::Lock
-        ) || matches!(&self.current().kind, TokenKind::Identifier(name) if name == "flow")
+        ) || matches!(&self.current().kind, TokenKind::Identifier(name) if name == "flow" || name == "cell_roles" || name == "data_shape" || name == "collections")
     }
 
     fn synchronize_item(&mut self, start_position: usize) {
@@ -547,6 +551,30 @@ impl<'a> Parser<'a> {
             }
         };
         let item = match &self.current().kind {
+            TokenKind::Identifier(name) if name == "collections" => {
+                self.reject_all_attrs("collections", &attrs)?;
+                if !matches!(self.entry_body_grammar, EntryBodyGrammar::ConstraintBlock) {
+                    return Err(CompileError::new("collections declarations require Edition 2027 authoring", self.current().span));
+                }
+                Ok(Item::Collections(self.parse_collections()?))
+            }
+            TokenKind::Identifier(name) if name == "data_shape" => {
+                self.reject_all_attrs("data_shape", &attrs)?;
+                if !matches!(self.entry_body_grammar, EntryBodyGrammar::ConstraintBlock) {
+                    return Err(CompileError::new("data_shape declarations require Edition 2027 authoring", self.current().span));
+                }
+                Ok(Item::DataShape(self.parse_data_shape()?))
+            }
+            TokenKind::Identifier(name) if name == "cell_roles" => {
+                self.reject_all_attrs("cell_roles", &attrs)?;
+                if !matches!(self.entry_body_grammar, EntryBodyGrammar::ConstraintBlock) {
+                    return Err(CompileError::new(
+                        "named cell_roles declarations require Edition 2027 authoring",
+                        self.current().span,
+                    ));
+                }
+                Ok(Item::CellRoles(self.parse_cell_roles()?))
+            }
             TokenKind::Use => {
                 self.reject_type_id_attr(&attrs)?;
                 Ok(Item::Use(self.parse_use()?))
@@ -591,6 +619,33 @@ impl<'a> Parser<'a> {
         if item.name().is_none() && visibility != Visibility::LegacyPublic {
             return Err(CompileError::new("visibility modifiers are only valid on named top-level declarations", self.current().span));
         }
+        let visibility = if let Item::Collections(def) = &item {
+            if !matches!(visibility, Visibility::LegacyPublic | Visibility::Private) {
+                return Err(CompileError::new(
+                    "collections declarations are module-local; exported owner contracts are not yet implemented",
+                    def.span,
+                ));
+            }
+            Visibility::Private
+        } else if let Item::CellRoles(def) = &item {
+            if !matches!(visibility, Visibility::LegacyPublic | Visibility::Private) {
+                return Err(CompileError::new(
+                    "cell_roles catalogs are module-local; exported catalog interfaces are not yet implemented",
+                    def.span,
+                ));
+            }
+            Visibility::Private
+        } else if let Item::DataShape(def) = &item {
+            if !matches!(visibility, Visibility::LegacyPublic | Visibility::Private) {
+                return Err(CompileError::new(
+                    "data_shape names are module-local; exported shape aliases are not yet implemented",
+                    def.span,
+                ));
+            }
+            Visibility::Private
+        } else {
+            visibility
+        };
         Ok((item, visibility))
     }
 

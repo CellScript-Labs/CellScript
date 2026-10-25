@@ -1010,7 +1010,7 @@
       ]
     }
   ],
-  "inventory_sha256": "0x6e991120d2c2166b7cdfd534d4ab98262fd723ace974b0fcebf2a21c25e5e5e2",
+  "inventory_sha256": "0x707d9b70d9627c48458118ab308f8290a84562639cfa796c67a8760f06c61ef2",
   "release_requirements": {
     "backend": "pending",
     "ci": "pending",

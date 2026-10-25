@@ -28,6 +28,11 @@ pub use open_handles::{
     ProtocolOpenHandleBinding, ProtocolOpenTransaction,
 };
 
+mod selection;
+pub(crate) use selection::builder_contracts as builder_role_contracts;
+
+pub const PROTOCOL_BUNDLE_SELECTION_SCHEMA: &str = "cellscript-protocol-bundle-v2";
+pub const PROTOCOL_BUNDLE_SELECTION_REPORT_SCHEMA: &str = "cellscript-protocol-bundle-report-v2";
 pub const PROTOCOL_BUNDLE_SCHEMA: &str = "cellscript-protocol-bundle-v1";
 pub const PROTOCOL_BUNDLE_INPUT_SCHEMA: &str = "cellscript-protocol-bundle-input-v1";
 pub const PROTOCOL_BUNDLE_REPORT_SCHEMA: &str = "cellscript-protocol-bundle-report-v1";
@@ -398,6 +403,8 @@ pub struct ProtocolBundleInput {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProtocolArtifactIdentity {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exact_role_contracts: Option<cellscript_artifact_checker::cell_selection::transaction::Catalog>,
     pub id: String,
     pub package_coordinate: String,
     pub lock_node_id: String,
@@ -495,6 +502,8 @@ pub struct ProtocolBundleConflict {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProtocolBundleEvidenceTemplate {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub exact_role_selections: BTreeMap<String, Vec<cellscript_artifact_checker::cell_selection::transaction::Selection>>,
     pub schema: String,
     pub structural_verification: EvidenceState,
     pub artifact_admission: BTreeMap<String, CheckerReport>,
@@ -596,6 +605,7 @@ fn check_protocol_bundle_inner(
     let mut identities = Vec::with_capacity(input.artifacts.len());
     let mut reports = BTreeMap::new();
     let mut metadata_validation = BTreeMap::new();
+    let mut exact_role_selections = BTreeMap::new();
     let mut admitted_metadata = BTreeMap::new();
     let mut required_deployment_lines = BTreeSet::new();
     for artifact in &input.artifacts {
@@ -605,6 +615,9 @@ fn check_protocol_bundle_inner(
         }
         let transaction_value = transaction_validation_view(&input.transaction, &artifact.deployment.script)?;
         metadata_validation.insert(artifact.id.clone(), validate_transaction_against_metadata(&metadata, &transaction_value));
+        if identity.exact_role_contracts.is_some() {
+            exact_role_selections.insert(artifact.id.clone(), selection::verify(&identity, &input.transaction)?);
+        }
         admitted_metadata.insert(artifact.id.clone(), metadata);
         reports.insert(artifact.id.clone(), report);
         identities.push(identity);
@@ -643,8 +656,9 @@ fn check_protocol_bundle_inner(
     }
     let closed_roles = resolve_closed_roles(&input.closed_roles, &identities, &input.roles, &input.witnesses)?;
 
+    let selection_profile = !exact_role_selections.is_empty();
     let mut bundle = ResolvedProtocolBundle {
-        schema: PROTOCOL_BUNDLE_SCHEMA.to_string(),
+        schema: if selection_profile { PROTOCOL_BUNDLE_SELECTION_SCHEMA } else { PROTOCOL_BUNDLE_SCHEMA }.to_string(),
         network: normalized_network(&input.network)?,
         artifacts: identities,
         deployment_lines: input.deployment_lines.clone(),
@@ -675,16 +689,17 @@ fn check_protocol_bundle_inner(
     conflicts.dedup();
     let bundle_hash_value = serde_json::to_value(&bundle)
         .map_err(|error| CompileError::without_span(format!("failed to canonicalize ProtocolBundle for hashing: {error}")))?;
-    let bundle_hash = canonical_hash(PROTOCOL_BUNDLE_HASH_DOMAIN, &bundle_hash_value)
+    let bundle_hash = canonical_hash(&bundle.schema, &bundle_hash_value)
         .map_err(|error| CompileError::without_span(format!("failed to hash ProtocolBundle: {error}")))?;
     let status = if conflicts.is_empty() { "ok" } else { "failed" };
     Ok(ProtocolBundleReport {
-        schema: PROTOCOL_BUNDLE_REPORT_SCHEMA.to_string(),
+        schema: if selection_profile { PROTOCOL_BUNDLE_SELECTION_REPORT_SCHEMA } else { PROTOCOL_BUNDLE_REPORT_SCHEMA }.to_string(),
         status: status.to_string(),
         bundle_hash,
         bundle,
         conflicts,
         evidence: ProtocolBundleEvidenceTemplate {
+            exact_role_selections,
             schema: PROTOCOL_BUNDLE_EVIDENCE_SCHEMA.to_string(),
             structural_verification: if status == "ok" { EvidenceState::Verified } else { EvidenceState::NotProvided },
             artifact_admission: reports,
@@ -1093,6 +1108,7 @@ fn admit_artifact(input: &ProtocolArtifactInput, base: &Path) -> Result<(Protoco
     let exact_handle_hash = exact_script_handle_value_hash(&exact_handle)?;
     Ok((
         ProtocolArtifactIdentity {
+            exact_role_contracts: selection::project(&metadata, &input.entry)?,
             id: input.id.clone(),
             package_coordinate: input.package_coordinate.clone(),
             lock_node_id: input.lock_node_id.clone(),
@@ -1161,6 +1177,24 @@ fn validate_builder_manifest(input: &ProtocolArtifactInput, metadata: &CompileMe
             )));
         }
     }
+    let action_names = manifest
+        .get("actions")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| CompileError::without_span("builder manifest requires action projections"))?
+        .iter()
+        .map(|action| {
+            action
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| CompileError::without_span("builder action requires a name"))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let role_contracts = builder_role_contracts(metadata, &action_names)?;
+    let selection_profile = !role_contracts.is_empty();
+    let expected_roles = selection_profile.then(|| serde_json::to_value(&role_contracts)).transpose()?;
+    if manifest.get("exact_role_contracts") != expected_roles.as_ref() {
+        return Err(CompileError::without_span("builder exact-role contracts differ from checked typed metadata"));
+    }
     let structural_checks = [
         ("edition", serde_json::to_value(metadata.edition)),
         ("metadata_schema_version", serde_json::to_value(metadata.metadata_schema_version)),
@@ -1172,8 +1206,8 @@ fn validate_builder_manifest(input: &ProtocolArtifactInput, metadata: &CompileMe
         (
             "protocol_bundle_contract",
             Ok(serde_json::json!({
-                "schema": "cellscript-protocol-bundle-v1",
-                "report_schema": "cellscript-protocol-bundle-report-v1",
+                "schema": if selection_profile { PROTOCOL_BUNDLE_SELECTION_SCHEMA } else { PROTOCOL_BUNDLE_SCHEMA },
+                "report_schema": if selection_profile { PROTOCOL_BUNDLE_SELECTION_REPORT_SCHEMA } else { PROTOCOL_BUNDLE_REPORT_SCHEMA },
                 "artifact_binding_schema": "cellscript-protocol-bundle-artifact-binding-v1",
                 "closed_role_schema": "cellscript-protocol-closed-role-v1",
                 "bounded_output_plan_evidence_schema": "cellscript-bounded-output-plan-evidence-v1",
@@ -2127,6 +2161,7 @@ mod tests {
         .unwrap();
         let exact_handle_hash = exact_script_handle_value_hash(&exact_handle).unwrap();
         ProtocolArtifactIdentity {
+            exact_role_contracts: None,
             id: id.to_string(),
             package_coordinate,
             lock_node_id,

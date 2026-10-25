@@ -192,6 +192,7 @@ impl CodeGenerator {
     }
 
     pub(super) fn emit_stack_access_with_avoid(&mut self, opcode: &str, register: &str, offset: usize, avoid: &[&str]) {
+        let guard = self.allocated_write_guard.take();
         let offset = i64::try_from(offset).expect("stack offset should fit in i64");
         if small_signed_immediate(offset) {
             self.emit(format!("{} {}, {}(sp)", opcode, register, offset));
@@ -204,6 +205,7 @@ impl CodeGenerator {
             self.emit(format!("add {}, sp, {}", scratch, scratch));
             self.emit(format!("{} {}, 0({})", opcode, register, scratch));
         }
+        self.allocated_write_guard = guard;
     }
 
     /// Emit `addi rd, sp, offset` handling offsets that don't fit in 12 bits.
@@ -218,8 +220,16 @@ impl CodeGenerator {
         }
     }
 
-    pub(super) fn prepare_function_layout(&mut self, body: &IrBody, params: &[IrParam]) {
+    pub(super) fn prepare_function_layout(&mut self, body: &IrBody, params: &[IrParam]) -> Result<()> {
         self.cell_bindings.clone_from(&body.cell_bindings);
+        self.nested_cell_buffers.clear();
+        for binding in &body.cell_bindings {
+            if let Some(id) = binding.local_id
+                && let Some(layout) = self.nested_cell_layout(&binding.ty)?
+            {
+                self.nested_cell_buffers.insert(id, layout);
+            }
+        }
         self.cell_locations_by_local = body
             .cell_bindings
             .iter()
@@ -254,6 +264,7 @@ impl CodeGenerator {
         self.cell_buffer_size_offsets.clear();
         self.exact_read_cache_offset = None;
         self.dynamic_value_size_offsets.clear();
+        self.cell_data_view_buffers.clear();
         self.empty_molecule_vector_vars.clear();
         self.constructed_byte_vectors.clear();
         self.constructed_byte_vector_roots.clear();
@@ -306,6 +317,14 @@ impl CodeGenerator {
                 && let Some(width) = self.callable_abis.get(func).and_then(|abi| abi.return_buffer_bytes)
                 && self.fixed_struct_return_width(&dest.ty) == Some(width)
             {
+                self.local_schema_value_widths.insert(dest.id, width);
+            }
+            if let IrInstruction::AllocatedValue(op) = instruction
+                && let Some(dest) = &op.dest
+                && let Some(width) = self.fixed_struct_return_width(&dest.ty)
+            {
+                // Collection reads copy into caller-local storage. Preserve
+                // that exact extent for record fields and ordinary helper ABI.
                 self.local_schema_value_widths.insert(dest.id, width);
             }
         }
@@ -363,7 +382,7 @@ impl CodeGenerator {
                 self.schema_pointer_size_offsets.insert(param.binding.id, next_cell_slot);
                 self.cell_buffer_size_offsets.insert(param.binding.id, next_cell_slot);
                 self.cell_buffer_offsets.insert(param.binding.id, next_cell_slot + 8);
-                next_cell_slot += RUNTIME_CELL_SLOT_SIZE;
+                next_cell_slot += 8 + align_up(self.cell_buffer_capacity(param.binding.id), 8);
                 continue;
             }
             if is_ckb_temporal_scalar_ir_type(&param.ty) || self.fieldless_enum_width(&param.ty).is_some() {
@@ -419,7 +438,7 @@ impl CodeGenerator {
                 self.schema_pointer_size_offsets.insert(param.binding.id, next_cell_slot);
                 self.cell_buffer_size_offsets.insert(param.binding.id, next_cell_slot);
                 self.cell_buffer_offsets.insert(param.binding.id, next_cell_slot + 8);
-                next_cell_slot += RUNTIME_CELL_SLOT_SIZE;
+                next_cell_slot += 8 + align_up(self.cell_buffer_capacity(param.binding.id), 8);
             }
         }
 
@@ -436,7 +455,7 @@ impl CodeGenerator {
             self.schema_pointer_size_offsets.insert(param.binding.id, next_cell_slot);
             self.cell_buffer_size_offsets.insert(param.binding.id, next_cell_slot);
             self.cell_buffer_offsets.insert(param.binding.id, next_cell_slot + 8);
-            next_cell_slot += RUNTIME_CELL_SLOT_SIZE;
+            next_cell_slot += 8 + align_up(self.cell_buffer_capacity(param.binding.id), 8);
         }
 
         let consume_pattern_indices = body
@@ -461,7 +480,7 @@ impl CodeGenerator {
             self.cell_buffer_offsets.insert(param.binding.id, next_cell_slot + 8);
             self.consume_order.push(param.binding.id);
             self.consume_indices.insert(param.binding.id, consume_pattern_indices.get(pattern.binding.as_str()).copied().unwrap_or(0));
-            next_cell_slot += RUNTIME_CELL_SLOT_SIZE;
+            next_cell_slot += 8 + align_up(self.cell_buffer_capacity(param.binding.id), 8);
         }
         for block in &body.blocks {
             for instruction in &block.instructions {
@@ -481,7 +500,7 @@ impl CodeGenerator {
                         var.id,
                         consume_pattern_indices.get(var.name.as_str()).copied().unwrap_or(self.consume_order.len() - 1),
                     );
-                    next_cell_slot += RUNTIME_CELL_SLOT_SIZE;
+                    next_cell_slot += 8 + align_up(self.cell_buffer_capacity(var.id), 8);
                 }
             }
         }
@@ -496,7 +515,7 @@ impl CodeGenerator {
                     {
                         self.read_ref_indices.insert(dest.id, binding.ordinal);
                     }
-                    next_cell_slot += RUNTIME_CELL_SLOT_SIZE;
+                    next_cell_slot += 8 + align_up(self.cell_buffer_capacity(dest.id), 8);
                 }
             }
         }
@@ -512,7 +531,7 @@ impl CodeGenerator {
                 self.schema_pointer_size_offsets.insert(dest.id, next_cell_slot);
                 self.cell_buffer_size_offsets.insert(dest.id, next_cell_slot);
                 self.cell_buffer_offsets.insert(dest.id, next_cell_slot + 8);
-                next_cell_slot += RUNTIME_CELL_SLOT_SIZE;
+                next_cell_slot += 8 + align_up(self.cell_buffer_capacity(dest.id), 8);
             }
         }
 
@@ -530,6 +549,21 @@ impl CodeGenerator {
         }
 
         let mut create_dest_outputs = HashMap::new();
+        for instruction in body.blocks.iter().flat_map(|block| &block.instructions) {
+            if let IrInstruction::Index { dest, .. } | IrInstruction::FieldAccess { dest, .. } = instruction
+                && matches!(
+                    named_type_name(&dest.ty).and_then(crate::nested_values::parsed),
+                    Some(
+                        crate::nested_values::NestedType::Values(_)
+                            | crate::nested_values::NestedType::BytesView { .. }
+                            | crate::nested_values::NestedType::RecordView { .. }
+                    )
+                )
+            {
+                self.dynamic_value_size_offsets.insert(dest.id, next_cell_slot);
+                next_cell_slot += 8;
+            }
+        }
         for block in &body.blocks {
             for instruction in &block.instructions {
                 match instruction {
@@ -594,14 +628,14 @@ impl CodeGenerator {
                             }
                             self.cell_buffer_size_offsets.insert(dest.id, next_cell_slot);
                             self.cell_buffer_offsets.insert(dest.id, next_cell_slot + 8);
-                            next_cell_slot += RUNTIME_CELL_SLOT_SIZE;
+                            next_cell_slot += 8 + align_up(self.cell_buffer_capacity(dest.id), 8);
                         } else if self.consume_indices.contains_key(&var.id)
                             || self.read_ref_indices.contains_key(&var.id)
                             || self.read_ref_param_input_indices.contains_key(&var.id)
                         {
                             self.cell_buffer_size_offsets.insert(dest.id, next_cell_slot);
                             self.cell_buffer_offsets.insert(dest.id, next_cell_slot + 8);
-                            next_cell_slot += RUNTIME_CELL_SLOT_SIZE;
+                            next_cell_slot += 8 + align_up(self.cell_buffer_capacity(dest.id), 8);
                         }
                     }
                     IrInstruction::Call { dest: Some(dest), func, args }
@@ -611,14 +645,14 @@ impl CodeGenerator {
                     {
                         self.cell_buffer_size_offsets.insert(dest.id, next_cell_slot);
                         self.cell_buffer_offsets.insert(dest.id, next_cell_slot + 8);
-                        next_cell_slot += RUNTIME_CELL_SLOT_SIZE;
+                        next_cell_slot += 8 + align_up(self.cell_buffer_capacity(dest.id), 8);
                     }
                     IrInstruction::Call { dest: Some(dest), func, args }
                         if func == "__ckb_sighash_all_zero_lock" && args.len() == 4 && dest.ty == IrType::Hash =>
                     {
                         self.cell_buffer_size_offsets.insert(dest.id, next_cell_slot);
                         self.cell_buffer_offsets.insert(dest.id, next_cell_slot + 8);
-                        next_cell_slot += RUNTIME_CELL_SLOT_SIZE;
+                        next_cell_slot += 8 + align_up(self.cell_buffer_capacity(dest.id), 8);
                     }
                     IrInstruction::Call { dest: Some(dest), func, args }
                         if matches!(
@@ -638,7 +672,7 @@ impl CodeGenerator {
                     {
                         self.cell_buffer_size_offsets.insert(dest.id, next_cell_slot);
                         self.cell_buffer_offsets.insert(dest.id, next_cell_slot + 8);
-                        next_cell_slot += RUNTIME_CELL_SLOT_SIZE;
+                        next_cell_slot += 8 + align_up(self.cell_buffer_capacity(dest.id), 8);
                     }
                     IrInstruction::Call { dest: Some(dest), func, args }
                         if matches!(
@@ -655,7 +689,7 @@ impl CodeGenerator {
                     {
                         self.cell_buffer_size_offsets.insert(dest.id, next_cell_slot);
                         self.cell_buffer_offsets.insert(dest.id, next_cell_slot + 8);
-                        next_cell_slot += RUNTIME_CELL_SLOT_SIZE;
+                        next_cell_slot += 8 + align_up(self.cell_buffer_capacity(dest.id), 8);
                     }
                     IrInstruction::Call { dest: Some(dest), func, args }
                         if ((matches!(func.as_str(), "__ckb_cell_data_blake2b_span" | "__ckb_witness_blake2b_span")
@@ -675,6 +709,20 @@ impl CodeGenerator {
                     }
                     _ => {}
                 }
+            }
+        }
+
+        // Standalone creates do not have an output parameter slot. Reserve a
+        // dedicated bounded Cell buffer so their checks never use the legacy
+        // shared 512-byte scratch area or overwrite an input view.
+        let mut nested_ids = self.nested_cell_buffers.keys().copied().collect::<Vec<_>>();
+        nested_ids.sort_unstable();
+        for id in nested_ids {
+            if !self.cell_buffer_offsets.contains_key(&id) {
+                self.cell_buffer_size_offsets.insert(id, next_cell_slot);
+                self.cell_buffer_offsets.insert(id, next_cell_slot + 8);
+                self.schema_pointer_size_offsets.insert(id, next_cell_slot);
+                next_cell_slot += 8 + align_up(self.cell_buffer_capacity(id), 8);
             }
         }
 
@@ -711,6 +759,7 @@ impl CodeGenerator {
             .count();
         self.collection_region_start = next_cell_slot;
         next_cell_slot += collection_count * collection_slot_size;
+        self.reserve_allocated_owner_frames(body, &mut next_cell_slot)?;
 
         self.return_buffer_pointer_offset = self.current_return_buffer_bytes().map(|_| {
             next_cell_slot = align_up(next_cell_slot, 8);
@@ -719,7 +768,41 @@ impl CodeGenerator {
             offset
         });
 
+        self.exact_selection_offset = None;
+        for instruction in body.blocks.iter().flat_map(|block| &block.instructions) {
+            if let IrInstruction::FieldAccess { dest, obj: IrOperand::Var(obj), .. } = instruction
+                && let Some(schema) = named_type_name(&obj.ty).and_then(crate::cell_data_view::schema)
+                && let Some(layout) = self.nested_cell_layout(schema)?
+            {
+                if layout.capacity > 32768 {
+                    return Err(CompileError::without_span("Cell data table capacity exceeds 32768 bytes"));
+                }
+                next_cell_slot = align_up(next_cell_slot, 8);
+                self.cell_data_view_buffers.insert(dest.id, next_cell_slot);
+                next_cell_slot += 8 + align_up(layout.capacity, 8);
+            }
+        }
+        self.exact_selection_offsets.clear();
+        for instruction in body.blocks.iter().flat_map(|block| &block.instructions) {
+            if let IrInstruction::VerifyExactCellRoles { dest: Some(dest), contract } = instruction {
+                next_cell_slot = align_up(next_cell_slot, 16);
+                self.exact_selection_offsets.insert(dest.id, next_cell_slot);
+                next_cell_slot += self.source_selection_contract(contract)?.frame_bytes();
+            }
+        }
+        let mut shared_selection_bytes = 0;
+        for instruction in body.blocks.iter().flat_map(|block| &block.instructions) {
+            if let IrInstruction::VerifyExactCellRoles { dest: None, contract } = instruction {
+                shared_selection_bytes = shared_selection_bytes.max(self.source_selection_contract(contract)?.frame_bytes());
+            }
+        }
+        if shared_selection_bytes != 0 {
+            next_cell_slot = align_up(next_cell_slot, 16);
+            self.exact_selection_offset = Some(next_cell_slot);
+            next_cell_slot += shared_selection_bytes;
+        }
         self.frame_size = align_frame(next_cell_slot + RUNTIME_EXPR_TEMP_SIZE + RUNTIME_SCRATCH_SIZE + 16);
+        Ok(())
     }
 
     pub(super) fn exact_read_cache_header_size(&self) -> usize {
@@ -784,12 +867,23 @@ impl CodeGenerator {
         max_bytes: usize,
     ) {
         self.emit(format!("# cellscript abi: LOAD_CELL_DATA reason={} source={} index={}", reason, ckb_source_name(source), index));
+        let nested = self.nested_cell_buffer_layout(buffer_offset);
+        let max_bytes = nested.as_ref().map_or(max_bytes, |layout| layout.capacity);
+        let marker = nested.as_ref().map(|_| self.nested_cell_load_marker(size_offset, buffer_offset));
         self.emit_store_data_args_at(max_bytes, size_offset, buffer_offset);
         self.emit(format!("li a3, {}", index));
         self.emit(format!("li a4, {}", source));
         self.emit(format!("li a7, {}", self.runtime_abi().load_cell_data));
         self.emit("ecall");
         self.emit("# a0 = CKB syscall return code");
+        if let Some(layout) = nested {
+            self.emit_nested_loaded_cell_validation(
+                size_offset,
+                buffer_offset,
+                &layout,
+                marker.as_deref().expect("typed load marker"),
+            );
+        }
     }
 
     pub(super) fn emit_load_cell_data_syscall_to_offsets_dynamic_index(
@@ -801,6 +895,9 @@ impl CodeGenerator {
         buffer_offset: usize,
         max_bytes: usize,
     ) {
+        let nested = self.nested_cell_buffer_layout(buffer_offset);
+        let max_bytes = nested.as_ref().map_or(max_bytes, |layout| layout.capacity);
+        let marker = nested.as_ref().map(|_| self.nested_cell_load_marker(size_offset, buffer_offset));
         self.emit(format!(
             "# cellscript abi: LOAD_CELL_DATA reason={} source={} index={}",
             reason,
@@ -813,6 +910,14 @@ impl CodeGenerator {
         self.emit(format!("li a7, {}", self.runtime_abi().load_cell_data));
         self.emit("ecall");
         self.emit("# a0 = CKB syscall return code");
+        if let Some(layout) = nested {
+            self.emit_nested_loaded_cell_validation(
+                size_offset,
+                buffer_offset,
+                &layout,
+                marker.as_deref().expect("typed load marker"),
+            );
+        }
     }
 
     pub(super) fn emit_load_witness_syscall_to_offsets(
@@ -1001,7 +1106,7 @@ impl CodeGenerator {
             self.emit_spill_abi_arg(abi_index, offset);
             self.emit_label(&format!("{marker}_end"));
         }
-
+        self.emit_nested_param_validation(params)?;
         Ok(())
     }
 
@@ -1018,6 +1123,14 @@ impl CodeGenerator {
 
     pub(super) fn record_instruction_var(&self, instruction: &IrInstruction, max_var_id: &mut Option<usize>) {
         match instruction {
+            IrInstruction::AllocatedValue(op) => {
+                if let Some(dest) = &op.dest {
+                    self.record_var(dest, max_var_id);
+                }
+                for operand in op.owner.iter().chain(&op.args) {
+                    self.record_operand(operand, max_var_id);
+                }
+            }
             IrInstruction::LoadConst { dest, .. }
             | IrInstruction::LoadVar { dest, .. }
             | IrInstruction::Unary { dest, .. }
@@ -1164,6 +1277,18 @@ impl CodeGenerator {
                 }
             }
             IrInstruction::BoundedOutputEnd { index } => self.record_operand(index, max_var_id),
+            IrInstruction::VerifyExactCellRoles { dest, .. } => {
+                if let Some(dest) = dest {
+                    self.record_var(dest, max_var_id);
+                }
+            }
+            IrInstruction::ReadExactCellRole { dest, selection, index, .. } => {
+                self.record_var(dest, max_var_id);
+                self.record_operand(selection, max_var_id);
+                if let Some(index) = index {
+                    self.record_operand(index, max_var_id);
+                }
+            }
         }
     }
 
@@ -1184,10 +1309,33 @@ impl CodeGenerator {
         };
 
         match instruction {
+            IrInstruction::AllocatedValue(op) => {
+                if let Some(dest) = &op.dest {
+                    record(offsets, dest);
+                    if !is_fixed_scalar_ir_type(&dest.ty)
+                        && let Some(width) = type_static_length(&dest.ty).filter(|width| *width > 0)
+                    {
+                        offsets.insert(dest.id, width);
+                    }
+                }
+            }
+            IrInstruction::FieldAccess { dest, obj, .. } => {
+                record(offsets, dest);
+                // A byte-array field is addressed storage even when its value
+                // fits in one word. Copy it just like a wider field so a local
+                // record's field pointer is never mistaken for scalar bytes.
+                if let IrType::Array(inner, width) = &dest.ty
+                    && **inner == IrType::U8
+                    && (1..=8).contains(width)
+                    && matches!(obj, IrOperand::Var(object) if named_type_name(&object.ty)
+                        .is_some_and(|name| self.type_layouts.contains_key(name) && !self.cell_type_names.contains(name)))
+                {
+                    offsets.insert(dest.id, *width);
+                }
+            }
             IrInstruction::LoadConst { dest, .. }
             | IrInstruction::LoadVar { dest, .. }
             | IrInstruction::Unary { dest, .. }
-            | IrInstruction::FieldAccess { dest, .. }
             | IrInstruction::Index { dest, .. }
             | IrInstruction::Length { dest, .. }
             | IrInstruction::TypeHash { dest, .. }
@@ -1228,6 +1376,9 @@ impl CodeGenerator {
                         offsets.insert(dest.id, 32);
                     }
                     record(offsets, dest);
+                    if let Some(width) = self.callable_abis.get(func).and_then(|abi| abi.return_buffer_bytes) {
+                        offsets.insert(dest.id, width);
+                    }
                 }
             }
             IrInstruction::StoreVar { .. }
@@ -1245,7 +1396,9 @@ impl CodeGenerator {
             IrInstruction::BoundedCellLoad { .. }
             | IrInstruction::BoundedPlanLoad { .. }
             | IrInstruction::BoundedOutputVerify { .. }
-            | IrInstruction::BoundedOutputEnd { .. } => {}
+            | IrInstruction::BoundedOutputEnd { .. }
+            | IrInstruction::VerifyExactCellRoles { .. }
+            | IrInstruction::ReadExactCellRole { .. } => {}
         }
     }
 
@@ -1260,6 +1413,13 @@ impl CodeGenerator {
 
     pub(super) fn collect_u128_instruction_vars(&self, instruction: &IrInstruction, out: &mut BTreeSet<usize>) {
         match instruction {
+            IrInstruction::AllocatedValue(op) => {
+                if let Some(dest) = &op.dest
+                    && dest.ty == IrType::U128
+                {
+                    out.insert(dest.id);
+                }
+            }
             IrInstruction::LoadConst { dest, .. }
             | IrInstruction::LoadVar { dest, .. }
             | IrInstruction::Unary { dest, .. }
@@ -1310,7 +1470,9 @@ impl CodeGenerator {
             | IrInstruction::BoundedCellLoad { .. }
             | IrInstruction::BoundedPlanLoad { .. }
             | IrInstruction::BoundedOutputVerify { .. }
-            | IrInstruction::BoundedOutputEnd { .. } => {}
+            | IrInstruction::BoundedOutputEnd { .. }
+            | IrInstruction::VerifyExactCellRoles { .. }
+            | IrInstruction::ReadExactCellRole { .. } => {}
         }
     }
 

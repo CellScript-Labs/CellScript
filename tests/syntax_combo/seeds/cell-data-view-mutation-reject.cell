@@ -1,0 +1,12 @@
+// audit: phase=reject_compile
+// audit: contains=mutable aliases are not permitted
+module cellscript::audit::cell_data_view_mutation_reject
+
+resource Token has store { id: u64 }
+
+action inspect() -> u64 {
+    verification
+    let input = ckb::input<Token>(0)
+    let mut data = input.data
+    return data.id
+}

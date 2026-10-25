@@ -1,0 +1,22 @@
+// audit: edition=2027
+// audit: phase=accept
+module collections_records
+
+struct Pair<T: fixed_value> { left: T, right: T }
+
+collections Work {
+    limits { bytes: 512, allocations: 4 }
+    values: Vec<Pair<u64>> { items: 4 }
+}
+
+fn first(view: &Work) -> Pair<u64> { return view.values.get(0) }
+
+action inspect() -> u64 {
+    let mut work = Work::new()
+    work.values.push(Pair<u64> { right: 23, left: 11 })
+    let copied = first(&work)
+    work.drop()
+    require copied.left == 11
+    require copied.right == 23
+    return 0
+}

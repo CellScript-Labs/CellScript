@@ -1,0 +1,26 @@
+// Experimental read-only fixed Cell data views. This example checks field
+// values, not ownership or complete transaction settlement. Stable artifact
+// admission retains cell-data-view-artifact-proof.
+module cellscript::examples::typed_cell_data
+
+resource Token has store {
+    id: u8,
+    amount: u64,
+    owner: Hash,
+    large: u128,
+    bytes: [u8; 3],
+}
+
+action inspect() -> u64 {
+    verification
+    let input = ckb::input<Token>(0)
+    let output = ckb::output<Token>(0)
+    let data = input.data
+    let alias = data
+    require alias.id == 7
+    require alias.owner == output.data.owner
+    require alias.large == output.data.large
+    require alias.bytes == output.data.bytes
+    require alias.amount == 42
+    return 0
+}

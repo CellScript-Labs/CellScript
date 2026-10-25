@@ -1,0 +1,110 @@
+// Experimental Edition 2027; illustrative Script hashes, not deployments.
+// Settle 1–6 immutable full-fill orders between two exact asset Type Scripts.
+// Each order owns two distinct balance identities per asset: id*2 and id*2+1.
+module cellscript::language::batches::mixed_settlement
+
+resource Order has store {
+    id: u64,
+    seller: Hash,
+    buyer: Hash,
+    give: u64,
+    take: u64,
+    settled: u8,
+}
+resource Balance has store { id: u64, owner: Hash, amount: u64 }
+
+cell_roles Settlement {
+    limits { input_scan: 32, output_scan: 32, selected_per_side: 30, aggregate_bytes: 8192 }
+    orders: Order {
+        type_hash: "0x1111111111111111111111111111111111111111111111111111111111111111",
+        lock_hash: "0x4444444444444444444444444444444444444444444444444444444444444444",
+        identity: id, authority: local_type, correspondence: preserve,
+        inputs: 1..=6, outputs: 1..=6
+    }
+    base: Balance {
+        type_hash: "0x2222222222222222222222222222222222222222222222222222222222222222",
+        lock_hash: "0x4444444444444444444444444444444444444444444444444444444444444444",
+        identity: id, authority: observe, correspondence: preserve,
+        inputs: 2..=12, outputs: 2..=12
+    }
+    quote: Balance {
+        type_hash: "0x3333333333333333333333333333333333333333333333333333333333333333",
+        lock_hash: "0x4444444444444444444444444444444444444444444444444444444444444444",
+        identity: id, authority: observe, correspondence: preserve,
+        inputs: 2..=12, outputs: 2..=12
+    }
+}
+
+#[effect(ReadOnly)]
+fn full_fill(before: InputView<Order>, after: OutputView<Order>) -> bool {
+    if before.data.id > 9223372036854775807 { return false }
+    if before.data.settled != 0 { return false }
+    if after.data.settled != 1 { return false }
+    if before.data.seller == before.data.buyer { return false }
+    if before.data.give == 0 || before.data.take == 0 { return false }
+    if before.data.id != after.data.id { return false }
+    if before.data.seller != after.data.seller { return false }
+    if before.data.buyer != after.data.buyer { return false }
+    if before.data.give != after.data.give { return false }
+    if before.data.take != after.data.take { return false }
+    if after.capacity < before.capacity { return false }
+    return after.capacity >= ckb::cell_occupied_capacity(after)
+}
+
+#[effect(ReadOnly)]
+fn transfer_leg(before: InputView<Balance>, after: OutputView<Balance>, owner: Hash, amount: u64, debit: bool) -> bool {
+    if before.data.id != after.data.id { return false }
+    if before.data.owner != owner || after.data.owner != owner { return false }
+    if after.capacity < before.capacity { return false }
+    if after.capacity < ckb::cell_occupied_capacity(after) { return false }
+    if debit {
+        if before.data.amount < amount { return false }
+        return after.data.amount == before.data.amount - amount
+    }
+    if before.data.amount > 18446744073709551615 - amount { return false }
+    return after.data.amount == before.data.amount + amount
+}
+
+action settle() -> u64 {
+    verification
+    let selected = ckb::select_cell_roles<Settlement>()
+    let count = selected.orders.input_count()
+    require selected.base.input_count() == count * 2
+    require selected.quote.input_count() == count * 2
+    for i in 0..count {
+        let order = selected.orders.input(i)
+        require full_fill(order, selected.orders.successor(i))
+        let debit_id = order.data.id * 2
+        let credit_id = debit_id + 1
+        let mut base_matches = 0
+        let mut quote_matches = 0
+        for j in 0..selected.base.input_count() {
+            let balance = selected.base.input(j)
+            if balance.data.id == debit_id {
+                require transfer_leg(balance, selected.base.successor(j), order.data.seller, order.data.give, true)
+                base_matches = base_matches + 1
+            }
+            if balance.data.id == credit_id {
+                require transfer_leg(balance, selected.base.successor(j), order.data.buyer, order.data.give, false)
+                base_matches = base_matches + 1
+            }
+        }
+        for j in 0..selected.quote.input_count() {
+            let balance = selected.quote.input(j)
+            if balance.data.id == debit_id {
+                require transfer_leg(balance, selected.quote.successor(j), order.data.buyer, order.data.take, true)
+                quote_matches = quote_matches + 1
+            }
+            if balance.data.id == credit_id {
+                require transfer_leg(balance, selected.quote.successor(j), order.data.seller, order.data.take, false)
+                quote_matches = quote_matches + 1
+            }
+        }
+        require base_matches == 2
+        require quote_matches == 2
+    }
+    // Each observed asset Type independently checks conservation. Every
+    // spending Lock must authorize this same transaction; observation is not
+    // foreign lifecycle authority and does not substitute for those Scripts.
+    return 0
+}

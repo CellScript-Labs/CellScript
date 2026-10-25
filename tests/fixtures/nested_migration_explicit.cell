@@ -1,0 +1,67 @@
+// Explicit-bound authoring comparison; business predicates match the named example.
+// Experimental Edition 2027. Hashes below are illustrative deployment inputs.
+// Preserve each document and its history, append one release note, and advance
+// every document to the registry's next revision. No creation, burn or merge.
+module cellscript::language::batches::nested_migration
+
+resource Document has store { messages: NestedValues<Vec<u8>, 8, 256, 2120>, id: u64, revision: u64 }
+resource Registry has store { id: u64, revision: u64 }
+
+cell_roles Migration {
+    limits { input_scan: 32, output_scan: 32, selected_per_side: 9, aggregate_bytes: 32768 }
+    documents: Document {
+        type_hash: "0x1111111111111111111111111111111111111111111111111111111111111111",
+        lock_hash: "0x3333333333333333333333333333333333333333333333333333333333333333",
+        identity: id, authority: local_type, correspondence: preserve,
+        inputs: 1..=8, outputs: 1..=8
+    }
+    registry: Registry {
+        type_hash: "0x2222222222222222222222222222222222222222222222222222222222222222",
+        lock_hash: "0x3333333333333333333333333333333333333333333333333333333333333333",
+        identity: id, authority: observe, correspondence: preserve,
+        inputs: 1..=1, outputs: 1..=1
+    }
+}
+
+fn same_message(before: NestedBytesView<256>, after: NestedBytesView<256>) -> bool {
+    if before.len() != after.len() { return false }
+    for i in 0..before.len() {
+        if before[i] != after[i] { return false }
+    }
+    return true
+}
+
+#[effect(ReadOnly)]
+fn migrate_document(before: InputView<Document>, after: OutputView<Document>, note: NestedBytesView<256>, revision: u64) -> bool {
+    if before.data.id != after.data.id { return false }
+    if before.data.revision != revision { return false }
+    if after.data.revision != revision + 1 { return false }
+    if after.capacity < before.capacity { return false }
+    if after.capacity < ckb::cell_occupied_capacity(after) { return false }
+    let old = before.data.messages
+    let updated = after.data.messages
+    if old.len() >= 8 { return false }
+    if updated.len() != old.len() + 1 { return false }
+    for i in 0..old.len() {
+        if !same_message(old[i], updated[i]) { return false }
+    }
+    if !same_message(note, updated[old.len()]) { return false }
+    return true
+}
+
+action migrate(witness release_note: NestedValues<Vec<u8>, 8, 256, 2120>) -> u64 {
+    verification
+    require release_note.len() == 1
+    let selected = ckb::select_cell_roles<Migration>()
+    let registry_before = selected.registry.input(0)
+    let registry_after = selected.registry.successor(0)
+    let revision = registry_before.data.revision
+    require revision < 18446744073709551615
+    require registry_after.data.revision == revision + 1
+    // The registry Type and every spending Lock must also accept this same
+    // transaction. Observing their Cells does not grant lifecycle authority.
+    for i in 0..selected.documents.input_count() {
+        require migrate_document(selected.documents.input(i), selected.documents.successor(i), release_note[0], revision)
+    }
+    return 0
+}

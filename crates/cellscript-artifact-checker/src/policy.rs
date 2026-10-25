@@ -756,7 +756,13 @@ mod tests {
             name: name.to_string(),
             kind: "resource".to_string(),
             encoded_size: Some(8),
-            fields: vec![TypedSemanticField { name: "amount".to_string(), ty: "u64".to_string(), offset: 0, width_bytes: Some(8) }],
+            fields: vec![TypedSemanticField {
+                name: "amount".to_string(),
+                ty: "u64".to_string(),
+                offset: 0,
+                width_bytes: Some(8),
+                ..Default::default()
+            }],
             identity_policy: "none".to_string(),
             ..Default::default()
         };

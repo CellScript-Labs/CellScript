@@ -8815,6 +8815,7 @@ impl CodeGenerator {
         const FRAME: usize = 64;
         let invalid = self.fresh_label("cell_probe_invalid");
         let ready = self.fresh_label("cell_probe_ready");
+        // Keep the existing Type-presence helper's evidence labels stable.
         let scan = self.fresh_label("cell_probe_scan");
         let absent = self.fresh_label("cell_probe_absent");
         let success = self.fresh_label("cell_probe_success");
@@ -8838,9 +8839,26 @@ impl CodeGenerator {
         self.emit(format!("j {invalid}"));
         self.emit_label(&ready);
         self.emit_stack_store("t2", SOURCE);
-        self.emit_stack_store(if count { "zero" } else { "t1" }, INDEX);
+        if count {
+            self.emit_cell_source_count_scan(
+                cell_scan::CellScanFrame { source: SOURCE, index: INDEX, length: LENGTH, buffer: BUFFER },
+                None,
+                &invalid,
+                &invalid,
+            );
+            self.emit("li a1, 0");
+            self.emit(format!("j {done}"));
+            self.emit_label(&invalid);
+            self.emit_process_failure(CellScriptRuntimeError::CkbSourceViewInvalid);
+            self.emit_label(&done);
+            self.emit_stack_load("ra", RA);
+            self.emit(format!("addi sp, sp, {FRAME}"));
+            self.emit("ret");
+            return;
+        }
+        self.emit_stack_store("t1", INDEX);
         self.emit_label(&scan);
-        let size = if count { 8 } else { 32 };
+        let size = 32;
         self.emit(format!("li t0, {size}"));
         self.emit_stack_store("t0", LENGTH);
         self.emit(format!("addi a0, sp, {BUFFER}"));
@@ -8848,31 +8866,19 @@ impl CodeGenerator {
         self.emit("li a2, 0");
         self.emit_stack_load("a3", INDEX);
         self.emit_stack_load("a4", SOURCE);
-        self.emit(format!("li a5, {}", if count { CKB_CELL_FIELD_CAPACITY } else { CKB_CELL_FIELD_TYPE_HASH }));
+        self.emit(format!("li a5, {CKB_CELL_FIELD_TYPE_HASH}"));
         self.emit(format!("li a7, {}", abi.load_cell_by_field));
         self.emit("ecall");
-        self.emit(format!("li t0, {}", if count { CKB_INDEX_OUT_OF_BOUND } else { CKB_ITEM_MISSING }));
+        self.emit(format!("li t0, {CKB_ITEM_MISSING}"));
         self.emit(format!("beq a0, t0, {absent}"));
         self.emit(format!("bnez a0, {invalid}"));
         self.emit_stack_load("t0", LENGTH);
         self.emit(format!("li t1, {size}"));
         self.emit(format!("bne t0, t1, {invalid}"));
-        if count {
-            self.emit_stack_load("t0", INDEX);
-            self.emit("addi t0, t0, 1");
-            self.emit(format!("beqz t0, {invalid}"));
-            self.emit_stack_store("t0", INDEX);
-            self.emit(format!("j {scan}"));
-        } else {
-            self.emit("li a0, 1");
-            self.emit(format!("j {success}"));
-        }
+        self.emit("li a0, 1");
+        self.emit(format!("j {success}"));
         self.emit_label(&absent);
-        if count {
-            self.emit_stack_load("a0", INDEX);
-        } else {
-            self.emit("li a0, 0");
-        }
+        self.emit("li a0, 0");
         self.emit_label(&success);
         self.emit("li a1, 0");
         self.emit(format!("j {done}"));
@@ -11159,6 +11165,9 @@ pub struct MachineLayoutEvidence {
     pub blocks: Vec<MachineBlockEvidence>,
     pub edges: Vec<MachineEdgeEvidence>,
     pub symbols: BTreeMap<String, u64>,
+    /// Text labels in emission order, including labels sharing an address.
+    /// A preceding empty IR block must not own the next block's instructions.
+    pub symbol_order: Vec<String>,
     pub globals: BTreeSet<String>,
     pub entry_frame_sizes: BTreeMap<String, u32>,
     pub fixed_result_frames: BTreeMap<String, FixedResultFrameEvidence>,

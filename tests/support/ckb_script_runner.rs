@@ -374,6 +374,17 @@ pub fn execute_cellscript_script(elf_bytes: &[u8], fixture: &CkbVmFixture) -> Ck
     execute_cellscript_script_with_transaction_transform(elf_bytes, fixture, |tx, _| tx)
 }
 
+/// Explicit measurement limit for a large fixture. Ordinary callers retain
+/// MAX_CYCLES; this does not change any frozen business acceptance ceiling.
+#[allow(dead_code)]
+pub fn execute_cellscript_script_with_cycle_limit(
+    elf_bytes: &[u8],
+    fixture: &CkbVmFixture,
+    max_cycles: u64,
+) -> CkbScriptExecutionResult {
+    execute_with_limit(elf_bytes, fixture, max_cycles, |tx, _| tx, |_, _, _| (), |_, _, _| ()).0
+}
+
 /// Execute a fixture after applying a deterministic witness-only transform to
 /// the completed transaction. The callback also receives the exact current
 /// type Script so SDK signing-message tests can construct its ScriptGroup.
@@ -411,6 +422,22 @@ where
 pub fn execute_cellscript_script_with_context_setup_and_observer<F, S, O, T>(
     elf_bytes: &[u8],
     fixture: &CkbVmFixture,
+    transform: F,
+    setup: S,
+    observe: O,
+) -> (CkbScriptExecutionResult, T)
+where
+    F: FnOnce(TransactionView, packed::Script) -> TransactionView,
+    S: FnOnce(&mut Context, &TransactionView, &packed::Script),
+    O: FnOnce(&Context, &TransactionView, &packed::Script) -> T,
+{
+    execute_with_limit(elf_bytes, fixture, MAX_CYCLES, transform, setup, observe)
+}
+
+fn execute_with_limit<F, S, O, T>(
+    elf_bytes: &[u8],
+    fixture: &CkbVmFixture,
+    max_cycles: u64,
     transform: F,
     setup: S,
     observe: O,
@@ -558,7 +585,7 @@ where
     setup(&mut context, &tx, &type_script);
 
     // Execute via ckb-script ScriptVerify with full CKB syscall context.
-    let verify_result = context.verify_tx(&tx, MAX_CYCLES);
+    let verify_result = context.verify_tx(&tx, max_cycles);
     let observation = observe(&context, &tx, &type_script);
     let result = match verify_result {
         Ok(cycles) => CkbScriptExecutionResult {

@@ -1,0 +1,44 @@
+// audit:edition=2027
+// audit:phase=accept
+module nested_data_views
+
+struct Entry { tag: u8, payload: Vec<u8> }
+data_shape Messages {
+    element: Vec<u8>,
+    limits { items: 32, payload_bytes: 256, encoded_bytes: 4096 }
+}
+data_shape Entries {
+    element: Entry,
+    limits { items: 32, payload_bytes: 256, encoded_bytes: 4096 }
+}
+resource Batch has store { messages: Messages, id: u64, owner: Hash, entries: Entries }
+
+fn total(values: Messages) -> u64 {
+    let mut sum = 0
+    for value in values {
+        for byte in value { sum = sum + (byte as u64) }
+    }
+    return sum
+}
+#[effect(ReadOnly)]
+fn inspect(view: InputView<Batch>) -> u64 {
+    return total(view.data.messages)
+}
+action verify() -> u64 {
+    let before = ckb::input<Batch>(1)
+    let after = ckb::output<Batch>(0)
+    let input = before.data
+    let messages = input.messages
+    let alias = messages
+    let first = alias[0]
+    let entries = after.data.entries
+    require input.id == after.data.id
+    require input.owner == after.data.owner
+    require total(messages) == 6
+    require total(after.data.messages) == 9
+    require inspect(before) == 6
+    require first[0] == 1
+    require entries[0].tag == 7
+    require entries[0].payload[0] == 8
+    return 0
+}

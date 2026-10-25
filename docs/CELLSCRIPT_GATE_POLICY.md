@@ -1,5 +1,217 @@
 # CellScript Gate Policy
 
+`cellc explain collections [INPUT] [--json]` is experimental native declaration
+analysis for Edition 2027 named collections. It compares maximum one-time
+reservations with incremental growth from empty owners, includes resolved unused
+record/generic declarations, and reports shared byte/event shortfalls without
+changing compilation or allocation policy. `fits` describes those scenarios;
+it is not program-path, worst-case, stack-peak or production admission evidence.
+Focused checks are `cargo test --locked -p cellscript --test cli
+cellc_explain_collections -- --test-threads=1` and the
+`budget_scenarios_include_alignment_records_retired_buffers_and_shared_limits`
+library test. CLI changes also need the ordinary commit/integration gates at
+their respective checkpoints. The JSON report is separate from compile metadata
+and does not add data to the browser payload.
+
+Collection hover uses the same declaration cost model as the CLI. Run
+`cargo test --locked -p cellscript --lib collection_budget_hover`,
+`cargo test --locked -p cellscript --test selection_bundle editor_cross_package_budget`
+and `cargo test --locked -p cellscript-wasm --features wasm,language-service --lib wasm_collection_budget_hover`
+for local/virtual documents, imported generic layouts, unsaved dependency changes,
+unavailable invalid layouts and optional browser language-service parity.
+Keep the existing CLI and budget model tests when changing the shared calculation;
+these hints do not change allocation behavior or the default browser metadata.
+
+`cargo test --locked -p cellscript --test collection_budgets` compares the CLI
+report with an independent arena model and source execution at exact byte/event
+budgets, one alignment unit short and one allocation event short. These finite
+profiles include interleaved Vec/Map/Set operations and O0/O3; their explicit
+100-million-cycle execution limit is a measurement allowance, not a frozen
+business resource ceiling.
+`cargo test --locked -p cellscript --test selection_bundle allocated_transfer_preallocation_policy`
+compares actual-count and full-maximum reservations in the complete transfer
+program. It writes `target/collection-preallocation-comparison.json`, including
+candidate exceedances of the existing frozen limits. Baseline observations must
+still match exactly; a passing experiment does not admit the candidate policy.
+
+`cargo test --locked -p cellscript --test selection_bundle cross_package`
+checks readonly helper extraction into locked dependency packages: complete
+settlement and byte/record migration through the checker, SDK/adapter and all
+required VM groups, plus copied generic records after a local owner is dropped.
+Bounds and source/schema substitutions must reject; package variants retain the
+original numeric resource ceilings. Run the complete `selection_bundle` suite
+when changing these shared fixture paths. This does not export module-local
+catalog/shape/owner declarations or establish complete source equivalence.
+With the `lsp` feature, the same suite's `editor_cross_package` case checks
+imported/aliased schemas, nested-record payloads, same-name decoys, private
+visibility and unsaved dependency edits, including unfinished trailing-dot
+completion with unchanged document diagnostics. Changes to field resolution or workspace
+buffer overlays also require `cargo test --locked -p cellscript --lib lsp::`.
+
+Experimental #47 arena, allocated vector and ordered Map/Set primitives use
+`cargo test --locked -p cellscript --lib value_arena -- --nocapture` for VM/model
+comparison, memory guards, exhaustion and ordering. Source runtime coverage uses
+`cargo test --locked -p cellscript --test allocated_runtime`; structured contract
+and mandatory blocker mutations use
+`cargo test --locked -p cellscript --test artifact_checker allocated_values`.
+Collection input/result transport uses
+`cargo test --locked -p cellscript --test artifact_checker allocated_transport`.
+Its wide-result cases include small/large arenas, short/maximum byte arrays,
+`u128`, records and complete-transfer Map slices. Rebound copies/publications
+must reject altered bytes, widths, destinations, erased evidence and overlapping
+private storage. Changes to this shared path require the full checker suites,
+`allocated_runtime`, `owned_collections` and `selection_bundle`; existing business
+resource ceilings remain unchanged. The allocation admission blocker stays in place.
+These rebound cases include typed owner availability across moves/drops,
+branch joins and loop backedges, nested lexical loans and helper argument
+evaluation. ABI-compatible reference temporaries retain read-only authority.
+Run the complete checker suite when changing this shared typed-CFG analysis,
+and the `owned_collections` / `allocated_runtime` suites for accepted source
+programs. This does not replace allocation machine-state/source proof.
+Run `cargo test --locked -p cellscript --test artifact_checker allocated_initializers`
+for constructor machine binding: all state/descriptor stores, large offsets,
+multiple owners, erased markers and a bypass with the machine CFG rebound.
+Run `cargo test --locked -p cellscript --test artifact_checker allocated_allocations`
+for rebound allocation budget predicates, state/record writes, zeroing and site
+inventory mutations at small/large arena bounds. Run `allocated_runtime` and
+`selection_bundle` for accepted operations and unchanged frozen resources.
+Run `cargo test --locked -p cellscript --test artifact_checker allocated_lifecycle`
+for record walks, resize scratch/copy/retirement, explicit release and parent/child
+allocation boundaries, including large second-owner offsets and rebound CFG
+bypasses. Primitive VM/model coverage remains `--lib value_arena` above.
+Run `cargo test --locked -p cellscript --test artifact_checker allocated_descriptors`
+for reserve/drop admission and publication, member widths/limits, missing ranges,
+child-entry bypasses and large private frames with temporary spill budgets.
+Run `cargo test --locked -p cellscript --test artifact_checker allocated_elements`
+for copied-record byte loops, insert/remove overlap direction, clear/length
+updates, missing element ranges and reserve-child bypasses at large offsets.
+Run `cargo test --locked -p cellscript --test artifact_checker allocated_ordered`
+for owned binary-search bounds, integer/byte key ordering, found/index results,
+update-child branch selection and rebound entry bypasses, with all admitted key
+profiles and local/read-only helper aliases retained as accepted programs.
+Run `cargo test --locked -p cellscript --test artifact_checker allocated_reads`
+for owned indexed copies, pop/remove ordering, conditional Map results and
+missing-key failures. Run `cargo test --locked -p cellscript --test artifact_checker allocated_sorted_bodies`
+for typed batch counts, empty destinations, overlap/overflow checks, numeric/byte
+ordering, distinct-key reservation and last-value copying, including empty and
+singleton input, large second-owner offsets and rebound child-entry bypasses.
+Run `cargo test --locked -p cellscript --test artifact_checker allocated_helper_parameters`
+for readonly helper pointer/extent ABI spills, register/stack boundaries,
+forwarding signatures, mixed nested/coordinate decoder prefixes and full/partial
+body overwrites. Run the complete checker suite after changing the shared
+prologue or memory-effect analysis. This checks callee spills and preservation;
+caller pointer provenance and borrowed read bodies are checked separately below.
+Run `cargo test --locked -p cellscript --test artifact_checker allocated_helper_calls`
+for constructor/parameter pointer origins, same-type owner substitution, exact
+owned extents, paired forwarded lengths and full/partial retained-binding writes.
+Cases cover lexical reborrows, both predecessors of a branch join, pointer
+clobbers between loop iterations, register/stack boundaries, O0/O3 and large
+arenas. Large record and ordered-collection cases
+must remain within the existing checker state/fact/step budgets.
+Run the full checker and existing collection/selection suites after changes to
+this shared CFG provenance analysis. These checks do not replace complete
+machine retirement, complete input/result provenance or source correspondence.
+Run `cargo test --locked -p cellscript --test artifact_checker allocated_borrowed_reads`
+for readonly extent/descriptor/record-walk checks, searches, indexed copies,
+conditional and required Map reads, erased inventories and partial-entry bypasses.
+Run `cargo test --locked -p cellscript --test allocated_runtime allocated_borrowed_reads`
+for copied records, valid/missing keys and boundary/overflow indexes at O0/O3,
+512/65536-byte arenas and register/stack ABI boundaries. These reuse the owned
+descriptor and read recognizers; run the full checker and collection/selection
+regressions after changes. Key/index staging, final source result values and
+whole-operation lifecycle/correspondence remain pending.
+Run `cargo test --locked -p cellscript --test artifact_checker allocated_coordinate_calls`
+for exact guarded-write spill/restore composition before coordinate-bearing calls,
+and `cargo test --locked -p cellscript --test allocated_runtime allocated_coordinate_helpers`
+for the same register/stack, forwarding and large-arena programs in CKB-VM.
+The mixed arena/nested/coordinate prefix fixture also includes a caller mutation.
+Changes to the shared guard recognizer require the full checker suite and existing
+collection/selection regressions; successful guard composition does not replace
+the separate arena provenance check or admit general outgoing-frame control flow.
+Complete input/result provenance, value transport and whole-operation source correspondence remain separate;
+the allocation admission blocker remains mandatory.
+Run the complete checker and `selection_bundle` suites when changing the shared
+typed-block flow check; frozen resource ceilings must not be raised incidentally.
+Sorted-batch cases cover order checks, duplicate policy, empty/pre-reserved targets,
+array literals, small integer context, unchanged input and cost comparison.
+These do not replace backend/CI, independent allocation/ownership admission or
+complete aggregation/deduplication acceptance. See the
+[experimental memory contract](CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md#experimental-allocator-and-vector-machine-primitives).
+
+The `named_collections` compiler/LSP/doc tests, `named_runtime_snippets` and
+`wasm_named_collections` cover declarations and the explicit proof boundary.
+`cargo test --locked -p cellscript --test owned_collections` checks local owner
+moves, copied reads, iteration and non-escaping read-only helpers, including
+mutation/drop during argument evaluation and separation from Cell lifecycle
+authority. Syntax seeds accept local construction and deduplication with the
+allocation proof blocker; aggregation with read-only helpers also compiles.
+The `allocated_runtime` suite covers separate caller/callee storage, helper
+forwarding, early returns, stack arguments and witness-driven aggregation and
+deduplication against host oracles. `value_return_abi` checks fixed struct,
+1–64 byte-array, Hash and Address returns. Arrays of 1–8 bytes retain the scalar
+ABI; wider byte results use caller-owned buffers. Matching checker mutations
+must reject removed buffer copies and rebound width/layout changes.
+The `selection_bundle allocated_multi_asset` fixture composes allocated Map/Set
+operations with retained Cell reads, native/generated manifests, canonical
+transaction serialization and all-group VM execution. Its equivalent fixed-array
+program runs the same 44 cases at O0/O3 with identical packed transaction bytes.
+The separate `collection_transfer_resources.json` freezes 24 O3 observations,
+source/ELF/transaction identities and numeric ceilings; the
+`frozen_transfer_resources` test checks source binding and case inventory.
+Keep the existing settlement/migration resource ceilings unchanged when
+refreshing the transfer fixture. Run `artifact_checker
+allocated_writes` for rebound write-guard mutations, plus the full checker suite
+when changing its shared memory-effect proof. The `multi_asset_transfer`
+LSP/WASM checks retain the experimental admission boundary. These checks do not
+replace allocation semantics proofs or final business resource acceptance.
+Fixed Cell SDK changes use the `fixed_cell_builder` native/TypeScript vectors,
+the existing `nested_builder` suite and the complete transfer fixture, which
+executes SDK-generated Cell bytes. Generated packages must still pass their
+`npm run build` TypeScript check. The flat encoder enforces source field widths
+and canonical booleans; it does not certify the metadata or business invariants.
+
+Experimental exact-role builder changes use the focused `selection_bundle` and
+`bounded_cell_selection` integration suites, plus adapter/CLI ProtocolBundle
+regressions. They cover source-derived catalogs, canonical nested data, v2
+materialization and rebound substitutions; they do not replace backend/CI or
+complete business acceptance. See the [selection contract](CELLSCRIPT_BOUNDED_CELL_SELECTION.md).
+The `selection_bundle mixed_settlement` case adds generated participant bindings,
+exact deployment-line admission, canonical transaction bytes, local resolver
+substitution checks and all-group VM execution for the complete settlement
+example. Local fixture observations do not count as live-node evidence.
+The `selection_bundle nested_migration` case compares complete native/generated
+Document and release-note bytes with independent Molecule vectors, reuses the
+entry encoder and adapter, and executes migration, Registry and Lock groups at
+1/3/8 documents. It records unavailable memory metrics explicitly; the observed
+cycles/bytes/capacity are recorded separately from complete acceptance.
+The `selection_bundle record_migration` case compares named and explicit-bound
+record programs at O0/O3, including SDK/adapter bytes and all required groups.
+It covers strictly increasing record identities, the exact aggregate byte limit
+and over-budget rejection. Focused `record_migration` checker/LSP and
+`wasm_record_migration` tests cover paired payload substitutions and helper
+authoring. They retain all proof-admission blockers and do not replace final gates.
+The complete `selection_bundle` suite also checks frozen O3 business-resource
+fixtures. It replays every required group through the standard scheduler, checks
+exit/cycle parity, observes combined stack use and touched guest pages, and binds
+source/ELF/full-transaction hashes to separate ceilings. Maximum-batch late-invalid
+group cycles are recorded without inventing a failed transaction total. The suite
+also covers full 32-Cell scans, their combination with maximum-batch late business
+failures, and separate 33rd-input/output rejection cases. All 35 frozen cases
+must retain their exact identity and resource observations; new combinations do
+not authorize raising existing ceilings.
+See the
+[resource scope](CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md#frozen-complete-program-resource-fixtures);
+finite fixture ceilings do not establish a global worst-case bound.
+The `artifact_checker cell_view_helper` cases cover coordinate transport and
+callee parameter-slot lifetime. Rebound body-store mutations exercise every
+write width, partial overlap and register/stack parameters, with and without
+`.data` projection. Changes to these shared memory effects require the complete
+artifact-checker integration suite and business bundle regressions as well.
+The `artifact_checker cell_view` cases also cover caller-local constructor/alias
+instructions, erased producer markers, bypassed construction and full/partial
+coordinate overwrites before helper calls. Retain the nested-data runtime cases
+to exercise calls across normalized far branches.
+
 The exact ZK application checks include bounded counter-set producer fixtures,
 independent complete-set checker mutations and separate per-VM resource replay.
 The example walkthrough checks native/CCC/generated-SDK set parity and lifecycle

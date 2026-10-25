@@ -1,0 +1,13 @@
+// audit: edition=2027
+// audit: phase=accept
+module collections_construction
+
+collections Scratch {
+    limits { bytes: 8192, allocations: 32 }
+    totals: OrderedMap<Hash, u64> { items: 64 }
+}
+
+action inspect() -> u64 {
+    let scratch = Scratch::new()
+    return 0
+}

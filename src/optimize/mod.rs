@@ -72,7 +72,10 @@ impl Optimizer {
                 Item::Lock(lock) => {
                     lock.body = self.optimize_callable_body(&lock.params, &lock.body)?;
                 }
-                Item::Resource(_)
+                Item::Collections(_)
+                | Item::DataShape(_)
+                | Item::CellRoles(_)
+                | Item::Resource(_)
                 | Item::Shared(_)
                 | Item::Receipt(_)
                 | Item::Struct(_)

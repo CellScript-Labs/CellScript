@@ -1,4 +1,4 @@
-//! Independent validation of the caller-owned fixed ordinary-struct result ABI.
+//! Independent validation of the caller-owned fixed struct and bounded byte-value result ABI.
 //! This verifies placement, lifetime, bounded copies and frame ownership. It
 //! does not turn the bundle's structural claim into source equivalence.
 use std::collections::{BTreeMap, BTreeSet};
@@ -22,62 +22,76 @@ fn same_nominal_type(left: &str, right: &str, aliases: &BTreeMap<&str, String>) 
     crate::generic_projection::checked_source_type(left, aliases) == crate::generic_projection::checked_source_type(right, aliases)
 }
 
-fn result_width<'a>(record: &'a VerifiedLoweringRecord, entry: &TypedSemanticEntry) -> Option<(&'a str, u32)> {
+fn result_width<'a>(record: &'a VerifiedLoweringRecord, entry: &'a TypedSemanticEntry) -> Option<(&'a str, u32)> {
+    let name = entry.return_type.as_str();
+    let canonical = canonical_abi_type(name);
+    if matches!(canonical.as_str(), "hash" | "address") {
+        return Some((name, 32));
+    }
+    if let Some(count) = canonical.strip_prefix("[u8;").and_then(|ty| ty.strip_suffix(']')).and_then(|count| count.parse::<u32>().ok())
+        && (9..=64).contains(&count)
+    {
+        return Some((name, count));
+    }
     let ty = record.typed_semantics.types.iter().find(|ty| canonical_abi_type(&ty.name) == canonical_abi_type(&entry.return_type))?;
     (ty.kind == "struct").then_some((ty.name.as_str(), ty.encoded_size?))
 }
 
 fn argument_count(record: &VerifiedLoweringRecord, entry: &TypedSemanticEntry) -> Result<u32, CheckerError> {
     entry.params.iter().try_fold(0u32, |count, param| {
-        let ty = canonical_abi_type(&param.ty);
-        let ty = ty.strip_prefix("&mut").or_else(|| ty.strip_prefix('&')).unwrap_or(&ty);
-        let temporal = matches!(
-            ty,
-            "BlockNumber"
-                | "EpochNumber"
-                | "EpochDuration"
-                | "EpochLength"
-                | "EncodedSince"
-                | "DecodedSince"
-                | "TimestampMillis"
-                | "AbsoluteBlockSince"
-                | "AbsoluteEpochSince"
-                | "AbsoluteTimestampSince"
-                | "RelativeBlockSince"
-                | "RelativeEpochSince"
-                | "RelativeTimestampSince"
-        ) || ty.starts_with("Since<Absolute,")
-            || ty.starts_with("Since<Relative,");
-        let nominal = record.typed_semantics.types.iter().any(|layout| canonical_abi_type(&layout.name) == ty)
-            || (!matches!(ty, "bool" | "u8" | "u16" | "u32" | "i32" | "u64" | "u128" | "hash" | "address" | "unit")
-                && !ty.starts_with(['[', '(']));
-        let wide = committed_state_type_width(ty, &record.typed_semantics.types).is_some_and(|width| width > 8);
-        let type_hash = !ty.contains("__mono__")
-            && nominal
-            && entry.blocks.iter().flat_map(|block| &block.operations).any(|operation| {
-                operation.opcode == "type-hash"
-                    && operation.operands.iter().filter_map(|operand| operand.local).any(|local| {
-                        let source = entry.locals.iter().find(|candidate| candidate.id == local).map(|candidate| candidate.source_id);
-                        source.is_some()
-                            && source
-                                == entry
-                                    .locals
-                                    .iter()
-                                    .find(|candidate| candidate.id == param.binding_id)
-                                    .map(|candidate| candidate.source_id)
-                    })
-            });
-        let width = if temporal {
-            1
-        } else if nominal {
-            2 + 2 * u32::from(type_hash)
-        } else if wide {
-            2
-        } else {
-            1
-        };
-        count.checked_add(width).ok_or_else(|| error("argument expansion overflows"))
+        count.checked_add(parameter_word_width(record, entry, param)).ok_or_else(|| error("argument expansion overflows"))
     })
+}
+
+/// Independently derived word ABI shared by fixed-result and nested-input checks.
+pub(crate) fn parameter_word_width(record: &VerifiedLoweringRecord, entry: &TypedSemanticEntry, param: &TypedSemanticParam) -> u32 {
+    let ty = canonical_abi_type(&param.ty);
+    let ty = ty.strip_prefix("&mut").or_else(|| ty.strip_prefix('&')).unwrap_or(&ty);
+    let temporal = matches!(
+        ty,
+        "BlockNumber"
+            | "EpochNumber"
+            | "EpochDuration"
+            | "EpochLength"
+            | "EncodedSince"
+            | "DecodedSince"
+            | "TimestampMillis"
+            | "AbsoluteBlockSince"
+            | "AbsoluteEpochSince"
+            | "AbsoluteTimestampSince"
+            | "RelativeBlockSince"
+            | "RelativeEpochSince"
+            | "RelativeTimestampSince"
+    ) || ty.starts_with("Since<Absolute,")
+        || ty.starts_with("Since<Relative,");
+    let nominal = record.typed_semantics.types.iter().any(|layout| canonical_abi_type(&layout.name) == ty)
+        || (!matches!(ty, "bool" | "u8" | "u16" | "u32" | "i32" | "u64" | "u128" | "hash" | "address" | "unit")
+            && !ty.starts_with(['[', '(']));
+    let wide = committed_state_type_width(ty, &record.typed_semantics.types).is_some_and(|width| width > 8);
+    let type_hash = !ty.contains("__mono__")
+        && nominal
+        && entry.blocks.iter().flat_map(|block| &block.operations).any(|operation| {
+            operation.opcode == "type-hash"
+                && operation.operands.iter().filter_map(|operand| operand.local).any(|local| {
+                    let source = entry.locals.iter().find(|candidate| candidate.id == local).map(|candidate| candidate.source_id);
+                    source.is_some()
+                        && source
+                            == entry
+                                .locals
+                                .iter()
+                                .find(|candidate| candidate.id == param.binding_id)
+                                .map(|candidate| candidate.source_id)
+                })
+        });
+    if temporal {
+        1
+    } else if nominal {
+        2 + 2 * u32::from(type_hash)
+    } else if wide {
+        2
+    } else {
+        1
+    }
 }
 
 pub(crate) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result<(), CheckerError> {
@@ -691,7 +705,7 @@ fn add(left: Atom, right: Atom) -> Atom {
     }
 }
 
-fn validate_memcpy(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result<(), CheckerError> {
+pub(crate) fn validate_memcpy(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result<(), CheckerError> {
     let entry = record
         .entries
         .iter()

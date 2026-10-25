@@ -1,0 +1,13 @@
+// audit:edition=2027
+// audit:phase=accept
+// Declaration validation only; this action performs no allocation.
+module named_collections
+
+collections Scratch {
+    limits { bytes: 8192, allocations: 32 }
+    totals: OrderedMap<Hash, u64> { items: 64 }
+    seen: OrderedSet<Hash> { items: 64 }
+    pending: Vec<u64> { items: 64 }
+}
+
+action inspect() -> u64 { return 0 }

@@ -2,6 +2,7 @@
 //! Command-line interface and subcommand implementation
 
 mod artifact;
+mod collection_budget;
 pub mod commands;
 mod novaseal_certification;
 mod test_runner;

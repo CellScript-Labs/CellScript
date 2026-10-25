@@ -1,0 +1,19 @@
+// audit: edition=2027
+// audit: phase=accept
+module collections_sorted
+
+collections Work {
+    limits { bytes: 256, allocations: 2 }
+    totals: OrderedMap<u8, u16> { items: 4 }
+    seen: OrderedSet<u8> { items: 4 }
+}
+
+action inspect() -> u64 {
+    let mut work = Work::new()
+    work.totals.load_sorted([(1, 7), (1, 11), (2, 13)])
+    work.seen.load_sorted([1, 1, 2])
+    require work.totals.len() == work.seen.len()
+    require work.totals.get(1) == 11
+    require work.totals.get(2) == 13
+    return 0
+}

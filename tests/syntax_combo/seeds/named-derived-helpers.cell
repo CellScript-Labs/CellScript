@@ -1,0 +1,41 @@
+// audit:edition=2027
+// audit:phase=accept
+
+module named_derived_helpers
+
+struct Entry { id: u8, payload: Vec<u8> }
+data_shape Messages {
+    element: Vec<u8>,
+    limits { items: 3, payload_bytes: 8, encoded_bytes: 128 }
+}
+data_shape Entries {
+    element: Entry,
+    limits { items: 3, payload_bytes: 8, encoded_bytes: 128 }
+}
+
+fn payload_total(payload: Entries::Payload) -> u64 {
+    let mut total = 0
+    for byte in payload { total = total + (byte as u64) }
+    return total
+}
+
+fn message_total(message: Messages::Item) -> u64 {
+    let alias = message
+    return payload_total(alias)
+}
+
+fn record_total(entry: Entries::Item) -> u64 {
+    return (entry.id as u64) + payload_total(entry.payload)
+}
+
+fn total(messages: Messages, entries: Entries) -> u64 {
+    let mut total = 0
+    for message in messages { total = total + message_total(message) }
+    for entry in entries { total = total + record_total(entry) }
+    return total
+}
+
+action inspect(witness messages: Messages, witness entries: Entries, witness expected: u64) -> u64 {
+    require total(messages, entries) == expected
+    return 0
+}

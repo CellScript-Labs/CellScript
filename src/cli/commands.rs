@@ -107,6 +107,7 @@ pub enum Command {
     ExplainProof(ExplainProofArgs),
     ExplainAssumptions(ExplainAssumptionsArgs),
     ExplainGenerics(ExplainGenericsArgs),
+    ExplainCollections(ExplainCollectionsArgs),
     ExplainGraph(ExplainGraphArgs),
     OptReport(OptReportArgs),
     ProofDiff(ProofDiffArgs),
@@ -494,6 +495,12 @@ pub struct ExplainGenericsArgs {
     pub input: Option<PathBuf>,
     pub target: Option<String>,
     pub target_profile: Option<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct ExplainCollectionsArgs {
+    pub input: Option<PathBuf>,
     pub json: bool,
 }
 
@@ -1039,6 +1046,7 @@ impl CommandExecutor {
             Command::ExplainProof(args) => Self::explain_proof(args),
             Command::ExplainAssumptions(args) => Self::explain_assumptions(args),
             Command::ExplainGenerics(args) => Self::explain_generics(args),
+            Command::ExplainCollections(args) => Self::explain_collections(args),
             Command::ExplainGraph(args) => Self::explain_graph(args),
             Command::OptReport(args) => Self::opt_report(args),
             Command::ProofDiff(args) => Self::proof_diff(args),
@@ -3534,6 +3542,14 @@ impl CommandExecutor {
             human_lines,
         }
         .emit(args.json)
+    }
+
+    fn explain_collections(args: ExplainCollectionsArgs) -> Result<()> {
+        let input = args.input.unwrap_or_else(|| PathBuf::from("."));
+        let input = Utf8Path::from_path(&input)
+            .ok_or_else(|| crate::error::CompileError::without_span("collection budget input path is not valid UTF-8"))?;
+        let (machine, human_lines) = super::collection_budget::explain(input)?;
+        CommandOutcome { machine, human_lines }.emit(args.json)
     }
 
     fn explain_graph(args: ExplainGraphArgs) -> Result<()> {
@@ -8907,7 +8923,7 @@ fn write_typescript_builder_package(
         "raw_cell_data_required": metadata.cell_data_codec_manifest.raw_bytes_required,
         "lockfile_verified": locked_identity.is_some(),
         "deployment_verified": deployment_identity.is_some(),
-        "protocol_bundle_api_schema": "cellscript-protocol-bundle-v1",
+        "protocol_bundle_api_schema": manifest["protocol_bundle_contract"]["schema"],
         "protocol_bundle_artifact_binding_schema": "cellscript-protocol-bundle-artifact-binding-v1",
         "protocol_bundle_closed_role_schema": "cellscript-protocol-closed-role-v1",
         "exact_script_handle_receipt_schema": "cellscript-exact-script-handle-receipt-v1",
@@ -9002,6 +9018,11 @@ fn typescript_builder_manifest(
     locked_identity: Option<&serde_json::Value>,
     deployment_identity: Option<&serde_json::Value>,
 ) -> Result<serde_json::Value> {
+    let role_contracts = crate::protocol_bundle::builder_role_contracts(
+        metadata,
+        &actions.iter().map(|action| action.name.as_str()).collect::<Vec<_>>(),
+    )?;
+    let selection_profile = !role_contracts.is_empty();
     let runtime_abi_hash = metadata_abi_hash(metadata)?;
     let target_profile_hash = cellscript_artifact_checker::canonical_hash("cellscript-target-profile", &metadata.target_profile)
         .map_err(|error| CompileError::without_span(format!("failed to hash generated builder target profile: {error}")))?;
@@ -9043,8 +9064,8 @@ fn typescript_builder_manifest(
         "transaction_view_handles": metadata.runtime.transaction_view_handles,
         "signing_message_domains": metadata.runtime.signing_message_domains,
         "protocol_bundle_contract": {
-            "schema": "cellscript-protocol-bundle-v1",
-            "report_schema": "cellscript-protocol-bundle-report-v1",
+            "schema": if selection_profile { crate::protocol_bundle::PROTOCOL_BUNDLE_SELECTION_SCHEMA } else { crate::protocol_bundle::PROTOCOL_BUNDLE_SCHEMA },
+            "report_schema": if selection_profile { crate::protocol_bundle::PROTOCOL_BUNDLE_SELECTION_REPORT_SCHEMA } else { crate::protocol_bundle::PROTOCOL_BUNDLE_REPORT_SCHEMA },
             "artifact_binding_schema": "cellscript-protocol-bundle-artifact-binding-v1",
             "closed_role_schema": "cellscript-protocol-closed-role-v1",
             "bounded_output_plan_evidence_schema": "cellscript-bounded-output-plan-evidence-v1",
@@ -9107,6 +9128,9 @@ fn typescript_builder_manifest(
             action["policy_witness_required"] = serde_json::json!(true);
         }
     }
+    if selection_profile {
+        manifest["exact_role_contracts"] = serde_json::to_value(role_contracts)?;
+    }
     Ok(manifest)
 }
 
@@ -9161,6 +9185,8 @@ fn typescript_tsconfig_json() -> serde_json::Value {
 
 fn typescript_protocol_bundle_api() -> &'static str {
     r#"
+export const PROTOCOL_BUNDLE_SELECTION_SCHEMA = "cellscript-protocol-bundle-v2" as const;
+export const PROTOCOL_BUNDLE_SELECTION_REPORT_SCHEMA = "cellscript-protocol-bundle-report-v2" as const;
 export const PROTOCOL_BUNDLE_SCHEMA = "cellscript-protocol-bundle-v1" as const;
 export const PROTOCOL_BUNDLE_REPORT_SCHEMA = "cellscript-protocol-bundle-report-v1" as const;
 export const PROTOCOL_BUNDLE_ARTIFACT_BINDING_SCHEMA = "cellscript-protocol-bundle-artifact-binding-v1" as const;
@@ -9305,6 +9331,7 @@ export interface ProtocolBundleArtifactBinding {
   runtimeAbiHash: string;
   verifiedBundleId: string | null;
   schemaContracts: readonly ProtocolBundleRoleSchemaIdentity[];
+  exactRoleContracts?: unknown;
   builderManifestSchema: typeof CELLSCRIPT_BUILDER_SCHEMA;
   entry: { kind: "action" | "lock"; name: string };
   scriptRole: ProtocolBundleScriptRole;
@@ -9371,6 +9398,7 @@ export function bindProtocolBundleArtifact(options: {
     runtimeAbiHash: protocolBundleArtifactIdentity.runtimeAbiHash,
     verifiedBundleId: protocolBundleArtifactIdentity.verifiedBundleId,
     schemaContracts: protocolBundleArtifactIdentity.schemaContracts,
+    exactRoleContracts: (builderManifest as { exact_role_contracts?: Readonly<Record<string, unknown>> }).exact_role_contracts?.[`${options.entry.kind}:${options.entry.name}`],
     builderManifestSchema: protocolBundleArtifactIdentity.builderManifestSchema,
     entry: Object.freeze({ ...options.entry }),
     scriptRole: options.scriptRole,
@@ -9422,7 +9450,7 @@ export function openHandleWitnessFromCheckedBundle(
   consumer: ProtocolBundleArtifactBinding,
   parameter: string,
 ): BoundOpenHandleWitness {
-  if (checked.schema !== PROTOCOL_BUNDLE_REPORT_SCHEMA || checked.status !== "ok"
+  if ((checked.schema !== PROTOCOL_BUNDLE_REPORT_SCHEMA && checked.schema !== PROTOCOL_BUNDLE_SELECTION_REPORT_SCHEMA) || checked.status !== "ok"
     || !/^[0-9a-f]{64}$/.test(checked.bundle_hash)) {
     throw new Error("open handle requires a successful native ProtocolBundle report");
   }
@@ -9496,7 +9524,7 @@ export function instanceHandleWitnessFromCheckedBundle(
   consumer: ProtocolBundleArtifactBinding,
   parameter: string,
 ): BoundInstanceHandleWitness {
-  if (checked.schema !== PROTOCOL_BUNDLE_REPORT_SCHEMA || checked.status !== "ok"
+  if ((checked.schema !== PROTOCOL_BUNDLE_REPORT_SCHEMA && checked.schema !== PROTOCOL_BUNDLE_SELECTION_REPORT_SCHEMA) || checked.status !== "ok"
     || !/^[0-9a-f]{64}$/.test(checked.bundle_hash)) {
     throw new Error("instance handle requires a successful native ProtocolBundle report");
   }
@@ -9657,17 +9685,46 @@ export function bindClosedProtocolRole(options: {
 }
 
 export interface CheckedProtocolBundle {
-  schema: typeof PROTOCOL_BUNDLE_REPORT_SCHEMA;
+  schema: typeof PROTOCOL_BUNDLE_REPORT_SCHEMA | typeof PROTOCOL_BUNDLE_SELECTION_REPORT_SCHEMA;
   status: "ok";
   bundle_hash: string;
   bundle: unknown;
   evidence: unknown;
 }
 
+/** Compare generated source contracts; actual Cell reconstruction remains the
+ * native checker and materialization adapter's responsibility. */
+function assertExactRoleCatalog(checked: CheckedProtocolBundle, artifact: ProtocolBundleArtifactBinding): void {
+  if (artifact.exactRoleContracts === undefined) return;
+  const bundle = checked.bundle as { schema?: string; artifacts?: readonly Record<string, unknown>[] };
+  const evidence = checked.evidence as { exact_role_selections?: Readonly<Record<string, unknown>> };
+  const candidates = bundle.artifacts?.filter((item) => item.id === artifact.id) ?? [];
+  if (checked.schema !== PROTOCOL_BUNDLE_SELECTION_REPORT_SCHEMA || bundle.schema !== PROTOCOL_BUNDLE_SELECTION_SCHEMA
+    || candidates.length !== 1 || !sameRoleContract(candidates[0].exact_role_contracts, artifact.exactRoleContracts)
+    || !Array.isArray(evidence.exact_role_selections?.[artifact.id])) {
+    throw new Error("checked exact-role catalog differs from the generated builder or lacks v2 evidence");
+  }
+}
+
+function sameRoleContract(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (left === null || right === null || typeof left !== "object" || typeof right !== "object") return false;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) && left.length === right.length
+      && left.every((value, index) => sameRoleContract(value, right[index]));
+  }
+  const l = left as Record<string, unknown>;
+  const r = right as Record<string, unknown>;
+  const keys = Object.keys(l);
+  return keys.length === Object.keys(r).length
+    && keys.every((key) => Object.prototype.hasOwnProperty.call(r, key) && sameRoleContract(l[key], r[key]));
+}
+
 export function exactScriptHandleFromCheckedBundle(
   checked: CheckedProtocolBundle,
   artifact: ProtocolBundleArtifactBinding,
 ): BoundExactScriptHandle {
+  assertExactRoleCatalog(checked, artifact);
   const bundle = checked.bundle as { artifacts?: readonly Record<string, unknown>[] };
   const candidate = bundle.artifacts?.find((item) => item.id === artifact.id);
   if (!candidate) {
@@ -9828,9 +9885,10 @@ export function createProtocolBundleClient(runtime: ProtocolBundleRuntime) {
         throw new Error("ProtocolBundle artifact binding schema mismatch");
       }
       const checked = await runtime.checkBundle(input, artifacts);
-      if (!checked || checked.schema !== PROTOCOL_BUNDLE_REPORT_SCHEMA || checked.status !== "ok" || !checked.bundle_hash) {
+      if (!checked || (checked.schema !== PROTOCOL_BUNDLE_REPORT_SCHEMA && checked.schema !== PROTOCOL_BUNDLE_SELECTION_REPORT_SCHEMA) || checked.status !== "ok" || !checked.bundle_hash) {
         throw new Error("ProtocolBundle offline check did not return a successful canonical report");
       }
+      for (const artifact of artifacts) assertExactRoleCatalog(checked, artifact);
       const materialized = await runtime.materializeBundle(checked);
       assertProtocolBundleStage(materialized, "MaterializedProtocolBundleTx");
       if (materialized.bundleHash !== checked.bundle_hash) throw new Error("ProtocolBundle materialization changed bundle identity");
@@ -9937,6 +9995,23 @@ fn typescript_builder_index(
     ts.push_str(&format!("export const signingMessageDomains = {signing_message_domains_json} as const;\n"));
     ts.push_str(include_str!("zk_builder.ts"));
     ts.push_str(include_str!("zk_witness_builder.ts"));
+    ts.push_str(&format!(
+        "export const nestedValueContracts = {} as const;\n",
+        json_string_pretty("nested value contracts", &crate::nested_builder::nested_value_contracts(metadata)?)?
+    ));
+    ts.push_str(include_str!("nested_builder.ts"));
+    ts.push_str(&format!(
+        "export const fixedCellContracts = Object.fromEntries({}) as Readonly<Record<string, FixedCellWireContract>>;\n",
+        json_string_pretty(
+            "fixed Cell contracts",
+            &crate::fixed_cell_builder::fixed_cell_contracts(metadata)?.into_iter().collect::<Vec<_>>()
+        )?
+    ));
+    ts.push_str(include_str!("fixed_cell_builder.ts"));
+    ts.push_str(&format!(
+        "export const nestedCellContracts = {} as const;\n",
+        json_string_pretty("nested Cell contracts", &crate::nested_builder::nested_cell_contracts(metadata)?)?
+    ));
     ts.push_str(&format!(
         "export const zkVerifierContracts = {} as const;\n",
         json_string_pretty("ZK verifier contracts", &metadata.runtime.zk_verifiers)?
@@ -10221,7 +10296,7 @@ fn typescript_builder_index(
            }\n\
            return {\n\
              action: context.action,\n\
-             fields: context.fields.map((field) => ({ ...field })),\n\
+             fields: context.fields.map((field: CellScriptActionFieldContext) => ({ ...field })),\n\
              entry_witness_required: context.entry_witness_required,\n\
              runtimeInputRequirements: [...context.runtimeInputRequirements],\n\
              actionScanSelectors: context.actionScanSelectors as ActionScanSelectors,\n\
@@ -11135,7 +11210,7 @@ fn typescript_builder_test(metadata: &CompileMetadata, actions: &[&crate::Action
              rawTransactionHash: previous?.rawTransactionHash ?? \"raw-tx-hash\", transaction, evidence: { state },\n\
            });\n\
            const runtime = {\n\
-             async checkBundle(_input, artifacts) { calls.push(\"check\"); assert.equal(artifacts.length, 2); return { schema: builder.PROTOCOL_BUNDLE_REPORT_SCHEMA, status: \"ok\", bundle_hash: \"bundle-hash\", bundle: {}, evidence: {} }; },\n\
+             async checkBundle(_input, artifacts) { calls.push(\"check\"); assert.equal(artifacts.length, 2); const selected = artifacts.filter(a => a.exactRoleContracts !== undefined); return { schema: selected.length ? builder.PROTOCOL_BUNDLE_SELECTION_REPORT_SCHEMA : builder.PROTOCOL_BUNDLE_REPORT_SCHEMA, status: \"ok\", bundle_hash: \"bundle-hash\", bundle: { schema: selected.length ? builder.PROTOCOL_BUNDLE_SELECTION_SCHEMA : builder.PROTOCOL_BUNDLE_SCHEMA, artifacts: selected.map(a => ({ id: a.id, exact_role_contracts: a.exactRoleContracts })) }, evidence: { exact_role_selections: Object.fromEntries(selected.map(a => [a.id, []])) } }; },\n\
              async materializeBundle() { calls.push(\"materialize\"); return stage(\"MaterializedProtocolBundleTx\"); },\n\
              async resolveLiveInputs(value) { calls.push(\"live-inputs\"); return stage(\"LiveResolvedProtocolBundleTx\", value); },\n\
              async resolveLiveDependencies(_materialized, value) { calls.push(\"live-dependencies\"); return stage(\"LiveDependenciesResolvedProtocolBundleTx\", value); },\n\
@@ -16915,7 +16990,7 @@ impl CliParser {
             )
             .subcommand(
                 ClapCommand::new("explain")
-                    .about("Explain runtime errors, target profiles, ProofPlan records, assumptions, generics, and graph views")
+                    .about("Explain runtime errors, target profiles, ProofPlan records, assumptions, generics, collection budgets, and graph views")
                     .arg_required_else_help(true)
                     .arg(Arg::new("code").value_name("CODE").help("Runtime error code, E-code, or error name"))
 
@@ -16948,6 +17023,11 @@ impl CliParser {
                             .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                             .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb or ckb-type-hash"))
                             ,
+                    )
+                    .subcommand(
+                        ClapCommand::new("collections")
+                            .about("Explain named collection preallocation and cumulative growth budgets")
+                            .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml")),
                     )
                     .subcommand(
                         ClapCommand::new("graph")
@@ -18573,6 +18653,10 @@ impl CliParser {
                     target: generics.get_one::<String>("target").cloned(),
                     target_profile: generics.get_one::<String>("target-profile").cloned(),
                     json: json_output(generics),
+                }),
+                Some(("collections", collections)) => Command::ExplainCollections(ExplainCollectionsArgs {
+                    input: collections.get_one::<String>("input").map(PathBuf::from),
+                    json: json_output(collections),
                 }),
                 Some(("graph", graph)) => Command::ExplainGraph(ExplainGraphArgs {
                     input: graph.get_one::<String>("input").map(PathBuf::from),

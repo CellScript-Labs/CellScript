@@ -1,0 +1,15 @@
+module conservation_peer
+resource Balance has store { id: u64, owner: Hash, amount: u64 }
+action verify() -> u64 {
+    verification
+    let inputs = ckb::cell_count(ckb::group_input<Balance>(0))
+    let outputs = ckb::cell_count(ckb::group_output<Balance>(0))
+    require inputs >= 2 && inputs <= 12
+    require outputs == inputs
+    let mut before: u128 = 0
+    let mut after: u128 = 0
+    for i in 0..inputs { before = before + (ckb::group_input<Balance>(i).data.amount as u128) }
+    for i in 0..outputs { after = after + (ckb::group_output<Balance>(i).data.amount as u128) }
+    require before == after
+    return 0
+}

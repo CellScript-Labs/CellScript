@@ -1,5 +1,36 @@
 # Tutorial 06: Metadata Verification and Production Gates
 
+For experimental Edition 2027 named collections, run
+`cellc explain collections path/to/package` or add `--json` before tuning shared
+budgets. It shows each member's maximum payload, alignment/record overhead,
+cumulative growth cost, and whether all maxima fit when reserved once or grown
+incrementally. A shared shortfall is a reported scenario, not a source error.
+The command includes unused declarations and does not emit artifacts or modify
+source. Hovering the collection declaration or constructor's owner name displays
+the same capacity scenarios in the editor, including resolved package record
+widths; invalid layouts do not receive a guessed estimate. These scenarios do not prove all execution paths or stable source
+admission; see the [budget boundary](../CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md#experimental-named-collection-declarations).
+
+Experimental exact-role selections use v2 ProtocolBundle/report schemas when
+their mandatory source-derived contracts are present. Native checking and the
+adapter reconstruct protected Cells, canonical nested data and correspondence;
+the adapter repeats the check over packed outputs. Non-selection bundles retain
+v1. This is candidate transaction evidence, with source admission, live input
+resolution and VM execution still separate. Complete fixed settlement and nested
+migration fixtures now compare generated SDK data, adapter bytes and all-group
+VM outcomes. Record-list migration also compares named/explicit bounds and checks
+revision identities and aggregate exhaustion. Conditional-path binding and stable source/builder admission remain
+pending; see the
+[selection contract](../CELLSCRIPT_BOUNDED_CELL_SELECTION.md).
+
+The experimental multi-asset transfer fixture also compares native
+`encode_fixed_cell_data` with generated `encodeFixedCellData`, then executes the
+SDK's actual Note bytes through the canonical adapter and all required groups.
+These encoders accept exact named bytes for supported flat fixed Cell fields;
+encoding establishes neither asset conservation nor authorization. The generated
+plan retains its allocation and Cell-data admission blockers. See the
+[collection business evidence](../CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md#full-transaction-collection-aggregation).
+
 The bounded [ZK counter-set profile](../CELLSCRIPT_ZK_COUNTER_SET.md) composes
 1–4 unchanged exact leaf proofs over one final transaction. Its separate set
 codec/checker reconstructs complete transaction-wide membership; leaf metadata

@@ -9493,6 +9493,93 @@ action transfer(input token: Token, witness recipient: Address) -> next: Token {
 }
 
 #[test]
+fn cellc_explain_collections_reports_preallocation_and_growth_without_writing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    std::fs::create_dir(root.join("src")).unwrap();
+    std::fs::write(root.join("Cell.toml"), "[package]\nname = \"budgets\"\nversion = \"0.1.0\"\nedition = \"2027\"\n").unwrap();
+    std::fs::write(root.join("src/main.cell"), include_str!("../examples/language/batches/multi_asset_transfer.cell")).unwrap();
+    let output = cellc_command().current_dir(root).args(["explain", "collections", "--json"]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["schema"], "cellscript-collection-budget-report-v1");
+    assert_eq!(report["experimental"], true);
+    let owners = report["owners"].as_array().unwrap();
+    assert_eq!(owners.len(), 1);
+    let owner = &owners[0];
+    assert_eq!(owner["name"], "Totals");
+    assert_eq!(owner["reserve_all_once"]["cost"]["bytes"], 3712);
+    assert_eq!(owner["reserve_all_once"]["cost"]["allocations"], 4);
+    assert_eq!(owner["reserve_all_once"]["fits"], true);
+    assert_eq!(owner["grow_all_incrementally"]["cost"]["bytes"], 7840);
+    assert_eq!(owner["grow_all_incrementally"]["cost"]["allocations"], 24);
+    assert_eq!(owner["grow_all_incrementally"]["bytes_shortfall"], 3744);
+    assert_eq!(owner["grow_all_incrementally"]["allocations_shortfall"], 20);
+    assert_eq!(owner["grow_all_incrementally"]["fits"], false);
+    assert_eq!(owner["frame_region_bytes"], 4384);
+    assert_eq!(owner["members"][0]["element_bytes"], 48);
+    assert_eq!(owner["members"][0]["reserve_once"]["bytes"], 1568);
+    assert_eq!(owner["members"][0]["incremental"]["bytes"], 3216);
+    assert_eq!(owner["members"][2]["reserve_once"]["bytes"], 288);
+    assert_eq!(owner["members"][2]["incremental"]["bytes"], 704);
+    let human = cellc_command().current_dir(root).args(["explain", "collections"]).output().unwrap();
+    assert!(human.status.success(), "{}", String::from_utf8_lossy(&human.stderr));
+    let text = String::from_utf8(human.stdout).unwrap();
+    assert!(text.contains("3712 bytes / 4 allocations — fits"));
+    assert!(text.contains("7840 bytes / 24 allocations — does not fit"));
+    assert!(text.contains("retired bytes remain charged"));
+    assert!(text.contains("not a program-path or worst-case proof"));
+    let files = std::fs::read_dir(root).unwrap().map(|entry| entry.unwrap().file_name()).collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(files, [std::ffi::OsString::from("Cell.toml"), std::ffi::OsString::from("src")].into_iter().collect());
+}
+
+#[test]
+fn cellc_explain_collections_resolves_unused_imported_records_and_shared_shortfalls() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    std::fs::create_dir(root.join("src")).unwrap();
+    std::fs::write(root.join("Cell.toml"), "[package]\nname = \"budgets\"\nversion = \"0.1.0\"\nedition = \"2027\"\n").unwrap();
+    std::fs::write(root.join("src/values.cell"), "module values\npublic struct Pair<T: fixed_value> { left: T, right: T }").unwrap();
+    let source = r#"module budgets
+use values::Pair
+struct Row { pair: Pair<u64>, tag: u8 }
+collections Work { limits { bytes: 256, allocations: 2 }
+    rows: Vec<Row> { items: 3 }
+    by_key: OrderedMap<Hash, Row> { items: 2 }
+}
+action inspect() -> u64 { return 0 }
+"#;
+    std::fs::write(root.join("src/main.cell"), source).unwrap();
+    let run = || cellc_command().current_dir(root).args(["explain", "collections", "--json"]).output().unwrap();
+    let output = run();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let owner = &report["owners"][0];
+    assert_eq!(owner["members"][0]["element_bytes"], 17);
+    assert_eq!(owner["members"][1]["element_bytes"], 49);
+    assert_eq!(owner["reserve_all_once"]["cost"]["bytes"], 240);
+    assert_eq!(owner["reserve_all_once"]["fits"], true);
+    assert_eq!(owner["grow_all_incrementally"]["cost"]["bytes"], 480);
+    assert_eq!(owner["grow_all_incrementally"]["cost"]["allocations"], 5);
+    std::fs::write(root.join("src/main.cell"), source.replace("bytes: 256, allocations: 2", "bytes: 160, allocations: 1")).unwrap();
+    let output = run();
+    assert!(output.status.success(), "a shared shortfall is a report, not invalid source");
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["owners"][0]["reserve_all_once"]["fits"], false);
+    assert_eq!(report["owners"][0]["reserve_all_once"]["bytes_shortfall"], 80);
+    assert_eq!(report["owners"][0]["reserve_all_once"]["allocations_shortfall"], 1);
+    std::fs::write(root.join("src/main.cell"), source.replace("Vec<Row>", "Vec<Unknown>")).unwrap();
+    assert!(!run().status.success());
+    // A separate empty project must not retain the imported generic template.
+    std::fs::remove_file(root.join("src/values.cell")).unwrap();
+    std::fs::write(root.join("src/main.cell"), "module empty\naction inspect() -> u64 { return 0 }").unwrap();
+    let output = run();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["owners"], serde_json::json!([]));
+}
+
+#[test]
 fn cellc_explain_generics_reports_checked_vec_instantiations() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();

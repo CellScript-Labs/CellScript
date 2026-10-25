@@ -1,0 +1,26 @@
+// audit:edition=2027
+// audit:phase=accept
+
+module named_roles
+resource Order has store { id: u64, amount: u64 }
+cell_roles Settlement {
+    limits {
+        input_scan: 64,
+        output_scan: 64,
+        selected_per_side: 32,
+        aggregate_bytes: 32768,
+    }
+    orders: Order {
+        type_hash: "0x1111111111111111111111111111111111111111111111111111111111111111",
+        lock_hash: "0x2222222222222222222222222222222222222222222222222222222222222222",
+        identity: id,
+        authority: observe,
+        correspondence: preserve,
+        inputs: 1..=16,
+        outputs: 1..=16,
+    }
+}
+action inspect() -> u64 {
+    ckb::verify_cell_roles<Settlement>()
+    return 0
+}

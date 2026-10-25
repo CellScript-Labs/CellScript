@@ -1,6 +1,6 @@
 use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug)]
 pub struct ModuleResolver {
@@ -16,6 +16,10 @@ pub struct SymbolTable {
     functions: HashMap<String, FunctionDef>,
     constants: HashMap<String, ConstantDef>,
     imported: HashMap<String, String>,
+    /// Reserve module-local policy names without treating them as value types.
+    cell_role_catalogs: HashSet<String>,
+    data_shapes: HashSet<String>,
+    collection_pools: HashSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -86,6 +90,18 @@ impl ModuleResolver {
                 Item::Struct(s) => {
                     Self::insert_type_symbol(&mut symbol_table, &s.name, TypeDef::Struct(s.clone()), s.span)?;
                 }
+                Item::Collections(def) => {
+                    Self::ensure_symbol_available(&symbol_table, &def.name, def.span)?;
+                    symbol_table.collection_pools.insert(def.name.clone());
+                }
+                Item::DataShape(def) => {
+                    Self::ensure_symbol_available(&symbol_table, &def.name, def.span)?;
+                    symbol_table.data_shapes.insert(def.name.clone());
+                }
+                Item::CellRoles(def) => {
+                    Self::ensure_symbol_available(&symbol_table, &def.name, def.span)?;
+                    symbol_table.cell_role_catalogs.insert(def.name.clone());
+                }
                 Item::Flow(_) => {}
                 Item::Enum(e) => {
                     Self::insert_type_symbol(&mut symbol_table, &e.name, TypeDef::Enum(e.clone()), e.span)?;
@@ -154,6 +170,9 @@ impl ModuleResolver {
             || symbol_table.functions.contains_key(name)
             || symbol_table.constants.contains_key(name)
             || symbol_table.imported.contains_key(name)
+            || symbol_table.cell_role_catalogs.contains(name)
+            || symbol_table.data_shapes.contains(name)
+            || symbol_table.collection_pools.contains(name)
         {
             Err(CompileError::new(format!("duplicate symbol '{}'", name), span))
         } else {

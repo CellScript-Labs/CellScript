@@ -406,6 +406,32 @@ fn output_script_fixture() -> ckb_script_runner::CkbVmFixture {
     fixture
 }
 
+#[test]
+fn complete_cell_count_preserves_global_group_and_legacy_unbounded_semantics() {
+    for count in [3, 65] {
+        let source = format!(
+            r#"
+module runtime_views::complete_count
+resource Token has store {{ amount: u64 }}
+action inspect() -> u64 {{
+    require ckb::cell_count(ckb::input<Token>(55)) == {count}
+    require ckb::cell_count(ckb::group_input<Token>(55)) == 1
+    require ckb::cell_count(ckb::output<Token>(55)) == 2
+    require ckb::cell_count(ckb::group_output<Token>(55)) == 1
+    require !ckb::cell_has_type(ckb::input<Token>(1))
+    return 0
+}}
+"#
+        );
+        let result = compile(&source);
+        let mut fixture = build_simple_fixture(Bytes::new(), count, 2);
+        fixture.current_type_script_input_indices = vec![0];
+        fixture.outputs[0].type_script = Some(deterministic_always_success_script(Bytes::from_static(b"foreign")));
+        let execution = execute_cellscript_script(strip_vm_abi_trailer(&result.artifact_bytes), &fixture);
+        assert_eq!(execution.exit_code, 0, "count={count}: {execution:?}");
+    }
+}
+
 fn input_group_dep_witness_fixture() -> ckb_script_runner::CkbVmFixture {
     let mut fixture = build_simple_fixture(Bytes::from(vec![0x21; 32]), 1, 1);
     fixture.current_type_script_input_indices = vec![0];

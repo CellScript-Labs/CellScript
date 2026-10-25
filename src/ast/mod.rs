@@ -47,6 +47,9 @@ impl Visibility {
 
 #[derive(Debug, Clone)]
 pub enum Item {
+    DataShape(DataShapeDef),
+    Collections(CollectionsDef),
+    CellRoles(CellRolesDef),
     Resource(ResourceDef),
     Shared(SharedDef),
     Receipt(ReceiptDef),
@@ -64,6 +67,9 @@ pub enum Item {
 impl Item {
     pub fn name(&self) -> Option<&str> {
         match self {
+            Self::DataShape(def) => Some(&def.name),
+            Self::Collections(def) => Some(&def.name),
+            Self::CellRoles(def) => Some(&def.name),
             Self::Resource(def) => Some(&def.name),
             Self::Shared(def) => Some(&def.name),
             Self::Receipt(def) => Some(&def.name),
@@ -77,6 +83,96 @@ impl Item {
             Self::Flow(_) | Self::Use(_) => None,
         }
     }
+}
+
+/// Source policy catalog, separate from executable Cell values. Field names
+/// and authority remain structured until schema resolution and elaboration.
+#[derive(Debug, Clone)]
+pub struct CellRolesDef {
+    pub name: String,
+    pub limits: CellRoleLimits,
+    pub roles: Vec<NamedCellRole>,
+    pub span: Span,
+}
+
+/// Reusable bounded codec shape. This declaration is transparent after
+/// elaboration: its name does not introduce a new wire format or owned value.
+#[derive(Debug, Clone)]
+pub struct DataShapeDef {
+    pub name: String,
+    pub element: Type,
+    pub limits: DataShapeLimits,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct DataShapeLimits {
+    pub items: u32,
+    pub payload_bytes: u32,
+    pub encoded_bytes: u32,
+}
+
+/// Invocation-local allocation policy and named owned collections. The arena
+/// budget includes retired allocations; these declarations are not wire types.
+#[derive(Debug, Clone)]
+pub struct CollectionsDef {
+    pub name: String,
+    pub bytes: u32,
+    pub allocations: u32,
+    pub members: Vec<CollectionMember>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct CollectionMember {
+    pub name: String,
+    pub kind: ValueCollectionKind,
+    pub items: u32,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum ValueCollectionKind {
+    Vec(Type),
+    OrderedMap { key: Type, value: Type },
+    OrderedSet(Type),
+}
+
+#[derive(Debug, Clone)]
+pub struct CellRoleLimits {
+    pub input_scan: u32,
+    pub output_scan: u32,
+    pub selected_per_side: u32,
+    pub aggregate_bytes: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct NamedCellRole {
+    pub name: String,
+    pub schema: Type,
+    pub type_hash: [u8; 32],
+    pub lock_hash: [u8; 32],
+    pub identity_field: String,
+    pub authority: CellRoleAuthority,
+    pub correspondence: CellRoleCorrespondence,
+    /// Inclusive count intervals, written `min..=max` in source.
+    pub inputs: (u32, u32),
+    pub outputs: (u32, u32),
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CellRoleAuthority {
+    Observe,
+    LocalType,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CellRoleCorrespondence {
+    Preserve,
+    Create,
+    Burn,
+    Merge(Vec<u8>),
 }
 
 #[derive(Debug, Clone)]

@@ -7,7 +7,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 mod bindings;
 mod generic_contract;
 pub use generic_contract::{IrGenericContract, IrGenericDeclaration, IrGenericKind, IrGenericParameter, IrGenericValueParameter};
+pub mod allocated;
 mod optimize;
+use allocated::IrAllocatedValue;
 mod policy;
 pub use bindings::{IrCellBinding, IrCellBindingRole, IrCellMembership, IrCellSource};
 pub(crate) use optimize::{optimize_exact_cell_data_equality, optimize_source_byte_equality};
@@ -608,6 +610,8 @@ pub struct IrBorrowRegion {
     pub binding: String,
     pub root_type: String,
     pub view_type: String,
+    /// Retain the lexical alias even when only a nested reborrow uses it.
+    pub view_binding: IrVar,
     pub start_block: BlockId,
     pub start_instruction: usize,
     pub end_block: Option<BlockId>,
@@ -828,6 +832,7 @@ pub enum IrInstruction {
         dest: IrVar,
         operand: IrOperand,
     },
+    AllocatedValue(IrAllocatedValue),
     CollectionNew {
         dest: IrVar,
         ty: String,
@@ -895,6 +900,18 @@ pub enum IrInstruction {
         max_elements: usize,
         element_type: String,
         element_width: usize,
+    },
+    /// Source-committed complete fixed-role selection and correspondence.
+    VerifyExactCellRoles {
+        dest: Option<IrVar>,
+        contract: crate::cell_selection::Contract,
+    },
+    ReadExactCellRole {
+        dest: IrVar,
+        selection: IrOperand,
+        role: u32,
+        read: crate::cell_selection::Read,
+        index: Option<IrOperand>,
     },
     /// Decode one element from the canonical versioned Molecule FixVec carried
     /// by the BoundedList witness parameter.
@@ -1091,6 +1108,8 @@ fn is_read_only_runtime_call(call: &CallExpr) -> bool {
 }
 
 pub struct IrGenerator {
+    cell_role_catalogs: HashMap<String, CellRolesDef>,
+    collection_pools: HashMap<String, CollectionsDef>,
     module: IrModule,
     var_counter: usize,
     block_counter: usize,
@@ -1336,6 +1355,8 @@ struct IrImportContext {
 impl IrGenerator {
     pub fn new(module_name: String) -> Self {
         Self {
+            cell_role_catalogs: HashMap::new(),
+            collection_pools: HashMap::new(),
             module: IrModule {
                 name: module_name,
                 items: Vec::new(),
@@ -1440,6 +1461,14 @@ impl IrGenerator {
     }
 
     pub fn generate_diagnostics(mut self, ast: &Module) -> std::result::Result<IrModule, Vec<CompileError>> {
+        self.collection_pools = ast
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Collections(def) => Some((def.name.clone(), def.clone())),
+                _ => None,
+            })
+            .collect();
         let validity_constant_names = ast
             .items
             .iter()
@@ -1554,6 +1583,9 @@ impl IrGenerator {
                     self.function_return_types.insert(lock.name.clone(), Some(IrType::Bool));
                     self.function_return_types.insert(format!("{}::{}", self.module.name, lock.name), Some(IrType::Bool));
                 }
+                Item::CellRoles(def) => {
+                    self.cell_role_catalogs.insert(def.name.clone(), def.clone());
+                }
                 Item::Flow(_) => {}
                 _ => {}
             }
@@ -1616,6 +1648,7 @@ impl IrGenerator {
                     let ir_item = IrItem::Lock(self.gen_lock(l));
                     self.module.items.push(ir_item);
                 }
+                Item::DataShape(_) | Item::CellRoles(_) | Item::Collections(_) => {}
                 Item::Flow(_) => {}
                 Item::Use(_) => {}
             }
@@ -3336,7 +3369,8 @@ impl IrGenerator {
                         self.lower_expr(expr, current, blocks, vars)
                     };
                     let active = lowered.current?;
-                    self.block_mut(blocks, active).terminator = IrTerminator::Return(Some(lowered.operand));
+                    let value = self.materialize_fixed_return_constant(lowered.operand, self.block_mut(blocks, active));
+                    self.block_mut(blocks, active).terminator = IrTerminator::Return(Some(value));
                     return None;
                 }
                 if let Stmt::If(if_stmt) = stmt {
@@ -3369,6 +3403,13 @@ impl IrGenerator {
                     None => self.lower_expr(&let_stmt.value, current, blocks, vars),
                 };
                 let active = lowered.current?;
+                if let BindingPattern::Name(name) = &let_stmt.pattern
+                    && matches!(&lowered.operand, IrOperand::Var(var) if matches!(&var.ty, IrType::Named(owner) if self.collection_pools.contains_key(owner)))
+                {
+                    let var = self.materialize_owned_operand(name, lowered.operand, self.block_mut(blocks, active));
+                    vars.insert(name.clone(), var);
+                    return Some(active);
+                }
                 let block = self.block_mut(blocks, active);
                 if let (BindingPattern::Name(name), Some(declared_ty)) = (&let_stmt.pattern, &let_stmt.ty) {
                     let declared_ty = Self::convert_type(declared_ty);
@@ -3415,7 +3456,8 @@ impl IrGenerator {
                     self.lower_expr(expr, current, blocks, vars)
                 };
                 let active = lowered.current?;
-                self.block_mut(blocks, active).terminator = IrTerminator::Return(Some(lowered.operand));
+                let value = self.materialize_fixed_return_constant(lowered.operand, self.block_mut(blocks, active));
+                self.block_mut(blocks, active).terminator = IrTerminator::Return(Some(value));
                 None
             }
             Stmt::If(if_stmt) => self.lower_if_stmt(if_stmt, current, blocks, vars, return_type, false),
@@ -3458,23 +3500,34 @@ impl IrGenerator {
                 };
                 let parent_region = self.borrow_regions.iter().rev().find(|region| region.binding == borrow_stmt.root).cloned();
                 let canonical_root = parent_region.as_ref().map_or_else(|| borrow_stmt.root.clone(), |region| region.root.clone());
+                let root_type = parent_region.as_ref().map_or_else(
+                    || {
+                        ir_type_display(match &root.ty {
+                            IrType::Ref(inner) | IrType::MutRef(inner) => inner,
+                            ty => ty,
+                        })
+                    },
+                    |region| region.root_type.clone(),
+                );
                 let mut canonical_path = parent_region.map_or_else(Vec::new, |region| region.path);
                 canonical_path.extend(borrow_stmt.path.iter().cloned());
                 let region_index = self.borrow_regions.len();
                 let start_instruction = self.block_mut(blocks, current).instructions.len();
+                let view =
+                    IrVar { id: projected.id, name: borrow_stmt.binding.clone(), ty: IrType::Ref(Box::new(view_target.clone())) };
                 self.borrow_regions.push(IrBorrowRegion {
                     root: canonical_root,
                     path: canonical_path,
                     binding: borrow_stmt.binding.clone(),
-                    root_type: ir_type_display(&root.ty),
+                    root_type,
                     view_type: ir_type_display(&view_target),
+                    view_binding: view.clone(),
                     start_block: current,
                     start_instruction,
                     end_block: None,
                     end_instruction: None,
                     span: borrow_stmt.span,
                 });
-                let view = IrVar { id: projected.id, name: borrow_stmt.binding.clone(), ty: IrType::Ref(Box::new(view_target)) };
                 let previous = vars.insert(borrow_stmt.binding.clone(), view);
                 let exit = self.lower_stmts(&borrow_stmt.body, current, blocks, vars, return_type, false);
                 if let Some(end_block) = exit {
@@ -3540,6 +3593,21 @@ impl IrGenerator {
                 base_var
             }
             BindingPattern::Wildcard => None,
+        }
+    }
+
+    fn materialize_fixed_return_constant(&mut self, operand: IrOperand, block: &mut IrBlock) -> IrOperand {
+        let copied = match &operand {
+            IrOperand::Const(IrConst::Hash(_) | IrConst::Address(_)) => true,
+            IrOperand::Const(IrConst::Array(items)) => {
+                (1..=64).contains(&items.len()) && items.iter().all(|item| matches!(item, IrConst::U8(_)))
+            }
+            _ => false,
+        };
+        if copied {
+            IrOperand::Var(self.materialize_operand("returned_bytes", operand, block))
+        } else {
+            operand
         }
     }
 
@@ -3686,6 +3754,9 @@ impl IrGenerator {
                 LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) }
             }
             Expr::Call(call) => {
+                if let Some(lowered) = self.lower_allocated_call(call, current, blocks, vars) {
+                    return lowered;
+                }
                 if let Expr::Identifier(path) = call.func.as_ref()
                     && let Some(lowered) = self.try_lower_enum_constructor_path(path, &call.args, current, blocks, vars, call.span)
                 {
@@ -3750,7 +3821,13 @@ impl IrGenerator {
             Expr::ReplaceRelation(relation) => self.lower_replace_relation(relation, current, blocks, vars),
             Expr::StructInit(init) => self.lower_struct_init(init, current, blocks, vars),
             Expr::FieldAccess(field) => self.lower_field_access(field, current, blocks, vars),
-            Expr::Index(index) => self.lower_index_expr(index, current, blocks, vars),
+            Expr::Index(index) => {
+                if let Some(lowered) = self.lower_allocated_index(index, current, blocks, vars) {
+                    lowered
+                } else {
+                    self.lower_index_expr(index, current, blocks, vars)
+                }
+            }
             Expr::Block(stmts) => self.lower_tail_block_value(stmts, current, blocks, vars),
             Expr::If(if_expr) => self.lower_if_expr(if_expr, current, blocks, vars),
             Expr::Match(match_expr) => self.lower_match_expr(match_expr, current, blocks, vars),
@@ -3951,8 +4028,7 @@ impl IrGenerator {
     fn unary_result_type(&self, op: UnaryOp, operand: &IrOperand) -> IrType {
         match op {
             UnaryOp::Not => IrType::Bool,
-            UnaryOp::Neg => IrType::U64,
-            UnaryOp::Ref | UnaryOp::Deref => match operand {
+            UnaryOp::Neg | UnaryOp::Ref | UnaryOp::Deref => match operand {
                 IrOperand::Var(var) => var.ty.clone(),
                 IrOperand::Const(value) => self.const_type(value),
             },
@@ -4187,6 +4263,9 @@ impl IrGenerator {
         vars: &mut HashMap<String, IrVar>,
         return_type: Option<&IrType>,
     ) -> Option<BlockId> {
+        if let Some(lowered) = self.lower_allocated_for(for_stmt, current, blocks, vars, return_type) {
+            return lowered;
+        }
         match &for_stmt.iterable {
             Expr::Range(range) => self.lower_for_range_stmt(for_stmt, range, current, blocks, vars, return_type),
             _ => {
@@ -5736,7 +5815,7 @@ impl IrGenerator {
         let aggregate = self.new_var("array_tmp", array_ty);
         self.block_mut(blocks, active)
             .instructions
-            .push(IrInstruction::Move { dest: aggregate.clone(), src: IrOperand::Const(IrConst::U64(0)) });
+            .push(IrInstruction::Tuple { dest: aggregate.clone(), fields: elements.iter().cloned().map(IrOperand::Var).collect() });
         self.aggregate_elements.insert(aggregate.id, elements);
         LoweredExpr { operand: IrOperand::Var(aggregate), current: Some(active) }
     }
@@ -5769,6 +5848,10 @@ impl IrGenerator {
             }
             Expr::Array(items) if matches!(expected_ty, IrType::Array(_, _)) => {
                 self.lower_array_expr_with_expected_type(items, expected_ty.clone(), current, blocks, vars)
+            }
+            Expr::Tuple(items) if matches!(expected_ty, IrType::Tuple(_)) => {
+                let IrType::Tuple(types) = expected_ty else { unreachable!() };
+                self.lower_tuple_expr_with_types(items, Some(types), current, blocks, vars)
             }
             Expr::Block(stmts) => self.lower_tail_block_value_with_expected_type(stmts, expected_ty, current, blocks, vars),
             Expr::Binary(binary)
@@ -5842,7 +5925,7 @@ impl IrGenerator {
         let aggregate = self.new_var("array_tmp", expected_ty);
         self.block_mut(blocks, active)
             .instructions
-            .push(IrInstruction::Move { dest: aggregate.clone(), src: IrOperand::Const(IrConst::U64(0)) });
+            .push(IrInstruction::Tuple { dest: aggregate.clone(), fields: elements.iter().cloned().map(IrOperand::Var).collect() });
         self.aggregate_elements.insert(aggregate.id, elements);
         LoweredExpr { operand: IrOperand::Var(aggregate), current: Some(active) }
     }
@@ -5924,9 +6007,7 @@ impl IrGenerator {
         }
 
         let aggregate = self.new_var("array_tmp", ir_ty);
-        self.block_mut(blocks, current)
-            .instructions
-            .push(IrInstruction::Move { dest: aggregate.clone(), src: IrOperand::Const(IrConst::U64(0)) });
+        self.block_mut(blocks, current).instructions.push(IrInstruction::Tuple { dest: aggregate.clone(), fields: vec![] });
         self.aggregate_elements.insert(aggregate.id, Vec::new());
         LoweredExpr { operand: IrOperand::Var(aggregate), current: Some(current) }
     }
@@ -5938,12 +6019,27 @@ impl IrGenerator {
         blocks: &mut Vec<IrBlock>,
         vars: &mut HashMap<String, IrVar>,
     ) -> LoweredExpr {
+        self.lower_tuple_expr_with_types(items, None, current, blocks, vars)
+    }
+
+    fn lower_tuple_expr_with_types(
+        &mut self,
+        items: &[Expr],
+        expected: Option<&[IrType]>,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> LoweredExpr {
         let mut active = current;
         let mut fields = HashMap::new();
         let mut types = Vec::with_capacity(items.len());
 
         for (index, item) in items.iter().enumerate() {
-            let lowered = self.lower_expr(item, active, blocks, vars);
+            let lowered = if let Some(ty) = expected.and_then(|types| types.get(index)) {
+                self.lower_expr_with_expected_type(item, ty, active, blocks, vars)
+            } else {
+                self.lower_expr(item, active, blocks, vars)
+            };
             let Some(next) = lowered.current else {
                 return lowered;
             };
@@ -6040,6 +6136,17 @@ impl IrGenerator {
         };
 
         if let IrOperand::Var(base_var) = &lowered_base.operand {
+            if let IrType::Named(owner) = &base_var.ty
+                && let Some(projected) = crate::cell_selection::project_role_type(owner, &field.field)
+            {
+                let dest = self.new_var(&field.field, IrType::Named(projected));
+                self.block_mut(blocks, active).instructions.push(IrInstruction::FieldAccess {
+                    dest: dest.clone(),
+                    obj: lowered_base.operand,
+                    field: field.field.clone(),
+                });
+                return LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) };
+            }
             if matches!(base_var.ty, IrType::U64) && (field.field == "lock" || field.field == "type" || field.field == "type_script") {
                 let script_ref_ty = if field.field == "lock" {
                     IrType::Named(CKB_LOCK_SCRIPT_REF_TYPE.to_string())
@@ -6729,6 +6836,24 @@ impl IrGenerator {
         }
     }
 
+    // Inspect without emitting instructions: non-selection methods must retain
+    // their normal lowering path and evaluate their receiver exactly once.
+    fn selection_receiver_type(&self, expr: &Expr, vars: &HashMap<String, IrVar>) -> Option<String> {
+        match expr {
+            Expr::Identifier(name) => match &vars.get(name)?.ty {
+                IrType::Named(ty) if crate::cell_selection::parse_selection_type(ty).is_some() => Some(ty.clone()),
+                _ => None,
+            },
+            Expr::FieldAccess(field) => {
+                crate::cell_selection::project_role_type(&self.selection_receiver_type(&field.expr, vars)?, &field.field)
+            }
+            Expr::Call(call) if matches!(call.func.as_ref(), Expr::Identifier(name) if name == crate::cell_selection::SELECT) => {
+                Some(crate::cell_selection::selection_type(&crate::cell_selection::resolve_call(call, &self.cell_role_catalogs).ok()?))
+            }
+            _ => None,
+        }
+    }
+
     fn try_lower_builtin_call(
         &mut self,
         call: &CallExpr,
@@ -6736,8 +6861,82 @@ impl IrGenerator {
         blocks: &mut Vec<IrBlock>,
         vars: &mut HashMap<String, IrVar>,
     ) -> Option<LoweredExpr> {
+        if let Expr::FieldAccess(method) = call.func.as_ref()
+            && let Some(read) = crate::cell_selection::method(&method.field)
+            && self.selection_receiver_type(&method.expr, vars).is_some()
+        {
+            let lowered = self.lower_expr(&method.expr, current, blocks, vars);
+            let mut active = lowered.current?;
+            let selection = lowered.operand;
+            let IrType::Named(owner) = self.operand_type(&selection) else { return None };
+            let contract = crate::cell_selection::parse_selection_type(&owner)?;
+            let role = contract.selected?;
+            let index = if read.indexed() {
+                let lowered = self.lower_expr(call.args.first()?, active, blocks, vars);
+                active = lowered.current?;
+                Some(lowered.operand)
+            } else {
+                None
+            };
+            let ty = if read.indexed() { IrType::Named(read.result_type(&contract.schemas[role as usize])) } else { IrType::U64 };
+            let dest = self.new_var("selected_role_read", ty);
+            self.block_mut(blocks, active).instructions.push(IrInstruction::ReadExactCellRole {
+                dest: dest.clone(),
+                selection,
+                role,
+                read,
+                index,
+            });
+            return Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) });
+        }
         match call.func.as_ref() {
             Expr::Identifier(name) => match name.as_str() {
+                "ckb::verify_cell_roles" | "ckb::select_cell_roles" => {
+                    let mut result = IrOperand::Const(IrConst::Unit);
+                    match crate::cell_selection::resolve_call(call, &self.cell_role_catalogs) {
+                        Ok(mut contract) => {
+                            if contract.roles.iter().any(|role| self.type_fields.get(&role.type_name).is_some_and(|fields|
+                                fields.values().any(|ty| matches!(ty, IrType::Named(name) if matches!(crate::nested_values::parsed(name), Some(crate::nested_values::NestedType::Values(_))))))) {
+                                contract.profile = crate::cell_selection::BOUNDED_PROFILE.into();
+                            }
+                            let dest = (name == crate::cell_selection::SELECT).then(|| {
+                                self.new_var("exact_selection", IrType::Named(crate::cell_selection::selection_type(&contract)))
+                            });
+                            if let Some(dest) = &dest {
+                                result = IrOperand::Var(dest.clone());
+                            }
+                            self.block_mut(blocks, current).instructions.push(IrInstruction::VerifyExactCellRoles { dest, contract })
+                        }
+                        Err(error) => self.errors.push(error),
+                    }
+                    Some(LoweredExpr { operand: result, current: Some(current) })
+                }
+                name if crate::cell_selection::read(name).is_some() => {
+                    let read = crate::cell_selection::read(name)?;
+                    let Expr::Integer(role) = call.args.get(1)? else { return None };
+                    let role = u32::try_from(*role).ok()?;
+                    let lowered = self.lower_expr(call.args.first()?, current, blocks, vars);
+                    let mut active = lowered.current?;
+                    let selection = lowered.operand;
+                    let index = if read.indexed() {
+                        let lowered = self.lower_expr(call.args.get(2)?, active, blocks, vars);
+                        active = lowered.current?;
+                        Some(lowered.operand)
+                    } else {
+                        None
+                    };
+                    let Type::Named(element) = call.type_args.first()? else { return None };
+                    let ty = if read.indexed() { IrType::Named(read.result_type(element)) } else { IrType::U64 };
+                    let dest = self.new_var("selected_role_read", ty);
+                    self.block_mut(blocks, active).instructions.push(IrInstruction::ReadExactCellRole {
+                        dest: dest.clone(),
+                        selection,
+                        role,
+                        read,
+                        index,
+                    });
+                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
+                }
                 "__cellscript_consume_each" => {
                     if let Some(lowered) = self.lower_bounded_consume_each(call, current, blocks, vars) {
                         return Some(lowered);
@@ -9506,6 +9705,27 @@ impl IrGenerator {
     }
 
     fn lookup_field_ir_type(&self, ty: &IrType, field: &str) -> Option<IrType> {
+        if let IrType::Named(name) = ty {
+            if field == "data"
+                && let Some(schema) = crate::cell_data_view::transaction_schema(name)
+            {
+                return Some(IrType::Named(format!("CellDataView<{schema}>")));
+            }
+            if let Some(schema) = crate::cell_data_view::schema(name) {
+                return self.type_fields.get(schema)?.get(field).cloned();
+            }
+        }
+        if let IrType::Named(name) = ty
+            && let Some(crate::nested_values::NestedType::RecordView { element, max_payload_bytes }) =
+                crate::nested_values::parsed(name)
+        {
+            let field_ty = self.type_fields.get(&element)?.get(field)?.clone();
+            return Some(if matches!(&field_ty, IrType::Named(name) if crate::nested_values::is_bytes_element(name)) {
+                IrType::Named(crate::nested_values::bytes_view_type(max_payload_bytes))
+            } else {
+                field_ty
+            });
+        }
         match ty {
             IrType::Tuple(items) => field.parse::<usize>().ok().and_then(|index| items.get(index)).cloned(),
             IrType::Named(name) if name == CKB_SCRIPT_VALUE_TYPE => match field {
@@ -9535,6 +9755,13 @@ impl IrGenerator {
     }
 
     fn index_result_type_from_ir_type(&self, ty: &IrType) -> Option<IrType> {
+        if let IrType::Named(name) = ty {
+            match crate::nested_values::parsed(name) {
+                Some(crate::nested_values::NestedType::Values(values)) => return Some(IrType::Named(values.item_type())),
+                Some(crate::nested_values::NestedType::BytesView { .. }) => return Some(IrType::U8),
+                _ => {}
+            }
+        }
         match ty {
             IrType::Array(inner, _) => Some((**inner).clone()),
             IrType::Ref(inner) | IrType::MutRef(inner) => self.index_result_type_from_ir_type(inner),
@@ -10741,7 +10968,14 @@ fn collect_call_names(ast: &Module) -> HashSet<String> {
             Item::Shared(shared) => collect_call_names_from_validity(shared.validity.as_ref(), &mut names),
             Item::Receipt(receipt) => collect_call_names_from_validity(receipt.validity.as_ref(), &mut names),
             Item::Struct(struct_def) => collect_call_names_from_validity(struct_def.validity.as_ref(), &mut names),
-            Item::Flow(_) | Item::Invariant(_) | Item::Const(_) | Item::Enum(_) | Item::Use(_) => {}
+            Item::Collections(_)
+            | Item::DataShape(_)
+            | Item::CellRoles(_)
+            | Item::Flow(_)
+            | Item::Invariant(_)
+            | Item::Const(_)
+            | Item::Enum(_)
+            | Item::Use(_) => {}
         }
     }
     names
@@ -11084,7 +11318,7 @@ fn function_def_return_type(function: &FunctionDef) -> Option<IrType> {
     }
 }
 
-fn ast_type_to_ir(ty: &Type) -> IrType {
+pub(crate) fn ast_type_to_ir(ty: &Type) -> IrType {
     match ty {
         Type::U8 => IrType::U8,
         Type::U16 => IrType::U16,
@@ -11980,7 +12214,7 @@ action check(x: u64, y: u64) -> u64 {
     }
 
     #[test]
-    fn byte_string_literal_lowers_to_fixed_array_const() {
+    fn byte_string_literal_materializes_fixed_array_constant_for_return() {
         let source = r#"
 module test
 
@@ -11999,12 +12233,18 @@ action symbol() -> [u8; 4]
                 _ => None,
             })
             .expect("expected symbol action");
-        let bytes = action.body.blocks.iter().find_map(|block| match &block.terminator {
-            IrTerminator::Return(Some(IrOperand::Const(IrConst::Array(items)))) => Some(items),
-            _ => None,
+        // Fixed-byte returns use an explicit local so the ABI can distinguish
+        // packed short bytes from a pointer into addressed byte storage.
+        let bytes = action.body.blocks.iter().find_map(|block| {
+            let IrTerminator::Return(Some(IrOperand::Var(returned))) = &block.terminator else { return None };
+            assert_eq!(returned.ty, IrType::Array(Box::new(IrType::U8), 4));
+            block.instructions.iter().find_map(|instruction| match instruction {
+                IrInstruction::LoadConst { dest, value: IrConst::Array(items) } if dest.id == returned.id => Some(items),
+                _ => None,
+            })
         });
 
-        let bytes = bytes.expect("expected byte string return to lower to a fixed array const");
+        let bytes = bytes.expect("expected returned local to preserve the fixed byte constant");
         let lowered = bytes
             .iter()
             .map(|byte| match byte {

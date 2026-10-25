@@ -26,6 +26,13 @@ const ACCEPT: &str = "accepted";
 const ACCEPT_WHEN_CLOSED: &str = "accepted only when the shape classifier reports no fail-closed feature";
 const FRONTEND_ONLY: &str = "not materialized as a runtime value";
 
+/// These features have experimental runtime lowerings. Their rejection occurs
+/// at strict artifact admission, not at an emitted unimplemented-operation trap.
+pub(crate) fn experimental_artifact_admission_detail(feature: &str) -> Option<&'static str> {
+    matches!(feature, "cell-data-view-artifact-proof" | "exact-role-selection-artifact-proof" | "nested-values-artifact-proof" | "allocated-values-artifact-proof")
+        .then_some("Experimental runtime implementation; strict executable-surface admission rejects this program pending complete independent source/value and transaction-builder evidence")
+}
+
 macro_rules! entry {
     ($id:literal, $layer:literal, $status:literal, $policy:expr, $conditions:literal) => {
         ExecutableSurfaceEntry {
@@ -50,6 +57,20 @@ macro_rules! entry {
 }
 
 pub static EXECUTABLE_SURFACE: &[ExecutableSurfaceEntry] = &[
+    entry!("ir:allocated-value", "instruction", "shape-gated", ACCEPT_WHEN_CLOSED,
+        "Experimental invocation-local collections; complete independent allocation, initialization, ownership and source contracts remain required.",
+        ["allocated-values-artifact-proof"]),
+    entry!("artifact:cell-data-view-proof", "artifact-policy", "shape-gated", ACCEPT_WHEN_CLOSED,
+        "Experimental immutable fixed and bounded nested Cell data views have independently checked complete field-load/codec instructions and retained-buffer write effects. Helper-carried transaction views retain this blocker even without data reads; complete caller/source/value provenance and builder binding remain required before stable admission.",
+        ["cell-data-view-artifact-proof"]),
+    entry!("ir:verify-exact-cell-roles", "instruction", "shape-gated", ACCEPT_WHEN_CLOSED,
+        "Experimental complete fixed/bounded-table selection, immutable role counts and typed transaction coordinates have retained-table lifetime checks. Edition 2027 module-local named catalogs bind role names and schemas through immutable projections, aliases and reads; bounded nested data reads retain separate owned buffers; complete aggregate/source proof and builder binding remain required.",
+        ["exact-role-selection-artifact-proof"]),
+    entry!(
+        "artifact:nested-values-proof", "artifact-policy", "shape-gated", ACCEPT_WHEN_CLOSED,
+        "Experimental bounded nested witness and Cell views validate canonical bytes. Edition 2027 data_shape declarations and Item/Payload view types resolve reusable bounds. Whole and derived views support immutable read-only helpers with per-call list/element validation and checked pointer/length source binding; complete source, codec and output evidence remain pending.",
+        ["nested-values-artifact-proof"]
+    ),
     entry!(
         "runtime:gather-hash-arguments", "runtime", "shape-gated", ACCEPT_WHEN_CLOSED,
         "Experimental gathered hashes require proven local byte/offset vectors and checked transaction span bounds.",
@@ -570,6 +591,7 @@ fn ir_type_surface_id(ty: &IrType) -> &'static str {
 
 fn ir_instruction_surface_id(instruction: &IrInstruction) -> &'static str {
     match instruction {
+        IrInstruction::AllocatedValue(_) => "ir:allocated-value",
         IrInstruction::LoadConst { .. } => "ir:load-const",
         IrInstruction::LoadVar { .. } => "ir:load-var",
         IrInstruction::StoreVar { .. } => "ir:store-var",
@@ -593,6 +615,8 @@ fn ir_instruction_surface_id(instruction: &IrInstruction) -> &'static str {
         IrInstruction::CollectionTruncate { .. } => "ir:collection-truncate",
         IrInstruction::CollectionSwap { .. } => "ir:collection-swap",
         IrInstruction::BoundedCellLoad { .. } => "ir:bounded-cell-load",
+        IrInstruction::VerifyExactCellRoles { .. } => "ir:verify-exact-cell-roles",
+        IrInstruction::ReadExactCellRole { .. } => "ir:verify-exact-cell-roles",
         IrInstruction::BoundedPlanLoad { .. } => "ir:bounded-plan-load",
         IrInstruction::BoundedOutputVerify { .. } => "ir:bounded-output-verify",
         IrInstruction::BoundedOutputEnd { .. } => "ir:bounded-output-end",

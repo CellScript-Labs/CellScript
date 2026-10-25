@@ -2,12 +2,474 @@
 
 ## Unreleased — 0.32
 
+Bind copied collection `u128`, fixed-byte and record results to the checked
+producer, full value width, private destination buffer and typed pointer slot.
+Reject truncated/shifted copies, missing publication evidence and destinations
+overlapping scalar slots, collection storage or other copied results. These
+local transport checks retain the allocation admission blocker; key/value
+argument staging and complete source/machine ownership remain separate work.
+
+Show collection budget scenarios directly on declaration hover, including
+per-member reservation costs, cumulative growth and shared byte/event shortfalls.
+CLI and editor use one calculation; imported generic layouts follow open package
+buffers, and unresolved layouts do not claim a fit. The optional browser language
+service exposes the same hint without adding fields to ordinary compile metadata.
+
+Fix missing editor field completion when Cell schemas or nested records come
+from a dependency package. Resolve fields through nominal imports and package
+visibility, including aliases, instead of searching only the current file.
+Honor open dependency buffers and retain readonly payload methods; unrelated
+same-named declarations and inaccessible private types do not supply fields.
+Trailing-dot completion recovery preserves those open dependency buffers and
+their visibility without replacing the unfinished document's diagnostics.
+
+Add locked dependency-package fixtures for readonly helpers in complete mixed
+settlement and byte/record migration, preserving canonical transaction bytes and
+required peer execution. Reject mismatched helper bounds and source/schema
+substitution. Verify imported generic record copies after local collection drop,
+including wide values, budget widths and standalone checker evidence. Package
+variants retain existing resource ceilings; module-local declaration exports,
+complete source equivalence and stable API admission remain separate work.
+
+Add experimental `cellc explain collections [INPUT] [--json]` for named collection
+budgets, including unused declarations and resolved record/generic layouts. Show
+per-member payload, alignment, allocation records and retained growth costs;
+compare reserving every maximum once with incremental growth from an empty owner.
+Report shared byte/event shortfalls and distinguish fixed owner storage from total
+stack use. This analysis changes neither allocation policy nor source syntax and
+does not establish a program's worst-case budget or freeze the authoring API.
+Cross-check its byte/event thresholds against an independent model and 68 O0/O3
+VM executions. Compare actual-count and full-maximum reservations in the complete
+transfer corpus: full maxima increase small-transaction initialization costs and
+exceed existing resource ceilings. Preserve the baseline and record candidate
+exceedances; automatic full-maximum reservation is not adopted as the default.
+
+Independently bind collection index arguments to typed constants/local slots and
+copied scalar results to their typed destinations. Compose this transport with
+the same checked owned/readonly member primitive, including Map entry/value
+offsets and signed `i32` publication. Require complete typed inventories and reject
+branch entry that bypasses preparation or the result producer. Evidence labels
+preserve existing immediate stack-load forwarding. Fixed-width result publication
+is covered by the transport checks above. Key/value input copies, upstream
+arithmetic and complete source/lifetime equivalence remain pending; retain the
+allocation admission blocker.
+
+Independently check readonly collection helper bodies against caller-relative
+descriptors: exact extent admission, live allocation record walks, length/capacity,
+ordered searches, indexed copies and conditional/required Map lookup. Require
+typed site inventories even with all borrowed-read markers erased,
+and bind each site's pointer/extent to checked incoming facts through the CFG.
+Copied bytes stay within disjoint private scratch. Index and copied-result
+transport are covered by the checks above. Key staging, upstream value provenance
+and complete source/lifetime correspondence remain pending; retain the allocation
+admission blocker.
+
+Independently bind arena helper calls to their typed owner identities and paired
+extents through the machine CFG. Pointer facts originate at checked constructors
+or checked readonly parameters, survive actual copies and joins, and disappear
+after overlapping writes or reconstruction. Check call targets/order, expanded
+register/stack ABI and forwarded extent identity. Rebound tests swap same-type
+owners, substitute lengths and overwrite retained bindings on either branch
+before a join. Consume straight-line proof states after propagation while
+retaining branch and summary checkpoints within unchanged checker budgets.
+Complete machine retirement, borrowed read values and source correspondence
+remain pending.
+
+Allow coordinate-bearing helper calls after guarded collection writes in the
+same typed block. Share exact spill/guard/store/restore recognition between the
+independent transport and memory-effect checks; prove private write bounds and
+require fresh coordinate argument loads after each dynamic write. Rebound tests
+cover broken guards, spills, restoration, interior entry and argument loads;
+CKB-VM cases cover register/stack calls, forwarding and large arenas. Complete
+arena lifetime and borrowed read admission remain pending.
+
+Independently bind readonly collection helper pointer/extent spills to their
+typed incoming ABI words, including register/stack splits and mixed nested/Cell
+view signatures. Preserve both slots through the helper's checked memory-effect
+CFG and reject full or partial overwrites. Complete machine owner lifetime, borrowed
+read bodies and complete source correspondence remain pending; retain the
+allocation admission blocker.
+
+Independently recognize owned collection reads into bounded private result
+buffers, read-before-remove ordering, pop's last index, conditional Map copies
+and mandatory missing-key failures. Bind `load_sorted` to its typed fixed input
+count, empty destination, non-overlap/overflow checks, nondecreasing key scan,
+unique-key reservation and last-value-wins copying. Rebound tests cover small
+and large owners, numeric and byte keys, empty/singleton batches, omitted ranges
+and child bypasses. Borrowed access, input/result provenance and whole-operation
+source correspondence remain pending; retain the allocation admission blocker.
+
+Independently bind owned Map/Set binary search to member key width, unsigned
+integer or lexicographic byte order, shrinking bounds and returned found/index
+values. Compose checked search and element bodies with exact insertion,
+replacement, duplicate-set and absent-removal branches. Rebound tests cover
+comparison direction, byte/stride arithmetic, return values and child bypasses;
+all admitted key profiles retain O0/O3 coverage. Borrowed helper search,
+argument/result transport and whole-operation correspondence remain
+pending; retain the allocation admission blocker.
+
+Independently recognize owned-vector push/insert/set/remove instructions shared
+by Vec and ordered collections. Check index bounds, complete element copying,
+overlap-safe shift direction, vacated-byte clearing and length publication.
+Bind growth to a checked reserve for the same member, and require typed site
+inventories for both ordered-map replacement/insertion paths. Input provenance,
+argument/result transport and complete admission remain pending.
+
+Bind allocated reserve/drop descriptor transitions to the typed member's address,
+element width and limit. Independently check descriptor admission, bounded growth,
+resize/release child ownership and pointer/capacity publication or full clearing.
+Recognize early-return restore tails against the actual private frame, excluding
+temporary spill budgets. Readonly borrowed descriptors and complete source
+correspondence remain pending; retain admission blockers.
+
+Independently bind Cell-view constructors and aliases to their typed slots,
+index operands, source tags and checked runtime helpers. Track live coordinates
+through data projections, selected-role reads and helper calls; reject rebound
+producer bypasses and intervening full/partial slot overwrites. Complete scalar
+index and field-result provenance remain pending; admission blockers stay in
+force.
+
+Add experimental Edition 2027 `collections` declarations for named Vec,
+OrderedMap and OrderedSet members sharing explicit byte/allocation budgets.
+Validate member limits and fixed type boundaries through parsing and type
+checking, with formatter, editor, doc and WASM coverage. Add experimental local
+owner moves, copied member reads, bounded iteration, lexical borrows and
+non-escaping read-only `&Owner` helper parameters. Reject Cell lifecycle use,
+alias escape and mutations while a call is still evaluating borrowed arguments.
+Lower local construction, moves, copied reads, mutation and ordered iteration
+through a shared bounded frame arena. Record structured allocation contracts
+and retain the mandatory `allocated-values-artifact-proof` admission blocker;
+read-only helpers retain the caller's arena and checked extent while using
+callee-local copy scratch. Helpers support forwarding, early return and copied
+results. An unused declaration creates no allocation or wire interface. Source
+CKB-VM tests cover local operations, helper calls, exhaustion and value copies;
+complete business acceptance remains pending.
+
+Independently track allocated owner availability and read-only loans through
+the typed control-flow graph. Reject rebound stale moves/drops, borrowed
+mutation, invalidated helper arguments and branch/loop lifetime violations.
+Retain lexical alias identities used only for nested reborrows. Allocation
+machine-state/source proof and its mandatory admission blocker remain separate.
+
+Bind experimental owner constructors to independently checked machine stores
+for zero arena state, empty live descriptors and the published owner pointer.
+Check private-frame extents and successful-path initialization using the shared
+typed-block CFG validation. Rebound tests cover small/large arenas and multiple
+owners. Complete collection machine/source admission remains pending.
+
+Independently recognize bounded arena allocation instructions: admission checks,
+monotonic cursor/event updates, record fields, guarded stores and zeroing.
+Require allocation-site counts from typed operations and constructor storage;
+rebound tests reject mutated predicates/writes and erased or extra ranges.
+Bind arena resize/release to exact live-record lookup, their checked allocation
+children, bounded copying and retirement without budget refunds. Rebound tests
+cover record walks, copy/retirement mutations and parent/child bypasses at large
+owner offsets. Descriptor state and complete source correspondence remain
+pending; retain the mandatory admission blocker and existing arena policy.
+
+Compose allocated collections with retained Cell data using checked dynamic-write
+address bounds and a separately validated spill/restore sequence. Preserve the
+checker state budgets and allocation admission blocker. Add a transfer-only
+multi-asset Cell example with Map aggregation, Set duplicate detection, a borrowed
+helper and O0/O3 canonical transaction/all-group VM comparisons against an
+independent host model. Full allocation semantics and application resource
+acceptance remain pending.
+
+Compare the complete transfer with an equivalent 32-item fixed-array program
+over 44 cases at O0/O3, requiring identical packed transaction bytes. Freeze
+24 O3 resource observations with source/ELF/transaction identity and separate
+numeric ceilings. Repeated and distinct asset labels show different cycle
+tradeoffs; this finite comparison is not a global worst-case bound.
+
+Add native and generated TypeScript fixed Cell encoders for supported flat
+schemas. Derive field order/width and total size from metadata, enforce canonical
+booleans and reject missing/extra fields or unsupported schemas. The complete
+multi-asset transfer fixture uses actual SDK-produced Cell bytes and checks
+native/reference parity while retaining its proof-admission blockers.
+
+Extend experimental collection values to ordinary fixed records and concrete
+generic records within the existing 64-byte Vec / 32-byte Map value bounds.
+Resolve nested field layouts before checking budgets, retain unused member
+layouts in scoped evidence, and copy records through ordinary helper ABI storage.
+The independent checker derives record widths and field offsets separately;
+hidden Cells, references, recursion and dynamic owned fields reject. Record keys
+remain unsupported, and the allocation proof blocker remains mandatory.
+
+Add experimental empty-member `load_sorted` for ordered collection arrays of
+at most 1024 entries. Validate order before allocation, deduplicate Set keys,
+keep the last Map value and reserve once for the distinct count. Materialize
+fixed array literals and contextually type tuple fields; independently check
+array shapes. Record-valued batches, arbitrary-order sorting and allocation
+machine/ownership admission remain pending.
+
+Extend the caller-owned fixed-result ABI to Hash, Address and 9–64 byte arrays,
+so later calls cannot overwrite a returned pointer into a retired callee frame.
+Arrays of 1–8 bytes retain the scalar ABI, packing copied or borrowed storage
+into a value at helper argument and return boundaries. Independent checking
+derives the exact buffered result width and checks the copy before
+frame teardown. Collection allocation/ownership proof remains separate.
+
+The arena, vector and ordered Map/Set primitives account for retired growth
+buffers and check deterministic exhaustion, initialization, stable insertion
+and removal against independent CKB-VM models. Numeric/byte ordering is compared
+with `BTreeMap`, including adversarial descending insertion costs. Independent
+machine/ownership admission, complete business examples and frozen source-level
+resource budgets remain pending.
+
+Bind experimental mandatory exact-role selection sites into generated builder
+manifests and v2 ProtocolBundle reports. Reconstruct membership and nested
+codecs from concrete transaction data and recheck packed outputs during
+materialization. Retain v1 for bundles without selection; generated consumers
+reject catalog removal, altered bounds and schema downgrade. Conditional-path
+binding, complete business builders and stable admission remain pending; all
+existing proof-admission blockers remain enforced.
+
+Add an experimental fixed mixed-role settlement example with 1–6 full-fill
+orders, two exact asset groups and checked read-only helpers. Compare complete
+named/positional programs through all-group VM cases and reject late balance,
+identity, custody and peer substitutions. Recognize complete shared return tails
+without treating them as bypasses of a final typed field-check block; altered
+restores and skipped checks still reject. Full builder/source admission, resource
+freeze and stable artifact admission remain pending.
+
+Exercise that complete settlement through generated SDK bindings, Type-hash
+deployment-line receipts and the existing ProtocolBundle transaction adapter.
+Compare canonical transaction bytes and run every required Script group for
+1/3/6 orders. Local resolver checks reject input, code, admission and witness
+substitution; package transfer predicates still require VM execution. This is
+experimental local evidence, not live-chain or stable source admission.
+
+Add an experimental named-role nested batch migration with extracted read-only
+helpers. Preserve history, append a witness release note and advance document
+revisions with an independently executing Registry. Full-group VM tests cover
+one through eight documents, maximum payloads and hostile successors. Mixed
+transaction-view/nested helper signatures now reuse the independently checked
+parameter-decoder prefix while still binding coordinate spills. Add complete
+generated SDK/ProtocolBundle fixtures for empty, mixed and maximum histories:
+native, TypeScript and independent Molecule vectors agree, generated data retains
+canonical transaction bytes, and migration/Registry/Lock groups execute them.
+Reject malformed tables, changed bounds, substituted histories and late-invalid
+notes. Stable builder/source admission, resource ceilings and final gates remain
+pending.
+
+Add the complete record-list migration counterpart with positive, increasing
+historical revision identities and a checked next-revision note. Compare named
+shape and explicit-bound programs at O0/O3 through generated SDKs, independent
+Molecule vectors, canonical adapter bytes and all required Script groups. Cover
+the exact aggregate byte budget and reject over-budget batches, duplicate history
+and incorrect new identities. Editor/WASM checks retain derived helper bounds;
+independent checker mutations reject paired payload argument substitution after
+hash rebinding. Stable proof admission remains pending.
+
+Freeze O3 SDK/ProtocolBundle business resource fixtures for settlement and
+byte/record-list migration. Require standard-verifier parity for each traced
+Script group, measure combined stack use and touched guest pages, and record
+maximum-batch late-invalid cycles. Bind complete ELF/transaction identities and
+source hashes to exact observations and separate numeric ceilings.
+Complete 32-Cell global scans retain the same protected membership; separate
+33rd-input and 33rd-output cases reject in both native reconstruction and the VM.
+Combine full scans with maximum-batch late business failures in all three programs;
+retain canonical adapter bytes and per-group failure evidence within the existing
+scan ceilings. The frozen inventory contains 35 cases.
+Failed transaction totals and heap-only measurements remain explicitly unavailable;
+these finite cases do not establish a global worst-case bound or stable admission.
+
+Protect helper-carried transaction-coordinate parameter slots throughout the
+independent CFG memory-effect proof. Previously a rebound ordinary body store
+could overwrite a parameter after its checked spill; full, partial and overlapping
+writes now reject, including helpers without `.data` reads. Preserve checked
+mixed nested parameter prefixes and derive outgoing call extents from expanded,
+aligned callee ABIs. This strengthens the experimental proof without changing
+source syntax, wire bytes or stable-admission blockers.
+
+Extend immutable transaction `.data` reads to canonical bounded nested tables
+of at most 32768 encoded bytes. Validate every field on each read and retain
+nested pointer/length results in disjoint frame buffers across later reads,
+selection and admitted read-only helpers. The independent checker binds full
+codecs, coordinates, result spans and buffer lifetimes; coherent buffer-alias
+mutations reject. Global/group VM fixtures cover large offsets, malformed unused
+fields and fixed siblings. Stable source/interface and builder admission remain
+pending, with the existing nested and data-view blockers retained.
+
+Add an internal bounded nested-table selection primitive for #49. Validate every
+field, including unused nested payloads, before extracting a fixed identity
+field at its checked Molecule offset. Keep payload scratch disjoint from retained
+selection tables and charge actual loaded bytes against the aggregate budget.
+Mixed fixed/nested layouts, variable payload replacement and hostile peer groups
+have primitive and real CKB transaction tests. Named/positional source catalogs
+now derive `bounded-v2` for nested schemas, retaining `fixed-v1` for fixed-only
+catalogs. Independently check ordered layouts, full codecs, dynamic frame
+extents, normalized identities and actual-byte accounting. Selected coordinates
+compose with live nested witnesses. Complete business examples, source/interface
+proof and final builder admission remain pending. Selection and nested
+proof-admission blockers remain mandatory.
+
+Add experimental Edition 2027 `data_shape` declarations with reusable named
+item, payload-byte and encoded-byte limits. Resolve witness/Cell field uses
+to the existing concrete nested codec, preserving interface/builder identities
+and wire bytes. Declaration errors, inferred view completion, WASM, native /
+generated builder vectors and witness/successor VM parity have focused tests.
+Require the nested proof-admission blocker in independently checked metadata;
+removing it and rebinding sidecars now rejects. Shape exports and complete source
+proof remain pending. Check forward declarations
+and declaration-scoped generic resolution. Editor templates prefer named
+catalog calls and offer both declarations only in the authoring source mode.
+
+Allow immutable whole nested values, including named data shapes, as ordinary
+parameters of Pure/ReadOnly helpers. Preserve bounds through aliases, forwarding,
+and register/stack arguments; validate the complete codec on every callee entry.
+The independent checker binds both pointer and length to the selected source;
+substituting another valid value of the same type rejects. Byte/record iteration
+and mixed Cell/value helper calls have focused VM tests.
+
+Extend immutable helpers to derived byte and record views. `Shape::Item` and
+`Shape::Payload` resolve to the declaration's element/payload view and bounds.
+Each helper validates its received element encoding; the checker binds incoming
+spills, outgoing spans and transitive forwarding to their selected sources.
+Derived views remain forbidden at external witness/Cell boundaries and cannot
+be returned, stored or mutated. Allocation and stable admission remain pending.
+
+Add experimental Edition 2027 module-local `cell_roles` declarations with named
+scan/byte limits, schema fields, authority and correspondence policies, and
+inclusive count intervals. `ckb::verify_cell_roles<Catalog>()` elaborates
+directly to the existing checked IR contract. Named selection supports
+`selected.orders.input(i)`, output/successor reads, role counts and immutable
+role aliases. Typed contracts retain catalog/role/schema identity through
+projections; the independent checker binds pointer copies and read ordinals.
+Catalog exports and complete source proof remain pending; stable artifact
+admission stays blocked.
+
+Permit immutable typed transaction input/output views in read-only helpers,
+including transitive forwarding and local fixed-schema `.data` predicates.
+Preserve nominal source/schema checks and report inherited helper coordinates
+without claiming a fixed global/group source. Runtime, checker mutation,
+editor and browser tests cover the experimental slice; complete call-site
+source/value proof and stable data-view admission remain pending.
+Independently bind view helper call targets, ordering, source-slot loads,
+outgoing register/stack words and incoming parameter spills. Rebound offset
+and spill substitutions reject; repeated/branched calls, wide arguments and
+fixed-result returns retain coverage without changing the runtime ABI.
+
+Share the complete capacity-field scanner with `ckb::cell_count` and add its
+internal bounded end-probe form for #49. Preserve the existing unbounded API;
+the bounded primitive is not yet source-level heterogeneous selection support.
+Add an internal fixed-role selection/correspondence emitter with full identity,
+layout, uniqueness, group-coordinate and budget checks. Differential VM and
+all-group CKB transaction fixtures accompany an experimental literal-policy
+`ckb::verify_cell_roles` source operation. Derive layouts from named Cell types,
+retain complete runtime-access provenance and reject runtime-selected catalogs.
+Check declaration mutations and retain the `exact-role-selection-artifact-proof`
+blocker; complete machine/source proof, nested selection and
+complete transaction builder admission remain pending.
+
+Add experimental immutable `ckb::select_cell_roles` handles, role counts and
+typed InputView/OutputView reads, including correspondence-selected successors.
+Keep role-local ordinals distinct from global transaction indices and retain
+separate tables for simultaneous catalogs. Reject handle storage, mutation,
+escape and nominal-role mismatches. Independently check constructor pointer
+materialization, alias and read instructions, slot/operand bindings, fatal
+guards and successful-path order; reject hash-rebound substitutions. Exercise
+ordinary and maximum catalogs in real CKB transactions at O0–O3, with invalid
+ordinals and rejecting peers. Track constructed handles and retained tables
+through enclosing CFG paths, protect them against ordinary and checked-helper
+writes, and reject aliased physical handle slots. Complete aggregate/source
+proof and transaction builder binding remain pending.
+Compose selected views with live nested witness views by checking the complete
+Cell-field hash helper and its disjoint caller result/size writes. Reject
+rebound helper instructions and caller pointers redirected into nested storage.
+Check the existing cold/hot exact-byte cache and scalar wrapper instructions,
+initialization, retained pointer invariants and disjoint caller-owned write
+regions. Prove saved-register restoration and bind borrowed cache effects
+through helper calls and CFG joins. Retain actual emission order for typed
+ownership while sorting serialized co-located boundary sets canonically,
+including the nine-argument nested/fixed-result case.
+
+Add experimental immutable `.data` projections from typed input/output views,
+including selected and group views, for fixed 1–512 byte Cell schemas. Read
+unsigned scalars and complete fixed bytes, checking exact whole-Cell length;
+reject mutation, escape and unsupported layouts. Independently check field-load
+instructions, source-domain guards, full-width copies, fatal exits and bounded
+write effects. Compose reads with maximum selected catalogs and live nested
+witnesses without increasing analysis budgets. Editor, formatter, source example,
+real CKB execution and rebound-machine mutations cover this boundary. Retain
+`cell-data-view-artifact-proof` pending complete source/value provenance and
+transaction builder binding; observation grants no lifecycle authority.
+
+Independently recognize fixed-role verification instructions from typed policy
+and layout evidence. Check complete scans, exact identities, bounded records,
+uniqueness, correspondence and fatal exits, including relaxed branches and
+proved immediate reload forwarding. Bind candidate ranges to typed operations
+and require successful typed-block paths to execute them in order. Reject
+hash-rebound instruction and well-formed policy substitutions. Full enclosing
+memory/source proofs and the existing experimental admission blocker remain.
+
+Compose independently recognized fixed-role scratch effects with nested-view
+lifetime checks. Reject coherently rebound scratch aliases into nested lengths
+or live Cell buffers, and preserve witness/Cell views across verification.
+Retain actual emission order for co-located typed labels so an empty fallthrough
+block cannot capture the next block's nested reads. Exercise nested witness
+views across repeated role scans in complete CKB transactions, including maximum
+catalogs, substituted payloads and rejecting peers. This does not yet admit
+variable-payload selection or complete transaction-builder binding.
+
 Reject unadmitted dynamic-element vector length operations instead of treating
 encoded byte size as element count. Preserve fixed-element vector semantics.
-Add independent host validation and internally tested CKB-VM decoding for the
-bounded nested-values codec as prerequisites for #48; new source shapes and
-successor admission remain pending. See
+Add independent host validation, CKB-VM decoding and experimental immutable
+`NestedValues<T, N, P, B>` witness and Cell views as prerequisites for #48.
+Validate complete values before use, preserve wide fields and check indexes;
+reject view mutation/escape and rehashed invalid typed operations. Derive
+typed Cell buffers from declared byte bounds and check actual input/successor
+encodings and expected output values. Generate accurate bounded nested Molecule
+schemas and native/TypeScript value and complete Cell-data encoders with
+independent vectors, budget rejection and existing-adapter capacity checks.
+Independently check nested witness decoder instructions against typed bounds,
+bind inputs to incoming ABI words through mandatory entry spills/reloads, and
+reject hash-rebound instruction, argument and bypass mutations. Check the actual
+single-entry nested witness envelope and positional argument transport, including
+mixed Script.args, disjoint buffers, live cursors and outgoing stack arguments.
+Check policy-selected nested arguments from the bounded private copy through
+the exact action call, including positional lengths and outgoing stack words.
+Bind nested length/index/field/move instructions to typed operations, scalar
+slots, exact record offsets, fatal range checks and disjoint view-size slots.
+Preserve co-located read and typed CFG labels in bounded optional evidence.
+Check decoded witness definitions across CFG joins and reject unrelated writes
+to nested pointer/length storage. Check private callee effects, bounded syscall
+destinations and independently verified fixed copies. Track caller-owned fixed
+struct results through actual hidden register/stack arguments, disjoint caller
+buffers and transitive return copies; distinguish owned frames from outgoing
+scratch. Retain explicit analysis budgets and reject unproved writes.
+Check typed Cell load arguments and complete table codecs independently,
+including source/index, disjoint bounded buffers, every fixed/nested field and
+fatal exits. Reject missing codecs for unused fields and hash-rebound transport
+or decoder mutations. Bind nested Cell field projections to explicit Molecule
+field indices, bounded spans and disjoint view lengths. Preserve declaration
+order independently of dynamic byte-offset sorting, include indices in layout
+hashes, and check failed-load rejection and input/read-only pointer assignment.
+Track direct Cell-root initialization through checked loads and CFG joins;
+protect loaded buffers, root pointers and size slots against ordinary/callee
+writes. Reject definition bypasses and full/partial storage clobbers while
+retaining mixed witness/Cell reads. Bind read-only borrowed Cell helper calls to
+their selected roots through actual register/stack arguments and transitive
+forwarding; reject another validated Cell with the same layout. Derive private
+frames from decoded prologues separately from outgoing argument space.
+Bind nested successor byte comparisons to the selected output, declared field
+index and exact typed expected value. Check span/length/byte-loop instructions
+and require their completion on every successful CFG path, after the checked
+Cell load and value definition. Check fixed sibling comparisons against typed
+literal bytes or local slots: full unsigned scalar equality, complete u128/
+Hash/Address/array bytes, and the distinct inline ABI of short byte-array
+parameters and their aliases. Include fixed comparisons in successful-path
+obligations. Fixed-value producer provenance, additional caller-owned write
+effects and complete transaction builder parity remain pending. See
 `docs/CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md` for the implementation ledger.
+
+Freeze the first #49 exact-role fixed-layout selection/correspondence reference
+contract and independent host oracle. Cover complete protected membership,
+custody failures, explicit lifecycle shapes, role-local identity, global/group
+coordinates, bounded proposals and equivalent transaction permutations. This
+reference work does not admit new executable Cell selection syntax or replace
+the required VM, checker, builder and all-group transaction evidence. See
+`docs/CELLSCRIPT_BOUNDED_CELL_SELECTION.md`.
 
 Add versioned bounded Script-instance admission alongside the existing exact
 and compatible implementation policies. Authenticate concrete args, consumer

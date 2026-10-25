@@ -1,0 +1,54 @@
+// audit:edition=2027
+// audit:phase=accept
+
+module named_nested_selection
+
+struct Entry { tag: u8, payload: Vec<u8> }
+data_shape Messages {
+    element: Vec<u8>,
+    limits { items: 32, payload_bytes: 256, encoded_bytes: 4096 }
+}
+data_shape Entries {
+    element: Entry,
+    limits { items: 32, payload_bytes: 256, encoded_bytes: 4096 }
+}
+resource Order has store { messages: Messages, id: u64, entries: Entries }
+resource Refund has store { id: u64, amount: u64 }
+cell_roles Settlement {
+    limits { input_scan: 64, output_scan: 64, selected_per_side: 32, aggregate_bytes: 32768 }
+    orders: Order {
+        type_hash: "0x1111111111111111111111111111111111111111111111111111111111111111",
+        lock_hash: "0x2222222222222222222222222222222222222222222222222222222222222222",
+        identity: id, authority: observe, correspondence: preserve,
+        inputs: 1..=16, outputs: 1..=16,
+    }
+    refunds: Refund {
+        type_hash: "0x3333333333333333333333333333333333333333333333333333333333333333",
+        lock_hash: "0x2222222222222222222222222222222222222222222222222222222222222222",
+        identity: id, authority: observe, correspondence: preserve,
+        inputs: 0..=16, outputs: 0..=16,
+    }
+}
+cell_roles Refunds {
+    limits { input_scan: 64, output_scan: 64, selected_per_side: 32, aggregate_bytes: 32768 }
+    refunds: Refund {
+        type_hash: "0x3333333333333333333333333333333333333333333333333333333333333333",
+        lock_hash: "0x2222222222222222222222222222222222222222222222222222222222222222",
+        identity: id, authority: observe, correspondence: preserve,
+        inputs: 0..=16, outputs: 0..=16,
+    }
+}
+action inspect() -> u64 {
+    let selected = ckb::select_cell_roles<Settlement>()
+    let orders = selected.orders
+    let other = ckb::select_cell_roles<Refunds>()
+    ckb::verify_cell_roles<Settlement>()
+    require selected.refunds.input_count() == other.refunds.output_count()
+    let count = orders.input_count()
+    require count == orders.output_count()
+    let before = orders.input(count - 1)
+    let after = orders.successor(count - 1)
+    require before.capacity == after.capacity
+    require before.type_hash == after.type_hash
+    return after.output_index
+}

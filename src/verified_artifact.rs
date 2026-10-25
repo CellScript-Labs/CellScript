@@ -105,6 +105,12 @@ pub(crate) fn build_verified_artifact_boundary(
         entry.proof_ids = proof_ids_by_entry.get(&entry.id).cloned().unwrap_or_default();
     }
 
+    let mut labels_by_address = BTreeMap::<u64, Vec<&str>>::new();
+    for label in &draft.machine_layout.symbol_order {
+        let address =
+            draft.machine_layout.symbols.get(label).ok_or_else(|| boundary_error("ordered text label has no machine address"))?;
+        labels_by_address.entry(*address).or_default().push(label);
+    }
     let mut blocks = Vec::with_capacity(draft.machine_layout.blocks.len());
     for (index, machine) in draft.machine_layout.blocks.iter().enumerate() {
         let owner_name = owners.get(index).ok_or_else(|| boundary_error("machine block owner map is incomplete"))?;
@@ -121,7 +127,20 @@ pub(crate) fn build_verified_artifact_boundary(
             .find(|entry| entry.id == owner_entry)
             .map(|entry| entry.effect.clone())
             .unwrap_or_else(|| "runtime".to_string());
-        let lowering_block_id = lowering_block_id(machine.label.as_deref(), owner_name);
+        // Several source/verification boundaries may name the same byte. A
+        // nested-read completion must not hide the following typed CFG label.
+        // An empty fallthrough block can share that address too; the last typed
+        // label in emission order owns the following instructions.
+        let labels = labels_by_address.get(&machine.start).map(Vec::as_slice).unwrap_or_default();
+        // Ownership follows emission order, while serialized boundary sets
+        // retain their canonical lexical order (including multi-digit IDs).
+        let mut boundary_labels = labels.to_vec();
+        boundary_labels.sort_unstable();
+        let lowering_block_id = labels
+            .iter()
+            .rev()
+            .find_map(|label| lowering_block_id(Some(label), owner_name))
+            .or_else(|| lowering_block_id(machine.label.as_deref(), owner_name));
         let typed_block_hash = lowering_block_id
             .and_then(|block_id| {
                 metadata
@@ -141,6 +160,75 @@ pub(crate) fn build_verified_artifact_boundary(
             lowering_block_id,
             typed_block_hash,
             machine_label: machine.label.clone(),
+            nested_read_labels: boundary_labels
+                .iter()
+                .filter(|label| label.starts_with(".Lnested_use_"))
+                .map(|label| (*label).to_string())
+                .collect(),
+            nested_cell_labels: boundary_labels
+                .iter()
+                .filter(|label| label.starts_with(".Lnested_cell_codec_"))
+                .map(|label| (*label).to_string())
+                .collect(),
+            nested_output_labels: boundary_labels
+                .iter()
+                .filter(|label| label.starts_with(".Lnested_output_check_"))
+                .map(|label| (*label).to_string())
+                .collect(),
+            exact_role_labels: boundary_labels
+                .iter()
+                .filter(|label| {
+                    label.starts_with(".Lexact_role_check_")
+                        || label.starts_with(".Lexact_role_use_")
+                        || label.starts_with(".Lexact_role_data_")
+                })
+                .map(|label| (*label).to_string())
+                .collect(),
+            allocated_allocation_labels: boundary_labels
+                .iter()
+                .filter(|label| label.starts_with(".Lallocated_allocation_"))
+                .map(|label| (*label).to_string())
+                .collect(),
+            allocated_lifecycle_labels: boundary_labels
+                .iter()
+                .filter(|label| {
+                    [
+                        ".Lallocated_resize_",
+                        ".Lallocated_release_",
+                        ".Lallocated_reserve_",
+                        ".Lallocated_drop_",
+                        ".Lallocated_push_",
+                        ".Lallocated_insert_",
+                        ".Lallocated_set_",
+                        ".Lallocated_remove_",
+                        ".Lallocated_find_",
+                        ".Lallocated_put_",
+                        ".Lallocated_erase_",
+                        ".Lallocated_read_",
+                        ".Lallocated_lookup_",
+                        ".Lallocated_take_",
+                        ".Lallocated_pop_",
+                        ".Lallocated_required_",
+                        ".Lallocated_sorted_",
+                        ".Lallocated_borrowed_",
+                        ".Lallocated_index_",
+                        ".Lallocated_result_",
+                    ]
+                    .iter()
+                    .any(|prefix| label.starts_with(prefix))
+                })
+                .map(|label| (*label).to_string())
+                .collect(),
+            cell_view_value_labels: boundary_labels
+                .iter()
+                .filter(|label| label.starts_with(".Lcell_view_value_"))
+                .map(|label| (*label).to_string())
+                .collect(),
+            allocated_init_labels: boundary_labels
+                .iter()
+                .filter(|label| label.starts_with(".Lallocated_init_"))
+                .map(|label| (*label).to_string())
+                .collect(),
             terminator: match machine.terminator {
                 MachineTerminatorEvidence::Fallthrough => MachineTerminator::Fallthrough,
                 MachineTerminatorEvidence::Jump => MachineTerminator::Jump,

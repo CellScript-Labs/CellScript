@@ -1,0 +1,57 @@
+// Experimental Edition 2027: conserved asset labels within this Type group.
+// This example has no mint/burn path and does not implement xUDT compatibility.
+// Spending Locks authorize transfers; collections exist only for this invocation.
+module cellscript::language::batches::multi_asset_transfer
+
+resource Note has store { asset: Hash, serial: u64, amount: u64 }
+
+collections Totals {
+    limits { bytes: 4096, allocations: 4 }
+    incoming: OrderedMap<Hash, u128> { items: 32 }
+    outgoing: OrderedMap<Hash, u128> { items: 32 }
+    input_serials: OrderedSet<u64> { items: 32 }
+    output_serials: OrderedSet<u64> { items: 32 }
+}
+
+fn conserved(totals: &Totals) -> bool {
+    if totals.incoming.len() != totals.outgoing.len() { return false }
+    for (asset, amount) in totals.incoming {
+        if !totals.outgoing.contains_key(asset) { return false }
+        if totals.outgoing.get(asset) != amount { return false }
+    }
+    return true
+}
+
+action transfer() -> u64 {
+    verification
+    let inputs = ckb::cell_count(ckb::group_input<Note>(0))
+    let outputs = ckb::cell_count(ckb::group_output<Note>(0))
+    require inputs >= 1 && inputs <= 32
+    require outputs >= 1 && outputs <= 32
+    let mut totals = Totals::new()
+    totals.incoming.reserve(inputs)
+    totals.outgoing.reserve(outputs)
+    totals.input_serials.reserve(inputs)
+    totals.output_serials.reserve(outputs)
+    for i in 0..inputs {
+        let note = ckb::group_input<Note>(i).data
+        require note.amount > 0
+        let fresh = totals.input_serials.insert(note.serial)
+        require fresh
+        // At most 32 u64 amounts fit exactly in u128, even at u64::MAX.
+        let previous = totals.incoming.get_or(note.asset, 0)
+        totals.incoming.insert(note.asset, previous + (note.amount as u128))
+    }
+    for i in 0..outputs {
+        let cell = ckb::group_output<Note>(i)
+        require cell.capacity >= ckb::cell_occupied_capacity(cell)
+        let note = cell.data
+        require note.amount > 0
+        let fresh = totals.output_serials.insert(note.serial)
+        require fresh
+        let previous = totals.outgoing.get_or(note.asset, 0)
+        totals.outgoing.insert(note.asset, previous + (note.amount as u128))
+    }
+    require conserved(&totals)
+    return 0
+}

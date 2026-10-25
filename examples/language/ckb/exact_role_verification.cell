@@ -1,0 +1,31 @@
+// Experimental fixed-role verification; independent machine-proof admission
+// remains blocked. These illustrative complete Script hashes are not deployments.
+module cellscript::examples::exact_role_verification
+
+resource Order has store {
+    id: [u8; 16],
+    amount: u64,
+}
+
+resource Receipt has store {
+    id: [u8; 16],
+    digest: Hash,
+}
+
+action verify() -> u64 {
+    verification
+    ckb::verify_cell_roles(
+        64, 64, 32, 32768,
+        ckb::exact_cell_role<Order>(
+            "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "0x3333333333333333333333333333333333333333333333333333333333333333",
+            "id", "observe", "preserve", 1, 16, 1, 16
+        ),
+        ckb::exact_cell_role<Receipt>(
+            "0x2222222222222222222222222222222222222222222222222222222222222222",
+            "0x3333333333333333333333333333333333333333333333333333333333333333",
+            "id", "observe", "preserve", 1, 16, 1, 16
+        )
+    )
+    return 0
+}

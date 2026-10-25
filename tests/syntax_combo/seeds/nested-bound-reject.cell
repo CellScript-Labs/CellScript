@@ -1,0 +1,8 @@
+// audit: phase=reject_compile
+// audit: contains=nested values require NestedValues<T, N, P, B>
+module cellscript::audit::seed_nested_bound_reject
+
+action inspect(witness values: NestedValues<Vec<u8>, 33, 8, 128>) -> u64 {
+    verification
+    return 0
+}

@@ -71,14 +71,20 @@ pub(crate) fn build(module: &ir::IrModule, metadata: &CompileMetadata) -> TypedS
             _ => None,
         }))
         .map(|definition| {
+            let nested_cell = matches!(definition.kind, ir::IrTypeKind::Resource | ir::IrTypeKind::Shared | ir::IrTypeKind::Receipt)
+                && definition.fields.iter().any(|field| {
+                    matches!(crate::nested_values::parsed(&render_type(&field.ty)), Some(crate::nested_values::NestedType::Values(_)))
+                });
             let mut fields = definition
                 .fields
                 .iter()
-                .map(|field| TypedSemanticField {
+                .enumerate()
+                .map(|(index, field)| TypedSemanticField {
                     name: field.name.clone(),
                     ty: render_type(&field.ty),
                     offset: u32::try_from(field.offset).unwrap_or(u32::MAX),
                     width_bytes: field.fixed_size.and_then(|width| u32::try_from(width).ok()),
+                    molecule_field_index: nested_cell.then(|| u32::try_from(index).expect("bounded source field count")),
                 })
                 .collect::<Vec<_>>();
             let encoded_size = definition
@@ -1657,6 +1663,12 @@ fn build_entry(
             reference: param.is_ref || param.is_read_ref,
         })
         .collect::<Vec<_>>();
+    // Region identity is required even when an outer alias is used only to
+    // introduce a nested borrow and appears in no executable operation.
+    // Insert after operation locals so existing artifact identities stay stable.
+    for borrow in &body.borrow_regions {
+        insert_var(&mut locals, &borrow.view_binding);
+    }
     let mut typed_locals = locals.into_values();
     refine_collection_local_types(&mut typed_locals, &mut typed_params, &mut blocks);
     let cell_bindings = body
@@ -1774,6 +1786,17 @@ fn operation(
     signatures: &BTreeMap<String, CallableSignature>,
 ) -> TypedSemanticOperation {
     let (opcode, destinations, operands, detail, call) = match instruction {
+        IrInstruction::AllocatedValue(op) => (
+            "allocated-value",
+            op.dest.iter().collect(),
+            op.owner.iter().chain(&op.args).collect(),
+            TypedSemanticOperationDetail::AllocatedValue {
+                contract: op.contract(),
+                member: op.member.map(|index| index as u32),
+                operation: op.operation,
+            },
+            None,
+        ),
         IrInstruction::LoadConst { dest, value } => {
             let value = typed_constant(value);
             ("load-const", vec![dest], vec![], TypedSemanticOperationDetail::Constant { value }, None)
@@ -1877,6 +1900,20 @@ fn operation(
         IrInstruction::BoundedOutputEnd { index } => {
             ("bounded-output-end", vec![], vec![index], TypedSemanticOperationDetail::None, None)
         }
+        IrInstruction::VerifyExactCellRoles { dest, contract } => (
+            "verify-exact-cell-roles",
+            dest.iter().collect(),
+            vec![],
+            TypedSemanticOperationDetail::ExactRoleSelection { contract: contract.clone() },
+            None,
+        ),
+        IrInstruction::ReadExactCellRole { dest, selection, role, read, index } => (
+            "read-exact-cell-role",
+            vec![dest],
+            std::iter::once(selection).chain(index.iter()).collect(),
+            TypedSemanticOperationDetail::ExactRoleRead { role: *role, read: *read },
+            None,
+        ),
         IrInstruction::Call { dest, func, args } => {
             let signature = signatures.get(func).cloned().unwrap_or_else(|| CallableSignature {
                 params: args.iter().map(operand_type).collect(),
