@@ -2,6 +2,13 @@
 
 ## Unreleased — 0.32
 
+Extend the complete mixed-role settlement bundle comparison to named and
+positional authoring at O0/O3, including generated SDK bindings, canonical
+transaction bytes, required peer execution and rebound hostile reports. Retain
+the named resource baseline and report the positional cost difference separately.
+Refresh the business-corpus evidence digest after the bounded-runtime changes;
+this preserves its candidate status and all existing admission requirements.
+
 Bind copied collection `u128`, fixed-byte and record results to the checked
 producer, full value width, private destination buffer and typed pointer slot.
 Reject truncated/shifted copies, missing publication evidence and destinations

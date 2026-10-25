@@ -1082,10 +1082,24 @@ The retained [positional comparison](../tests/fixtures/mixed_settlement_position
 has the same complete business predicates and helpers. Only its policy/use-site
 spelling differs. The named form declares schema, identity, authority and bounds
 once, then uses `selected.base.input(j)` and `.successor(j)`; the positional form
-repeats `Balance` and catalog ordinal `1` on each read. O3 tests compare their
-positive/negative transaction outcomes and canonical transaction bytes. This is
-an authoring comparison for the chosen direction; final API freeze and review
-remain dependent on the complete #47–#49 acceptance program.
+repeats `Balance` and catalog ordinal `1` on each read. The complete bundle test
+now runs both forms at O0/O3 through generated SDK bindings, native artifact and
+ProtocolBundle checks, the packed adapter and all four Script groups. One, three
+and six orders in both output orders produce identical transaction bytes between
+forms. Both reject hostile peers, late amount changes, rebound catalog/output
+substitutions and stale live-Cell/dependency observations. SDK plans retain the
+same admission blockers.
+
+The O3 named form uses 117,533 / 356,202 / 843,183 whole-transaction cycles for
+one / three / six orders; the positional form uses 117,447 / 355,924 / 842,377.
+The settlement ELF is 26,752 versus 26,648 bytes, and observed stack is 8,800
+versus 8,704 bytes. Both touch 45,056 guest-page bytes for that Script; separate
+heap accounting remains unavailable. These differences are measured compiler
+costs, not intrinsic costs of named syntax. The named baseline still passes its
+unchanged frozen observations and ceilings; positional observations do not
+replace or relax them. This is an authoring comparison for the chosen direction;
+final API freeze and review remain dependent on the complete #47–#49 acceptance
+program.
 
 The all-group `ckb-testtool` fixture executes the settlement Type, two separate
 asset Type groups and the spending Lock group. Each asset Type independently

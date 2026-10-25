@@ -1,6 +1,6 @@
 //! The real settlement program through generated catalog bindings, the existing
 //! packed transaction adapter and every required CKB-VM Script group.
-use super::support::{bind_deployment_lines, compile, context, identity, participants, reference};
+use super::support::{bind_deployment_lines, compile_at, context, identity, participants, reference};
 use super::*;
 use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
 
@@ -102,14 +102,27 @@ fn mixed_settlement_cross_package_helpers_preserve_transaction_and_authority() {
 }
 
 fn artifacts(root: &Path) -> (Vec<CompileResult>, Vec<Value>) {
-    let mut source = include_str!("../../examples/language/batches/mixed_settlement.cell").to_string();
+    artifacts_at(root, true, 3)
+}
+
+fn artifacts_at(root: &Path, named: bool, opt_level: u8) -> (Vec<CompileResult>, Vec<Value>) {
+    let mut source = if named {
+        include_str!("../../examples/language/batches/mixed_settlement.cell")
+    } else {
+        include_str!("../fixtures/mixed_settlement_positional.cell")
+    }
+    .to_string();
     for (placeholder, tag) in [("11", 1), ("22", 2), ("33", 3), ("44", 4)] {
         let hash = cellscript::script_handle::ckb_script_identity_hash(&identity(tag)).unwrap();
         source = source.replace(&placeholder.repeat(32), &hash[2..]);
     }
     let asset = include_str!("../fixtures/mixed_settlement_asset.cell");
-    let compiled =
-        vec![compile(&source), compile(asset), compile(asset), compile("module auth\nlock authorize() -> bool { return true }")];
+    let compiled = vec![
+        compile_at(&source, opt_level),
+        compile_at(asset, opt_level),
+        compile_at(asset, opt_level),
+        compile_at("module auth\nlock authorize() -> bool { return true }", opt_level),
+    ];
     let artifacts = participants(
         root,
         &[
@@ -193,9 +206,18 @@ fn input(compiled: &[CompileResult], artifacts: &[Value], count: usize, reverse:
 
 #[test]
 fn mixed_settlement_bundle_materializes_canonical_bytes_and_executes_every_group() {
+    for opt_level in [0, 3] {
+        let named = run_bundle(true, opt_level);
+        let positional = run_bundle(false, opt_level);
+        assert_eq!(named, positional, "named/positional complete settlement transaction bytes O{opt_level}");
+    }
+}
+
+fn run_bundle(named: bool, opt_level: u8) -> Vec<Vec<u8>> {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
-    let (compiled, artifacts) = artifacts(root);
+    let (compiled, artifacts) = artifacts_at(root, named, opt_level);
+    let mut transactions = Vec::new();
     for count in [1, 3, 6] {
         for reverse in [false, true] {
             let input = input(&compiled, &artifacts, count, reverse);
@@ -205,21 +227,38 @@ fn mixed_settlement_bundle_materializes_canonical_bytes_and_executes_every_group
             let (tx, materialized) =
                 cellscript_ckb_adapter::materialize_protocol_bundle_report(&serde_json::to_vec(&report).unwrap()).unwrap();
             assert_eq!(tx.data().as_slice(), reference(&input));
+            transactions.push(tx.data().as_slice().to_vec());
             assert_eq!(materialized.script_groups.len(), 4);
             assert_eq!(materialized.exact_role_selections["settlement"][0].cells.len(), count * 10);
             assert_eq!(materialized.ckb_vm_execution, "not-executed");
             let vm_tx = packed::Transaction::from_slice(tx.data().as_slice()).unwrap().into_view();
             let fixture = context(&input, &compiled, None);
             let cycles = fixture.verify_tx(&vm_tx, 20_000_000).unwrap();
-            super::resources::measure(
-                &format!("Settlement-{count}-{reverse}-valid"),
-                &fixture,
-                &input,
-                &compiled,
-                &vm_tx,
-                &[0, 0, 0, 0],
+            if opt_level == 3 {
+                if named {
+                    super::resources::measure(
+                        &format!("Settlement-{count}-{reverse}-valid"),
+                        &fixture,
+                        &input,
+                        &compiled,
+                        &vm_tx,
+                        &[0, 0, 0, 0],
+                    );
+                } else {
+                    super::resources::observe(
+                        &format!("Settlement-{count}-{reverse}-positional"),
+                        &fixture,
+                        &input,
+                        &compiled,
+                        &vm_tx,
+                        &[0, 0, 0, 0],
+                    );
+                }
+            }
+            eprintln!(
+                "mixed settlement bundle: named={named} O{opt_level} count={count} reverse={reverse} bytes={} cycles={cycles}",
+                tx.data().as_slice().len()
             );
-            eprintln!("mixed settlement bundle: count={count} reverse={reverse} bytes={} cycles={cycles}", tx.data().as_slice().len());
             if count != 6 || reverse {
                 continue;
             }
@@ -293,8 +332,10 @@ fn mixed_settlement_bundle_materializes_canonical_bytes_and_executes_every_group
                 cellscript_ckb_adapter::materialize_protocol_bundle_report(&serde_json::to_vec(&bad_report).unwrap()).unwrap();
             let bad_vm_tx = packed::Transaction::from_slice(bad_tx.data().as_slice()).unwrap().into_view();
             assert!(context(&bad, &compiled, None).verify_tx(&bad_vm_tx, 20_000_000).is_err());
-            super::resources::measure("Settlement-6-false-late-amount", &fixture, &bad, &compiled, &bad_vm_tx, &[5, 0, 5, 0]);
-            super::resources::scan_limits("Settlement", 6, &input, &compiled, root, &bad, &[5, 0, 5, 0]);
+            if named && opt_level == 3 {
+                super::resources::measure("Settlement-6-false-late-amount", &fixture, &bad, &compiled, &bad_vm_tx, &[5, 0, 5, 0]);
+                super::resources::scan_limits("Settlement", 6, &input, &compiled, root, &bad, &[5, 0, 5, 0]);
+            }
             std::fs::write(root.join("checked.json"), serde_json::to_vec(&report).unwrap()).unwrap();
             for mutation in 0..4 {
                 let mut hostile = report.clone();
@@ -346,4 +387,5 @@ for (const a of report.bundle.artifacts) {
 "#).unwrap();
     let result = Command::new("node").arg("--experimental-strip-types").arg(js).output().unwrap();
     assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    transactions
 }
