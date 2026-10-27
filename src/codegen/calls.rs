@@ -678,7 +678,7 @@ impl CodeGenerator {
         // any invalid source or syscall failure. Successful calls therefore
         // return only the scalar value in a0 and need no per-call status
         // branch. Other scalar runtime helpers retain the a1 status ABI.
-        if is_runtime_scalar_failclosed_call(func) && !is_terminal_scalar_runtime_helper(func) {
+        if runtime_contract::return_abi(func) == Some(runtime_contract::RuntimeReturnAbi::ScalarStatusA1) {
             let ok_label = self.fresh_label("runtime_scalar_ok");
             self.emit("# cellscript abi: scalar runtime helper status check (a1 == 0)");
             self.emit(format!("beqz a1, {}", ok_label));
@@ -687,7 +687,7 @@ impl CodeGenerator {
             self.emit_label(&ok_label);
         }
 
-        if is_void_runtime_requirement_call(func) {
+        if runtime_contract::return_abi(func) == Some(runtime_contract::RuntimeReturnAbi::StatusA0) {
             let ok_label = self.fresh_label("runtime_requirement_ok");
             self.emit(format!("beqz a0, {}", ok_label));
             self.emit_process_failure_status();
@@ -954,6 +954,7 @@ impl CodeGenerator {
             "__ckb_cell_lock_hash"
                 | "__ckb_cell_type_hash"
                 | "__ckb_cell_data_hash_field"
+                | "__ckb_cell_data_hash"
                 | "__ckb_cell_lock_code_hash"
                 | "__ckb_cell_type_code_hash"
                 | "__ckb_cell_lock_args_hash"

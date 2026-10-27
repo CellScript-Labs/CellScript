@@ -252,7 +252,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
-const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v128-0.32-consensus-data-hash";
+const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v129-0.32-runtime-return-contracts";
 pub const METADATA_SCHEMA_VERSION: u32 = 72;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 2;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -17824,6 +17824,7 @@ fn metadata_prelude_availability(
                         | "__ckb_cell_lock_hash"
                         | "__ckb_cell_type_hash"
                         | "__ckb_cell_data_hash_field"
+                        | "__ckb_cell_data_hash"
                         | "__ckb_cell_lock_code_hash"
                         | "__ckb_cell_type_code_hash"
                         | "__ckb_cell_lock_args_hash"
@@ -19274,6 +19275,7 @@ fn body_ckb_runtime_features(
                             | "__ckb_require_cell_type_args_suffix_hash"
                             | "__ckb_require_cell_lock_script_hash_type"
                             | "__ckb_require_cell_type_script_hash_type"
+                            | "__ckb_cell_data_hash"
                             | "__ckb_cell_data_bytes32"
                             | "__ckb_cell_data_size"
                             | "__ckb_cell_data_equal"
@@ -19344,7 +19346,8 @@ fn body_ckb_runtime_features(
                     }
                     if matches!(
                         func.as_str(),
-                        "__ckb_cell_data_bytes32"
+                        "__ckb_cell_data_hash"
+                            | "__ckb_cell_data_bytes32"
                             | "__ckb_cell_data_equal"
                             | "__ckb_source_bytes_equal"
                             | "__ckb_source_bytes_equal_memory"
@@ -19730,6 +19733,7 @@ fn runtime_range_for_call(func: &str, args: &[ir::IrOperand]) -> CkbRuntimeRange
         }
         "__ckb_cell_occupied_capacity"
         | "__ckb_cell_unoccupied_capacity"
+        | "__ckb_cell_data_hash"
         | "__ckb_cell_lock_code_hash"
         | "__ckb_cell_type_code_hash"
         | "__ckb_cell_lock_args_empty"
@@ -20564,6 +20568,7 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
         )),
         "__ckb_current_script_hash" => Some(("current-script-hash", "LOAD_SCRIPT_HASH", "CurrentScript", "ckb::current_script_hash")),
         "__ckb_transaction_hash" => Some(("transaction-hash", "LOAD_TX_HASH", "Transaction", "ckb::transaction_hash")),
+        "__ckb_cell_data_hash" => Some(("cell-data-hash", "LOAD_CELL_DATA", "SourceView", "ckb::cell_data_hash")),
         "__ckb_cell_data_bytes32" => Some(("cell-data-bytes32", "LOAD_CELL_DATA", "SourceView", "ckb::cell_data_bytes32")),
         "__ckb_cell_data_blake2b_span" => {
             Some(("cell-data-blake2b-span", "LOAD_CELL_DATA", "SourceView", "ckb::cell_data_blake2b_span"))

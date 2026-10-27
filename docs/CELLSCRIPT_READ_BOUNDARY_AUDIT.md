@@ -3,61 +3,77 @@
 **Status: repaired candidate; final identified-source gates pending.**
 
 This follows the [stack-layout audit](CELLSCRIPT_STACK_LAYOUT_AUDIT.md) on base
-`f34c175756b4d310812dad3dfae9bc8ff60724d3`. Current artifact-cache generation is v128.
+`f34c175756b4d310812dad3dfae9bc8ff60724d3`. Current artifact-cache generation is v129.
 No release/version change, TAC or external security scan is included.
 
-## Consensus-field convergence (v128)
+## Return conventions and compatibility (v129)
 
-The whole-data accessor now lowers to the existing
-`__ckb_cell_data_hash_field`, shared by `ckb::cell_data_hash`,
-`ckb::cell_data_hash_field` and typed Cell `.data_hash`. The duplicate
-512-byte read and memory-hash dependency are removed. The private helper frame
-changes from **544 used + 0 padding = 544** to **64 used + 0 padding = 64**:
-length at 0, 32-byte result at 8, caller output pointer at 40, caller size pointer
-at 48, and RA at 56. This saves 480 bytes in that helper alone; it does not claim
-a measured whole-program peak reduction. Caller-owned result/size buffers remain.
+The four scalar getters `input_out_point_index`,
+`input_out_point_tx_hash_low`, `cell_lock_hash_low` and
+`cell_type_hash_low` return a value in a0 and status in a1. Their callers
+previously ignored a1. Actual VM execution reproduced success after each failed
+read at O0 (`/tmp/cellscript-v129-status-before.log`). Registry-driven callers
+now terminate with the returned error before saving any scalar value.
 
-The oracle is CKB's
-[CellOutput::calc_data_hash](https://github.com/nervosnetwork/ckb/blob/f7fa4436737756f97a24e254f22c13a36316ecea/util/gen-types/src/extension/calc_hash.rs),
-used by the
-[DATA_HASH syscall](https://github.com/nervosnetwork/ckb/blob/f7fa4436737756f97a24e254f22c13a36316ecea/script/src/syscalls/load_cell.rs).
-Empty data returns zero bytes, not BLAKE2b(empty); data larger than 512 bytes is
-supported. Source decoding remains unchanged. Invalid/missing Cell sources and
-failed field reads use the existing field accessor's error 44; the removed
-buffer implementation used error 3 for failed reads. Null output/size pointers
-still fail with error 18. This is an intentional semantic correction, not merely
-a layout optimization.
+`src/codegen/runtime_contract.rs` declares public dispatch and private helper
+return conventions: scalar values, scalar/a1 status, internally terminating
+errors, checked a0 status, explicit status-valued IPC results, buffer results,
+and multi-register results. The generated-machine inventory requires every
+runtime entry to have a convention and checks a1 initialization on every
+returning path for scalar-status entries, including compatible tail calls.
+This structural test is not a semantic proof of every helper or every caller.
 
-Raw 32-byte projection is named `ckb::cell_data_bytes32(view, offset)`;
-`cell_data_hash_at` is a compatibility alias with identical machine output.
-It retains the Hash value representation but performs no hashing. Both spellings
-emit the same 32-byte-frame helper, request exactly 32 bytes, require at least
-32 remaining bytes, and publish 32 only after that check. Metadata names the
-canonical operation `cell-data-bytes32`; whole-data hashing records the existing
-`cell-data-hash-field` / `LOAD_CELL_BY_FIELD` contract. Custom-range hashing
-continues to use the separate bounded incremental span interface.
+The independent checker does not import that registry. It decodes the complete
+four getter bodies and all incoming caller guards, including source selection,
+field selectors, OutPoint lengths, extraction, a1 success/error values,
+restoration and the error edge to the verified terminal sink. Rebound mutations
+of the caller guard, status copy and callee statuses reject at O0/O3.
 
-The independent checker validates the complete field/slice machine bodies even
-for direct calls outside collection owners, including source decoding, syscall,
-field selector, returned length, copy bounds, output pointers and restoration.
-It continues to prove caller buffer disjointness in composed lifetime checks.
-Disabled targets may only return the established error without touching memory.
+Legacy `ckb::cell_data_hash` keeps its 512-byte raw buffer and **544 used +
+0 padding = 544-byte** frame. It checks reported length before hashing, returns
+BLAKE2b(empty) for empty input, and rejects more than 512 bytes with error 3.
+`cell_data_hash_field` and typed `.data_hash` separately read consensus
+DATA_HASH: empty input produces zero, and no 512-byte limit applies. The field
+helper retains **64 used + 0 padding = 64 bytes**. Neither frame changes in v129.
+The oracle is pinned CKB
+[CellOutput::calc_data_hash](https://github.com/nervosnetwork/ckb/blob/f7fa4436737756f97a24e254f22c13a36316ecea/util/gen-types/src/extension/calc_hash.rs).
 
-Focused v128 checks completed:
+`cell_data_bytes32(view, offset)` names the raw 32-byte read explicitly;
+`cell_data_hash_at` is its compatibility alias. Both require at least 32
+remaining bytes, permit a longer suffix and compute no digest. Their frame is
+32 used + 0 padding = 32 bytes. The complete independent field, bounded legacy
+hash and slice contracts remain distinct. Caller lifetime checks preserve
+separate result/size buffers and live Cell/collection copies.
+
+The [legacy read contract matrix](CELLSCRIPT_LEGACY_READ_CONTRACTS.md) records
+short/long input behavior, failure propagation and migration choices. No legacy
+witness projection or exact Script-args read silently changes semantics.
+
+The v128 unification candidate was superseded before publication. Its focused
+receipts demonstrate that candidate only. The backend run on signed
+`e4280a29d6af9b8828a98b4dab2dfcdbed72e010` was stopped during compiler tests;
+queued dev/ci runs did not start. No full acceptance is claimed for it.
+
+Current focused receipts:
 
 | Check | Receipt |
 |---|---|
-| Six read-boundary/composition tests, O0/O3 | `/tmp/cellscript-v128-crypto-read.log`: empty/1/511/512/513/600/4096-byte consensus hashes across all five Cell sources; raw short slices and longer suffixes; invalid tags/HeaderDep/missing coordinates; alias and formatter machine parity; live Cell/collection copies |
-| Five stack-layout behavior tests, O0/O3 | `/tmp/cellscript-v128-read-stack.log`: 64-byte field frame, nested fixed returns, large frames/arguments and preserved legacy behavior |
-| Rebound machine mutations, O0/O3 | `/tmp/cellscript-v128-checker.log`: request capacity, omitted/inverted length guard, output and size writes, saved RA restore, syscall, field selector, copy bound and source decoder |
-| Complete runtime/stdlib machine inventory | `/tmp/cellscript-v128-inventory.log`: 246 entries / 358 stack adjustments at O0/O3, plus instance profile delta test; removing one duplicate helper accounts for the 247/360 reduction |
-| Editor and browser metadata-only boundary | `/tmp/cellscript-v128-editor.log` and `/tmp/cellscript-v128-browser.log`: canonical completions, alias features, invalid-offset diagnostics; no native access/machine records added to browser summaries |
-| Cryptographic regression | Eight tests in `/tmp/cellscript-v128-crypto-read.log`, including unchanged exact-range/empty-span hashing |
-| Compiler/checker and WASM clippy, all targets, warnings denied | `/tmp/cellscript-v128-clippy.log` and `/tmp/cellscript-v128-wasm-clippy.log`; native and WASM feature configurations checked separately |
-| iCKB differential suite, serialized and updates disabled | 220 tests in `/tmp/cellscript-v128-ickb.log`; no further baseline or numeric-ceiling changes |
+| Runtime inventory: four tests, 248 entries / 362 stack adjustments, O0/O3 | `/tmp/cellscript-v129-contract-inventory.log`; the dispatcher registry also includes the constant-named fungible helper omitted by the earlier literal-only discovery |
+| Nine read-boundary, five stack-layout and twelve typed-view tests | `/tmp/cellscript-v129-read-stack-final.log`; valid index 44, all four scalar values alongside collection/fixed-byte results, propagated failures and distinct empty/oversized hash contracts |
+| Eight bounded admission checker tests | `/tmp/cellscript-v129-bounded-checker.log` |
+| Restored legacy hash plus field/slice rebound mutations | `/tmp/cellscript-v129-read-mutations.log` |
+| Four scalar getters' body/caller status mutations, O0/O3 | `/tmp/cellscript-v129-status-mutations.log` |
+| iCKB differential suite, serialized, no baseline updates | 220 passed in `/tmp/cellscript-v129-ickb.log` |
+| Compiler/checker all-target clippy, warnings denied | `/tmp/cellscript-v129-clippy-final.log` |
+| WASM metadata-only parity and separate all-target clippy | `/tmp/cellscript-v129-browser-final.log`, `/tmp/cellscript-v129-wasm-clippy.log` |
 
-Final identified-source backend/dev/ci validation remains pending. Prior receipts
-below remain evidence of the earlier repairs, not final acceptance of this change.
+Two frozen runtime-view measurements were refreshed after adding caller guards:
+input/group/dep/witness 92,306 to 92,318 cycles and 15,032 to 15,056 ELF bytes;
+persistent policy 94,794 to 94,799 cycles and 19,320 to 19,328 ELF bytes. Their
+stack sizes and all numeric ceilings remain unchanged. Exact artifact, lowering,
+source-map and transaction identities were rebound; the complete twelve-test
+suite then passed without update mode. Full identified-source backend/dev/ci
+gates remain pending.
 
 ## Historical v127 read contracts and reproduced defects
 
@@ -81,8 +97,7 @@ the defect.
 | xUDT amount-word getter | 8 / remaining bytes from offset 0 or 8 / min(8, remaining) / one u64 | Require at least 8 remaining bytes before loading the word. Keep 24 used + 8 padding = 32 bytes. |
 | Legacy WitnessArgs field getter | 512 / full witness length / min(512, length) / projected fixed value | Reject reported length > 512 before parsing offsets against unloaded data. Keep 592 used + 0 padding = 592 bytes. |
 
-The v127 hash repair retained the bounded-buffer design; v128 supersedes that
-choice with the consensus-field implementation described above. The separate
+The v127 bounded-buffer repair is retained in v129 for compatibility. The separate
 field accessor and typed `.data_hash` already used that consensus interface.
 The original syscall source checks and runtime error families remain. Raw
 `witness::raw` intentionally zero-pads/truncates its fixed result and is distinct

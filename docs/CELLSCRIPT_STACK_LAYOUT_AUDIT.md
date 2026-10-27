@@ -6,9 +6,11 @@ Base revision: `f34c175756b4d310812dad3dfae9bc8ff60724d3`. This review incorpora
 the existing context-hash/ScriptHash composition repairs without reverting other
 workspace work. The layout-only receipt below covers cache generation v126;
 the later [read-boundary audit](CELLSCRIPT_READ_BOUNDARY_AUDIT.md) records v127
-length checks/register handling and v128 consensus-field convergence. The latter
-replaces the 544-byte buffer-hash frame below with the existing 64-byte field
-accessor; the table remains the historical v126 layout comparison. No TAC or external security scan was run.
+length checks/register handling and v129 return conventions. The attempted v128
+hash unification was superseded: the legacy 544-byte buffer-hash frame remains
+because its empty-input and maximum-size contracts differ from the 64-byte
+consensus field accessor. No 480-byte saving is claimed for the legacy API.
+The table remains the historical v126 layout comparison. No TAC or external security scan was run.
 Workspace/package versions, syscall sources, business rules and borrowing are
 unchanged. Statements below about pending gates and uncommitted work describe
 that v126 receipt, not a completed acceptance of the later changes.

@@ -3,9 +3,10 @@ use super::*;
 #[test]
 fn bounded_cell_read_helpers_reject_rebound_capacity_length_and_pointer_mutations() {
     for opt_level in [0, 3] {
-        for (call, name, guard_kind, guard_registers, output_word) in [
-            ("ckb::cell_data_hash(source::input(0))", "__ckb_cell_data_hash_field", 0x1063, (7, 0), 0x02813f83),
-            ("ckb::cell_data_bytes32(source::input(0), 7)", "__ckb_cell_data_bytes32", 0x6063, (7, 6), 0x00813503),
+        for (call, name, capacity_word, guard_kind, guard_registers, output_word) in [
+            ("ckb::cell_data_hash_field(source::input(0))", "__ckb_cell_data_hash_field", 0x02000293, 0x1063, (7, 0), 0x02813f83),
+            ("ckb::cell_data_hash(source::input(0))", "__ckb_cell_data_hash", 0x20000293, 0x6063, (5, 11), 0x20813603),
+            ("ckb::cell_data_bytes32(source::input(0), 7)", "__ckb_cell_data_bytes32", 0x02000293, 0x6063, (7, 6), 0x00813503),
         ] {
             let source =
                 format!("module read_bounds\naction inspect() -> u64 {{ let value = {call} require value == value return 0 }}");
@@ -24,7 +25,7 @@ fn bounded_cell_read_helpers_reject_rebound_capacity_length_and_pointer_mutation
                 .iter()
                 .filter(|word| blocks.iter().any(|block| block.range.contains(word.address)))
                 .collect::<Vec<_>>();
-            let capacity = words.iter().find(|word| word.word == 0x02000293).unwrap();
+            let capacity = words.iter().find(|word| word.word == capacity_word).unwrap();
             let guard = words
                 .iter()
                 .find(|word| word.word & 0x707f == guard_kind && (word.word >> 15 & 31, word.word >> 20 & 31) == guard_registers)
@@ -413,5 +414,47 @@ fn strict_nested_successors_still_require_complete_output_comparisons() {
         }
         missing.rebind_sidecars();
         assert_code(&missing, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+    }
+}
+
+#[test]
+fn scalar_getter_status_and_caller_guards_reject_rebound_mutations() {
+    for opt_level in [0, 3] {
+        for method in ["input_out_point_index", "input_out_point_tx_hash_low", "cell_lock_hash_low", "cell_type_hash_low"] {
+            let source = format!("module scalar_status\naction inspect() -> u64 {{ let value = ckb::{method}(source::input(0)) require value == value return 0 }}");
+            let valid = Fixture::from_result(
+                compile(
+                    &source,
+                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                )
+                .unwrap(),
+            );
+            valid.check().unwrap();
+            let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+            let owner = format!("runtime:__ckb_{method}");
+            let entry = valid.record.entries.iter().find(|entry| entry.id == owner).unwrap();
+            let start = valid.record.blocks.iter().find(|block| block.id == entry.entry_block).unwrap().range.start;
+            let blocks = valid.record.blocks.iter().filter(|block| block.owner_entry == owner).collect::<Vec<_>>();
+            let call = elf.control_flow.iter().find(|edge| edge.target == start).unwrap();
+            let word_at = |pc| elf.instructions.iter().find(|word| word.address == pc).unwrap().word;
+            let body_word = |value| {
+                elf.instructions
+                    .iter()
+                    .find(|word| word.word == value && blocks.iter().any(|block| block.range.contains(word.address)))
+                    .unwrap()
+                    .address
+            };
+            for (address, word) in [
+                (call.address + 4, 0x00000013),
+                (call.address + 4, word_at(call.address + 4) ^ (1 << 12)),
+                (call.address + 8, 0x00050513),
+                (body_word(0x00000593), 0x00100593),
+                (body_word(0x02c00513), 0x00000513),
+            ] {
+                let mut rebound = valid.clone();
+                rebound.replace_machine_words(&[(address, word)]);
+                assert!(rebound.check().is_err(), "{method}, O{opt_level}, mutation at {address:#x}");
+            }
+        }
     }
 }

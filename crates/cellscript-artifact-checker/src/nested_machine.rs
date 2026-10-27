@@ -24,6 +24,7 @@ mod lifetime;
 mod out_point_hash;
 mod outputs;
 mod parameters;
+mod scalar_status;
 mod script_hash_fields;
 mod uses;
 mod view_calls;
@@ -32,6 +33,7 @@ mod witness_exact_hash;
 
 pub(crate) use cell_read_hashes::validate_all as validate_cell_data_reads;
 pub(crate) use hash_fields::validate as validate_hash_property_runtime;
+pub(crate) use scalar_status::validate_all as validate_scalar_status_calls;
 
 const PREFIX: &str = ".Lnested_param_codec_";
 

@@ -560,209 +560,7 @@ impl CodeGenerator {
             self.emit_runtime_current_script_role_at_helper(enabled);
         }
 
-        for (name, detail) in [
-            ("__ckb_exec_cell_dep_u8_args", "non-returning EXEC of a full CellDep ELF with zero to four single-byte C-string arguments"),
-            ("__ckb_exec_cell_dep_hex4", "non-returning EXEC with four hex-encoded local byte-vector segments"),
-            ("__ckb_transaction_u32_le", "exact complete packed Transaction u32 read"),
-            ("__ckb_witness_bytes32", "exact 32 raw witness bytes as a Hash-shaped value, without hashing"),
-            ("__ckb_transaction_blake2b_gather", "CKB hash over ordered transaction spans with local prefix/suffix"),
-            ("__ckb_witness_blake2b_select_chunks", "CKB hash over selected fixed-width witness chunks with local prefix/suffix"),
-            ("__ckb_spawn_wait_cell_dep_hex4", "checked returning SPAWN and WAIT with four hexadecimal arguments"),
-            ("__ckb_current_role", "current script role inferred from group input lock/type hashes"),
-            ("__ckb_current_script_hash", "current script hash loaded via LOAD_SCRIPT_HASH"),
-            ("__ckb_transaction_hash", "canonical raw transaction hash loaded via LOAD_TX_HASH"),
-            ("__ckb_script_hash", "canonical bounded Molecule Script CKB Blake2b-256"),
-            ("__ckb_since_to_raw", "explicit typed Since to raw CKB wire bits conversion"),
-            ("__ckb_epoch_number_to_u64", "explicit EpochNumber to u64 conversion"),
-            ("__ckb_epoch_duration_to_u64", "explicit EpochDuration to u64 conversion"),
-            ("__ckb_block_number_to_u64", "explicit BlockNumber to u64 conversion"),
-            ("__ckb_epoch_length_to_u64", "explicit EpochLength to u64 conversion"),
-            ("__ckb_timestamp_millis_to_u64", "explicit TimestampMillis to u64 conversion"),
-            ("__ckb_cell_capacity", "SourceView cell capacity field"),
-            ("__ckb_cell_occupied_capacity", "SourceView occupied capacity from CellOutput scripts and data bytes"),
-            ("__ckb_cell_unoccupied_capacity", "SourceView capacity minus occupied capacity"),
-            ("__ckb_cell_output_index", "SourceView output index"),
-            ("__ckb_input_out_point_index", "SourceView input OutPoint index"),
-            ("__ckb_input_out_point_tx_hash_low", "SourceView input OutPoint tx hash low word"),
-            ("__ckb_input_out_point_tx_hash", "SourceView input OutPoint full tx hash read"),
-            ("__ckb_require_input_out_point_tx_hash", "SourceView input OutPoint full tx-hash binding check"),
-            ("__ckb_require_input_out_point", "SourceView input OutPoint full tx-hash and index binding check"),
-            ("__ckb_require_metapoint_relative", "SourceView MetaPoint relative-distance binding check"),
-            ("__ckb_require_lock_type_metapoint_pairs", "current-script lock-only to type-only MetaPoint pair cardinality check"),
-            ("__ckb_require_type_lock_metapoint_pairs", "current-script type-only to lock-only MetaPoint pair cardinality check"),
-            (
-                "__ckb_require_lock_type_metapoint_pairs_from_i32_data",
-                "current-script lock-only to type-only MetaPoint pair cardinality check using signed i32 distance loaded from base cell data",
-            ),
-            (
-                "__ckb_require_type_lock_metapoint_pairs_from_i32_data",
-                "current-script type-only to lock-only MetaPoint pair cardinality check using signed i32 distance loaded from base cell data",
-            ),
-            (
-                "__ckb_require_lock_type_metapoint_pairs_from_i32_data_filtered",
-                "current-script lock-only to type-only filtered MetaPoint pair cardinality check using signed i32 distance loaded from base cell data",
-            ),
-            (
-                "__ckb_require_type_lock_metapoint_pairs_from_i32_data_filtered",
-                "current-script type-only to lock-only filtered MetaPoint pair cardinality check using signed i32 distance loaded from base cell data",
-            ),
-            (
-                "__ckb_require_lock_match_master_out_point_pairs_from_data",
-                "current-script lock-only match order input/output pairing using master OutPoint loaded from order data",
-            ),
-            ("__ckb_cell_lock_hash_low", "SourceView lock hash low word"),
-            ("__ckb_cell_type_hash_low", "SourceView type hash low word"),
-            ("__ckb_cell_lock_hash", "SourceView lock hash full 32-byte read"),
-            ("__ckb_cell_type_hash", "SourceView type hash full 32-byte read"),
-            ("__ckb_cell_data_hash_field", "SourceView consensus DATA_HASH field, all 32 bytes"),
-            ("__ckb_cell_data_bytes32", "SourceView cell data 32-byte read at byte offset"),
-            ("__ckb_cell_data_blake2b_span", "exact Cell data interval CKB Blake2b-256"),
-            ("__ckb_witness_blake2b_span", "exact raw witness interval CKB Blake2b-256"),
-            ("__ckb_raw_transaction_hash_without_cell_deps", "canonical RawTransaction hash with empty CellDepVec"),
-            ("__ckb_cell_lock_code_hash", "SourceView lock Script code_hash read"),
-            ("__ckb_cell_type_code_hash", "SourceView type Script code_hash read"),
-            ("__ckb_cell_lock_hash_type", "SourceView lock Script hash_type read"),
-            ("__ckb_cell_type_hash_type", "SourceView type Script hash_type read"),
-            ("__ckb_cell_lock_args_empty", "SourceView lock Script args_empty read"),
-            ("__ckb_cell_type_args_empty", "SourceView type Script args_empty read"),
-            ("__ckb_cell_lock_args_hash", "SourceView lock Script 32-byte args read"),
-            ("__ckb_cell_type_args_hash", "SourceView type Script 32-byte args read"),
-            ("__ckb_require_cell_lock_hash", "SourceView lock hash full 32-byte binding check"),
-            ("__ckb_require_cell_type_hash", "SourceView type hash full 32-byte binding check"),
-            (
-                "__ckb_require_cell_lock_exact_handle",
-                "CSHDLv1 full-value commitment plus complete SourceView Lock Script identity binding check",
-            ),
-            (
-                "__ckb_require_cell_type_exact_handle",
-                "CSHDLv1 full-value commitment plus complete SourceView Type Script identity binding check",
-            ),
-            (
-                "__ckb_require_cell_dep_exact_verifier_handle",
-                "CSHDLv1 full-value commitment plus exact CellDep artifact data-hash binding check",
-            ),
-            (
-                "__ckb_require_cell_dep_open_script_handle",
-                "CSOHWv1 structural, membership and selected Script CellDep binding check",
-            ),
-            (
-                "__ckb_require_cell_dep_open_verifier_handle",
-                "CSOHWv1 structural, membership and selected verifier CellDep binding check",
-            ),
-            (
-                "__ckb_require_cell_dep_open_script_handle_from_args",
-                "CSOHWv1 membership with the expected root derived from the current Script's committed 32-byte args",
-            ),
-            (
-                "__ckb_require_open_script_participant_from_args",
-                "CSOHWv1 committed-root membership, exact code dependency and observed participant Script identity",
-            ),
-            (
-                "__ckb_require_cell_dep_open_verifier_handle_from_args",
-                "CSOHWv1 verifier membership with the expected root derived from the current Script's committed 32-byte args",
-            ),
-            (
-                "__ckb_require_cell_lock_deployment_line_handle",
-                "active CSLINv1 admission plus exact Lock Script and Type-hash code CellDep binding check",
-            ),
-            (
-                "__ckb_require_cell_type_deployment_line_handle",
-                "active CSLINv1 admission plus exact Type Script and Type-hash code CellDep binding check",
-            ),
-            (
-                "__ckb_require_cell_dep_deployment_line_verifier_handle",
-                "active CSLINv1 admission plus exact spawned-verifier Type-hash code CellDep binding check",
-            ),
-            ("__ckb_require_cell_data_hash", "SourceView data hash full 32-byte binding check"),
-            (
-                "__ckb_require_bounded_cell_dep_data_hash",
-                "bounded resolved CellDep data-hash membership check",
-            ),
-            ("__ckb_require_current_script_args_empty", "current Script empty args requirement"),
-            ("__ckb_require_cell_lock_args_empty", "SourceView lock Script empty args requirement"),
-            ("__ckb_require_cell_type_args_empty", "SourceView type Script empty args requirement"),
-            ("__ckb_require_cell_lock_args_hash", "SourceView lock Script 32-byte args binding check"),
-            ("__ckb_require_cell_type_args_hash", "SourceView type Script 32-byte args binding check"),
-            ("__ckb_require_cell_lock_args_exact", "SourceView lock Script arbitrary exact args binding check"),
-            ("__ckb_require_cell_type_args_exact", "SourceView type Script arbitrary exact args binding check"),
-            ("__ckb_require_cell_lock_args_prefix_hash", "SourceView lock Script 32-byte args prefix binding check"),
-            ("__ckb_require_cell_type_args_prefix_hash", "SourceView type Script 32-byte args prefix binding check"),
-            ("__ckb_require_cell_lock_args_suffix_hash", "SourceView lock Script 32-byte args suffix binding check"),
-            ("__ckb_require_cell_type_args_suffix_hash", "SourceView type Script 32-byte args suffix binding check"),
-            ("__ckb_require_cell_lock_script_hash_type", "SourceView lock Script code_hash/hash_type binding check"),
-            ("__ckb_require_cell_type_script_hash_type", "SourceView type Script code_hash/hash_type binding check"),
-            ("__c256_require_u128_product_lte", "C256 u128 product <= requirement"),
-            ("__c256_require_u128_product_eq", "C256 u128 product == requirement"),
-            ("__c256_require_u128_sum2_products_lte", "C256 u128 product-sum <= requirement"),
-            ("__c256_require_u128_sum2_products_eq", "C256 u128 product-sum == requirement"),
-            ("__ckb_cell_data_size", "SourceView cell data byte length"),
-            ("__ckb_cell_data_equal", "exact equality of two complete SourceView Cell data payloads"),
-            ("__ckb_source_bytes_equal", "exact equality of two bounded byte ranges from CKB syscall sources"),
-            ("__ckb_source_bytes_equal_memory", "exact equality of a bounded CKB source range and fixed in-memory bytes"),
-            ("__ckb_source_bytes_zero", "exact all-zero check over a bounded CKB source range"),
-            ("__ckb_cell_count", "SourceView complete cell-source cardinality"),
-            ("__ckb_cell_has_type", "SourceView optional Type Script presence"),
-            ("__ckb_cell_data_u32_le", "SourceView cell data little-endian u32 read"),
-            ("__ckb_cell_data_u64_le", "SourceView cell data little-endian u64 read"),
-            ("__dao_accumulated_rate", "DAO accumulated rate from HeaderDep SourceView"),
-            (
-                "__dao_input_accumulated_rate",
-                "DAO accumulated rate from an Input/GroupInput committed header",
-            ),
-            ("__dao_has_dao_type", "DAO type hash classifier"),
-            ("__dao_is_deposit_data", "DAO deposit data classifier"),
-            ("__dao_is_withdrawal_request_data", "DAO withdrawal request data classifier"),
-            ("__dao_require_header_dep_for_input", "DAO input header to HeaderDep lineage requirement"),
-            ("__dao_require_input_since_at_least", "DAO input since lower-bound requirement"),
-            ("__dao_require_input_relative_epoch_since_at_least", "DAO relative epoch since maturity requirement"),
-            ("__xudt_amount_low", "xUDT amount low 64 bits"),
-            ("__xudt_amount_high", "xUDT amount high 64 bits"),
-            ("__xudt_owner_mode_input_type_hash", "xUDT owner-mode input-type hash low word"),
-            ("__xudt_require_owner_mode_input_type", "xUDT owner-mode input-type binding check"),
-            ("__xudt_require_owner_mode_type_args", "xUDT owner-mode type args binding check"),
-            (
-                "__xudt_require_owner_mode_type_args_current_script",
-                "xUDT owner-mode type args binding check against current script hash",
-            ),
-            (
-                FUNGIBLE_TYPE_GROUP_V1_CODEGEN_HELPER,
-                "chain-neutral fungible type-group v1 conservation",
-            ),
-            ("__xudt_require_group_amount_conserved", "xUDT group input/output amount conservation"),
-            ("__xudt_require_group_amount_minted", "xUDT group output-input amount delta check"),
-            ("__xudt_require_group_amount_burned", "xUDT group input-output amount delta check"),
-            ("__ckb_witness_raw", "raw witness bytes"),
-            ("__ckb_witness_lock", "WitnessArgs.lock"),
-            ("__ckb_witness_input_type", "WitnessArgs.input_type"),
-            ("__ckb_witness_output_type", "WitnessArgs.output_type"),
-            ("__ckb_witness_lock_exact32", "exact 32-byte WitnessArgs.lock"),
-            ("__ckb_witness_input_type_exact32", "exact 32-byte WitnessArgs.input_type"),
-            ("__ckb_witness_output_type_exact32", "exact 32-byte WitnessArgs.output_type"),
-            ("__ckb_witness_bounded_size", "bounded raw witness or owned WitnessArgs field size"),
-            ("__ckb_witness_bounded_u8", "bounded raw witness or owned WitnessArgs field byte"),
-            ("__ckb_witness_bounded_u32_le", "bounded raw witness or owned WitnessArgs field u32"),
-            ("__ckb_witness_bounded_u64_le", "bounded raw witness or owned WitnessArgs field u64"),
-            ("__ckb_witness_bounded_blake2b", "bounded raw witness or owned WitnessArgs field CKB Blake2b-256"),
-            ("__ckb_witness_size", "witness byte size"),
-            ("__ckb_witness_count", "complete transaction witness count"),
-            ("__ckb_witness_u8", "exact raw witness byte"),
-            ("__ckb_witness_u32_le", "exact raw witness little-endian word"),
-            ("__ckb_witness_u64_le", "exact raw witness little-endian doubleword"),
-            ("__ckb_cell_data_u8", "exact Cell data byte"),
-            ("__ckb_cell_lock_size", "complete serialized Cell Lock Script size"),
-            ("__ckb_cell_type_size", "complete serialized Cell Type Script size"),
-            ("__ckb_cell_lock_u8", "exact serialized Cell Lock Script byte"),
-            ("__ckb_cell_type_u8", "exact serialized Cell Type Script byte"),
-            ("__ckb_input_since_at", "source-selected raw Input since"),
-            ("__ckb_require_witness_size_at_least", "require witness size lower bound"),
-            ("__ckb_sighash_all", "CKB sighash-all digest"),
-            ("__ckb_sighash_all_zero_lock", "bounded CKB sighash-all zero-lock message"),
-            ("__ckb_require_maturity", "CKB block-number since maturity"),
-            ("__ckb_require_time", "CKB timestamp since"),
-            ("__ckb_require_epoch_after", "CKB absolute epoch since"),
-            ("__ckb_require_epoch_relative", "CKB relative epoch since"),
-            ("__ckb_occupied_capacity", "compile-visible occupied capacity floor"),
-        ] {
+        for &(name, detail, _return_abi) in runtime_contract::SURFACE {
             if !referenced_helpers.contains(name) {
                 continue;
             }
@@ -839,6 +637,7 @@ impl CodeGenerator {
                 "__ckb_cell_data_hash_field" => {
                     self.emit_runtime_cell_hash_field_helper(name, detail, CKB_CELL_FIELD_DATA_HASH, enabled);
                 }
+                "__ckb_cell_data_hash" => self.emit_runtime_cell_data_hash_helper(name, detail, enabled),
                 "__ckb_cell_data_bytes32" => {
                     self.emit_runtime_cell_data_bytes32_helper(name, detail, enabled);
                 }
@@ -846,28 +645,76 @@ impl CodeGenerator {
                 "__ckb_witness_blake2b_span" => self.emit_runtime_span_hash_helper(name, RuntimeByteSource::Witness, enabled),
                 "__ckb_raw_transaction_hash_without_cell_deps" => self.emit_runtime_raw_transaction_hash_without_cell_deps(enabled),
                 "__ckb_cell_lock_code_hash" => {
-                    self.emit_runtime_cell_script_hash_field_helper(name, detail, CKB_CELL_FIELD_LOCK, ScriptHashFieldRead::CodeHash, enabled);
+                    self.emit_runtime_cell_script_hash_field_helper(
+                        name,
+                        detail,
+                        CKB_CELL_FIELD_LOCK,
+                        ScriptHashFieldRead::CodeHash,
+                        enabled,
+                    );
                 }
                 "__ckb_cell_type_code_hash" => {
-                    self.emit_runtime_cell_script_hash_field_helper(name, detail, CKB_CELL_FIELD_TYPE, ScriptHashFieldRead::CodeHash, enabled);
+                    self.emit_runtime_cell_script_hash_field_helper(
+                        name,
+                        detail,
+                        CKB_CELL_FIELD_TYPE,
+                        ScriptHashFieldRead::CodeHash,
+                        enabled,
+                    );
                 }
                 "__ckb_cell_lock_args_hash" => {
-                    self.emit_runtime_cell_script_hash_field_helper(name, detail, CKB_CELL_FIELD_LOCK, ScriptHashFieldRead::Args32, enabled);
+                    self.emit_runtime_cell_script_hash_field_helper(
+                        name,
+                        detail,
+                        CKB_CELL_FIELD_LOCK,
+                        ScriptHashFieldRead::Args32,
+                        enabled,
+                    );
                 }
                 "__ckb_cell_type_args_hash" => {
-                    self.emit_runtime_cell_script_hash_field_helper(name, detail, CKB_CELL_FIELD_TYPE, ScriptHashFieldRead::Args32, enabled);
+                    self.emit_runtime_cell_script_hash_field_helper(
+                        name,
+                        detail,
+                        CKB_CELL_FIELD_TYPE,
+                        ScriptHashFieldRead::Args32,
+                        enabled,
+                    );
                 }
                 "__ckb_cell_lock_hash_type" => {
-                    self.emit_runtime_cell_script_scalar_field_helper(name, detail, CKB_CELL_FIELD_LOCK, ScriptScalarFieldRead::HashType, enabled);
+                    self.emit_runtime_cell_script_scalar_field_helper(
+                        name,
+                        detail,
+                        CKB_CELL_FIELD_LOCK,
+                        ScriptScalarFieldRead::HashType,
+                        enabled,
+                    );
                 }
                 "__ckb_cell_type_hash_type" => {
-                    self.emit_runtime_cell_script_scalar_field_helper(name, detail, CKB_CELL_FIELD_TYPE, ScriptScalarFieldRead::HashType, enabled);
+                    self.emit_runtime_cell_script_scalar_field_helper(
+                        name,
+                        detail,
+                        CKB_CELL_FIELD_TYPE,
+                        ScriptScalarFieldRead::HashType,
+                        enabled,
+                    );
                 }
                 "__ckb_cell_lock_args_empty" => {
-                    self.emit_runtime_cell_script_scalar_field_helper(name, detail, CKB_CELL_FIELD_LOCK, ScriptScalarFieldRead::ArgsEmpty, enabled);
+                    self.emit_runtime_cell_script_scalar_field_helper(
+                        name,
+                        detail,
+                        CKB_CELL_FIELD_LOCK,
+                        ScriptScalarFieldRead::ArgsEmpty,
+                        enabled,
+                    );
                 }
                 "__ckb_cell_type_args_empty" => {
-                    self.emit_runtime_cell_script_scalar_field_helper(name, detail, CKB_CELL_FIELD_TYPE, ScriptScalarFieldRead::ArgsEmpty, enabled);
+                    self.emit_runtime_cell_script_scalar_field_helper(
+                        name,
+                        detail,
+                        CKB_CELL_FIELD_TYPE,
+                        ScriptScalarFieldRead::ArgsEmpty,
+                        enabled,
+                    );
                 }
                 "__ckb_require_cell_lock_hash" => self.emit_runtime_cell_hash_requirement_helper(
                     name,
@@ -938,16 +785,15 @@ impl CodeGenerator {
                     crate::script_handle_contract::EXACT_SCRIPT_HANDLE_ROLE_TYPE,
                     enabled,
                 ),
-                "__ckb_require_cell_dep_deployment_line_verifier_handle" => {
-                    self.emit_runtime_deployment_line_handle_requirement_helper(
+                "__ckb_require_cell_dep_deployment_line_verifier_handle" => self
+                    .emit_runtime_deployment_line_handle_requirement_helper(
                         name,
                         detail,
                         None,
                         crate::script_handle_contract::EXACT_SCRIPT_HANDLE_CLASS_VERIFIER,
                         crate::script_handle_contract::EXACT_SCRIPT_HANDLE_ROLE_SPAWNED_VERIFIER,
                         enabled,
-                    )
-                }
+                    ),
                 "__ckb_require_cell_data_hash" => self.emit_runtime_cell_hash_requirement_helper(
                     name,
                     detail,
@@ -955,9 +801,7 @@ impl CodeGenerator {
                     CellScriptRuntimeError::ScriptIdentityMismatch,
                     enabled,
                 ),
-                "__ckb_require_bounded_cell_dep_data_hash" => {
-                    self.emit_runtime_bounded_cell_dep_data_hash_requirement_helper(enabled)
-                }
+                "__ckb_require_bounded_cell_dep_data_hash" => self.emit_runtime_bounded_cell_dep_data_hash_requirement_helper(enabled),
                 "__ckb_require_current_script_args_empty" => self.emit_runtime_current_script_args_empty_requirement_helper(enabled),
                 "__ckb_require_cell_lock_args_empty" => {
                     self.emit_runtime_cell_script_args_empty_requirement_helper(name, detail, CKB_CELL_FIELD_LOCK, enabled)
@@ -965,66 +809,54 @@ impl CodeGenerator {
                 "__ckb_require_cell_type_args_empty" => {
                     self.emit_runtime_cell_script_args_empty_requirement_helper(name, detail, CKB_CELL_FIELD_TYPE, enabled)
                 }
-                "__ckb_require_cell_lock_args_hash" => {
-                    self.emit_runtime_cell_script_args_hash_requirement_helper(
-                        name,
-                        detail,
-                        CKB_CELL_FIELD_LOCK,
-                        ScriptArgsHashRequirementMode::Exact32,
-                        enabled,
-                    )
-                }
-                "__ckb_require_cell_type_args_hash" => {
-                    self.emit_runtime_cell_script_args_hash_requirement_helper(
-                        name,
-                        detail,
-                        CKB_CELL_FIELD_TYPE,
-                        ScriptArgsHashRequirementMode::Exact32,
-                        enabled,
-                    )
-                }
+                "__ckb_require_cell_lock_args_hash" => self.emit_runtime_cell_script_args_hash_requirement_helper(
+                    name,
+                    detail,
+                    CKB_CELL_FIELD_LOCK,
+                    ScriptArgsHashRequirementMode::Exact32,
+                    enabled,
+                ),
+                "__ckb_require_cell_type_args_hash" => self.emit_runtime_cell_script_args_hash_requirement_helper(
+                    name,
+                    detail,
+                    CKB_CELL_FIELD_TYPE,
+                    ScriptArgsHashRequirementMode::Exact32,
+                    enabled,
+                ),
                 "__ckb_require_cell_lock_args_exact" => {
                     self.emit_runtime_cell_script_args_exact_requirement_helper(name, detail, CKB_CELL_FIELD_LOCK, enabled)
                 }
                 "__ckb_require_cell_type_args_exact" => {
                     self.emit_runtime_cell_script_args_exact_requirement_helper(name, detail, CKB_CELL_FIELD_TYPE, enabled)
                 }
-                "__ckb_require_cell_lock_args_prefix_hash" => {
-                    self.emit_runtime_cell_script_args_hash_requirement_helper(
-                        name,
-                        detail,
-                        CKB_CELL_FIELD_LOCK,
-                        ScriptArgsHashRequirementMode::Prefix32,
-                        enabled,
-                    )
-                }
-                "__ckb_require_cell_type_args_prefix_hash" => {
-                    self.emit_runtime_cell_script_args_hash_requirement_helper(
-                        name,
-                        detail,
-                        CKB_CELL_FIELD_TYPE,
-                        ScriptArgsHashRequirementMode::Prefix32,
-                        enabled,
-                    )
-                }
-                "__ckb_require_cell_lock_args_suffix_hash" => {
-                    self.emit_runtime_cell_script_args_hash_requirement_helper(
-                        name,
-                        detail,
-                        CKB_CELL_FIELD_LOCK,
-                        ScriptArgsHashRequirementMode::Suffix32,
-                        enabled,
-                    )
-                }
-                "__ckb_require_cell_type_args_suffix_hash" => {
-                    self.emit_runtime_cell_script_args_hash_requirement_helper(
-                        name,
-                        detail,
-                        CKB_CELL_FIELD_TYPE,
-                        ScriptArgsHashRequirementMode::Suffix32,
-                        enabled,
-                    )
-                }
+                "__ckb_require_cell_lock_args_prefix_hash" => self.emit_runtime_cell_script_args_hash_requirement_helper(
+                    name,
+                    detail,
+                    CKB_CELL_FIELD_LOCK,
+                    ScriptArgsHashRequirementMode::Prefix32,
+                    enabled,
+                ),
+                "__ckb_require_cell_type_args_prefix_hash" => self.emit_runtime_cell_script_args_hash_requirement_helper(
+                    name,
+                    detail,
+                    CKB_CELL_FIELD_TYPE,
+                    ScriptArgsHashRequirementMode::Prefix32,
+                    enabled,
+                ),
+                "__ckb_require_cell_lock_args_suffix_hash" => self.emit_runtime_cell_script_args_hash_requirement_helper(
+                    name,
+                    detail,
+                    CKB_CELL_FIELD_LOCK,
+                    ScriptArgsHashRequirementMode::Suffix32,
+                    enabled,
+                ),
+                "__ckb_require_cell_type_args_suffix_hash" => self.emit_runtime_cell_script_args_hash_requirement_helper(
+                    name,
+                    detail,
+                    CKB_CELL_FIELD_TYPE,
+                    ScriptArgsHashRequirementMode::Suffix32,
+                    enabled,
+                ),
                 "__ckb_require_cell_lock_script_hash_type" => {
                     self.emit_runtime_cell_script_hash_type_requirement_helper(name, detail, CKB_CELL_FIELD_LOCK, enabled)
                 }
@@ -1045,19 +877,11 @@ impl CodeGenerator {
                 "__ckb_cell_data_u8" => self.emit_runtime_exact_byte_word_helper(name, RuntimeByteSource::CellData, 1, enabled),
                 "__ckb_cell_lock_size" => self.emit_runtime_cell_script_read(name, CKB_CELL_FIELD_LOCK, false, enabled),
                 "__ckb_cell_type_size" => self.emit_runtime_cell_script_read(name, CKB_CELL_FIELD_TYPE, false, enabled),
-                "__ckb_cell_lock_u8" => {
-                    self.emit_runtime_exact_byte_word_helper(name, RuntimeByteSource::CellLock, 1, enabled)
-                }
-                "__ckb_cell_type_u8" => {
-                    self.emit_runtime_exact_byte_word_helper(name, RuntimeByteSource::CellType, 1, enabled)
-                }
+                "__ckb_cell_lock_u8" => self.emit_runtime_exact_byte_word_helper(name, RuntimeByteSource::CellLock, 1, enabled),
+                "__ckb_cell_type_u8" => self.emit_runtime_exact_byte_word_helper(name, RuntimeByteSource::CellType, 1, enabled),
                 "__ckb_input_since_at" => self.emit_runtime_input_since_at(enabled),
-                "__ckb_cell_data_u32_le" => {
-                    self.emit_runtime_exact_byte_word_helper(name, RuntimeByteSource::CellData, 4, enabled)
-                }
-                "__ckb_cell_data_u64_le" => {
-                    self.emit_runtime_exact_byte_word_helper(name, RuntimeByteSource::CellData, 8, enabled)
-                }
+                "__ckb_cell_data_u32_le" => self.emit_runtime_exact_byte_word_helper(name, RuntimeByteSource::CellData, 4, enabled),
+                "__ckb_cell_data_u64_le" => self.emit_runtime_exact_byte_word_helper(name, RuntimeByteSource::CellData, 8, enabled),
                 "__dao_accumulated_rate" => self.emit_runtime_dao_accumulated_rate_helper(enabled),
                 "__dao_input_accumulated_rate" => self.emit_runtime_dao_input_accumulated_rate_helper(enabled),
                 "__dao_has_dao_type" => self.emit_runtime_dao_type_classifier_helper(enabled),
@@ -1094,20 +918,14 @@ impl CodeGenerator {
                 "__ckb_witness_u8" => self.emit_runtime_exact_byte_word_helper(name, RuntimeByteSource::Witness, 1, enabled),
                 "__ckb_witness_u32_le" => self.emit_runtime_exact_byte_word_helper(name, RuntimeByteSource::Witness, 4, enabled),
                 "__ckb_witness_u64_le" => self.emit_runtime_exact_byte_word_helper(name, RuntimeByteSource::Witness, 8, enabled),
-                "__ckb_require_witness_size_at_least" => {
-                    self.emit_runtime_require_witness_size_at_least_helper(enabled)
-                }
+                "__ckb_require_witness_size_at_least" => self.emit_runtime_require_witness_size_at_least_helper(enabled),
                 "__ckb_witness_raw" => self.emit_runtime_witness_raw_helper(enabled),
                 "__ckb_witness_lock" => self.emit_runtime_witness_args_field_helper(name, detail, 0, false, enabled),
                 "__ckb_witness_input_type" => self.emit_runtime_witness_args_field_helper(name, detail, 1, false, enabled),
                 "__ckb_witness_output_type" => self.emit_runtime_witness_args_field_helper(name, detail, 2, false, enabled),
                 "__ckb_witness_lock_exact32" => self.emit_runtime_witness_args_field_helper(name, detail, 0, true, enabled),
-                "__ckb_witness_input_type_exact32" => {
-                    self.emit_runtime_witness_args_field_helper(name, detail, 1, true, enabled)
-                }
-                "__ckb_witness_output_type_exact32" => {
-                    self.emit_runtime_witness_args_field_helper(name, detail, 2, true, enabled)
-                }
+                "__ckb_witness_input_type_exact32" => self.emit_runtime_witness_args_field_helper(name, detail, 1, true, enabled),
+                "__ckb_witness_output_type_exact32" => self.emit_runtime_witness_args_field_helper(name, detail, 2, true, enabled),
                 "__ckb_witness_bounded_size" => self.emit_runtime_bounded_witness_size(enabled),
                 "__ckb_witness_bounded_u8" => self.emit_runtime_bounded_witness_word(name, 1, enabled),
                 "__ckb_witness_bounded_u32_le" => self.emit_runtime_bounded_witness_word(name, 4, enabled),
@@ -1141,6 +959,7 @@ impl CodeGenerator {
                     | "__ckb_hash_blake2b_var"
                     | "__ckb_hash_blake2b_packed"
                     | "__ckb_script_hash"
+                    | "__ckb_cell_data_hash"
                     | "__ckb_cell_data_blake2b_span"
                     | "__ckb_witness_blake2b_span"
                     | "__ckb_witness_bounded_blake2b"
@@ -1185,6 +1004,7 @@ impl CodeGenerator {
             self.emit_runtime_blake2b_hash32(enabled);
         }
         if referenced_helpers.contains("__ckb_hash_blake2b_var")
+            || referenced_helpers.contains("__ckb_cell_data_hash")
             || referenced_helpers.contains("__ckb_script_hash")
             || referenced_helpers.contains("__ckb_hash_data_packed")
             || referenced_helpers.contains("__ckb_hash_blake2b_packed")
@@ -9532,6 +9352,77 @@ impl CodeGenerator {
         self.emit(format!("li a0, {}", CellScriptRuntimeError::CellLoadFailed.code()));
         self.emit_label(&done);
         self.emit(format!("ld ra, {}(sp)", RA_OFFSET));
+        self.emit_stack_adjustment(FRAME_SIZE as i64);
+        self.emit("ret");
+    }
+
+    fn emit_runtime_cell_data_hash_helper(&mut self, symbol: &str, detail: &str, enabled: bool) {
+        self.emit_global(symbol);
+        self.emit_label(symbol);
+        self.emit(format!("# cellscript abi: CKB SourceView LOAD_CELL_DATA and Blake2b ({})", detail));
+        self.emit("# cellscript abi: args a0=SourceView, a1=out32_ptr, a2=size_ptr; returns a0=status");
+        if !enabled {
+            self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
+            self.emit("ret");
+            return;
+        }
+
+        const SIZE_OFFSET: usize = 0;
+        const BUFFER_OFFSET: usize = 8;
+        const OUT_PTR_OFFSET: usize = BUFFER_OFFSET + RUNTIME_CELL_BUFFER_SIZE;
+        const SIZE_PTR_OFFSET: usize = OUT_PTR_OFFSET + 8;
+        const RA_OFFSET: usize = SIZE_PTR_OFFSET + 8;
+        const FRAME_SIZE: usize = align_frame(RA_OFFSET + 8);
+
+        let invalid = self.fresh_label("cell_data_hash_source_invalid");
+        let bad_output = self.fresh_label("cell_data_hash_output_invalid");
+        let failed = self.fresh_label("cell_data_hash_load_failed");
+        let done = self.fresh_label("cell_data_hash_done");
+        let abi = self.runtime_abi();
+
+        self.emit_stack_adjustment(-(FRAME_SIZE as i64));
+        self.emit_stack_store("ra", RA_OFFSET);
+        self.emit_stack_store("a1", OUT_PTR_OFFSET);
+        self.emit_stack_store("a2", SIZE_PTR_OFFSET);
+        self.emit(format!("beqz a1, {}", bad_output));
+        self.emit(format!("beqz a2, {}", bad_output));
+
+        self.emit_decode_source_view_to_t1_t2(&invalid);
+        self.emit(format!("li t0, {}", RUNTIME_CELL_BUFFER_SIZE));
+        self.emit_stack_store("t0", SIZE_OFFSET);
+        self.emit_sp_addi("a0", BUFFER_OFFSET);
+        self.emit_sp_addi("a1", SIZE_OFFSET);
+        self.emit("li a2, 0");
+        self.emit("addi a3, t1, 0");
+        self.emit("addi a4, t2, 0");
+        self.emit(format!("li a7, {}", abi.load_cell_data));
+        self.emit("ecall");
+        self.emit(format!("bnez a0, {}", failed));
+        self.emit_sp_addi("a0", BUFFER_OFFSET);
+        self.emit_stack_load("a1", SIZE_OFFSET);
+        // LOAD_CELL_DATA reports the full remaining length, not copied bytes.
+        // This bounded helper may hash only bytes initialized in its buffer.
+        self.emit(format!("li t0, {}", RUNTIME_CELL_BUFFER_SIZE));
+        self.emit(format!("bltu t0, a1, {}", failed));
+        self.emit_stack_load("a2", OUT_PTR_OFFSET);
+        self.emit("call __ckb_hash_blake2b_var");
+        self.emit(format!("bnez a0, {}", failed));
+        self.emit_stack_load("t6", SIZE_PTR_OFFSET);
+        self.emit("li t0, 32");
+        self.emit("sd t0, 0(t6)");
+        self.emit("li a0, 0");
+        self.emit(format!("j {}", done));
+
+        self.emit_label(&invalid);
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::CkbSourceViewInvalid.code()));
+        self.emit(format!("j {}", done));
+        self.emit_label(&bad_output);
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::FixedByteComparisonUnresolved.code()));
+        self.emit(format!("j {}", done));
+        self.emit_label(&failed);
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::CellLoadFailed.code()));
+        self.emit_label(&done);
+        self.emit_stack_load("ra", RA_OFFSET);
         self.emit_stack_adjustment(FRAME_SIZE as i64);
         self.emit("ret");
     }

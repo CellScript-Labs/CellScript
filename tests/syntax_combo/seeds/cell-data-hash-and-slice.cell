@@ -4,7 +4,7 @@ module cellscript::audit::seed_cell_data_hash_and_slice
 action inspect() -> u64 {
     verification
         let view = source::input(0)
-        let digest = ckb::cell_data_hash(view)
+        let digest = ckb::cell_data_hash_field(view)
         let bytes = ckb::cell_data_bytes32(view, 7)
         require digest == ckb::cell_data_hash_field(view)
         require bytes == ckb::cell_data_hash_at(view, 7)

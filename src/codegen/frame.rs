@@ -698,6 +698,7 @@ impl CodeGenerator {
                                 | "__ckb_cell_lock_hash"
                                 | "__ckb_cell_type_hash"
                                 | "__ckb_cell_data_hash_field"
+                                | "__ckb_cell_data_hash"
                                 | "__ckb_cell_data_bytes32"
                                 | "__ckb_cell_lock_code_hash"
                                 | "__ckb_cell_type_code_hash"

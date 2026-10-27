@@ -808,10 +808,13 @@ implementation.
 
 ## Cell Data Hashes And Raw Slices
 
-`ckb::cell_data_hash(view)` reads the consensus `DATA_HASH` field, just like
-`ckb::cell_data_hash_field(view)` and typed Cell views' `.data_hash`. It does
-not copy the full Cell data into a temporary buffer, so there is no 512-byte
-limit. Empty Cell data has the consensus zero hash, not BLAKE2b(empty).
+`ckb::cell_data_hash_field(view)` and typed Cell views' `.data_hash` read the
+consensus `DATA_HASH` field without copying the full Cell data. They have no
+512-byte limit and return zero for empty data. The legacy
+`ckb::cell_data_hash(view)` instead hashes at most 512 bytes in memory and
+returns BLAKE2b(empty) for empty data; larger data fails with error 3. These
+interfaces are not aliases. Choose the field accessor for consensus identity;
+review empty-data behavior before migrating existing code.
 
 `ckb::cell_data_bytes32(view, offset)` copies exactly 32 raw bytes into a Hash
 value; it does not compute a digest. At least 32 bytes must remain at the offset;
@@ -819,10 +822,17 @@ a longer suffix is allowed. `cell_data_hash_at` remains a compatibility alias.
 Use `ckb::cell_data_blake2b_span(view, offset, length)` for bounded incremental
 hashing of an exact range instead.
 
-Both APIs accept Input, Output, CellDep, GroupInput and GroupOutput sources.
+These APIs accept Input, Output, CellDep, GroupInput and GroupOutput sources.
 HeaderDep is not a Cell source. Full-data field failures use error 44; short
 slice reads use error 1. Source selection still needs the application's normal
 identity and authority checks.
+
+Legacy ScriptRef `.args_hash` reads exactly 32 raw argument bytes; it does not
+hash them. Legacy witness projections truncate or zero-pad to 32 bytes, so
+equal results do not establish equality of the original fields. Prefer exact32
+reads when the protocol requires exactly 32 bytes, or bounded witness views and
+their explicit BLAKE2b operation for variable-length contents. See the
+[legacy read contracts and migration guide](../CELLSCRIPT_LEGACY_READ_CONTRACTS.md).
 
 ## Invariant Assertions
 

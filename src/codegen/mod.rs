@@ -28,6 +28,7 @@ mod nested;
 mod pointer_alias_tests;
 mod policy;
 mod runtime;
+mod runtime_contract;
 mod runtime_gather;
 mod scalar_slots;
 mod scalar_values;
@@ -356,6 +357,7 @@ fn is_v014_runtime_helper(func: &str) -> bool {
             | "__ckb_cell_lock_hash"
             | "__ckb_cell_type_hash"
             | "__ckb_cell_data_hash_field"
+            | "__ckb_cell_data_hash"
             | "__ckb_cell_data_bytes32"
             | "__ckb_cell_data_blake2b_span"
             | "__ckb_witness_blake2b_span"
@@ -494,33 +496,6 @@ fn is_cached_exact_read_helper(func: &str) -> bool {
             | "__ckb_cell_lock_u8"
             | "__ckb_cell_type_u8"
     )
-}
-
-fn is_source_view_helper(func: &str) -> bool {
-    matches!(
-        func,
-        "__ckb_source_input"
-            | "__ckb_source_output"
-            | "__ckb_source_cell_dep"
-            | "__ckb_source_header_dep"
-            | "__ckb_source_group_input"
-            | "__ckb_source_group_output"
-    )
-}
-
-fn is_terminal_scalar_runtime_helper(func: &str) -> bool {
-    is_cached_exact_read_helper(func)
-        || is_source_view_helper(func)
-        || matches!(
-            func,
-            "__ckb_witness_count"
-                | "__ckb_witness_size"
-                | "__ckb_cell_count"
-                | "__ckb_cell_has_type"
-                | "__ckb_cell_data_size"
-                | "__ckb_cell_lock_size"
-                | "__ckb_cell_type_size"
-        )
 }
 
 fn is_ckb_fixed_hash_helper(func: &str) -> bool {

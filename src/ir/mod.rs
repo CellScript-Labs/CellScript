@@ -7554,9 +7554,18 @@ impl IrGenerator {
                     blocks,
                     vars,
                 ),
-                "ckb::cell_data_hash" | "ckb::cell_data_hash_field" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                "ckb::cell_data_hash_field" if call.args.len() == 1 => self.lower_simple_runtime_call(
                     "__ckb_cell_data_hash_field",
                     "cell_data_hash_field",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_data_hash" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_cell_data_hash",
+                    "ckb_cell_data_hash",
                     IrType::Hash,
                     &call.args,
                     current,

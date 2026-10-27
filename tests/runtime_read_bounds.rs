@@ -116,7 +116,7 @@ fn consensus_cell_data_hash_covers_empty_large_and_all_cell_sources() {
                 ("source::cell_dep(0)", &dep),
             ] {
                 source.push_str(&format!(
-                    "require ckb::cell_data_hash({view}) == Hash::from_bytes(b\"{}\")\nrequire ckb::cell_data_hash({view}) == ckb::cell_data_hash_field({view})\n",
+                    "require ckb::cell_data_hash_field({view}) == Hash::from_bytes(b\"{}\")\n",
                     data_hash_literal(data),
                 ));
             }
@@ -164,10 +164,8 @@ fn compile_read(source: &str, opt_level: u8) -> cellscript::CompileResult {
 #[test]
 fn cell_data_read_aliases_share_artifacts_and_reject_invalid_sources() {
     for opt_level in [0, 3] {
-        for (canonical, alias, arguments) in [
-            ("cell_data_hash", "cell_data_hash_field", "source::input(0)"),
-            ("cell_data_bytes32", "cell_data_hash_at", "source::input(0), 0"),
-        ] {
+        {
+            let (canonical, alias, arguments) = ("cell_data_bytes32", "cell_data_hash_at", "source::input(0), 0");
             let source = format!("module aliases\naction inspect() -> u64 {{ let value = ckb::{canonical}({arguments}) require value == value return 0 }}");
             let first = compile_read(&source, opt_level);
             let second = compile_read(&source.replace(canonical, alias), opt_level);
@@ -188,7 +186,7 @@ fn cell_data_read_aliases_share_artifacts_and_reject_invalid_sources() {
             "source::cell_dep(99)",
         ] {
             for (call, expected) in [
-                (format!("ckb::cell_data_hash({view})"), 44),
+                (format!("ckb::cell_data_hash_field({view})"), 44),
                 (format!("ckb::cell_data_bytes32({view}, 0)"), if view == "0" || view == "30064771072" { 44 } else { 1 }),
             ] {
                 let source =
@@ -247,5 +245,83 @@ action check() -> u64 {{
         let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
         fixture.inputs[0].data = data.clone().into();
         assert_eq!(ckb_script_runner::execute_cellscript_script(&result.artifact_bytes, &fixture).exit_code, 0);
+    }
+}
+
+#[test]
+fn fallible_scalar_getters_never_turn_error_status_into_a_value() {
+    for opt_level in [0, 3] {
+        for (method, view) in [
+            ("input_out_point_index", "source::input(99)"),
+            ("input_out_point_tx_hash_low", "source::input(99)"),
+            ("cell_lock_hash_low", "source::input(99)"),
+            ("cell_type_hash_low", "source::input(0)"),
+        ] {
+            let source = format!("module scalar_status\naction inspect() -> u64 {{ let value = ckb::{method}({view}) require value == value return 0 }}");
+            let result = compile_read(&source, opt_level);
+            let fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
+            let execution = ckb_script_runner::execute_cellscript_script(&result.artifact_bytes, &fixture);
+            assert_eq!(execution.exit_code, 44, "{method}, O{opt_level}: {execution:?}");
+        }
+    }
+}
+
+#[test]
+fn scalar_getters_preserve_valid_values_including_the_error_code_as_an_index() {
+    let mut preimage = b"cellscript-test-input-v1".to_vec();
+    preimage.extend_from_slice(&44u64.to_le_bytes());
+    let low_word = |hash: &[u8]| u64::from_le_bytes(hash[..8].try_into().unwrap());
+    let tx_low = low_word(&blake2b_256(&preimage));
+    let lock_low = low_word(&ckb_script_runner::deterministic_always_success_lock_hash());
+    let script = ckb_script_runner::deterministic_always_success_script(Bytes::from_static(b"scalar-type"));
+    let type_low = low_word(script.calc_script_hash().as_slice());
+    let source = format!(
+        r#"module valid_scalar_status
+collections Work {{ limits {{ bytes: 256, allocations: 2 }}
+    values: Vec<[u8; 32]> {{ items: 2 }}
+}}
+fn inspect(work: &Work) -> bool {{
+    let saved = work.values.get(0)
+    let index = ckb::input_out_point_index(source::input(44))
+    let tx_low = ckb::input_out_point_tx_hash_low(source::input(44))
+    let lock_low = ckb::cell_lock_hash_low(source::input(44))
+    let type_low = ckb::cell_type_hash_low(source::input(44))
+    let fixed = ckb::cell_data_bytes32(source::input(44), 0)
+    return index == 44 && tx_low == {tx_low} && lock_low == {lock_low} && type_low == {type_low}
+        && fixed == Hash::from_bytes(b"0123456789abcdef0123456789ABCDEF")
+        && saved == b"0123456789abcdef0123456789ABCDEF"
+}}
+action check() -> u64 {{
+    let mut work = Work::new()
+    work.values.push(b"0123456789abcdef0123456789ABCDEF")
+    require inspect(&work)
+    return 0
+}}"#
+    );
+    for opt_level in [0, 3] {
+        let result = compile_read(&source, opt_level);
+        let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 45, 1);
+        fixture.inputs[44].type_script = Some(script.clone());
+        fixture.inputs[44].data = Bytes::from_static(b"0123456789abcdef0123456789ABCDEF");
+        let execution = ckb_script_runner::execute_cellscript_script(&result.artifact_bytes, &fixture);
+        assert_eq!(execution.exit_code, 0, "O{opt_level}: {execution:?}");
+    }
+}
+
+#[test]
+fn legacy_memory_hash_and_consensus_data_hash_keep_distinct_empty_and_size_contracts() {
+    for opt_level in [0, 3] {
+        for length in [0usize, 1, 512, 513, 600] {
+            let data = vec![0x5a; length];
+            let legacy = blake2b_256(&data).iter().map(|byte| format!("\\x{byte:02x}")).collect::<String>();
+            let consensus = data_hash_literal(&data);
+            let source = format!("module distinct_hashes\naction inspect() -> u64 {{ let legacy = ckb::cell_data_hash(source::input(0)) let consensus = ckb::cell_data_hash_field(source::input(0)) require legacy == Hash::from_bytes(b\"{legacy}\") require consensus == Hash::from_bytes(b\"{consensus}\") return 0 }}");
+            let result = compile_read(&source, opt_level);
+            let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
+            fixture.inputs[0].data = data.into();
+            let execution = ckb_script_runner::execute_cellscript_script(&result.artifact_bytes, &fixture);
+            assert_eq!(execution.exit_code, if length <= 512 { 0 } else { 3 }, "O{opt_level}, length={length}: {execution:?}");
+            assert_eq!(legacy == consensus, length != 0);
+        }
     }
 }

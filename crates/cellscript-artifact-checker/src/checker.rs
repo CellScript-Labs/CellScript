@@ -274,6 +274,7 @@ pub fn check_bundle_values(
     validate_script_hash_machine_contract(record, &elf)?;
     crate::instance_machine::validate(record, &elf)?;
     crate::nested_machine::validate_cell_data_reads(record, &elf)?;
+    crate::nested_machine::validate_scalar_status_calls(record, &elf, terminal_sink)?;
     zk::validate(record, &elf)?;
     let zk_contracts = crate::zk_profile::contracts(&record.typed_semantics)
         .map_err(|message| CheckerError::new(CheckerRejectionCode::V2419TypedSemanticsInvalid, message))?;

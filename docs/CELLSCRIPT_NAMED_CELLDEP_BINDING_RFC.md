@@ -47,14 +47,14 @@ action settle(amount: u64, fair_price: u64) {
         let oracle = source::cell_dep(0)               // which cell is this?
         let size   = ckb::cell_data_size(oracle)      // 4 bytes
         require size == 32, "oracle schema drift"
-        let hash   = ckb::cell_data_hash(oracle)
+        let hash   = ckb::cell_data_hash_field(oracle)
         require hash == 0xab12...34, "oracle rotated" // compares to a literal
         // ...read price bytes, compare to fair_price, settle...
 }
 ```
 
 This compiles and runs in CKB VM today (`ckb::cell_data_size` /
-`ckb::cell_data_hash` are real runtime builtins, see
+`ckb::cell_data_hash_field` are real runtime builtins, see
 `tests/support/ckb_script_runner.rs:217-228` and
 `tests/ickb_diff.rs:3369-3396`). But four things are wrong:
 
@@ -88,15 +88,16 @@ the existing surface.
 |---|---|---|
 | `source::cell_dep(i)` (typed view) | implemented, executable | `src/parser/`, `src/ir/mod.rs` |
 | `source::header_dep(i)` | implemented, executable | `src/parser/`, `src/ir/mod.rs` |
-| `ckb::cell_data_hash(view)` / `ckb::cell_data_hash_field(view)` | implemented; read the consensus `DATA_HASH` field, including zero hash for empty data | `emit_runtime_cell_hash_field_helper` in `src/codegen/runtime.rs` |
+| `ckb::cell_data_hash_field(view)` | implemented; read the consensus `DATA_HASH` field, including zero hash for empty data | `emit_runtime_cell_hash_field_helper` in `src/codegen/runtime.rs` |
 | `ckb::cell_data_bytes32(view, offset)` | implemented; copies 32 raw bytes as `Hash`; requires at least 32 remaining bytes and permits a longer suffix; `cell_data_hash_at` remains a compatibility alias | `emit_runtime_cell_data_bytes32_helper` in `src/codegen/runtime.rs` |
 | `ckb::cell_data_size(view)` | implemented, returns `u64` | `src/ir/mod.rs:4658-4660`; `src/codegen/mod.rs:16037` |
 | `ckb::cell_capacity(view)` | implemented | `src/types/mod.rs:4904` |
 | `read_ref<T>()` (type-bound data dep) | implemented | `src/lib.rs:20800-20810` |
 | `read param: T` (action/lock entry) | implemented | `src/codegen/mod.rs:1849-1921` |
 
-Both full-data hash spellings and typed Cell views' `.data_hash` read the same
-consensus field. There is no 512-byte limit or raw-data buffer on this path.
+The field accessor and typed Cell views' `.data_hash` read the same
+consensus field. Legacy `ckb::cell_data_hash(view)` instead computes BLAKE2b
+over at most 512 bytes, including the nonzero BLAKE2b(empty); it is not an alias. There is no 512-byte limit or raw-data buffer on this path.
 Empty Cell data has a zero `Hash`, not BLAKE2b(empty). Input, Output, CellDep,
 GroupInput and GroupOutput are supported; HeaderDep is not a Cell source.
 Invalid handles, missing coordinates and failed field reads return runtime
@@ -223,7 +224,7 @@ action settle(amount: u64, fair_price: u64) {
     verification
         let oracle_view = source::cell_dep(price_oracle)
         require ckb::cell_data_size(oracle_view) == 32, "oracle schema drift"
-        require ckb::cell_data_hash(oracle_view) == price_oracle.data_hash,
+        require ckb::cell_data_hash_field(oracle_view) == price_oracle.data_hash,
             "oracle rotated"
         let price = oracle_view.price   // layout-derived field access
         require price matches fair_price within slippage, "stale price"
@@ -358,7 +359,7 @@ tiers and discharge conditions are:
 |---|---|
 | `metadata-only` | source declares the binding but emits no `require` and no `source::cell_dep(name)` access |
 | `builder-evidence-required` | adapter must verify the policy against the live cell at build time, but the script emits no on-chain check |
-| `checked-runtime` | the script's IR lowers to a `require ckb::cell_data_hash(view) == bound_policy_hash` (or equivalent) that runs in CKB VM |
+| `checked-runtime` | the script's IR lowers to a `require ckb::cell_data_hash_field(view) == bound_policy_hash` (or equivalent) that runs in CKB VM |
 
 Strict metadata validation must reject any claim labelled `checked-runtime`
 that lacks a generated runtime access. A `builder-evidence-required` claim may
@@ -448,7 +449,7 @@ index                (compiler)        binding layer
 SourceView<CellDep>  (0.22 release)    type layer
     │
     ▼  accessor
-ckb::cell_data_hash  (existing)        runtime layer
+ckb::cell_data_hash_field (existing)        runtime layer
 ```
 
 What each layer adds:
@@ -550,7 +551,7 @@ Success looks like all of the following, all enforceable in CI.
 | `Deployed.toml` resolves a `name` that the source does not declare → warning | adapter | `dev` |
 | `source::cell_dep(name)` lowers to the existing `__ckb_source_cell_dep` constructor; a hash accessor continues to use `__ckb_cell_data_hash_field`; no new helper emitted | codegen, opt-report | `backend` |
 | `builder_required_assumption` is emitted in metadata for each named binding | metadata audit | `ci` |
-| An `evidence_tier` of `checked-runtime` is only emitted when the IR contains a `require ckb::cell_data_hash(view) == bound_hash` access | strict metadata validation | `ci` |
+| An `evidence_tier` of `checked-runtime` is only emitted when the IR contains a `require ckb::cell_data_hash_field(view) == bound_hash` access | strict metadata validation | `ci` |
 | `checked-runtime` is rejected when the script does not generate a matching on-chain check; `builder-evidence-required` remains explicitly builder-only | strict metadata validation | `ci` |
 | Bundle size budget unchanged (no new wasm surface) | `website/scripts/build-wasm.sh` | `release` |
 | New syntax is rejected by 0.21.x gate as "future-version syntax" | syntax-combo matrix | `dev` |
@@ -577,7 +578,7 @@ Success looks like all of the following, all enforceable in CI.
 
 - Evidence tier classification in `CompileMetadata` and strict 0.17
   validation, following the 0.21 aggregate-invariant pattern.
-- `require ckb::cell_data_hash(view) == bound_hash` promotion path
+- `require ckb::cell_data_hash_field(view) == bound_hash` promotion path
   to `checked-runtime` when the IR contains a matching access.
 
 ### Phase 4 — source-qualifier sugar (follow-up RFC, 0.22+)

@@ -375,7 +375,7 @@ mod tests {
     #[test]
     fn wasm_cell_data_read_aliases_preserve_the_metadata_only_boundary() {
         for (method, args, feature) in [
-            ("cell_data_hash", "source::input(0)", "ckb-consensus-data-hash-field"),
+            ("cell_data_hash", "source::input(0)", "ckb-cell-data-decode"),
             ("cell_data_hash_field", "source::input(0)", "ckb-consensus-data-hash-field"),
             ("cell_data_bytes32", "source::input(0), 7", "ckb-cell-data-decode"),
             ("cell_data_hash_at", "source::input(0), 7", "ckb-cell-data-decode"),
