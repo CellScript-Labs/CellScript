@@ -6,7 +6,8 @@ const PEER: &str = include_str!("../../../../../tests/fixtures/mixed_settlement_
 
 fn compile_settlement(opt_level: u8, named: bool) -> crate::CompileResult {
     let mut source =
-        if named { SOURCE } else { include_str!("../../../../../tests/fixtures/mixed_settlement_positional.cell") }.to_string();
+        if named { SOURCE } else { include_str!("../../../../../tests/selection_bundle/fixtures/mixed_settlement_positional.cell") }
+            .to_string();
     for (placeholder, tag) in [("11", 1), ("22", 2), ("33", 3), ("44", 4)] {
         source = source.replace(&placeholder.repeat(32), &hex::encode(hash(&script(&code_identity(tag), 0))));
     }

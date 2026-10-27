@@ -187,6 +187,11 @@ impl CodeGenerator {
         self.emit_stack_access("sb", rs2, offset);
     }
 
+    /// Emit `sb rs2, offset(sp)` while retaining explicitly live registers.
+    pub(super) fn emit_stack_store_byte_with_avoid(&mut self, rs2: &str, offset: usize, avoid: &[&str]) {
+        self.emit_stack_access_with_avoid("sb", rs2, offset, avoid);
+    }
+
     pub(super) fn emit_stack_access(&mut self, opcode: &str, register: &str, offset: usize) {
         self.emit_stack_access_with_avoid(opcode, register, offset, &[]);
     }
@@ -221,6 +226,7 @@ impl CodeGenerator {
     }
 
     pub(super) fn prepare_function_layout(&mut self, body: &IrBody, params: &[IrParam]) -> Result<()> {
+        self.checked_scalar_values = super::scalar_values::covers_body(body, params);
         self.cell_bindings.clone_from(&body.cell_bindings);
         self.nested_cell_buffers.clear();
         for binding in &body.cell_bindings {
@@ -1321,16 +1327,16 @@ impl CodeGenerator {
             }
             IrInstruction::FieldAccess { dest, obj, .. } => {
                 record(offsets, dest);
-                // A byte-array field is addressed storage even when its value
+                // An aggregate field is addressed storage even when its value
                 // fits in one word. Copy it just like a wider field so a local
-                // record's field pointer is never mistaken for scalar bytes.
-                if let IrType::Array(inner, width) = &dest.ty
-                    && **inner == IrType::U8
-                    && (1..=8).contains(width)
-                    && matches!(obj, IrOperand::Var(object) if named_type_name(&object.ty)
-                        .is_some_and(|name| self.type_layouts.contains_key(name) && !self.cell_type_names.contains(name)))
+                // record/tuple field pointer is never mistaken for scalar bytes.
+                if matches!(dest.ty, IrType::Array(_, _) | IrType::Tuple(_))
+                    && let Some(width) = type_static_length(&dest.ty).filter(|width| (1..=8).contains(width))
+                    && matches!(obj, IrOperand::Var(object) if matches!(object.ty, IrType::Tuple(_) | IrType::Array(_, _))
+                        || named_type_name(&object.ty).is_some_and(|name|
+                            self.type_layouts.contains_key(name) && !self.cell_type_names.contains(name)))
                 {
-                    offsets.insert(dest.id, *width);
+                    offsets.insert(dest.id, width);
                 }
             }
             IrInstruction::LoadConst { dest, .. }

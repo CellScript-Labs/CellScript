@@ -13,6 +13,54 @@ fn is_view(ty: &str) -> bool {
     ty.starts_with("InputView<") || ty.starts_with("OutputView<")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn store(register: u32, offset: u32, kind: u32) -> u32 {
+        ((offset >> 5) << 25) | (register << 20) | (2 << 15) | (kind << 12) | ((offset & 31) << 7) | 0x23
+    }
+
+    #[test]
+    fn retained_coordinate_values_expire_on_overwrites_calls_and_joins() {
+        let mut machine = Transport::new();
+        machine.step(0, store(10, 32, 3)).unwrap();
+        assert_eq!(machine.registers[10], Atom::Slot(32));
+        machine.step(4, 0x00050593).unwrap(); // ADDI a1,a0,0
+        assert_eq!(machine.registers[11], Atom::Slot(32));
+        machine.step(8, store(12, 32, 3)).unwrap();
+        assert_eq!(machine.registers[10], Atom::Unknown);
+        assert_eq!(machine.registers[11], Atom::Unknown);
+        assert_eq!(machine.registers[12], Atom::Slot(32));
+        machine.step(12, store(13, 39, 0)).unwrap();
+        assert_eq!(machine.registers[12], Atom::Unknown);
+
+        machine.step(16, store(10, 32, 3)).unwrap();
+        machine.step(20, 0x00150513).unwrap(); // ADDI a0,a0,1 changes the coordinate.
+        assert_ne!(machine.registers[10], Atom::Slot(32));
+        machine.step(24, store(10, 32, 3)).unwrap();
+        machine.step(28, 0x000000ef).unwrap(); // A call invalidates volatile registers.
+        assert_eq!(machine.registers[10], Atom::Unknown);
+        machine.step(32, store(10, 32, 3)).unwrap();
+        machine.boundary().unwrap();
+        assert_eq!(machine.registers[10], Atom::Unknown);
+    }
+
+    #[test]
+    fn partial_stores_cannot_establish_full_coordinate_transport() {
+        for kind in 0..3 {
+            let mut machine = Transport::new();
+            machine.step(0, store(10, 32, kind)).unwrap();
+            assert_eq!(machine.registers[10], Atom::Unknown);
+        }
+        let mut machine = Transport::new();
+        machine.step(0, store(10, 33, 3)).unwrap();
+        assert_eq!(machine.registers[10], Atom::Unknown);
+        machine.step(4, store(2, 32, 3)).unwrap();
+        assert_eq!(machine.registers[2], Atom::Stack(0));
+    }
+}
+
 pub(super) fn outgoing_bytes(record: &VerifiedLoweringRecord, entry: &TypedSemanticEntry) -> Result<u32, CheckerError> {
     let mut words = entry.params.iter().try_fold(0u32, |words, param| {
         words
@@ -30,21 +78,13 @@ pub(super) fn outgoing_bytes(record: &VerifiedLoweringRecord, entry: &TypedSeman
 }
 
 /// The enclosing write proof needs the expanded, aligned outgoing extent for
-/// coordinate and arena references; a scalar parameter count is insufficient.
-/// Arena caller transport remains separate from this frame-size calculation.
+/// every typed helper called by this owner, including ordinary scalar/array
+/// helpers beside bounded calls. Caller transport remains a separate proof.
 pub(super) fn outgoing_for_owner(record: &VerifiedLoweringRecord, owner: &str) -> Result<u32, CheckerError> {
     let Some(entry) = record.typed_semantics.entries.iter().find(|entry| entry.id == owner) else { return Ok(0) };
-    let owners = crate::allocated_values::owner_types(&record.typed_semantics);
     let mut bytes = 0;
     for call in entry.blocks.iter().flat_map(|block| &block.operations).filter_map(|operation| operation.call.as_ref()) {
-        if let Some(callee) = record.typed_semantics.entries.iter().find(|entry| {
-            entry.kind == "helper"
-                && entry.name == call.target
-                && entry
-                    .params
-                    .iter()
-                    .any(|param| is_view(&param.ty) || param.ty.strip_prefix('&').is_some_and(|ty| owners.contains(ty)))
-        }) {
+        if let Some(callee) = record.typed_semantics.entries.iter().find(|entry| entry.kind == "helper" && entry.name == call.target) {
             bytes = bytes.max(outgoing_bytes(record, callee)?);
         }
     }
@@ -247,7 +287,7 @@ pub(super) fn validate(
     Ok(calls)
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Atom {
     Unknown,
     Constant(i64),
@@ -388,6 +428,16 @@ impl Transport {
                     self.outgoing.retain(|_, value| !stale(*value));
                     if kind == 3 && offset < 0 {
                         self.outgoing.insert(offset, self.registers[right]);
+                    } else if kind == 3
+                        && offset >= 0
+                        && offset % 8 == 0
+                        && matches!(self.registers[right], Atom::Unknown | Atom::Slot(_))
+                    {
+                        // A store followed by a redundant reload may keep the
+                        // value in its register. It is now exactly the current
+                        // value of this slot; the lifetime proof separately
+                        // requires that slot to hold the typed live coordinate.
+                        self.registers[right] = Atom::Slot(offset);
                     }
                 } else {
                     self.outgoing.clear();

@@ -7,7 +7,7 @@
   "rejected_transaction_cycles_unavailable_reason": "the all-group rejection API does not return a cycle total; independent group replay totals are not an executed transaction total",
   "sources": {
     "examples/language/batches/multi_asset_transfer.cell": "4ce648a4dacb8ac15bcd3861e2fa16ab49c8ae5b741aa64bbdeb6bb3276d397b",
-    "tests/fixtures/multi_asset_transfer_stack.cell": "c3416f029ec30cab52a0391ffbf2edd2b915e2e481ec3ce9be54ce394dc3d2c1"
+    "tests/selection_bundle/fixtures/multi_asset_transfer_stack.cell": "c3416f029ec30cab52a0391ffbf2edd2b915e2e481ec3ce9be54ce394dc3d2c1"
   },
   "ceilings": {
     "arena": {
@@ -56,7 +56,7 @@
       "groups": [
         {
           "artifact": "transfer",
-          "cycles": 44210,
+          "cycles": 43632,
           "declared_frames": {
             "action:transfer": 11024,
             "helper:conserved": 1680,
@@ -73,18 +73,18 @@
             "runtime:__ckb_source_group_output": 0,
             "wrapper:_cellscript_entry": 0
           },
-          "elf_bytes": 41392,
-          "elf_sha256": "29ad197d34aea5757f41b8ab35133c7eceb64b26edf2f35b51e50675adcdc038",
+          "elf_bytes": 40536,
+          "elf_sha256": "05fb89dd76b2c19d7049325003cc6e5e7b10d02e1c7c45ec1a4c6c19fa4253dc",
           "exit_code": 0,
-          "instruction_cycles": 33851,
+          "instruction_cycles": 33487,
           "isa": 3,
           "observed_heap_bytes": null,
           "observed_stack_bytes": 7904,
           "role": "type",
-          "scheduler_and_loading_cycles": 10279,
+          "scheduler_and_loading_cycles": 10065,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 80,
-          "touched_guest_page_bytes": 57344,
+          "touched_guest_page_bytes": 53248,
           "vm_version": 2
         },
         {
@@ -119,14 +119,14 @@
       "occupied_output_capacity_shannons": 16600000000,
       "raw_witness_args_bytes": 36,
       "transaction_bytes": 638,
-      "transaction_cycles": 44836,
+      "transaction_cycles": 44258,
       "transaction_sha256": "b5e55fb9d0a3634b39eaafbac26b9d0268204ef96a2069ec97db596dbbeeb2c6"
     },
     "arena-8-1-valid": {
       "groups": [
         {
           "artifact": "transfer",
-          "cycles": 243021,
+          "cycles": 240763,
           "declared_frames": {
             "action:transfer": 11024,
             "helper:conserved": 1680,
@@ -143,18 +143,18 @@
             "runtime:__ckb_source_group_output": 0,
             "wrapper:_cellscript_entry": 0
           },
-          "elf_bytes": 41392,
-          "elf_sha256": "29ad197d34aea5757f41b8ab35133c7eceb64b26edf2f35b51e50675adcdc038",
+          "elf_bytes": 40536,
+          "elf_sha256": "05fb89dd76b2c19d7049325003cc6e5e7b10d02e1c7c45ec1a4c6c19fa4253dc",
           "exit_code": 0,
-          "instruction_cycles": 232102,
+          "instruction_cycles": 230058,
           "isa": 3,
           "observed_heap_bytes": null,
           "observed_stack_bytes": 7904,
           "role": "type",
-          "scheduler_and_loading_cycles": 10279,
+          "scheduler_and_loading_cycles": 10065,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 640,
-          "touched_guest_page_bytes": 57344,
+          "touched_guest_page_bytes": 53248,
           "vm_version": 2
         },
         {
@@ -189,14 +189,14 @@
       "occupied_output_capacity_shannons": 103400000000,
       "raw_witness_args_bytes": 148,
       "transaction_bytes": 2458,
-      "transaction_cycles": 243647,
+      "transaction_cycles": 241389,
       "transaction_sha256": "05438cf6427e7d924a86f04d423be1bebd9d9794734444daf43a98704fc1880b"
     },
     "arena-8-32-valid": {
       "groups": [
         {
           "artifact": "transfer",
-          "cycles": 317376,
+          "cycles": 314250,
           "declared_frames": {
             "action:transfer": 11024,
             "helper:conserved": 1680,
@@ -213,18 +213,18 @@
             "runtime:__ckb_source_group_output": 0,
             "wrapper:_cellscript_entry": 0
           },
-          "elf_bytes": 41392,
-          "elf_sha256": "29ad197d34aea5757f41b8ab35133c7eceb64b26edf2f35b51e50675adcdc038",
+          "elf_bytes": 40536,
+          "elf_sha256": "05fb89dd76b2c19d7049325003cc6e5e7b10d02e1c7c45ec1a4c6c19fa4253dc",
           "exit_code": 0,
-          "instruction_cycles": 306457,
+          "instruction_cycles": 303545,
           "isa": 3,
           "observed_heap_bytes": null,
           "observed_stack_bytes": 7904,
           "role": "type",
-          "scheduler_and_loading_cycles": 10279,
+          "scheduler_and_loading_cycles": 10065,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 640,
-          "touched_guest_page_bytes": 57344,
+          "touched_guest_page_bytes": 53248,
           "vm_version": 2
         },
         {
@@ -259,14 +259,14 @@
       "occupied_output_capacity_shannons": 103400000000,
       "raw_witness_args_bytes": 148,
       "transaction_bytes": 2458,
-      "transaction_cycles": 318002,
+      "transaction_cycles": 314876,
       "transaction_sha256": "12373cd253531433641da35a90f2702c58efe442ac3de1c383f1beda7ea53fb1"
     },
     "arena-32-1-valid": {
       "groups": [
         {
           "artifact": "transfer",
-          "cycles": 1052605,
+          "cycles": 1044587,
           "declared_frames": {
             "action:transfer": 11024,
             "helper:conserved": 1680,
@@ -283,18 +283,18 @@
             "runtime:__ckb_source_group_output": 0,
             "wrapper:_cellscript_entry": 0
           },
-          "elf_bytes": 41392,
-          "elf_sha256": "29ad197d34aea5757f41b8ab35133c7eceb64b26edf2f35b51e50675adcdc038",
+          "elf_bytes": 40536,
+          "elf_sha256": "05fb89dd76b2c19d7049325003cc6e5e7b10d02e1c7c45ec1a4c6c19fa4253dc",
           "exit_code": 0,
-          "instruction_cycles": 1039766,
+          "instruction_cycles": 1031962,
           "isa": 3,
           "observed_heap_bytes": null,
           "observed_stack_bytes": 7904,
           "role": "type",
-          "scheduler_and_loading_cycles": 10279,
+          "scheduler_and_loading_cycles": 10065,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 2560,
-          "touched_guest_page_bytes": 57344,
+          "touched_guest_page_bytes": 53248,
           "vm_version": 2
         },
         {
@@ -329,14 +329,14 @@
       "occupied_output_capacity_shannons": 401000000000,
       "raw_witness_args_bytes": 532,
       "transaction_bytes": 8698,
-      "transaction_cycles": 1053231,
+      "transaction_cycles": 1045213,
       "transaction_sha256": "b53bb92c1139aaa9c64b8a72383093b6936280f382a3bc7ee4540e68346d65ec"
     },
     "arena-32-32-valid": {
       "groups": [
         {
           "artifact": "transfer",
-          "cycles": 2052068,
+          "cycles": 2040206,
           "declared_frames": {
             "action:transfer": 11024,
             "helper:conserved": 1680,
@@ -353,18 +353,18 @@
             "runtime:__ckb_source_group_output": 0,
             "wrapper:_cellscript_entry": 0
           },
-          "elf_bytes": 41392,
-          "elf_sha256": "29ad197d34aea5757f41b8ab35133c7eceb64b26edf2f35b51e50675adcdc038",
+          "elf_bytes": 40536,
+          "elf_sha256": "05fb89dd76b2c19d7049325003cc6e5e7b10d02e1c7c45ec1a4c6c19fa4253dc",
           "exit_code": 0,
-          "instruction_cycles": 2039229,
+          "instruction_cycles": 2027581,
           "isa": 3,
           "observed_heap_bytes": null,
           "observed_stack_bytes": 7904,
           "role": "type",
-          "scheduler_and_loading_cycles": 10279,
+          "scheduler_and_loading_cycles": 10065,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 2560,
-          "touched_guest_page_bytes": 57344,
+          "touched_guest_page_bytes": 53248,
           "vm_version": 2
         },
         {
@@ -399,14 +399,14 @@
       "occupied_output_capacity_shannons": 401000000000,
       "raw_witness_args_bytes": 532,
       "transaction_bytes": 8698,
-      "transaction_cycles": 2052694,
+      "transaction_cycles": 2040832,
       "transaction_sha256": "55de1e588cc14f9f7f1f3cc11dc66a1d27c608eefd73427601cb96d02292b531"
     },
     "arena-32-32-duplicate-output": {
       "groups": [
         {
           "artifact": "transfer",
-          "cycles": 716830,
+          "cycles": 709056,
           "declared_frames": {
             "action:transfer": 11024,
             "helper:conserved": 1680,
@@ -423,18 +423,18 @@
             "runtime:__ckb_source_group_output": 0,
             "wrapper:_cellscript_entry": 0
           },
-          "elf_bytes": 41392,
-          "elf_sha256": "29ad197d34aea5757f41b8ab35133c7eceb64b26edf2f35b51e50675adcdc038",
+          "elf_bytes": 40536,
+          "elf_sha256": "05fb89dd76b2c19d7049325003cc6e5e7b10d02e1c7c45ec1a4c6c19fa4253dc",
           "exit_code": 5,
-          "instruction_cycles": 704003,
+          "instruction_cycles": 696443,
           "isa": 3,
           "observed_heap_bytes": null,
           "observed_stack_bytes": 6352,
           "role": "type",
-          "scheduler_and_loading_cycles": 10279,
+          "scheduler_and_loading_cycles": 10065,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 2548,
-          "touched_guest_page_bytes": 57344,
+          "touched_guest_page_bytes": 53248,
           "vm_version": 2
         },
         {
@@ -476,7 +476,7 @@
       "groups": [
         {
           "artifact": "transfer",
-          "cycles": 413987,
+          "cycles": 410053,
           "declared_frames": {
             "action:transfer": 11024,
             "helper:conserved": 1680,
@@ -493,18 +493,18 @@
             "runtime:__ckb_source_group_output": 0,
             "wrapper:_cellscript_entry": 0
           },
-          "elf_bytes": 41392,
-          "elf_sha256": "29ad197d34aea5757f41b8ab35133c7eceb64b26edf2f35b51e50675adcdc038",
+          "elf_bytes": 40536,
+          "elf_sha256": "05fb89dd76b2c19d7049325003cc6e5e7b10d02e1c7c45ec1a4c6c19fa4253dc",
           "exit_code": 5,
-          "instruction_cycles": 402440,
+          "instruction_cycles": 398720,
           "isa": 3,
           "observed_heap_bytes": null,
           "observed_stack_bytes": 6352,
           "role": "type",
-          "scheduler_and_loading_cycles": 10279,
+          "scheduler_and_loading_cycles": 10065,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 1268,
-          "touched_guest_page_bytes": 57344,
+          "touched_guest_page_bytes": 53248,
           "vm_version": 2
         },
         {
@@ -546,7 +546,7 @@
       "groups": [
         {
           "artifact": "transfer",
-          "cycles": 2052030,
+          "cycles": 2040168,
           "declared_frames": {
             "action:transfer": 11024,
             "helper:conserved": 1680,
@@ -563,18 +563,18 @@
             "runtime:__ckb_source_group_output": 0,
             "wrapper:_cellscript_entry": 0
           },
-          "elf_bytes": 41392,
-          "elf_sha256": "29ad197d34aea5757f41b8ab35133c7eceb64b26edf2f35b51e50675adcdc038",
+          "elf_bytes": 40536,
+          "elf_sha256": "05fb89dd76b2c19d7049325003cc6e5e7b10d02e1c7c45ec1a4c6c19fa4253dc",
           "exit_code": 5,
-          "instruction_cycles": 2039191,
+          "instruction_cycles": 2027543,
           "isa": 3,
           "observed_heap_bytes": null,
           "observed_stack_bytes": 7904,
           "role": "type",
-          "scheduler_and_loading_cycles": 10279,
+          "scheduler_and_loading_cycles": 10065,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 2560,
-          "touched_guest_page_bytes": 57344,
+          "touched_guest_page_bytes": 53248,
           "vm_version": 2
         },
         {
@@ -616,7 +616,7 @@
       "groups": [
         {
           "artifact": "transfer",
-          "cycles": 58178,
+          "cycles": 57480,
           "declared_frames": {
             "action:transfer": 11024,
             "helper:conserved": 1680,
@@ -633,18 +633,18 @@
             "runtime:__ckb_source_group_output": 0,
             "wrapper:_cellscript_entry": 0
           },
-          "elf_bytes": 41392,
-          "elf_sha256": "29ad197d34aea5757f41b8ab35133c7eceb64b26edf2f35b51e50675adcdc038",
+          "elf_bytes": 40536,
+          "elf_sha256": "05fb89dd76b2c19d7049325003cc6e5e7b10d02e1c7c45ec1a4c6c19fa4253dc",
           "exit_code": 0,
-          "instruction_cycles": 47777,
+          "instruction_cycles": 47293,
           "isa": 3,
           "observed_heap_bytes": null,
           "observed_stack_bytes": 7904,
           "role": "type",
-          "scheduler_and_loading_cycles": 10279,
+          "scheduler_and_loading_cycles": 10065,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 122,
-          "touched_guest_page_bytes": 57344,
+          "touched_guest_page_bytes": 53248,
           "vm_version": 2
         },
         {
@@ -679,14 +679,14 @@
       "occupied_output_capacity_shannons": 29000000000,
       "raw_witness_args_bytes": 36,
       "transaction_bytes": 830,
-      "transaction_cycles": 58804,
+      "transaction_cycles": 58106,
       "transaction_sha256": "736282f37459e24f6d237e7086d76a3763508e2623f1cd2186ff584766016412"
     },
     "arena-merge": {
       "groups": [
         {
           "artifact": "transfer",
-          "cycles": 56634,
+          "cycles": 55936,
           "declared_frames": {
             "action:transfer": 11024,
             "helper:conserved": 1680,
@@ -703,18 +703,18 @@
             "runtime:__ckb_source_group_output": 0,
             "wrapper:_cellscript_entry": 0
           },
-          "elf_bytes": 41392,
-          "elf_sha256": "29ad197d34aea5757f41b8ab35133c7eceb64b26edf2f35b51e50675adcdc038",
+          "elf_bytes": 40536,
+          "elf_sha256": "05fb89dd76b2c19d7049325003cc6e5e7b10d02e1c7c45ec1a4c6c19fa4253dc",
           "exit_code": 0,
-          "instruction_cycles": 46237,
+          "instruction_cycles": 45753,
           "isa": 3,
           "observed_heap_bytes": null,
           "observed_stack_bytes": 7904,
           "role": "type",
-          "scheduler_and_loading_cycles": 10279,
+          "scheduler_and_loading_cycles": 10065,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 118,
-          "touched_guest_page_bytes": 57344,
+          "touched_guest_page_bytes": 53248,
           "vm_version": 2
         },
         {
@@ -749,14 +749,14 @@
       "occupied_output_capacity_shannons": 16600000000,
       "raw_witness_args_bytes": 52,
       "transaction_bytes": 706,
-      "transaction_cycles": 57260,
+      "transaction_cycles": 56562,
       "transaction_sha256": "d87a9ce59d98cfffdb9f6ff07955f489f6e9bfc6106d9905d29d56b7849e6c96"
     },
     "arena-zero": {
       "groups": [
         {
           "artifact": "transfer",
-          "cycles": 19303,
+          "cycles": 19089,
           "declared_frames": {
             "action:transfer": 11024,
             "helper:conserved": 1680,
@@ -773,18 +773,18 @@
             "runtime:__ckb_source_group_output": 0,
             "wrapper:_cellscript_entry": 0
           },
-          "elf_bytes": 41392,
-          "elf_sha256": "29ad197d34aea5757f41b8ab35133c7eceb64b26edf2f35b51e50675adcdc038",
+          "elf_bytes": 40536,
+          "elf_sha256": "05fb89dd76b2c19d7049325003cc6e5e7b10d02e1c7c45ec1a4c6c19fa4253dc",
           "exit_code": 5,
           "instruction_cycles": 9008,
           "isa": 3,
           "observed_heap_bytes": null,
           "observed_stack_bytes": 6352,
           "role": "type",
-          "scheduler_and_loading_cycles": 10279,
+          "scheduler_and_loading_cycles": 10065,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 16,
-          "touched_guest_page_bytes": 57344,
+          "touched_guest_page_bytes": 53248,
           "vm_version": 2
         },
         {
@@ -826,7 +826,7 @@
       "groups": [
         {
           "artifact": "transfer",
-          "cycles": 47602,
+          "cycles": 47388,
           "declared_frames": {
             "action:transfer": 11024,
             "helper:conserved": 1680,
@@ -843,18 +843,18 @@
             "runtime:__ckb_source_group_output": 0,
             "wrapper:_cellscript_entry": 0
           },
-          "elf_bytes": 41392,
-          "elf_sha256": "29ad197d34aea5757f41b8ab35133c7eceb64b26edf2f35b51e50675adcdc038",
+          "elf_bytes": 40536,
+          "elf_sha256": "05fb89dd76b2c19d7049325003cc6e5e7b10d02e1c7c45ec1a4c6c19fa4253dc",
           "exit_code": 5,
           "instruction_cycles": 37191,
           "isa": 3,
           "observed_heap_bytes": null,
           "observed_stack_bytes": 6352,
           "role": "type",
-          "scheduler_and_loading_cycles": 10279,
+          "scheduler_and_loading_cycles": 10065,
           "script_hash": "36f52f325de02cf25029fb5b99ca1ebdcdedaf77adee8b81bc9e542c788a3975",
           "synchronous_syscall_cycles": 132,
-          "touched_guest_page_bytes": 57344,
+          "touched_guest_page_bytes": 53248,
           "vm_version": 2
         },
         {

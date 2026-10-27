@@ -8,6 +8,56 @@ mod ckb_script_runner;
 const SOURCE: &str = include_str!("../examples/language/ckb/typed_cell_data.cell");
 
 #[test]
+fn copied_cell_fields_snapshot_mutable_bindings_before_branch_assignment() {
+    for (ty, width) in [("u64", 8), ("u128", 16), ("Hash", 32), ("[u8; 1]", 1), ("[u8; 8]", 8), ("[u8; 9]", 9)] {
+        for annotated in [false, true] {
+            let annotation = if annotated { format!(": {ty}") } else { String::new() };
+            let source = format!(
+                "module field_snapshots\nresource Token has store {{ value: {ty} }}\n\
+                 #[effect(ReadOnly)]\nfn same(before: InputView<Token>, after: OutputView<Token>, change: bool) -> bool {{\n\
+                 let mut current = before.data.value\nlet original{annotation} = current\n\
+                 if change {{ current = after.data.value }}\nreturn original == current\n}}\n\
+                 action inspect() -> u64 {{ verification\n\
+                 require same(ckb::input<Token>(0), ckb::output<Token>(0), true)\nreturn 0\n}}"
+            );
+            for opt_level in 0..=3 {
+                let compiled = compile(
+                    &source,
+                    CompileOptions {
+                        edition: cellscript::NEXT_EDITION,
+                        opt_level,
+                        target: Some("riscv64-elf".into()),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+                for equal in [false, true] {
+                    let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
+                    fixture.current_type_script_input_indices = vec![0];
+                    let original = vec![0x25; width];
+                    let mut replacement = original.clone();
+                    if !equal {
+                        // Also exercise the high word/last byte of wide values.
+                        replacement[width - 1] ^= 1;
+                    }
+                    fixture.inputs[0].data = original.into();
+                    fixture.outputs[0].data = replacement.into();
+                    let execution = ckb_script_runner::execute_cellscript_script(
+                        cellscript::strip_vm_abi_trailer(&compiled.artifact_bytes),
+                        &fixture,
+                    );
+                    assert_eq!(
+                        execution.exit_code,
+                        if equal { 0 } else { 5 },
+                        "{ty} O{opt_level} annotated={annotated} equal={equal}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn nested_data_views_keep_owned_buffers_across_reads_and_helpers() {
     use cellscript::nested_builder::{encode_nested_cell_data, NestedCellFieldInput as Field, NestedElementInput as Item};
     use std::collections::BTreeMap;

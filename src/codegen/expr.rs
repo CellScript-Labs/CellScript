@@ -6,6 +6,20 @@ impl CodeGenerator {
             self.emit_materialize_u128_operand_to_var(dest, &IrOperand::Const(value.clone()));
             return Ok(());
         }
+        if let IrType::Array(inner, width) = &dest.ty
+            && **inner == IrType::U8
+            && (1..=8).contains(width)
+            && let Some(bytes) = fixed_byte_const_bytes(value).filter(|bytes| bytes.len() == *width)
+        {
+            // Reassigned locals cannot use the body-wide constant cache. Keep
+            // their actual slot in the same packed representation as Move and
+            // the short-array argument/result ABI.
+            let mut packed = [0u8; 8];
+            packed[..bytes.len()].copy_from_slice(&bytes);
+            self.emit(format!("li t0, {}", u64::from_le_bytes(packed)));
+            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
+            return Ok(());
+        }
         match value {
             IrConst::Unit => self.emit("li t0, 0"),
             IrConst::U8(n) => self.emit(format!("li t0, {}", n)),
@@ -720,8 +734,8 @@ impl CodeGenerator {
         if self.emit_nested_field(dest, obj, field)? {
             return Ok(());
         }
-        // A tuple call returns register payloads, not the address of its
-        // allocated (but uninitialized) fixed-byte local buffer.
+        // Resource tuples retain register projections. Fixed value tuples
+        // have already been copied into complete caller-owned storage.
         if self.emit_tuple_call_return_field_access(dest, obj, field) {
             return Ok(());
         }
@@ -802,10 +816,7 @@ impl CodeGenerator {
             }
             return true;
         }
-        let Some(width) = layout_fixed_byte_width(&layout)
-            .or_else(|| fixed_aggregate_pointer_param_width(&layout.ty))
-            .or_else(|| self.fixed_named_type_width(&layout.ty))
-        else {
+        let Some(width) = self.fixed_byte_like_width(&layout.ty) else {
             return false;
         };
         let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else {

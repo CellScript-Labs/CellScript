@@ -51,11 +51,45 @@ infer authorization or move on-chain checks into a builder.
 | #48 nested data | Experimental `data_shape` declarations resolve named limits into the existing nested codec; derived view types remain inferred | Reusable data shapes with named count, per-payload and total-encoding limits; ordinary indexing, fields and iteration at use sites |
 | #47 allocation | Experimental `collections` declarations and local runtime operations; read-only helper transport with independent allocation proof pending | Familiar collection operations; explicit memory/element budgets at construction or scope declaration, with visible exhaustion and invalidation rules |
 
-The experimental declaration grammar still requires complete-program review. Do not freeze
-an alias, attribute, named-argument syntax or a new keyword from this table.
-Prefer one canonical form that elaborates directly into the existing structured
-IR/semantic contracts. A wrapper that merely renames the current long argument
-lists does not satisfy the authoring requirement.
+The initial declaration form is selected in the complete-program decision below.
+Stable admission still requires the runtime, checker, parity and gate evidence.
+Declarations elaborate directly into the existing structured IR/semantic
+contracts; a wrapper that merely renames long argument lists would not satisfy
+the authoring requirement.
+
+### Initial authoring form: complete-program decision, 2026-10-26
+
+Implementation decision for the initial bounded profile: retain one module-local
+named declaration for each distinct contract, ordinary reads and collection
+operations, and non-escaping read-only helper parameters. This is a source API
+choice, not a stable-admission or release decision. The author reviewed the
+complete programs below; no independent human review or review waiver is claimed.
+
+| Contract | Chosen form and reviewed program | Reason and retained boundary |
+|---|---|---|
+| Cell roles | `cell_roles`, `ckb::select_cell_roles<Catalog>()`, named role access; [mixed settlement](../examples/language/batches/mixed_settlement.cell) | Two roles reuse `Balance` while retaining distinct Script identity, authority and correspondence. Helpers receive typed input/output views; foreign observation grants no lifecycle authority. |
+| Nested data | `data_shape`, inferred indexing and fields, named `Item`/`Payload` helper types; [byte migration](../examples/language/batches/nested_migration.cell) and [record migration](../examples/language/batches/record_migration.cell) | One shape supplies witness and Cell bounds without repeating the codec limits at each read. Byte views retain their source and lifetime; the record case keeps revision identity separate from payload comparison. |
+| Temporary collections | `collections`, `Owner::new()`, per-member `reserve(count)` and familiar Vec/OrderedMap/OrderedSet operations; [transfer](../examples/language/batches/multi_asset_transfer.cell) | Shared budgets and member limits are declared once. The four reservations express two checked transaction counts. Aggregation, duplicate detection and `conserved(&totals)` need no allocator arguments at use sites. |
+
+For the initial collection API, keep explicit per-invocation reservations next
+to construction. Do not silently reserve every declared maximum or introduce a
+second constructor spelling solely to combine four calls. The complete transfer
+comparison below shows why: full-maximum reservation raises the one-Note case
+from 44,258 to 158,322 cycles and exceeds the existing observed-stack ceiling.
+The CLI/editor budget report exposes alignment, allocation records and retained
+growth history, so authors can inspect combined costs without calculating them
+by hand. This makes explicit reservation a usable initial policy; it does not
+make `items` a simultaneous-capacity guarantee or erase cumulative allocation
+costs. A later declarative reservation proposal must preserve checked runtime
+counts and demonstrate an improvement on these complete programs.
+
+Keep explicit `borrow` for lexical read-only regions, copied ordinary reads,
+and whole-owner read-only helpers. None of these four reviewed programs needs
+member-level mutation during a live whole-owner borrow. Mutable/member-level
+borrowing therefore remains outside this initial choice, rather than being
+added to make these examples compile. Existing negative escape/stale-view
+tests, module-local declaration boundaries, the stack-backed Vec contract and
+all mandatory proof-admission blockers remain in force.
 
 The 2026-10-22 implementation begins this declaration layer with Edition 2027
 module-local `cell_roles` catalogs and `ckb::verify_cell_roles<Catalog>()`.
@@ -69,6 +103,15 @@ in the typed contract and independent pointer/read checks. Reusable nested
 shape declarations are now implemented as described below; exported catalog
 interfaces, complete helper/source proofs and the complete business-program
 acceptance below remain open.
+
+Role navigation and rename retain catalog identity across comments between the
+receiver and role, including multiline comments, parenthesized receivers and
+range endpoints such as `0..(selected) /* explanation */ .quote.input_count()`.
+The complete settlement editor regression applies the rename, recompiles the program and preserves
+same-named roles in another catalog, unrelated locals and comment text. Rename
+requests on comment or string contents produce no edits. The optional browser
+language service checks the same definition locations; this is local editor
+coverage, not completion of the package/API admission requirements below.
 
 ### Experimental named data shapes
 
@@ -207,9 +250,36 @@ instruction proofs compose with these ranges, including relaxed branches.
 The enclosing memory analysis requires live coordinates at aliases, data reads
 and helper calls, invalidating them on full/partial writes and at incompatible
 joins. Checked selected-role reads and helper parameter prefixes establish
-their corresponding roots. Dynamic scalar index computation, transaction-property
-value provenance and complete field-result/source equivalence remain separate
-obligations; the mandatory admission blockers remain.
+their corresponding roots. Complete field-result/source equivalence and final
+admission remain separate obligations; the mandatory admission blockers remain.
+
+Typed Input/Output view scalar properties now compose with these coordinate
+roots: `capacity`, `occupied_capacity`, `unoccupied_capacity`, `data_size` and
+`output_index` bind the coordinate load, resolved runtime call, required error
+handling and scalar destination. Their complete runtime bodies independently
+bind source/index decoding, syscall buffers and returned values, occupied-size
+validation, subtraction underflow and frame restoration. Every property call
+participates in bounded-body operation ordering. The
+[property mutations](../tests/artifact_checker/bounded_properties.rs) cover
+O0/O3 and transaction/group sources; zeroed runtime results change an actual
+VM rejection to success and must still reject after all identities are rebound.
+Substituted call coordinates/results, ignored statuses and erased call evidence
+also reject. The memory-effect pass requires a live coordinate at the actual
+property call; an intervening helper result redirected into its slot invalidates
+that coordinate, even when the property instructions themselves remain intact.
+This finite property contract does not admit general raw runtime
+calls or complete upstream aggregate computation.
+
+The same property-call contract covers `data_hash`, `lock_hash` and `type_hash`
+on typed Input/Output views. It composes the existing full hash-helper runtime
+proof with the caller's live coordinate, private size/output buffers, status
+guard and published result pointer. Distinct property results cannot share
+storage, and unrelated stores, calls and syscalls must preserve those buffers.
+The [hash-property mutations](../tests/artifact_checker/bounded_hash_properties.rs)
+substitute sources, coherently alias result storage and redirect an intervening
+helper's store; actual VM outcomes expose the substitutions. O0/O3 large-frame
+cases retain bounded addressing. General hash computation and raw untyped APIs
+are outside this property extension.
 
 ### Selection and data use sites
 
@@ -270,8 +340,8 @@ The complete migration comparisons retain both declarations and helper bodies:
 
 | Program | Explicit bounds at use sites | Named shape at use sites | Policy retained in both |
 | --- | --- | --- | --- |
-| [Byte-list migration](../examples/language/batches/nested_migration.cell) / [explicit counterpart](../tests/fixtures/nested_migration_explicit.cell) | `NestedValues<Vec<u8>, 8, 256, 2120>` on the Cell field and witness; `NestedBytesView<256>` on helper parameters | `Messages` on the Cell field and witness; `Messages::Item` on helper parameters | Document identity and history preservation, one appended note, next Registry revision, capacity, source roles and peer Script obligations |
-| [Record-list migration](../examples/language/batches/record_migration.cell) / [explicit counterpart](../tests/fixtures/record_migration_explicit.cell) | `NestedValues<Message, 8, 256, 2280>`, `NestedRecordView<Message, 256>` and `NestedBytesView<256>` | `Messages`, `Messages::Item` and `Messages::Payload` | The same migration rules plus positive, ordered historical revision identities and the appended record's revision |
+| [Byte-list migration](../examples/language/batches/nested_migration.cell) / [explicit counterpart](../tests/selection_bundle/fixtures/nested_migration_explicit.cell) | `NestedValues<Vec<u8>, 8, 256, 2120>` on the Cell field and witness; `NestedBytesView<256>` on helper parameters | `Messages` on the Cell field and witness; `Messages::Item` on helper parameters | Document identity and history preservation, one appended note, next Registry revision, capacity, source roles and peer Script obligations |
+| [Record-list migration](../examples/language/batches/record_migration.cell) / [explicit counterpart](../tests/selection_bundle/fixtures/record_migration_explicit.cell) | `NestedValues<Message, 8, 256, 2280>`, `NestedRecordView<Message, 256>` and `NestedBytesView<256>` | `Messages`, `Messages::Item` and `Messages::Payload` | The same migration rules plus positive, ordered historical revision identities and the appended record's revision |
 
 The named shape is the preferred authoring direction for these programs: count,
 payload and encoding limits live together, and helpers refer back to the shape
@@ -957,6 +1027,18 @@ encoder's output is independently checked and is exercised inside actual Cell
 input/successor transactions. Reproduce the host/generated SDK checks with
 `cargo test --locked -p cellscript --test nested_builder`.
 
+The fixture reader in `tests/support/nested_codec_oracle.rs` independently
+reconstructs each fixed field and payload using literal schema widths and
+numeric limits, without compiler metadata or codec helpers. Its wire rules
+follow the [Molecule encoding specification](https://github.com/nervosnetwork/molecule/blob/master/docs/encoding_spec.md).
+Every accepted native/generated vector round-trips its complete value, including
+empty and mixed-size lists, 256-byte payloads, both byte/record lists at exactly
+4096 bytes, and wide fixed fields. Both builders reject one-over record count,
+payload and total limits. The reader and independent contract validator reject
+truncation, trailing bytes even with a rebound outer size, and invalid first
+offsets. These are bounded codec/reference checks; final source/machine
+admission and gates remain separate.
+
 Molecule schema generation now describes the actual vector of Bytes or record
 tables instead of falling back to an opaque Bytes field. Count, payload and
 total bounds enter the generated alias and schema identity. Tests confirm
@@ -1078,7 +1160,7 @@ transition. `transfer_leg` checks owner, capacity, debit sufficiency and credit
 overflow. Both are checked non-escaping read-only helpers over typed input/output
 views; Hash owner arguments remain copied values.
 
-The retained [positional comparison](../tests/fixtures/mixed_settlement_positional.cell)
+The retained [positional comparison](../tests/selection_bundle/fixtures/mixed_settlement_positional.cell)
 has the same complete business predicates and helpers. Only its policy/use-site
 spelling differs. The named form declares schema, identity, authority and bounds
 once, then uses `selected.base.input(j)` and `.successor(j)`; the positional form
@@ -1281,7 +1363,7 @@ The maximum selected data total is 32,288 bytes. Complete worst-case coverage,
 source/interface admission and final gates/review remain open; this evidence
 does not close #48 or #49.
 
-The [explicit-bound byte-list counterpart](../tests/fixtures/nested_migration_explicit.cell)
+The [explicit-bound byte-list counterpart](../tests/selection_bundle/fixtures/nested_migration_explicit.cell)
 retains the entire program, replacing `Messages` with
 `NestedValues<Vec<u8>, 8, 256, 2120>` and `Messages::Item` with
 `NestedBytesView<256>`. The bundle test runs both forms at O0/O3 with one, three
@@ -1310,7 +1392,7 @@ current Registry revision. The appended record must carry the next revision.
 `same_message` compares identities and delegates payload comparison to
 `same_payload`; `migrate_document` checks every historical record and successor.
 
-The [explicit-bound counterpart](../tests/fixtures/record_migration_explicit.cell)
+The [explicit-bound counterpart](../tests/selection_bundle/fixtures/record_migration_explicit.cell)
 contains the same complete predicates using `NestedValues<Message, 8, 256, 2280>`,
 `NestedRecordView<Message, 256>` and `NestedBytesView<256>`. The named form uses
 `Messages`, `Messages::Item` and `Messages::Payload`. The bundle fixture compiles
@@ -1411,8 +1493,9 @@ O3 package variants replay valid and late-invalid groups against the existing
 per-profile cycle, stack, guest-page, ELF and transaction-byte ceilings. Package
 source/artifact identities may differ; the original exact resource observations
 remain unchanged, and no ceiling is enlarged by library extraction. These finite
-package fixtures do not replace complete source-equivalence proofs, final API
-review, browser/editor package parity or the remaining integration gates.
+package fixtures do not replace the advertised source/bounds/lifetime/authority
+proofs, final API review, browser/editor package parity or the remaining
+integration gates. They do not create a whole-language equivalence obligation.
 
 ```bash
 cargo test --locked -p cellscript --test selection_bundle cross_package -- --nocapture
@@ -1517,6 +1600,33 @@ editor behavior and remaining admission obligations. This observation path is
 available in the maximum selected/nested coexistence fixture, but does not yet
 complete the mixed-role settlement or final transaction builder binding.
 
+Independent field checking now rejects coherent result-buffer aliasing across
+Cell data producers, including copied fixed fields from nested tables. The
+regression covers exact/partial result overlap and overlap with another table
+load, and executes a forged alias that changes hash equality in CKB-VM. This
+closes that local storage-composition gap. CFG lifetime analysis also preserves
+copied buffers across ordinary stores and summarized memory effects, allowing
+initialization only by their recognized producer. Mutable binding snapshots
+retain independent values after reassignment, with scalar/wide and fixed/nested
+VM regressions. Collection record snapshots cover 8–64-byte values through
+local reassignment, collection mutation and owner drop at O0/O3, with inferred
+and explicitly typed bindings. Short byte arrays (1–8 bytes) use packed values
+for literal initialization and local moves, while collection reads retain their
+private copied buffers. Indexing resolves the actual byte storage in either
+case; copying a field does not preserve an alias to that field's parent.
+VM regressions cover every short-array width with literals, witness parameters,
+record fields and collection results, helper returns, owner drop and unsigned
+index bounds. Complete source/value provenance remains an admission obligation.
+
+Copied fixed-value locals do not inherit their source's pointer/length aliases
+or field-decoding cache. Small named records copy bytes into their own storage,
+just like wider records. A field saved before parent reassignment therefore
+continues to carry the evaluated value into Vec/Map operations and readonly
+helper defaults; O0/O3 VM regressions cover 1/8/16/32-byte fields. Pointer-alias
+propagation is bounded by the body size and rejects incompatible source/length
+bindings instead of failing to converge. This is a compiler correctness boundary,
+not a claim of complete independent lifetime proof.
+
 The corrected emission-order ownership of co-located CFG labels changes the
 lowering/source-map/bundle identities in two existing typed runtime-view
 resource profiles. Their reproduced ELF and transaction identities, cycles,
@@ -1618,9 +1728,10 @@ the 4096-byte/4-event `Totals` owner produces:
 | Each `OrderedSet<u64>` | 288 bytes, 1 event | 704 bytes, 6 events |
 | Both Maps and both Sets together | 3712 bytes, 4 events: fits | 7840 bytes, 24 events: does not fit |
 
-The business example already reserves against checked input/output counts. Its
-four explicit reservations are useful evidence for this policy, not a reason to
-freeze repeated `reserve` calls as the final authoring experience.
+The business example reserves against checked input/output counts. The initial
+authoring decision above selects these explicit reservations together with
+CLI/editor budget explanations; it does not rule out a later declarative form
+supported by complete-program evidence.
 
 The [budget execution test](../tests/collection_budgets.rs) compares the report
 with a separate logical arena model and actual interleaved Vec/Map/Set operations.
@@ -1644,23 +1755,24 @@ records 24 O3 resource observations. Representative whole-transaction cycles are
 
 | Input and output Notes / distinct assets | Actual-count reservations | Reserve all maxima |
 | --- | --- | --- |
-| 1 / 1 | 44,836 | 158,900 |
-| 8 / 1 | 243,647 | 332,367 |
-| 32 / 32 | 2,052,694 | 2,052,710 |
+| 1 / 1 | 44,258 | 158,322 |
+| 8 / 1 | 241,389 | 330,109 |
+| 32 / 32 | 2,040,832 | 2,040,848 |
 
 The current allocator clears each allocated buffer, so unused reserved capacity
 still consumes initialization cycles. The full-maximum variant also increases
-the generated transfer ELF from 41,392 to 41,424 bytes and the observed valid-path
+the generated transfer ELF from 40,536 to 40,568 bytes and the observed valid-path
 stack from 7,904 to 7,936 bytes; these are measurements of this compiler and
-program, not intrinsic costs of declarative syntax. Touched guest pages remain
-57,344 bytes. Original resource observations and ceilings are unchanged. The
-candidate exceeds existing ELF/stack ceilings and, at 32 distinct assets, cycle
-ceilings; the comparison records those exceedances instead of granting admission.
+program, not intrinsic costs of declarative syntax. Touched guest pages are
+53,248 bytes in both variants for these valid cases. The original numeric
+ceilings are unchanged. After the wide-copy optimization, both ELF sizes and
+cycle totals fit those ceilings; the full-maximum candidate still exceeds the
+stack ceiling. The comparison records that exceedance instead of granting admission.
 Rejected transactions retain a null whole-transaction cycle field rather than
 substituting a sum of independently replayed groups.
 
 Consequently, automatic full-maximum reservation is not selected as the default.
-A future declaration/constructor design must support checked per-invocation
+Any future declaration/constructor design must support checked per-invocation
 member counts, explain their combined budget before use, and make full-maximum
 reservation an explicit choice. It should reduce repeated reservation syntax
 without forcing small transactions to initialize every declared maximum. The
@@ -1668,11 +1780,12 @@ syntax and failure/initialization boundary remain design work; this experiment
 changes neither source syntax nor the allocator and is not a global worst-case
 proof.
 
-Stable authoring still requires a budget-experience decision. Preserve named
-workspaces, copied reads and non-escaping readonly helpers, and keep the
-monotonic arena while evaluating declarative preallocation against complete
-business programs. Developers should not need to derive alignment, record
-overhead or historical growth by hand. Whole-owner borrowing remains the current
+The initial budget-experience decision combines named workspaces, copied reads,
+non-escaping readonly helpers, explicit count-based reservations and shared
+CLI/editor budget explanations. Keep the monotonic arena while evaluating
+future declarative preallocation against complete business programs. Developers
+should not need to derive alignment, record overhead or historical growth by
+hand. Whole-owner borrowing remains the current
 rule; use real examples of reading one member while updating another to decide
 whether member-level borrowing is needed. Arena lifetime (#47), decoded byte/view
 lifetime (#48), and Cell source/selection/state rules (#49) remain distinct
@@ -1701,13 +1814,15 @@ used only by an unused member of a constructed owner remain in scoped artifact
 evidence. This structural check does not discharge the allocation proof blocker.
 Record reads copy into local storage and reuse the ordinary caller-owned helper
 result ABI. See the [record fixture](../tests/syntax_combo/seeds/collections-records.cell)
-and [runtime cases](../tests/allocated_runtime.rs). Complete generic, cross-package
-owner and business acceptance remain part of #47; this slice is not closure.
+and [runtime cases](../tests/allocated_runtime.rs). Imported generic value copies
+are exercised by the complete transfer suite; final parity, admission and
+business acceptance remain part of #47. Exporting owner declarations is outside
+the initial module-local interface.
 
-The declaration grammar is an experimental implementation choice for the
-authoring direction. It must still be assessed with complete aggregation and
-deduplication programs, helper extraction, diagnostics and measured costs before
-stable freeze. The experimental type checker now enforces these local rules:
+The initial-form decision above selects this declaration after complete
+aggregation/deduplication programs, helper extraction and measured reservation
+comparisons. Stable admission still requires final parity, independent-checker
+and integration evidence. The experimental type checker enforces these local rules:
 
 - Construction types a fresh invocation-local owner. Named member methods use
   the declared types without repeating budgets; each constructor reserves aligned
@@ -1812,7 +1927,7 @@ the spending Lock with a rejecting fixture makes otherwise valid transfers fail.
 The normal test Lock is permissive; this is not a wallet authentication example,
 issuance protocol, xUDT implementation or deployment approval.
 
-The [fixed-array reference](../tests/fixtures/multi_asset_transfer_stack.cell)
+The [fixed-array reference](../tests/selection_bundle/fixtures/multi_asset_transfer_stack.cell)
 copies up to 32 Notes per side into fixed stack arrays and uses linear scans
 for per-asset totals and serial uniqueness. It implements the same transfer
 rule, including output-only assets, positive amounts and occupied capacity.
@@ -1836,17 +1951,20 @@ ELF and complete transaction hashes and separate numeric ceilings. It includes
 1/8/32-item successes, repeated/distinct assets, split/merge, maximum-size
 duplicate serials, a last-key amount failure, zero amounts and 33-item rejection.
 The existing 35 settlement/migration resource observations are unchanged.
+Typed wide-argument copies now retain one source pointer across all byte stores.
+The refreshed Map/Set observations remain within every original numeric ceiling;
+array observations and canonical transaction identities are unchanged.
 
 | Notes per side / asset labels | Map/Set transaction cycles | Array transaction cycles | Transaction bytes |
 |---|---:|---:|---:|
-| 1 / 1 | 44,836 | 228,108 | 638 |
-| 8 / 1 | 243,647 | 449,574 | 2,458 |
-| 8 / 8 | 318,002 | 324,806 | 2,458 |
-| 32 / 1 | 1,053,231 | 3,258,606 | 8,698 |
-| 32 / 32 | 2,052,694 | 1,048,430 | 8,698 |
+| 1 / 1 | 44,258 | 228,108 | 638 |
+| 8 / 1 | 241,389 | 449,574 | 2,458 |
+| 8 / 8 | 314,876 | 324,806 | 2,458 |
+| 32 / 1 | 1,045,213 | 3,258,606 | 8,698 |
+| 32 / 32 | 2,040,832 | 1,048,430 | 8,698 |
 
 These successful totals include both Type and Lock groups. Map/Set uses 7,904
-observed stack bytes and a 41,392-byte main ELF; the fixed-array program uses
+observed stack bytes and a 40,536-byte main ELF; the fixed-array program uses
 17,472 observed stack bytes and a 42,824-byte main ELF. Stack measurements are
 entry-SP-to-minimum-SP observations, not a separate heap metric. The opposite
 cycle results for repeated and distinct assets prevent a blanket speed claim.
@@ -1858,7 +1976,7 @@ arena growth or reclaim retired buffers.
 
 Rejected transactions retain a null total cycle count; independently replayed
 groups are recorded separately. For the last-key amount failure the Type group
-uses 2,052,030 cycles with Map/Set and 849,416 with arrays, and both reject with
+uses 2,040,168 cycles with Map/Set and 849,416 with arrays, and both reject with
 error 5. These are finite corpus ceilings, not global worst-case bounds.
 
 The [native fixed Cell encoder](../src/fixed_cell_builder.rs) and generated
@@ -1893,6 +2011,25 @@ of branches into the checked sequence. It summarizes the complete sequence to
 avoid retaining redundant CFG states; proof budgets are unchanged. Rebound
 mutations cover missing/changed bounds, address displacement, writes below the
 temporary subframe, entry past guards and incorrect SP restoration at O0/O3.
+
+Owned arena storage is also protected between recognized operations. The
+independent constructor derives the region containing state, allocation
+records, elements and descriptors. Complete checked primitive ranges authorize
+writes only to their own region; an ordinary result store, unrelated copy,
+call or syscall cannot change it. The write-effect proof runs even for a
+local-only owner with no Cell/nested view or borrowed helper. Private scratch
+remains separate from the arena's persistent state.
+
+The [arena-isolation mutations](../tests/artifact_checker/allocated_isolation.rs)
+redirect an ordinary helper's result store into the cursor, allocation live
+flag, element bytes and descriptor length/live flag, without changing any
+collection operation or its evidence. They also redirect a tuple copy into
+live element storage and change its count/stride. O0/O3 VM outcomes distinguish
+the corruption from the valid program. Finite private byte-copy recognition
+checks the complete loop, actual incoming destination/count and absence of
+partial entry; it does not prove the copied source's semantic value. This
+preserves existing tuple and stack Vec composition while closing unrelated
+writes into the arena, not every source/value or ownership obligation.
 
 An independent typed-CFG pass additionally tracks initialized owners, affine
 moves, explicit drops and read-only references through branches and loop
@@ -2113,8 +2250,222 @@ existing optimized instruction bytes. Rebound cases substitute argument loads,
 copy arithmetic and destination stores, remove markers and redirect source
 branches around transport. Small/large arenas and O0/O3 cover owned operations
 and readonly helpers. This establishes local argument/result transport, not
-upstream scalar computation, key/value argument copies,
+upstream scalar computation,
 whole-operation reachability or complete source equivalence.
+
+Key/value preparation now composes with that transport. For complete argument
+lists of scalars and pointer-backed fixed values, the checker binds each input
+to its typed local slot or literal. It recognizes every scalar byte store/shift
+and the typed pointer load plus every copied byte into the exact member scratch region.
+The latter covers u128, byte arrays, Hash/Address and admitted fixed records;
+record widths are independently derived from their typed fields. Existing source
+and length checks precede the transfer boundary. Fixed-value copies then use the
+already evaluated typed local instead of re-decoding its original field. Each
+copy retains that pointer in an explicitly preserved register across small or
+large-offset stores, avoiding a repeated pointer reload for every byte. This covers Vec push/insert/set,
+ordered insert/remove/contains/get and Map get_or defaults, including readonly
+helpers. Vec index preparation is included in the checked range. The consumer
+must be the adjacent independently checked primitive for the same owner, member
+and typed block; external branches cannot skip any part of preparation. Complete
+typed inventories reject omitted markers rather than trusting label presence.
+The [argument regressions](../tests/artifact_checker/allocated_arguments.rs)
+cover scalar and fixed-value inputs, small/large arenas and O0/O3, wrong input slots,
+byte widths/offsets/shifts, marker erasure, forged owner/member coordinates and
+bypass branches. A key substitution accepted with the new check disabled changes
+the full program's VM outcome; the complete check rejects it after hash rebinding.
+For 1–8-byte array arguments, the checker derives the representation from typed
+producers: parameters, literals and local copies carry packed words; fields,
+indexed elements and collection reads carry pointers, and reference conversions
+preserve the source representation. Every literal byte is checked independently.
+VM regressions also cover packed fixed-aggregate parameter and local-copy indexing,
+constant and dynamic element selection and unsigned bounds. Short elements retain their
+addressed storage when subsequently copied into collections.
+
+Nonempty `load_sorted` input transport binds the evaluated typed local to the
+sorted primitive's exact input-pointer scratch slot. Its array element type,
+count and byte extent come from the member layout and typed operation. Packed
+arrays use the address of their scalar slot; pointer-backed arrays load the
+evaluated pointer. The same complete inventory, adjacent owner/member binding
+and branch-entry checks apply. Empty arrays introduce no input-read evidence.
+The [sorted-input mutations](../tests/artifact_checker/allocated_sorted_inputs.rs)
+cover counts 0/1/4/1024, short/wide keys and values, small/large arenas and O0/O3.
+They substitute machine and typed input identities, erase preparation and markers,
+forge coordinates and bypass preparation. VM regressions additionally check
+mutable record field snapshots after reassignment and loops, and 1024-item
+`OrderedMap<u16, u8>` construction against a host `BTreeMap`, including last-item
+disorder/duplicates and prior shared-budget consumption. These maximum-size VM
+inputs fit the existing entry-witness limit; larger checker-only shapes are not
+runtime acceptance evidence. No arena or entry-witness limit is increased.
+
+Mutable local record, tuple and fixed-array reads refresh projections after
+assignment. Projected writes rebuild each affected parent into separate storage
+before replacing the root, preserving earlier reads and whole-value snapshots.
+Array writes still require a compile-time constant, in-range index; literals use
+the destination type. Iteration, tuple destructuring and match projections read
+current storage across loop backedges. Fixed primitive tuple/array fields in records are
+serialized with their complete width. Short aggregate fields use addressed
+copies. Fixed primitive tuple helper results retain the eight-register field
+ABI, with a complete caller-owned copy made before subsequent calls. Return
+values are read from current storage, including parameters and updated locals,
+instead of replaying constructor operands. Wider fields are copied without a
+helper call while the callee bytes remain available. More than eight fields
+fail closed; this does not introduce a larger return ABI. These rules do not
+widen the admitted collection element-type inventory.
+The [runtime fixtures](../tests/allocated_runtime.rs) and
+[projected-write cases](../tests/allocated_runtime/projections.rs) check mixed
+nested paths, by-value helpers, imported generic records, branches and loops,
+unchanged siblings and 1/8/9/32/1024-byte arrays. Rebuilding copies all components
+of each affected parent and uses frame storage; it does not reclaim arena bytes
+or establish new resource ceilings. Cell resource transitions retain their
+dedicated lowering. General aggregate/source proof obligations remain open.
+
+The [tuple-return cases](../tests/allocated_runtime/returns.rs) additionally
+check whole-value forwarding and snapshots, conditional writes, nested small
+tuples, empty fields, negative i32 values, 1/7/8/9/32/1024-byte fields and all
+eight registers with offsets above 2047. They execute at O0/O3 and require
+register overflow to fail. This is runtime evidence for fixed primitive tuples;
+it does not certify the generic source/lifetime proof or ordinary-record,
+dynamic and resource tuple combinations.
+
+This establishes local value transport, not complete upstream value computation or the
+validity/lifetime of every source pointer. Those obligations still apply to sorted
+arrays; an operation with an unproved argument does not claim partial coverage.
+
+Scalar definitions within bodies that contain allocated-value operations, Cell
+coordinates, exact selections or nested views have mandatory source-coordinate
+boundaries, including named-shape helpers without an arena. The independent checker derives
+their complete inventory from typed operations and checks constants, copies,
+negation, boolean operations and integer arithmetic/comparisons, including
+signed division/remainder, truncation/sign extension and fatal divisor/shift
+guards. It binds every operand/result slot, forbids overlapping or reordered
+ranges and outside entry into a partial definition, and handles large stack
+offsets. Every successful exit from a covered typed block must execute these
+definitions in order; branches cannot skip an entire checked range. Fatal
+arithmetic guards retain their exact independently checked exit behavior.
+Comparison values retain the exact boolean result; fused branches bind
+the predicate's signedness, operand order, polarity and both typed successors.
+The checker permits fusion only for an adjacent branch condition that is the
+result's sole typed use. Empty unconditional target blocks may resolve to their
+successor, with cycle/work limits; definitions and conditions cannot be skipped.
+The path traversal follows both fused successors after the checked operand
+preparation, rather than treating the branch as an atomic fallthrough.
+Checked Cell reads and selections compose in the same typed operation order;
+their complete independently recognized bodies account for inline returning
+syscalls without trusting an unverified syscall annotation.
+Complete nested load/read/output and coordinate bodies also compose after their
+instruction and lifetime checks pass. A summary cannot hide a required scalar
+definition or partially overlap another checked body. O0/O3 Cell and named-view
+fixtures reject changed arithmetic, whole-definition bypasses and erased markers;
+complete settlement and byte/record migration examples require the same inventory.
+The markers do not add executable instructions. Entry/helper parameter decoding, aggregate producers and
+preservation across arbitrary intervening writes remain separate obligations;
+these definition checks do not discharge the complete source/lifetime proof.
+See [machine/typed mutations](../tests/artifact_checker/allocated_scalars.rs)
+and [Cell/nested-view mutations](../tests/artifact_checker/bounded_scalars.rs)
+and [integer-model VM cases](../tests/allocated_runtime/scalars.rs).
+Contextual nonnegative i32 literals retain a typed local even though their
+constant encoding is U32; array/vector index reads restore the signed value.
+
+Helpers using Cell coordinates, nested views or allocated-value operations, and
+helpers receiving readonly collection handles, bind ordinary `bool`, `u8`,
+`u16`, `u32`, `i32` and `u64` parameter slots to their exact incoming ABI words.
+The independent prefix interpreter counts expanded pointer/extent pairs, follows
+register and caller-stack spills and rejects source substitution, including
+constant-zero stores. The [parameter mutations](../tests/artifact_checker/allocated_parameters.rs)
+exercise mixed owner/Hash/scalar signatures and a corruption that changes VM
+behavior. Scalar entry binding does not make those slots immutable and does not
+prove caller-side scalar computation or preservation across subsequent writes.
+The [bounded-helper parameter cases](../tests/artifact_checker/bounded_parameters.rs)
+extend the same checks to coordinates, complete nested values and derived views,
+including helpers with scalar-only signatures that create bounded values locally.
+
+For calls to those helpers, scalar argument preparation is independently bound
+to the evaluated typed local or literal and the expanded ABI word, including
+outgoing stack stores. Mandatory preparation/invocation markers are located in
+the same typed block; their decoded instructions and complete inventory are
+checked. The existing path/memory-effect analysis carries each prepared argument
+to its consuming call, invalidates overwritten facts, and consumes the facts
+after invocation. Missing preparation cannot be replaced with an unchecked
+register value. [Call mutations](../tests/artifact_checker/allocated_calls.rs)
+cover source substitution that changes VM execution, erased evidence, register
+and stack arguments, forwarding and skipped preparation. This establishes
+evaluated scalar transport; it does not certify earlier scalar/aggregate
+computation or full source-to-machine control-flow equivalence.
+[Cell/nested call mutations](../tests/artifact_checker/bounded_calls.rs) apply the
+same obligations to arena-free helpers, including forwarding a value returned by
+another helper and overwriting a prepared argument before invocation.
+The enclosing write proof derives its outgoing stack allowance from all typed
+helper calls in that body, including ordinary array/scalar helpers beside bounded
+ones; writes below that finite ABI-derived allowance still reject.
+
+Scalar results from these helpers are bound to the caller's typed destination,
+including helpers with no scalar parameters. The checker starts immediately
+after the resolved call and recognizes outgoing-stack restoration followed by
+the complete `a0` store. The destination must have the callee's scalar type and
+fit inside the caller's private frame. Explicit incoming edges cannot enter
+partway through reception. [Result mutations](../tests/artifact_checker/bounded_results.rs)
+cover bool/u8/u16/u32/i32/u64, calls with register and stack arguments, zeroed
+results with changed VM outcomes, destination substitution and incorrect stack
+restoration at O0/O3. This is call-result reception evidence; callee computation
+and preservation across arbitrary later writes remain separate obligations.
+The callee-side scalar return check now binds bool/u8/u16/u32/i32/u64 return
+operands to `a0`, requires the return on each successful source-block path and
+preserves its value through the shared frame restore. Lock predicates retain
+their explicit failure semantics. The same result-mutation suite covers zeroed
+and substituted return sources, erased return markers and epilogue clobbers;
+zeroing a collection helper's result changes the actual VM outcome and rejects.
+This closes scalar return transport, not arbitrary upstream computation or
+aggregate-return provenance.
+Direct collection results produced and returned in the same typed block now
+also bind `u128` and `[u8; 1..8]` transport. The checker derives the copied
+pointer slot from the typed producer, checks every little-endian byte load and
+register combination, and preserves `a0`/`a1` through the shared epilogue.
+This additional boundary does not cover general aggregate producers, alias
+chains or tuple returns.
+Scalar-only wrappers that directly call these helpers also retain distinct
+source-local slots, because argument/result checks bind that layout. Repeated
+reads through a wrapper must compile and execute at O0/O3, while redirected or
+zeroed result stores still reject. Slot reuse remains available to other
+scalar-only functions; admitting it at checked calls requires a separately
+verified location map. This restriction can change wrapper frame/ELF layouts.
+
+Owned `len`, `capacity` and `is_empty` queries now use the same complete
+descriptor-check grammar as borrowed queries. Their scalar results, and ordered
+Map `contains_key` and Set `contains` results, must be stored from `a0` into the exact typed destination
+immediately after the independently checked producer. Parent-owned searches
+inside insert/get/remove are not separate source membership queries.
+[Query mutations](../tests/artifact_checker/allocated_queries.rs) cover owned
+and borrowed Vec/Map/Set, small/large arena offsets and O0/O3, including changed
+descriptor results, omitted query markers and substituted/zeroed result stores.
+This binds local query production and publication, not whole-operation
+successful-path coverage or preservation across arbitrary later writes.
+
+The subsequent operation-path check binds complete top-level collection
+primitives to their typed operation kind, owner/member and contract, then
+requires every successful typed-block exit to execute them in source order.
+It includes constructors, explicit member operations, all member retirements
+within an owner drop and the extent check before each borrowed operation.
+Scalar definitions and Cell operations share the ordering check; complete
+independently checked nested/Cell bodies provide returning-syscall summaries.
+[Path mutations](../tests/artifact_checker/allocated_paths.rs) rebind jumps and
+all outer identities to skip an entire push, one/all member retirements in
+2/32-member owners, or a borrowed query plus result. Push/query mutations also
+change actual VM outcomes. This closes per-block operation bypasses; arbitrary
+source-CFG/value equivalence and preservation across unrelated writes are
+separate from that guarantee.
+
+Non-fused source branches and jumps in collection, Cell and nested-view bodies
+also bind their evaluated scalar conditions and typed successors. The complete
+terminator inventory covers both optimized and unoptimized code; only an
+independently recognized fused comparison replaces a separate branch site.
+Empty fallthrough aliases retain evidence without instructions. Branch
+exits from mapped blocks must still reach their typed successor, preventing
+relocated empty-span labels from disguising a changed loop backedge. Branch
+preparation participates in source operation order while its decoded successors
+remain visible to path analysis. The path mutations above additionally cover
+predicate inversion, condition substitution, redirected targets and erased
+branch evidence, including changed VM outcomes for conditional collection
+execution. This does not prove arbitrary upstream value provenance.
 
 Fixed-value result publication extends this same contract to `u128`, fixed byte
 arrays (including short arrays) and ordinary records. The checker derives the
@@ -2133,11 +2484,13 @@ all unrelated frame values or the complete lifetime/source contract.
 
 These checks establish write isolation, typed owner availability and machine
 initialization/allocation/resize/release, descriptor transitions, owned element
-copies/writes, ordered search/update and fixed-count sorted construction
-for the composed example, not the complete allocation machine/ownership proof.
-Complete input/result transport, machine owner lifetime, complete source
-equivalence, the remaining adversarial resource corpus and final gates remain
-pending. The array/stack comparison and finite application resource ceilings
+copies/writes, ordered search/update and fixed-count sorted construction.
+The subsequent transport and path checks above also bind readonly helper
+arguments/results and require every declared member retirement on successful
+typed-block paths. These are specific allocation/lifecycle claims; they do not
+prove arbitrary upstream computation or whole-language source equivalence.
+Final profile admission, the remaining resource-scope audit and integration
+gates remain pending. The array/stack comparison and finite application resource ceilings
 above cover this transfer fixture. Fixed Cell encoder parity is
 established for this transfer and the flat profile; aggregate Cell encoding is
 outside that profile.
@@ -2163,12 +2516,15 @@ Formatter, symbol navigation/rename/hover, declaration snippets, generated docs
 and WASM diagnostics describe this experimental typing boundary. No executable
 allocation metadata or public interface entry is inferred from an unused
 declaration. Executed operations emit a structured `cellscript-allocated-values-v1`
-contract containing owner/member identity, types and named budgets. The checker
-validates shapes, per-entry declaration consistency and the mandatory blocker,
-including mutations with rebound outer hashes; this does not validate emitted
-allocation machine checks or lifetime equivalence. Source-to-machine ownership/
-helper proofs, cross-package contracts and builder/serialization decisions
-remain pending. The source runtime and checker suites are
+contract containing owner/member identity, types and named budgets. In addition
+to shape/declaration consistency and the mandatory blocker, the checker now
+validates the allocation, descriptor, element, helper, write-isolation and
+operation-path machine contracts described above, with rebound-hash mutations.
+The locked-package tests cover imported fixed-value generics and readonly helper
+composition; the complete transfer binds native/generated flat Cell encoding.
+Exported owner declarations and aggregate Cell encoding are separate extensions.
+Stable admission still requires the final scope audit, gates and recorded review
+disposition. The source runtime and checker suites are
 `cargo test --locked -p cellscript --test allocated_runtime` and
 `cargo test --locked -p cellscript --test artifact_checker allocated_values`.
 Run `cargo test --locked -p cellscript --test owned_collections`,
@@ -2301,21 +2657,71 @@ deduplication, an array comparison and finite application ceilings. Complete
 typed ownership, source/checker binding and adversarial resource acceptance
 remain required before admission.
 
+### Maximum sorted-construction resource evidence
+
+`tests/fixtures/sorted_collection_resources.json` freezes eight O3 observations
+for `OrderedMap<u16, u8>::load_sorted` with 1024 input pairs, an 8192-byte arena
+and two allocation events. The original O0/O3 outcome test compares cardinality
+and the aggregate value sum against `BTreeMap`, including last-value replacement
+for duplicate keys; it does not compare every emitted key/value pair.
+The resource replay uses the same completed transaction, with an independently
+stepped Type Script group checked against the ordinary group verifier's exit
+and cycle count. It also exercises preallocation of a separate 636-element
+`Vec<u64>` before construction, without changing the shared budget.
+
+| Input pattern | Without preallocation: exit / Type-group cycles | With preallocation: exit / Type-group cycles |
+|---|---:|---:|
+| 1024 ascending unique keys | 0 / 1,028,773 | 21 / 265,174 |
+| 1024 copies of one key | 0 / 271,285 | 0 / 440,214 |
+| Final key less than the previous key | 21 / 96,373 | 21 / 265,074 |
+| Final key equal to the previous key | 0 / 1,028,131 | 21 / 265,180 |
+
+Frozen corpus ceilings are 1,028,773 Type-group cycles, 15,168 observed stack
+bytes, 32,768 touched guest-page bytes, 8704 ELF bytes, 3456 transaction bytes
+and 3116 serialized witness bytes. Stack is measured from entry SP after argv
+initialization; guest pages include ELF, argv and syscall buffers. Separate heap
+accounting is unavailable, and the declared arena size is not reported as an
+observed heap peak. Rejected transactions have no aggregate cycle total in this
+harness; the table reports the independently observed Type-group cost instead.
+
+The test checks all eight case keys, exact source/ELF/transaction identities,
+observations and finite ceilings. Reproduce with
+`cargo test --locked -p cellscript --test allocated_runtime allocated_sorted_maximum_and_late_invalid_inputs_match_btree -- --exact`.
+This adds maximum-size sorted-construction evidence without relaxing existing
+transfer/array budgets or claiming a global worst-case bound for every operation.
+
 ## Completion ledger
 
 Each row is required for its corresponding issue, not an optional follow-up.
+Scalar definition binding, per-block successful-path coverage and scalar
+helper entry/call transport now apply across all three issues, including
+arena-free Cell and nested-view helpers.
+Scalar call-result reception also binds the typed destination and outgoing
+stack restoration across these helpers.
+This shared progress does not discharge the complete source/value obligations
+listed below.
+
+Read this ledger against the issues' explicit acceptance criteria. Module-local
+declarations are the implemented interface boundary; exporting `cell_roles`,
+`data_shape` or `collections` declarations is a separate extension, not an
+implicit prerequisite for testing imported ordinary values and checked helpers.
+Likewise, source/value proof obligations below concern the operations, sources,
+bounds, lifetimes and authority advertised by the admitted profile. They do not
+require proving arbitrary whole-language source equivalence. This distinction
+does not waive any advertised machine claim, permit removal of an unproved
+admission blocker, or replace final gates and a recorded review disposition.
 
 | Obligation | #49 | #48 | #47 |
 |---|---|---|---|
 | Authoring API and complete-program readability; checked helper composition | module-local named catalogs, typed role projections/aliases and reads; complete settlement and migration examples; complete helper/source proofs pending | module-local shapes, Item/Payload views and read-only helpers; complete byte/record migration examples; complete source proof pending | shared `collections`, read-only helpers and a complete transfer-only Map/Set business example; complete business acceptance pending |
 | Source/type/ownership rules and unsupported-shape rejection | literal/named fixed and bounded-table catalogs, immutable handles and typed coordinates; fixed/bounded-table `.data` with retained result buffers; stable admission pending | bounded read-only witness/Cell views; whole-value and derived helper bounds/effects and escape rejection; complete source proofs pending | local affine moves, copied reads, borrowed iteration/helper arguments and escape rejection; complete source/runtime proof pending |
 | Runtime lowering, including maximum and late-invalid execution | fixed/nested selection, complete settlement and migration transactions; O3 finite resource ceilings including full-scan late failures frozen; full adversarial corpus pending | O0–O3 witness and actual single-Cell successor checks; complete byte/record migration and O3 finite resource ceilings; full adversarial corpus pending | local source operations, fixed records, read-only helpers and sorted batches with primitive/source VM evidence; full admission pending |
-| Metadata and independent checker binding; rebound machine mutations | selector/read/field instructions, coordinate constructors/aliases/helper transport and retained-table/coordinate CFG lifetime checked; complete aggregate/source/value proof pending | codec/read/output instructions and coordinate roots/lifetimes checked; complete index/field-result/source proof pending | dynamic-write isolation, typed owner/loan CFG analysis, constructor, allocation/resize/release, descriptor/element/read/search/update primitives, sorted construction, readonly helper ABI/calls/bodies, index staging and scalar/fixed-value publication checked with rebound mutations; key/value input copies and complete source/machine ownership proof pending |
-| Independent canonical/reference vectors | fixed-role host/VM differential primitive; stable admission pending | in progress | logical arena/vector and BTreeMap comparisons; complete transfer host oracle, flat native/SDK Cell encoding and canonical packed transaction bytes; aggregate encoder profile remains separate |
-| Generated builder/adapter and complete transaction bytes | mandatory-site catalogs, v2 reconstruction and fixed settlement/nested migration SDK/adapter/all-group byte evidence; conditional paths and stable admission pending | native/TypeScript value and complete Cell encoders with parity vectors; complete byte/record-list migration SDK/adapter/VM evidence and named/explicit comparisons; stable admission pending | flat Note native/SDK bytes in complete transfer and equivalent fixed-array transactions; stable admission and remaining profile coverage pending |
+| Metadata and independent checker binding; rebound machine mutations | selector/read/field instructions, coordinate constructors/aliases/helper transport and retained-table/coordinate CFG lifetime checked; complete aggregate/source/value proof pending | codec/read/output instructions and coordinate roots/lifetimes checked; complete index/field-result/source proof pending | dynamic-write isolation, typed owner/loan CFG analysis, constructor, allocation/resize/release, descriptor/element/read/search/update primitives, sorted construction, readonly helper ABI/calls/bodies, index/scalar/fixed-value and sorted-input argument staging, scalar definitions and per-block execution coverage, scalar helper entry/call transport and scalar/fixed-value publication checked with rebound mutations; upstream value/pointer provenance plus complete source/machine ownership proof pending |
+| Independent canonical/reference vectors | fixed-role host/VM differential primitive; stable admission pending | literal golden bytes, independent fixture-reader round trips for byte/record empty, mixed-size and exact-4096-byte values, wide fixed fields, generated TypeScript parity and malformed/boundary rejection; stable admission pending | logical arena/vector and BTreeMap comparisons; complete transfer host oracle, flat native/SDK Cell encoding and canonical packed transaction bytes; aggregate encoder profile remains separate |
+| Generated builder/adapter and complete transaction bytes | mandatory-site catalogs, v2 reconstruction and fixed settlement/nested migration SDK/adapter/all-group byte evidence; unbound conditional sites fail closed in `projection_checks_selected_entry_and_rejects_unbound_conditional_paths`; stable admission pending | native/TypeScript value and complete Cell encoders with parity vectors; complete byte/record-list migration SDK/adapter/VM evidence and named/explicit comparisons; stable admission pending | flat Note native/SDK bytes in complete transfer and equivalent fixed-array transactions; stable admission and remaining profile coverage pending |
 | All required groups and hostile peer cases | mixed settlement with independent asset peers and nested migration with Registry; hostile peers/Lock checked; final acceptance pending | single-Cell successor and complete nested migration VM fixtures; final acceptance pending | complete transfer Type/Lock execution and hostile spending Lock; final acceptance pending |
-| Formatter/LSP/WASM/support matrix and examples | complete settlement source/editor coverage and locked-package helper execution; final package/editor/browser parity pending | named-shape tools, complete migration examples and locked-package helper execution; declaration exports and final package/editor/browser parity pending | declaration/transfer tools and experimental WASM summaries; imported fixed-value generic copies checked; owner exports and full admission pending |
-| Cycles, stack/heap or unavailable metrics, ELF, bytes and capacity | O3 business fixture ceilings, group/late-invalid cycles and observed stack/guest pages frozen; complete worst-case corpus pending | byte/record-list O3 fixture ceilings and stack/late-invalid observations frozen; complete worst-case corpus pending | 24 O3 transfer/array resource observations and finite ceilings frozen; complete adversarial corpus pending |
+| Formatter/LSP/WASM/support matrix and examples | complete settlement source/editor coverage and locked-package helper execution; final package/editor/browser parity pending for the module-local API | named-shape tools, complete migration examples and locked-package helper execution; final package/editor/browser parity pending for the module-local API | declaration/transfer tools and experimental WASM summaries; imported fixed-value generic copies checked; final package/editor/browser parity and admission pending for the module-local API |
+| Cycles, stack/heap or unavailable metrics, ELF, bytes and capacity | O3 business fixture ceilings, group/late-invalid cycles and observed stack/guest pages frozen; complete worst-case corpus pending | byte/record-list O3 fixture ceilings and stack/late-invalid observations frozen; complete worst-case corpus pending | 24 O3 transfer/array observations plus eight 1024-input sorted-construction/duplicate/late-disorder/shared-exhaustion observations and finite ceilings frozen; remaining operation profiles require audit |
 | Applicable dev/backend/ci gates and review disposition | pending | pending | pending |
 
 No issue will close based solely on host decoding, a design record, a compile

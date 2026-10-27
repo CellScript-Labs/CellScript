@@ -7,11 +7,14 @@ use super::*;
 use crate::allocated_values::Contract;
 use crate::cell_selection::machine::{cursor::Cursor, flow::Markers};
 
+mod arguments;
 mod borrowed;
 mod descriptor;
 mod elements;
 mod lifecycle;
 mod ordered;
+mod paths;
+mod queries;
 mod reads;
 mod sorted;
 mod transport;
@@ -68,6 +71,7 @@ struct Site<'a> {
     start: u64,
     end: u64,
     owner: &'a str,
+    block: u32,
     offset: u32,
     descriptor: Option<u32>,
     kind: Primitive,
@@ -228,7 +232,7 @@ pub(super) fn validate(
     constructors: &Markers<'_>,
     abort: u64,
     checked_constructors: &BTreeMap<String, BTreeMap<u64, Constructor>>,
-) -> Result<BTreeMap<String, BTreeMap<u64, BorrowedRead>>, CheckerError> {
+) -> Result<Checked, CheckerError> {
     let mut expected = BTreeMap::<(&str, u32, u32, Option<u32>, Primitive), (usize, &Contract)>::new();
     let owner_types = crate::allocated_values::owner_types(&record.typed_semantics);
     let mut work = 0usize;
@@ -284,6 +288,9 @@ pub(super) fn validate(
                             | Operation::EntryKey
                             | Operation::EntryValue
                             | Operation::LoadSorted
+                            | Operation::Len
+                            | Operation::Capacity
+                            | Operation::IsEmpty
                     )
                 {
                     continue;
@@ -308,7 +315,14 @@ pub(super) fn validate(
                     // separate machine proof; typed lifetime checking is mandatory.
                     if !matches!(
                         operation,
-                        Operation::Get | Operation::GetOr | Operation::Contains | Operation::EntryKey | Operation::EntryValue
+                        Operation::Get
+                            | Operation::GetOr
+                            | Operation::Contains
+                            | Operation::EntryKey
+                            | Operation::EntryValue
+                            | Operation::Len
+                            | Operation::Capacity
+                            | Operation::IsEmpty
                     ) || entry.kind != "helper"
                         || !parameters
                             .get(&root)
@@ -363,6 +377,9 @@ pub(super) fn validate(
                     }
                 }
                 let element_kinds = match operation {
+                    Operation::Len => vec![Primitive::Len],
+                    Operation::Capacity => vec![Primitive::Capacity],
+                    Operation::IsEmpty => vec![Primitive::Empty],
                     Operation::Push => vec![Primitive::Push],
                     Operation::Insert => {
                         let member = member
@@ -406,7 +423,14 @@ pub(super) fn validate(
             current.insert(block.owner_entry.as_str(), id);
         }
         for label in block.allocated_allocation_labels.iter().chain(&block.allocated_lifecycle_labels) {
-            if label.starts_with(borrowed::PREFIX) || transport::is_marker(label) {
+            if label.starts_with(borrowed::PREFIX)
+                || label.starts_with(arguments::PREFIX)
+                || label.starts_with(crate::scalar_machine::PREFIX)
+                || label.starts_with(".Lallocated_call_")
+                || label.starts_with(".Lallocated_branch_")
+                || label.starts_with(".Lallocated_return_")
+                || transport::is_marker(label)
+            {
                 continue;
             }
             let (primitive, suffix) = if let Some(suffix) = label.strip_prefix(".Lallocated_allocation_") {
@@ -443,6 +467,12 @@ pub(super) fn validate(
                 (Primitive::Pop, suffix)
             } else if let Some(suffix) = label.strip_prefix(".Lallocated_required_") {
                 (Primitive::Required, suffix)
+            } else if let Some(suffix) = label.strip_prefix(".Lallocated_len_") {
+                (Primitive::Len, suffix)
+            } else if let Some(suffix) = label.strip_prefix(".Lallocated_capacity_") {
+                (Primitive::Capacity, suffix)
+            } else if let Some(suffix) = label.strip_prefix(".Lallocated_empty_") {
+                (Primitive::Empty, suffix)
             } else if let Some(suffix) = label.strip_prefix(".Lallocated_sorted_") {
                 let (count, suffix) = suffix.split_once('_').ok_or_else(|| invalid("sorted marker has no count"))?;
                 (Primitive::Sorted(count.parse().map_err(|_| invalid("invalid sorted count"))?), suffix)
@@ -486,7 +516,7 @@ pub(super) fn validate(
         *remaining -= 1;
         checked.insert((owner, offset, descriptor, primitive, id, kind));
         checked.insert(end_key);
-        sites.push(Site { start, end, owner, offset, descriptor, kind: primitive, contract, borrowed: None });
+        sites.push(Site { start, end, owner, block: typed, offset, descriptor, kind: primitive, contract, borrowed: None });
     }
     if checked.len() != boundaries.len() || expected.values().any(|(count, _)| *count != 0) {
         return Err(invalid("missing or orphan allocation site"));
@@ -521,6 +551,8 @@ pub(super) fn validate(
             machine.find(site, &types).map_err(|error| invalid(error.message))?;
         } else if matches!(site.kind, Primitive::Sorted(_)) {
             machine.sorted(site, &reserves, &mut consumed_reserves, &types).map_err(|error| invalid(error.message))?;
+        } else if matches!(site.kind, Primitive::Len | Primitive::Capacity | Primitive::Empty) {
+            machine.query(site, &types)?;
         } else {
             machine.elements(site, &reserves, &mut consumed_reserves, &types).map_err(|error| invalid(error.message))?;
         }
@@ -563,5 +595,34 @@ pub(super) fn validate(
     let borrowed = borrowed::validate(record, elf, &machine, checked_constructors)?;
     sites.extend(borrowed.sites);
     transport::validate(record, elf, &machine, checked_constructors, &sites)?;
-    Ok(borrowed.reads)
+    arguments::validate(record, elf, &machine, checked_constructors, &sites)?;
+    queries::validate(record, elf, &machine, checked_constructors, &sites)?;
+    // Export only complete independently recognized primitive ranges. Nested
+    // children authorize the same arena as their parent, never a second owner.
+    let mut result = Checked {
+        borrowed_reads: borrowed.reads,
+        flow_sites: paths::sites(record, checked_constructors, &sites)?,
+        ..Checked::default()
+    };
+    let mut owned = sites.iter().filter(|site| site.borrowed.is_none()).collect::<Vec<_>>();
+    owned.sort_by_key(|site| (site.owner, site.start, std::cmp::Reverse(site.end)));
+    for site in owned {
+        let constructor = checked_constructors
+            .get(site.owner)
+            .into_iter()
+            .flat_map(|sites| sites.values())
+            .find(|constructor| constructor.offset == i64::from(site.offset))
+            .ok_or_else(|| invalid("owned primitive has no checked arena region"))?;
+        let ranges = result.owned_primitives.entry(site.owner.to_string()).or_default();
+        if let Some((_, previous)) = ranges.last_key_value()
+            && site.start < previous.end
+        {
+            if site.end > previous.end || previous.offset != constructor.offset || previous.extent != constructor.extent {
+                return Err(invalid("overlapping owned primitives disagree on their arena region"));
+            }
+            continue;
+        }
+        ranges.insert(site.start, OwnedPrimitive { end: site.end, offset: constructor.offset, extent: constructor.extent });
+    }
+    Ok(result)
 }

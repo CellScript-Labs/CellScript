@@ -56,7 +56,56 @@ and mandatory blocker mutations use
 `cargo test --locked -p cellscript --test artifact_checker allocated_values`.
 Collection input/result transport uses
 `cargo test --locked -p cellscript --test artifact_checker allocated_transport`.
-Its wide-result cases include small/large arenas, short/maximum byte arrays,
+Scalar definitions in collection bodies additionally use
+`cargo test --locked -p cellscript --test artifact_checker scalar_definitions_`
+and `cargo test --locked -p cellscript --test artifact_checker scalar_comparisons_`
+for typed operand/result bindings, arithmetic guards, mandatory inventories and
+materialized/fused comparisons with rebound branch predicates and targets.
+Whole-definition bypass mutations must reject even with intact definition
+bytes and rebound control-flow metadata; the fixture also checks that the
+mutation changes actual VM execution. Both fused successors remain visible to
+the successful-path coverage check. A successful EXIT disguised by a returning
+syscall annotation must fail this coverage check independently of lifetime checks.
+Cell-coordinate, selection and nested-view bodies use the same scalar contract;
+`cargo test --locked -p cellscript --test artifact_checker bounded_scalars::`
+covers arena-free helpers, full settlement/migration inventory, changed arithmetic
+and bypasses that change VM execution. Checked nested bodies may compose only
+after instruction/lifetime validation and cannot hide required definitions.
+`cargo test --locked -p cellscript --test artifact_checker bounded_parameters::`
+checks six scalar entry/argument types after expanded coordinate, fixed-value
+and nested-view arguments, including stack words and erased call evidence.
+`cargo test --locked -p cellscript --test artifact_checker bounded_calls::`
+checks forwarding, substituted sources, skipped preparation and clobbers after
+preparation. These extend collection-helper transport without claiming complete
+upstream value provenance.
+`cargo test --locked -p cellscript --test artifact_checker bounded_properties::`
+checks typed Input/Output scalar property runtime bodies and call sites at
+O0/O3 with transaction/group sources. Zeroed runtime results must change actual
+VM behavior and reject after rebinding; wrong coordinates/results, ignored
+statuses, erased property evidence and overwritten live coordinates also reject.
+Immediate coordinate-to-property reads retain optimized forwarding. Run `cell_data_views` and
+the complete selection-bundle suite for shared property/source behavior.
+`cargo test --locked -p cellscript --test artifact_checker bounded_hash_properties::`
+adds full-hash source substitution, coherent result-buffer aliasing, intervening
+helper writes and large-frame addressing at O0/O3. Changes to these retained
+buffers also require the complete checker and Cell/nested/selection suites.
+`cargo test --locked -p cellscript --test artifact_checker bounded_results::`
+checks six scalar result types across collection/Cell/nested helper calls,
+including calls without scalar parameters and with outgoing stack arguments.
+Rebound mutations zero or redirect received values and change stack restoration;
+the oracle checks changed VM outcomes for zeroed results. Result reception does
+not by itself establish the callee's value computation or later preservation.
+`cargo test --locked -p cellscript --test artifact_checker allocated_isolation::`
+checks writes between collection operations: ordinary helper results cannot be
+redirected into arena headers, records, elements or descriptors, and finite
+tuple-copy loops cannot overwrite an arena or use invalid counts/strides.
+`cargo test --locked -p cellscript --test allocated_runtime --test owned_collections`
+retains legacy stack Vec and tuple behavior alongside local allocated owners.
+`cargo test --locked -p cellscript --test allocated_runtime scalars::` compares
+O0/O3 results with independent integer/boolean models, including signed extrema,
+width boundaries and invalid divisors/shifts. These definition checks do not
+establish parameter/aggregate provenance or preservation across arbitrary writes.
+Transport wide-result cases include small/large arenas, short/maximum byte arrays,
 `u128`, records and complete-transfer Map slices. Rebound copies/publications
 must reject altered bytes, widths, destinations, erased evidence and overlapping
 private storage. Changes to this shared path require the full checker suites,
@@ -101,6 +150,31 @@ forwarding signatures, mixed nested/coordinate decoder prefixes and full/partial
 body overwrites. Run the complete checker suite after changing the shared
 prologue or memory-effect analysis. This checks callee spills and preservation;
 caller pointer provenance and borrowed read bodies are checked separately below.
+Run `cargo test --locked -p cellscript --test artifact_checker allocated_scalar_parameters_`
+for scalar entry spills alongside readonly collection handles, mixed-width ABI
+arguments, register/stack transitions and a VM-observed corruption. Caller scalar
+provenance and body value preservation remain separate obligations.
+Run `cargo test --locked -p cellscript --test artifact_checker allocated_scalar_calls_`
+for caller scalar preparations, exact evaluated-source substitutions, omitted
+markers, CFG bypasses and argument preservation to the consuming helper. Keep
+the full checker suite for changes to the shared path/memory-effect analysis.
+Run `cargo test --locked -p cellscript --test artifact_checker bounded_results`
+for scalar-only wrapper layout, repeated reads, typed result destinations and
+outgoing-stack restoration, plus callee scalar return sources, mandatory return
+inventories and result preservation through shared epilogues.
+Keep the cached-read helper/CFG regressions and
+frozen business resource checks when changing caller slot allocation.
+Run `cargo test --locked -p cellscript --test artifact_checker collection_queries_`
+for owned/borrowed descriptor queries, ordered membership results and rebound
+scalar publication mutations. Changes to shared query recognition also require
+the collection runtime, complete checker and frozen selection/transfer suites.
+Run `cargo test --locked -p cellscript --test artifact_checker allocated_paths`
+for rebound whole-operation bypasses, including partial/all owner retirement
+and borrowed query publication, plus non-fused branch predicates, condition
+sources, successor targets and mandatory branch inventories at O0/O3.
+Changes to this shared successful-path check
+require complete checker, collection runtime and selection/transaction suites;
+scalar and Cell/nested operation coverage must continue to compose.
 Run `cargo test --locked -p cellscript --test artifact_checker allocated_helper_calls`
 for constructor/parameter pointer origins, same-type owner substitution, exact
 owned extents, paired forwarded lengths and full/partial retained-binding writes.

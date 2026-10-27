@@ -12,8 +12,47 @@ mod collection_coordinate_helpers;
 #[path = "support/borrowed_collection_reads.rs"]
 mod borrowed_collection_reads;
 
+#[path = "support/ckb_script_runner.rs"]
+#[allow(dead_code)]
+mod ckb_script_runner;
+
+#[path = "artifact_checker/allocated_arguments.rs"]
+mod allocated_arguments;
+#[path = "artifact_checker/allocated_calls.rs"]
+mod allocated_calls;
+#[path = "artifact_checker/allocated_isolation.rs"]
+mod allocated_isolation;
+#[path = "artifact_checker/allocated_parameters.rs"]
+mod allocated_parameters;
+#[path = "artifact_checker/allocated_paths.rs"]
+mod allocated_paths;
+#[path = "artifact_checker/allocated_queries.rs"]
+mod allocated_queries;
+#[path = "support/allocated_scalar_definitions.rs"]
+mod allocated_scalar_definitions;
+#[path = "artifact_checker/allocated_scalars.rs"]
+mod allocated_scalars;
+#[path = "artifact_checker/bounded_calls.rs"]
+mod bounded_calls;
+#[path = "artifact_checker/bounded_hash_properties.rs"]
+mod bounded_hash_properties;
+#[path = "artifact_checker/bounded_parameters.rs"]
+mod bounded_parameters;
+#[path = "artifact_checker/bounded_properties.rs"]
+mod bounded_properties;
+#[path = "artifact_checker/bounded_results.rs"]
+mod bounded_results;
+#[path = "artifact_checker/bounded_scalars.rs"]
+mod bounded_scalars;
+
+#[path = "artifact_checker/allocated_sorted_inputs.rs"]
+mod allocated_sorted_inputs;
+
 #[path = "artifact_checker/allocated_wide_transport.rs"]
 mod allocated_wide_transport;
+
+#[path = "artifact_checker/cell_data_results.rs"]
+mod cell_data_results;
 
 const FIXTURE_SOURCE: &str = r#"
 module artifact_checker_fixture
@@ -1337,7 +1376,7 @@ fn selected_hash_reads_prove_caller_writes_while_nested_views_remain_live() {
             )
             .unwrap_err();
             assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
-            assert!(error.message.contains("overlaps nested view storage"), "{error}");
+            assert!(error.message.contains("overlaps protected runtime storage"), "{error}");
         }
     }
 }
@@ -1851,7 +1890,7 @@ fn exact_role_scratch_preserves_nested_views_and_rejects_rebound_aliases() {
             )
             .unwrap_err();
             assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
-            assert!(error.message.contains("overlaps nested view storage"), "O{opt_level}: {error:?}");
+            assert!(error.message.contains("overlaps protected runtime storage"), "O{opt_level}: {error:?}");
         }
     }
 }
@@ -5838,7 +5877,9 @@ fn allocated_initializers_bind_every_state_word_and_reject_rebound_bypasses() {
             )
             .unwrap_err();
             assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{error}");
-            assert!(error.message.contains("bypasses") || error.message.contains("bypass"), "{error}");
+            // The source-branch recognizer can reject the redirected successor
+            // before the generic initialization-path coverage check reaches it.
+            assert!(error.message.contains("bypass") || error.message.contains("control-flow target differs"), "{error}");
         }
     }
 }
@@ -10216,15 +10257,28 @@ fn mixed_settlement_shared_return_tails_reject_skipped_restores_and_field_checks
         );
         valid.check().unwrap();
         let helper = valid.record.entries.iter().find(|entry| entry.name.ends_with("transfer_leg")).unwrap();
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        // Source-only evidence can share the epilogue address and become its
+        // primary machine label. Locate the actual return rather than a label
+        // spelling, while retaining the complete restoration mutation range.
         let tail = valid
             .record
             .blocks
             .iter()
             .find(|block| {
-                block.owner_entry == helper.id && block.machine_label.as_ref().is_some_and(|label| label.ends_with("_epilogue"))
+                block.owner_entry == helper.id
+                    && elf
+                        .instructions
+                        .iter()
+                        .any(|instruction| block.range.contains(instruction.address) && instruction.word == 0x00008067)
             })
             .unwrap();
-        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        assert!(
+            elf.stack_adjustments
+                .iter()
+                .any(|adjustment| tail.range.contains(adjustment.address) && adjustment.delta == i64::from(helper.frame_size_bytes)),
+            "return mutation range must include frame restoration"
+        );
         for instruction in elf.instructions.iter().filter(|instruction| tail.range.contains(instruction.address)) {
             let mut changed = valid.clone();
             changed.replace_machine_word(instruction.address, instruction.word ^ (1 << 7));

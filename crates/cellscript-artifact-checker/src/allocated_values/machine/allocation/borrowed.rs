@@ -202,7 +202,17 @@ pub(super) fn validate<'a>(
         {
             return Err(invalid("borrowed read boundaries disagree on their source"));
         }
-        sites.push(Site { start, end, owner, offset: 0, descriptor, kind, contract, borrowed: Some(Borrowed { pointer, scratch }) });
+        sites.push(Site {
+            start,
+            end,
+            owner,
+            block: typed,
+            offset: 0,
+            descriptor,
+            kind,
+            contract,
+            borrowed: Some(Borrowed { pointer, scratch }),
+        });
         checked.insert((owner, pointer, coordinate, scratch, kind, id, edge));
         checked.insert(end_key);
     }
@@ -215,15 +225,7 @@ pub(super) fn validate<'a>(
             Primitive::Read => machine.elements(site, &BTreeMap::new(), &mut BTreeSet::new(), &types)?,
             Primitive::Find => machine.find(site, &types)?,
             Primitive::Len | Primitive::Capacity | Primitive::Empty => {
-                let (descriptor, width, limit) = descriptor::layout(site, &types)?;
-                let mut c = Cursor::new(site.start, site.end, machine.words, machine.targets);
-                machine.check_descriptor(&mut c, site, descriptor, width, limit)?;
-                match site.kind {
-                    Primitive::Len => c.addi(10, 6, 0)?,
-                    Primitive::Capacity => c.addi(10, 7, 0)?,
-                    _ => c.immediate(0x13, 3, 10, 6, 1)?,
-                }
-                c.finish()?;
+                machine.query(site, &types)?;
             }
             _ => return Err(invalid("unknown borrowed read body")),
         }

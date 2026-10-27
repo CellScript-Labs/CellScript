@@ -4,6 +4,8 @@ use super::*;
 use crate::checker::is_nested_source_type;
 use std::collections::VecDeque;
 
+mod copies;
+
 #[derive(Clone)]
 pub(super) struct Seed {
     pub machine: PrefixMachine,
@@ -44,6 +46,9 @@ enum Value {
     NestedLength(u64),
     ArenaPointer(u64),
     ArenaExtent(u64),
+    // One evaluated typed operand, valid until its consuming call. Full source
+    // computation is separate from this checked load and transport fact.
+    ScalarArgument(u64, u32),
     // Slot-specific evidence: only a checked producer/alias/projection can
     // establish a different destination's coordinate. Ordinary copies retain
     // the source identity, and overlapping writes invalidate stored facts.
@@ -245,9 +250,10 @@ pub(super) fn validate(
     uses: &BTreeMap<String, BTreeMap<u64, Use>>,
     effects: CellEffects<'_>,
     terminal_sink: Option<u64>,
-) -> Result<(), CheckerError> {
+) -> Result<BTreeMap<u64, u64>, CheckerError> {
     let cells = effects.cells;
     let view_values = view_values::validate(record, elf, terminal_sink, effects.selections)?;
+    let property_sources = crate::scalar_machine::property_call_sources(record, elf)?;
     let cell_arguments = cell_args::validate(record, elf)?;
     let arena_arguments = arena_calls::validate(record, elf, seeds, effects.allocated)?;
     let outputs = outputs::validate(record, elf, cells, sizes)?;
@@ -270,6 +276,7 @@ pub(super) fn validate(
         selections: effects.selections,
         view_values: &view_values,
         view_calls: effects.view_calls,
+        property_sources: &property_sources,
         outputs: &outputs,
         cell_arguments: &cell_arguments,
         arena_arguments: &arena_arguments,
@@ -282,6 +289,7 @@ pub(super) fn validate(
         memcpy_checked: false,
         cache,
         cache_borrowers: BTreeSet::new(),
+        returning_syscalls: BTreeMap::new(),
     };
     for owner in seeds
         .keys()
@@ -291,6 +299,8 @@ pub(super) fn validate(
         .chain(effects.selections.uses.keys())
         .chain(effects.selections.data.keys())
         .chain(effects.view_calls.keys())
+        .chain(property_sources.keys())
+        .chain(effects.allocated.constructors.keys())
         .chain(arena_arguments.calls.values().map(|call| &call.owner))
     {
         proof.entry(owner)?;
@@ -325,7 +335,24 @@ pub(super) fn validate(
             proof.entry(&caller)?;
         }
     }
-    Ok(())
+    // Publish atomic bodies only after their instruction grammars and complete
+    // lifetime/CFG effects have passed. Scalar coverage may compose these
+    // successful fallthroughs, including Cell loads' inline syscalls.
+    let ranges = cells
+        .loads
+        .values()
+        .flat_map(|sites| sites.iter().map(|(start, site)| (*start, site.end)))
+        .chain(uses.values().flat_map(|sites| sites.iter().map(|(start, site)| (*start, site.end))))
+        .chain(view_values.values().flat_map(|sites| sites.iter().map(|(start, site)| (*start, site.end))))
+        .chain(outputs.sites.values().flat_map(|sites| sites.iter().map(|(start, site)| (*start, site.end))))
+        .chain(proof.returning_syscalls.iter().filter_map(|(&pc, &returns)| returns.then_some((pc, pc + 4))));
+    let mut bodies = BTreeMap::new();
+    for (start, end) in ranges {
+        if bodies.insert(start, end).is_some_and(|previous| previous != end) {
+            return Err(invalid("checked bodies disagree on their complete extent"));
+        }
+    }
+    Ok(bodies)
 }
 
 struct Proof<'a> {
@@ -342,6 +369,7 @@ struct Proof<'a> {
     selections: &'a crate::cell_selection::machine::Checked,
     view_values: &'a view_values::Checked,
     view_calls: &'a view_calls::Calls,
+    property_sources: &'a BTreeMap<String, BTreeMap<u64, crate::scalar_machine::PropertyCallSource>>,
     outputs: &'a outputs::Checked,
     cell_arguments: &'a cell_args::Checked,
     arena_arguments: &'a arena_calls::Checked,
@@ -354,6 +382,9 @@ struct Proof<'a> {
     memcpy_checked: bool,
     cache: Option<exact_cache::Checked>,
     cache_borrowers: BTreeSet<String>,
+    // All analyzed states at a site must prove a returning observation with
+    // bounded, non-overlapping writes. Sidecar syscall numbers are insufficient.
+    returning_syscalls: BTreeMap<u64, bool>,
 }
 
 impl Proof<'_> {
@@ -401,7 +432,8 @@ impl Proof<'_> {
             || self.cells.loads.contains_key(owner)
             || !params.is_empty()
             || self.selections.sites.contains_key(owner)
-            || self.selections.uses.contains_key(owner);
+            || self.selections.uses.contains_key(owner)
+            || self.property_sources.contains_key(owner);
         let checked_roots = checked_roots || self.selections.data.contains_key(owner);
         let checked_roots = checked_roots
             || self.allocated.constructors.contains_key(owner)
@@ -425,6 +457,14 @@ impl Proof<'_> {
         let mut protected = view_slots.to_vec();
         let allocated_slots = seed.map_or(&[][..], |seed| seed.allocated_slots.as_slice());
         protected.extend_from_slice(allocated_slots);
+        let owned_arenas = self
+            .allocated
+            .constructors
+            .get(owner)
+            .into_iter()
+            .flat_map(|sites| sites.values())
+            .map(|constructor| (constructor.offset, constructor.offset + i64::from(constructor.extent)))
+            .collect::<BTreeSet<_>>();
         let mut selection_slots = Vec::new();
         let mut data_regions = Vec::new();
         for result in
@@ -438,6 +478,15 @@ impl Proof<'_> {
             data_regions.push((start, end));
         }
         protected.extend(&data_regions);
+        let copied_data_regions = self
+            .selections
+            .data
+            .get(owner)
+            .into_iter()
+            .flat_map(|sites| sites.values())
+            .filter_map(|site| site.result_buffer)
+            .map(|(start, bytes)| (i64::from(start), i64::from(start) + i64::from(bytes)))
+            .collect::<Vec<_>>();
         if checked_roots {
             let typed = self
                 .record
@@ -509,7 +558,64 @@ impl Proof<'_> {
             if self.owner(pc) != Some(owner) {
                 return Err(invalid(format!("nested lifetime leaves {owner} at {pc:#x}")));
             }
+            if let Some(stages) = self.arena_arguments.scalar_ends.get(&pc) {
+                for stage in stages {
+                    if stage.owner != owner || state.registers[2] != Value::Stack(0) {
+                        return Err(invalid("scalar call preparation changed its owning frame"));
+                    }
+                    let value = Value::ScalarArgument(stage.call, stage.word);
+                    if stage.word < 8 {
+                        state.registers[10 + stage.word as usize] = value;
+                    } else {
+                        let slot = i64::from(stage.word - 8) * 8 - i64::from(stage.outgoing);
+                        state.forget(slot, 8);
+                        state.memory.insert(slot, value);
+                    }
+                }
+            }
             let mut protected = protected.clone();
+            // An arena's state, allocation records, elements and descriptors
+            // may change only inside its independently checked constructor or
+            // primitive. Ordinary stores and unrelated helpers cannot repair
+            // a dropped descriptor or change a previously checked capacity.
+            let allowed_arena = self
+                .allocated
+                .constructors
+                .get(owner)
+                .and_then(|sites| sites.get(&pc))
+                .map(|site| (site.offset, site.offset + i64::from(site.extent)))
+                .or_else(|| {
+                    self.allocated
+                        .owned_primitives
+                        .get(owner)
+                        .and_then(|sites| sites.range(..=pc).next_back())
+                        .filter(|(_, site)| pc < site.end)
+                        .map(|(_, site)| (site.offset, site.offset + i64::from(site.extent)))
+                });
+            let arena_protected = owned_arenas.iter().copied().filter(|region| Some(*region) != allowed_arena);
+            protected.extend(arena_protected.clone());
+            // Only the recognized producer at its exact entry may write its
+            // copied result. Other stores/calls/syscalls must preserve it.
+            // Keep other protected regions even if their extents coincide.
+            let own_copy = self
+                .selections
+                .data
+                .get(owner)
+                .and_then(|sites| sites.get(&pc))
+                .and_then(|site| site.result_buffer)
+                .map(|(start, bytes)| (i64::from(start), i64::from(start) + i64::from(bytes)));
+            let copied_protected = copied_data_regions.iter().copied().filter(|region| Some(*region) != own_copy);
+            protected.extend(copied_protected.clone());
+            // Only a fully recognized hash-property call body may initialize
+            // or fill its own size/result storage. All other effects preserve it.
+            protected.extend(
+                self.property_sources
+                    .get(owner)
+                    .into_iter()
+                    .flat_map(|sites| sites.values())
+                    .filter(|site| !(site.start..site.end).contains(&pc))
+                    .filter_map(|site| site.hash_region),
+            );
             for load in self.cells.loads.get(owner).into_iter().flat_map(|loads| loads.values()) {
                 if state.loaded_cells.contains(&load.source) {
                     protected.extend([
@@ -538,8 +644,10 @@ impl Proof<'_> {
             let mut auxiliary_protected = cache_regions.clone();
             auxiliary_protected.extend_from_slice(view_slots);
             auxiliary_protected.extend_from_slice(allocated_slots);
+            auxiliary_protected.extend(arena_protected);
             auxiliary_protected.extend(&selection_protected);
             auxiliary_protected.extend(&data_regions);
+            auxiliary_protected.extend(copied_protected);
             let mut next = vec![pc + 4];
             if let Some(read) = self.allocated.borrowed_reads.get(owner).and_then(|sites| sites.get(&pc))
                 && (state.registers[2] != Value::Stack(0)
@@ -649,7 +757,7 @@ impl Proof<'_> {
                         state.memory.insert(slot, Value::NestedPointer(result.root));
                         state.memory.insert(i64::from(result.length), Value::NestedLength(result.root));
                     }
-                    if let Some(pointer) = data.result_pointer {
+                    if let Some((pointer, _)) = data.result_buffer {
                         state.memory.insert(slot, Value::Stack(i64::from(pointer)));
                     }
                     for register in [5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 28, 29, 30, 31] {
@@ -806,6 +914,8 @@ impl Proof<'_> {
                     }
                 }
                 next[0] = site.end;
+            } else if let Some(end) = self.private_byte_copy(&mut state, pc, floor, frame, &protected)? {
+                next[0] = end;
             } else if let Some((end, start, bytes)) = self.guarded_store_sequence(&state, pc, frame, &protected)? {
                 state.forget(start, bytes);
                 // Registers and SP are restored by the checked sequence. Its
@@ -835,6 +945,12 @@ impl Proof<'_> {
                     0x37 => state.registers[rd] = Value::Constant(i64::from((word & 0xfffff000) as i32)),
                     0x17 => state.registers[rd] = Value::Constant((pc as i64).wrapping_add(i64::from((word & 0xfffff000) as i32))),
                     0x33 if kind == 0 && word >> 25 == 0 => state.registers[rd] = state.registers[rs1].add(state.registers[rs2]),
+                    0x33 if kind == 0 && word >> 25 == 1 => {
+                        state.registers[rd] = match (state.registers[rs1], state.registers[rs2]) {
+                            (Value::Constant(left), Value::Constant(right)) => Value::Constant(left.wrapping_mul(right)),
+                            _ => Value::Unknown,
+                        };
+                    }
                     0x03 => {
                         state.registers[rd] = match (kind, state.registers[rs1].add(Value::Constant(immediate))) {
                             (3, Value::Stack(offset)) => state.memory.get(&offset).copied().unwrap_or(Value::Unknown),
@@ -870,12 +986,13 @@ impl Proof<'_> {
                         let callee = self.owner(target).ok_or_else(|| invalid("call has no memory-effect owner"))?.to_string();
                         let callee_entry = self.entries[callee.as_str()];
                         if self.arena_arguments.helpers.contains(&callee) {
-                            let call = self.arena_arguments.calls.get(&pc).ok_or_else(|| invalid("arena call is not bound"))?;
+                            let call =
+                                self.arena_arguments.calls.get(&pc).ok_or_else(|| invalid("bounded helper call is not bound"))?;
                             if call.owner != owner
                                 || call.callee != callee
                                 || state.registers[2] != Value::Stack(-i64::from(call.outgoing))
                             {
-                                return Err(invalid("arena call target or outgoing frame differs from its typed ABI"));
+                                return Err(invalid("bounded helper call target or outgoing frame differs from its typed ABI"));
                             }
                             let incoming = |index: u32| {
                                 if index < 8 {
@@ -896,6 +1013,11 @@ impl Proof<'_> {
                                         "arena call pointer/extent lack their typed owner's provenance: {owner} at {pc:#x}, word {}",
                                         argument.word
                                     )));
+                                }
+                            }
+                            for argument in &call.scalars {
+                                if incoming(argument.word) != Value::ScalarArgument(pc, argument.word) {
+                                    return Err(invalid("scalar call argument lost its evaluated typed source"));
                                 }
                             }
                         }
@@ -936,6 +1058,15 @@ impl Proof<'_> {
                                 if state.memory.get(source) != Some(&Value::Coordinate(*source)) {
                                     return Err(invalid("Cell view helper argument has no live checked coordinate source"));
                                 }
+                            }
+                        }
+                        if let Some(site) = self.property_sources.get(owner).and_then(|calls| calls.get(&pc)) {
+                            // Scalar machine recognition binds the actual load
+                            // (including checked adjacent-store forwarding).
+                            // Atomic coordinate producers need not retain a0
+                            // facts in this memory-effect interpreter.
+                            if state.memory.get(&site.source) != Some(&Value::Coordinate(site.source)) {
+                                return Err(invalid("Cell property argument has no live checked coordinate source"));
                             }
                         }
                         if self.cache.as_ref().is_some_and(|cache| cache.wrappers.contains(&callee)) {
@@ -1015,6 +1146,15 @@ impl Proof<'_> {
                         // Outgoing argument scratch is not permanent caller
                         // storage and can be reused by a subsequent callee.
                         state.memory.retain(|offset, _| *offset >= 0);
+                        // A later loop iteration must prepare its own values;
+                        // neither a saved register nor a copied stack fact can
+                        // reuse evidence consumed by this invocation.
+                        state.memory.retain(|_, value| !matches!(value, Value::ScalarArgument(call, _) if *call == pc));
+                        for value in &mut state.registers {
+                            if matches!(value, Value::ScalarArgument(call, _) if *call == pc) {
+                                *value = Value::Unknown;
+                            }
+                        }
                         // Ordinary callees prove saved-register restoration.
                         // Cache wrappers update their hot registers explicitly.
                         for register in 1..32 {
@@ -1044,6 +1184,7 @@ impl Proof<'_> {
                     }
                     0x73 if word == 0x00000073 => match state.registers[17] {
                         Value::Constant(93) => {
+                            self.returning_syscalls.insert(pc, false);
                             if !matches!(state.registers[10], Value::Constant(code) if code != 0) {
                                 self.require_comparisons(owner, &state)?;
                             }
@@ -1058,6 +1199,9 @@ impl Proof<'_> {
                             state.forget(buffer, width);
                             state.forget(size, 8);
                             state.registers[10] = Value::Unknown;
+                            // Never turn a site seen as EXIT on another path
+                            // into a returning summary.
+                            self.returning_syscalls.entry(pc).or_insert(true);
                         }
                         _ => return Err(invalid("unproved syscall memory effects in nested view lifetime")),
                     },
@@ -1385,7 +1529,7 @@ fn write(address: Value, width: i64, floor: i64, frame: i64, protected: &[(i64, 
         return Err(invalid(format!("write [{start}, {end}) leaves private frame [{floor}, {frame}) at {pc:#x}")));
     }
     if width != 0 && protected.iter().any(|(protected_start, protected_end)| start < *protected_end && end > *protected_start) {
-        return Err(invalid(format!("unverified write overlaps nested view storage at {pc:#x}")));
+        return Err(invalid(format!("unverified write overlaps protected runtime storage at {pc:#x}")));
     }
     Ok(start)
 }

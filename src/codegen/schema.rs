@@ -599,6 +599,11 @@ impl CodeGenerator {
                 if self.fixed_byte_local_offsets.contains_key(&var.id) && var_width == expected_width {
                     return Some(ExpectedFixedByteSource::PointerBytes { var_id: var.id, width: expected_width });
                 }
+                // An indexed fixed-byte element remains addressed storage even
+                // when its byte width fits in a word.
+                if self.aggregate_pointer_sources.contains_key(&var.id) && var_width == expected_width {
+                    return Some(ExpectedFixedByteSource::PointerBytes { var_id: var.id, width: expected_width });
+                }
                 if expected_width <= 8
                     && (fixed_scalar_width(&var.ty, type_static_length(&var.ty)).is_some()
                         || (var_width == expected_width && matches!(var.ty, IrType::Array(_, _) | IrType::Tuple(_)))
@@ -611,9 +616,6 @@ impl CodeGenerator {
                     && !self.fixed_byte_param_size_offsets.contains_key(&var.id)
                     && var_width == expected_width
                 {
-                    return Some(ExpectedFixedByteSource::PointerBytes { var_id: var.id, width: expected_width });
-                }
-                if self.aggregate_pointer_sources.contains_key(&var.id) && var_width == expected_width {
                     return Some(ExpectedFixedByteSource::PointerBytes { var_id: var.id, width: expected_width });
                 }
                 if self.param_vars.contains(&var.id)

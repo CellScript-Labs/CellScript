@@ -14,7 +14,7 @@ pub(super) fn validate(
     seeds: &BTreeMap<String, lifetime::Seed>,
     effects: lifetime::CellEffects<'_>,
     terminal_sink: Option<u64>,
-) -> Result<(), CheckerError> {
+) -> Result<BTreeMap<u64, u64>, CheckerError> {
     let cells = effects.cells;
     let cell_buffers = &cells.buffers;
     let words = elf.instructions.iter().map(|instruction| (instruction.address, instruction.word)).collect::<BTreeMap<_, _>>();

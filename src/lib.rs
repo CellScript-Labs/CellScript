@@ -252,7 +252,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
-const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v105-0.32-nested-transaction-data-views";
+const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v122-0.32-typed-cell-hash-properties";
 pub const METADATA_SCHEMA_VERSION: u32 = 72;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 2;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -26946,7 +26946,12 @@ action activate(ticket: Ticket) -> Ticket {
         assert!(asm.contains("li t0, 1"), "missing initial x field constant:\n{}", asm);
         assert!(asm.contains("li t0, 2"), "missing initial y field constant:\n{}", asm);
         assert!(asm.contains("sd t0, 8(sp)"), "missing field x storage slot writes:\n{}", asm);
-        assert!(!asm.contains("# field access .x"), "local struct field access fell back to schema field path:\n{}", asm);
+        assert!(
+            asm.contains("materialize fixed aggregate Point"),
+            "local struct updates must retain complete value storage:\n{}",
+            asm
+        );
+        assert!(!asm.contains("fixed aggregate field source is unavailable"), "local struct field source was unresolved:\n{}", asm);
     }
 
     #[test]
@@ -29068,7 +29073,7 @@ action issue(witness old_cell: OutPoint, witness digest: Hash) -> issued: Receip
         let result = compile(LOCAL_ARRAY_STATIC_INDEX_PROGRAM, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
-        assert!(!asm.contains("# index access"), "local fixed-array static indexes fell back to fail-closed runtime:\n{}", asm);
+        assert!(asm.contains("materialize fixed array"), "local fixed-array writes lost whole-value storage:\n{}", asm);
         assert!(
             !asm.contains("index access fail-closed runtime path"),
             "local fixed-array static indexes incorrectly failed closed:\n{}",
@@ -29115,7 +29120,7 @@ action issue(witness old_cell: OutPoint, witness digest: Hash) -> issued: Receip
         let result = compile(LOCAL_TUPLE_STATIC_FIELD_PROGRAM, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
-        assert!(!asm.contains("# field access .1"), "local tuple field access fell back to schema path:\n{}", asm);
+        assert!(asm.contains("materialize fixed tuple"), "local tuple writes lost whole-value storage:\n{}", asm);
         assert!(asm.contains("li t0, 7"), "tuple field assignment did not preserve assigned constant:\n{}", asm);
         assert!(asm.contains("add t0, t0, t1"), "tuple field reads did not lower into arithmetic:\n{}", asm);
     }

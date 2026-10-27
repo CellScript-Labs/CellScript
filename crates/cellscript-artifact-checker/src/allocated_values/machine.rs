@@ -1,8 +1,10 @@
 //! Machine initialization and arena primitives of typed collection owners.
 //! Reserve/drop descriptor transitions compose checked arena primitives;
 //! element reads/writes compose those transitions and ordered operations. Index
-//! and scalar/fixed-value copy transport are checked separately from key/value
-//! input copies and complete source/machine lifetime proof.
+//! and scalar/fixed-value result transport compose with scalar and pointer-backed
+//! fixed-value inputs, short-array representations and sorted input transport.
+//! Scalar definition contracts cover local arithmetic/copies. Complete source
+//! provenance, parameter decoding and machine lifetime remain separate obligations.
 use super::{Operation, TypedSemanticOperationDetail};
 use crate::{CheckerError, CheckerRejectionCode, ParsedElf, VerifiedLoweringRecord};
 use std::collections::{BTreeMap, BTreeSet};
@@ -11,10 +13,20 @@ const PREFIX: &str = ".Lallocated_init_";
 
 mod allocation;
 
+pub(crate) type FlowSites = BTreeMap<(String, u32, u32), (u64, u64, u32)>;
+
 #[derive(Default)]
 pub(crate) struct Checked {
     pub constructors: BTreeMap<String, BTreeMap<u64, Constructor>>,
     pub borrowed_reads: BTreeMap<String, BTreeMap<u64, BorrowedRead>>,
+    pub owned_primitives: BTreeMap<String, BTreeMap<u64, OwnedPrimitive>>,
+    pub flow_sites: FlowSites,
+}
+
+pub(crate) struct OwnedPrimitive {
+    pub end: u64,
+    pub offset: i64,
+    pub extent: u32,
 }
 
 pub(crate) struct BorrowedRead {
@@ -238,8 +250,10 @@ pub(crate) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf, sink: O
     if checked.len() != labels.len() {
         return Err(invalid("machine initializer has no typed constructor"));
     }
-    crate::cell_selection::machine::flow::validate(record, elf, &sites, abort)?;
-    result.borrowed_reads = allocation::validate(record, elf, &sites, abort, &result.constructors)?;
+    let allocation = allocation::validate(record, elf, &sites, abort, &result.constructors)?;
+    result.borrowed_reads = allocation.borrowed_reads;
+    result.owned_primitives = allocation.owned_primitives;
+    result.flow_sites = allocation.flow_sites;
     Ok(result)
 }
 

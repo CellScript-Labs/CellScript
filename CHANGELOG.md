@@ -2,6 +2,274 @@
 
 ## Unreleased — 0.32
 
+Bind typed Input/Output `data_hash`, `lock_hash` and `type_hash` property calls
+to live coordinates, checked runtime implementations, status handling and
+published pointers. Require distinct private result buffers, protected from
+intervening stores and calls. Advance artifact-cache generation to v122.
+Return-tail mutation tests locate the actual restoration/RET block even when
+source evidence shares its address; restoration, partial-entry and skipped-field
+mutations retain their original coverage. Stable admission remains pending.
+
+Bind typed Input/Output view `capacity`, `occupied_capacity`,
+`unoccupied_capacity`, `data_size` and `output_index` calls to their source
+coordinate, runtime implementation, error path and scalar destination. Require
+these calls in bounded-body operation order. Independent runtime checks cover
+source decoding, syscall arguments/results, capacity subtraction and frame
+restoration. Rebound runtime values, call sources/results, ignored errors and
+erased evidence reject. Property reads also require their coordinate to remain
+live after intervening writes and helper calls. Advance artifact-cache generation to v121; stable
+admission and final integration gates remain pending.
+
+Bind direct collection-read returns of `u128` and `[u8; 1..8]` to the
+copied result pointer and exact little-endian return-register assembly. Require
+the return evidence and preserve both `u128` limbs through frame restoration.
+This extends the checked return boundary for collection results produced in
+the same typed block; general aggregate computation, aliases and tuple returns
+remain separate. Advance artifact-cache generation to v120.
+Materialize wide fixed-byte call literals in immutable data with their exact
+length, instead of passing a null pointer and zero length. This fixes missing-key
+`OrderedMap<u64, u128>` defaults passed as literals through readonly helpers;
+register and outgoing-stack calls retain the same value representation.
+Keep complete authoring-comparison sources under the selection-bundle fixtures,
+outside the legacy scenarios' sibling-module directory. Their contents and
+named/explicit and collection/array comparisons are unchanged; the frozen
+array-source record changes only its path. This restores old-edition scenario
+discovery without changing edition routing or skipping scenario tests.
+
+Bind bool/u8/u16/u32/i32/u64 returns in bounded collection, Cell and nested-view
+bodies to their evaluated typed source. Check the complete return inventory,
+mandatory execution, lock predicate failure and shared frame restoration while
+preserving `a0`. Rebound zeroed/substituted returns, epilogue result clobbers and
+erased return evidence reject. Advance artifact-cache generation to v119;
+aggregate return provenance and final admission remain separate obligations.
+Compose returning observation sites only after actual-register and bounded-write
+lifetime checks, preserving standalone nested Cell creation followed by a return.
+Sites seen as EXIT remain ineligible for returning summaries.
+
+Bind non-fused branches and jumps in bounded collection, Cell and nested-view
+bodies to their typed conditions and successors. Require complete branch
+evidence and preserve decoded control flow in the operation-order check.
+Only actual machine fusion exempts a branch from this separate inventory;
+unoptimized comparisons retain their own branch checks. Advance artifact-cache
+generation to v118. Stable admission and final acceptance remain pending.
+
+Freeze eight O3 resource observations for 1024-input ordered-map sorted
+construction: unique keys, duplicate compaction, late disorder and shared-arena
+exhaustion. Bind exact source/ELF/transaction identities, Type-group cycles,
+observed stack and guest pages, witness/transaction sizes and explicit unavailable
+heap/rejected-transaction totals. Independent scheduler replay must agree with
+the authoritative group result. Existing business resource ceilings are unchanged.
+
+Extend nested codec reference evidence with a test-only Molecule reader using
+literal fixture field widths and limits. Native and generated TypeScript bytes
+round-trip every admitted fixture value, including empty/mixed-size byte and
+record lists, 256-byte payloads, and both shapes at exactly 4096 encoded bytes.
+Truncation, trailing bytes, rebound total sizes and invalid offsets reject;
+record count/payload/total one-over cases reject in both builders. This adds
+acceptance evidence without changing runtime behavior or stable admission.
+
+Require successful typed-block paths to execute checked collection operations
+in source order, alongside scalar definitions and Cell operations. Bind each
+owned or borrowed top-level primitive to its typed operation; owner drop must
+retire every declared member. Constructor coverage now composes with completed
+nested/Cell instruction and lifetime proofs. Rebound jumps that skip a push,
+member retirement, or borrowed query/result reject. Advance artifact-cache
+generation to v117 without changing emitted instructions or resource ceilings.
+This establishes per-block operation coverage, not arbitrary source-CFG or
+value equivalence; final admission gates remain pending.
+
+Bind owned collection `len`, `capacity` and `is_empty` descriptor checks, using
+the same independent instruction grammar as readonly borrowed queries. Bind
+these queries and ordered Map/Set membership results to their typed scalar destinations
+for both owner forms. Reject replaced result stores, descriptor-result
+instructions, omitted query evidence and entries that bypass the producer.
+Advance artifact-cache generation to v116. Query labels add evidence without
+changing emitted instructions; complete operation-path coverage and final
+admission gates remain separate obligations.
+
+Keep distinct scalar slots in ordinary wrappers that call bounded helpers, so
+checked argument preparation and result reception use the same layout as the
+compiler. Other scalar-only functions retain slot reuse. O0/O3 regressions cover
+repeated Cell reads through wrappers and rebound result-store mutations. Advance
+artifact-cache generation to v115; this can change wrapper ELF/frame layouts.
+Browser language-service checks distinguish declaration and effect completion
+positions. Final integration and source admission remain pending.
+
+Protect owned arena state, allocation records, elements and descriptors between
+independently checked collection operations. The write-effect checker now also
+covers local-only owners; ordinary stores, calls and syscalls cannot rewrite
+their storage. Only the matching checked constructor or primitive may write an
+arena. Recognize finite private byte-copy loops and constant multiplication so
+existing tuple reception and stack Vec operations retain their behavior.
+Rebound mutations corrupt ordinary result stores and inline copies without
+altering collection bodies; O0/O3 execution demonstrates changed outcomes.
+Advance artifact-cache generation to v114. Complete source/value admission and
+final integration gates remain separate obligations.
+
+Bind scalar results of bounded helper calls to their typed caller destination.
+Recognize the actual call continuation, exact outgoing-stack restoration and
+complete `a0` store for bool/u8/u16/u32/i32/u64, including helpers without scalar
+parameters. O0/O3 rebound mutations cover zeroed results, redirected stores and
+incorrect frame restoration across collection, Cell and nested-view helpers.
+Advance artifact-cache generation to v113. This proves result reception, not
+the callee's value computation or preservation across later arbitrary writes.
+Record the initial authoring-form decision against complete settlement,
+migration and transfer programs: named declarations, ordinary reads/helpers,
+and explicit count-based reservations with CLI/editor budget explanations.
+Stable admission and final integration gates remain pending.
+
+Bind ordinary scalar entry parameters and evaluated call arguments for Cell and
+nested-view helpers, as well as collection helpers. Count expanded coordinate,
+fixed-value and pointer/extent ABI words before scalar register/stack arguments.
+Require complete preparation/invocation evidence and preserve the evaluated
+arguments to their consuming call across every reaching path. O0/O3 mutations
+cover zeroed/substituted spills, caller source replacement, erased evidence,
+bypassed preparation and later register clobbers. Advance artifact-cache
+generation to v112. Arbitrary upstream value and aggregate provenance remain
+separate obligations; this does not open stable admission.
+
+Extend scalar definition and successful-path checks to bodies using Cell
+coordinates, exact selections and nested views, including named-shape helpers
+without an arena. Compose complete nested read/load/output bodies only after
+their instruction and lifetime proofs pass; these bodies cannot hide required
+scalar operations. Recognize register-local logical-right-shift constants and
+retained coordinate arguments after full-slot stores, while invalidating them
+on overlapping writes, calls and joins. Advance artifact-cache generation to
+v111. Refresh sidecar and ProtocolBundle identities for the additional evidence;
+executable/transaction identities and resource ceilings remain unchanged.
+Complete aggregate/source provenance and stable admission remain pending.
+
+Require successful typed-block exits in collection bodies to execute every
+checked scalar definition in source order. Reject whole-definition bypasses,
+including rebound branches that change actual VM results while leaving the
+definition's instructions intact. Fused comparisons expose both successors to
+the path checker; arithmetic bodies retain their independently checked fatal
+guards. Compose independently checked Cell reads and selections in the same
+operation order, including inline returning syscalls. Advance artifact-cache
+generation to v110. Unchecked syscall-number annotations cannot authorize
+fallthrough past required operations. This does not establish
+arbitrary value preservation or complete source-to-machine CFG equivalence.
+
+Bind scalar arguments at readonly collection-helper calls to their evaluated
+typed locals/constants and complete expanded ABI positions. Require preparation
+and invocation evidence, recognize every load/store, and preserve each argument
+through intervening code to the exact consuming call on all reaching paths.
+Consume argument facts after calls so later invocations cannot reuse them.
+O0/O3 runtime and rebound tests cover forwarding, nested calls, source
+substitution, erased evidence and preparation bypasses. Advance artifact-cache
+generation to v109; complete upstream source/value proofs remain pending.
+
+Bind ordinary scalar parameters alongside readonly collection handles to their
+exact incoming helper ABI words. Count pointer/extent pairs when locating later
+register or stack arguments, and reject substituted sources or zeroed spills.
+Rebound tests include all six scalar types, mixed Hash/owner parameters and a
+mutation that changes actual VM behavior. This establishes entry spills only;
+caller scalar provenance and subsequent value preservation remain separate.
+
+Extend scalar machine binding to all six integer comparisons and boolean
+equality. Check materialized boolean values and fused conditional branches,
+including signedness, swapped operands, inverted predicates, both successors
+and eliminated empty jump blocks. A fused result must have exactly one typed
+use, its adjacent branch condition. O0/O3 VM cases compare extreme/equal values
+with independent models; rebound mutations cover result instructions, missing
+markers and redirected branches. Advance artifact-cache generation to v108.
+Parameter/aggregate provenance and complete CFG lifetime remain open.
+
+Bind scalar definitions in collection bodies to their typed constants, operands,
+operations and destination slots. Check integer arithmetic, width normalization,
+division/shift guards, boolean operations and copies against decoded instructions;
+require complete marker inventory and reject partial entry. These checks do not
+yet establish parameter decoding, aggregate provenance or complete CFG lifetime.
+Keep contextual nonnegative i32 literals signed through assignment, casts and
+arithmetic, and sign-extend i32 array/vector index reads. O0/O3 fixtures compare
+integer operations with host models and reject rebound instruction/semantic
+mutations. Advance artifact-cache generation to v107 for the new boundary.
+
+Preserve complete fixed primitive tuple values returned by helpers. Keep the
+eight-register field ABI, read returns from current value storage, and copy all
+returned fields into the caller's storage before another call can reuse the
+callee frame. Copies, forwarding, conditional updates and nested short-aggregate
+fields retain their values. O0/O3 VM fixtures cover packed and wide fields,
+empty fields, signed scalars, all eight registers and large field offsets.
+More than eight return fields fail closed instead of silently truncating.
+Resource tuples retain separate handling; general tuple source/lifetime proof
+remains open. Advance the artifact-cache generation to invalidate older output.
+
+Bind nonempty `load_sorted` inputs to their evaluated typed local and adjacent
+checked member primitive, including packed arrays and pointer-backed storage.
+Reject source substitution, omitted preparation, forged member coordinates and
+branches that bypass preparation. Re-read mutable record fields after whole-value
+assignment while preserving saved snapshots and explicit field/index writes.
+O0/O3 VM checks cover field snapshots through reassignment and loops, 1024-item
+sorted maps, last-item disorder/duplicates and shared arena exhaustion. Upstream
+value computation and complete source/lifetime equivalence remain unproved.
+
+Materialize projected assignments to mutable local records, tuples and fixed
+arrays by rebuilding each affected parent in separate storage before replacing
+the root. Copies, collection inputs and by-value helpers observe those writes;
+saved values remain independent. Type literals against their destination field
+or element, including u8 assignments. Array writes retain constant-index and
+bound checks. Refresh iteration, destructuring and match reads across loop
+backedges. VM/checker fixtures cover mixed nested paths, conditional/repeated
+writes, imported generic records, packed arrays and 1024-byte inputs. Serialize
+fixed primitive tuple/array fields in records, and preserve addressed short-byte tuple
+fields, including register-returned fields read on conditional paths. Cell
+resource transitions keep their separate lowering contract.
+
+Preserve 1–8-byte array values when initializing or copying mutable locals.
+Pack byte-array literals and moves consistently, and resolve actual byte storage
+for indexing instead of treating every local slot as a pointer. Copied fields
+retain their own value after reassignment. VM regressions cover all short-array
+widths, literal/witness/record/collection sources, readonly helper returns,
+owner drop and unsigned index bounds. These correctness fixes do not remove the
+remaining independent source/value proof obligations.
+
+Keep copied fixed-value locals independent of their original field and witness
+length metadata. Small records now copy their bytes as wider records do;
+reassigning a parent cannot redirect a saved field. Bound pointer-alias analysis
+and reject incompatible reference bindings instead of looping indefinitely.
+O0/O3 VM regressions cover 1/8/16/32-byte fields through local snapshots,
+collection arguments and readonly helper defaults.
+
+Bind complete scalar and pointer-backed fixed-value collection argument lists to
+typed local slots/literals and the consuming checked member primitive. Verify byte order, full scalar width,
+Vec indexes and Map get_or defaults for owned operations and readonly helpers.
+Reject substituted sources, missing preparation and entry after preparation,
+including large stack offsets. Wide and record copies read their evaluated typed
+locals after retaining existing source/length checks, with one preserved pointer
+load per copy. Derive record copy widths independently. Short-array arguments
+bind packed words/literals and pointer-backed field, index and collection values
+to their typed producers; reference conversions preserve that representation.
+Fix indexing of packed aggregate parameters and preserve the addressed storage
+of short-array elements. Upstream sorted-array provenance and complete
+source/value/lifetime equivalence remain separate admission obligations.
+The transfer replay reduces the main ELF from 41,392 to 40,536 bytes and the
+32-distinct-asset transaction from 2,052,694 to 2,040,832 cycles. Refresh measured
+observations while retaining every existing ceiling and canonical transaction.
+
+Reject coherently rebound Cell field copies that alias another data result or
+load buffer. Derive each copied result's full extent from its checked schema
+and compare data-producer write regions within the invocation. Preserve those
+buffers across ordinary stores and summarized memory effects. Fixed and nested
+table regressions include a VM comparison changed by the forged alias; stable
+source/value admission remains blocked.
+
+Snapshot mutable local values when creating a new immutable binding, including
+explicitly typed bindings. Reassigning the original local must not change the
+saved value. Verify copied Cell fields with scalar, u128, Hash and byte-array
+VM cases, including branch assignment and fixed/nested data layouts. Collection
+record snapshots also survive later local assignment, collection mutation and
+owner drop for 8–64-byte values. Refresh the canonical persistent-policy sidecar
+and bundle identities from replay; executable bytes and resource ceilings stay
+unchanged.
+
+Preserve named Cell role navigation and rename across receiver comments and
+parenthesized receivers, including multiline comments and range endpoints.
+Resolve references within their own catalog and reject renames initiated from
+comments or string text.
+Check the complete settlement program after edits and the optional browser
+language service's definition locations.
+
 Extend the complete mixed-role settlement bundle comparison to named and
 positional authoring at O0/O3, including generated SDK bindings, canonical
 transaction bytes, required peer execution and rebound hostile reports. Retain
@@ -13,8 +281,8 @@ Bind copied collection `u128`, fixed-byte and record results to the checked
 producer, full value width, private destination buffer and typed pointer slot.
 Reject truncated/shifted copies, missing publication evidence and destinations
 overlapping scalar slots, collection storage or other copied results. These
-local transport checks retain the allocation admission blocker; key/value
-argument staging and complete source/machine ownership remain separate work.
+local transport checks retain the allocation admission blocker; sorted input
+provenance and complete source/machine ownership remain separate work.
 
 Show collection budget scenarios directly on declaration hover, including
 per-member reservation costs, cumulative growth and shared byte/event shortfalls.
@@ -57,7 +325,7 @@ the same checked owned/readonly member primitive, including Map entry/value
 offsets and signed `i32` publication. Require complete typed inventories and reject
 branch entry that bypasses preparation or the result producer. Evidence labels
 preserve existing immediate stack-load forwarding. Fixed-width result publication
-is covered by the transport checks above. Key/value input copies, upstream
+is covered by the transport checks above. Wide/record input copies, upstream
 arithmetic and complete source/lifetime equivalence remain pending; retain the
 allocation admission blocker.
 

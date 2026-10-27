@@ -1,4 +1,4 @@
-//! Independently checked incoming helper words and their immutable frame slots.
+//! Independently checked incoming helper words and protected owner/view slots.
 //! Arena spills do not establish caller pointer provenance or borrowed reads.
 use super::*;
 
@@ -134,6 +134,58 @@ pub(super) fn allocated(
         seed.allocated_slots = slots;
         seed.allocated_spans = spans;
         seeds.insert(typed.id.clone(), seed);
+    }
+    Ok(())
+}
+
+/// Bind ordinary scalar entry values in bounded helpers, counting every ABI
+/// word of preceding fixed values, coordinates and pointer/extent arguments.
+/// Mutable scalars may be reassigned after entry; this is not a lifetime region.
+pub(super) fn scalars(
+    record: &VerifiedLoweringRecord,
+    elf: &ParsedElf,
+    seeds: &BTreeMap<String, lifetime::Seed>,
+) -> Result<(), CheckerError> {
+    let owners = crate::allocated_values::owner_types(&record.typed_semantics);
+    let words = elf.instructions.iter().map(|instruction| (instruction.address, instruction.word)).collect();
+    let scalar = |ty: &str| matches!(ty, "bool" | "u8" | "u16" | "u32" | "i32" | "u64");
+    for typed in &record.typed_semantics.entries {
+        let owner_parameter = typed.params.iter().any(|param| param.ty.strip_prefix('&').is_some_and(|ty| owners.contains(ty)));
+        if typed.kind != "helper"
+            || !(owner_parameter || crate::scalar_machine::covered_entry(typed))
+            || !typed.params.iter().any(|param| scalar(&param.ty))
+        {
+            continue;
+        }
+        let entry = record.entries.iter().find(|entry| entry.id == typed.id).ok_or_else(|| invalid("scalar helper has no entry"))?;
+        let machine = finish_prefix(record, elf, entry, seeds.get(&typed.id), &words)?;
+        let mut word = 0u32;
+        for param in &typed.params {
+            let width = crate::fixed_results::parameter_word_width(record, typed, param);
+            if scalar(&param.ty) {
+                let local = typed
+                    .locals
+                    .iter()
+                    .find(|local| local.id == param.binding_id)
+                    .ok_or_else(|| invalid("scalar helper parameter has no typed local"))?;
+                let slot = local
+                    .source_id
+                    .checked_mul(8)
+                    .and_then(|offset| i64::try_from(offset).ok())
+                    .ok_or_else(|| invalid("scalar helper parameter slot overflows"))?;
+                if width != 1
+                    || local.ty != param.ty
+                    || slot.checked_add(8).is_none_or(|end| end > machine.frame.saturating_sub(16))
+                    || machine.memory.get(&(slot - machine.frame)) != Some(&Origin::Incoming(word))
+                {
+                    return Err(invalid(format!(
+                        "scalar helper spill differs from its typed incoming ABI word: {}/{}",
+                        typed.id, param.name
+                    )));
+                }
+            }
+            word = word.checked_add(width).ok_or_else(|| invalid("scalar helper argument expansion overflows"))?;
+        }
     }
     Ok(())
 }

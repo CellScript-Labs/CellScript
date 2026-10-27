@@ -102,6 +102,14 @@ preserves all numeric bounds, existing wire/capacity contracts, independent
 checking and full transaction acceptance. No proposed spelling is executable
 merely because this direction has been adopted.
 
+The [2026-10-26 initial-form decision](CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md#initial-authoring-form-complete-program-decision-2026-10-26)
+records the complete-program author review and selects module-local named roles,
+data shapes and collection workspaces with ordinary reads and checked helpers.
+For collections it retains explicit per-invocation reservations with CLI/editor
+budget explanations; full-maximum reservation is not the default. This chooses
+the initial interface without claiming stable admission, final gate completion
+or independent human review.
+
 ## Direct semantic elaboration
 
 The authoring frontend must lower directly into structured, versioned semantic

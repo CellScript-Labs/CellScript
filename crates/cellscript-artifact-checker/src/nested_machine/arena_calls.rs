@@ -1,9 +1,26 @@
-//! Bind arena helper calls to source owner identities and expanded ABI words.
+//! Bind arena owner arguments and bounded helpers' scalar arguments to expanded
+//! ABI words. Cell/nested pointer and coordinate arguments have their own proofs.
 //! `lifetime` separately requires the actual pointer/extent facts on every
 //! reaching path. Complete collection value and machine retirement proofs remain
 //! separate from constructor/parameter provenance and argument transport.
 use super::*;
 use crate::allocated_values::machine::Checked as Allocated;
+
+mod results;
+mod scalars;
+
+pub(super) struct ScalarArgument {
+    pub position: u32,
+    pub word: u32,
+    pub operand: crate::TypedSemanticOperand,
+}
+
+pub(super) struct ScalarStage {
+    pub owner: String,
+    pub call: u64,
+    pub word: u32,
+    pub outgoing: u32,
+}
 
 #[derive(Clone, Copy)]
 pub(super) enum Root {
@@ -18,15 +35,19 @@ pub(super) struct Argument {
 
 pub(super) struct Call {
     pub owner: String,
+    pub block: u32,
     pub callee: String,
     pub outgoing: u32,
     pub arguments: Vec<Argument>,
+    pub scalars: Vec<ScalarArgument>,
+    pub result: Option<u32>,
 }
 
 #[derive(Default)]
 pub(super) struct Checked {
     pub helpers: BTreeSet<String>,
     pub calls: BTreeMap<u64, Call>,
+    pub scalar_ends: BTreeMap<u64, Vec<ScalarStage>>,
 }
 
 struct Parameter {
@@ -75,12 +96,16 @@ pub(super) fn validate(
             }
             word = word.checked_add(width).ok_or_else(|| invalid("arena call ABI expansion overflows"))?;
         }
-        if !params.is_empty() {
+        if !params.is_empty() || crate::scalar_machine::covered_entry(entry) {
             result.helpers.insert(entry.id.clone());
             parameters.insert(entry.id.as_str(), params);
         }
     }
     if parameters.is_empty() {
+        if record.blocks.iter().flat_map(|block| &block.allocated_lifecycle_labels).any(|label| label.starts_with(".Lallocated_call_"))
+        {
+            return Err(invalid("scalar call evidence has no bounded helper"));
+        }
         return Ok(result);
     }
     let entries = record.typed_semantics.entries.iter().map(|entry| (entry.id.as_str(), entry)).collect::<BTreeMap<_, _>>();
@@ -93,16 +118,16 @@ pub(super) fn validate(
     let mut outgoing = BTreeMap::new();
     for id in parameters.keys() {
         let entry =
-            record.entries.iter().find(|entry| entry.id == *id).ok_or_else(|| invalid("arena helper has no lowering entry"))?;
+            record.entries.iter().find(|entry| entry.id == *id).ok_or_else(|| invalid("bounded helper has no lowering entry"))?;
         let start = record
             .blocks
             .iter()
             .find(|block| block.id == entry.entry_block)
-            .ok_or_else(|| invalid("arena helper has no entry block"))?
+            .ok_or_else(|| invalid("bounded helper has no entry block"))?
             .range
             .start;
         if starts.insert(start, *id).is_some() {
-            return Err(invalid("arena helpers share a machine entry"));
+            return Err(invalid("bounded helpers share a machine entry"));
         }
         outgoing.insert(*id, view_calls::outgoing_bytes(record, entries[id])?);
     }
@@ -135,24 +160,42 @@ pub(super) fn validate(
     let mut steps = 0usize;
     for flow in flows {
         let Some(callee) = starts.get(&flow.target).copied() else { continue };
-        let word = *words.get(&flow.address).ok_or_else(|| invalid("arena call instruction missing"))?;
+        let word = *words.get(&flow.address).ok_or_else(|| invalid("bounded helper call instruction missing"))?;
         if !matches!(word & 0x7f, 0x67 | 0x6f) || word >> 7 & 31 != 1 {
-            return Err(invalid("arena helper must be entered through a call"));
+            return Err(invalid("bounded helper must be entered through a call"));
         }
-        let &(owner, Some(block)) = typed_at.range(..=flow.address).next_back().ok_or_else(|| invalid("arena call owner missing"))?.1
+        let &(owner, Some(block)) =
+            typed_at.range(..=flow.address).next_back().ok_or_else(|| invalid("bounded call owner missing"))?.1
         else {
-            return Err(invalid("arena call has no typed block"));
+            return Err(invalid("bounded call has no typed block"));
         };
         let ordinal = observed.entry((owner, block)).or_default();
         let op = expected
             .get(&(owner, block))
             .and_then(|ops| ops.get(*ordinal))
-            .ok_or_else(|| invalid("machine arena call has no typed operation"))?;
+            .ok_or_else(|| invalid("machine bounded call has no typed operation"))?;
         *ordinal += 1;
         if op.call.as_ref().and_then(|call| names.get(call.target.as_str())).copied() != Some(callee) {
-            return Err(invalid("arena call target or order differs from typed source"));
+            return Err(invalid("bounded call target or order differs from typed source"));
         }
         let mut arguments = Vec::new();
+        let mut scalar_arguments = Vec::new();
+        let mut abi_word = 0u32;
+        for (position, param) in entries[callee].params.iter().enumerate() {
+            let width = crate::fixed_results::parameter_word_width(record, entries[callee], param);
+            if matches!(param.ty.as_str(), "bool" | "u8" | "u16" | "u32" | "i32" | "u64") {
+                let operand = op
+                    .operands
+                    .get(position)
+                    .filter(|arg| arg.ty == param.ty)
+                    .ok_or_else(|| invalid("scalar call argument differs from its parameter"))?;
+                if width != 1 {
+                    return Err(invalid("scalar call argument has a non-scalar ABI width"));
+                }
+                scalar_arguments.push(ScalarArgument { position: position as u32, word: abi_word, operand: operand.clone() });
+            }
+            abi_word = abi_word.checked_add(width).ok_or_else(|| invalid("scalar call ABI expansion overflows"))?;
+        }
         for param in &parameters[callee] {
             let arg = op.operands.get(param.position).ok_or_else(|| invalid("arena call operand missing"))?;
             if arg.ty.trim_start_matches('&') != param.owner_type {
@@ -180,11 +223,25 @@ pub(super) fn validate(
         }
         result.calls.insert(
             flow.address,
-            Call { owner: owner.to_string(), callee: callee.to_string(), outgoing: outgoing[callee], arguments },
+            Call {
+                owner: owner.to_string(),
+                block,
+                callee: callee.to_string(),
+                outgoing: outgoing[callee],
+                arguments,
+                scalars: scalar_arguments,
+                result: if matches!(entries[callee].return_type.as_str(), "bool" | "u8" | "u16" | "u32" | "i32" | "u64") {
+                    op.destinations.first().copied()
+                } else {
+                    None
+                },
+            },
         );
     }
     if expected.iter().any(|(key, ops)| observed.get(key).copied().unwrap_or(0) != ops.len()) {
-        return Err(invalid("typed arena call lacks machine coverage"));
+        return Err(invalid("typed bounded call lacks machine coverage"));
     }
+    result.scalar_ends = scalars::validate(record, elf, &result.calls)?;
+    results::validate(record, elf, &result.calls)?;
     Ok(result)
 }

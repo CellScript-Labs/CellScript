@@ -5,6 +5,9 @@ impl CodeGenerator {
         if self.emit_nested_index(dest, arr, idx) {
             return Ok(());
         }
+        if self.emit_short_byte_array_index(dest, arr, idx) {
+            return Ok(());
+        }
         if self.emit_fixed_aggregate_index(dest, arr, idx) {
             return Ok(());
         }
@@ -22,6 +25,42 @@ impl CodeGenerator {
         self.emit("# cellscript abi: fail closed because element layout is not statically computable");
         self.emit_fail(CellScriptRuntimeError::TypeHashMismatch);
         Ok(())
+    }
+
+    fn emit_short_byte_array_index(&mut self, dest: &IrVar, arr: &IrOperand, idx: &IrOperand) -> bool {
+        let width = match arr {
+            IrOperand::Var(var) => match &var.ty {
+                IrType::Array(inner, width) if **inner == IrType::U8 && (1..=8).contains(width) => *width,
+                _ => return false,
+            },
+            IrOperand::Const(IrConst::Array(bytes))
+                if (1..=8).contains(&bytes.len()) && bytes.iter().all(|byte| matches!(byte, IrConst::U8(_))) =>
+            {
+                bytes.len()
+            }
+            _ => return false,
+        };
+        // A local may hold packed bytes or a copied-buffer pointer. At higher
+        // optimization levels the array may also be an immediate constant.
+        let Some(source) = self.expected_fixed_byte_source(arr, width) else {
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return true;
+        };
+        self.emit_prepare_fixed_byte_source(&source, width, "short byte-array index");
+        if !self.emit_fixed_byte_source_pointer_or_const_to("t4", &source) {
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return true;
+        }
+        self.emit_operand_to_register("t1", idx);
+        self.emit(format!("li t2, {width}"));
+        let valid = self.fresh_label("short_byte_index_valid");
+        self.emit(format!("bltu t1, t2, {valid}"));
+        self.emit_fail(CellScriptRuntimeError::BoundsCheckFailed);
+        self.emit_label(&valid);
+        self.emit("add t4, t4, t1");
+        self.emit("lbu t0, 0(t4)");
+        self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
+        true
     }
 
     fn emit_fixed_aggregate_index(&mut self, dest: &IrVar, arr: &IrOperand, idx: &IrOperand) -> bool {
@@ -53,6 +92,9 @@ impl CodeGenerator {
         self.emit_stack_load("t4", self.scalar_slot_offset(arr_var.id));
         if let Some(width) = fixed_scalar_width(inner, Some(element_width)) {
             self.emit_unaligned_scalar_load("t4", "t0", "t2", offset, width);
+            if dest.ty == IrType::I32 {
+                self.emit_sign_extend_i32("t0");
+            }
         } else {
             self.emit(format!("addi t0, t4, {}", offset));
         }
@@ -117,6 +159,9 @@ impl CodeGenerator {
         self.emit("add t4, t4, t1");
         if fixed_scalar_width(&dest.ty, Some(element_width)).is_some() {
             self.emit_unaligned_scalar_load("t4", "t0", "t2", 0, element_width.min(8));
+            if dest.ty == IrType::I32 {
+                self.emit_sign_extend_i32("t0");
+            }
         } else {
             self.emit("addi t0, t4, 0");
         }
@@ -158,6 +203,9 @@ impl CodeGenerator {
         self.emit("add t4, t4, t1");
         if dest_scalar {
             self.emit_unaligned_scalar_load("t4", "t0", "t2", 0, element_width);
+            if dest.ty == IrType::I32 {
+                self.emit_sign_extend_i32("t0");
+            }
         } else {
             self.emit("addi t0, t4, 0");
         }
@@ -191,7 +239,18 @@ impl CodeGenerator {
         }
 
         // Load array base pointer
-        self.emit_stack_load("t4", self.scalar_slot_offset(arr_var.id));
+        // Small parameters and ordinary aggregate locals contain packed bytes.
+        // Field/index projections can instead retain addressed storage.
+        if total_width <= 8
+            && !self.aggregate_pointer_sources.contains_key(&arr_var.id)
+            && !self.fixed_byte_local_offsets.contains_key(&arr_var.id)
+            && !self.schema_pointer_vars.contains(&arr_var.id)
+            && !self.schema_field_value_sources.contains_key(&arr_var.id)
+        {
+            self.emit_sp_addi("t4", self.scalar_slot_offset(arr_var.id));
+        } else {
+            self.emit_stack_load("t4", self.scalar_slot_offset(arr_var.id));
+        }
 
         // Load index value into t1
         match idx {
@@ -220,6 +279,9 @@ impl CodeGenerator {
             // Scalar element: load from base + offset
             self.emit("add t4, t4, t1");
             self.emit_unaligned_scalar_load("t4", "t0", "t2", 0, element_width.min(8));
+            if dest.ty == IrType::I32 {
+                self.emit_sign_extend_i32("t0");
+            }
         } else {
             // Pointer-sized element: compute base + offset
             self.emit("add t0, t4, t1");

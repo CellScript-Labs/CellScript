@@ -23,6 +23,7 @@ mod nested_machine;
 pub mod open_handle_policy;
 mod policy;
 mod policy_machine;
+mod scalar_machine;
 mod schema;
 mod value_abilities;
 pub mod zk;

@@ -109,7 +109,7 @@ fn artifacts_at(root: &Path, named: bool, opt_level: u8) -> (Vec<CompileResult>,
     let mut source = if named {
         include_str!("../../examples/language/batches/mixed_settlement.cell")
     } else {
-        include_str!("../fixtures/mixed_settlement_positional.cell")
+        include_str!("fixtures/mixed_settlement_positional.cell")
     }
     .to_string();
     for (placeholder, tag) in [("11", 1), ("22", 2), ("33", 3), ("44", 4)] {

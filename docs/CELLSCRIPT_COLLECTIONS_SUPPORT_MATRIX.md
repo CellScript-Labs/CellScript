@@ -81,9 +81,23 @@ Index arguments now bind to typed constants/local slots, and copied scalar
 results bind to typed destinations with exact byte order, Map key/value offsets
 and `i32` sign extension. Both compose with the same adjacent checked member
 primitive; erased transport inventories and bypass branches are rejected.
-Key/value input copies, wide result publication, upstream scalar provenance,
-machine retirement and full source correspondence remain unproved; the admission
-blocker is retained.
+Fixed-value result publication also binds full-width private buffers and typed
+pointer slots for u128, byte arrays and records. Complete argument lists of
+scalars and pointer-backed fixed values bind key/value/default bytes and indexed
+writes to the adjacent checked primitive. Record widths come from typed layouts;
+missing preparation, source/member substitution and bypass branches reject.
+Short-array argument copies distinguish packed words/literals from pointed field,
+index and collection results using typed producers and reference conversions.
+Nonempty sorted inputs bind their evaluated typed slot and packed/pointer
+representation to the adjacent checked sorted primitive; empty input reads no
+source bytes. Upstream value/pointer provenance, machine retirement and full
+source correspondence are not established merely by these argument checks.
+The subsequent operation-path proof binds each top-level collection primitive
+to its typed source operation, alongside scalar definitions and Cell operations.
+Successful typed-block paths must execute the operations in order; owner drop
+must retire every declared member. This covers whole-operation bypasses without
+claiming arbitrary source-CFG or value equivalence. Final profile admission and
+integration gates remain pending, and the admission blocker is retained.
 Arena helper arguments now require the correct source owner pointer from a checked
 constructor or incoming parameter on every reaching machine path. Copies preserve
 that identity; overlapping writes and reconstruction invalidate prior facts.
@@ -120,7 +134,7 @@ admit owner export, escaping borrows or complete source equivalence.
 | `Vec<Vec<u8>>` | Boundary | Boundary | No generic helper | Must fail closed unless a concrete lowering is added |
 | `NestedValues<T, N, P, B>` | Experimental explicit witness, direct/transaction Cell fields and immutable whole-value helper parameters | Immutable indexing, fields, length and iteration | Complete byte/record codec validation on entry, each transaction field read and helper call; checked pointer/length source binding and retained buffers | Experimental VM path; stable artifact admission and builder parity remain blocked |
 | `data_shape` (Edition 2027) | Transparent named bounds for the same experimental codec | Immutable whole-value, `Shape::Item` and `Shape::Payload` read-only helpers | Complete list or element validation per helper call; no new wire or witness budget | Experimental; module-local names, complete source proof and stable admission pending |
-| `collections` (Edition 2027) | Named shared arena budgets and fixed member types; no wire type | Local construction, owner moves, copied reads and ordered iteration; read-only helper reads, iteration and forwarding | Shared bounded arena plus structured operation contracts; independent machine proof blocked | Independent allocation/ownership proof and complete business acceptance pending |
+| `collections` (Edition 2027) | Named shared arena budgets and fixed member types; no wire type | Local construction, owner moves, copied reads and ordered iteration; read-only helper reads, iteration and forwarding | Independent allocation, descriptor, element, helper transport, write-isolation and per-block operation-path checks | Strict admission remains blocked pending final profile acceptance, gates and review disposition; no whole-language semantic-equivalence claim |
 | Generated allocation-backed collection helpers | No | No | Fail-closed entry symbols | Not a production allocator ABI |
 | `HashMap<u64, u64>` | Limited | Limited | No production helper surface | Unsupported/fail-closed for production contracts |
 | `HashMap<Hash, Token>` | No | No | No | Unsupported; must fail closed |

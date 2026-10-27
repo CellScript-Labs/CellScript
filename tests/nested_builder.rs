@@ -23,6 +23,9 @@ action inspect(
 
 type OwnedItems = Vec<(Vec<Vec<u8>>, Vec<u8>)>;
 
+#[path = "support/nested_codec_oracle.rs"]
+mod codec_oracle;
+
 fn generated_package(source_text: &str) -> (tempfile::TempDir, std::path::PathBuf) {
     let temp = tempfile::tempdir().unwrap();
     let source = temp.path().join("nested.cell");
@@ -168,13 +171,27 @@ fn native_and_generated_typescript_nested_codecs_match_independent_vectors_and_l
     assert_eq!(native(&metadata, bytes_ty, &maximum).unwrap().len(), 4096);
     let mut too_large = maximum.clone();
     too_large.last_mut().unwrap().1.push(1);
+    let record_maximum =
+        (0..32).map(|index| (vec![vec![index as u8]], vec![index as u8; if index < 31 { 107 } else { 103 }])).collect::<OwnedItems>();
+    assert_eq!(native(&metadata, record_ty, &record_maximum).unwrap().len(), 4096);
+    let mut record_too_large = record_maximum.clone();
+    record_too_large.last_mut().unwrap().1.push(1);
     let vectors = vec![
+        (bytes_ty, vec![], true),
+        (record_ty, vec![], true),
         (bytes_ty, bytes, true),
         (record_ty, record, true),
+        (record_ty, vec![(vec![vec![0]], vec![]), (vec![vec![255]], vec![1, 2, 3])], true),
+        (bytes_ty, vec![(vec![], vec![0xa5; 256])], true),
+        (record_ty, vec![(vec![vec![0xff]], vec![0xa5; 256])], true),
         (bytes_ty, maximum, true),
+        (record_ty, record_maximum, true),
         (empty_ty, vec![], true),
         (small_ty, vec![(vec![], vec![1, 2])], true),
         (bytes_ty, too_large, false),
+        (record_ty, record_too_large, false),
+        (record_ty, vec![(vec![vec![1]], vec![]); 33], false),
+        (record_ty, vec![(vec![vec![1]], vec![0; 257])], false),
         (bytes_ty, vec![(vec![], vec![]); 33], false),
         (bytes_ty, vec![(vec![], vec![0; 257])], false),
         (record_ty, vec![(vec![], vec![1])], false),
@@ -194,7 +211,37 @@ fn native_and_generated_typescript_nested_codecs_match_independent_vectors_and_l
         assert_eq!(result.is_ok(), success, "{ty}: {result:?}");
         let wire = result.ok();
         if let Some(wire) = &wire {
-            nested_value_contract(&metadata, ty).unwrap().check(wire).unwrap();
+            let (widths, count, payload, total): (&[usize], _, _, _) = if ty == record_ty {
+                (&[1], 32, 256, 4096)
+            } else if ty == wide_ty {
+                (&[16, 32, 17], 2, 8, 256)
+            } else if ty == small_ty {
+                (&[], 1, 2, 15)
+            } else if ty == empty_ty {
+                (&[], 0, 0, 4)
+            } else {
+                assert_eq!(ty, bytes_ty);
+                (&[], 32, 256, 4096)
+            };
+            let decoded = codec_oracle::decode(wire, widths, count, payload, total).unwrap();
+            assert_eq!(decoded, items, "independent round trip for {ty}");
+            assert_eq!(native(&metadata, ty, &decoded).unwrap(), *wire);
+            let contract = nested_value_contract(&metadata, ty).unwrap();
+            contract.check(wire).unwrap();
+            let mut trailing = wire.clone();
+            trailing.push(0);
+            let mut rebound_size = trailing.clone();
+            rebound_size[..4].copy_from_slice(&(trailing.len() as u32).to_le_bytes());
+            let mut malformed = vec![wire[..wire.len() - 1].to_vec(), trailing, rebound_size];
+            if wire.len() > 4 {
+                let mut bad_offset = wire.clone();
+                bad_offset[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
+                malformed.push(bad_offset);
+            }
+            for bytes in malformed {
+                assert!(codec_oracle::decode(&bytes, widths, count, payload, total).is_none(), "oracle: {ty}");
+                assert!(contract.check(&bytes).is_err(), "contract: {ty}");
+            }
         }
         fixtures.push(serde_json::json!({"type": ty, "items": items.iter().map(|(fields,payload)| serde_json::json!({"fixedFields":fields,"payload":payload})).collect::<Vec<_>>(), "wire": wire.map(hex::encode)}));
     }

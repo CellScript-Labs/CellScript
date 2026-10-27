@@ -90,6 +90,7 @@ impl<'a> Cursor<'a> {
                 0x13 => source.wrapping_add(((word as i32) >> 20) as u64),
                 0x1b => source.wrapping_add(((word as i32) >> 20) as u64) as i32 as i64 as u64,
                 0x1013 if word >> 26 == 0 => source << (word >> 20 & 63),
+                0x5013 if word >> 26 == 0 => source >> (word >> 20 & 63),
                 _ if word & 0x7f == 0x37 => (word & 0xfffff000) as i32 as i64 as u64,
                 _ => return Err(invalid("unsupported constant materialization")),
             };
@@ -255,5 +256,33 @@ impl<'a> Cursor<'a> {
             return Err(invalid("verification extent or control-flow target differs"));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn constant_program(program: &[u32], expected: u64) -> Result<(), CheckerError> {
+        let words = program.iter().enumerate().map(|(index, word)| (index as u64 * 4, *word)).collect();
+        let targets = BTreeMap::new();
+        let mut cursor = Cursor::new(0, program.len() as u64 * 4, &words, &targets);
+        cursor.constant(6, expected)?;
+        cursor.finish()
+    }
+
+    #[test]
+    fn low_masks_require_initialized_register_local_logical_shifts() {
+        // ADDI t1,zero,-1; SRLI t1,t1,n independently materializes low masks.
+        for shift in 1..=52 {
+            let logical = (shift << 20) | 0x35313;
+            let expected = u64::MAX >> shift;
+            assert!(constant_program(&[0xfff00313, logical], expected).is_ok());
+            assert!(constant_program(&[logical], expected).is_err());
+            assert!(constant_program(&[0xfff00313, logical ^ (1 << 15)], expected).is_err());
+            assert!(constant_program(&[0xfff00313, logical | (1 << 30)], expected).is_err());
+            assert!(constant_program(&[0xfff00313, logical | (1 << 26)], expected).is_err());
+            assert!(constant_program(&[0xfff00313, logical], expected ^ 1).is_err());
+        }
     }
 }

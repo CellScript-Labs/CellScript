@@ -45,7 +45,7 @@ see the [evidence ledger](../../docs/CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md#e
 
 [`batches/record_migration.cell`](batches/record_migration.cell) adds explicit
 revision identities to each message and checks strictly increasing history.
-The complete named and [explicit-bound programs](../../tests/fixtures/record_migration_explicit.cell)
+The complete named and [explicit-bound programs](../../tests/selection_bundle/fixtures/record_migration_explicit.cell)
 produce identical SDK/adapter transaction bytes in O0/O3 all-group fixtures.
 Tests cover the aggregate byte limit, duplicate history and incorrect new
 identities; stable admission remains blocked. See the

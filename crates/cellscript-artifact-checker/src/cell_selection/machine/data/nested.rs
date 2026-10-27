@@ -70,7 +70,7 @@ pub(super) fn validate(
                     return Err(invalid("fixed data result overlaps its input buffer or scalar storage"));
                 }
                 effect.writes.push((output, *width));
-                effect.result_pointer = Some(output);
+                effect.result_buffer = Some((output, *width));
             } else if output != 0 {
                 return Err(invalid("scalar table field has an unexpected result buffer"));
             }

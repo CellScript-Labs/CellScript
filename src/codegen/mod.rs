@@ -24,11 +24,15 @@ mod expr;
 mod frame;
 mod instance_policy;
 mod nested;
+#[cfg(test)]
+mod pointer_alias_tests;
 mod policy;
 mod runtime;
 mod runtime_gather;
 mod scalar_slots;
+mod scalar_values;
 mod schema;
+mod tuple_values;
 mod value_arena;
 mod value_returns;
 mod zk;
@@ -1141,6 +1145,7 @@ enum PreludeU64ValueSource {
 #[derive(Debug, Clone)]
 struct CallableAbi {
     params: Vec<IrParam>,
+    checked_scalar_parameters: bool,
     type_hash_param_indices: BTreeSet<usize>,
     runtime_bound_param_indices: BTreeSet<usize>,
     bounded_plan_param_indices: BTreeSet<usize>,
@@ -1189,6 +1194,7 @@ pub struct CodeGenerator {
     allocated_owner_frames: HashMap<usize, usize>,
     allocated_owner_extents: HashMap<usize, usize>,
     allocated_borrow_scratch: Option<usize>,
+    checked_scalar_values: bool,
     allocated_write_guard: Option<value_arena::WriteGuard>,
     /// Runtime collection buffer allocator for the current function.
     next_collection_slot: usize,
@@ -1453,6 +1459,7 @@ impl CodeGenerator {
             allocated_owner_frames: HashMap::new(),
             allocated_owner_extents: HashMap::new(),
             allocated_borrow_scratch: None,
+            checked_scalar_values: false,
             allocated_write_guard: None,
             next_collection_slot: 0,
             type_layouts: HashMap::new(),
@@ -1890,6 +1897,22 @@ impl CodeGenerator {
     fn register_callable_abis(&mut self, ir: &IrModule) {
         self.callable_abis.clear();
         self.local_callable_names.clear();
+        let allocated_owners = ir
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                IrItem::Action(action) => Some(&action.body),
+                IrItem::PureFn(function) => Some(&function.body),
+                IrItem::Lock(lock) => Some(&lock.body),
+                _ => None,
+            })
+            .flat_map(|body| &body.blocks)
+            .flat_map(|block| &block.instructions)
+            .filter_map(|instruction| match instruction {
+                IrInstruction::AllocatedValue(op) => Some(op.declaration.name.as_str()),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
         for item in &ir.items {
             let (name, params, body) = match item {
                 IrItem::Action(action) => (&action.name, &action.params, &action.body),
@@ -1918,6 +1941,12 @@ impl CodeGenerator {
             self.callable_abis.insert(
                 name.clone(),
                 CallableAbi {
+                    checked_scalar_parameters: matches!(item, IrItem::PureFn(_))
+                        && (scalar_values::covers_body(body, params)
+                            || params.iter().any(|param| {
+                                matches!(&param.ty, IrType::Ref(inner)
+                                if matches!(&**inner, IrType::Named(name) if allocated_owners.contains(name.as_str())))
+                            })),
                     params: params.clone(),
                     type_hash_param_indices,
                     runtime_bound_param_indices,
@@ -1940,6 +1969,7 @@ impl CodeGenerator {
                 external.name.clone(),
                 CallableAbi {
                     params: external.params.clone(),
+                    checked_scalar_parameters: false,
                     type_hash_param_indices: external.type_hash_param_indices.clone(),
                     runtime_bound_param_indices,
                     bounded_plan_param_indices: BTreeSet::new(),
@@ -1984,7 +2014,7 @@ impl CodeGenerator {
         self.set_schema_pointer_params(&action.params);
         self.set_consumed_schema_pointers(&action.body);
         self.set_read_ref_schema_pointers(&action.body);
-        self.set_pointer_aliases(&action.body);
+        self.set_pointer_aliases(&action.body)?;
         self.set_schema_field_value_sources(&action.body);
         self.set_verified_operation_outputs(&action.body);
         self.set_constructed_byte_vectors(&action.body);
@@ -2065,7 +2095,7 @@ impl CodeGenerator {
         self.set_schema_pointer_params(&function.params);
         self.set_consumed_schema_pointers(&function.body);
         self.set_read_ref_schema_pointers(&function.body);
-        self.set_pointer_aliases(&function.body);
+        self.set_pointer_aliases(&function.body)?;
         self.set_schema_field_value_sources(&function.body);
         self.set_verified_operation_outputs(&function.body);
         self.set_constructed_byte_vectors(&function.body);
@@ -2123,7 +2153,7 @@ impl CodeGenerator {
         self.set_schema_pointer_params(&lock.params);
         self.set_consumed_schema_pointers(&lock.body);
         self.set_read_ref_schema_pointers(&lock.body);
-        self.set_pointer_aliases(&lock.body);
+        self.set_pointer_aliases(&lock.body)?;
         self.set_schema_field_value_sources(&lock.body);
         self.set_verified_operation_outputs(&lock.body);
         self.set_constructed_byte_vectors(&lock.body);
@@ -2229,13 +2259,24 @@ impl CodeGenerator {
         }
     }
 
-    fn set_pointer_aliases(&mut self, body: &IrBody) {
-        let mut changed = true;
-        while changed {
-            changed = false;
+    fn move_has_owned_value_storage(&self, dest: &IrVar) -> bool {
+        self.fixed_byte_local_offsets.contains_key(&dest.id)
+            || self.u128_value_offsets.contains_key(&dest.id)
+            || matches!(&dest.ty, IrType::Array(inner, width) if **inner == IrType::U8 && (1..=8).contains(width))
+    }
+
+    fn set_pointer_aliases(&mut self, body: &IrBody) -> Result<()> {
+        let limit = body.blocks.iter().map(|block| block.instructions.len()).sum::<usize>() + 1;
+        for _ in 0..limit {
+            let mut changed = false;
             for block in &body.blocks {
                 for instruction in &block.instructions {
                     let alias = match instruction {
+                        // These destinations own a copied value, not the
+                        // source pointer/length pair. Propagating both witness
+                        // sources through reassignment would alternate their
+                        // length slots forever and would misdescribe the copy.
+                        IrInstruction::Move { dest, .. } if self.move_has_owned_value_storage(dest) => None,
                         IrInstruction::Unary { dest, op: UnaryOp::Ref | UnaryOp::Deref, operand: IrOperand::Var(src) }
                         | IrInstruction::Move { dest, src: IrOperand::Var(src) } => Some((dest, src)),
                         _ => None,
@@ -2291,7 +2332,11 @@ impl CodeGenerator {
                     }
                 }
             }
+            if !changed {
+                return Ok(());
+            }
         }
+        Err(CompileError::without_span("pointer aliases have incompatible source/length bindings; this reassignment is not supported"))
     }
 
     fn set_schema_field_value_sources(&mut self, body: &IrBody) {
@@ -2392,11 +2437,12 @@ impl CodeGenerator {
                         }
                     }
                     IrInstruction::FieldAccess { dest, obj: IrOperand::Var(obj), field } => {
-                        if self
-                            .tuple_call_return_vars
-                            .get(&obj.id)
-                            .and_then(|ty| tuple_return_field_type(ty, field))
-                            .is_some_and(|field_ty| field_ty == dest.ty)
+                        if type_static_length(&obj.ty).is_none()
+                            && self
+                                .tuple_call_return_vars
+                                .get(&obj.id)
+                                .and_then(|ty| tuple_return_field_type(ty, field))
+                                .is_some_and(|field_ty| field_ty == dest.ty)
                         {
                             self.tuple_call_return_field_slots.entry((obj.id, field.clone())).or_insert(dest.id);
                             continue;
@@ -2453,6 +2499,12 @@ impl CodeGenerator {
                         }
                     }
                     IrInstruction::Index { dest, arr: IrOperand::Var(arr), idx } => {
+                        if matches!(&dest.ty, IrType::Array(inner, width) if **inner == IrType::U8 && (1..=8).contains(width)) {
+                            // Indexing an array of fixed byte arrays yields an
+                            // element address, including dynamic indices and
+                            // packed aggregate parameters.
+                            self.aggregate_pointer_sources.insert(dest.id, AggregatePointerSource { ty: dest.ty.clone() });
+                        }
                         if self.aggregate_pointer_sources.contains_key(&arr.id) {
                             if let (IrType::Array(inner, len), Some(index)) = (&arr.ty, const_usize_operand(idx)) {
                                 let element_ty = inner.as_ref();
@@ -2557,6 +2609,7 @@ impl CodeGenerator {
                             self.prelude_fixed_byte_constants.insert(dest.id, bytes);
                         }
                     }
+                    IrInstruction::Move { dest, .. } if self.move_has_owned_value_storage(dest) => {}
                     IrInstruction::Move { dest, src: IrOperand::Var(src) }
                     | IrInstruction::Unary { dest, op: UnaryOp::Ref | UnaryOp::Deref, operand: IrOperand::Var(src) } => {
                         if self.stack_collection_vars.contains(&src.id) && dest.ty == src.ty {
@@ -2579,6 +2632,10 @@ impl CodeGenerator {
             for block in &body.blocks {
                 for instruction in &block.instructions {
                     match instruction {
+                        // A fixed-value Move owns its copied bytes. Reusing
+                        // the source field's decoder would turn a snapshot
+                        // back into a read of its mutable parent.
+                        IrInstruction::Move { dest, .. } if self.move_has_owned_value_storage(dest) => {}
                         IrInstruction::Move { dest, src: IrOperand::Var(src) }
                         | IrInstruction::Unary { dest, op: UnaryOp::Ref | UnaryOp::Deref, operand: IrOperand::Var(src) } => {
                             if !self.schema_field_value_sources.contains_key(&dest.id)
@@ -3289,6 +3346,7 @@ impl CodeGenerator {
         let fused = block.instructions.last().is_some_and(|instruction| self.can_fuse_branch(instruction, &block.terminator));
         let instruction_count = block.instructions.len().saturating_sub(usize::from(fused));
         for (index, instruction) in block.instructions[..instruction_count].iter().enumerate() {
+            let scalar_marker = self.begin_scalar_value(instruction, block.id.0, index);
             let selection_marker = if let IrInstruction::VerifyExactCellRoles { dest, .. } = instruction {
                 let offset = self.selection_frame(dest.as_ref())?;
                 let marker = self.fresh_label(&format!("exact_role_check_{}_{}_{}", block.id.0, index, offset));
@@ -3325,6 +3383,9 @@ impl CodeGenerator {
                 None
             };
             self.generate_instruction(instruction)?;
+            if let Some(marker) = scalar_marker {
+                self.emit_label(&format!("{marker}_end"));
+            }
             if let Some(marker) = selection_marker {
                 if let IrInstruction::VerifyExactCellRoles { dest: Some(dest), .. } = instruction {
                     self.emit_sp_addi("t0", self.selection_frame(Some(dest))?);
@@ -3334,17 +3395,36 @@ impl CodeGenerator {
             }
         }
         if fused {
-            self.try_emit_fused_branch(
-                block.instructions.last().expect("fused branch has a defining instruction"),
-                &block.terminator,
-                fallthrough,
-            )?;
+            let instruction = block.instructions.last().expect("fused branch has a defining instruction");
+            let scalar_marker = self.begin_scalar_value(instruction, block.id.0, instruction_count);
+            self.try_emit_fused_branch(instruction, &block.terminator, fallthrough)?;
+            if let Some(marker) = scalar_marker {
+                self.emit_label(&format!("{marker}_end"));
+            }
         }
 
         if let Some(error) = block.runtime_error {
             self.emit_process_failure(error);
         } else if !fused {
+            let branch_marker = (self.checked_scalar_values
+                && matches!(block.terminator, IrTerminator::Branch { .. } | IrTerminator::Jump(_)))
+            .then(|| self.fresh_label(&format!("allocated_branch_{}", block.id.0)));
+            if let Some(marker) = &branch_marker {
+                self.emit_label(&format!("{marker}_begin"));
+            }
+            let return_marker = (self.checked_scalar_values
+                && matches!(&block.terminator, IrTerminator::Return(Some(operand)) if scalar_values::return_operand(block, operand)))
+            .then(|| self.fresh_label(&format!("allocated_return_{}", block.id.0)));
+            if let Some(marker) = &return_marker {
+                self.emit_label(&format!("{marker}_begin"));
+            }
             self.generate_terminator(&block.terminator, fallthrough)?;
+            if let Some(marker) = return_marker {
+                self.emit_label(&format!("{marker}_end"));
+            }
+            if let Some(marker) = branch_marker {
+                self.emit_label(&format!("{marker}_end"));
+            }
         }
 
         Ok(())
@@ -3596,6 +3676,9 @@ impl CodeGenerator {
                     self.emit_epilogue();
                     return Ok(());
                 }
+                if self.emit_fixed_tuple_return(operand) {
+                    return Ok(());
+                }
                 if let IrOperand::Var(v) = operand
                     && let Some(fields) = self.tuple_aggregate_fields.get(&v.id).cloned()
                 {
@@ -3704,7 +3787,16 @@ impl CodeGenerator {
             self.emit_materialize_u128_operand_to_var(dest, src);
             return Ok(());
         }
-        if let Some(width) = self.fixed_byte_like_width(&dest.ty).filter(|width| *width > 8)
+        // Short byte-array Move destinations use the one-word representation. A
+        // collection read can instead supply a pointer to its private copy;
+        // pack its bytes so reassignment never stores that pointer as a value.
+        if matches!(&dest.ty, IrType::Array(inner, width) if **inner == IrType::U8 && (1..=8).contains(width))
+            && self.emit_small_byte_array_register("t0", src)
+        {
+            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
+            return Ok(());
+        }
+        if let Some(width) = self.fixed_byte_like_width(&dest.ty).filter(|width| *width > 0)
             && self.emit_materialize_fixed_byte_operand_to_var(dest, src, width)
         {
             return Ok(());
@@ -3770,6 +3862,9 @@ impl CodeGenerator {
             let Some(layout) = aggregate_field_layout(&dest.ty, &index.to_string()) else {
                 return false;
             };
+            if layout.fixed_size == Some(0) {
+                continue;
+            }
             let Some(field_width) = self.fixed_byte_like_width(&layout.ty).or_else(|| fixed_aggregate_pointer_param_width(&layout.ty))
             else {
                 return false;
@@ -3991,8 +4086,10 @@ impl CodeGenerator {
 
         self.emit(format!("# cellscript abi: materialize fixed aggregate {} var{} size={}", type_name, dest.id, width));
         for (field, layout) in fields.iter().zip(ordered.iter()) {
-            let Some(field_width) = layout_fixed_byte_width(layout).or_else(|| self.fixed_named_type_width(&layout.ty)) else {
-                return false;
+            let Some(field_width) = layout_fixed_byte_width(layout).or_else(|| self.fixed_byte_like_width(&layout.ty)) else {
+                self.emit("# cellscript abi: fixed aggregate field width is unavailable; fail closed");
+                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+                return true;
             };
             if field_width == 0 {
                 continue;
@@ -4582,7 +4679,18 @@ fn eliminate_immediate_stack_reloads(assembly: &mut [String]) {
     // These source-only markers must not change executable bytes. A reference
     // anywhere in the assembly makes even such a marker an ordinary barrier.
     let evidence_marker = |label: &str| {
-        [".Lcell_view_value_", ".Lallocated_index_", ".Lallocated_result_"].iter().any(|prefix| label.starts_with(prefix))
+        [
+            ".Lcell_view_value_",
+            ".Lallocated_index_",
+            ".Lallocated_result_",
+            ".Lallocated_args_",
+            ".Lallocated_scalar_",
+            ".Lallocated_branch_",
+            ".Lallocated_return_",
+            ".Lallocated_call_",
+        ]
+        .iter()
+        .any(|prefix| label.starts_with(prefix))
     };
     let referenced_markers = assembly
         .iter()
@@ -4750,6 +4858,8 @@ mod stack_reload_tests {
             (".Lcell_view_value_0_0_1", None),
             (".Lcell_view_value_0_0_1", Some("j .Lcell_view_value_0_0_1")),
             (".Lcell_view_value_0_0_1", Some("beq t1, t2, .Lcell_view_value_0_0_1")),
+            (".Lallocated_args_0_1_2_begin", None),
+            (".Lallocated_args_0_1_2_end", Some("j .Lallocated_args_0_1_2_end")),
             (".Lallocated_index_0_0_1_begin", None),
             (".Lallocated_index_0_0_1_begin", Some("j .Lallocated_index_0_0_1_begin")),
             (".Lallocated_result_0_0_8_1_end", None),

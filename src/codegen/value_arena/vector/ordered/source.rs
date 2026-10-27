@@ -5,6 +5,21 @@ use crate::ast::{CollectionsDef, Type, ValueCollectionKind};
 use crate::ir::allocated::{AllocatedOperation as Op, IrAllocatedValue};
 use std::collections::HashSet;
 
+fn short_argument_width(operand: &IrOperand) -> Option<usize> {
+    match operand {
+        IrOperand::Var(var) => match &var.ty {
+            IrType::Array(inner, width) if **inner == IrType::U8 && (1..=8).contains(width) => Some(*width),
+            _ => None,
+        },
+        IrOperand::Const(IrConst::Array(items))
+            if (1..=8).contains(&items.len()) && items.iter().all(|item| matches!(item, IrConst::U8(_))) =>
+        {
+            Some(items.len())
+        }
+        _ => None,
+    }
+}
+
 impl CodeGenerator {
     fn allocated_ir_width(&self, ty: &IrType, visiting: &mut HashSet<String>) -> Option<usize> {
         if !matches!(ty, IrType::Named(_)) {
@@ -106,14 +121,86 @@ impl CodeGenerator {
         Ok(())
     }
 
-    fn allocated_copy_argument(&mut self, operand: &IrOperand, width: usize, output: usize) -> Result<()> {
-        if width <= 8 && fixed_scalar_operand_width(operand).is_some() {
-            self.emit_operand_to_register("t1", operand);
+    fn begin_allocated_arguments(&mut self, op: &IrAllocatedValue, owner: &IrVar, member: usize) -> Result<Option<String>> {
+        let pointer_width = |operand: &IrOperand| match operand {
+            IrOperand::Var(var) => self.allocated_ir_width(&var.ty, &mut HashSet::new()).filter(|width| {
+                (*width > 8 || matches!(var.ty, IrType::Named(_)) || short_argument_width(operand).is_some())
+                    && self.allocated_argument_uses_pointer(var, *width)
+            }),
+            _ => None,
+        };
+        if !op.args.iter().all(|arg| {
+            fixed_scalar_operand_width(arg).is_some() || pointer_width(arg).is_some() || short_argument_width(arg).is_some()
+        }) {
+            return Ok(None);
+        }
+        let preparations = op
+            .args
+            .iter()
+            .filter_map(|arg| pointer_width(arg).map(|width| (arg, width)))
+            .map(|(arg, width)| {
+                self.expected_fixed_byte_source(arg, width)
+                    .map(|source| (source, width))
+                    .ok_or_else(|| CompileError::without_span("allocated argument has no checked fixed-value source"))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        // Preserve the existing source/length checks before the value-transfer
+        // boundary. FieldAccess already saved the evaluated field pointer; the
+        // transfer itself reads that typed local instead of re-decoding it.
+        for (source, width) in preparations {
+            self.emit_prepare_fixed_byte_source(&source, width, "allocated value copy");
+        }
+        let marker = self.fresh_label(&format!("allocated_args_{}_{member}", owner.id));
+        self.emit_label(&format!("{marker}_begin"));
+        Ok(Some(marker))
+    }
+
+    fn allocated_argument_uses_pointer(&self, var: &IrVar, width: usize) -> bool {
+        width > 8
+            || matches!(var.ty, IrType::Named(_))
+            || self.fixed_byte_local_offsets.contains_key(&var.id)
+            || self.schema_field_value_sources.contains_key(&var.id)
+            || self.schema_pointer_vars.contains(&var.id)
+            || self.aggregate_pointer_sources.contains_key(&var.id)
+    }
+
+    fn end_allocated_arguments(&mut self, marker: &Option<String>) {
+        if let Some(marker) = marker {
+            self.emit_label(&format!("{marker}_end"));
+        }
+    }
+
+    fn allocated_copy_argument(&mut self, operand: &IrOperand, width: usize, output: usize, prepared: bool) -> Result<()> {
+        let packed_short = prepared
+            && short_argument_width(operand).is_some()
+            && !matches!(operand, IrOperand::Var(var) if self.allocated_argument_uses_pointer(var, width));
+        if width <= 8 && (fixed_scalar_operand_width(operand).is_some() || packed_short) {
+            if let IrOperand::Const(IrConst::Array(items)) = operand {
+                let value = items.iter().enumerate().fold(0u64, |value, (index, item)| {
+                    let IrConst::U8(byte) = item else { unreachable!("checked short byte literal") };
+                    value | (u64::from(*byte) << (index * 8))
+                });
+                self.emit(format!("li t1, {value}"));
+            } else {
+                self.emit_operand_to_register("t1", operand);
+            }
             for index in 0..width {
                 self.emit_stack_store_byte("t1", output + index);
                 if index + 1 < width {
                     self.emit("srli t1, t1, 8");
                 }
+            }
+        } else if prepared {
+            let IrOperand::Var(var) = operand else {
+                return Err(CompileError::without_span("prepared fixed-value argument requires a typed local"));
+            };
+            // t4 stays live across every byte store, including large stack
+            // offsets. Reloading the same pointer for each byte wastes both
+            // code and cycles at the transfer boundary.
+            self.emit_stack_load("t4", self.scalar_slot_offset(var.id));
+            for index in 0..width {
+                self.emit(format!("lbu t1, {index}(t4)"));
+                self.emit_stack_store_byte_with_avoid("t1", output + index, &["t4"]);
             }
         } else {
             let source = self
@@ -284,18 +371,14 @@ impl CodeGenerator {
         }
         match op.operation {
             Op::Len | Op::Capacity | Op::IsEmpty => {
-                let marker = if vector.arena.pointer_slot.is_some() {
-                    self.begin_value_element_marker(
-                        vector,
-                        match op.operation {
-                            Op::Len => "len",
-                            Op::Capacity => "capacity",
-                            _ => "empty",
-                        },
-                    )
-                } else {
-                    None
-                };
+                let marker = self.begin_value_element_marker(
+                    vector,
+                    match op.operation {
+                        Op::Len => "len",
+                        Op::Capacity => "capacity",
+                        _ => "empty",
+                    },
+                );
                 self.emit_value_vector_check(vector);
                 self.emit(match op.operation {
                     Op::Len => "mv a0, t1",
@@ -311,12 +394,16 @@ impl CodeGenerator {
             _ => match &member.kind {
                 ValueCollectionKind::Vec(_) => match op.operation {
                     Op::Push => {
-                        self.allocated_copy_argument(arg(0)?, vector.width, scratch)?;
+                        let arguments = self.begin_allocated_arguments(op, owner, index)?;
+                        self.allocated_copy_argument(arg(0)?, vector.width, scratch, arguments.is_some())?;
+                        self.end_allocated_arguments(&arguments);
                         self.emit_value_vector_push(vector, scratch)?;
                     }
                     Op::Insert | Op::Set => {
-                        self.allocated_copy_argument(arg(1)?, vector.width, scratch)?;
+                        let arguments = self.begin_allocated_arguments(op, owner, index)?;
+                        self.allocated_copy_argument(arg(1)?, vector.width, scratch, arguments.is_some())?;
                         self.allocated_index(owner, index, arg(0)?);
+                        self.end_allocated_arguments(&arguments);
                         if op.operation == Op::Insert {
                             self.emit_value_vector_insert(vector, scratch)?;
                         } else {
@@ -368,27 +455,53 @@ impl CodeGenerator {
                                 .expected_fixed_byte_source(input, width)
                                 .ok_or_else(|| CompileError::without_span("sorted input has no exact bounded copy source"))?;
                             self.emit_prepare_fixed_byte_source(&source, width, "sorted collection input");
-                            if !self.emit_fixed_byte_source_pointer_or_const_to("a4", &source) {
-                                return Err(CompileError::without_span("sorted input has no addressable storage"));
+                            let marker = self.fresh_label(&format!("allocated_args_{}_{index}", owner.id));
+                            self.emit_label(&format!("{marker}_begin"));
+                            // Bind the evaluated input rather than re-reading a
+                            // cached literal or its original parent field.
+                            if self.allocated_argument_uses_pointer(input_var, width) {
+                                self.emit_stack_load("a4", self.scalar_slot_offset(input_var.id));
+                            } else {
+                                self.emit_sp_addi("a4", self.scalar_slot_offset(input_var.id));
                             }
                             self.emit_stack_store("a4", scratch);
+                            self.emit_label(&format!("{marker}_end"));
                         }
                         return self.emit_value_ordered_load_sorted(ordered, scratch, *count);
                     }
-                    self.allocated_copy_argument(arg(0)?, key_width, scratch)?;
+                    let arguments = self.begin_allocated_arguments(op, owner, index)?;
+                    self.allocated_copy_argument(arg(0)?, key_width, scratch, arguments.is_some())?;
                     match op.operation {
                         Op::Insert => {
                             if vector.width > key_width {
-                                self.allocated_copy_argument(arg(1)?, vector.width - key_width, scratch + key_width)?;
+                                self.allocated_copy_argument(
+                                    arg(1)?,
+                                    vector.width - key_width,
+                                    scratch + key_width,
+                                    arguments.is_some(),
+                                )?;
                             }
+                            self.end_allocated_arguments(&arguments);
                             self.emit_value_ordered_put(ordered, scratch)?;
                         }
-                        Op::Remove => self.emit_value_ordered_remove(ordered, scratch)?,
-                        Op::Contains => self.emit_value_ordered_find(ordered, scratch)?,
+                        Op::Remove => {
+                            self.end_allocated_arguments(&arguments);
+                            self.emit_value_ordered_remove(ordered, scratch)?;
+                        }
+                        Op::Contains => {
+                            self.end_allocated_arguments(&arguments);
+                            self.emit_value_ordered_find(ordered, scratch)?;
+                        }
                         Op::Get | Op::GetOr => {
                             if op.operation == Op::GetOr {
-                                self.allocated_copy_argument(arg(1)?, vector.width - key_width, result + key_width)?;
+                                self.allocated_copy_argument(
+                                    arg(1)?,
+                                    vector.width - key_width,
+                                    result + key_width,
+                                    arguments.is_some(),
+                                )?;
                             }
+                            self.end_allocated_arguments(&arguments);
                             let marker =
                                 if op.operation == Op::Get { self.begin_value_element_marker(vector, "required") } else { None };
                             self.emit_value_ordered_get(ordered, scratch, result)?;

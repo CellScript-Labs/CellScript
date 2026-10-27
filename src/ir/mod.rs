@@ -11,6 +11,7 @@ pub mod allocated;
 mod optimize;
 use allocated::IrAllocatedValue;
 mod policy;
+mod value_aggregates;
 pub use bindings::{IrCellBinding, IrCellBindingRole, IrCellMembership, IrCellSource};
 pub(crate) use optimize::{optimize_exact_cell_data_equality, optimize_source_byte_equality};
 pub(crate) use policy::bind_artifact_policy;
@@ -1112,6 +1113,8 @@ pub struct IrGenerator {
     collection_pools: HashMap<String, CollectionsDef>,
     module: IrModule,
     var_counter: usize,
+    /// Locals whose storage can be reassigned; a new binding must snapshot them.
+    mutable_local_ids: HashSet<usize>,
     block_counter: usize,
     aggregate_fields: HashMap<usize, HashMap<String, IrVar>>,
     schema_field_roots: HashMap<usize, (usize, String)>,
@@ -1369,6 +1372,7 @@ impl IrGenerator {
                 source_type_origins: BTreeMap::new(),
             },
             var_counter: 0,
+            mutable_local_ids: HashSet::new(),
             block_counter: 0,
             aggregate_fields: HashMap::new(),
             schema_field_roots: HashMap::new(),
@@ -2830,6 +2834,7 @@ impl IrGenerator {
         return_type: Option<IrType>,
         core_input_bindings: &HashSet<String>,
     ) -> (Vec<IrParam>, IrBody) {
+        self.mutable_local_ids.clear();
         self.borrow_regions.clear();
         self.enforced_claims.clear();
         self.zk_origins.clear();
@@ -2864,6 +2869,7 @@ impl IrGenerator {
                 binding,
             });
         }
+        self.mutable_local_ids.extend(ir_params.iter().filter(|param| param.is_mut).map(|param| param.binding.id));
         self.transition_param_ids = ir_params.iter().map(|param| param.binding.id).collect();
         let mut blocks = Vec::new();
         let entry = self.push_block(&mut blocks);
@@ -3423,6 +3429,9 @@ impl IrGenerator {
                     } else {
                         self.materialize_operand_with_type(name, lowered.operand, declared_ty, block)
                     };
+                    if let_stmt.is_mut {
+                        self.mutable_local_ids.insert(var.id);
+                    }
                     if transition_coverable && var.ty == IrType::U64 {
                         self.transition_coverable_value_ids.insert(var.id);
                     }
@@ -3431,6 +3440,7 @@ impl IrGenerator {
                 }
                 if let (BindingPattern::Name(name), true) = (&let_stmt.pattern, let_stmt.is_mut) {
                     let var = self.materialize_owned_operand(name, lowered.operand, block);
+                    self.mutable_local_ids.insert(var.id);
                     if transition_coverable && var.ty == IrType::U64 {
                         self.transition_coverable_value_ids.insert(var.id);
                     }
@@ -3570,6 +3580,7 @@ impl IrGenerator {
                     let tuple_name = format!("{}_{}", binding_pattern_label(item), index);
                     let projected = base_var
                         .as_ref()
+                        .filter(|var| !self.is_mutable_value_aggregate(var))
                         .and_then(|var| self.aggregate_fields.get(&var.id).and_then(|fields| fields.get(&field)).cloned())
                         .map(IrOperand::Var)
                         .or_else(|| {
@@ -3613,6 +3624,9 @@ impl IrGenerator {
 
     fn materialize_operand(&mut self, name: &str, operand: IrOperand, block: &mut IrBlock) -> IrVar {
         match operand {
+            IrOperand::Var(var) if self.mutable_local_ids.contains(&var.id) => {
+                self.materialize_owned_operand(name, IrOperand::Var(var), block)
+            }
             IrOperand::Var(var) => var,
             IrOperand::Const(value) => {
                 let ty = self.const_type(&value);
@@ -3625,7 +3639,7 @@ impl IrGenerator {
 
     fn materialize_operand_with_type(&mut self, name: &str, operand: IrOperand, ty: IrType, block: &mut IrBlock) -> IrVar {
         match operand {
-            IrOperand::Var(var) if var.ty == ty => var,
+            IrOperand::Var(var) if var.ty == ty && !self.mutable_local_ids.contains(&var.id) => var,
             IrOperand::Var(var) => {
                 let dest = self.new_var(name.to_string(), ty);
                 let source = IrOperand::Var(var);
@@ -3675,7 +3689,17 @@ impl IrGenerator {
                 if let Some(var) = vars.get(name).cloned() {
                     LoweredExpr { operand: IrOperand::Var(var), current: Some(current) }
                 } else if let Some(constant) = self.lower_constant(name, Span::default()) {
-                    LoweredExpr { operand: constant, current: Some(current) }
+                    let operand = if self.constants.get(name).is_some_and(|(_, ty)| *ty == IrType::I32) {
+                        IrOperand::Var(self.materialize_operand_with_type(
+                            name,
+                            constant,
+                            IrType::I32,
+                            self.block_mut(blocks, current),
+                        ))
+                    } else {
+                        constant
+                    };
+                    LoweredExpr { operand, current: Some(current) }
                 } else if let Some(zero) = self.lower_zero_value(name) {
                     LoweredExpr { operand: zero, current: Some(current) }
                 } else if let Some(lowered) = self.try_lower_enum_constructor_path(name, &[], current, blocks, vars, Span::default()) {
@@ -3700,8 +3724,8 @@ impl IrGenerator {
                     let left = if matches!(binary.op, BinaryOp::Shl | BinaryOp::Shr) {
                         LoweredExpr { operand: IrOperand::Const(Self::default_integer_const(*left_value)), current: Some(active) }
                     } else {
-                        Self::integer_const_for_expected_type(*left_value, &right_ty)
-                            .map(|value| LoweredExpr { operand: IrOperand::Const(value), current: Some(active) })
+                        self.integer_operand_for_expected_type(*left_value, &right_ty, self.block_mut(blocks, active))
+                            .map(|operand| LoweredExpr { operand, current: Some(active) })
                             .unwrap_or_else(|| LoweredExpr {
                                 operand: IrOperand::Const(Self::default_integer_const(*left_value)),
                                 current: Some(active),
@@ -3718,8 +3742,8 @@ impl IrGenerator {
                         if matches!(binary.op, BinaryOp::Shl | BinaryOp::Shr) {
                             LoweredExpr { operand: IrOperand::Const(Self::default_integer_const(*right_value)), current: Some(active) }
                         } else {
-                            Self::integer_const_for_expected_type(*right_value, &left_ty)
-                                .map(|value| LoweredExpr { operand: IrOperand::Const(value), current: Some(active) })
+                            self.integer_operand_for_expected_type(*right_value, &left_ty, self.block_mut(blocks, active))
+                                .map(|operand| LoweredExpr { operand, current: Some(active) })
                                 .unwrap_or_else(|| LoweredExpr {
                                     operand: IrOperand::Const(Self::default_integer_const(*right_value)),
                                     current: Some(active),
@@ -3969,6 +3993,18 @@ impl IrGenerator {
             }
             _ => None,
         }
+    }
+
+    fn integer_operand_for_expected_type(&mut self, value: u128, expected_ty: &IrType, block: &mut IrBlock) -> Option<IrOperand> {
+        let value = IrOperand::Const(Self::integer_const_for_expected_type(value, expected_ty)?);
+        // The constant encoding has no signed variant. Preserve the contextual
+        // i32 type in a LoadConst destination before assignment, arithmetic or
+        // helper transport can mistake its U32 encoding for an unsigned value.
+        Some(if *expected_ty == IrType::I32 {
+            IrOperand::Var(self.materialize_operand_with_type("i32_literal", value, IrType::I32, block))
+        } else {
+            value
+        })
     }
 
     fn binary_result_type_for_operands(&self, op: BinaryOp, left: &IrOperand, right: &IrOperand) -> IrType {
@@ -4286,7 +4322,9 @@ impl IrGenerator {
         return_type: Option<&IrType>,
     ) -> Option<BlockId> {
         if let IrOperand::Var(iterable_var) = &iterable {
-            if let Some(elements) = self.aggregate_elements.get(&iterable_var.id).cloned() {
+            if !self.is_mutable_value_aggregate(iterable_var)
+                && let Some(elements) = self.aggregate_elements.get(&iterable_var.id).cloned()
+            {
                 return self.lower_for_local_fixed_array_stmt(for_stmt, elements, current, blocks, vars, return_type);
             }
             if let IrType::Array(_, len) = &iterable_var.ty {
@@ -4660,8 +4698,8 @@ impl IrGenerator {
     ) -> LoweredExpr {
         if let Expr::Integer(value) = cast.expr.as_ref() {
             let target = Self::convert_type(&cast.ty);
-            if let Some(value) = Self::integer_const_for_expected_type(*value, &target) {
-                return LoweredExpr { operand: IrOperand::Const(value), current: Some(current) };
+            if let Some(operand) = self.integer_operand_for_expected_type(*value, &target, self.block_mut(blocks, current)) {
+                return LoweredExpr { operand, current: Some(current) };
             }
         }
 
@@ -5317,6 +5355,9 @@ impl IrGenerator {
         blocks: &mut Vec<IrBlock>,
         vars: &mut HashMap<String, IrVar>,
     ) -> LoweredExpr {
+        if let Some(lowered) = self.lower_local_projection_assign(assign, current, blocks, vars) {
+            return lowered;
+        }
         match assign.target.as_ref() {
             Expr::Identifier(name) => {
                 let Some(target_var) = vars.get(name).cloned() else {
@@ -5344,6 +5385,12 @@ impl IrGenerator {
                         });
                         block.instructions.push(IrInstruction::Move { dest: target_var.clone(), src: IrOperand::Var(tmp) });
                     }
+                }
+                if self.is_mutable_value_aggregate(&target_var) {
+                    // Cached projections describe the previous value. Keep
+                    // already materialized snapshots, but re-read this local
+                    // after assignment instead of aliasing its old fields.
+                    self.invalidate_local_value_projections(target_var.id);
                 }
                 LoweredExpr { operand: IrOperand::Var(target_var), current: Some(active) }
             }
@@ -5741,6 +5788,7 @@ impl IrGenerator {
         };
 
         if let IrOperand::Var(arr_var) = &lowered_arr.operand
+            && !self.is_mutable_value_aggregate(arr_var)
             && let Some(elements) = self.aggregate_elements.get(&arr_var.id)
         {
             let Some(index_value) = const_usize_operand(&lowered_idx.operand) else {
@@ -5837,8 +5885,8 @@ impl IrGenerator {
                 self.lower_vec_constructor_expr(call, name, current, blocks, vars)
             }
             Expr::Integer(value) => {
-                if let Some(value) = Self::integer_const_for_expected_type(*value, expected_ty) {
-                    LoweredExpr { operand: IrOperand::Const(value), current: Some(current) }
+                if let Some(operand) = self.integer_operand_for_expected_type(*value, expected_ty, self.block_mut(blocks, current)) {
+                    LoweredExpr { operand, current: Some(current) }
                 } else {
                     self.lower_expr(expr, current, blocks, vars)
                 }
@@ -6200,7 +6248,8 @@ impl IrGenerator {
                 return LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) };
             }
 
-            if let Some(fields) = self.aggregate_fields.get(&base_var.id)
+            if !self.is_mutable_value_aggregate(base_var)
+                && let Some(fields) = self.aggregate_fields.get(&base_var.id)
                 && let Some(field_var) = fields.get(&field.field)
                 && self.aggregate_field_read_dominates(field_var.id)
             {
@@ -6749,7 +6798,9 @@ impl IrGenerator {
                 var
             }
         };
-        if let Some(projected) = self.aggregate_fields.get(&base.id).and_then(|fields| fields.get(field)).cloned() {
+        if !self.is_mutable_value_aggregate(&base)
+            && let Some(projected) = self.aggregate_fields.get(&base.id).and_then(|fields| fields.get(field)).cloned()
+        {
             return Some(IrOperand::Var(projected));
         }
         let Some(field_ty) = self.lookup_field_ir_type(&base.ty, field) else {
@@ -9828,6 +9879,15 @@ impl IrGenerator {
             .cloned()
     }
 
+    fn is_mutable_value_aggregate(&self, var: &IrVar) -> bool {
+        self.mutable_local_ids.contains(&var.id)
+            && match &var.ty {
+                IrType::Array(_, _) | IrType::Tuple(_) => true,
+                IrType::Named(name) => self.type_kinds.get(name) == Some(&IrTypeKind::Struct),
+                _ => false,
+            }
+    }
+
     /// A cached field read is reusable only when the context that defined it
     /// dominates the current lowering position: a strictly shallower branch
     /// depth always dominates, an equal depth dominates only within the same
@@ -9857,6 +9917,9 @@ impl IrGenerator {
         let IrOperand::Var(source_var) = source else {
             return;
         };
+        if self.is_mutable_value_aggregate(source_var) {
+            return;
+        }
         if let Some(fields) = self.aggregate_fields.get(&source_var.id).cloned() {
             self.aggregate_fields.insert(dest_id, fields);
         }

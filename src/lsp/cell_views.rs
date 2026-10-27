@@ -63,6 +63,17 @@ impl LspServer {
     /// Role navigation is nominal and lexical: an alias keeps its catalog,
     /// while the same spelling in another catalog or local binding is distinct.
     pub(super) fn named_role_definition(&self, uri: &str, position: Position, symbol: &str) -> Option<Location> {
+        let tokens = crate::lexer::lex(self.documents.get(uri)?).ok()?;
+        self.named_role_definition_from_tokens(uri, position, symbol, &tokens)
+    }
+
+    fn named_role_definition_from_tokens(
+        &self,
+        uri: &str,
+        position: Position,
+        symbol: &str,
+        tokens: &[crate::lexer::token::Token],
+    ) -> Option<Location> {
         let source = self.documents.get(uri)?;
         let module = self.ast_cache.get(uri)?;
         for item in &module.items {
@@ -79,10 +90,21 @@ impl LspServer {
             }
         }
         let offset = position_to_offset(source, position)?;
-        let line = self.line_start_offset(source, position.line);
-        let prefix = &source[line..offset];
-        let dot = prefix.rfind('.')?;
-        let ty = self.cell_view_completion_type(uri, position, &prefix[..dot])?;
+        // Comments may span lines between a receiver and its role. Use real
+        // identifier/dot tokens so their contents cannot change the receiver.
+        let first = tokens.partition_point(|token| token.span.end < offset);
+        let role_token = tokens[first..]
+            .iter()
+            .take_while(|token| token.span.start <= offset)
+            .position(|token| matches!(&token.kind, TokenKind::Identifier(name) if name == symbol))?
+            + first;
+        let dot = role_token.checked_sub(1)?;
+        if tokens[dot].kind != TokenKind::Dot {
+            return None;
+        }
+        let start = receiver_start(tokens, dot.checked_sub(1)?)?;
+        let receiver = crate::parser::parse_expression_fragment(&tokens[start..dot]).ok()?;
+        let ty = self.cell_view_expression_type(uri, position, &receiver)?;
         let selection = crate::cell_selection::parse_selection_type(&ty)?;
         if selection.selected.is_some() {
             return None;
@@ -102,26 +124,33 @@ impl LspServer {
     }
 
     pub(super) fn named_role_references(&self, uri: &str, position: Position, symbol: &str) -> Option<Vec<Location>> {
-        let definition = self.named_role_definition(uri, position, symbol)?;
         let source = self.documents.get(uri)?;
+        let tokens = crate::lexer::lex(source).ok()?;
+        let definition = self.named_role_definition_from_tokens(uri, position, symbol, &tokens)?;
         Some(
-            word_occurrences(source, symbol)
-                .into_iter()
-                .filter_map(|(start, end)| {
-                    let at = offset_to_position(source, start);
-                    (self.named_role_definition(uri, at, symbol).as_ref().map(|location| location.range) == Some(definition.range))
-                        .then(|| Location { uri: uri.into(), range: Range { start: at, end: offset_to_position(source, end) } })
+            tokens
+                .iter()
+                .filter(|token| matches!(&token.kind, TokenKind::Identifier(name) if name == symbol))
+                .filter_map(|token| {
+                    let at = offset_to_position(source, token.span.start);
+                    (self.named_role_definition_from_tokens(uri, at, symbol, &tokens).as_ref().map(|location| location.range)
+                        == Some(definition.range))
+                    .then(|| Location { uri: uri.into(), range: Range { start: at, end: offset_to_position(source, token.span.end) } })
                 })
                 .collect(),
         )
     }
 
     pub(super) fn cell_view_completion_type(&self, uri: &str, position: Position, before_dot: &str) -> Option<String> {
+        let path = before_dot.trim_end().rsplit(|ch: char| !is_ident_char(ch) && ch != '.').next()?.rsplit("..").next()?;
+        let tokens = crate::lexer::lex(path).ok()?;
+        let receiver = crate::parser::parse_expression_fragment(&tokens[..tokens.len().checked_sub(1)?]).ok()?;
+        self.cell_view_expression_type(uri, position, &receiver)
+    }
+
+    fn cell_view_expression_type(&self, uri: &str, position: Position, receiver: &Expr) -> Option<String> {
         let source = self.documents.get(uri)?;
         let module = self.ast_cache.get(uri)?;
-        let path = before_dot.trim_end().rsplit(|ch: char| !is_ident_char(ch) && ch != '.').next()?.rsplit("..").next()?;
-        let mut parts = path.split('.');
-        let root = parts.next()?;
         let catalogs = module
             .items
             .iter()
@@ -144,10 +173,7 @@ impl LspServer {
             let mut bindings =
                 params.iter().map(|param| (param.name.clone(), shape_type(&type_to_string(&param.ty), module))).collect();
             visible_bindings(source, body, position, &mut bindings, &catalogs, module, &record_fields);
-            let mut ty = bindings.get(root)?.clone();
-            for field in parts {
-                ty = project(&ty, field, &record_fields)?;
-            }
+            let ty = expression_type(receiver, &bindings, &catalogs, &record_fields)?;
             return (crate::cell_data_view::transaction_schema(&ty).is_some()
                 || crate::cell_data_view::schema(&ty).is_some()
                 || crate::cell_selection::parse_selection_type(&ty).is_some()
@@ -155,6 +181,32 @@ impl LspServer {
             .then_some(ty);
         }
         None
+    }
+}
+
+/// Locate a lexical receiver path, preserving balanced grouping for the real
+/// expression parser. Range endpoints stop at `..`, which lexes as two dots.
+fn receiver_start(tokens: &[crate::lexer::token::Token], mut cursor: usize) -> Option<usize> {
+    loop {
+        match tokens.get(cursor)?.kind {
+            TokenKind::Identifier(_) => {}
+            TokenKind::RParen => {
+                let mut depth = 1usize;
+                while depth != 0 {
+                    cursor = cursor.checked_sub(1)?;
+                    match tokens[cursor].kind {
+                        TokenKind::RParen => depth += 1,
+                        TokenKind::LParen => depth -= 1,
+                        _ => {}
+                    }
+                }
+            }
+            _ => return None,
+        }
+        if cursor < 2 || tokens[cursor - 1].kind != TokenKind::Dot || tokens[cursor - 2].kind == TokenKind::Dot {
+            return Some(cursor);
+        }
+        cursor -= 2;
     }
 }
 

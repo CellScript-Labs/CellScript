@@ -25,6 +25,8 @@ mod uses;
 mod view_calls;
 mod view_values;
 
+pub(crate) use hash_fields::validate as validate_hash_property_runtime;
+
 const PREFIX: &str = ".Lnested_param_codec_";
 
 fn invalid(message: impl Into<String>) -> CheckerError {
@@ -40,7 +42,7 @@ pub(crate) fn validate(
     terminal_sink: Option<&str>,
     selections: &crate::cell_selection::machine::Checked,
     allocated: &crate::allocated_values::machine::Checked,
-) -> Result<(), CheckerError> {
+) -> Result<BTreeMap<u64, u64>, CheckerError> {
     let has_values = record
         .typed_semantics
         .entries
@@ -53,6 +55,7 @@ pub(crate) fn validate(
             || !block.nested_cell_labels.is_empty()
             || !block.nested_output_labels.is_empty()
             || !block.cell_view_value_labels.is_empty()
+            || block.allocated_lifecycle_labels.iter().any(|label| label.starts_with(".Lallocated_call_"))
     });
     let has_cell_values =
         record.typed_semantics.types.iter().any(|ty| ty.fields.iter().any(|field| crate::checker::is_nested_source_type(&field.ty)));
@@ -66,17 +69,21 @@ pub(crate) fn validate(
     let has_allocated_parameters = record.typed_semantics.entries.iter().any(|entry| {
         entry.kind == "helper" && entry.params.iter().any(|param| param.ty.strip_prefix('&').is_some_and(|ty| owners.contains(ty)))
     });
+    let has_bounded_helpers =
+        record.typed_semantics.entries.iter().any(|entry| entry.kind == "helper" && crate::scalar_machine::covered_entry(entry));
     if !has_values
         && !has_markers
         && !has_cell_values
         && !has_view_parameters
         && !has_coordinates
         && !has_allocated_parameters
+        && !has_bounded_helpers
+        && allocated.constructors.is_empty()
         && selections.sites.is_empty()
         && selections.uses.is_empty()
         && selections.data.is_empty()
     {
-        return Ok(());
+        return Ok(BTreeMap::new());
     }
     let normalized = crate::policy_machine::normalize_relaxed_branches(record, elf).map_err(invalid)?;
     let (record, elf) = normalized.as_ref().map_or((record, elf), |(record, elf)| (record, elf));
@@ -234,6 +241,7 @@ pub(crate) fn validate(
     }
     let view_calls = view_calls::validate(record, elf, &mut lifetime_seeds)?;
     parameters::allocated(record, elf, &mut lifetime_seeds)?;
+    parameters::scalars(record, elf, &lifetime_seeds)?;
     crate::entry_codec::verify_nested(record, elf)?;
     for (owner, sites) in &selections.data {
         for result in sites.values().filter_map(|site| site.nested.as_ref()) {

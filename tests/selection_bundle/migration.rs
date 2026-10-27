@@ -55,9 +55,9 @@ pub(super) fn package_sources(source: &str, shape: Shape) -> (String, String) {
 fn artifacts(root: &Path, shape: Shape, explicit: bool, opt_level: u8, cross_package: bool) -> (Vec<CompileResult>, Vec<Value>) {
     let mut source = match (shape, explicit) {
         (Shape::Bytes, false) => include_str!("../../examples/language/batches/nested_migration.cell"),
-        (Shape::Bytes, true) => include_str!("../fixtures/nested_migration_explicit.cell"),
+        (Shape::Bytes, true) => include_str!("fixtures/nested_migration_explicit.cell"),
         (Shape::Records, false) => include_str!("../../examples/language/batches/record_migration.cell"),
-        (Shape::Records, true) => include_str!("../fixtures/record_migration_explicit.cell"),
+        (Shape::Records, true) => include_str!("fixtures/record_migration_explicit.cell"),
     }
     .to_string();
     for (placeholder, tag) in [("11", 1), ("22", 2), ("33", 3)] {

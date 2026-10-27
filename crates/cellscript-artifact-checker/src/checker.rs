@@ -292,7 +292,8 @@ pub fn check_bundle_values(
     validate_policy_dispatch_machine_contract(record, &elf)?;
     let selections = crate::cell_selection::machine::validate(record, &elf, terminal_sink)?;
     let allocated = crate::allocated_values::machine::validate(record, &elf, terminal_sink)?;
-    crate::nested_machine::validate(record, &elf, terminal_sink, &selections, &allocated)?;
+    let bodies = crate::nested_machine::validate(record, &elf, terminal_sink, &selections, &allocated)?;
+    crate::scalar_machine::validate(record, &elf, terminal_sink, &selections, &bodies, &allocated)?;
     crate::code_origin::validate_open_verifier_claims(record, &elf)?;
     validate_source_map(source_map, record, artifact, &elf)?;
 
@@ -4624,7 +4625,15 @@ fn validate_block_abi(
                     ".Lallocated_pop_",
                     ".Lallocated_required_",
                     ".Lallocated_sorted_",
+                    ".Lallocated_len_",
+                    ".Lallocated_capacity_",
+                    ".Lallocated_empty_",
                     ".Lallocated_borrowed_",
+                    ".Lallocated_args_",
+                    ".Lallocated_scalar_",
+                    ".Lallocated_branch_",
+                    ".Lallocated_return_",
+                    ".Lallocated_call_",
                     ".Lallocated_index_",
                     ".Lallocated_result_",
                 ]

@@ -24,8 +24,10 @@ input/output/successor coordinates and bounded nested `.data` reads are availabl
 The [nested migration example](CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md#executable-nested-batch-migration)
 executes the variable-payload business transition. The
 [mixed settlement example](CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md#executable-fixed-mixed-role-settlement)
-executes fixed full-fill orders and two independently checked asset groups. Final
-builder/source admission, frozen resources and gates remain pending.
+executes fixed full-fill orders and two independently checked asset groups.
+Finite complete-program resource fixtures now include maximum batches, full
+scan domains and late business failures. Final builder/source admission, the
+remaining acceptance audit and integration gates remain pending.
 
 ## Authoring target and prototype boundary
 
@@ -48,10 +50,12 @@ The complete mixed-role settlement and nested batch examples must demonstrate
 this authoring form and checked, non-escaping read-only helpers. Current view
 escape/call restrictions remain until the proofs are implemented. Named access
 must retain complete membership, correspondence and source/authority checking;
-it cannot authenticate a policy or grant foreign ownership by itself. Exact
-spelling remains under design and must reuse existing structured lowering and
-ProtocolBundle/generated-builder contracts. All acceptance requirements below
-remain mandatory.
+it cannot authenticate a policy or grant foreign ownership by itself. The
+[initial-form decision](CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md#initial-authoring-form-complete-program-decision-2026-10-26)
+selects module-local named catalogs after reviewing complete programs and their
+positional comparisons. The chosen form reuses structured lowering and
+ProtocolBundle/generated-builder contracts. Stable admission and all acceptance
+requirements below remain mandatory.
 
 ### Experimental named verification catalog
 
@@ -61,7 +65,7 @@ declaration. Its `limits` block names `input_scan`, `output_scan`,
 schema, `type_hash`, `lock_hash`, `identity` field, `authority`,
 `correspondence`, and inclusive `inputs`/`outputs` count intervals. See the
 [runnable syntax fixture](../tests/syntax_combo/seeds/named-role-verification.cell).
-This is an experimental grammar candidate, not a stable API freeze.
+This is the selected initial form; stable API admission remains pending.
 
 ```cellscript
 action inspect() -> u64 {
@@ -108,9 +112,11 @@ field name fixes the destination role; the independent machine checker checks
 the source pointer load and destination store and carries retained-table
 lifetime evidence through that projection. Numeric role reads are checked
 against the projected role, preventing same-schema role substitution. No
-runtime name lookup or text-to-source expansion is involved. Exported catalogs,
-variable-layout selection and complete business-program acceptance remain open.
-The `exact-role-selection-artifact-proof` blocker remains required.
+runtime name lookup or text-to-source expansion is involved. Bounded-table
+selection and complete business examples are implemented as described above;
+their final acceptance remains open. Exported catalog declarations are outside
+the initial module-local interface. The `exact-role-selection-artifact-proof`
+blocker remains required.
 
 Focused tests compare named and positional verification in complete CKB
 transactions at O0/O3, with two roles and with the maximum eight roles and
@@ -348,6 +354,24 @@ It derives the scratch region from the actual frame and checks that scratch,
 wide results and scalar destinations preserve live nested and selection
 storage. Only after those checks does lifetime analysis summarize the writes,
 retaining its original state budget even for maximum selection fixtures.
+Copied field buffers are also disjoint from every other checked data producer's
+write regions in the same invocation, including nested table load buffers.
+Transient load scratch may be reused; copied results retain distinct storage.
+The [coherent-copy regression](../tests/artifact_checker/cell_data_results.rs)
+rebounds all byte stores, result-pointer publication, markers and hashes for
+Hash, u128 and 9/256-byte fields in fixed and nested layouts at O0/O3. Exact and
+one-byte result overlaps reject, as does redirecting a nested fixed-field copy
+into another table load buffer. Its VM case demonstrates that the forged alias
+can turn unequal input/output hashes into an accepted equality check, while the
+original program rejects. CFG lifetime analysis additionally protects each copied
+buffer from ordinary stores and summarized memory effects; only its recognized
+producer may initialize it. The regression redirects byte, halfword, word and
+doubleword body stores into both copied buffers, including partial overlaps,
+for fixed/nested layouts at O0/O3. Legal mutable local assignment still copies
+the value: an earlier immutable binding retains its own bytes after reassignment.
+VM cases cover both equal and unequal values, and branch assignment covers
+inferred/annotated u64, u128, Hash and 9-byte bindings at O0–O3.
+These are buffer-integrity checks, not a complete proof of every field-value use.
 Complete dynamic index and later field-value provenance remain pending:
 `cell-data-view-artifact-proof` is mandatory and strict stable admission rejects
 these programs. Constructor-only programs still require checked producer ranges;
@@ -415,8 +439,12 @@ siblings, derived aliases and helpers. `tests/cell_data_views.rs` covers O0–O3
 global/group inputs and outputs, large buffers, malformed unused fields,
 trailing bytes and payload limits. Selected-role transaction tests additionally
 exercise correspondence-selected nested fields with live witness views and
-required peer groups. Per-read complete decoding is finite, but final
-worst-case repeated-read and whole-business-program budgets remain to be frozen.
+required peer groups. Per-read complete decoding is finite. The complete
+byte-list and record-list migration programs now have
+[frozen resource fixtures](CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md#frozen-complete-program-resource-fixtures),
+including their repeated reads, maximum declared batches, full scans and
+late-invalid executions. These finite program ceilings do not claim a single
+cost bound for arbitrary user programs or settle stable admission.
 
 ## Numeric bounds and scan termination
 
@@ -741,11 +769,21 @@ transactions, checks record revision identities and exercises both the exact
 aggregate budget and over-budget rejection. These fixtures retain every stable
 admission blocker.
 
-Still required: complete source/role/layout provenance and enclosing memory
-effects, field-value provenance, optional proposed-index validation,
-complete dynamic field-view proofs, stable builder/source admission,
-final business acceptance and frozen end-to-end resource budgets.
-The primitive's successful VM execution does not satisfy these items.
+The complete-program fixtures also publish frozen per-case cycles, observed
+stack and guest pages, ELF, witness/transaction bytes and occupied capacity in
+the [resource ledger](CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md#frozen-complete-program-resource-fixtures).
+The remaining acceptance audit must check source/role/layout provenance,
+enclosing memory effects, field-value provenance, dynamic field-view proofs,
+stable builder/source admission, final gates and review against the
+[completion ledger](CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md#completion-ledger).
+Primitive VM execution alone does not satisfy those obligations.
+
+Executable selection derives protected membership through the bounded complete
+source scans; it does not accept a witness-supplied index list as authoritative.
+The reference proposal validator separately tests omissions, insertions,
+duplicates and source substitution. Adding an optional proposed-index source
+API is not a prerequisite for this full-scan profile and would require its own
+checked integration if introduced.
 
 The variable-payload phase remains part of #49, not a follow-up substituted for
 its completion. It must combine this selection/authority/correspondence

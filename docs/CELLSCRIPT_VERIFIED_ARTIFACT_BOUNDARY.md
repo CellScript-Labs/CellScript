@@ -109,9 +109,10 @@ unknown-field rejection and cannot certify bundles containing either extension;
 the current checker also rejects a missing extension when typed declarations or
 decoded calls require one. This is a feature-specific compatibility boundary,
 not permission to relabel an old unchecked return bundle. Source-map v2 retains
-its hash-bound machine ranges and its incomplete-coverage claim. Cache generation
-`project-source-set-v63-0.32-checked-results-vec-context` invalidates earlier cached
-artifacts; package and toolchain versions remain unchanged.
+its hash-bound machine ranges and its incomplete-coverage claim. This boundary
+introduced cache generation `project-source-set-v63-0.32-checked-results-vec-context`
+to invalidate earlier artifacts; later lowering corrections advance that
+generation without changing package or toolchain versions.
 
 The standalone checker independently derives the nominal result layout and
 expanded hidden argument index. It checks saved-pointer placement, caller-buffer
@@ -124,6 +125,173 @@ storage or overwrite the saved destination. These bounded ABI checks do not
 prove arbitrary source-to-machine equivalence or arbitrary pointer dataflow.
 Cell, enum and dynamic results retain their separate admission rules. The
 policy-witness aggregate-helper boundary is unchanged.
+
+### Fixed primitive tuple helper results
+
+Fixed primitive tuple helpers still use one field per `a0`–`a7` register:
+fields up to eight bytes are packed values, and wider fields are temporary
+addresses. The caller immediately copies every field into its own complete
+tuple storage, without making an intervening call that could reuse the callee
+frame. Returns read current value bytes, including forwarded parameters and
+updated locals. Register overflow fails closed. This runtime correction does
+not extend `cellscript-fixed-struct-result-abi-v1` or its independent proof to
+tuple results; generic source/lifetime proof remains required. Artifact cache
+generation `project-source-set-v106-0.32-fixed-value-transport` invalidates older
+fixed-value output. Generation `project-source-set-v107-0.32-scalar-definition-binding`
+additionally invalidates output predating mandatory scalar-definition evidence
+in collection bodies and contextual i32 value corrections. The added marker
+prefix is rejected by older checkers; current checks require its full typed
+inventory rather than accepting an omitted proof.
+Generation `project-source-set-v108-0.32-scalar-comparison-binding` additionally
+requires scalar comparison evidence, including fused branch predicates and
+both source successors. Fusion cannot discard a result needed by another typed
+use. Empty unconditional target aliases are resolved with bounded traversal;
+this does not establish complete source-to-machine control-flow equivalence.
+Generation `project-source-set-v109-0.32-scalar-call-binding` also requires
+scalar preparation/invocation evidence for readonly collection-helper calls.
+The checker binds the complete scalar argument inventory and carries those
+evaluated-value facts to the consuming ABI words; older checkers reject the new
+marker prefix. Upstream computation and aggregate provenance remain separate.
+Generation `project-source-set-v110-0.32-scalar-definition-flow` additionally
+requires successful exits from each covered typed block to execute its checked
+scalar definitions in order. Whole-range bypasses are rejected even when the
+definition bytes and marker inventory are intact. Fused comparison branches
+remain visible to the CFG traversal so neither successor is silently omitted.
+The traversal composes complete Cell read/selection bodies only after their
+independent validation; syscall metadata alone cannot exempt a skipped definition.
+This local execution-coverage contract does not prove arbitrary value
+preservation, source branch selection or complete CFG equivalence.
+
+Generation `project-source-set-v111-0.32-bounded-scalar-flow` extends this
+mandatory inventory and path coverage to typed bodies using Cell coordinates,
+exact selections or nested views, even without arena operations. The shared
+scalar checker composes complete nested load/read/output and coordinate bodies
+only after independent instruction and lifetime validation. Optional bodies
+cannot cover or partially overlap a required scalar operation; nested summaries
+do not count as executing one. This includes named-shape helpers and complete
+settlement/migration programs. Parameter decoding, arbitrary intervening writes,
+aggregate producers and complete source equivalence remain separate obligations.
+
+Generation `project-source-set-v112-0.32-bounded-scalar-calls` additionally binds
+ordinary scalar helper entry spills and caller argument transport for these
+bounded bodies. Full expanded ABI positions include preceding coordinates,
+fixed values and nested pointer/extent pairs. The same mandatory preparation
+and invocation inventory used by collection helpers now covers Cell and
+nested-view helpers. Complete operand loads/stores are checked, and their
+evaluated-value facts must reach the consuming call without substitution or
+clobbering on any reaching path. This proves entry and call transport; arbitrary
+upstream computation, aggregate provenance and post-entry reassignment remain
+separate contracts.
+
+Generation `project-source-set-v113-0.32-bounded-scalar-results` binds scalar
+call-result reception for the same helpers, including calls without scalar
+arguments. Starting immediately after the decoded call, it recognizes exact
+outgoing-stack restoration and the complete `a0` store to the typed destination
+inside the caller's frame. No marker can relocate this check past an intervening
+write. Explicit incoming edges cannot enter this sequence from outside it.
+This does not prove the callee's returned value or preserve the result against
+arbitrary later writes.
+
+Generation `project-source-set-v114-0.32-owned-arena-write-isolation` protects
+each owned arena's state, allocation records, backing storage and descriptors
+from unrelated machine writes, including in functions with no Cell/nested view
+or borrowed helper. Only complete independently checked constructor/primitive
+ranges authorize writes to their matching arena. Bounds and outer hashes alone
+cannot grant that permission. Finite inline byte-copy summaries derive their
+destination and positive count from incoming machine facts, recognize every
+loop instruction and reject partial entry; they do not establish source-value
+provenance. Existing tuple reception and stack Vec operations retain their
+semantics while writes into protected arena storage reject.
+
+Generation `project-source-set-v115-0.32-bounded-caller-slot-layout` retains
+distinct source-local slots in scalar-only wrappers that directly call bounded
+helpers. Argument and result proofs require that layout even when the wrapper
+itself has no view/arena locals. Ordinary scalar-only functions retain slot
+reuse. This is a conservative code-generation boundary: a future reused-slot
+layout at these calls needs independent liveness/location evidence. Wrapper
+ELF and frame layouts can change; resource ceilings are not increased.
+
+Generation `project-source-set-v116-0.32-collection-query-results` binds owned
+`len`, `capacity` and `is_empty` checks to the descriptor instruction grammar
+already used for readonly borrowed queries. Both forms publish query and
+ordered Map/Set membership results through an independently recognized `a0` store to
+the typed scalar destination, immediately after the checked producer. Nested
+searches inside updates are not mistaken for source membership queries.
+The result sequence rejects foreign incoming edges; this local evidence does
+not prove that every successful path executes the entire source operation.
+
+Generation `project-source-set-v117-0.32-collection-operation-paths` adds
+successful typed-block path coverage for collection operations. Only complete
+independently recognized top-level primitive ranges become required events;
+their nested children cannot be counted as separate source operations. Events
+bind operation kind, owner, member, contract and source order. A borrowed
+operation includes its extent check; owner drop includes every member's
+retirement. These events compose with scalar and Cell events after independent
+nested instruction/lifetime validation, including returning syscall bodies.
+Rebound jumps cannot omit a required event or change event order while exiting
+that typed block successfully. This does not establish arbitrary source-CFG or
+upstream value equivalence.
+
+Generation `project-source-set-v118-0.32-bounded-source-branches` binds non-fused
+branches and jumps in the same bounded bodies to their typed successors and
+evaluated scalar condition. It distinguishes actual fused machine branches
+from comparison candidates, requires complete source terminator inventories,
+and checks empty fallthrough aliases without adding executable instructions.
+For a mapped block with an empty terminator, every successful machine exit must
+reach its typed successor; relocated labels cannot disguise a changed loop jump.
+Branch preparation is a required ordered event; the decoded branch remains
+visible to path analysis. Predicate inversion, condition substitution, redirected
+targets and erased evidence reject. This adds source branch selection evidence;
+it does not establish arbitrary upstream value provenance or full source
+equivalence.
+
+Generation `project-source-set-v119-0.32-bounded-scalar-returns` binds bounded-body
+bool/u8/u16/u32/i32/u64 returns to their evaluated local or literal and requires
+each return site on its successful source-block path. The destination is `a0`;
+lock returns retain their checked false-predicate abort and zero success status.
+The shared epilogue must preserve the result through an exact frame restore and
+RET. Pure scratch calculations and callee-saved cache reloads may precede that
+restore; cache-value lifetime remains independently checked. Erased return
+inventories, wrong source slots, zeroed returns and epilogue result clobbers
+reject after hash rebinding. Aggregate returns and upstream value provenance
+are separate from this scalar transport guarantee.
+
+Generation `project-source-set-v120-0.32-collection-byte-returns` extends this
+inventory to direct collection results of type `u128` or `[u8; 1..8]` produced
+in the same typed block. The typed destination determines the copied pointer
+slot; exact byte loads, shifts and combinations determine `a0` (and `a1` for
+`u128`). The mandatory return event and shared frame restore apply to these
+results too. General aggregate producers, aliases and tuple returns are outside
+this additional transport boundary.
+
+Generation `project-source-set-v121-0.32-typed-cell-properties` adds typed
+Input/Output view scalar property calls to the mandatory scalar operation
+inventory. The independent checker binds the coordinate load, actual runtime
+target, status propagation and destination store. Finite runtime recognizers
+cover capacity, occupied/unoccupied capacity, data size and output index,
+including decoded source tags, private buffers, syscall arguments, returned
+values, underflow and restoration. Unoccupied capacity requires both called
+capacity implementations to pass. External entries into partial runtime bodies
+reject. This is a bounded property contract; raw untyped runtime APIs and
+general source equivalence remain outside this extension.
+The lifetime pass additionally requires each property's coordinate slot to
+remain live at the actual call. Its call-site inventory grants no instruction
+or write-effect summary; complete scalar call recognition remains mandatory.
+
+Generation `project-source-set-v122-0.32-typed-cell-hash-properties` extends
+property binding to data, Lock and Type hashes. Exact caller preparation and
+result publication compose with the independent full runtime hash-helper proof.
+Each result has a distinct private 32-byte buffer and eight-byte size slot;
+the memory-effect pass permits writes only in its checked property body and
+protects it across other writes/calls/syscalls. Coherent rebinding of both the
+runtime output pointer and published pointer cannot alias two results.
+
+Returning observation syscalls outside the nested codec ranges may contribute
+one-instruction flow summaries only after lifetime analysis proves their actual
+`a7` value and bounded writes on the analyzed paths. A site encountered as EXIT
+on any path cannot receive this summary. This preserves standalone nested Cell
+creation followed by an explicit scalar return without trusting syscall numbers
+from sidecar metadata or permitting an early successful EXIT to omit work.
 
 ### Fatal verifier failures
 

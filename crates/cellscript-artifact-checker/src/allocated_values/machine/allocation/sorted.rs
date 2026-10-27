@@ -1,6 +1,7 @@
 //! Fixed-count sorted construction. Validate nondecreasing input before reserve,
 //! count distinct keys and copy with last-value-wins duplicate handling.
-//! The input pointer's source provenance remains an enclosing-operation duty.
+//! The enclosing argument stage binds the input pointer to its evaluated local;
+//! upstream source computation and pointer lifetime remain separate obligations.
 use super::descriptor::layout;
 use super::*;
 use crate::TypedSemanticType;

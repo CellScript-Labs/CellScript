@@ -2081,8 +2081,13 @@ impl LspServer {
         if !is_valid_rename_identifier(&new_name) {
             return changes;
         }
-        if let Some(symbol) = self.symbol_at_position(uri, position)
-            && let Some(definition) = self.named_role_definition(uri, position, &symbol)
+        let Some(symbol) = self.symbol_at_position(uri, position) else { return changes };
+        let Some(source) = self.documents.get(uri) else { return changes };
+        let Some(offset) = position_to_offset(source, position) else { return changes };
+        if !word_occurrences(source, &symbol).iter().any(|&(start, end)| start <= offset && offset <= end) {
+            return changes;
+        }
+        if let Some(definition) = self.named_role_definition(uri, position, &symbol)
             && let (Some(module), Some(source)) = (self.ast_cache.get(uri), self.documents.get(uri))
             && module.items.iter().any(|item| {
                 matches!(item, Item::CellRoles(catalog)
@@ -3476,6 +3481,60 @@ mod tests {
     }
 
     #[test]
+    fn named_role_rename_preserves_catalog_identity_across_receiver_forms() {
+        let original = include_str!("../../examples/language/batches/mixed_settlement.cell");
+        let declaration = &original[original.find("cell_roles Settlement").unwrap()..original.find("#[effect").unwrap()];
+        for (receiver, separator) in [
+            ("selected", " /* quote is a role */ "),
+            ("selected", " /* quote remains\n in this catalog */ "),
+            ("(selected)", " /* quote is a role */ "),
+            ("((selected))", " /* quote remains\n in this catalog */ "),
+        ] {
+            let access = format!("{receiver}{separator}.quote");
+            let source = format!(
+                "{}\n{}\nfn unrelated(quote: u64) -> u64 {{ return quote }}",
+                original.replace("selected.quote", &access),
+                declaration.replace("Settlement", "Other")
+            );
+            let uri = "file:///role_comments.cell";
+            let mut server = LspServer::new();
+            server.open_document_with_edition(uri.into(), source.clone(), crate::NEXT_EDITION);
+            assert!(server.get_diagnostics(uri).iter().all(|item| item.severity != DiagnosticSeverity::Error));
+            let use_offset = source.find(&access).unwrap() + receiver.len() + separator.len() + 1;
+            let use_position = offset_to_position(&source, use_offset + 1);
+            let comment = source.find("/* quote").unwrap() + "/* ".len();
+            assert!(server.rename(uri, offset_to_position(&source, comment + 1), "payments".into()).is_empty());
+            let definition = server.goto_definition(uri, use_position).expect("commented role receiver must resolve");
+            assert_eq!(definition.range.start, offset_to_position(&source, source.find("quote: Balance").unwrap()));
+            assert!(server.rename(uri, use_position, "base".into()).is_empty());
+            let changes = server.rename(uri, use_position, "payments".into());
+            assert_eq!(changes.len(), 1);
+            let edits = changes.get(uri).unwrap();
+            assert_eq!(edits.len(), 1 + original.matches("selected.quote.").count());
+            let mut replacements = edits
+                .iter()
+                .map(|edit| {
+                    (
+                        position_to_offset(&source, edit.range.start).unwrap(),
+                        position_to_offset(&source, edit.range.end).unwrap(),
+                        &edit.new_text,
+                    )
+                })
+                .collect::<Vec<_>>();
+            replacements.sort_by_key(|(start, _, _)| std::cmp::Reverse(*start));
+            let mut renamed = source.clone();
+            for (start, end, replacement) in replacements {
+                renamed.replace_range(start..end, replacement);
+            }
+            assert!(renamed.contains("fn unrelated(quote: u64) -> u64 { return quote }"));
+            assert!(renamed.contains(&declaration.replace("Settlement", "Other")));
+            assert!(renamed.contains(separator));
+            assert_eq!(renamed.matches(".payments.").count(), original.matches("selected.quote.").count());
+            crate::compile_metadata(&renamed, crate::NEXT_EDITION, None).unwrap();
+        }
+    }
+
+    #[test]
     fn named_runtime_snippets_use_declarations_and_respect_source_modes() {
         fn expand_defaults(snippet: &str) -> String {
             let mut expanded = snippet.to_string();
@@ -4834,5 +4893,8 @@ action inspect(token: Token) -> u64 {
         assert!(edits.iter().all(|edit| edit.range.start.line != 8), "rename must not edit string literals: {edits:?}");
         assert!(edits.iter().any(|edit| edit.range.start.line == 3), "definition should be renamed: {edits:?}");
         assert!(edits.iter().any(|edit| edit.range.start.line == 7), "type reference should be renamed: {edits:?}");
+        for offset in [source.find("Token in a comment").unwrap(), source.find("\"Token\"").unwrap() + 1] {
+            assert!(server.rename(&uri, offset_to_position(source, offset + 1), "Asset".into()).is_empty());
+        }
     }
 }

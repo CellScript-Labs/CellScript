@@ -530,6 +530,39 @@ action verify() -> u64 {
 
     #[test]
     #[cfg(feature = "language-service")]
+    fn wasm_named_role_navigation_preserves_comments_and_range_receivers() {
+        let original = include_str!("../../../examples/language/batches/mixed_settlement.cell");
+        for receiver in ["selected", "(selected)", "((selected))"] {
+            let source = original.replace("selected.quote", &format!("{receiver} /* quote 😀\n remains a role */ .quote"));
+            let declaration = source.find("quote: Balance").unwrap();
+            let position = |offset: usize| {
+                let prefix = &source[..offset];
+                (
+                    prefix.bytes().filter(|byte| *byte == b'\n').count() as u32,
+                    prefix.rsplit('\n').next().unwrap().encode_utf16().count() as u32,
+                )
+            };
+            let (definition_line, definition_character) = position(declaration);
+            for (offset, _) in source.match_indices(".quote") {
+                let (line, character) = position(offset + 2);
+                let result: serde_json::Value =
+                    serde_json::from_str(&language_service_json_for_edition(&source, "2027", line, character)).unwrap();
+                assert_eq!(result["definition"]["range"]["start"]["line"], definition_line, "{result}");
+                assert_eq!(result["definition"]["range"]["start"]["character"], definition_character, "{result}");
+                let diagnostics = result["diagnostics"].as_array().unwrap();
+                assert!(diagnostics.iter().all(|item| item["severity"] != "Error"), "{result}");
+                assert!(
+                    diagnostics.iter().any(|item| item["message"]
+                        .as_str()
+                        .is_some_and(|message| message.contains("exact-role-selection-artifact-proof"))),
+                    "navigation must retain the program's admission warning: {result}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "language-service")]
     fn wasm_collection_budget_hover_matches_native_scenarios() {
         let source = include_str!("../../../examples/language/batches/multi_asset_transfer.cell");
         let prefix = &source[..source.find("collections Totals").unwrap() + 13];
@@ -805,6 +838,13 @@ type_script TokenTransfer on type_group<Token> {
             let language: serde_json::Value = serde_json::from_str(&language_service_json_for_edition(source, "2027", 3, 0)).unwrap();
             assert_eq!(language["diagnostics"].as_array().map(Vec::len), Some(0));
             assert!(language["completions"].as_array().is_some_and(|items| items.iter().any(|item| item["label"] == "type_script")));
+            assert!(!language["completions"].as_array().is_some_and(|items| items.iter().any(|item| item["label"] == "pool")));
+            // Effect keywords belong inside the entry body, not at the
+            // top-level declaration position used above.
+            let line = source.lines().position(|line| line.contains("effects {")).unwrap() as u32;
+            let language: serde_json::Value =
+                serde_json::from_str(&language_service_json_for_edition(source, "2027", line, 15)).unwrap();
+            assert_eq!(language["diagnostics"].as_array().map(Vec::len), Some(0));
             assert!(language["completions"].as_array().is_some_and(|items| items.iter().any(|item| item["label"] == "pool")));
             assert!(language["completions"].as_array().is_some_and(|items| items.iter().any(|item| item["label"] == "audit")));
         }

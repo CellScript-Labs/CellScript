@@ -1,5 +1,6 @@
 //! Deterministic scalar-only slot reuse. Any unclassified instruction, pointer,
-//! resource binding or external call retains the original function layout.
+//! resource binding, external call or checked bounded-helper call retains the
+//! original function layout.
 //!
 //! Named mutable-variable slots, buffers, wide values, helper scratch and
 //! outgoing arguments are allocated separately by frame.rs. No location claim
@@ -140,6 +141,10 @@ fn instruction_effect(
         IrInstruction::Call { dest, func, args } => {
             let abi = abis.get(func)?;
             if !local_calls.contains(func)
+                // Bounded-call argument/result proofs currently bind source
+                // locals to distinct slots. Keep that layout in scalar-only
+                // wrappers too, until the checker proves a reused-slot map.
+                || abi.checked_scalar_parameters
                 || !abi.type_hash_param_indices.is_empty()
                 || !abi.runtime_bound_param_indices.is_empty()
                 || !abi.bounded_plan_param_indices.is_empty()

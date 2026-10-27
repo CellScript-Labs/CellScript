@@ -237,7 +237,7 @@ fn cases() -> Vec<Case> {
 fn allocated_multi_asset_transfer_matches_independent_model_and_all_group_execution() {
     let programs = [
         ("arena", include_str!("../../examples/language/batches/multi_asset_transfer.cell")),
-        ("stack", include_str!("../fixtures/multi_asset_transfer_stack.cell")),
+        ("stack", include_str!("fixtures/multi_asset_transfer_stack.cell")),
     ];
     let cases = cases();
     let mut observations = BTreeMap::new();
@@ -389,11 +389,24 @@ fn frozen_transfer_resources_bind_sources_and_complete_case_inventory() {
             "examples/language/batches/multi_asset_transfer.cell",
             include_bytes!("../../examples/language/batches/multi_asset_transfer.cell").as_slice(),
         ),
-        ("tests/fixtures/multi_asset_transfer_stack.cell", include_bytes!("../fixtures/multi_asset_transfer_stack.cell").as_slice()),
+        (
+            "tests/selection_bundle/fixtures/multi_asset_transfer_stack.cell",
+            include_bytes!("fixtures/multi_asset_transfer_stack.cell").as_slice(),
+        ),
     ];
     assert_eq!(fixture["sources"].as_object().unwrap().len(), sources.len());
-    for (path, bytes) in sources {
+    for ((path, bytes), profile) in sources.into_iter().zip(["arena", "stack"]) {
         assert_eq!(fixture["sources"][path], hex::encode(Sha256::digest(bytes)), "{path}");
+        // Catch compiler code-size regressions before the full transaction
+        // replay, which separately verifies cycles, memory and all groups.
+        let compiled = compile_at(std::str::from_utf8(bytes).unwrap(), 3);
+        let limit = fixture["ceilings"][profile]["groups"]["transfer"]["elf_bytes"].as_u64().unwrap();
+        assert!(compiled.artifact_bytes.len() as u64 <= limit, "{profile}: ELF {} exceeds {limit}", compiled.artifact_bytes.len());
+        assert_eq!(
+            hex::encode(Sha256::digest(&compiled.artifact_bytes)),
+            fixture["observations"][format!("{profile}-1-1-valid")]["groups"][0]["elf_sha256"],
+            "{profile}: compiler identity drift requires transaction resource replay"
+        );
     }
     let cases = cases();
     assert_eq!(cases.len(), 44);

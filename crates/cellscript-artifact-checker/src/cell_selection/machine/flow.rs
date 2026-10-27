@@ -5,12 +5,90 @@ use super::*;
 use std::collections::VecDeque;
 
 pub(crate) type Markers<'a> = BTreeMap<(&'a str, u32, u32), (u64, u64, u32)>;
+pub(crate) type Fallthroughs<'a> = BTreeMap<(&'a str, u32), u64>;
+
+/// Source operation order with room for all 32 members retired by one owner
+/// drop, or an extent check followed by one borrowed collection operation.
+pub(crate) fn operation_position(operation: u32, part: u32) -> Result<u32, CheckerError> {
+    if part >= 33 {
+        return Err(invalid("too many checked parts in one source operation"));
+    }
+    operation
+        .checked_mul(33)
+        .and_then(|position| position.checked_add(part))
+        .ok_or_else(|| invalid("checked source operation position overflows"))
+}
 
 pub(crate) fn validate(
     record: &VerifiedLoweringRecord,
     elf: &ParsedElf,
     markers: &Markers<'_>,
     abort: u64,
+) -> Result<(), CheckerError> {
+    validate_with_bodies(record, elf, markers, abort, &BTreeMap::new())
+}
+
+/// Additional bodies come only from completed independent instruction/lifetime
+/// proofs. They do not satisfy mandatory sites, and must not hide one.
+pub(crate) fn validate_with_bodies(
+    record: &VerifiedLoweringRecord,
+    elf: &ParsedElf,
+    markers: &Markers<'_>,
+    abort: u64,
+    bodies: &BTreeMap<u64, u64>,
+) -> Result<(), CheckerError> {
+    validate_with_fallthroughs(record, elf, markers, abort, bodies, &BTreeMap::new())
+}
+
+/// Empty source terminators still constrain every successful exit from their
+/// block. Moving evidence labels to a successor cannot erase that obligation.
+pub(crate) fn validate_with_fallthroughs(
+    record: &VerifiedLoweringRecord,
+    elf: &ParsedElf,
+    markers: &Markers<'_>,
+    abort: u64,
+    bodies: &BTreeMap<u64, u64>,
+    fallthroughs: &Fallthroughs<'_>,
+) -> Result<(), CheckerError> {
+    let atomic = compose_bodies(markers, bodies)?;
+    validate_paths(record, elf, markers, abort, &atomic, fallthroughs)
+}
+
+fn compose_bodies(markers: &Markers<'_>, bodies: &BTreeMap<u64, u64>) -> Result<BTreeMap<u64, u64>, CheckerError> {
+    let required_ranges = markers.values().map(|&(start, end, _)| (start, end)).collect::<BTreeMap<_, _>>();
+    let mut atomic = BTreeMap::new();
+    for (&start, &end) in bodies {
+        if start >= end {
+            return Err(invalid("empty or reversed checked body"));
+        }
+        if let Some((&required_start, &required_end)) = required_ranges.range(..end).next_back() {
+            if required_start <= start && end <= required_end {
+                continue;
+            }
+            if start < required_end {
+                return Err(invalid("checked body would hide a required verification"));
+            }
+        }
+        if let Some((&previous, &previous_end)) = atomic.last_key_value()
+            && start < previous_end
+        {
+            if end <= previous_end {
+                continue;
+            }
+            return Err(invalid(format!("checked bodies partially overlap at {previous:#x}/{start:#x}")));
+        }
+        atomic.insert(start, end);
+    }
+    Ok(atomic)
+}
+
+fn validate_paths(
+    record: &VerifiedLoweringRecord,
+    elf: &ParsedElf,
+    markers: &Markers<'_>,
+    abort: u64,
+    atomic: &BTreeMap<u64, u64>,
+    fallthroughs: &Fallthroughs<'_>,
 ) -> Result<(), CheckerError> {
     let words = elf.instructions.iter().map(|i| (i.address, i.word)).collect::<BTreeMap<_, _>>();
     let targets = elf.control_flow.iter().map(|flow| (flow.address, flow.target)).collect::<BTreeMap<_, _>>();
@@ -43,6 +121,9 @@ pub(crate) fn validate(
     let mut required = BTreeMap::<(&str, u32), Vec<(u64, u64)>>::new();
     for (&(owner, block, _operation), &(start, end, _offset)) in markers {
         required.entry((owner, block)).or_default().push((start, end));
+    }
+    for &key in fallthroughs.keys() {
+        required.entry(key).or_default();
     }
     for ((entry_id, block_id), sites) in required {
         let start = record
@@ -79,13 +160,16 @@ pub(crate) fn validate(
                 )));
             }
         }
-        let complete = |count: usize| {
+        let complete = |count: usize, pc: u64, target: Option<u64>| {
+            if fallthroughs.get(&(entry_id, block_id)).is_some_and(|expected| Some(*expected) != target) {
+                return Err(invalid("empty source terminator exits to a different successor"));
+            }
             if count == sites.len() {
                 Ok(())
             } else {
                 Err(invalid(format!(
-                    "successful path bypasses a typed verification: entry={entry_id} block={block_id} visited={count} required={}",
-                    sites.len()
+                    "successful path bypasses a typed verification: entry={entry_id} block={block_id} pc={pc:#x} visited={count} required={} next={:?}",
+                    sites.len(), sites.get(count)
                 )))
             }
         };
@@ -99,38 +183,45 @@ pub(crate) fn validate(
             }
             let mut count = states[&pc];
             let mut next = vec![pc + 4];
+            let mut decode = true;
             if let Some(index) = sites.iter().position(|site| site.0 == pc) {
                 if index != count {
                     return Err(invalid("typed verification order differs"));
                 }
                 count += 1;
-                next = vec![sites[index].1];
-            } else {
+                // A checked terminator can have no preparation instructions.
+                // Count its mandatory site, then expose its actual successors.
+                if sites[index].1 != pc {
+                    next = vec![sites[index].1];
+                    decode = false;
+                }
+            } else if let Some(&end) = atomic.get(&pc) {
+                if owner(end - 4) != Some((entry_id, Some(block_id))) {
+                    return Err(invalid("checked body crosses the current typed block"));
+                }
+                next = vec![end];
+                decode = false;
+            }
+            if decode {
                 let word = *words.get(&pc).ok_or_else(|| invalid("verification CFG leaves decoded instructions"))?;
                 match word & 0x7f {
                     0x63 => next.push(*targets.get(&pc).ok_or_else(|| invalid("unresolved conditional edge"))?),
                     0x6f if word >> 7 & 31 == 0 => next = vec![*targets.get(&pc).ok_or_else(|| invalid("unresolved direct edge"))?],
                     0x6f if word >> 7 & 31 == 1 => {} // A returning checked call resumes at pc + 4.
                     0x67 if word == 0x00008067 => {
-                        complete(count)?;
+                        complete(count, pc, None)?;
                         next.clear();
                     }
                     0x67 if word >> 7 & 31 == 1 && targets.contains_key(&pc) => {}
                     0x67 if word >> 7 & 31 == 0 && targets.contains_key(&pc) => next = vec![targets[&pc]],
                     0x67 => return Err(invalid("unproved indirect verification CFG edge")),
                     0x73 => {
-                        let number = record.syscall_sites.iter().find(|site| site.address == pc).and_then(|site| site.syscall_number);
-                        if !matches!(
-                            number,
-                            Some(
-                                2041 | 2042 | 2051 | 2052 | 2061 | 2062 | 2071 | 2072 | 2073 | 2074 | 2081 | 2082 | 2083 | 2092 | 2177
-                            )
-                        ) {
-                            // An exit/exec/unknown syscall cannot silently bypass
-                            // an outstanding verification or return to this CFG.
-                            complete(count)?;
-                            next.clear();
-                        }
+                        // Returning syscall bodies must be independently checked
+                        // and composed as atomic sites. A sidecar's syscall
+                        // number alone does not prove the machine's a7 value.
+                        // Unrecognized exit/exec/syscalls cannot bypass work.
+                        complete(count, pc, None)?;
+                        next.clear();
                     }
                     _ => {}
                 }
@@ -140,7 +231,7 @@ pub(crate) fn validate(
                     continue;
                 }
                 if owner(target) != Some((entry_id, Some(block_id))) || target == start {
-                    complete(count)?;
+                    complete(count, pc, Some(target))?;
                     continue;
                 }
                 if sites.iter().any(|&(begin, end)| begin < target && target < end) {
@@ -165,7 +256,7 @@ pub(crate) fn validate(
 
 /// Match only a complete frame restore ending in RET. No stores, calls, value
 /// changes or conditional edges can hide in an exempted return tail.
-fn checked_return_tail(start: u64, end: u64, frame: u32, words: &BTreeMap<u64, u32>, targets: &BTreeMap<u64, u64>) -> bool {
+pub(crate) fn checked_return_tail(start: u64, end: u64, frame: u32, words: &BTreeMap<u64, u32>, targets: &BTreeMap<u64, u64>) -> bool {
     if frame < 16 || !frame.is_multiple_of(16) {
         return false;
     }
@@ -183,6 +274,17 @@ fn checked_return_tail(start: u64, end: u64, frame: u32, words: &BTreeMap<u64, u
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn checked_body_composition_cannot_hide_or_partially_cover_required_operations() {
+        let required = BTreeMap::from([(("helper:test", 0, 1), (16, 32, 0)), (("helper:test", 0, 2), (48, 64, 0))]);
+        for (start, end) in [(0, 20), (20, 36), (0, 36), (28, 52), (0, 80), (64, 64), (80, 64)] {
+            assert!(compose_bodies(&required, &BTreeMap::from([(start, end)])).is_err(), "{start}..{end}");
+        }
+        let bodies = BTreeMap::from([(0, 16), (4, 12), (16, 32), (20, 28), (32, 48), (64, 80)]);
+        assert_eq!(compose_bodies(&required, &bodies).unwrap(), BTreeMap::from([(0, 16), (32, 48), (64, 80)]));
+        assert!(compose_bodies(&required, &BTreeMap::from([(0, 12), (4, 16)])).is_err());
+    }
 
     #[test]
     fn shared_return_tail_requires_exact_frame_restoration_and_no_other_effects() {

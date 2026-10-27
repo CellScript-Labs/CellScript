@@ -282,6 +282,7 @@ pub(crate) fn validate(
     if checked.len() != markers.len() {
         return Err(invalid("machine verification lacks a typed obligation"));
     }
+    data::validate_result_storage(&data_effects)?;
     flow::validate(record, elf, &markers, abort)?;
     let mut effects = Checked { uses, data: data_effects, ..Default::default() };
     for (key @ (owner, _, _), (start, end, offset)) in markers {

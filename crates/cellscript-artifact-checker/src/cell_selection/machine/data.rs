@@ -24,7 +24,7 @@ pub(crate) struct Effect {
     pub destination: u32,
     pub projection: bool,
     pub writes: Vec<(u32, u32)>,
-    pub result_pointer: Option<u32>,
+    pub result_buffer: Option<(u32, u32)>,
     pub nested: Option<NestedResult>,
 }
 
@@ -58,7 +58,7 @@ pub(super) fn validate(
         destination,
         projection: !operand.ty.starts_with("CellDataView<"),
         writes: Vec::new(),
-        result_pointer: None,
+        result_buffer: None,
         nested: None,
     };
     if effect.projection {
@@ -120,7 +120,7 @@ pub(super) fn validate(
             return Err(invalid("Cell data result overlaps scalar, scratch or saved storage"));
         }
         effect.writes.push((output, width));
-        effect.result_pointer = Some(output);
+        effect.result_buffer = Some((output, width));
     } else if output != 0 {
         return Err(invalid("scalar Cell data result has an unexpected buffer"));
     }
@@ -191,4 +191,36 @@ pub(super) fn validate(
     c.bind(done)?;
     c.finish()?;
     Ok(effect)
+}
+
+/// Copied fields have private storage for the invocation. Check every data
+/// producer together: recognizing each copy in isolation cannot rule out a
+/// coherent marker/instruction rewrite that aliases another result or load.
+pub(super) fn validate_result_storage(
+    effects: &std::collections::BTreeMap<String, std::collections::BTreeMap<u64, Effect>>,
+) -> Result<(), CheckerError> {
+    for sites in effects.values() {
+        let mut regions = sites
+            .values()
+            .flat_map(|effect| {
+                effect.writes.iter().map(|&(start, bytes)| (start, start + bytes, effect.result_buffer == Some((start, bytes))))
+            })
+            .collect::<Vec<_>>();
+        regions.sort_unstable();
+        let mut previous_end = 0;
+        let mut copied_end = 0;
+        for (start, end, copied) in regions {
+            // Reusing transient load scratch is allowed. A copied result must
+            // not overlap any other data producer's write footprint, even if
+            // that producer has not executed yet or lies on another branch.
+            if start < copied_end || (copied && start < previous_end) {
+                return Err(invalid("copied Cell data results overlap another data read's storage"));
+            }
+            previous_end = previous_end.max(end);
+            if copied {
+                copied_end = copied_end.max(end);
+            }
+        }
+    }
+    Ok(())
 }

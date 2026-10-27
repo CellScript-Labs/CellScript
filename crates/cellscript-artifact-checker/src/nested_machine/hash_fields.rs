@@ -12,7 +12,7 @@ pub(super) fn field(owner: &str) -> Option<u32> {
     }
 }
 
-pub(super) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf, owner: &str, field: u32) -> Result<(), CheckerError> {
+pub(crate) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf, owner: &str, field: u32) -> Result<(), CheckerError> {
     use Label::*;
     let blocks = record.blocks.iter().filter(|block| block.owner_entry == owner).collect::<Vec<_>>();
     let start = blocks.iter().map(|block| block.range.start).min().ok_or_else(|| invalid("hash helper has no body"))?;

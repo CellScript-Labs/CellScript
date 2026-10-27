@@ -584,13 +584,32 @@ impl CodeGenerator {
             (call_abi_arg_count(abi.as_ref(), args) + usize::from(return_buffer_bytes.is_some())).saturating_sub(8) * 8,
         );
         let mut abi_index = 0usize;
+        let scalar_call = abi
+            .as_ref()
+            .filter(|abi| {
+                abi.checked_scalar_parameters
+                    && abi.params.iter().any(|param| {
+                        matches!(param.ty, IrType::Bool | IrType::U8 | IrType::U16 | IrType::U32 | IrType::I32 | IrType::U64)
+                    })
+            })
+            .map(|_| self.fresh_label("allocated_call"));
         for (arg_index, arg) in args.iter().enumerate() {
             if let Some(abi) = &abi
                 && let Some(param) = abi.params.get(arg_index)
             {
                 let needs_type_hash = abi.type_hash_param_indices.contains(&arg_index);
+                let scalar_marker = scalar_call
+                    .as_ref()
+                    .filter(|_| matches!(param.ty, IrType::Bool | IrType::U8 | IrType::U16 | IrType::U32 | IrType::I32 | IrType::U64))
+                    .map(|marker| format!("{marker}_{arg_index}"));
+                if let Some(marker) = &scalar_marker {
+                    self.emit_label(&format!("{marker}_begin"));
+                }
                 if !self.emit_call_param_arg(func, param, needs_type_hash, &mut abi_index, arg, outgoing_stack_arg_bytes) {
                     return Ok(());
+                }
+                if let Some(marker) = &scalar_marker {
+                    self.emit_label(&format!("{marker}_end"));
                 }
                 continue;
             }
@@ -643,6 +662,9 @@ impl CodeGenerator {
                 return Ok(());
             }
             self.emit("mv a2, s11");
+        }
+        if let Some(marker) = &scalar_call {
+            self.emit_label(&format!("{marker}_invoke"));
         }
         self.emit(format!("call {}", func));
         if outgoing_stack_arg_bytes > 0 {
@@ -726,11 +748,33 @@ impl CodeGenerator {
                     self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
                 }
             } else if let IrType::Tuple(items) = &d.ty {
+                if self.emit_fixed_tuple_call_result(d) {
+                    return Ok(());
+                }
                 self.emit_stack_store("a0", self.scalar_slot_offset(d.id));
-                for index in 0..items.len().min(8) {
+                for (index, item) in items.iter().take(8).enumerate() {
                     let field = index.to_string();
                     if let Some(field_var_id) = self.tuple_call_return_field_slots.get(&(d.id, field)).copied() {
-                        self.emit_stack_store(&format!("a{}", index), self.scalar_slot_offset(field_var_id));
+                        if let IrType::Array(inner, width) = item
+                            && **inner == IrType::U8
+                            && (1..=8).contains(width)
+                            && let Some(offset) = self.fixed_byte_local_offsets.get(&field_var_id).copied()
+                        {
+                            // Tuple return registers carry packed short arrays;
+                            // field projections carry addressed bytes. Convert
+                            // at the call, before conditional/repeated reads.
+                            self.emit(format!("mv t0, a{index}"));
+                            for byte in 0..*width {
+                                self.emit_stack_store_byte("t0", offset + byte);
+                                if byte + 1 < *width {
+                                    self.emit("srli t0, t0, 8");
+                                }
+                            }
+                            self.emit_sp_addi("t0", offset);
+                            self.emit_stack_store("t0", self.scalar_slot_offset(field_var_id));
+                        } else {
+                            self.emit_stack_store(&format!("a{}", index), self.scalar_slot_offset(field_var_id));
+                        }
                     }
                 }
             } else {
@@ -2003,12 +2047,16 @@ impl CodeGenerator {
         outgoing_stack_arg_bytes: usize,
     ) -> bool {
         let register = self.call_abi_register(*abi_index);
-        if const_width.is_some() && matches!(arg, IrOperand::Const(_)) {
-            self.emit(format!(
-                "# cellscript abi: call {} pointer param {} uses a constant unsupported by the call ABI; pass null pointer",
-                func, label
-            ));
-            self.emit(format!("li {}, 0", register));
+        if let (Some(width), IrOperand::Const(value)) = (const_width, arg) {
+            let Some(bytes) = fixed_byte_const_bytes(value).filter(|bytes| bytes.len() == width) else {
+                self.emit(format!("# cellscript abi: call {func} pointer param {label} has no exact-width constant storage"));
+                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+                return false;
+            };
+            // Ordinary value parameters borrow immutable constant storage for
+            // the call. Use the same little-endian bytes as local materialization.
+            let data = self.const_data_label_for_bytes(bytes);
+            self.emit(format!("la {register}, {data}"));
         } else {
             self.emit_operand_to_register(&register, arg);
         }
@@ -2062,12 +2110,12 @@ impl CodeGenerator {
                 self.emit(format!("li {}, 0", register));
             }
         } else if let CallLengthKind::FixedBytes = kind {
-            if matches!(arg, IrOperand::Const(_)) {
-                self.emit(format!(
-                    "# cellscript abi: call {} fixed-byte const param {} has no materialized pointer; pass zero length to fail closed",
-                    func, label
-                ));
-                self.emit(format!("li {}, 0", register));
+            if let IrOperand::Const(value) = arg {
+                let Some(bytes) = fixed_byte_const_bytes(value) else {
+                    self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+                    return false;
+                };
+                self.emit(format!("li {register}, {}", bytes.len()));
             } else {
                 self.emit(format!(
                     "# cellscript abi: call {} fixed-byte param {} has no tracked ABI length; pass zero length to fail closed",

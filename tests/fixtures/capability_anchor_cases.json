@@ -19,9 +19,9 @@
     {
       "artifact_hash": "0x90679a6d2bbfe68becbcda7dde1b8ebf5c15e3ba1474a376edd9c516b81a161b",
       "id": "policy",
-      "lowering_record_hash": "0x84c62a7de7da5d1ecf1e19460cb49bfa7201341a3f83286cb1d30e8add82655a",
-      "source_map_hash": "0x9a691c7fa6f35e3b2fc88a8ee2dd0b7fed09d4933a574b8fcc1270659f41580e",
-      "verified_bundle_id": "0xd3f05c69e65ec093837c8c51075a20d3c9263a23e6d78d7bbec9a0f5ac6a9eb7"
+      "lowering_record_hash": "0xa7469eab40091a2dafef05482c388593befdc5e6d6e7dca216d50ef84fb032a7",
+      "source_map_hash": "0x26a1b219c2cdb46e51a493b108b9d6c26beb82c8f9372c4abfa19e73254d693d",
+      "verified_bundle_id": "0x6b784890488f832e38ef6fb61764331995b747357519c625c3ef8231ff2ac5b7"
     },
     {
       "artifact_hash": "0x99c1cd4ba11a89f0e1c51542bbccf6112d35315b97525de2e129523ec826973e",
@@ -92,7 +92,7 @@
     "cycles": 40886,
     "max_stack_frame_bytes": 5376,
     "occupied_capacity_shannons": 32800000000,
-    "protocol_bundle_hash": "2defa1ead3471c6e47d20e2fe9ff493b4585b49667d54b4e078da3b2a42b372d",
+    "protocol_bundle_hash": "fb4f5caa7783454b785b8688427ef15eb821a7b85e79537fb9643f7dd5a8a3d3",
     "raw_transaction_hash": "0x025f688c8e33abb001f85534b0d16bc6f2e08adf18159965cfb0d5403a6b0880",
     "serialized_transaction_hash": "0x1f634e453a4365addf6e2dc1b2dcccda52c7ff553c6b0016928b95cadcb0872f",
     "transaction_bytes": 1423,
