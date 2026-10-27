@@ -38,7 +38,7 @@ impl CodeGenerator {
             .take(3)
             .collect::<Vec<_>>();
         let (pointer, lower, upper) = (registers[0], registers[1], registers[2]);
-        self.emit("addi sp, sp, -32");
+        self.emit_stack_adjustment(-32);
         for (index, register) in registers.iter().enumerate() {
             self.emit_stack_store(register, index * 8);
         }
@@ -56,7 +56,7 @@ impl CodeGenerator {
         for (index, register) in registers.iter().enumerate() {
             self.emit_stack_load(register, index * 8);
         }
-        self.emit("addi sp, sp, 32");
+        self.emit_stack_adjustment(32);
         true
     }
 }

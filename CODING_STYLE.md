@@ -133,6 +133,11 @@ implicit backend contracts more implicit.
 - Keep register liveness local and visible. If a helper needs scratch registers,
   document the live registers through arguments or an avoid set rather than
   assuming `t6` is free.
+- Large-immediate textual normalization may reuse an overwritten destination,
+  but must not invent an unadvertised scratch register. Stores and in-place
+  address updates need the structured emitter's live-register contract.
+  Scratch exhaustion must fail compilation, including register aliases; it must
+  never fall back to a register in the avoid set.
 - Constants that need an address must use concrete `.rodata` labels. Do not emit
   references to placeholder labels that are not materialized.
 - Fixed-byte values wider than 8 bytes must use fixed-byte storage and byte

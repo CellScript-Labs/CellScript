@@ -11,8 +11,8 @@ impl CodeGenerator {
         self.emit("mv t4, a4");
         let step = match ordered.order {
             KeyOrder::UnsignedLittleEndian => {
-                self.emit(format!("addi t3, t3, {}", ordered.key_bytes - 1));
-                self.emit(format!("addi t4, t4, {}", ordered.key_bytes - 1));
+                self.emit_large_addi("t3", "t3", (ordered.key_bytes - 1) as i64);
+                self.emit_large_addi("t4", "t4", (ordered.key_bytes - 1) as i64);
                 -1
             }
             KeyOrder::LexicographicBytes => 1,
@@ -73,7 +73,7 @@ impl CodeGenerator {
             let unique = self.fresh_label("ordered_sorted_unique");
             let next = self.fresh_label("ordered_sorted_next");
             self.emit("mv a3, a4");
-            self.emit(format!("addi a4, a4, {}", vector.width));
+            self.emit_large_addi("a4", "a4", vector.width as i64);
             self.emit(format!("li a5, {}", count - 1));
             self.emit_label(&scan);
             self.emit_sorted_key_compare(ordered, &unique, &next, &bad);
@@ -81,7 +81,7 @@ impl CodeGenerator {
             self.emit("addi a6, a6, 1");
             self.emit_label(&next);
             self.emit("mv a3, a4");
-            self.emit(format!("addi a4, a4, {}", vector.width));
+            self.emit_large_addi("a4", "a4", vector.width as i64);
             self.emit("addi a5, a5, -1");
             self.emit(format!("bnez a5, {scan}"));
         }
@@ -97,18 +97,18 @@ impl CodeGenerator {
         self.emit_label(&advance);
         // a3 is one past the last output. Equal keys overwrite that entry;
         // unequal keys restore the next free output address before copying.
-        self.emit(format!("addi a3, a3, -{}", vector.width));
+        self.emit_large_addi("a3", "a3", -(vector.width as i64));
         let fresh = self.fresh_label("ordered_sorted_fresh");
         self.emit_sorted_key_compare(ordered, &fresh, &copy, &bad);
         self.emit_label(&fresh);
-        self.emit(format!("addi a3, a3, {}", vector.width));
+        self.emit_large_addi("a3", "a3", vector.width as i64);
         self.emit_label(&copy);
         self.emit("mv t0, a3");
         self.emit("mv t3, a4");
         self.emit(format!("li t2, {}", vector.width));
         self.emit_value_vector_copy();
-        self.emit(format!("addi a3, a3, {}", vector.width));
-        self.emit(format!("addi a4, a4, {}", vector.width));
+        self.emit_large_addi("a3", "a3", vector.width as i64);
+        self.emit_large_addi("a4", "a4", vector.width as i64);
         self.emit("addi a5, a5, -1");
         self.emit(format!("bnez a5, {advance}"));
         self.emit(format!("j {done}"));

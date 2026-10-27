@@ -252,7 +252,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
-const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v124-0.32-bounded-runtime-admission";
+const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v127-0.32-read-bounds-and-scratch";
 pub const METADATA_SCHEMA_VERSION: u32 = 72;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 2;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -11230,6 +11230,17 @@ fn runtime_view_provenance_by_var(body: &ir::IrBody) -> HashMap<usize, RuntimeVi
                 ir::IrInstruction::Move { dest, src: ir::IrOperand::Var(src) } => {
                     if let Some(provenance) = values.get(&src.id).cloned() {
                         values.insert(dest.id, provenance);
+                    } else if transaction_view_handle_type(&src.ty).is_some() && transaction_view_handle_type(&dest.ty).is_some() {
+                        // A ScriptRef/OutPoint projection from a helper's view
+                        // parameter copies its encoded source/index. Its caller
+                        // may supply a global or group coordinate.
+                        values.insert(
+                            dest.id,
+                            RuntimeViewProvenance {
+                                resolved_source: "SourceView".to_string(),
+                                index: runtime_scalar_dynamic(format!("{}.index", src.name), Some(u64::from(u32::MAX))),
+                            },
+                        );
                     }
                 }
                 _ => {}
@@ -11296,9 +11307,17 @@ fn body_transaction_view_handles(scope_kind: &str, scope_name: &str, body: &ir::
                         None,
                     )
                 }
-                ir::IrInstruction::Move { dest, src: ir::IrOperand::Var(src) } => {
-                    (dest, None, sources.get(&src.id).cloned(), None, "inherited-source-view", Some(src.name.clone()))
-                }
+                ir::IrInstruction::Move { dest, src: ir::IrOperand::Var(src) } => (
+                    dest,
+                    None,
+                    sources
+                        .get(&src.id)
+                        .cloned()
+                        .or_else(|| source_values.get(&dest.id).map(|provenance| provenance.resolved_source.clone())),
+                    None,
+                    "inherited-source-view",
+                    Some(src.name.clone()),
+                ),
                 _ => continue,
             };
             let source = explicit_source.or(inherited_source).or(runtime_source).unwrap_or_else(|| "Derived".to_string());
@@ -17771,7 +17790,9 @@ fn metadata_prelude_availability(
                         }
                     }
                 }
-                ir::IrInstruction::Call { dest: Some(dest), func, args } if dest.ty == ir::IrType::Hash => {
+                ir::IrInstruction::Call { dest: Some(dest), func, args }
+                    if dest.ty == ir::IrType::Hash || ir::is_ckb_script_hash_property_result(func, &dest.ty) =>
+                {
                     let fixed_hash_result = match func.as_str() {
                         "__ckb_hash_chain" | "__ckb_hash_blake2b" | "__ckb_hash_sha256" | "__ckb_hash_sha256d" => {
                             args.first().is_some_and(|arg| metadata_fixed_value_available_with_width(arg, &availability, 32))

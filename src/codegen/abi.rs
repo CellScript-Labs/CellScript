@@ -434,7 +434,7 @@ impl CodeGenerator {
                     self.emit_label(&bytes_ok_label);
                     self.emit_entry_abi_pointer_from_dynamic_offset(abi_index, "t6", 0, "t0", outgoing_stack_arg_bytes);
                     self.emit_entry_abi_immediate_arg(abi_index + 1, width as u64, outgoing_stack_arg_bytes);
-                    self.emit(format!("addi t6, t6, {}", width));
+                    self.emit_large_addi_with_avoid("t6", "t6", width as i64, &["t5"]);
                     abi_index += 2;
                 } else if let Some(width) = entry_witness_register_param_width(&param.ty) {
                     let bytes_ok_label = self.fresh_label("entry_witness_scalar_bytes_ok");
@@ -468,7 +468,7 @@ impl CodeGenerator {
                         ));
                         self.emit_entry_abi_reg_arg(abi_index, "t3", outgoing_stack_arg_bytes);
                     }
-                    self.emit(format!("addi t6, t6, {}", width));
+                    self.emit_large_addi_with_avoid("t6", "t6", width as i64, &["t5"]);
                     abi_index += 1;
                 } else {
                     self.emit(format!("# cellscript entry abi: unsupported param {} shape; fail closed", param.name));
@@ -765,7 +765,7 @@ impl CodeGenerator {
     ) {
         self.emit(format!("add {}, sp, {}", temp_reg, offset_reg));
         if ENTRY_WITNESS_BUFFER_OFFSET + extra_offset != 0 {
-            self.emit(format!("addi {}, {}, {}", temp_reg, temp_reg, ENTRY_WITNESS_BUFFER_OFFSET + extra_offset));
+            self.emit_large_addi_with_avoid(temp_reg, temp_reg, (ENTRY_WITNESS_BUFFER_OFFSET + extra_offset) as i64, &["t5", "t6"]);
         }
         self.emit_entry_abi_reg_arg(abi_index, temp_reg, outgoing_stack_arg_bytes);
     }
@@ -955,7 +955,7 @@ impl CodeGenerator {
         }
 
         self.emit_stack_load_with_avoid("t3", ENTRY_SCRIPT_ARGS_CURSOR_OFFSET, &witness_cursor_live);
-        self.emit(format!("addi t3, t3, {}", width));
+        self.emit_large_addi_with_avoid("t3", "t3", width as i64, &witness_cursor_live);
         self.emit_stack_store_with_avoid("t3", ENTRY_SCRIPT_ARGS_CURSOR_OFFSET, &witness_cursor_live);
     }
 

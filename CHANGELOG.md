@@ -2,6 +2,39 @@
 
 ## Unreleased — 0.32
 
+Separate read capacity, syscall-reported remaining length and published value
+length. Reject short fixed Cell-data slices and xUDT amount words, and reject
+oversized Cell-data hashes and legacy WitnessArgs projections before reading
+beyond their 512-byte buffers. Independently bind Cell-data hash/slice machine
+contracts and reject rebound capacity, length-branch and pointer mutations.
+Large-immediate expansion preserves unrelated live registers; implicit scratch
+use and scratch exhaustion fail compilation. Advance artifact-cache generation
+to v127. See the [read-boundary audit](docs/CELLSCRIPT_READ_BOUNDARY_AUDIT.md).
+
+Audit runtime, ordinary-function, outgoing-argument and generated-library stack
+layouts. Centralize aligned SP adjustments, compact hash/Script/WitnessArgs,
+SHA, OutPoint, MetaPoint, DAO, xUDT and process helper frames, and remove obsolete
+legacy witness return fragments. Independently reject balanced but misaligned
+machine frames; retain exact source, copy, output-pointer and saved-slot checks.
+The O0/O3 all-helper machine inventory covers 247 entries and 360 adjustments.
+Advance artifact-cache generation to v126. See the
+[layout audit](docs/CELLSCRIPT_STACK_LAYOUT_AUDIT.md) for per-frame sizes, retained
+ABI reservations and validation limits. This remains uncommitted candidate work,
+not final bounded-runtime acceptance.
+
+Align the current-Script and transaction-hash runtime helpers to compact 16-byte frames
+so they compose with live typed Cell views under the existing 16-byte alignment
+check. Cover both helpers with strict O0/O3 compilation, actual VM execution and
+rebound frame mutations. Advance artifact-cache generation to v125; final
+bounded-runtime gates remain pending.
+Retain `ScriptHash` for typed Cell `lock_hash`/`type_hash` and ScriptRef `hash` properties through IR,
+buffer allocation, admission and independent result checking. Keep raw SourceView
+hash calls and `data_hash` in the ordinary Hash domain. Independently recognize
+the context-hash, ScriptRef field, input OutPoint and exact WitnessArgs helpers'
+finite caller-buffer writes and reject overlap with live protected buffers.
+Keep ScriptRef/OutPoint projections from helper parameters bound to the caller's
+dynamic source/index rather than inventing a global Input coordinate.
+
 Add the bounded-runtime admission candidate for #47–#49: retire four blanket
 experimental proof flags while retaining nominal, machine, transport and lifetime
 checks. Strict-policy tests cover complete business programs and rebound removal

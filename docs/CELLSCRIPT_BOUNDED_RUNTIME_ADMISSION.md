@@ -17,7 +17,7 @@ without the four unconditional `*-artifact-proof` flags. Retain all nominal,
 codec, allocation, machine, control-flow, transport and lifetime checks. Older
 bundles carrying those flags still report their legacy admission restriction;
 they must be rebuilt and independently checked against the current contracts.
-Artifact-cache generation is v124. Numeric limits and wire formats remain
+Artifact-cache generation is v127. Numeric limits and wire formats remain
 unchanged; artifact admission does not authorize transaction submission.
 
 The surface classifier now recognizes typed named-role projections and bounded
@@ -102,10 +102,56 @@ small-case ceilings and was rejected rather than accommodated by raising budgets
 
 ## Final validation receipt
 
-Pending: a signed candidate source revision and completed `backend`, `dev` and
-`ci` gates on that unchanged revision. Focused tests and the commit gate permit
-an intermediate candidate commit; they do not close these issues. Record each
-gate's source, terminal result and evidence location before changing this status.
+The backend run on `f34c175756b4d310812dad3dfae9bc8ff60724d3` passed all 1089
+compiler unit tests and 42 collection runtime tests, then stopped with 198
+checker tests passing and one failure. The valid runtime-provenance fixture
+exposed a 24-byte frame in `__ckb_transaction_hash` that violated the existing
+16-byte owned-frame alignment check. The current-Script hash helper used the
+same layout. Both helpers now allocate and restore 16 bytes, storing the size
+pointer at offset 0 and the return address at offset 8. The new O0/O3 regression combines
+both hashes with a live typed Cell view, executes the actual VM, and rejects
+rebound misaligned-frame mutations. This failed backend receipt does not count
+as a pass; `dev` and `ci` did not run for that revision.
+
+The same combination also exposed two composition gaps. Typed Cell `lock_hash`
+and `type_hash`, plus ScriptRef `hash`, now retain the source `ScriptHash` domain through IR,
+admission, buffer allocation and independent property checking; `data_hash` and
+raw SourceView hash calls retain ordinary Hash. The context-hash helper effects
+are checked against their complete finite instruction bodies, including syscall,
+length, status, frame restoration and branch targets. Call sites must provide
+disjoint private 32-byte output and eight-byte length buffers, with existing
+live-view/copy protection retained. Regression mutations rebind outer hashes and
+reject writes through a substituted pointer or reads from the wrong length slot.
+
+Composed runtime-view regressions also require finite effects for ScriptRef
+code-hash/exact-32-byte args reads, input OutPoint transaction-hash reads and
+exact-32-byte WitnessArgs field reads. Their summaries bind the complete helper
+bodies and checked resolver call, while the witness resolver independently
+proves its private memory effects. Rebound mutations cover copy limits, syscall
+fields, resolver bounds and output pointers. ScriptRef/OutPoint projections from
+helper parameters retain dynamic `SourceView` provenance and bounded indexes;
+they do not invent global-versus-group coordinates. Resource fixture identity
+refreshes retain the existing measurements and numeric ceilings.
+
+Focused v125 validation passes: all four bounded-admission tests (O0/O3 positive
+bundles and rebound mutations), the original runtime-provenance regression,
+all 12 typed runtime-view tests with unchanged numeric resource profiles, and
+all-target clippy for the compiler and standalone checker with `-D warnings`.
+
+The subsequent [stack-layout audit](CELLSCRIPT_STACK_LAYOUT_AUDIT.md) expands
+this repair across all runtime/stdlib entries and the ordinary frame/call paths.
+It compacts additional helpers and independently rejects every unaligned stack
+adjustment, including balanced allocation/restoration mutations. Its receipt
+records the current uncommitted-source validation and supersedes the v125
+focused receipt for modified layouts. No source version is frozen by that audit.
+
+The subsequent [read-boundary audit](CELLSCRIPT_READ_BOUNDARY_AUDIT.md) records
+four reproduced length-check defects and the scratch-register repair. Its v127
+receipts supersede earlier focused results for the changed code. Final
+clean-source `backend`, `dev` and `ci` acceptance remains pending. Production
+stateful acceptance requires a clean source tree; record each gate's source,
+terminal result and evidence location before changing this status or closing
+the issues.
 
 The earlier backend run on `eb19fcc135bfa423bdfe52e4d7fb4d981fbd108c` ended with
 exit 143 before completion. Its passing component tests are partial evidence,

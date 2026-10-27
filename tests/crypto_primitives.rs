@@ -21,12 +21,14 @@ action verify(
     witness expected_sha256: Hash,
     witness expected_sha256d: Hash,
     witness expected_pair: Hash,
+    witness expected_sha256_pair: Hash,
     witness expected_merkle_root: Hash,
 ) -> u64 {
     verification
         require ckb::hash_sha256(leaf) == expected_sha256
         require ckb::hash_sha256d(leaf) == expected_sha256d
         require ckb::hash_sha256d_pair(leaf, other) == expected_pair
+        require ckb::hash_sha256_pair(leaf, other) == expected_sha256_pair
         ckb::require_sha256d_merkle_root(leaf, siblings, 1, 0, expected_merkle_root)
         return 0
 }
@@ -128,6 +130,7 @@ fn sha256_merkle_witness(expected_root: [u8; 32]) -> Bytes {
     witness.extend_from_slice(&expected_sha256);
     witness.extend_from_slice(&expected_sha256d);
     witness.extend_from_slice(&expected_pair);
+    witness.extend_from_slice(&sha256(&pair_preimage));
     witness.extend_from_slice(&expected_root);
     canonical_entry_witness(witness)
 }
@@ -143,23 +146,34 @@ fn bounded_sha256_sha256d_and_merkle_execute_in_ckb_vm() {
 
     let witness = sha256_merkle_witness(expected_pair);
 
-    let elf = compile_cellscript_source_to_elf(SHA256_MERKLE_PROGRAM, "verify", None);
-    let mut fixture = build_simple_fixture(Bytes::default(), 1, 1);
-    fixture.witnesses = vec![witness];
-    let result = execute_cellscript_script(&elf, &fixture);
-
-    assert_eq!(result.exit_code, 0, "bounded SHA-256/SHA256d/Merkle helpers failed in CKB VM: {:?}", result.captured_debug);
-    assert!(result.cycles > 0);
+    for opt_level in [0, 3] {
+        let elf = compile_sha256_stack_fixture(opt_level);
+        let mut fixture = build_simple_fixture(Bytes::default(), 1, 1);
+        fixture.witnesses = vec![witness.clone()];
+        let result = execute_cellscript_script(&elf, &fixture);
+        assert_eq!(result.exit_code, 0, "O{opt_level} SHA-256/SHA256d/Merkle helpers: {:?}", result.captured_debug);
+        assert!(result.cycles > 0);
+    }
 }
 
 #[test]
 fn bounded_merkle_rejects_wrong_root_in_ckb_vm() {
-    let elf = compile_cellscript_source_to_elf(SHA256_MERKLE_PROGRAM, "verify", None);
-    let mut fixture = build_simple_fixture(Bytes::default(), 1, 1);
-    fixture.witnesses = vec![sha256_merkle_witness([0x5a; 32])];
-    let result = execute_cellscript_script(&elf, &fixture);
+    for opt_level in [0, 3] {
+        let elf = compile_sha256_stack_fixture(opt_level);
+        let mut fixture = build_simple_fixture(Bytes::default(), 1, 1);
+        fixture.witnesses = vec![sha256_merkle_witness([0x5a; 32])];
+        let result = execute_cellscript_script(&elf, &fixture);
+        assert_eq!(result.exit_code, 64, "O{opt_level} wrong Merkle root: {:?}", result.captured_debug);
+    }
+}
 
-    assert_eq!(result.exit_code, 64, "wrong Merkle root must fail closed with the stable runtime code: {:?}", result.captured_debug);
+fn compile_sha256_stack_fixture(opt_level: u8) -> Vec<u8> {
+    cellscript::compile(
+        SHA256_MERKLE_PROGRAM,
+        cellscript::CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+    )
+    .unwrap()
+    .artifact_bytes
 }
 
 #[test]

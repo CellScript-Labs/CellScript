@@ -273,6 +273,7 @@ pub fn check_bundle_values(
     validate_syscalls(record, &elf)?;
     validate_script_hash_machine_contract(record, &elf)?;
     crate::instance_machine::validate(record, &elf)?;
+    crate::nested_machine::validate_cell_data_reads(record, &elf)?;
     zk::validate(record, &elf)?;
     let zk_contracts = crate::zk_profile::contracts(&record.typed_semantics)
         .map_err(|message| CheckerError::new(CheckerRejectionCode::V2419TypedSemanticsInvalid, message))?;
@@ -4964,6 +4965,12 @@ fn validate_stack_discipline(
         let block = blocks[block_id];
         let mut delta = incoming_delta;
         for adjustment in elf.stack_adjustments.iter().filter(|adjustment| block.range.contains(adjustment.address)) {
+            if adjustment.delta % 16 != 0 {
+                return Err(CheckerError::new(
+                    CheckerRejectionCode::V2407AbiOrStackInvalid,
+                    format!("stack adjustment {} at {:#x} violates 16-byte alignment", adjustment.delta, adjustment.address),
+                ));
+            }
             delta = delta.checked_add(adjustment.delta).ok_or_else(|| {
                 CheckerError::new(
                     CheckerRejectionCode::V2407AbiOrStackInvalid,

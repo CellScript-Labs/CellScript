@@ -64,8 +64,8 @@ impl CodeGenerator {
         self.emit(format!("li a6, {}", ordered.key_bytes));
         let step = match ordered.order {
             KeyOrder::UnsignedLittleEndian => {
-                self.emit(format!("addi t3, t3, {}", ordered.key_bytes - 1));
-                self.emit(format!("addi t4, t4, {}", ordered.key_bytes - 1));
+                self.emit_large_addi("t3", "t3", (ordered.key_bytes - 1) as i64);
+                self.emit_large_addi("t4", "t4", (ordered.key_bytes - 1) as i64);
                 -1
             }
             KeyOrder::LexicographicBytes => 1,

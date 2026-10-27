@@ -22,7 +22,9 @@ const HASH: usize = 688;
 const SCHEMA: usize = 720;
 const SCHEMA_BYTES: usize = wire::ARGS_SCHEMA_DOMAIN.len() + 8 + wire::MAX_CONSTRAINTS * 8;
 const STAGING: usize = 912;
-const FRAME: usize = 1808;
+// RA already has its own slot at 24; the final policy preimage needs only
+// alignment padding, not a second trailer reserved for a return address.
+const FRAME: usize = align_frame(STAGING + wire::POLICY_DOMAIN.len() + wire::POLICY_BYTES);
 
 impl CodeGenerator {
     /// Read an unaligned LE field. Only `destination` and `scratch` are
@@ -72,7 +74,7 @@ impl CodeGenerator {
         }
         let invalid = self.fresh_label("instance_invalid");
         let done = self.fresh_label("instance_done");
-        self.emit(format!("addi sp, sp, -{FRAME}"));
+        self.emit_stack_adjustment(-(FRAME as i64));
         for (reg, slot) in [("ra", RA), ("a0", DEP), ("a1", HANDLE), ("a3", SUBJECT)] {
             self.emit_stack_store(reg, slot);
         }
@@ -253,7 +255,7 @@ impl CodeGenerator {
         self.emit(format!("li a0, {}", CellScriptRuntimeError::OpenHandleInvalid.code()));
         self.emit_label(&done);
         self.emit_stack_load("ra", RA);
-        self.emit(format!("addi sp, sp, {FRAME}"));
+        self.emit_stack_adjustment(FRAME as i64);
         self.emit("ret");
     }
 

@@ -1112,9 +1112,49 @@ impl Proof<'_> {
                                     state.forget(destination, width);
                                 }
                             }
-                        } else if let Some(field) = hash_fields::field(&callee) {
+                        } else if witness_exact_hash::field(&callee).is_some() {
                             if !self.done.contains(&callee) {
-                                hash_fields::validate(self.record, self.elf, &callee, field)?;
+                                witness_exact_hash::validate(self.record, self.elf, &callee)?;
+                                self.entry(witness_exact_hash::RESOLVER)?;
+                                self.done.insert(callee.clone());
+                            }
+                            let buffer = write(state.registers[11], 32, 0, frame - 16, &protected, pc)?;
+                            state.forget(buffer, 32);
+                        } else if context_hashes::syscall(&callee).is_some() {
+                            if !self.done.contains(&callee) {
+                                context_hashes::validate(self.record, self.elf, &callee)?;
+                                self.done.insert(callee.clone());
+                            }
+                            let buffer = write(state.registers[10], 32, 0, frame - 16, &protected, pc)?;
+                            let size = write(state.registers[11], 8, 0, frame - 16, &protected, pc)?;
+                            if buffer < size + 8 && size < buffer + 32 {
+                                return Err(invalid("context hash output and size storage overlap"));
+                            }
+                            state.forget(buffer, 32);
+                            state.forget(size, 8);
+                        } else if matches!(callee.as_str(), cell_read_hashes::HASH | cell_read_hashes::SLICE) {
+                            // Complete bodies and the memory-hash dependency
+                            // are validated even without bounded callers.
+                            let output = if callee == cell_read_hashes::SLICE { 12 } else { 11 };
+                            let buffer = write(state.registers[output], 32, 0, frame - 16, &protected, pc)?;
+                            let size = write(state.registers[output + 1], 8, 0, frame - 16, &protected, pc)?;
+                            if buffer < size + 8 && size < buffer + 32 {
+                                return Err(invalid("Cell data read output and size storage overlap"));
+                            }
+                            state.forget(buffer, 32);
+                            state.forget(size, 8);
+                        } else if hash_fields::field(&callee).is_some()
+                            || script_hash_fields::kind(&callee).is_some()
+                            || callee == out_point_hash::OWNER
+                        {
+                            if !self.done.contains(&callee) {
+                                if let Some(field) = hash_fields::field(&callee) {
+                                    hash_fields::validate(self.record, self.elf, &callee, field)?;
+                                } else if callee == out_point_hash::OWNER {
+                                    out_point_hash::validate(self.record, self.elf)?;
+                                } else {
+                                    script_hash_fields::validate(self.record, self.elf, &callee)?;
+                                }
                                 self.done.insert(callee.clone());
                             }
                             let buffer = write(state.registers[11], 32, 0, frame - 16, &protected, pc)?;

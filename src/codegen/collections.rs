@@ -692,7 +692,7 @@ impl CodeGenerator {
         }
         self.emit_stack_load("t4", self.scalar_slot_offset(collection.id));
         self.emit("ld t0, -8(t4)");
-        self.emit(format!("addi t0, t0, {}", element_count));
+        self.emit_large_addi("t0", "t0", element_count as i64);
         self.emit("sd t0, -8(t4)");
         true
     }

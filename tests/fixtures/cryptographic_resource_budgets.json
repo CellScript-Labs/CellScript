@@ -200,8 +200,8 @@
         "tests/support/ckb_script_runner.rs"
       ],
       "measured": {
-        "cycles": 79836,
-        "elf_bytes": 1408,
+        "cycles": 79832,
+        "elf_bytes": 1400,
         "max_stack_frame_bytes": 1200,
         "witness_bytes": 0,
         "transaction_bytes": 377,

@@ -41,12 +41,12 @@
         "one-past-last global and group output indexes"
       ],
       "identities": {
-        "artifact_hash": "0x2d82887d0732602d399317466e0ad8b68f574251629ce7f82fb17ab98ceb6000",
-        "lowering_record_hash": "0x0474f7c577446818af0d9f9629b8663ccd4592ca6a0598342a2212859ce5befe",
-        "raw_transaction_hash": "0x97a9472f46ea08ff9f0911dee1820906b2987b9baa34804a2f0e5856a5ab6bd8",
-        "serialized_transaction_hash": "0x5ddf3da00cbb2f18e8392c264e9713134e2328acd466eaf3c2fee3d26f520b4b",
-        "source_map_hash": "0x548b389f9d813436145f547d5dbddb40d15b054cbbe4528b9133cf18931cd112",
-        "verified_bundle_id": "0x9c6565195694860b2ae4d4f2c9a4aeb93407fd544fa57cc8a125d27d2641800b"
+        "artifact_hash": "0xd16795e2b9eff0d051bd93a0a1025880d03aa15c52ff49443b8f1fb7da52edc9",
+        "lowering_record_hash": "0x3e82663e85e862d832d68e1f2290f9ad580a6f32e3ac3d3f759ed203911ee837",
+        "raw_transaction_hash": "0x2b432d67015d21d52b6189039286f0867af2838c016a033ac967a81716b0f166",
+        "serialized_transaction_hash": "0x9c9755382df19ab0d9f4979d8f1554fbf6bce053a802785145b76f7dd8a92cc9",
+        "source_map_hash": "0x770ec8c4699a6e00aefaa164d0fefa204580eb47cd7158a549c8ffae1b2d87b9",
+        "verified_bundle_id": "0xb14bce10493b56b2ebe783ae0dff81184445622a59c57d8a1a627f8b2b0361df"
       },
       "measured": {
         "cycles": 45452,
@@ -115,12 +115,12 @@
         "WitnessArgs size and exact 32-byte lock, input_type, and output_type projections"
       ],
       "identities": {
-        "artifact_hash": "0xb47a6f193e9814cdb306f8a28835245e58cfe9c579ad9a49d1fad33893e5a128",
-        "lowering_record_hash": "0x3d6427cb263058826bf124ad714bb82fad28bca353997f3746ba2d817793b0b9",
-        "raw_transaction_hash": "0xf7c2d73eb81a98345b6fe95f1ddb63f41faff560dc77b4df5e55b5ac04bbbf09",
-        "serialized_transaction_hash": "0x2262c245682e19dc7bc97d0043942e44f5d631e1438c9971f459738d54190f7d",
-        "source_map_hash": "0x63268084ac62f92ec3c069f212d421e6eb08faa8cd9826d1724ee35c83886850",
-        "verified_bundle_id": "0x301379bb793ce32d65829ce2dcb5ac4eacc4d719a7ad88c0c6fc89005a44a8ba"
+        "artifact_hash": "0x8fcefdfabcae294ed813a6a74c6cc454eca05fe1336eefa9746a70a25c4176ff",
+        "lowering_record_hash": "0xf8b296b1e52da8c1f70ea0dc45a922a466cc3a3206f314192e83201c26017b63",
+        "raw_transaction_hash": "0x8df3c0c6dce7d3586da1597665474da69995386eddb170556196e06733306bc8",
+        "serialized_transaction_hash": "0x9617248500a6be3fd467b1c834e9305a1614ccfcfd6914aa55238f3613fad1af",
+        "source_map_hash": "0x979c30d38f909ccd6fb3e71016f7ee2423f9dd94ff0fb6b422f040f0b1d00a66",
+        "verified_bundle_id": "0xabf30bb9beac91107d044a286d3faf483d4c89bf359f6e9d1722cbeb089cb6c3"
       },
       "measured": {
         "cycles": 92306,
@@ -152,12 +152,12 @@
         "bounded policy entry witness and raw transaction hash"
       ],
       "identities": {
-        "artifact_hash": "0x5031d8b70b4c684e6399ec23be7c63358663fd3dad7c39937b306fe6f6c14b5d",
-        "lowering_record_hash": "0xf8314dd4fe4b79d84ed47c2635c60c1b2f508c52af98c8fbce054fbbd203d759",
-        "raw_transaction_hash": "0x212b9f6a2777d3f5cd9e0c5b2487a91052efe73fb4feab1e0b9ad1e6a414f1a3",
-        "serialized_transaction_hash": "0xd4c390b62bf5c24e98cd8cb468baaa1d84232eeebc59c97df654a6417a0aed68",
-        "source_map_hash": "0xcf51809e0aa9f167ca12873864c602ef154ff84df11676f20b1103334f2c4b82",
-        "verified_bundle_id": "0x0c8b32426bf4245504a7f4cb1917eb152cdcd0886091220000f581fe12013fef"
+        "artifact_hash": "0x3431e3e23d82c1224c1b7102f8b2fa361eaa670fa9fadf8fa1e988d53a34dadc",
+        "lowering_record_hash": "0x1d187f83385adee3faa7ed42f16063b0fbc57dfb6f1bc9ad48e9b7e7128492eb",
+        "raw_transaction_hash": "0x334036beb9a9ffb6f4d6b11424c96cd567dddabc8c34b95cac0e8991d8cae099",
+        "serialized_transaction_hash": "0x9d1e0c7cd50ab2bbd7771b4e515adbbe97632cc0df6d2eae8b8014e8a1c4d448",
+        "source_map_hash": "0xff7450041bf443c1f9c1252ec22deef702ea76f25545e46e84ad67670bbf136d",
+        "verified_bundle_id": "0xebcd4f193771ba84a8c681e1eaed3b2dd8336a2ce868b3205471e31751f60e0c"
       },
       "measured": {
         "cycles": 94794,

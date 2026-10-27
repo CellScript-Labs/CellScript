@@ -47,6 +47,13 @@ pub(crate) fn is_ckb_fixed_hash_domain_name(name: &str) -> bool {
     CKB_FIXED_HASH_DOMAIN_TYPE_NAMES.contains(&name)
 }
 
+/// Typed Cell and ScriptRef properties retain the full-Script hash domain.
+/// Raw SourceView hash calls and data hashes keep their ordinary Hash result.
+pub(crate) fn is_ckb_script_hash_property_result(func: &str, ty: &IrType) -> bool {
+    matches!(func, "__ckb_cell_lock_hash" | "__ckb_cell_type_hash")
+        && matches!(ty, IrType::Named(name) if name == CKB_SCRIPT_HASH_TYPE)
+}
+
 pub(crate) const CKB_WITNESS_OWNER_RAW: u64 = 0;
 pub(crate) const CKB_WITNESS_OWNER_LOCK: u64 = 1;
 pub(crate) const CKB_WITNESS_OWNER_ENTRY: u64 = 2;
@@ -10030,10 +10037,10 @@ fn typed_view_property_runtime_helper(ty: &IrType, field: &str) -> Option<(&'sta
         ("OutputView", "output_index") => Some(("__ckb_cell_output_index", "typed_view_output_index", IrType::U64)),
         ("InputView", "since") => Some(("__ckb_input_since_at", "typed_view_since", IrType::Named("EncodedSince".to_string()))),
         ("InputView" | "OutputView" | "CellDepView", "lock_hash") => {
-            Some(("__ckb_cell_lock_hash", "typed_view_lock_hash", IrType::Hash))
+            Some(("__ckb_cell_lock_hash", "typed_view_lock_hash", IrType::Named(CKB_SCRIPT_HASH_TYPE.to_string())))
         }
         ("InputView" | "OutputView" | "CellDepView", "type_hash") => {
-            Some(("__ckb_cell_type_hash", "typed_view_type_hash", IrType::Hash))
+            Some(("__ckb_cell_type_hash", "typed_view_type_hash", IrType::Named(CKB_SCRIPT_HASH_TYPE.to_string())))
         }
         ("WitnessArgsView", "size") => Some(("__ckb_witness_size", "typed_witness_size", IrType::U64)),
         ("WitnessArgsView", "lock") => Some(("__ckb_witness_lock_exact32", "typed_witness_lock", IrType::Hash)),
@@ -10088,7 +10095,7 @@ fn script_ref_property_runtime_helper(ty: &IrType, field: &str) -> Option<(&'sta
         "hash" => Some((
             if lock_script { "__ckb_cell_lock_hash" } else { "__ckb_cell_type_hash" },
             if lock_script { "ckb_cell_lock_hash" } else { "ckb_cell_type_hash" },
-            IrType::Hash,
+            IrType::Named(CKB_SCRIPT_HASH_TYPE.to_string()),
         )),
         "code_hash" => Some((
             if lock_script { "__ckb_cell_lock_code_hash" } else { "__ckb_cell_type_code_hash" },

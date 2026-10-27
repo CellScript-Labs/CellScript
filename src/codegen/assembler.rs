@@ -1797,14 +1797,14 @@ pub(super) fn small_signed_immediate(value: i64) -> bool {
     (-2048..=2047).contains(&value)
 }
 
-pub(super) fn scratch_register_avoiding(registers: &[&str]) -> &'static str {
+pub(super) fn scratch_register_avoiding(registers: &[&str]) -> Option<&'static str> {
     for candidate in ["t6", "t5", "t3", "t2", "t1", "t0"] {
         let candidate_id = parse_register(candidate).expect("scratch register name should be valid");
         if registers.iter().all(|register| parse_register(register).ok() != Some(candidate_id)) {
-            return candidate;
+            return Some(candidate);
         }
     }
-    "t6"
+    None
 }
 
 pub(super) fn parse_register(name: &str) -> Result<u8> {
@@ -2008,15 +2008,15 @@ fn relative_offset(pc: u64, target: u64) -> Result<i64> {
         .map_err(|_| CompileError::new("relative offset overflowed i64", crate::error::Span::default()))
 }
 
-pub(super) fn align_up(value: usize, align: usize) -> usize {
+pub(super) const fn align_up(value: usize, align: usize) -> usize {
     if align <= 1 {
         return value;
     }
     (value + align - 1) & !(align - 1)
 }
 
-pub(super) fn align_frame(value: usize) -> usize {
-    align_up(value.max(16), 16)
+pub(super) const fn align_frame(value: usize) -> usize {
+    align_up(if value < 16 { 16 } else { value }, 16)
 }
 
 pub(super) fn is_min_call(func: &str) -> bool {
@@ -2844,7 +2844,7 @@ mod tests {
         generator.emit_large_addi("t0", "t6", 2048);
         generator.emit_large_addi("t6", "t6", 4096);
 
-        assert_eq!(generator.assembly, vec!["    li t5, 2048", "    add t0, t6, t5", "    li t5, 4096", "    add t6, t6, t5",]);
+        assert_eq!(generator.assembly, vec!["    li t0, 2048", "    add t0, t6, t0", "    li t5, 4096", "    add t6, t6, t5",]);
     }
 
     #[test]
@@ -2986,33 +2986,107 @@ mod tests {
     }
 
     #[test]
-    fn generated_large_offsets_are_normalized_before_assembly() {
+    fn large_offset_normalization_has_no_hidden_clobbers() {
         let mut generator = CodeGenerator::new(CodegenOptions::default());
-        generator.emit("sd t0, 2048(sp)");
         generator.emit("ld t6, 2056(sp)");
         generator.emit("lbu t2, 2048(t4)");
         generator.emit("addi t0, t4, 2048");
-        generator.emit("sb t0, 4096(t6)");
-
+        assert!(generator.emission_error.is_none());
         assert_eq!(
             generator.assembly,
             vec![
-                "    li t6, 2048",
+                "    li t6, 2056",
                 "    add t6, sp, t6",
-                "    sd t0, 0(t6)",
-                "    li t5, 2056",
-                "    add t5, sp, t5",
-                "    ld t6, 0(t5)",
-                "    li t6, 2048",
-                "    add t6, t4, t6",
-                "    lbu t2, 0(t6)",
-                "    li t6, 2048",
-                "    add t0, t4, t6",
-                "    li t5, 4096",
-                "    add t5, t6, t5",
-                "    sb t0, 0(t5)",
+                "    ld t6, 0(t6)",
+                "    li t2, 2048",
+                "    add t2, t4, t2",
+                "    lbu t2, 0(t2)",
+                "    li t0, 2048",
+                "    add t0, t4, t0",
             ]
         );
+        for instruction in ["sd t0, 2048(sp)", "sb t0, 4096(t6)", "addi t0, t0, 4096", "ld x31, 2048(t6)"] {
+            let mut generator = CodeGenerator::new(CodegenOptions::default());
+            generator.emit(instruction);
+            assert!(generator.assembly.is_empty());
+            assert!(generator.emission_error.unwrap().contains("explicit live-register contract"));
+        }
+    }
+
+    #[test]
+    fn scratch_exhaustion_rejects_register_aliases_without_emitting_a_write() {
+        assert_eq!(scratch_register_avoiding(&["t6", "x30", "t3", "x7", "t1", "x5"]), None);
+        assert_eq!(scratch_register_avoiding(&["x31"]), Some("t5"));
+        let mut generator = CodeGenerator::new(CodegenOptions::default());
+        generator.emit_stack_store_with_avoid("a0", 4096, &["t6", "t5", "t3", "t2", "t1", "t0"]);
+        assert!(generator.assembly.is_empty());
+        assert!(generator.emission_error.as_ref().unwrap().contains("no scratch register available"));
+        let ir = IrModule {
+            name: "scratch_exhaustion".into(),
+            items: vec![],
+            entry_selection: Default::default(),
+            external_type_defs: vec![],
+            external_callable_abis: vec![],
+            enum_fixed_sizes: Default::default(),
+            enum_layouts: Default::default(),
+            generic_contracts: Default::default(),
+            source_type_origins: Default::default(),
+        };
+        let error = generator.generate(&ir, ArtifactFormat::RiscvAssembly).unwrap_err();
+        assert!(error.message.contains("no scratch register available"));
+    }
+
+    #[test]
+    fn large_addresses_preserve_live_registers_in_ckb_vm() {
+        use ckb_vm::{
+            cost_model::estimate_cycles, machine::VERSION2, Bytes, DefaultCoreMachine, DefaultMachineBuilder, DefaultMachineRunner,
+            SparseMemory, SupportMachine, TraceMachine, WXorXMemory, ISA_B, ISA_IMC, ISA_MOP,
+        };
+        for opt_level in [0, 3] {
+            let mut g = CodeGenerator::new(CodegenOptions { opt_level, ..Default::default() });
+            g.emit(".section .text");
+            g.emit(".global entry");
+            g.emit_label("entry");
+            g.emit_stack_adjustment(-8192);
+            g.emit("li t6, 4660");
+            g.emit("li t5, 22136");
+            g.emit("li t0, 85");
+            g.emit_memory_store_with_avoid("sd", "t0", "sp", 4096, &["t5", "t6"]);
+            g.emit_large_addi("t2", "sp", 4096);
+            g.emit("ld t1, 4096(sp)");
+            g.emit("bne t0, t1, failed");
+            g.emit("li a1, 4660");
+            g.emit("bne t6, a1, failed");
+            g.emit("li a1, 22136");
+            g.emit("bne t5, a1, failed");
+            // Alias-sensitive address construction must preserve both source
+            // pointers, as used by large fixed-value collection swaps.
+            g.emit_large_addi("t2", "t5", 4096);
+            g.emit_large_addi("t3", "t6", 4096);
+            g.emit("li a1, 8756");
+            g.emit("bne t3, a1, failed");
+            g.emit("li a1, 4660");
+            g.emit("bne t6, a1, failed");
+            g.emit("li a0, 0");
+            g.emit("j done");
+            g.emit_label("failed");
+            g.emit("li a0, 1");
+            g.emit_label("done");
+            g.emit_stack_adjustment(8192);
+            g.emit("li a7, 93");
+            g.emit("ecall");
+            assert!(g.emission_error.is_none());
+            if opt_level > 0 {
+                eliminate_immediate_stack_reloads(&mut g.assembly);
+            }
+            let elf = assemble_elf_internal(&g.assembly).unwrap();
+            type Machine = TraceMachine<DefaultCoreMachine<u64, WXorXMemory<SparseMemory<u64>>>>;
+            let core =
+                <<Machine as DefaultMachineRunner>::Inner as SupportMachine>::new(ISA_IMC | ISA_B | ISA_MOP, VERSION2, 1_000_000);
+            let mut machine = Machine::new(DefaultMachineBuilder::new(core).instruction_cycle_func(Box::new(estimate_cycles)).build());
+            machine.load_program(&Bytes::from(elf), std::iter::empty::<std::result::Result<Bytes, ckb_vm::Error>>()).unwrap();
+            assert_eq!(machine.run().unwrap(), 0, "O{opt_level}");
+        }
     }
 
     #[test]

@@ -23,10 +23,10 @@ pub(crate) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf, owner: 
     let words = elf.instructions.iter().map(|instruction| (instruction.address, instruction.word)).collect();
     let targets = elf.control_flow.iter().map(|edge| (edge.address, edge.target)).collect();
     let mut c = Decoder { pc: start, words: &words, targets: &targets, labels: BTreeMap::new(), branches: Vec::new() };
-    c.addi(2, 2, -80)?;
-    c.hash_store(1, 2, 72, false)?;
-    c.hash_store(11, 2, 56, false)?;
-    c.hash_store(12, 2, 64, false)?;
+    c.addi(2, 2, -64)?;
+    c.hash_store(1, 2, 56, false)?;
+    c.hash_store(11, 2, 40, false)?;
+    c.hash_store(12, 2, 48, false)?;
     c.branch(0, 11, 0, HashBadOutput)?;
     c.branch(0, 12, 0, HashBadOutput)?;
     // Decode the source-view's upper tag and lower global index.
@@ -46,9 +46,9 @@ pub(crate) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf, owner: 
     c.addi(7, 5, 0)?;
     c.label(HashDecoded);
     c.li(5, 32)?;
-    c.hash_store(5, 2, 8, false)?;
-    c.addi(10, 2, 16)?;
-    c.addi(11, 2, 8)?;
+    c.hash_store(5, 2, 0, false)?;
+    c.addi(10, 2, 8)?;
+    c.addi(11, 2, 0)?;
     c.li(12, 0)?;
     c.addi(13, 6, 0)?;
     c.addi(14, 7, 0)?;
@@ -56,7 +56,7 @@ pub(crate) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf, owner: 
     c.constant(17, 2081)?;
     c.exact(0x73)?;
     c.branch(1, 10, 0, HashFailed)?;
-    c.immediate(3, 3, 5, 2, 8)?;
+    c.immediate(3, 3, 5, 2, 0)?;
     c.li(6, 32)?;
     c.sub(7, 5, 6)?;
     c.branch(1, 7, 0, HashFailed)?;
@@ -65,16 +65,16 @@ pub(crate) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf, owner: 
     c.li(7, 32)?;
     c.register(3, 0, 28, 6, 7)?;
     c.branch(0, 28, 0, HashCopied)?;
-    c.addi(31, 2, 16)?;
+    c.addi(31, 2, 8)?;
     c.add(31, 31, 6)?;
     c.immediate(3, 4, 30, 31, 0)?;
-    c.immediate(3, 3, 31, 2, 56)?;
+    c.immediate(3, 3, 31, 2, 40)?;
     c.add(31, 31, 6)?;
     c.hash_store(30, 31, 0, true)?;
     c.addi(6, 6, 1)?;
     c.hash_jump(HashCopy)?;
     c.label(HashCopied);
-    c.immediate(3, 3, 31, 2, 64)?;
+    c.immediate(3, 3, 31, 2, 48)?;
     c.li(5, 32)?;
     c.hash_store(5, 31, 0, false)?;
     c.li(10, 0)?;
@@ -88,8 +88,8 @@ pub(crate) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf, owner: 
     c.label(HashFailed);
     c.li(10, 44)?;
     c.label(Done);
-    c.immediate(3, 3, 1, 2, 72)?;
-    c.addi(2, 2, 80)?;
+    c.immediate(3, 3, 1, 2, 56)?;
+    c.addi(2, 2, 64)?;
     c.exact(0x00008067)?;
     if c.pc != end || c.branches.iter().any(|(label, target)| c.labels.get(label) != Some(target)) {
         return Err(invalid("hash helper extent or branch destination differs"));
@@ -101,12 +101,12 @@ pub(crate) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf, owner: 
 }
 
 impl Decoder<'_> {
-    fn hash_store(&mut self, source: u32, base: u32, offset: u32, byte: bool) -> Result<(), CheckerError> {
+    pub(super) fn hash_store(&mut self, source: u32, base: u32, offset: u32, byte: bool) -> Result<(), CheckerError> {
         self.exact(
             ((offset >> 5) << 25) | (source << 20) | (base << 15) | (if byte { 0 } else { 3 } << 12) | ((offset & 31) << 7) | 0x23,
         )
     }
-    fn hash_jump(&mut self, label: Label) -> Result<(), CheckerError> {
+    pub(super) fn hash_jump(&mut self, label: Label) -> Result<(), CheckerError> {
         let target = self.jump()?;
         self.branches.push((label, target));
         Ok(())

@@ -8,9 +8,13 @@ use crate::{ckb_blake2b256, hex_encode, CheckerError, CheckerRejectionCode, Entr
 use std::collections::BTreeMap;
 
 const MAIN: &str = "__ckb_require_instance_script_participant_from_args";
+// v126 frame compaction changes only each body's paired SP immediates:
+// instance 1808 -> 1792, open handle 992 -> 976. The compiler's machine-delta
+// regression reconstructs the previous complete-body identities by reverting
+// exactly those two words; all other instructions and call identities match.
 const PROFILE: [(&str, &str); 6] = [
-    (MAIN, "3ff70996e363e4e171ea23c25f278159fa69a4ef922c4521f4732d5c62a20983"),
-    ("__ckb_require_cell_dep_open_script_handle", "d21189ae305942f8153d8198cda764685c29ca352eb0af8ac73c01637c4d4ee4"),
+    (MAIN, "1ff44c167045e426e2b40a6f4e7294d8bb7be7e56b5e9921093e4b8589177539"),
+    ("__ckb_require_cell_dep_open_script_handle", "809b33e9466bf13a9649ed5e0d8750345d260aa66232f48adb2365da811c6cef"),
     ("__ckb_hash_blake2b_var", "d150e62cd6bd057dbf699f9c4a60b3e7b54cccb4bdfb77b2709a81fcf0dc7319"),
     ("__cellscript_blake2b_compress", "7eb8c0955f6a5fda2496a11ae01faec53911becdb5a66d01c7f885a31f18205a"),
     ("__cellscript_memcpy_fixed", "79baa2495af6eeab947d46da99db1996d7c6e9419e9b95a1ece63cbe97c92713"),
@@ -35,9 +39,17 @@ pub(crate) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Resu
     if !present {
         return Ok(());
     }
+    validate_profile(record, elf, &PROFILE)
+}
+
+pub(crate) fn validate_memory_blake2b(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result<(), CheckerError> {
+    validate_profile(record, elf, &PROFILE[2..4])
+}
+
+fn validate_profile(record: &VerifiedLoweringRecord, elf: &ParsedElf, profile: &[(&str, &str)]) -> Result<(), CheckerError> {
     let mut entries = BTreeMap::new();
     let mut ranges = BTreeMap::new();
-    for (name, _) in PROFILE {
+    for &(name, _) in profile {
         let identity = format!("runtime:{name}");
         let entry = record
             .entries
@@ -57,7 +69,7 @@ pub(crate) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Resu
         ranges.insert(name, (first.range.start, last.range.end));
     }
     let mut mismatches = Vec::new();
-    for (name, expected) in PROFILE {
+    for &(name, expected) in profile {
         let (start, end) = ranges[name];
         let begin = elf.instructions.partition_point(|instruction| instruction.address < start);
         let stop = elf.instructions.partition_point(|instruction| instruction.address < end);

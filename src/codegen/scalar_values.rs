@@ -86,7 +86,8 @@ impl CodeGenerator {
                             | "__ckb_cell_output_index"
                     ))
                     || (dest.ty == IrType::Hash
-                        && matches!(func.as_str(), "__ckb_cell_data_hash_field" | "__ckb_cell_lock_hash" | "__ckb_cell_type_hash")))
+                        && matches!(func.as_str(), "__ckb_cell_data_hash_field" | "__ckb_cell_lock_hash" | "__ckb_cell_type_hash"))
+                    || crate::ir::is_ckb_script_hash_property_result(func, &dest.ty))
                     && matches!(args.as_slice(), [IrOperand::Var(var)] if matches!(&var.ty,
                         IrType::Named(name) if name.starts_with("InputView<") || name.starts_with("OutputView<")))
             }

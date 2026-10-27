@@ -14,17 +14,23 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod arena_calls;
 mod cell_args;
+mod cell_read_hashes;
 pub(crate) mod cells;
+mod context_hashes;
 mod exact_cache;
 mod guarded_writes;
 mod hash_fields;
 mod lifetime;
+mod out_point_hash;
 mod outputs;
 mod parameters;
+mod script_hash_fields;
 mod uses;
 mod view_calls;
 mod view_values;
+mod witness_exact_hash;
 
+pub(crate) use cell_read_hashes::validate_all as validate_cell_data_reads;
 pub(crate) use hash_fields::validate as validate_hash_property_runtime;
 
 const PREFIX: &str = ".Lnested_param_codec_";

@@ -1183,6 +1183,7 @@ impl Default for CodegenOptions {
 pub struct CodeGenerator {
     options: CodegenOptions,
     assembly: Vec<String>,
+    emission_error: Option<String>,
     current_function: Option<String>,
     current_function_owns_exact_read_cache: bool,
     module_uses_exact_read_cache: bool,
@@ -1449,6 +1450,7 @@ impl CodeGenerator {
         Self {
             options,
             assembly: Vec::new(),
+            emission_error: None,
             current_function: None,
             current_function_owns_exact_read_cache: false,
             module_uses_exact_read_cache: false,
@@ -1699,6 +1701,10 @@ impl CodeGenerator {
         self.emit_process_failure_helper();
         self.emit_const_data_pool();
 
+        if let Some(message) = self.emission_error {
+            return Err(CompileError::without_span(message));
+        }
+
         if self.options.opt_level > 0 {
             eliminate_immediate_stack_reloads(&mut self.assembly);
         }
@@ -1794,10 +1800,16 @@ impl CodeGenerator {
                 if small_signed_immediate(offset) {
                     return false;
                 }
-                let scratch = scratch_register_avoiding(&[args[0], base]);
-                self.assembly.push(format!("    li {}, {}", scratch, offset));
-                self.assembly.push(format!("    add {}, {}, {}", scratch, base, scratch));
-                self.assembly.push(format!("    {} {}, 0({})", opcode, args[0], scratch));
+                let dst = parse_register(args[0]).unwrap();
+                if dst == parse_register(base).unwrap() || matches!(dst, 0 | 2) {
+                    self.reject_implicit_scratch(instruction);
+                    return true;
+                }
+                // A load already owns its destination. Reuse that register for
+                // the address so textual normalization has no hidden clobber.
+                self.assembly.push(format!("    li {}, {}", args[0], offset));
+                self.assembly.push(format!("    add {}, {}, {}", args[0], base, args[0]));
+                self.assembly.push(format!("    {} {}, 0({})", opcode, args[0], args[0]));
                 true
             }
             "sb" | "sh" | "sw" | "sd" if args.len() == 2 => {
@@ -1810,10 +1822,7 @@ impl CodeGenerator {
                 if small_signed_immediate(offset) {
                     return false;
                 }
-                let scratch = scratch_register_avoiding(&[args[0], base]);
-                self.assembly.push(format!("    li {}, {}", scratch, offset));
-                self.assembly.push(format!("    add {}, {}, {}", scratch, base, scratch));
-                self.assembly.push(format!("    {} {}, 0({})", opcode, args[0], scratch));
+                self.reject_implicit_scratch(instruction);
                 true
             }
             "addi" if args.len() == 3 => {
@@ -1826,13 +1835,33 @@ impl CodeGenerator {
                 if small_signed_immediate(offset) {
                     return false;
                 }
-                let scratch = scratch_register_avoiding(&[args[0], args[1]]);
-                self.assembly.push(format!("    li {}, {}", scratch, offset));
-                self.assembly.push(format!("    add {}, {}, {}", args[0], args[1], scratch));
+                let dst = parse_register(args[0]).unwrap();
+                if dst == parse_register(args[1]).unwrap() || matches!(dst, 0 | 2) {
+                    self.reject_implicit_scratch(instruction);
+                    return true;
+                }
+                self.assembly.push(format!("    li {}, {}", args[0], offset));
+                self.assembly.push(format!("    add {}, {}, {}", args[0], args[1], args[0]));
                 true
             }
             _ => false,
         }
+    }
+
+    fn reject_implicit_scratch(&mut self, instruction: &str) {
+        self.emission_error.get_or_insert_with(|| format!(
+            "large-offset instruction requires an explicit live-register contract: {instruction}; use a structured address/access emitter"
+        ));
+    }
+
+    fn reserve_scratch(&mut self, avoid: &[&str]) -> Option<&'static str> {
+        let scratch = scratch_register_avoiding(avoid);
+        if scratch.is_none() {
+            self.emission_error.get_or_insert_with(|| {
+                format!("no scratch register available without clobbering live registers: {}", avoid.join(", "))
+            });
+        }
+        scratch
     }
 
     fn generate_type_def(&mut self, type_def: &IrTypeDef) -> Result<()> {

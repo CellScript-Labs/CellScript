@@ -116,13 +116,37 @@ impl CodeGenerator {
 
     /// Emit `addi rd, rs1, imm` handling immediates that don't fit in 12 bits.
     pub(super) fn emit_large_addi(&mut self, rd: &str, rs1: &str, imm: i64) {
+        self.emit_large_addi_with_avoid(rd, rs1, imm, &[]);
+    }
+
+    pub(super) fn emit_large_addi_with_avoid(&mut self, rd: &str, rs1: &str, imm: i64, avoid: &[&str]) {
+        if parse_register(rd).ok() == Some(2) {
+            assert_eq!(parse_register(rs1).ok(), Some(2), "stack adjustments must retain the current frame base");
+            assert_eq!(imm % 16, 0, "stack adjustments must preserve 16-byte alignment");
+        }
         if (-2048..=2047).contains(&imm) {
             self.emit(format!("addi {}, {}, {}", rd, rs1, imm));
+        } else if parse_register(rd).ok() != parse_register(rs1).ok() && !matches!(parse_register(rd), Ok(0 | 2)) {
+            // The destination is overwritten by this operation anyway. Keeping
+            // address materialization there preserves every other live value.
+            self.emit(format!("li {}, {}", rd, imm));
+            self.emit(format!("add {}, {}, {}", rd, rs1, rd));
         } else {
-            let scratch = scratch_register_avoiding(&[rs1]);
+            let mut live = vec![rs1];
+            live.extend_from_slice(avoid);
+            let Some(scratch) = self.reserve_scratch(&live) else {
+                return;
+            };
             self.emit(format!("li {}, {}", scratch, imm));
             self.emit(format!("add {}, {}, {}", rd, rs1, scratch));
         }
+    }
+
+    /// Runtime frames, outgoing arguments and temporary frame rebasing all
+    /// preserve the same alignment, including materialized large adjustments.
+    /// This does not round silently: the layout and its offsets must agree.
+    pub(super) fn emit_stack_adjustment(&mut self, delta: i64) {
+        self.emit_large_addi("sp", "sp", delta);
     }
 
     pub(super) fn emit_memory_load_with_avoid(&mut self, opcode: &str, dst: &str, base: &str, offset: usize, avoid: &[&str]) {
@@ -134,7 +158,9 @@ impl CodeGenerator {
             registers.push(dst);
             registers.push(base);
             registers.extend_from_slice(avoid);
-            let scratch = scratch_register_avoiding(&registers);
+            let Some(scratch) = self.reserve_scratch(&registers) else {
+                return;
+            };
             self.emit(format!("li {}, {}", scratch, offset));
             self.emit(format!("add {}, {}, {}", scratch, base, scratch));
             self.emit(format!("{} {}, 0({})", opcode, dst, scratch));
@@ -150,7 +176,9 @@ impl CodeGenerator {
             registers.push(src);
             registers.push(base);
             registers.extend_from_slice(avoid);
-            let scratch = scratch_register_avoiding(&registers);
+            let Some(scratch) = self.reserve_scratch(&registers) else {
+                return;
+            };
             self.emit(format!("li {}, {}", scratch, offset));
             self.emit(format!("add {}, {}, {}", scratch, base, scratch));
             self.emit(format!("{} {}, 0({})", opcode, src, scratch));
@@ -205,7 +233,10 @@ impl CodeGenerator {
             let mut live_registers = Vec::with_capacity(1 + avoid.len());
             live_registers.push(register);
             live_registers.extend_from_slice(avoid);
-            let scratch = scratch_register_avoiding(&live_registers);
+            let Some(scratch) = self.reserve_scratch(&live_registers) else {
+                self.allocated_write_guard = guard;
+                return;
+            };
             self.emit(format!("li {}, {}", scratch, offset));
             self.emit(format!("add {}, sp, {}", scratch, scratch));
             self.emit(format!("{} {}, 0({})", opcode, register, scratch));
@@ -215,10 +246,10 @@ impl CodeGenerator {
 
     /// Emit `addi rd, sp, offset` handling offsets that don't fit in 12 bits.
     pub(super) fn emit_sp_addi(&mut self, rd: &str, offset: usize) {
-        if offset <= 2047 {
+        if rd == "sp" {
+            self.emit_stack_adjustment(offset as i64);
+        } else if offset <= 2047 {
             self.emit(format!("addi {}, sp, {}", rd, offset));
-        } else if rd == "sp" {
-            self.emit_large_addi("sp", "sp", offset as i64);
         } else {
             self.emit(format!("li {}, {}", rd, offset));
             self.emit(format!("add {}, sp, {}", rd, rd));
@@ -674,7 +705,7 @@ impl CodeGenerator {
                                 | "__ckb_cell_lock_args_hash"
                                 | "__ckb_cell_type_args_hash"
                         ) && (args.len() == 1 || (func == "__ckb_cell_data_hash_at" && args.len() == 2))
-                            && dest.ty == IrType::Hash =>
+                            && (dest.ty == IrType::Hash || crate::ir::is_ckb_script_hash_property_result(func, &dest.ty)) =>
                     {
                         self.cell_buffer_size_offsets.insert(dest.id, next_cell_slot);
                         self.cell_buffer_offsets.insert(dest.id, next_cell_slot + 8);
@@ -1122,7 +1153,9 @@ impl CodeGenerator {
         } else {
             let caller_stack_offset = (abi_index - 8) * 8;
             self.emit(format!("# cellscript abi: arg{} loaded from caller stack +{}", abi_index, caller_stack_offset));
-            self.emit(format!("ld t0, {}(fp)", caller_stack_offset));
+            // Register arguments have already been spilled; t0 is consumed by
+            // the next store and no other temporary is live in this prefix.
+            self.emit_memory_load_with_avoid("ld", "t0", "fp", caller_stack_offset, &[]);
             self.emit_stack_store("t0", stack_offset);
         }
     }

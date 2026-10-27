@@ -965,7 +965,7 @@ impl CodeGenerator {
         let Some(dest) = dest else {
             return Ok(false);
         };
-        if args.len() != 1 || dest.ty != IrType::Hash {
+        if args.len() != 1 || (dest.ty != IrType::Hash && !crate::ir::is_ckb_script_hash_property_result(func, &dest.ty)) {
             return Ok(false);
         }
         let Some(size_offset) = self.cell_buffer_size_offsets.get(&dest.id).copied() else {
@@ -2217,7 +2217,9 @@ impl CodeGenerator {
         if small_signed_immediate(offset) {
             self.emit(format!("sd {}, {}(sp)", register, offset));
         } else {
-            let scratch = scratch_register_avoiding(&[register]);
+            let Some(scratch) = self.reserve_scratch(&[register]) else {
+                return;
+            };
             self.emit(format!("li {}, {}", scratch, offset));
             self.emit(format!("add {}, sp, {}", scratch, scratch));
             self.emit(format!("sd {}, 0({})", register, scratch));

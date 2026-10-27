@@ -393,7 +393,7 @@ impl CodeGenerator {
                     self.emit_stack_load("t2", LENGTH);
                     self.emit("add t0, t0, t2");
                 } else {
-                    self.emit(format!("addi t0, t0, {}", role.width));
+                    self.emit_large_addi("t0", "t0", role.width as i64);
                 }
                 self.emit(format!("li t1, {}", contract.aggregate_bytes));
                 self.emit(format!("bltu t1, t0, {bounds}"));

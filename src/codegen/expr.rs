@@ -834,7 +834,7 @@ impl CodeGenerator {
         if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &source) {
             return false;
         }
-        self.emit(format!("addi a0, a0, {}", layout.offset));
+        self.emit_large_addi("a0", "a0", layout.offset as i64);
         self.emit_sp_addi("a1", dest_offset);
         self.emit(format!("li a2, {}", width));
         self.emit("call __cellscript_memcpy_fixed");

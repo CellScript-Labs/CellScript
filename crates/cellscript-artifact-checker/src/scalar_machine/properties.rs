@@ -189,8 +189,13 @@ pub(super) fn call(
     };
     let source_local = source.local.and_then(|id| locals.get(&id)).ok_or_else(|| invalid("Cell property has no coordinate"))?;
     let destination = locals.get(destination).ok_or_else(|| invalid("Cell property has no destination"))?;
+    let result_type = match property {
+        Property::DataHash => "hash",
+        Property::LockHash | Property::TypeHash => "ScriptHash",
+        _ => "u64",
+    };
     if source_local.ty != source.ty
-        || destination.ty != if property.hash_field().is_some() { "hash" } else { "u64" }
+        || destination.ty != result_type
         || (property == Property::OutputIndex && !source.ty.starts_with("OutputView<"))
     {
         return Err(invalid(format!(
@@ -289,15 +294,17 @@ fn runtime(c: &mut Cursor<'_>, property: Property, ranges: &BTreeMap<Property, (
     if property == Property::OutputIndex {
         return output_index(c);
     }
-    c.addi(2, 2, -48)?;
-    c.store(1, 2, 40, false)?;
+    // Independent constants for the decoded layouts, not compiler metadata.
+    let frame = if property == Property::Occupied { 48 } else { 32 };
+    c.addi(2, 2, -frame)?;
+    c.store(1, 2, frame as u32 - 8, false)?;
     if property == Property::Unoccupied {
         unoccupied(c, ranges)?;
     } else {
         field(c, property, abort)?;
     }
-    c.load(1, 2, 40, false)?;
-    c.addi(2, 2, 48)?;
+    c.load(1, 2, frame as u32 - 8, false)?;
+    c.addi(2, 2, frame)?;
     c.exact(0x00008067)
 }
 
@@ -378,14 +385,14 @@ fn unoccupied(c: &mut Cursor<'_>, ranges: &BTreeMap<Property, (u64, u64)>) -> Re
     let status_ok = c.label();
     let underflow = c.label();
     let done = c.label();
-    c.store(10, 2, 32, false)?;
+    c.store(10, 2, 8, false)?;
     c.call(ranges[&Property::Capacity].0)?;
     c.branch(1, 11, 0, failed)?;
-    c.store(10, 2, 24, false)?;
-    c.load(10, 2, 32, false)?;
+    c.store(10, 2, 0, false)?;
+    c.load(10, 2, 8, false)?;
     c.call(ranges[&Property::Occupied].0)?;
     c.branch(1, 11, 0, failed)?;
-    c.load(5, 2, 24, false)?;
+    c.load(5, 2, 0, false)?;
     c.exact((10 << 20) | (5 << 15) | (3 << 12) | (6 << 7) | 0x33)?;
     c.branch(1, 6, 0, underflow)?;
     c.sub(10, 5, 10)?;
