@@ -20,6 +20,8 @@ mod ckb_script_runner;
 mod allocated_arguments;
 #[path = "artifact_checker/allocated_calls.rs"]
 mod allocated_calls;
+#[path = "artifact_checker/allocated_copy_lifetime.rs"]
+mod allocated_copy_lifetime;
 #[path = "artifact_checker/allocated_isolation.rs"]
 mod allocated_isolation;
 #[path = "artifact_checker/allocated_parameters.rs"]

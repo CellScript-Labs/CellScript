@@ -132,7 +132,7 @@ pub(super) fn validate(
     machine: &Machine<'_>,
     constructors: &BTreeMap<String, BTreeMap<u64, Constructor>>,
     sites: &[Site<'_>],
-) -> Result<(), CheckerError> {
+) -> Result<BTreeMap<String, BTreeMap<u64, CopiedResult>>, CheckerError> {
     let mut expected = BTreeMap::<(&str, u32, Direction, u64, u32), VecDeque<Expected<'_>>>::new();
     let owner_types = crate::allocated_values::owner_types(&record.typed_semantics);
     let types = record.typed_semantics.types.iter().map(|ty| (ty.name.as_str(), ty)).collect();
@@ -316,6 +316,7 @@ pub(super) fn validate(
         }
     }
     let mut result_regions = BTreeMap::<(&str, u64), (u32, u32)>::new();
+    let mut copied_results = BTreeMap::<String, BTreeMap<u64, CopiedResult>>::new();
     for stage in stages(record)? {
         let coordinate = stage.coordinate;
         let input = coordinate.direction == Direction::Index;
@@ -410,6 +411,17 @@ pub(super) fn validate(
                     c.stack_byte(5, destination + byte, true)?;
                 }
                 c.stack_address(5, destination)?;
+                if copied_results
+                    .entry(stage.owner.to_string())
+                    .or_default()
+                    .insert(
+                        stage.start,
+                        CopiedResult { end: stage.end, buffer: destination, bytes: expected.width, slot: slot(output.source_id)? },
+                    )
+                    .is_some()
+                {
+                    return Err(invalid("duplicate copied result publication"));
+                }
             }
             c.stack_store(5, slot(output.source_id)?)?;
         }
@@ -435,5 +447,5 @@ pub(super) fn validate(
     if expected.values().any(|queue| !queue.is_empty()) {
         return Err(invalid("missing typed collection transport"));
     }
-    Ok(())
+    Ok(copied_results)
 }

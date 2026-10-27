@@ -2479,8 +2479,18 @@ cover 1/8/16/17/32/64-byte results, small/large arenas and O0/O3, including firs
 and last bytes, pointer stores, erased evidence, forged widths and destination
 ranges. Destination substitutions rebind both emitted stores and label evidence;
 the complete transfer also checks the distinct Map key/value result slices.
-This is local publication evidence, not proof of arbitrary earlier computation,
-all unrelated frame values or the complete lifetime/source contract.
+The completed publication exports its exact byte-buffer and pointer-slot regions
+to the enclosing memory-effect analysis. Only that independently recognized
+publication may write them; subsequent ordinary stores, calls and syscalls must
+preserve both. This protects the immutable collection-read temporary, while
+mutable source bindings use their own copied storage. The
+[copy-lifetime regressions](../tests/artifact_checker/allocated_copy_lifetime.rs)
+redirect an unrelated helper result into the copy's first/last bytes or pointer
+slot after rebinding all artifact identities. They cover owned and borrowed
+reads, 1/8/9/16/32/64-byte values, small/large arenas and O0/O3, including actual
+VM outcome changes. Mutable-record updates, snapshots, helper returns and owner
+drop remain positive cases. These checks do not prove arbitrary earlier
+computation, all unrelated frame values or whole-language source equivalence.
 
 These checks establish write isolation, typed owner availability and machine
 initialization/allocation/resize/release, descriptor transitions, owned element

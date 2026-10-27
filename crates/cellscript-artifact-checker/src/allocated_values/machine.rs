@@ -20,7 +20,25 @@ pub(crate) struct Checked {
     pub constructors: BTreeMap<String, BTreeMap<u64, Constructor>>,
     pub borrowed_reads: BTreeMap<String, BTreeMap<u64, BorrowedRead>>,
     pub owned_primitives: BTreeMap<String, BTreeMap<u64, OwnedPrimitive>>,
+    pub copied_results: BTreeMap<String, BTreeMap<u64, CopiedResult>>,
     pub flow_sites: FlowSites,
+}
+
+/// A complete checked publication of an immutable collection-read temporary.
+/// Mutable source bindings copy this value into their own storage.
+pub(crate) struct CopiedResult {
+    pub end: u64,
+    pub buffer: u32,
+    pub bytes: u32,
+    pub slot: u32,
+}
+
+impl CopiedResult {
+    pub(crate) fn regions(&self) -> [(i64, i64); 2] {
+        let buffer = i64::from(self.buffer);
+        let slot = i64::from(self.slot);
+        [(buffer, buffer + i64::from(self.bytes)), (slot, slot + 8)]
+    }
 }
 
 pub(crate) struct OwnedPrimitive {
@@ -253,6 +271,7 @@ pub(crate) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf, sink: O
     let allocation = allocation::validate(record, elf, &sites, abort, &result.constructors)?;
     result.borrowed_reads = allocation.borrowed_reads;
     result.owned_primitives = allocation.owned_primitives;
+    result.copied_results = allocation.copied_results;
     result.flow_sites = allocation.flow_sites;
     Ok(result)
 }

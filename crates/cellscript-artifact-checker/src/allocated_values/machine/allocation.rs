@@ -594,13 +594,14 @@ pub(super) fn validate(
     }
     let borrowed = borrowed::validate(record, elf, &machine, checked_constructors)?;
     sites.extend(borrowed.sites);
-    transport::validate(record, elf, &machine, checked_constructors, &sites)?;
+    let copied_results = transport::validate(record, elf, &machine, checked_constructors, &sites)?;
     arguments::validate(record, elf, &machine, checked_constructors, &sites)?;
     queries::validate(record, elf, &machine, checked_constructors, &sites)?;
     // Export only complete independently recognized primitive ranges. Nested
     // children authorize the same arena as their parent, never a second owner.
     let mut result = Checked {
         borrowed_reads: borrowed.reads,
+        copied_results,
         flow_sites: paths::sites(record, checked_constructors, &sites)?,
         ..Checked::default()
     };

@@ -487,6 +487,9 @@ impl Proof<'_> {
             .filter_map(|site| site.result_buffer)
             .map(|(start, bytes)| (i64::from(start), i64::from(start) + i64::from(bytes)))
             .collect::<Vec<_>>();
+        let copied_value_sites = self.allocated.copied_results.get(owner);
+        let copied_value_regions =
+            copied_value_sites.into_iter().flat_map(|sites| sites.values()).flat_map(|site| site.regions()).collect::<BTreeSet<_>>();
         if checked_roots {
             let typed = self
                 .record
@@ -606,6 +609,16 @@ impl Proof<'_> {
                 .map(|(start, bytes)| (i64::from(start), i64::from(start) + i64::from(bytes)));
             let copied_protected = copied_data_regions.iter().copied().filter(|region| Some(*region) != own_copy);
             protected.extend(copied_protected.clone());
+            // Collection reads publish immutable value temporaries. Only the
+            // complete checked publication may write its bytes/pointer; later
+            // ordinary stores and helper effects must preserve both regions.
+            let own_value_copy = copied_value_sites
+                .and_then(|sites| sites.range(..=pc).next_back())
+                .filter(|(_, site)| pc < site.end)
+                .map(|(_, site)| site.regions());
+            let copied_value_protected =
+                copied_value_regions.iter().copied().filter(|region| own_value_copy.is_none_or(|regions| !regions.contains(region)));
+            protected.extend(copied_value_protected.clone());
             // Only a fully recognized hash-property call body may initialize
             // or fill its own size/result storage. All other effects preserve it.
             protected.extend(
@@ -648,6 +661,7 @@ impl Proof<'_> {
             auxiliary_protected.extend(&selection_protected);
             auxiliary_protected.extend(&data_regions);
             auxiliary_protected.extend(copied_protected);
+            auxiliary_protected.extend(copied_value_protected);
             let mut next = vec![pc + 4];
             if let Some(read) = self.allocated.borrowed_reads.get(owner).and_then(|sites| sites.get(&pc))
                 && (state.registers[2] != Value::Stack(0)

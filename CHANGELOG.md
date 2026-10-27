@@ -2,6 +2,12 @@
 
 ## Unreleased — 0.32
 
+Protect copied collection results between checked publications: ordinary stores,
+helper effects and syscalls cannot overwrite the retained bytes or their pointer
+slots. Mutable record bindings still copy into separate storage, and snapshots
+remain usable after owner drop. Add O0/O3 rebound mutations with VM comparisons
+and advance artifact-cache generation to v123. Stable admission remains pending.
+
 Bind typed Input/Output `data_hash`, `lock_hash` and `type_hash` property calls
 to live coordinates, checked runtime implementations, status handling and
 published pointers. Require distinct private result buffers, protected from

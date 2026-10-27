@@ -111,6 +111,10 @@ must reject altered bytes, widths, destinations, erased evidence and overlapping
 private storage. Changes to this shared path require the full checker suites,
 `allocated_runtime`, `owned_collections` and `selection_bundle`; existing business
 resource ceilings remain unchanged. The allocation admission blocker stays in place.
+`cargo test --locked -p cellscript --test artifact_checker allocated_copy_lifetime::`
+checks retained collection-copy buffers and pointer slots against intervening
+helper writes at O0/O3, with VM-changing rebound mutations and mutable-record,
+snapshot and owner-drop positives. The same full-suite requirements apply.
 These rebound cases include typed owner availability across moves/drops,
 branch joins and loop backedges, nested lexical loans and helper argument
 evaluation. ABI-compatible reference temporaries retain read-only authority.
