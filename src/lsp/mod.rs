@@ -1470,9 +1470,9 @@ impl LspServer {
                 kind: CompletionItemKind::TypeParameter,
                 detail: Some(format!("{} type", ty)),
                 documentation: match ty {
-                    "NestedValues" => Some("Experimental NestedValues<T, N, P, B>: immutable bounded lists for explicit witnesses or direct Cell fields, containing Vec<u8> or records with a trailing byte payload. Bounds: N <= 32, P <= 256, 4 <= B <= 4096. The complete entry witness also has a 4096-byte budget. Stable artifact admission and generated-builder parity remain pending.".into()),
-                    "NestedBytesView" => Some("NestedBytesView<P>: invocation-local read-only payload derived by indexing NestedValues. Supports len, is_empty, iteration and checked byte indexing. Cannot be constructed, mutated, stored, passed or returned.".into()),
-                    "NestedRecordView" => Some("NestedRecordView<T, P>: invocation-local read-only record derived by indexing NestedValues. Fixed fields retain their declared value types; the trailing payload is NestedBytesView<P>. Cannot cross callable or storage boundaries.".into()),
+                    "NestedValues" => Some("Bounded NestedValues<T, N, P, B>: immutable bounded lists for explicit witnesses or direct Cell fields, containing Vec<u8> or records with a trailing byte payload. Bounds: N <= 32, P <= 256, 4 <= B <= 4096. The complete entry witness also has a 4096-byte budget. Native artifact checking requires codec, source, transport and lifetime evidence; browser metadata alone is not machine evidence.".into()),
+                    "NestedBytesView" => Some("NestedBytesView<P>: invocation-local read-only payload derived by indexing NestedValues. Supports len, is_empty, iteration and checked byte indexing. Supports checked read-only helper parameters; cannot be constructed, mutated, stored or returned.".into()),
+                    "NestedRecordView" => Some("NestedRecordView<T, P>: invocation-local read-only record derived by indexing NestedValues. Fixed fields retain their declared value types; the trailing payload is NestedBytesView<P>. Supports checked read-only helper parameters; cannot escape through storage or return values.".into()),
                     "ScriptHandle" => Some("ScriptHandle<I>: a 656-byte nominal imported-interface selection for a checked Lock/Type participant; accepted as an action or Lock witness. Membership does not prove peer acceptance.".into()),
                     "InstanceScriptHandle" => Some("InstanceScriptHandle<I>: a versioned 1768-byte selection combining implementation membership with bounded Script-args constraints. Its consumer commits a policy, concrete subject and configuration in 208-byte CSINCv1 args. Observation grants no ownership or peer-execution authority.".into()),
                     "VerifierHandle" => Some("VerifierHandle<I>: a 656-byte nominal imported-interface selection. Native admission requires the parameterless child profile and unconditional checked SPAWN/WAIT after committed-args membership.".into()),
@@ -1490,20 +1490,20 @@ impl LspServer {
             match item {
                 Item::Collections(def) => items.push(CompletionItem {
                     label: def.name.clone(), kind: CompletionItemKind::Struct,
-                    detail: Some(format!("collections {} (proof pending)", def.name)),
-                    documentation: Some("Shared named allocation policy with local owner and read-only helper typing. Local operations and read-only helpers execute experimentally; independent allocation proof remains pending.".into()),
+                    detail: Some(format!("collections {}", def.name)),
+                    documentation: Some("Shared named allocation policy with local owner and read-only helper typing. Local operations and read-only helpers use checked allocation, bounds and lifetime contracts.".into()),
                     insert_text: Some(def.name.clone()),
                 }),
                 Item::DataShape(def) => items.push(CompletionItem {
                     label: def.name.clone(), kind: CompletionItemKind::Struct,
                     detail: Some(format!("data_shape {}", def.name)),
-                    documentation: Some(format!("Experimental bounded codec shape: {} items, {} bytes per payload, {} encoded bytes. Entry-witness budget is separate.", def.limits.items, def.limits.payload_bytes, def.limits.encoded_bytes)),
+                    documentation: Some(format!("Bounded codec shape: {} items, {} bytes per payload, {} encoded bytes. Entry-witness budget is separate.", def.limits.items, def.limits.payload_bytes, def.limits.encoded_bytes)),
                     insert_text: Some(def.name.clone()),
                 }),
                 Item::CellRoles(def) => items.push(CompletionItem {
                     label: def.name.clone(), kind: CompletionItemKind::Constant,
                     detail: Some(format!("cell_roles {}", def.name)),
-                    documentation: Some("Experimental exact-role catalog. Verify with ckb::verify_cell_roles<Catalog>() or select with ckb::select_cell_roles<Catalog>() and read named roles. Stable artifact admission remains pending.".into()),
+                    documentation: Some("Bounded exact-role catalog. Verify with ckb::verify_cell_roles<Catalog>() or select with ckb::select_cell_roles<Catalog>() and read named roles. Native artifact checking requires source, authority and lifetime evidence.".into()),
                     insert_text: Some(def.name.clone()),
                 }),
                 Item::Resource(r) => {
@@ -1890,15 +1890,15 @@ impl LspServer {
         let range = span_to_range(source, item_span(item));
         match item {
             Item::Collections(def) => Some(Hover {
-                contents: format!("collections {}\n\nShared arena: {} bytes and {} allocation events; {} named members; local operations and read-only helpers are experimental; independent allocation proof remains pending.", def.name, def.bytes, def.allocations, def.members.len()),
+                contents: format!("collections {}\n\nShared arena: {} bytes and {} allocation events; {} named members; local operations and read-only helpers require allocation, bounds and lifetime evidence.", def.name, def.bytes, def.allocations, def.members.len()),
                 range: Some(range),
             }),
             Item::DataShape(def) => Some(Hover {
-                contents: format!("data_shape {}\n\nElement: {}. Limits: {} items, {} payload bytes, {} encoded bytes. Experimental read-only codec shape; no new wire format or entry-witness budget.", def.name, type_to_string(&def.element), def.limits.items, def.limits.payload_bytes, def.limits.encoded_bytes),
+                contents: format!("data_shape {}\n\nElement: {}. Limits: {} items, {} payload bytes, {} encoded bytes. Bounded read-only codec shape; no new wire format or entry-witness budget.", def.name, type_to_string(&def.element), def.limits.items, def.limits.payload_bytes, def.limits.encoded_bytes),
                 range: Some(span_to_range(source, def.span)),
             }),
             Item::CellRoles(def) => Some(Hover {
-                contents: format!("cell_roles {}\n\n{} named roles; exact identities, authority, correspondence and bounded scans. Experimental verification and immutable named-role selection; stable artifact admission remains pending.", def.name, def.roles.len()),
+                contents: format!("cell_roles {}\n\n{} named roles; exact identities, authority, correspondence and bounded scans. Bounded verification and immutable named-role selection; native artifact checking requires source, authority and lifetime evidence.", def.name, def.roles.len()),
                 range: Some(range),
             }),
             Item::Resource(r) => Some(Hover {
@@ -3444,9 +3444,8 @@ mod tests {
         let call = source.rfind("Settlement").unwrap();
         let position = offset_to_position(source, call + 1);
         let completion = server.completion(uri, position);
-        assert!(completion
-            .iter()
-            .any(|item| item.label == "Settlement" && item.documentation.as_deref().is_some_and(|doc| doc.contains("Experimental"))));
+        assert!(completion.iter().any(|item| item.label == "Settlement"
+            && item.documentation.as_deref().is_some_and(|doc| doc.contains("source, authority and lifetime"))));
         let definition = server.goto_definition(uri, position).unwrap();
         assert_eq!(definition.range.start, offset_to_position(source, source.find("Settlement").unwrap()));
         assert!(server.hover(uri, position).unwrap().contents.contains("named roles"));
@@ -3618,7 +3617,7 @@ mod tests {
     }
 
     #[test]
-    fn named_collections_have_navigation_and_explicit_proof_pending_status() {
+    fn named_collections_have_navigation_and_bounded_contract_status() {
         let source = include_str!("../../tests/syntax_combo/seeds/named-collections.cell");
         let uri = "file:///named_collections.cell";
         let mut server = LspServer::new();
@@ -3634,7 +3633,7 @@ mod tests {
         assert!(server
             .symbol_completions(server.ast_cache.get(uri).unwrap())
             .iter()
-            .any(|item| item.label == "Scratch" && item.detail.as_deref().is_some_and(|detail| detail.contains("proof pending"))));
+            .any(|item| item.label == "Scratch" && item.detail.as_deref().is_some_and(|detail| detail == "collections Scratch")));
         let constructed = source.replace("return 0", "let scratch = Scratch::new()\nreturn 0");
         server.open_document_with_edition(uri.into(), constructed, crate::NEXT_EDITION);
         assert!(server.get_diagnostics(uri).iter().all(|item| item.severity != DiagnosticSeverity::Error));
@@ -3941,12 +3940,8 @@ mod tests {
         let types = server.type_completions();
         assert!(types.iter().any(|item| item.label == "BoundedCellSet"));
         assert!(types.iter().any(|item| item.label == "BoundedList"));
-        assert!(
-            types
-                .iter()
-                .any(|item| item.label == "NestedValues"
-                    && item.documentation.as_deref().is_some_and(|doc| doc.contains("Experimental")))
-        );
+        assert!(types.iter().any(|item| item.label == "NestedValues"
+            && item.documentation.as_deref().is_some_and(|doc| doc.contains("codec, source, transport and lifetime"))));
         assert!(types.iter().any(|item| item.label == "NestedBytesView"));
         assert!(types.iter().any(|item| item.label == "NestedRecordView"));
         assert!(types.iter().any(|item| item.label == "DecodedSince"));
@@ -4057,8 +4052,8 @@ mod tests {
         server.open_document(uri.into(), include_str!("../../examples/language/ckb/typed_cell_data.cell").into());
         let diagnostics = server.get_diagnostics(uri);
         assert!(diagnostics.iter().all(|item| item.severity != DiagnosticSeverity::Error), "{diagnostics:?}");
-        assert!(diagnostics.iter().any(|item| item.message.contains("cell-data-view-artifact-proof")));
-        assert!(diagnostics.iter().any(|item| item.message.contains("requires experimental artifact admission")));
+        assert!(!diagnostics.iter().any(|item| item.message.contains("cell-data-view-artifact-proof")));
+        assert!(!diagnostics.iter().any(|item| item.message.contains("requires experimental artifact admission")));
         assert!(diagnostics.iter().all(|item| !item.message.contains("emits fail-closed runtime traps")));
         let input = server.member_completions(uri, "InputView<Token>");
         assert!(input.iter().any(|field| field.label == "data"));

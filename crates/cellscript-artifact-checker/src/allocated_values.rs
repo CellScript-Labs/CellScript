@@ -1,6 +1,6 @@
-//! Experimental allocation declarations and typed operation shapes. This does
-//! not certify emitted allocation checks or machine owner lifetimes; the proof blocker
-//! is mandatory even after outer hashes are recomputed.
+//! Allocation declarations and typed operation shapes. The composing checker also
+//! requires allocation machine contracts, owner lifetimes and protected copied
+//! results; nominal validation alone is not an allocation proof.
 use crate::{
     CheckerError, CheckerRejectionCode, TypedSemanticOperation, TypedSemanticOperationDetail, TypedSemanticRecord, TypedSemanticType,
 };
@@ -12,6 +12,7 @@ pub(crate) mod machine;
 pub(crate) use lifetime::{owner_types, validate as validate_lifetimes};
 
 pub const PROFILE: &str = "cellscript-allocated-values-v1";
+/// Legacy bundle flag; current bounded contracts require machine evidence instead.
 pub const PROOF_BLOCKER: &str = "allocated-values-artifact-proof";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -219,35 +220,21 @@ pub(crate) fn valid_operation(
         && op.operands[1..].iter().zip(args).all(|(operand, expected)| operand.ty == expected)
 }
 
-pub(crate) fn validate_metadata(metadata: &serde_json::Value, typed: &TypedSemanticRecord) -> Result<(), CheckerError> {
-    let mut present = false;
+pub(crate) fn validate_types(typed: &TypedSemanticRecord) -> Result<(), CheckerError> {
     // A helper borrows the same declared owner layout as its caller. A valid
     // budget in isolation must not allow a callee to reinterpret that arena.
     let mut contracts = BTreeMap::new();
     for entry in &typed.entries {
         for op in entry.blocks.iter().flat_map(|block| &block.operations) {
-            if let TypedSemanticOperationDetail::AllocatedValue { contract, .. } = &op.detail {
-                present = true;
-                if contracts.insert(&contract.owner, contract).is_some_and(|old| old != contract) {
-                    return Err(CheckerError::new(
-                        CheckerRejectionCode::V2419TypedSemanticsInvalid,
-                        "allocated owner declaration differs between operations or helper entries",
-                    ));
-                }
+            if let TypedSemanticOperationDetail::AllocatedValue { contract, .. } = &op.detail
+                && contracts.insert(&contract.owner, contract).is_some_and(|old| old != contract)
+            {
+                return Err(CheckerError::new(
+                    CheckerRejectionCode::V2419TypedSemanticsInvalid,
+                    "allocated owner declaration differs between operations or helper entries",
+                ));
             }
         }
-    }
-    if present
-        && !metadata
-            .get("runtime")
-            .and_then(|r| r.get("fail_closed_runtime_features"))
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|features| features.iter().any(|f| f.as_str() == Some(PROOF_BLOCKER)))
-    {
-        return Err(CheckerError::new(
-            CheckerRejectionCode::V2410MetadataBindingMismatch,
-            "allocated values require independent allocation/ownership proof admission blocker",
-        ));
     }
     Ok(())
 }

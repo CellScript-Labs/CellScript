@@ -9,51 +9,13 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 pub const PROFILE: &str = "cellscript-bounded-nested-values-v1";
+/// Legacy bundle flag; current bounded contracts require machine evidence instead.
 pub const PROOF_BLOCKER: &str = "nested-values-artifact-proof";
 pub const MAX_ITEMS: u32 = 32;
 pub const MAX_PAYLOAD_BYTES: u32 = 256;
 pub const MAX_TOTAL_BYTES: u32 = 4096;
 pub const MAX_FIXED_FIELDS: usize = 8;
 pub const MAX_FIXED_FIELD_BYTES: u16 = 256;
-
-/// Keep experimental source/codec/output obligations explicit even when outer
-/// metadata hashes are rebound. An unused schema alone needs no runtime gate.
-pub(crate) fn validate_metadata(metadata: &serde_json::Value, typed: &crate::TypedSemanticRecord) -> Result<(), crate::CheckerError> {
-    let nested_cells = typed
-        .types
-        .iter()
-        .filter(|ty| ty.fields.iter().any(|field| crate::checker::is_nested_source_type(&field.ty)))
-        .map(|ty| ty.name.as_str())
-        .collect::<std::collections::BTreeSet<_>>();
-    let nested = |ty: &str| {
-        let canonical = crate::checker::canonical_abi_type(ty);
-        let base = canonical.strip_prefix("&mut").or_else(|| canonical.strip_prefix('&')).unwrap_or(&canonical);
-        crate::checker::is_nested_source_type(base)
-            || nested_cells.contains(base)
-            || base.strip_prefix("CellDataView<").and_then(|ty| ty.strip_suffix('>')).is_some_and(|ty| nested_cells.contains(ty))
-    };
-    let present = typed.entries.iter().any(|entry| {
-        entry.params.iter().any(|param| nested(&param.ty))
-            || entry.locals.iter().any(|local| nested(&local.ty))
-            || entry.blocks.iter().flat_map(|block| &block.operations).any(|op| {
-                matches!(&op.detail, crate::TypedSemanticOperationDetail::ExactRoleSelection { contract }
-                    if contract.profile == crate::cell_selection::BOUNDED_PROFILE)
-            })
-    });
-    if present
-        && !metadata
-            .get("runtime")
-            .and_then(|runtime| runtime.get("fail_closed_runtime_features"))
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|features| features.iter().any(|feature| feature.as_str() == Some(PROOF_BLOCKER)))
-    {
-        return Err(crate::CheckerError::new(
-            crate::CheckerRejectionCode::V2410MetadataBindingMismatch,
-            "nested witness/Cell values and views require their source/codec/output proof admission blocker",
-        ));
-    }
-    Ok(())
-}
 
 /// Fixed fields describe only encoded bitpattern widths. A producer/consumer
 /// must additionally bind the source schema and its type/authority contract.

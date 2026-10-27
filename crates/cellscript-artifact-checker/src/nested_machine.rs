@@ -1,4 +1,4 @@
-//! Independent instruction contract for experimental nested witness decoders.
+//! Independent instruction contract for bounded nested witness decoders.
 //! This binds canonical list/element decoders to typed parameter bounds. It
 //! binds decoder inputs to incoming ABI words and an unavoidable entry prefix.
 //! Single-entry and policy witness transports are checked separately below.
@@ -6,8 +6,8 @@
 //! Typed Cell loads and complete tables are checked in `cells`; `cell_args`
 //! binds borrowed Cell, whole-value and derived-view helper calls, including both
 //! ABI words' source identity. `outputs` checks nested successor comparisons;
-//! fixed-value producer provenance and source equivalence remain pending. Stable nested
-//! artifact admission stays closed.
+//! `scalar_machine` composes typed scalar definitions, calls, branches and results.
+//! This bounded contract does not claim arbitrary whole-language equivalence.
 use crate::bounded_nested::{ElementShape, NestedValueContract};
 use crate::{CheckerError, CheckerRejectionCode, ParsedElf, VerifiedLoweringRecord};
 use std::collections::{BTreeMap, BTreeSet};

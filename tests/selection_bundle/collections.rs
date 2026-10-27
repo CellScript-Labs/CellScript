@@ -34,8 +34,7 @@ impl Note {
 fn sdk_data(root: &Path, metadata: &cellscript::CompileMetadata, before: &[Note], after: &[Note]) -> Value {
     let vectors = json!({"before":before.iter().map(|note|note.sdk_vector(metadata)).collect::<Vec<_>>(),
         "after":after.iter().map(|note|note.sdk_vector(metadata)).collect::<Vec<_>>(),
-        "action_features":metadata.actions[0].fail_closed_runtime_features,
-        "allocated":metadata.runtime.fail_closed_runtime_features.iter().any(|feature|feature == "allocated-values-artifact-proof")});
+        "action_features":metadata.actions[0].fail_closed_runtime_features});
     std::fs::write(root.join("fixed-vectors.json"), serde_json::to_vec(&vectors).unwrap()).unwrap();
     let script = root.join("fixed-check.mjs");
     std::fs::write(&script, r#"
@@ -54,8 +53,8 @@ const encode = vector => {
 const plan = sdk.planTransfer({});
 assert.equal(plan.canSubmit, false);
 assert.deepEqual(plan.failClosedRuntimeFeatures, vectors.action_features);
-if (vectors.allocated) assert.ok(plan.failClosedRuntimeFeatures.includes('cell-data-view-artifact-proof'));
-assert.equal(plan.failClosedRuntimeFeatures.includes('allocated-values-artifact-proof'), vectors.allocated);
+assert.ok(!plan.failClosedRuntimeFeatures.includes('cell-data-view-artifact-proof'));
+assert.ok(!plan.failClosedRuntimeFeatures.includes('allocated-values-artifact-proof'));
 fs.writeFileSync(new URL('./fixed-generated.json', import.meta.url), JSON.stringify({before:vectors.before.map(encode), after:vectors.after.map(encode)}));
 "#).unwrap();
     let output = Command::new("node").arg("--experimental-strip-types").arg(script).output().unwrap();
@@ -251,11 +250,8 @@ fn allocated_multi_asset_transfer_matches_independent_model_and_all_group_execut
             let temp = tempfile::tempdir().unwrap();
             let root = temp.path();
             let compiled = vec![compile_at(source, opt), compile_at("module auth\nlock authorize() -> bool { return true }", opt)];
-            assert_eq!(
-                compiled[0].metadata.runtime.fail_closed_runtime_features.iter().any(|s| s == "allocated-values-artifact-proof"),
-                name == "arena"
-            );
-            assert!(compiled[0].metadata.runtime.fail_closed_runtime_features.iter().any(|s| s == "cell-data-view-artifact-proof"));
+            assert!(!compiled[0].metadata.runtime.fail_closed_runtime_features.iter().any(|s| s == "allocated-values-artifact-proof"));
+            assert!(!compiled[0].metadata.runtime.fail_closed_runtime_features.iter().any(|s| s == "cell-data-view-artifact-proof"));
             let artifacts = participants(root, &[("transfer", "action", "transfer"), ("auth", "lock", "authorize")], &compiled);
             for case in &cases {
                 let key = format!("{name}-{}", case.name);
@@ -476,7 +472,7 @@ action inspect() -> u64 {{
                 assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
                 let report: Value = serde_json::from_slice(&output.stdout).unwrap();
                 assert_eq!(report["owners"][0]["members"][0]["element_bytes"], width);
-                assert!(compiled
+                assert!(!compiled
                     .metadata
                     .runtime
                     .fail_closed_runtime_features

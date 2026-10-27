@@ -56,6 +56,22 @@ mod allocated_wide_transport;
 #[path = "artifact_checker/cell_data_results.rs"]
 mod cell_data_results;
 
+#[path = "artifact_checker/bounded_admission.rs"]
+mod bounded_admission;
+
+fn assert_bounded_admitted(fixture: &Fixture) {
+    let features = fixture.metadata["runtime"]["fail_closed_runtime_features"].as_array().unwrap();
+    for feature in [
+        "allocated-values-artifact-proof",
+        "nested-values-artifact-proof",
+        "exact-role-selection-artifact-proof",
+        "cell-data-view-artifact-proof",
+    ] {
+        assert!(!features.iter().any(|value| value == feature), "retired blanket blocker: {feature}");
+    }
+    fixture.check().unwrap();
+}
+
 const FIXTURE_SOURCE: &str = r#"
 module artifact_checker_fixture
 
@@ -339,16 +355,11 @@ fn cell_data_field_instructions_reject_rebound_source_length_copy_and_branch_cha
 }
 
 #[test]
-fn cell_view_helper_parameters_require_admission_blocker_without_data_projection() {
+fn cell_view_helper_parameters_admit_checked_transport_without_data_projection() {
     let source = include_str!("../examples/language/ckb/typed_cell_predicate.cell")
         .replace("before.data.id == after.data.id && before.data.owner == after.data.owner", "true");
-    let mut changed = Fixture::from_source(&source);
-    changed.metadata["runtime"]["fail_closed_runtime_features"]
-        .as_array_mut()
-        .unwrap()
-        .retain(|feature| feature.as_str() != Some("cell-data-view-artifact-proof"));
-    changed.rebind_sidecars();
-    assert_code(&changed, CheckerRejectionCode::V2410MetadataBindingMismatch);
+    let admitted = Fixture::from_source(&source);
+    assert_bounded_admitted(&admitted);
 }
 
 #[test]
@@ -966,22 +977,16 @@ fn cell_data_helper_fields_preserve_independent_machine_checks() {
 }
 
 #[test]
-fn cell_data_views_keep_nominal_fields_and_experimental_admission_bound() {
+fn cell_data_views_keep_nominal_fields_bound_after_admission() {
     let source = selected_roles_source().replace(
         "require input.capacity == partner.capacity",
         "require input.data.id == partner.data.id\nrequire input.data.amount == partner.data.amount",
     );
     let valid = Fixture::from_source(&source);
-    for case in 0..3 {
+    assert_bounded_admitted(&valid);
+    for case in 1..3 {
         let mut changed = valid.clone();
-        if case == 0 {
-            changed.metadata["runtime"]["fail_closed_runtime_features"]
-                .as_array_mut()
-                .unwrap()
-                .retain(|feature| feature.as_str() != Some("cell-data-view-artifact-proof"));
-            changed.rebind_sidecars();
-            assert_code(&changed, CheckerRejectionCode::V2410MetadataBindingMismatch);
-        } else {
+        {
             let operation = changed
                 .record
                 .typed_semantics
@@ -1393,15 +1398,7 @@ fn nested_transaction_data_views_bind_complete_tables_and_retained_results() {
         )
         .unwrap_or_else(|error| panic!("nested data O{opt_level}: {error}"));
         let valid = Fixture::from_result(result);
-        for blocker in ["cell-data-view-artifact-proof", "nested-values-artifact-proof"] {
-            let mut changed = valid.clone();
-            changed.metadata["runtime"]["fail_closed_runtime_features"]
-                .as_array_mut()
-                .unwrap()
-                .retain(|feature| feature.as_str() != Some(blocker));
-            changed.rebind_sidecars();
-            assert_code(&changed, CheckerRejectionCode::V2410MetadataBindingMismatch);
-        }
+        assert_bounded_admitted(&valid);
         let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
         let (start, end) = valid
             .record
@@ -1556,13 +1553,7 @@ fn nested_role_selection_checks_profiles_layouts_and_complete_machine_code() {
             2
         );
         assert_eq!(profiles.iter().filter(|profile| **profile == cellscript_artifact_checker::cell_selection::PROFILE).count(), 1);
-        let mut missing = valid.clone();
-        missing.metadata["runtime"]["fail_closed_runtime_features"]
-            .as_array_mut()
-            .unwrap()
-            .retain(|feature| feature.as_str() != Some("nested-values-artifact-proof"));
-        missing.rebind_sidecars();
-        assert_code(&missing, CheckerRejectionCode::V2410MetadataBindingMismatch);
+        assert_bounded_admitted(&valid);
         let mut downgraded = valid.clone();
         for op in downgraded
             .record
@@ -1617,15 +1608,9 @@ fn nested_role_selection_checks_profiles_layouts_and_complete_machine_code() {
 }
 
 #[test]
-fn exact_role_declarations_and_proof_blocker_reject_rebound_substitutions() {
+fn exact_role_declarations_reject_rebound_substitutions_after_admission() {
     let valid = Fixture::from_source(include_str!("../examples/language/ckb/exact_role_verification.cell"));
-    let mut missing = valid.clone();
-    missing.metadata["runtime"]["fail_closed_runtime_features"]
-        .as_array_mut()
-        .unwrap()
-        .retain(|feature| feature.as_str() != Some("exact-role-selection-artifact-proof"));
-    missing.rebind_sidecars();
-    assert_code(&missing, CheckerRejectionCode::V2410MetadataBindingMismatch);
+    assert_bounded_admitted(&valid);
 
     // These validate the declaration boundary. The separate machine test also
     // rejects well-formed catalog substitutions after hashes are rebound.
@@ -6055,19 +6040,13 @@ fn allocated_values_lifetimes_follow_joins_backedges_and_lexical_loans() {
 }
 
 #[test]
-fn allocated_values_keep_structured_contract_and_mandatory_proof_blocker_after_rebinding() {
+fn allocated_values_keep_structured_contract_after_admission_and_rebinding() {
     let source = "module allocated_proof\ncollections Work { limits { bytes: 128, allocations: 2 }\nvalues: Vec<u64> { items: 8 } }\nfn count(view: &Work) -> u64 { return view.values.len() }\naction inspect() -> u64 { let mut work = Work::new()\nwork.values.push(9)\nrequire work.values.get(0) == 9\nrequire count(&work) == 1\nreturn 0 }";
     let valid = Fixture::from_result(
         compile(source, CompileOptions { edition: NEXT_EDITION, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
     );
     valid.check().unwrap();
-    let mut missing = valid.clone();
-    missing.metadata["runtime"]["fail_closed_runtime_features"]
-        .as_array_mut()
-        .unwrap()
-        .retain(|value| value != "allocated-values-artifact-proof");
-    missing.rebind_sidecars();
-    assert_code(&missing, CheckerRejectionCode::V2410MetadataBindingMismatch);
+    assert_bounded_admitted(&valid);
     for mutation in 0..4 {
         let mut changed = valid.clone();
         let op = changed
@@ -7171,23 +7150,14 @@ fn stable_rejection_codes_cover_elf_sections_instructions_flow_and_digests() {
 fn named_data_shapes_retain_independent_codec_bounds_and_source_checks() {
     let unused = Fixture::from_source("module unused_nested_schema\nresource Batch has store { entries: NestedValues<Vec<u8>, 3, 8, 128> }\naction inspect() -> u64 { verification return 0 }");
     assert!(
-        !unused.metadata["runtime"]["fail_closed_runtime_features"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|feature| feature.as_str() == Some("nested-values-artifact-proof")),
+        unused.record.blocks.iter().all(|block| block.nested_cell_labels.is_empty() && block.nested_read_labels.is_empty()),
         "a declaration alone must not imply runtime nested decoding"
     );
     for source in [
         NESTED_CELL_CODEC_SOURCE,
         "module unused_nested_field\nresource Batch has store, consume { entries: NestedValues<Vec<u8>, 2, 3, 32> }\naction remove(input before: Batch) { verification consume before }",
     ] {
-        let mut missing = Fixture::from_source(source);
-        let features = missing.metadata["runtime"]["fail_closed_runtime_features"].as_array_mut().unwrap();
-        assert!(features.iter().any(|feature| feature.as_str() == Some("nested-values-artifact-proof")));
-        features.retain(|feature| feature.as_str() != Some("nested-values-artifact-proof"));
-        missing.rebind_sidecars();
-        assert_code(&missing, CheckerRejectionCode::V2410MetadataBindingMismatch);
+        assert_bounded_admitted(&Fixture::from_source(source));
     }
     let source = include_str!("syntax_combo/seeds/named-data-shapes.cell");
     for opt_level in [0, 3] {
@@ -7245,13 +7215,7 @@ fn named_data_shapes_retain_independent_codec_bounds_and_source_checks() {
         let mut changed = valid.clone();
         changed.replace_machine_word(start, word ^ (1 << 20));
         assert!(changed.check().is_err(), "named shape must not bypass the codec instruction proof");
-        let mut missing = valid.clone();
-        missing.metadata["runtime"]["fail_closed_runtime_features"]
-            .as_array_mut()
-            .unwrap()
-            .retain(|feature| feature.as_str() != Some("nested-values-artifact-proof"));
-        missing.rebind_sidecars();
-        assert_code(&missing, CheckerRejectionCode::V2410MetadataBindingMismatch);
+        assert_bounded_admitted(&valid);
     }
 }
 
@@ -10100,7 +10064,7 @@ fn nested_lifetime_rejects_coherent_derived_pointer_aliasing_of_a_root_slot() {
 }
 
 #[test]
-fn allocated_values_sorted_arrays_reject_rebound_shapes_and_missing_blocker() {
+fn allocated_values_sorted_arrays_reject_rebound_shapes_after_admission() {
     let source = "module sorted_proof\ncollections Work { limits { bytes: 128, allocations: 2 }\ntotals: OrderedMap<u8, u16> { items: 4 } }\naction inspect() -> u64 { let mut work = Work::new()\nwork.totals.load_sorted([(1, 7), (1, 11), (2, 13)])\nreturn 0 }";
     let valid = Fixture::from_result(
         compile(source, CompileOptions { edition: NEXT_EDITION, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
@@ -10159,13 +10123,7 @@ fn allocated_values_sorted_arrays_reject_rebound_shapes_and_missing_blocker() {
         changed.rebind_typed_semantics();
         assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
     }
-    let mut missing = valid.clone();
-    missing.metadata["runtime"]["fail_closed_runtime_features"]
-        .as_array_mut()
-        .unwrap()
-        .retain(|value| value != "allocated-values-artifact-proof");
-    missing.rebind_sidecars();
-    assert_code(&missing, CheckerRejectionCode::V2410MetadataBindingMismatch);
+    assert_bounded_admitted(&valid);
 }
 
 #[test]

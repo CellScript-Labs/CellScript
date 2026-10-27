@@ -11,6 +11,7 @@ pub use types::{parse_selection_type, project_role_type, SelectionType};
 
 pub const PROFILE: &str = "cellscript-exact-role-cell-selection-fixed-v1";
 pub const BOUNDED_PROFILE: &str = "cellscript-exact-role-cell-selection-bounded-v2";
+/// Legacy bundle flag; current bounded contracts require machine evidence instead.
 pub const PROOF_BLOCKER: &str = "exact-role-selection-artifact-proof";
 
 /// Invocation-local immutable catalog, never a serializable Cell resource.
@@ -50,9 +51,9 @@ impl Read {
     }
 }
 
-/// Until all machine/source obligations close, rebinding hashes must not turn an
-/// experimental selection opcode into a stable-admission claim.
-pub(crate) fn validate_metadata(metadata: &serde_json::Value, typed: &crate::TypedSemanticRecord) -> Result<(), crate::CheckerError> {
+/// Enforce nominal handle and escape rules. The composing checker separately
+/// requires selection machine, authority, source and lifetime contracts.
+pub(crate) fn validate_types(typed: &crate::TypedSemanticRecord) -> Result<(), crate::CheckerError> {
     let contains = |ty: &str| crate::checker::canonical_abi_type(ty).contains("ExactCellSelection<");
     let invalid = || {
         crate::CheckerError::new(crate::CheckerRejectionCode::V2419TypedSemanticsInvalid, "exact-role selection handles must be locally constructed immutable values; storage, ABI, arithmetic and unrelated calls are forbidden")
@@ -87,24 +88,6 @@ pub(crate) fn validate_metadata(metadata: &serde_json::Value, typed: &crate::Typ
                 return Err(invalid());
             }
         }
-    }
-    let present = typed
-        .entries
-        .iter()
-        .flat_map(|entry| &entry.blocks)
-        .flat_map(|block| &block.operations)
-        .any(|operation| matches!(operation.opcode.as_str(), "verify-exact-cell-roles" | "read-exact-cell-role"));
-    if present
-        && !metadata
-            .get("runtime")
-            .and_then(|runtime| runtime.get("fail_closed_runtime_features"))
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|features| features.iter().any(|feature| feature.as_str() == Some(PROOF_BLOCKER)))
-    {
-        return Err(crate::CheckerError::new(
-            crate::CheckerRejectionCode::V2410MetadataBindingMismatch,
-            "exact-role selection requires its independent-machine-proof admission blocker",
-        ));
     }
     Ok(())
 }

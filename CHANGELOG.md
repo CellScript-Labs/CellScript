@@ -2,6 +2,20 @@
 
 ## Unreleased — 0.32
 
+Add the bounded-runtime admission candidate for #47–#49: retire four blanket
+experimental proof flags while retaining nominal, machine, transport and lifetime
+checks. Strict-policy tests cover complete business programs and rebound removal
+of required proof; editor/browser summaries and the support matrix use the same
+boundary. Advance artifact-cache generation to v124. See the
+[scope review](docs/CELLSCRIPT_BOUNDED_RUNTIME_ADMISSION.md); final source gates
+and issue closure remain pending. No release, numeric-limit or wire-format change.
+Recognize checked named-role projections and bounded nested reads/successors in
+the executable-surface and output-obligation classifiers; retain independent
+source/codec/comparison validation for each.
+Preserve fixed tuple result availability through copies, and recognize checked
+scalar/fixed-byte indexing of known packed-byte and pointer-backed fixed arrays. Existing
+collection/value regression programs now exercise these paths in strict mode.
+
 Protect copied collection results between checked publications: ordinary stores,
 helper effects and syscalls cannot overwrite the retained bytes or their pointer
 slots. Mutable record bindings still copy into separate storage, and snapshots

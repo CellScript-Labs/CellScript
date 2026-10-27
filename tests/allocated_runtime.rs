@@ -1,4 +1,4 @@
-//! Source-to-CKB-VM evidence; independent artifact admission remains blocked.
+//! Source-to-CKB-VM evidence for bounded allocations and independent artifact checks.
 use cellscript::{CellScriptEdition, CompileOptions};
 use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
 #[path = "support/allocated_scalar_definitions.rs"]
@@ -85,7 +85,12 @@ fn execute_compiled(
     compiled: &cellscript::CompileResult,
     args: &[cellscript::EntryWitnessArg],
 ) -> ckb_script_runner::CkbScriptExecutionResult {
-    assert!(compiled.metadata.runtime.fail_closed_runtime_features.iter().any(|feature| feature == "allocated-values-artifact-proof"));
+    assert!(!compiled
+        .metadata
+        .runtime
+        .fail_closed_runtime_features
+        .iter()
+        .any(|feature| feature == "allocated-values-artifact-proof"));
     let payload = compiled.metadata.actions[0].entry_witness_args(args).unwrap();
     let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
     fixture.current_type_script_input_indices = vec![0];
@@ -94,7 +99,7 @@ fn execute_compiled(
 }
 
 fn compile_checked(source: &str, opt_level: u8) -> cellscript::CompileResult {
-    let compiled = cellscript::compile(
+    let compiled = cellscript::compile_with_executable_surface_policy(
         source,
         CompileOptions {
             edition: CellScriptEdition::Edition2027,
@@ -102,6 +107,7 @@ fn compile_checked(source: &str, opt_level: u8) -> cellscript::CompileResult {
             opt_level,
             ..Default::default()
         },
+        cellscript::ExecutableSurfacePolicy::DenyFailClosed,
     )
     .unwrap();
     cellscript_artifact_checker::check_bundle_values(

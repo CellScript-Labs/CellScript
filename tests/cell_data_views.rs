@@ -180,7 +180,7 @@ fn data_predicates_compose_through_typed_read_only_helpers() {
                 let compiled =
                     compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
                         .unwrap_or_else(|error| panic!("O{opt_level} padding={padding} group={group}: {error}"));
-                assert!(compiled.metadata.runtime.fail_closed_runtime_features.contains(&"cell-data-view-artifact-proof".into()));
+                assert!(!compiled.metadata.runtime.fail_closed_runtime_features.contains(&"cell-data-view-artifact-proof".into()));
                 let reads = compiled
                     .metadata
                     .runtime
@@ -233,19 +233,18 @@ fn data_predicates_compose_through_typed_read_only_helpers() {
 }
 
 #[test]
-fn helper_coordinate_transport_remains_experimental_without_data_reads() {
+fn helper_coordinate_transport_admits_checked_helpers_without_data_reads() {
     let base = include_str!("../examples/language/ckb/typed_cell_predicate.cell");
     for predicate in ["true", "before.capacity == after.capacity"] {
         let source = base.replace("before.data.id == after.data.id && before.data.owner == after.data.owner", predicate);
         let result = compile(&source, Default::default()).unwrap();
-        assert!(result.metadata.runtime.fail_closed_runtime_features.contains(&"cell-data-view-artifact-proof".into()));
-        let error = cellscript::compile_with_executable_surface_policy(
+        assert!(!result.metadata.runtime.fail_closed_runtime_features.contains(&"cell-data-view-artifact-proof".into()));
+        cellscript::compile_with_executable_surface_policy(
             &source,
             Default::default(),
             cellscript::ExecutableSurfacePolicy::DenyFailClosed,
         )
-        .unwrap_err();
-        assert!(error.message.contains("cell-data-view-artifact-proof"), "{error}");
+        .unwrap();
     }
 }
 
@@ -284,7 +283,7 @@ fn fixed_data_fields_lower_without_confusing_transaction_metadata_or_ownership()
     for opt_level in 0..=3 {
         let result = compile(SOURCE, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
             .unwrap_or_else(|error| panic!("O{opt_level}: {error}"));
-        assert!(result.metadata.runtime.fail_closed_runtime_features.contains(&"cell-data-view-artifact-proof".into()));
+        assert!(!result.metadata.runtime.fail_closed_runtime_features.contains(&"cell-data-view-artifact-proof".into()));
         assert!(!result.metadata.runtime.fail_closed_runtime_features.contains(&"field-access".into()));
         let reads = result
             .metadata
@@ -302,13 +301,12 @@ fn fixed_data_fields_lower_without_confusing_transaction_metadata_or_ownership()
             .iter()
             .filter(|view| view.handle_type.starts_with("CellDataView<"))
             .all(|view| view.ownership == "read-only-view" && !view.lifecycle_authority));
-        let denied = cellscript::compile_with_executable_surface_policy(
+        cellscript::compile_with_executable_surface_policy(
             SOURCE,
             CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
             cellscript::ExecutableSurfacePolicy::DenyFailClosed,
         )
-        .unwrap_err();
-        assert!(denied.message.contains("cell-data-view-artifact-proof"));
+        .unwrap();
     }
 }
 

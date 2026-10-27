@@ -1,44 +1,36 @@
 {
   "entries": [
     {
-      "conditions": "Experimental invocation-local collections; complete independent allocation, initialization, ownership and source contracts remain required.",
-      "fail_closed_features": [
-        "allocated-values-artifact-proof"
-      ],
+      "conditions": "Invocation-local fixed-value Vec and ordered Map/Set within declared byte, allocation-event and item limits. Independent constructor, allocation, bounds, lifecycle, readonly-helper and copied-result contracts are mandatory; owned dynamic values and Cell resources remain unsupported.",
+      "fail_closed_features": [],
       "id": "ir:allocated-value",
       "layer": "instruction",
-      "production_policy": "accepted only when the shape classifier reports no fail-closed feature",
-      "status": "shape-gated"
+      "production_policy": "accepted",
+      "status": "bounded"
     },
     {
-      "conditions": "Experimental immutable fixed and bounded nested Cell data views have independently checked complete field-load/codec instructions and retained-buffer write effects. Helper-carried transaction views retain this blocker even without data reads; complete caller/source/value provenance and builder binding remain required before stable admission.",
-      "fail_closed_features": [
-        "cell-data-view-artifact-proof"
-      ],
+      "conditions": "Immutable fixed and bounded nested Cell data views require checked source coordinates, field/codec instructions, readonly helper transport and retained-buffer lifetime. Nominal schemas and lifecycle authority remain distinct; metadata alone is not machine or transaction evidence.",
+      "fail_closed_features": [],
       "id": "artifact:cell-data-view-proof",
       "layer": "artifact-policy",
-      "production_policy": "accepted only when the shape classifier reports no fail-closed feature",
-      "status": "shape-gated"
+      "production_policy": "accepted",
+      "status": "bounded"
     },
     {
-      "conditions": "Experimental complete fixed/bounded-table selection, immutable role counts and typed transaction coordinates have retained-table lifetime checks. Edition 2027 module-local named catalogs bind role names and schemas through immutable projections, aliases and reads; bounded nested data reads retain separate owned buffers; complete aggregate/source proof and builder binding remain required.",
-      "fail_closed_features": [
-        "exact-role-selection-artifact-proof"
-      ],
+      "conditions": "Closed fixed/bounded-table role catalogs require complete bounded scans, explicit identity/authority/correspondence, checked typed projections and retained-table lifetime. Builders bind mandatory sites to the selected entry and reject unbound conditional paths; peer authorization remains with each Script.",
+      "fail_closed_features": [],
       "id": "ir:verify-exact-cell-roles",
       "layer": "instruction",
-      "production_policy": "accepted only when the shape classifier reports no fail-closed feature",
-      "status": "shape-gated"
+      "production_policy": "accepted",
+      "status": "bounded"
     },
     {
-      "conditions": "Experimental bounded nested witness and Cell views validate canonical bytes. Edition 2027 data_shape declarations and Item/Payload view types resolve reusable bounds. Whole and derived views support immutable read-only helpers with per-call list/element validation and checked pointer/length source binding; complete source, codec and output evidence remain pending.",
-      "fail_closed_features": [
-        "nested-values-artifact-proof"
-      ],
+      "conditions": "Bounded byte-list and fixed-identity/byte-payload record-list Molecule views require canonical witness/Cell decoding, exact named limits, checked readonly whole/derived helper spans and actual successor comparisons. Recursive schemas, escaping views and owned dynamic mutation remain unsupported.",
+      "fail_closed_features": [],
       "id": "artifact:nested-values-proof",
       "layer": "artifact-policy",
-      "production_policy": "accepted only when the shape classifier reports no fail-closed feature",
-      "status": "shape-gated"
+      "production_policy": "accepted",
+      "status": "bounded"
     },
     {
       "conditions": "Experimental gathered hashes require proven local byte/offset vectors and checked transaction span bounds.",
@@ -345,7 +337,7 @@
       "status": "bounded"
     },
     {
-      "conditions": "Requires a fixed schema, aggregate pointer, or tuple-call-return layout.",
+      "conditions": "Requires a known fixed schema/aggregate/tuple layout, a typed named-role projection, or a checked bounded Cell/nested view field.",
       "fail_closed_features": [
         "field-access"
       ],
@@ -355,7 +347,7 @@
       "status": "shape-gated"
     },
     {
-      "conditions": "Fixed aggregates and bounded stack collections with known element layout.",
+      "conditions": "Known fixed arrays and bounded stack collections with checked scalar/element layout, or immutable bounded nested list/payload indexing.",
       "fail_closed_features": [
         "index-access"
       ],

@@ -322,7 +322,7 @@ mod tests {
             let result =
                 crate::compile(SOURCE, CompileOptions { edition: CellScriptEdition::Edition2027, target, ..Default::default() })
                     .unwrap();
-            assert!(result.metadata.runtime.fail_closed_runtime_features.contains(&"exact-role-selection-artifact-proof".into()));
+            assert!(!result.metadata.runtime.fail_closed_runtime_features.contains(&"exact-role-selection-artifact-proof".into()));
         }
         for (source, expected) in [
             (SOURCE.replace("verify_cell_roles<Settlement>()", "verify_cell_roles<Unknown>()"), "unknown local"),

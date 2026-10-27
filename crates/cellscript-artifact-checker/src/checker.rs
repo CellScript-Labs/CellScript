@@ -417,10 +417,9 @@ fn validate_metadata_binding(
     source_map: &SourceArtifactMap,
 ) -> Result<(), CheckerError> {
     crate::policy::validate_policy_metadata(metadata, &record.typed_semantics)?;
-    crate::cell_selection::validate_metadata(metadata, &record.typed_semantics)?;
-    crate::cell_data_view::validate_metadata(metadata, &record.typed_semantics)?;
-    crate::bounded_nested::validate_metadata(metadata, &record.typed_semantics)?;
-    crate::allocated_values::validate_metadata(metadata, &record.typed_semantics)?;
+    crate::cell_selection::validate_types(&record.typed_semantics)?;
+    crate::cell_data_view::validate_types(&record.typed_semantics)?;
+    crate::allocated_values::validate_types(&record.typed_semantics)?;
     validate_ckb_vm2_target_contract(metadata)?;
     validate_runtime_access_provenance_metadata(metadata, &record.typed_semantics)?;
     let artifact_hash = hex_encode(&ckb_blake2b256(artifact));

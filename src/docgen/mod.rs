@@ -938,17 +938,17 @@ fn item_doc(item: &Item) -> Option<ItemDoc> {
     match item {
         Item::Collections(def) => Some(ItemDoc {
             kind: "collections".into(), name: def.name.clone(), signature: format!("collections {}", def.name),
-            summary: format!("Experimental owned collection declaration: {} shared arena bytes, {} allocation events, {} members; local operations and read-only helpers are experimental; independent allocation proof remains pending.", def.bytes, def.allocations, def.members.len()),
+            summary: format!("Bounded owned collection declaration: {} shared arena bytes, {} allocation events, {} members; local operations and read-only helpers require allocation, bounds and lifetime evidence.", def.bytes, def.allocations, def.members.len()),
         }),
         Item::DataShape(def) => Some(ItemDoc {
             kind: "data_shape".into(), name: def.name.clone(), signature: format!("data_shape {}", def.name),
-            summary: format!("Experimental bounded codec shape: element {}; items <= {}, payload bytes <= {}, encoded bytes <= {}. Entry-witness budget is separate.", crate::generics::render_type(&def.element), def.limits.items, def.limits.payload_bytes, def.limits.encoded_bytes),
+            summary: format!("Bounded codec shape: element {}; items <= {}, payload bytes <= {}, encoded bytes <= {}. Entry-witness budget is separate.", crate::generics::render_type(&def.element), def.limits.items, def.limits.payload_bytes, def.limits.encoded_bytes),
         }),
         Item::CellRoles(def) => Some(ItemDoc {
             kind: "cell_roles".into(),
             name: def.name.clone(),
             signature: format!("cell_roles {}", def.name),
-            summary: "Experimental named exact-role policy with immutable role projections and typed reads; stable artifact admission is pending.".into(),
+            summary: "Bounded named exact-role policy with immutable role projections and typed reads; native artifact checking requires source, authority and lifetime evidence.".into(),
         }),
         Item::Use(_) => None,
         Item::Resource(resource) => Some(ItemDoc {
@@ -1276,9 +1276,7 @@ mod tests {
         let doc = item_doc(&ast.items[0]).unwrap();
         assert_eq!(doc.kind, "collections");
         assert!(doc.summary.contains("8192 shared arena bytes"));
-        assert!(doc
-            .summary
-            .contains("local operations and read-only helpers are experimental; independent allocation proof remains pending"));
+        assert!(doc.summary.contains("local operations and read-only helpers require allocation, bounds and lifetime evidence"));
     }
 
     #[test]

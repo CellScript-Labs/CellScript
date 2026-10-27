@@ -252,7 +252,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
-const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v123-0.32-collection-copy-lifetime";
+const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v124-0.32-bounded-runtime-admission";
 pub const METADATA_SCHEMA_VERSION: u32 = 72;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 2;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -17163,48 +17163,6 @@ fn body_fail_closed_runtime_features(
     pure_const_returns: &HashMap<String, ir::IrConst>,
 ) -> Vec<String> {
     let mut features = BTreeSet::new();
-    if body
-        .blocks
-        .iter()
-        .flat_map(|block| &block.instructions)
-        .any(|instruction| matches!(instruction, ir::IrInstruction::AllocatedValue(_)))
-    {
-        features.insert("allocated-values-artifact-proof".into());
-    }
-    if params.iter().any(|param| matches!(&param.ty, ir::IrType::Named(name) if cell_data_view::transaction_schema(name).is_some())) {
-        // Passing a tagged coordinate is executable, but stable admission
-        // still needs complete caller-to-callee source/value reconstruction,
-        // including helpers that read only transaction metadata or no fields.
-        features.insert("cell-data-view-artifact-proof".to_string());
-    }
-    let nested_type = |name: &str| {
-        nested_values::is_nested_name(name)
-            || type_layouts.get(name).is_some_and(|fields| {
-                fields.values().any(|field| matches!(&field.ty, ir::IrType::Named(name) if nested_values::is_nested_name(name)))
-            })
-    };
-    if body
-        .blocks
-        .iter()
-        .flat_map(|block| &block.instructions)
-        .any(|instruction| matches!(instruction, ir::IrInstruction::VerifyExactCellRoles { .. }))
-    {
-        features.insert("exact-role-selection-artifact-proof".to_string());
-    }
-    if params.iter().any(|param| named_type_name(&param.ty).is_some_and(nested_type))
-        || body.cell_bindings.iter().any(|binding| nested_type(&binding.ty))
-        || body.blocks.iter().flat_map(|block| &block.instructions).any(|instruction| {
-            matches!(instruction, ir::IrInstruction::VerifyExactCellRoles { contract, .. }
-                if contract.profile == cell_selection::BOUNDED_PROFILE)
-                || matches!(instruction, ir::IrInstruction::FieldAccess { obj: ir::IrOperand::Var(var), field, .. }
-                    if named_type_name(&var.ty).and_then(|name| cell_data_view::schema(name)
-                        .or_else(|| (field == "data").then(|| cell_data_view::transaction_schema(name)).flatten())).is_some_and(nested_type))
-        })
-    {
-        // The executable codec slice is not a stable artifact proof. Retain
-        // this blocker until source/codec/output machine obligations bind.
-        features.insert("nested-values-artifact-proof".to_string());
-    }
     for operation in &body.bounded_collection_ops {
         if operation.runtime_contract.is_some() {
             continue;
@@ -17266,16 +17224,25 @@ fn body_fail_closed_runtime_features(
                         );
                     }
                 }
-                ir::IrInstruction::FieldAccess { obj, field, .. } => {
+                ir::IrInstruction::FieldAccess { dest, obj, field } => {
+                    if matches!((obj, &dest.ty), (ir::IrOperand::Var(var), ir::IrType::Named(projected))
+                        if matches!(&var.ty, ir::IrType::Named(owner)
+                            if cell_selection::project_role_type(owner, field).as_ref() == Some(projected)))
+                    {
+                        // The catalog projection retains its nominal role and
+                        // owner; independent selection proofs bind both.
+                        continue;
+                    }
                     if matches!(obj, ir::IrOperand::Var(var) if matches!(&var.ty, ir::IrType::Named(name)
                         if cell_data_view::schema(name).is_some() || (field == "data" && cell_data_view::transaction_schema(name).is_some())))
                     {
-                        features.insert("cell-data-view-artifact-proof".to_string());
+                        // Nominal view reads have dedicated bounded machine/lifetime contracts.
                         continue;
                     }
                     if !is_executable_schema_field_access(obj, field, param_schema_vars, type_layouts)
                         && !is_executable_aggregate_field_access(obj, field, &prelude_availability, type_layouts)
                         && !is_executable_tuple_call_return_field_access(obj, field, &prelude_availability)
+                        && nested_values::ir_record_field(obj, field, type_layouts).as_ref() != Some(&dest.ty)
                     {
                         features.insert("field-access".to_string());
                     }
@@ -17287,7 +17254,8 @@ fn body_fail_closed_runtime_features(
                     features.insert("fixed-byte-comparison".to_string());
                 }
                 ir::IrInstruction::Index { dest, arr, idx }
-                    if !prelude_availability.aggregate_pointer_vars.contains_key(&dest.id)
+                    if nested_values::ir_index_result(arr).as_ref() != Some(&dest.ty)
+                        && !prelude_availability.aggregate_pointer_vars.contains_key(&dest.id)
                         && !prelude_availability.fixed_value_vars.contains(&dest.id)
                         && !prelude_availability.scalar_vars.contains(&dest.id)
                         && !metadata_stack_collection_index_is_runtime_supported(
@@ -17302,6 +17270,7 @@ fn body_fail_closed_runtime_features(
                 }
                 ir::IrInstruction::Length { operand, .. }
                     if operand_static_length(operand).is_none()
+                        && !nested_values::ir_has_length(operand)
                         && !metadata_dynamic_length_available(operand, &prelude_availability) =>
                 {
                     features.insert("dynamic-length".to_string());
@@ -17736,6 +17705,12 @@ fn metadata_prelude_availability(
                 }
                 ir::IrInstruction::Call { dest: Some(dest), .. } if matches!(dest.ty, ir::IrType::Tuple(_)) => {
                     availability.tuple_call_return_vars.insert(dest.id, dest.ty.clone());
+                    if metadata_ir_type_fixed_width(&dest.ty, type_layouts).is_some() {
+                        // Fixed tuple returns are materialized in caller-owned
+                        // storage, so ordinary copies retain field availability.
+                        availability.fixed_value_vars.insert(dest.id);
+                        availability.aggregate_pointer_vars.insert(dest.id, MetadataAggregatePointerSource { ty: dest.ty.clone() });
+                    }
                 }
                 ir::IrInstruction::Call { dest: Some(dest), func, .. }
                     if type_layouts.fixed_struct_returns.get(func) == Some(&dest.ty) =>
@@ -17929,6 +17904,7 @@ fn metadata_prelude_availability(
                         .get(&obj.id)
                         .and_then(|ty| metadata_tuple_return_field_type(ty, field))
                         .is_some_and(|field_ty| field_ty == dest.ty)
+                        && !availability.aggregate_pointer_vars.contains_key(&obj.id)
                     {
                         continue;
                     }
@@ -17956,7 +17932,9 @@ fn metadata_prelude_availability(
                     };
                     if metadata_layout_or_named_fixed_byte_width(&layout, type_layouts).is_some() && layout.ty == dest.ty {
                         availability.fixed_value_vars.insert(dest.id);
-                        if metadata_ir_type_fixed_width(&dest.ty, type_layouts).is_some_and(|width| width > 8) {
+                        if metadata_ir_type_fixed_width(&dest.ty, type_layouts)
+                            .is_some_and(|width| width > 8 || matches!(dest.ty, ir::IrType::Tuple(_) | ir::IrType::Named(_)))
+                        {
                             availability
                                 .aggregate_pointer_vars
                                 .insert(dest.id, MetadataAggregatePointerSource { ty: dest.ty.clone() });
@@ -17996,18 +17974,31 @@ fn metadata_prelude_availability(
                                 .aggregate_pointer_vars
                                 .insert(dest.id, MetadataAggregatePointerSource { ty: dest.ty.clone() });
                         }
-                    } else if availability.aggregate_pointer_vars.contains_key(&arr.id) {
-                        // Fixed-byte arrays already have bounded pointer-backed
-                        // index lowering. Preserve the existing constant-index
-                        // path and admit dynamic byte reads only; wider aggregate
-                        // element representations keep their separate boundary.
-                        if matches!(&arr.ty, ir::IrType::Array(inner, _) if **inner == ir::IrType::U8)
-                            && dest.ty == ir::IrType::U8
+                    } else if availability.aggregate_pointer_vars.contains_key(&arr.id)
+                        || (availability.fixed_value_vars.contains(&arr.id)
+                            && matches!(&arr.ty, ir::IrType::Array(inner, _) if **inner == ir::IrType::U8))
+                    {
+                        // Known fixed arrays have checked scalar/fixed-byte indexing in
+                        // both packed-byte and pointer-backed representations.
+                        // Dynamic indexing of aggregate elements stays separate.
+                        if matches!(&arr.ty, ir::IrType::Array(inner, _) if inner.as_ref() == &dest.ty
+                            && (metadata_fixed_scalar_size(inner).is_some()
+                                || metadata_fixed_byte_width(inner, type_static_length(inner)).is_some()))
                             && const_usize_operand(idx).is_none()
                             && metadata_u64_operand_available(idx, &availability)
                         {
-                            availability.scalar_vars.insert(dest.id);
                             availability.fixed_value_vars.insert(dest.id);
+                            if metadata_fixed_scalar_size(&dest.ty).is_some() {
+                                availability.scalar_vars.insert(dest.id);
+                                if dest.ty == ir::IrType::U64 {
+                                    availability.u64_value_vars.insert(dest.id);
+                                    availability.u64_operand_vars.insert(dest.id);
+                                }
+                            } else {
+                                availability
+                                    .aggregate_pointer_vars
+                                    .insert(dest.id, MetadataAggregatePointerSource { ty: dest.ty.clone() });
+                            }
                         } else if let (ir::IrType::Array(inner, len), Some(index)) = (&arr.ty, const_usize_operand(idx)) {
                             let element_ty = inner.as_ref();
                             let fixed_size = type_static_length(element_ty);
@@ -18311,7 +18302,12 @@ fn metadata_can_verify_create_output_fields(
     }
     pattern.fields.iter().all(|(field, value)| {
         layouts.get(field).is_some_and(|layout| {
-            if let Some(width) = metadata_layout_or_named_fixed_byte_width(layout, type_layouts) {
+            if matches!(nested_values::ir_type(&layout.ty), Some(nested_values::NestedType::Values(_))) {
+                // Nested values cannot be constructed or mutated. The output
+                // verifier validates its complete table and compares the exact
+                // bounded source span; the checker binds that comparison.
+                matches!(value, ir::IrOperand::Var(var) if var.ty == layout.ty)
+            } else if let Some(width) = metadata_layout_or_named_fixed_byte_width(layout, type_layouts) {
                 metadata_fixed_value_available_with_layout_width(value, availability, width, type_layouts)
             } else {
                 metadata_dynamic_create_output_value_available(value, layout, availability, type_layouts)
@@ -19573,6 +19569,7 @@ fn is_executable_schema_field_access(
     };
     metadata_layout_or_named_fixed_byte_width(layout, type_layouts).is_some()
         || metadata_molecule_vector_element_fixed_width(&layout.ty, type_layouts).is_some()
+        || matches!(nested_values::ir_type(&layout.ty), Some(nested_values::NestedType::Values(_)))
 }
 
 fn is_executable_aggregate_field_access(

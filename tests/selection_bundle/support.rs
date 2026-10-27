@@ -63,7 +63,7 @@ pub(super) fn compile(source: &str) -> CompileResult {
 }
 
 pub(super) fn compile_at(source: &str, opt_level: u8) -> CompileResult {
-    cellscript::compile(
+    cellscript::compile_with_executable_surface_policy(
         source,
         CompileOptions {
             edition: NEXT_EDITION,
@@ -72,6 +72,7 @@ pub(super) fn compile_at(source: &str, opt_level: u8) -> CompileResult {
             target_profile: Some("ckb-type-hash".into()),
             ..Default::default()
         },
+        cellscript::ExecutableSurfacePolicy::DenyFailClosed,
     )
     .unwrap()
 }

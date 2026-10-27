@@ -1,6 +1,6 @@
 # Bounded exact-role Cell selection and correspondence
 
-**Status: experimental fixed/bounded-table selection and coordinate reads; stable admission remains blocked.**
+**Status: bounded fixed/table selection and coordinate reads; admission candidate awaiting final gates.**
 This is the first semantic contract for [#49](https://github.com/CellScript-Labs/CellScript/issues/49),
 `cellscript-exact-role-cell-selection-fixed-v1`. The independent host model in
 [`tests/support/cell_selection_reference.rs`](../tests/support/cell_selection_reference.rs)
@@ -10,8 +10,10 @@ nor the CKB adapter. They are not a serializer, a builder admission path, a
 consensus implementation or evidence of peer execution.
 
 Implementation ownership remains the #47–#49 compiler/backend workstream.
-Scope-specific review disposition and full executable admission remain pending.
-Do not remove an executable-surface blocker on the strength of this model.
+The [scope review](CELLSCRIPT_BOUNDED_RUNTIME_ADMISSION.md) records the candidate
+admission decision and composing machine/transport/lifetime evidence. Final
+identified-source gates remain pending. The host model alone is not admission
+evidence; older implementation notes below retain their historical context.
 
 Named and positional source catalogs now also admit canonical nested Cell tables
 under `cellscript-exact-role-cell-selection-bounded-v2`; see the

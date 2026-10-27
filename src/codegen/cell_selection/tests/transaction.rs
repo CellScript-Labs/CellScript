@@ -266,16 +266,14 @@ fn source_program(
     let formatted = crate::fmt::format_default(&ast).unwrap();
     assert_eq!(crate::fmt::format_default(&crate::frontend::parse(&formatted, edition).unwrap()).unwrap(), formatted);
     let options = crate::CompileOptions { edition, opt_level, target: Some("riscv64-elf".into()), ..Default::default() };
-    let compiled = crate::compile(&source, options.clone()).unwrap_or_else(|error| panic!("{error}\n{source}"));
-    assert!(compiled
+    let compiled = crate::compile_with_executable_surface_policy(&source, options, crate::ExecutableSurfacePolicy::DenyFailClosed)
+        .unwrap_or_else(|error| panic!("{error}\n{source}"));
+    assert!(!compiled
         .metadata
         .runtime
         .fail_closed_runtime_features
         .iter()
         .any(|feature| feature == "exact-role-selection-artifact-proof"));
-    let rejected =
-        crate::compile_with_executable_surface_policy(&source, options, crate::ExecutableSurfacePolicy::DenyFailClosed).unwrap_err();
-    assert!(rejected.message.contains("exact-role-selection-artifact-proof"), "{rejected}");
     compiled
 }
 
@@ -549,7 +547,7 @@ fn named_cell_roles_execute_identical_full_transaction_checks() {
 }
 
 #[test]
-fn exact_role_source_executes_typed_catalogs_and_retains_the_proof_admission_gate() {
+fn exact_role_source_executes_typed_catalogs_under_strict_admission() {
     for opt in 0..=3 {
         for maximum in [false, true] {
             let cycles = execute(maximum, Change::None, Some(opt)).unwrap();

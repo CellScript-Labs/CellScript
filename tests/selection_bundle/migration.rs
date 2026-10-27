@@ -262,7 +262,7 @@ const generated = vectors.map(vector => {
   const plan = sdk.planMigrate({release_note: noteWire});
   assert.equal(plan.canSubmit, false);
   for (const blocker of ['nested-values-artifact-proof', 'cell-data-view-artifact-proof', 'exact-role-selection-artifact-proof']) {
-    assert.ok(plan.failClosedRuntimeFeatures.includes(blocker));
+    assert.ok(!plan.failClosedRuntimeFeatures.includes(blocker));
   }
   const documents = vector.documents.map(d => {
     const encode = (messages, revision) => sdk.encodeNestedCellData('Document', {messages:items(messages), id:bytes(d.id), revision:bytes(revision)});

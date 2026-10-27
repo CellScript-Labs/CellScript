@@ -1,7 +1,8 @@
 //! Independent bounded-role instruction validation. This recognizes every word
 //! and branch inside a typed verification, including terminal failures. Full
-//! source equivalence, enclosing memory effects and builder admission remain
-//! separate obligations; the experimental blocker is retained.
+//! enclosing memory effects are checked by `nested_machine`; builder contracts
+//! are reconstructed separately from typed mandatory sites. This instruction
+//! contract does not claim arbitrary whole-language source equivalence.
 use super::layout::{self, Layout};
 use super::{Contract, Correspondence, Role};
 use crate::{CheckerError, CheckerRejectionCode, ParsedElf, TypedSemanticOperationDetail, VerifiedLoweringRecord};

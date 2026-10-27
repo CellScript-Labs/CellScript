@@ -1,25 +1,20 @@
-//! Independent nominal schema and experimental-admission rules for data views.
+//! Independent nominal schema and escape rules for bounded data views.
 use crate::TypedSemanticType;
 use std::collections::BTreeMap;
 
-pub(crate) fn validate_metadata(metadata: &serde_json::Value, typed: &crate::TypedSemanticRecord) -> Result<(), crate::CheckerError> {
+pub(crate) fn validate_types(typed: &crate::TypedSemanticRecord) -> Result<(), crate::CheckerError> {
     let contains = |ty: &str| ty.contains("CellDataView<");
     let invalid = |message: &str| crate::CheckerError::new(crate::CheckerRejectionCode::V2419TypedSemanticsInvalid, message);
     if typed.types.iter().flat_map(|ty| &ty.fields).any(|field| contains(&field.ty)) {
         return Err(invalid("CellDataView cannot be stored or serialized"));
     }
-    let mut present = false;
     for entry in &typed.entries {
-        present |= entry.params.iter().any(|param| param.ty.starts_with("InputView<") || param.ty.starts_with("OutputView<"));
         if contains(&entry.return_type) || entry.params.iter().any(|param| contains(&param.ty)) {
             return Err(invalid("CellDataView cannot cross a callable boundary"));
         }
         for local in &entry.locals {
-            if contains(&local.ty) {
-                present = true;
-                if !local.ty.starts_with("CellDataView<") {
-                    return Err(invalid("CellDataView cannot be wrapped in a reference or container"));
-                }
+            if contains(&local.ty) && !local.ty.starts_with("CellDataView<") {
+                return Err(invalid("CellDataView cannot be wrapped in a reference or container"));
             }
         }
         for operation in entry.blocks.iter().flat_map(|block| &block.operations) {
@@ -29,18 +24,6 @@ pub(crate) fn validate_metadata(metadata: &serde_json::Value, typed: &crate::Typ
                 return Err(invalid("CellDataView supports only immutable aliases and schema-field reads"));
             }
         }
-    }
-    if present
-        && !metadata
-            .get("runtime")
-            .and_then(|runtime| runtime.get("fail_closed_runtime_features"))
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|features| features.iter().any(|feature| feature.as_str() == Some("cell-data-view-artifact-proof")))
-    {
-        return Err(crate::CheckerError::new(
-            crate::CheckerRejectionCode::V2410MetadataBindingMismatch,
-            "Cell data views and helper-carried transaction views require their independent-machine-proof admission blocker",
-        ));
     }
     Ok(())
 }

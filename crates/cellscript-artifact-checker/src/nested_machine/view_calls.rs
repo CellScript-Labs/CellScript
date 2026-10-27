@@ -3,7 +3,8 @@
 //! aliases; `lifetime` requires those coordinates to remain live at each call.
 //! Export the fully checked prefix and immutable coordinate slots to the
 //! enclosing memory-effect proof; later body writes must preserve them.
-//! Complete source/value reconstruction retains its experimental blocker.
+//! This transport proof composes with typed operation and scalar validation;
+//! it does not claim arbitrary whole-language source equivalence.
 use super::*;
 use crate::{TypedSemanticEntry, TypedSemanticOperation};
 

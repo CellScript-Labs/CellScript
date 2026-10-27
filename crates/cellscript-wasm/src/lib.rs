@@ -456,7 +456,7 @@ action verify() -> u64 {
         let source = include_str!("../../../tests/syntax_combo/seeds/named-role-verification.cell");
         let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
         assert!(result.get("error").is_none(), "{result}");
-        assert!(result["runtime"]["fail_closed_runtime_features"]
+        assert!(!result["runtime"]["fail_closed_runtime_features"]
             .as_array()
             .unwrap()
             .iter()
@@ -475,7 +475,7 @@ action verify() -> u64 {
         let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
         assert!(result.get("error").is_none(), "{result}");
         for blocker in ["exact-role-selection-artifact-proof", "cell-data-view-artifact-proof"] {
-            assert!(result["runtime"]["fail_closed_runtime_features"].as_array().unwrap().iter().any(|value| value == blocker));
+            assert!(!result["runtime"]["fail_closed_runtime_features"].as_array().unwrap().iter().any(|value| value == blocker));
         }
         let invalid = source.replace("selected.orders", "selected.absent");
         let report: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(&invalid, "2027", None)).unwrap();
@@ -488,7 +488,7 @@ action verify() -> u64 {
         let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
         assert!(result.get("error").is_none(), "{result}");
         for blocker in ["nested-values-artifact-proof", "cell-data-view-artifact-proof"] {
-            assert!(result["runtime"]["fail_closed_runtime_features"].as_array().unwrap().iter().any(|value| value == blocker));
+            assert!(!result["runtime"]["fail_closed_runtime_features"].as_array().unwrap().iter().any(|value| value == blocker));
         }
         assert!(result.get("typed_semantics").is_none());
         let invalid = source.replace("let messages = input.messages", "let mut messages = input.messages");
@@ -497,12 +497,12 @@ action verify() -> u64 {
     }
 
     #[test]
-    fn wasm_named_nested_selection_preserves_schema_and_proof_blockers() {
+    fn wasm_named_nested_selection_preserves_schema_under_bounded_admission() {
         let source = include_str!("../../../tests/syntax_combo/seeds/named-nested-selection.cell");
         let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
         assert!(result.get("error").is_none(), "{result}");
         for blocker in ["exact-role-selection-artifact-proof", "nested-values-artifact-proof"] {
-            assert!(result["runtime"]["fail_closed_runtime_features"].as_array().unwrap().iter().any(|value| value == blocker));
+            assert!(!result["runtime"]["fail_closed_runtime_features"].as_array().unwrap().iter().any(|value| value == blocker));
         }
         // Browser summaries intentionally omit native operations and fields.
         // Preserve the dynamic/fixed size distinction without those records.
@@ -521,7 +521,7 @@ action verify() -> u64 {
         let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
         assert!(result.get("error").is_none(), "{result}");
         for blocker in ["exact-role-selection-artifact-proof", "cell-data-view-artifact-proof"] {
-            assert!(result["runtime"]["fail_closed_runtime_features"].as_array().unwrap().iter().any(|value| value == blocker));
+            assert!(!result["runtime"]["fail_closed_runtime_features"].as_array().unwrap().iter().any(|value| value == blocker));
         }
         let invalid = source.replace("selected.quote.input_count()", "selected.unknown.input_count()");
         let report: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(&invalid, "2027", None)).unwrap();
@@ -552,10 +552,10 @@ action verify() -> u64 {
                 let diagnostics = result["diagnostics"].as_array().unwrap();
                 assert!(diagnostics.iter().all(|item| item["severity"] != "Error"), "{result}");
                 assert!(
-                    diagnostics.iter().any(|item| item["message"]
+                    !diagnostics.iter().any(|item| item["message"]
                         .as_str()
                         .is_some_and(|message| message.contains("exact-role-selection-artifact-proof"))),
-                    "navigation must retain the program's admission warning: {result}"
+                    "navigation must not report a retired blanket admission warning: {result}"
                 );
             }
         }
@@ -597,7 +597,7 @@ action verify() -> u64 {
         ] {
             let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(&executable, "2027", None)).unwrap();
             assert!(result.get("error").is_none(), "{result}");
-            assert!(result["runtime"]["fail_closed_runtime_features"]
+            assert!(!result["runtime"]["fail_closed_runtime_features"]
                 .as_array()
                 .unwrap()
                 .iter()
@@ -606,12 +606,12 @@ action verify() -> u64 {
     }
 
     #[test]
-    fn wasm_named_data_shapes_bind_resolved_bounds_and_keep_admission_blocker() {
+    fn wasm_named_data_shapes_bind_resolved_bounds_under_bounded_admission() {
         let source = include_str!("../../../tests/syntax_combo/seeds/named-data-shapes.cell");
         let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
         assert!(result.get("error").is_none(), "{result}");
         assert_eq!(result["actions"][0]["params"][0]["ty"], "NestedValues<Vec<u8>, 3, 8, 128>");
-        assert!(result["runtime"]["fail_closed_runtime_features"]
+        assert!(!result["runtime"]["fail_closed_runtime_features"]
             .as_array()
             .unwrap()
             .iter()
@@ -622,7 +622,7 @@ action verify() -> u64 {
     }
 
     #[test]
-    fn wasm_nested_helpers_keep_bounds_and_fail_closed_admission() {
+    fn wasm_nested_helpers_keep_bounds_and_reject_mutating_effects() {
         for source in [
             include_str!("../../../tests/syntax_combo/seeds/named-nested-helpers.cell"),
             include_str!("../../../tests/syntax_combo/seeds/named-derived-helpers.cell"),
@@ -630,7 +630,7 @@ action verify() -> u64 {
             let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
             assert!(result.get("error").is_none(), "{result}");
             assert_eq!(result["actions"][0]["params"][0]["ty"], "NestedValues<Vec<u8>, 3, 8, 128>");
-            assert!(result["runtime"]["fail_closed_runtime_features"]
+            assert!(!result["runtime"]["fail_closed_runtime_features"]
                 .as_array()
                 .unwrap()
                 .iter()
@@ -648,7 +648,7 @@ action verify() -> u64 {
         assert!(result.get("error").is_none(), "{result}");
         assert_eq!(result["actions"][0]["params"][0]["ty"], "NestedValues<Message, 8, 256, 2280>");
         for blocker in ["nested-values-artifact-proof", "cell-data-view-artifact-proof", "exact-role-selection-artifact-proof"] {
-            assert!(result["runtime"]["fail_closed_runtime_features"].as_array().unwrap().iter().any(|feature| feature == blocker));
+            assert!(!result["runtime"]["fail_closed_runtime_features"].as_array().unwrap().iter().any(|feature| feature == blocker));
         }
         for invalid in [
             source.replace("payload_bytes: 256", "payload_bytes: 257"),
@@ -660,13 +660,13 @@ action verify() -> u64 {
     }
 
     #[test]
-    fn wasm_cell_view_helpers_keep_source_types_and_experimental_status() {
+    fn wasm_cell_view_helpers_keep_source_types_under_bounded_admission() {
         let source = include_str!("../../../examples/language/ckb/typed_cell_predicate.cell");
         for edition in ["2026", "2027"] {
             let source = if edition == "2027" { source.replace("verification", "") } else { source.to_owned() };
             let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(&source, edition, None)).unwrap();
             assert!(result.get("error").is_none(), "{result}");
-            assert!(result["runtime"]["fail_closed_runtime_features"]
+            assert!(!result["runtime"]["fail_closed_runtime_features"]
                 .as_array()
                 .unwrap()
                 .iter()
@@ -684,7 +684,7 @@ action verify() -> u64 {
         assert!(result.get("error").is_none(), "{result}");
         assert_eq!(result["actions"][0]["name"], "transfer");
         for blocker in ["allocated-values-artifact-proof", "cell-data-view-artifact-proof"] {
-            assert!(result["runtime"]["fail_closed_runtime_features"].as_array().unwrap().iter().any(|feature| feature == blocker));
+            assert!(!result["runtime"]["fail_closed_runtime_features"].as_array().unwrap().iter().any(|feature| feature == blocker));
         }
         let invalid = source.replace("return true", "totals.incoming.reserve(32)\nreturn true");
         let report: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(&invalid, "2027", None)).unwrap();
@@ -692,17 +692,17 @@ action verify() -> u64 {
     }
 
     #[test]
-    fn wasm_cell_data_views_preserve_experimental_admission_and_diagnostics() {
+    fn wasm_cell_data_views_preserve_bounded_admission_and_diagnostics() {
         let source = include_str!("../../../examples/language/ckb/typed_cell_data.cell");
         for edition in ["2026", "2027"] {
             let source = if edition == "2027" { source.replace("verification", "") } else { source.to_owned() };
             let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(&source, edition, None)).unwrap();
             assert!(result.get("error").is_none(), "{result}");
             let features = result["runtime"]["fail_closed_runtime_features"].as_array().unwrap();
-            assert!(features.iter().any(|feature| feature == "cell-data-view-artifact-proof"));
+            assert!(!features.iter().any(|feature| feature == "cell-data-view-artifact-proof"));
             assert!(!features.iter().any(|feature| feature == "field-access"));
             assert!(
-                result["runtime"]["fail_closed_obligations"].as_array().unwrap().iter().any(|reason| {
+                !result["runtime"]["fail_closed_obligations"].as_array().unwrap().iter().any(|reason| {
                     reason["feature"] == "cell-data-view-artifact-proof"
                         && reason["detail"].as_str().is_some_and(|detail| detail.contains("strict executable-surface admission"))
                 }),

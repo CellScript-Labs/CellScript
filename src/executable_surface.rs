@@ -26,11 +26,17 @@ const ACCEPT: &str = "accepted";
 const ACCEPT_WHEN_CLOSED: &str = "accepted only when the shape classifier reports no fail-closed feature";
 const FRONTEND_ONLY: &str = "not materialized as a runtime value";
 
-/// These features have experimental runtime lowerings. Their rejection occurs
-/// at strict artifact admission, not at an emitted unimplemented-operation trap.
+/// Older bundles retain these experimental admission blockers. Rebuilding with
+/// the current checked contracts is required; a flag is not a machine proof.
 pub(crate) fn experimental_artifact_admission_detail(feature: &str) -> Option<&'static str> {
-    matches!(feature, "cell-data-view-artifact-proof" | "exact-role-selection-artifact-proof" | "nested-values-artifact-proof" | "allocated-values-artifact-proof")
-        .then_some("Experimental runtime implementation; strict executable-surface admission rejects this program pending complete independent source/value and transaction-builder evidence")
+    matches!(
+        feature,
+        "cell-data-view-artifact-proof"
+            | "exact-role-selection-artifact-proof"
+            | "nested-values-artifact-proof"
+            | "allocated-values-artifact-proof"
+    )
+    .then_some("Legacy experimental artifact admission blocker; rebuild and verify with the current bounded runtime contracts")
 }
 
 macro_rules! entry {
@@ -57,19 +63,15 @@ macro_rules! entry {
 }
 
 pub static EXECUTABLE_SURFACE: &[ExecutableSurfaceEntry] = &[
-    entry!("ir:allocated-value", "instruction", "shape-gated", ACCEPT_WHEN_CLOSED,
-        "Experimental invocation-local collections; complete independent allocation, initialization, ownership and source contracts remain required.",
-        ["allocated-values-artifact-proof"]),
-    entry!("artifact:cell-data-view-proof", "artifact-policy", "shape-gated", ACCEPT_WHEN_CLOSED,
-        "Experimental immutable fixed and bounded nested Cell data views have independently checked complete field-load/codec instructions and retained-buffer write effects. Helper-carried transaction views retain this blocker even without data reads; complete caller/source/value provenance and builder binding remain required before stable admission.",
-        ["cell-data-view-artifact-proof"]),
-    entry!("ir:verify-exact-cell-roles", "instruction", "shape-gated", ACCEPT_WHEN_CLOSED,
-        "Experimental complete fixed/bounded-table selection, immutable role counts and typed transaction coordinates have retained-table lifetime checks. Edition 2027 module-local named catalogs bind role names and schemas through immutable projections, aliases and reads; bounded nested data reads retain separate owned buffers; complete aggregate/source proof and builder binding remain required.",
-        ["exact-role-selection-artifact-proof"]),
+    entry!("ir:allocated-value", "instruction", "bounded", ACCEPT,
+        "Invocation-local fixed-value Vec and ordered Map/Set within declared byte, allocation-event and item limits. Independent constructor, allocation, bounds, lifecycle, readonly-helper and copied-result contracts are mandatory; owned dynamic values and Cell resources remain unsupported."),
+    entry!("artifact:cell-data-view-proof", "artifact-policy", "bounded", ACCEPT,
+        "Immutable fixed and bounded nested Cell data views require checked source coordinates, field/codec instructions, readonly helper transport and retained-buffer lifetime. Nominal schemas and lifecycle authority remain distinct; metadata alone is not machine or transaction evidence."),
+    entry!("ir:verify-exact-cell-roles", "instruction", "bounded", ACCEPT,
+        "Closed fixed/bounded-table role catalogs require complete bounded scans, explicit identity/authority/correspondence, checked typed projections and retained-table lifetime. Builders bind mandatory sites to the selected entry and reject unbound conditional paths; peer authorization remains with each Script."),
     entry!(
-        "artifact:nested-values-proof", "artifact-policy", "shape-gated", ACCEPT_WHEN_CLOSED,
-        "Experimental bounded nested witness and Cell views validate canonical bytes. Edition 2027 data_shape declarations and Item/Payload view types resolve reusable bounds. Whole and derived views support immutable read-only helpers with per-call list/element validation and checked pointer/length source binding; complete source, codec and output evidence remain pending.",
-        ["nested-values-artifact-proof"]
+        "artifact:nested-values-proof", "artifact-policy", "bounded", ACCEPT,
+        "Bounded byte-list and fixed-identity/byte-payload record-list Molecule views require canonical witness/Cell decoding, exact named limits, checked readonly whole/derived helper spans and actual successor comparisons. Recursive schemas, escaping views and owned dynamic mutation remain unsupported."
     ),
     entry!(
         "runtime:gather-hash-arguments", "runtime", "shape-gated", ACCEPT_WHEN_CLOSED,
@@ -177,7 +179,7 @@ pub static EXECUTABLE_SURFACE: &[ExecutableSurfaceEntry] = &[
         "instruction",
         "shape-gated",
         ACCEPT_WHEN_CLOSED,
-        "Requires a fixed schema, aggregate pointer, or tuple-call-return layout.",
+        "Requires a known fixed schema/aggregate/tuple layout, a typed named-role projection, or a checked bounded Cell/nested view field.",
         ["field-access"]
     ),
     entry!(
@@ -185,7 +187,7 @@ pub static EXECUTABLE_SURFACE: &[ExecutableSurfaceEntry] = &[
         "instruction",
         "shape-gated",
         ACCEPT_WHEN_CLOSED,
-        "Fixed aggregates and bounded stack collections with known element layout.",
+        "Known fixed arrays and bounded stack collections with checked scalar/element layout, or immutable bounded nested list/payload indexing.",
         ["index-access"]
     ),
     entry!(

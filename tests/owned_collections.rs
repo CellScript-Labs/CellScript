@@ -73,7 +73,7 @@ fn owned_collections_accept_moves_scoped_reads_and_local_value_programs() {
         assert!(errors.is_empty(), "{errors:?}\n{source}");
         let result = cellscript::compile(&source, CompileOptions { edition: CellScriptEdition::Edition2027, ..Default::default() });
         let compiled = result.unwrap_or_else(|error| panic!("{error}\n{source}"));
-        assert!(compiled.metadata.runtime.fail_closed_runtime_features.iter().any(|feature| feature == "allocated-values-artifact-proof"));
+        assert!(!compiled.metadata.runtime.fail_closed_runtime_features.iter().any(|feature| feature == "allocated-values-artifact-proof"));
     }
 }
 
@@ -155,7 +155,7 @@ fn summarize(view: &Work, other: &Work, extra: u64) -> u64 {
         let ast = typed(&source).unwrap_or_else(|error| panic!("{error}\n{source}"));
         assert!(cellscript::types::diagnostics(&ast).is_empty());
         let compiled = cellscript::compile(&source, CompileOptions { edition: CellScriptEdition::Edition2027, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap_or_else(|error| panic!("{error}\n{source}"));
-        assert!(compiled.metadata.runtime.fail_closed_runtime_features.iter().any(|feature| feature == "allocated-values-artifact-proof"));
+        assert!(!compiled.metadata.runtime.fail_closed_runtime_features.iter().any(|feature| feature == "allocated-values-artifact-proof"));
     }
 }
 

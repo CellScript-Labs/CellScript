@@ -1,6 +1,6 @@
 //! Declaration admission for invocation-local owned value collections.
 //! Local owner/helper typing lives in types::allocated. Local runtime operations
-//! and helper transport are experimental; independent allocation proof remains pending.
+//! and helper transport compose independent allocation and lifetime checks.
 use crate::ast::{CollectionsDef, Type, ValueCollectionKind};
 use crate::error::{CompileError, Result};
 use std::collections::BTreeSet;
@@ -124,7 +124,7 @@ mod tests {
     const SOURCE: &str = include_str!("../tests/syntax_combo/seeds/named-collections.cell");
 
     #[test]
-    fn named_collections_roundtrip_structured_limits_with_explicit_proof_blocker() {
+    fn named_collections_roundtrip_structured_limits_under_strict_admission() {
         let ast = frontend::parse(SOURCE, CellScriptEdition::Edition2027).unwrap();
         let Item::Collections(def) = &ast.items[0] else { panic!("missing collections declaration") };
         assert_eq!((def.bytes, def.allocations, def.members.len()), (8192, 32, 3));
@@ -142,16 +142,13 @@ mod tests {
         assert_eq!(compiled.metadata.runtime.fail_closed_runtime_features, plain.metadata.runtime.fail_closed_runtime_features);
         let constructed = SOURCE.replace("return 0", "let values = Scratch::new()\nreturn 0");
         let allocated = crate::compile(&constructed, options.clone()).unwrap();
-        assert!(allocated
+        assert!(!allocated
             .metadata
             .runtime
             .fail_closed_runtime_features
             .iter()
             .any(|feature| feature == "allocated-values-artifact-proof"));
-        let denied =
-            crate::compile_with_executable_surface_policy(&constructed, options, crate::ExecutableSurfacePolicy::DenyFailClosed)
-                .unwrap_err();
-        assert!(denied.to_string().contains("allocated-values-artifact-proof"), "{denied}");
+        crate::compile_with_executable_surface_policy(&constructed, options, crate::ExecutableSurfacePolicy::DenyFailClosed).unwrap();
         assert!(frontend::parse(SOURCE, CellScriptEdition::Edition2026).is_err());
     }
 

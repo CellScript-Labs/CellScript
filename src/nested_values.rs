@@ -90,6 +90,45 @@ pub(crate) fn parsed(name: &str) -> Option<NestedType> {
     parse(name).ok().flatten()
 }
 
+/// Classify the already type-checked immutable view surface. This is metadata
+/// admission, not evidence of decoding, source identity or machine lifetime;
+/// those remain mandatory in the independent artifact checker.
+pub(crate) fn ir_type(ty: &crate::ir::IrType) -> Option<NestedType> {
+    match ty {
+        crate::ir::IrType::Named(name) => parsed(name),
+        _ => None,
+    }
+}
+
+pub(crate) fn ir_index_result(operand: &crate::ir::IrOperand) -> Option<crate::ir::IrType> {
+    let crate::ir::IrOperand::Var(var) = operand else { return None };
+    match ir_type(&var.ty)? {
+        NestedType::Values(values) => Some(crate::ir::IrType::Named(values.item_type())),
+        NestedType::BytesView { .. } => Some(crate::ir::IrType::U8),
+        NestedType::RecordView { .. } => None,
+    }
+}
+
+pub(crate) fn ir_has_length(operand: &crate::ir::IrOperand) -> bool {
+    matches!(operand, crate::ir::IrOperand::Var(var)
+        if matches!(ir_type(&var.ty), Some(NestedType::Values(_) | NestedType::BytesView { .. })))
+}
+
+pub(crate) fn ir_record_field(
+    operand: &crate::ir::IrOperand,
+    field: &str,
+    layouts: &crate::MetadataTypeLayouts,
+) -> Option<crate::ir::IrType> {
+    let crate::ir::IrOperand::Var(var) = operand else { return None };
+    let NestedType::RecordView { element, max_payload_bytes } = ir_type(&var.ty)? else { return None };
+    let ty = &layouts.get(&element)?.get(field)?.ty;
+    if matches!(ty, crate::ir::IrType::Named(name) if is_bytes_element(name)) {
+        Some(crate::ir::IrType::Named(bytes_view_type(max_payload_bytes)))
+    } else {
+        Some(ty.clone())
+    }
+}
+
 pub(crate) fn is_bytes_element(element: &str) -> bool {
     crate::generics::applied_type(element).is_some_and(|(base, args)| base == "Vec" && args == ["u8"])
 }

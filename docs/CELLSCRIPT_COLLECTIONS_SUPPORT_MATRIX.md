@@ -7,121 +7,66 @@ not be collapsed into one generic "collections are supported" claim.
 
 ## Support By Layer
 
-The #47–#49 [authoring direction](CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md#authoring-direction-adopted-on-2026-10-19)
-requires named roles/bounds, explicit allocation policy at construction or scope
-entry, and checked read-only helper composition before stable API freeze.
-`data_shape` now provides an experimental Edition 2027 declaration of reusable
-named limits, elaborated to the existing `NestedValues<T, N, P, B>` contract.
-Neither spelling is a stable public API freeze. `collections` declarations now
-validate named allocation budgets. Local allocation-backed Vec and ordered
-Map/Set operations have experimental runtime lowering with mandatory independent
-proof blockers. Existing stack-backed Vec capacity semantics remain unchanged.
+The #47–#49 bounded profile is an **admission candidate awaiting final gates**.
+The [scope review](CELLSCRIPT_BOUNDED_RUNTIME_ADMISSION.md) records its checked
+contracts, initial authoring decision and remaining validation. Strict compilation
+accepts supported shapes without blanket experimental proof flags; native bundle
+checking still requires the machine, source, bounds and lifetime evidence.
+This candidate is not a release or deployment receipt.
 
-Allocated Vec elements and Map values also accept ordinary fixed records,
-including concrete generic records, within their 64/32-byte limits. Fields must
-recursively be admitted scalars, byte arrays or records. Reads copy values into
-local storage; helper returns use caller-owned buffers. Hidden Cells, references,
-recursive/dynamic layouts and record keys reject. This is experimental value
-coverage, not completion of cross-package owners or independent allocation proof.
+Edition 2027 module-local `data_shape`, `cell_roles` and `collections`
+declarations centralize named limits and policies. Use ordinary reads and
+non-escaping read-only helpers. Existing stack-backed Vec capacity semantics
+remain unchanged. Exporting these declarations, mutable/member-level loans,
+recursive values and owned dynamic elements remain outside this profile.
 
-Ordered members additionally support experimental `load_sorted` from a fixed
-array of at most 1024 entries into an empty member. It validates order, deduplicates
-Set keys, keeps the last Map value and reserves once for distinct keys. Scalar
-and fixed-byte values are covered; record-valued batches and arbitrary-order
-sorting remain deferred. The independent allocation proof blocker remains.
+Allocated Vec elements and Map values accept ordinary fixed records, including
+concrete generic records, within their 64/32-byte limits. Fields must recursively
+be admitted scalars, byte arrays or records. Reads copy values into local storage;
+helper returns use caller-owned buffers. Hidden Cells, references, recursive or
+dynamic layouts and record keys reject. Runtime pointers never become serialized
+identities.
 
-These allocated members currently share a 32-byte descriptor and contiguous
-backing storage. Vec stores elements in insertion order; OrderedSet stores sorted
-unique keys; OrderedMap stores sorted unique key/value entries. This describes
-local allocated values, not the wire layout of schema `Vec` fields. Element
-lookup is direct for Vec and binary search for ordered members, but complete
-operations also validate the backing allocation by walking arena records. Growth
-retains charged old buffers, and middle insertion moves later entries. Known
-sizes should use `reserve`; already sorted batches can use `load_sorted` within
-its bounds. See the [measured comparison](CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md#experimental-named-collection-declarations).
+Ordered members support `load_sorted` from a fixed array of at most 1024 entries
+into an empty member. It validates order, deduplicates Set keys, keeps the last
+Map value and reserves once for distinct keys. Scalar and fixed-byte values are
+covered; record-valued batches and arbitrary-order sorting remain deferred.
 
-Private frame-backed arena, allocated vector and ordered Map/Set machine
-primitives have focused VM/reference-model coverage and experimental source
-construction and read-only helper transport. Independent allocation/ownership
-machine proof and complete business acceptance remain pending. See the
-[experimental memory contract](CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md#experimental-allocator-and-vector-machine-primitives).
+Allocated members share a 32-byte descriptor and contiguous backing storage.
+Vec retains insertion order; OrderedSet stores sorted unique keys; OrderedMap
+stores sorted unique key/value entries. This is invocation-local memory, not
+schema wire layout. Vec indexes directly and ordered members use binary search,
+but complete operations also validate backing allocations by walking arena
+records. Growth retains charged old buffers; middle insertion moves later items.
+Use actual-count `reserve` when possible and `load_sorted` for already sorted
+batches. The [measured comparison](CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md#experimental-named-collection-declarations)
+explains the costs and rejects automatic maximum reservation that exceeds the
+existing small-case ceilings.
 
-The independent checker now reconstructs typed owner availability across moves,
-drops, branches and loop backedges, retains lexical loans at joins and checks
-read-only helper arguments for stale references. This typed-CFG check does not
-prove allocator machine state transitions or remove the admission blocker.
-An outer lexical alias used only for a nested reborrow retains its typed identity.
-Constructor initialization is also bound to actual zero/live-flag/pointer stores
-and unavoidable typed-block control flow, including large arena offsets. This
-does not establish allocation, growth or retirement state-machine admission.
-Allocation primitives independently check budget predicates, monotonic cursor
-and event updates, record writes, zeroing and failure exits. A typed-block site
-inventory rejects erased or extra ranges. Arena resize/release now bind record
-lookup, allocation children, bounded copying and retirement without budget
-refund. Reserve/drop bind member-specific descriptor validation, bounded growth,
-checked lifecycle children and pointer/capacity publication or full clearing.
-Owned push/insert/set/remove also bind index admission, exact copy/shift/zero
-loops, same-member reserve children and length publication. Owned Map/Set search
-binds key width/order, binary-search bounds and found/index results; update
-parents bind search to the checked insertion/replacement/removal child and
-duplicate/absent behavior. Owned reads bind indexed copies to private result
-buffers, read-before-remove ordering, pop's index and conditional/required Map
-lookup. Sorted construction binds the typed input count, empty destination,
-non-overlap, ordering, unique-key reservation and last-value copying. Readonly
-helper entry checks bind pointer/extent spills to incoming ABI words and protect
-both slots through the memory-effect CFG, including mixed nested/coordinate
-parameters. Coordinate-bearing calls may follow guarded collection writes in the
-same typed block: exact temporary spills, bounds and restoration are checked,
-and coordinate arguments must be reloaded afterward. Readonly helper bodies
-also bind caller-relative descriptor checks, allocation record walks,
-length/capacity/empty results, ordered searches and indexed copies into disjoint
-private scratch. Exact extent checks and each read site's incoming pointer
-identity are required, with typed inventories covering erased markers.
-Index arguments now bind to typed constants/local slots, and copied scalar
-results bind to typed destinations with exact byte order, Map key/value offsets
-and `i32` sign extension. Both compose with the same adjacent checked member
-primitive; erased transport inventories and bypass branches are rejected.
-Fixed-value result publication also binds full-width private buffers and typed
-pointer slots for u128, byte arrays and records. Complete argument lists of
-scalars and pointer-backed fixed values bind key/value/default bytes and indexed
-writes to the adjacent checked primitive. Record widths come from typed layouts;
-missing preparation, source/member substitution and bypass branches reject.
-Short-array argument copies distinguish packed words/literals from pointed field,
-index and collection results using typed producers and reference conversions.
-Nonempty sorted inputs bind their evaluated typed slot and packed/pointer
-representation to the adjacent checked sorted primitive; empty input reads no
-source bytes. Upstream value/pointer provenance, machine retirement and full
-source correspondence are not established merely by these argument checks.
-The subsequent operation-path proof binds each top-level collection primitive
-to its typed source operation, alongside scalar definitions and Cell operations.
-Successful typed-block paths must execute the operations in order; owner drop
-must retire every declared member. This covers whole-operation bypasses without
-claiming arbitrary source-CFG or value equivalence. Final profile admission and
-integration gates remain pending, and the admission blocker is retained.
-Arena helper arguments now require the correct source owner pointer from a checked
-constructor or incoming parameter on every reaching machine path. Copies preserve
-that identity; overlapping writes and reconstruction invalidate prior facts.
-Owned extents must equal the declared frame arena span, and forwarded extents must
-come from the same incoming parameter as the pointer. Targets, call order and the
-expanded register/stack ABI are bound separately from complete machine retirement.
+The independent checker composes typed owner/loan CFG analysis with exact
+constructor, allocation, resize/release, descriptor, element and ordered-operation
+instructions. Checked argument/result transport, successful-path operation order,
+arena isolation and copied-result lifetimes apply across ordinary and read-only
+helper calls. Intervening writes must preserve copied bytes and pointer slots;
+mutable record bindings use separate storage. The
+[admission review](CELLSCRIPT_BOUNDED_RUNTIME_ADMISSION.md) maps each claim to its
+rebound mutation coverage; no arbitrary whole-language equivalence is claimed.
 
-The [transfer-only business example](CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md#full-transaction-collection-aggregation)
-composes Map/Set operations with retained Cell reads and complete transaction
-execution. Dynamic writes have checked private-frame bounds, preserving Cell
-buffers; this isolation proof does not certify allocation state transitions or
-remove the allocation admission blocker. Native/generated fixed Cell encoders
-agree for the transfer's flat Note schema, and their bytes enter the actual
-adapter/VM candidate. An equivalent fixed-array program matches all 44 O0/O3
-transaction cases. A separate resource fixture freezes 24 O3 observations and
-numeric ceilings; repeated and distinct assets produce different cycle tradeoffs.
-This finite comparison does not complete adversarial resource acceptance.
+The [complete transfer](CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md#full-transaction-collection-aggregation)
+composes aggregation and deduplication with retained Cell reads and every required
+Script group. Native/generated flat Note encoders feed the canonical adapter and
+actual VM transactions. Its equivalent array program agrees on all 44 O0/O3
+transaction cases. A separate fixture freezes 24 O3 resource observations; eight
+additional 1024-input sorted-construction cases cover unique/duplicate keys, late
+disorder and shared exhaustion. Existing finite ceilings remain unchanged;
+unavailable heap or rejected-transaction totals remain explicit, and these cases
+are not a global worst-case theorem.
 
-The [locked-package composition fixtures](CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md#cross-package-readonly-business-composition)
-exercise imported readonly settlement/migration helpers and imported generic
-record copies after a local collection owner is dropped. They preserve helper
-bounds/source checks, canonical transaction bytes and existing resource ceilings.
-Catalog, shape and owner declarations remain module-local; these fixtures do not
-admit owner export, escaping borrows or complete source equivalence.
+[Locked-package fixtures](CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md#cross-package-readonly-business-composition)
+exercise imported settlement/migration helpers and imported fixed-value generic
+record copies after local owner drop. They retain source/bounds checks, canonical
+transaction bytes and resource ceilings. Module-local declarations and non-escaping
+borrows remain distinct from exported owner types or general heap ownership.
 
 | Feature | Schema/ABI | IR construction | Runtime verifier helper | Production status |
 |---|---:|---:|---:|---|
@@ -132,9 +77,9 @@ admit owner export, escaping borrows or complete source equivalence.
 | Fixed byte arrays | Yes | Yes | Exact-size verification | Supported |
 | Stack-backed local `Vec<T: FixedWidth>` | Local-only | Yes | Codegen stack-backed lowering | Supported for verifier-local scalar, fixed-byte, and fixed-width named values |
 | `Vec<Vec<u8>>` | Boundary | Boundary | No generic helper | Must fail closed unless a concrete lowering is added |
-| `NestedValues<T, N, P, B>` | Experimental explicit witness, direct/transaction Cell fields and immutable whole-value helper parameters | Immutable indexing, fields, length and iteration | Complete byte/record codec validation on entry, each transaction field read and helper call; checked pointer/length source binding and retained buffers | Experimental VM path; stable artifact admission and builder parity remain blocked |
-| `data_shape` (Edition 2027) | Transparent named bounds for the same experimental codec | Immutable whole-value, `Shape::Item` and `Shape::Payload` read-only helpers | Complete list or element validation per helper call; no new wire or witness budget | Experimental; module-local names, complete source proof and stable admission pending |
-| `collections` (Edition 2027) | Named shared arena budgets and fixed member types; no wire type | Local construction, owner moves, copied reads and ordered iteration; read-only helper reads, iteration and forwarding | Independent allocation, descriptor, element, helper transport, write-isolation and per-block operation-path checks | Strict admission remains blocked pending final profile acceptance, gates and review disposition; no whole-language semantic-equivalence claim |
+| `NestedValues<T, N, P, B>` | Bounded explicit witness, direct/transaction Cell fields and immutable whole-value helper parameters | Immutable indexing, fields, length and iteration | Complete byte/record codec validation on entry, each transaction field read and helper call; checked pointer/length source binding and retained buffers | Bounded strict-admission candidate; final gates pending |
+| `data_shape` (Edition 2027) | Transparent named bounds for the same bounded codec | Immutable whole-value, `Shape::Item` and `Shape::Payload` read-only helpers | Complete list or element validation per helper call; no new wire or witness budget | Module-local bounded strict-admission candidate; final gates pending |
+| `collections` (Edition 2027) | Named shared arena budgets and fixed member types; no wire type | Local construction, owner moves, copied reads and ordered iteration; read-only helper reads, iteration and forwarding | Independent allocation, descriptor, element, helper transport, write-isolation and per-block operation-path checks | Bounded strict-admission candidate; final gates pending; no whole-language semantic-equivalence claim |
 | Generated allocation-backed collection helpers | No | No | Fail-closed entry symbols | Not a production allocator ABI |
 | `HashMap<u64, u64>` | Limited | Limited | No production helper surface | Unsupported/fail-closed for production contracts |
 | `HashMap<Hash, Token>` | No | No | No | Unsupported; must fail closed |
@@ -146,9 +91,9 @@ admit owner export, escaping borrows or complete source equivalence.
 An unadmitted dynamic-element vector's `len`/`is_empty` must return runtime
 error 24, never reinterpret its encoded byte length as element cardinality.
 The bounded nested codec work has independent host, primitive CKB-VM and
-experimental source witness/Cell tests. Native/generated TypeScript value
-encoders agree on bounded wire vectors. Stable artifact admission and complete
-transaction builder parity remain pending; see the
+source witness/Cell tests. Native/generated TypeScript encoders agree on bounded
+wire vectors and complete transaction bytes. Final candidate gates remain pending;
+see the
 [implementation and evidence ledger](CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md).
 
 ## Stack-Backed Local Vec Rule
@@ -253,9 +198,9 @@ byte/event shortfalls, including unused declarations. Its two fresh-owner
 scenarios are also shown on collection declaration/constructor hover using the
 same calculation, including resolved imported generic widths in the native
 editor. The optional browser language service supports single-source hover.
-These scenarios are not an arbitrary program-path or worst-case proof. Budget UX and
-the declarative-preallocation decision remain open; neither ordinary copied
-reads nor growing checker coverage freezes the experimental authoring API. See
+These scenarios are not an arbitrary program-path or worst-case proof. The initial
+authoring decision keeps explicit actual-count reservation; declarative reservation
+and allocator reuse require a separate measured improvement. See
 the [budget explanation and acceptance boundary](CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md#experimental-named-collection-declarations).
 
 Use dynamic vectors for data that is still a single cell field, such as signer

@@ -375,7 +375,7 @@ for (const a of report.bundle.artifacts) {
     const plan = sdk.planSettle({});
     assert.equal(plan.canSubmit, false);
     for (const blocker of ['exact-role-selection-artifact-proof', 'cell-data-view-artifact-proof']) {
-      assert.ok(plan.failClosedRuntimeFeatures.includes(blocker));
+      assert.ok(!plan.failClosedRuntimeFeatures.includes(blocker));
     }
     assert.deepEqual(binding.exactRoleContracts, a.exact_role_contracts);
     assert.equal(binding.exactRoleContracts.sites[0].contract.roles.length, 3);

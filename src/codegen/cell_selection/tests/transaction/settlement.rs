@@ -20,7 +20,7 @@ fn compile_settlement(opt_level: u8, named: bool) -> crate::CompileResult {
     )
     .unwrap_or_else(|error| panic!("settlement O{opt_level}: {error}"));
     for blocker in ["cell-data-view-artifact-proof", "exact-role-selection-artifact-proof"] {
-        assert!(compiled.metadata.runtime.fail_closed_runtime_features.iter().any(|feature| feature == blocker));
+        assert!(!compiled.metadata.runtime.fail_closed_runtime_features.iter().any(|feature| feature == blocker));
     }
     compiled
 }

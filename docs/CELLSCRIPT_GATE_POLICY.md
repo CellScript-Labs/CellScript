@@ -1,5 +1,11 @@
 # CellScript Gate Policy
 
+The [bounded-runtime admission candidate](CELLSCRIPT_BOUNDED_RUNTIME_ADMISSION.md)
+retires the four blanket proof flags for the existing checked profile. Final
+backend/dev/ci evidence must identify one unchanged candidate revision. Earlier
+focused-check descriptions below document incremental coverage; statements that
+a blanket flag remains mandatory describe those earlier implementation steps.
+
 `cellc explain collections [INPUT] [--json]` is experimental native declaration
 analysis for Edition 2027 named collections. It compares maximum one-time
 reservations with incremental growth from empty owners, includes resolved unused

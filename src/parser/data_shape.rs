@@ -109,7 +109,7 @@ mod tests {
                 },
             )
             .unwrap();
-            assert!(compiled.metadata.runtime.fail_closed_runtime_features.contains(&"nested-values-artifact-proof".into()));
+            assert!(!compiled.metadata.runtime.fail_closed_runtime_features.contains(&"nested-values-artifact-proof".into()));
         }
     }
 

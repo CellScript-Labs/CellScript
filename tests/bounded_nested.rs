@@ -118,8 +118,8 @@ fn execute_nested_arguments(source: &str, arguments: &[u8], opt_level: u8) -> (i
 
 fn execute_compiled_nested(compiled: &cellscript::CompileResult, arguments: &[u8]) -> (i64, u64) {
     assert!(
-        compiled.metadata.actions[0].fail_closed_runtime_features.iter().any(|feature| feature == "nested-values-artifact-proof"),
-        "machine proof admission must remain explicit while the codec slice is integrated"
+        !compiled.metadata.actions[0].fail_closed_runtime_features.iter().any(|feature| feature == "nested-values-artifact-proof"),
+        "bounded codec must not retain the retired blanket blocker"
     );
     let mut payload = b"CSARGv1\0".to_vec();
     payload.extend_from_slice(arguments);
@@ -715,7 +715,10 @@ fn execute_compiled_nested_cell(
     extra: &[u8],
     capacity: u64,
 ) -> i64 {
-    assert!(compiled.metadata.actions[0].fail_closed_runtime_features.iter().any(|feature| feature == "nested-values-artifact-proof"));
+    assert!(!compiled.metadata.actions[0]
+        .fail_closed_runtime_features
+        .iter()
+        .any(|feature| feature == "nested-values-artifact-proof"));
     let mut payload = b"CSARGv1\0".to_vec();
     payload.extend_from_slice(&ckb_script_runner::deterministic_always_success_lock_hash());
     payload.extend_from_slice(extra);
@@ -1063,15 +1066,14 @@ fn nested_cell_multiple_fields_keep_distinct_buffers_and_views() {
 }
 
 #[test]
-fn nested_cell_and_witness_profiles_keep_stable_admission_blocked() {
+fn nested_cell_and_witness_profiles_pass_strict_surface_admission() {
     for source in [NESTED_CELL_SOURCE.to_string(), nested_fixture_source("Vec<u8>", "")] {
-        let error = cellscript::compile_with_executable_surface_policy(
+        cellscript::compile_with_executable_surface_policy(
             &source,
             cellscript::CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() },
             cellscript::ExecutableSurfacePolicy::DenyFailClosed,
         )
-        .unwrap_err();
-        assert!(error.to_string().contains("nested-values-artifact-proof"), "{error}");
+        .unwrap();
     }
 }
 
@@ -1087,7 +1089,7 @@ fn nested_cell_layout_diagnostics_reject_unbounded_siblings_before_codegen() {
 }
 
 #[test]
-fn borrowed_nested_cell_helpers_retain_the_artifact_proof_blocker() {
+fn borrowed_nested_cell_helpers_retain_checked_transport_without_a_blanket_blocker() {
     let cell = molecule_fields(&[42u64.to_le_bytes().to_vec(), molecule_fields(&[vec![1, 0, 0, 0, 171]])]);
     for count in [0, 1, 6, 7, 8, 9] {
         let params = (0..count).map(|i| format!("p{i}: u64, ")).collect::<String>();
@@ -1100,7 +1102,7 @@ fn borrowed_nested_cell_helpers_retain_the_artifact_proof_blocker() {
                 cellscript::compile(&source, cellscript::CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() })
                     .unwrap();
             let helper = compiled.metadata.functions.iter().find(|function| function.name == "count").unwrap();
-            assert!(helper.fail_closed_runtime_features.iter().any(|feature| feature == "nested-values-artifact-proof"));
+            assert!(!helper.fail_closed_runtime_features.iter().any(|feature| feature == "nested-values-artifact-proof"));
             for opt in 0..=3 {
                 assert_eq!(execute_nested_cell(&source, &cell, &cell, opt), 0);
             }

@@ -1,5 +1,6 @@
 //! Independent typed-CFG owner availability. This does not bind allocator
-//! machine instructions or replace the mandatory allocation proof blocker.
+//! machine instructions; the composing checker also requires allocation machine
+//! contracts and memory-effect lifetime checks.
 use super::{Operation, TypedSemanticOperationDetail};
 use crate::{CheckerError, CheckerRejectionCode, TypedSemanticEntry, TypedSemanticOperation, TypedSemanticRecord};
 use std::collections::{BTreeMap, BTreeSet};

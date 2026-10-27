@@ -23,7 +23,7 @@ fn compile_migration(opt_level: u8) -> crate::CompileResult {
     )
     .unwrap_or_else(|error| panic!("migration O{opt_level}: {error}"));
     for blocker in ["nested-values-artifact-proof", "cell-data-view-artifact-proof", "exact-role-selection-artifact-proof"] {
-        assert!(compiled.metadata.runtime.fail_closed_runtime_features.iter().any(|feature| feature == blocker));
+        assert!(!compiled.metadata.runtime.fail_closed_runtime_features.iter().any(|feature| feature == blocker));
     }
     compiled
 }

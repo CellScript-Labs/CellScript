@@ -4,7 +4,8 @@
 //! and scalar/fixed-value result transport compose with scalar and pointer-backed
 //! fixed-value inputs, short-array representations and sorted input transport.
 //! Scalar definition contracts cover local arithmetic/copies. Complete source
-//! provenance, parameter decoding and machine lifetime remain separate obligations.
+//! equivalence is not claimed. Parameter/call transport and machine lifetime are
+//! composed by `nested_machine` and `scalar_machine`, using the checked sites below.
 use super::{Operation, TypedSemanticOperationDetail};
 use crate::{CheckerError, CheckerRejectionCode, ParsedElf, VerifiedLoweringRecord};
 use std::collections::{BTreeMap, BTreeSet};

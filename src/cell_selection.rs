@@ -330,7 +330,7 @@ mod tests {
             let compiled =
                 crate::compile(&source, crate::CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
                     .unwrap_or_else(|error| panic!("O{opt_level}: {error}"));
-            assert!(compiled
+            assert!(!compiled
                 .metadata
                 .runtime
                 .fail_closed_runtime_features
