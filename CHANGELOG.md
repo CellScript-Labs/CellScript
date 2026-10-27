@@ -19,7 +19,7 @@ machine frames; retain exact source, copy, output-pointer and saved-slot checks.
 The O0/O3 all-helper machine inventory covers 247 entries and 360 adjustments.
 Advance artifact-cache generation to v126. See the
 [layout audit](docs/CELLSCRIPT_STACK_LAYOUT_AUDIT.md) for per-frame sizes, retained
-ABI reservations and validation limits. This remains uncommitted candidate work,
+ABI reservations and validation limits. This remains candidate work,
 not final bounded-runtime acceptance.
 
 Align the current-Script and transaction-hash runtime helpers to compact 16-byte frames

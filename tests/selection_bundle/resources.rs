@@ -151,7 +151,29 @@ fn check_frozen(key: &str, row: &Value) {
     // Numeric ceilings are separate from exact observations: an intentional
     // artifact/fixture refresh must not silently raise previously frozen limits.
     // The full transaction SHA includes witnesses, unlike the raw tx hash.
+    if refresh_observations("selection_business_resources.json", &json!({key: row})) {
+        return;
+    }
     assert_eq!(row, &fixture["observations"][key], "{key}: resource/identity drift requires review");
+}
+
+/// Explicit measurement refresh only. Callers must check the original ceilings
+/// first; this replaces existing observations, never limits or case inventory.
+pub(super) fn refresh_observations(file: &str, rows: &Value) -> bool {
+    if std::env::var("CELLSCRIPT_UPDATE_SELECTION_RESOURCES").as_deref() != Ok("1") {
+        return false;
+    }
+    static WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = WRITE.lock().unwrap();
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(file);
+    let mut fixture: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    for (key, row) in rows.as_object().unwrap() {
+        *fixture["observations"].get_mut(key).expect("refresh requires an existing measured case") = row.clone();
+    }
+    let mut bytes = serde_json::to_vec_pretty(&fixture).unwrap();
+    bytes.push(b'\n');
+    std::fs::write(path, bytes).unwrap();
+    true
 }
 
 pub(super) fn check_ceiling(key: &str, row: &Value, ceiling: &Value) {

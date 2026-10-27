@@ -780,6 +780,12 @@ come from `WitnessArgs.input_type`; `witness::lock(input)` explicitly reads the
 `lock` field. Sharing one serialized `WitnessArgs` does not make the fields
 interchangeable.
 
+The legacy `witness::lock(input)` projection loads a complete serialized
+`WitnessArgs` of at most 512 bytes and rejects a larger witness. Its selected
+field is zero-padded or truncated to 32 bytes. Exact-width and bounded structured
+witness APIs have their own checked contracts; the legacy projection is not a
+general arbitrary-length witness decoder.
+
 `lock_args Address` is already bound to the executing lock script's typed
 `Script.args` bytes. That makes it a stable script-argument value, but it still
 does not verify a transaction signature. CellScript 0.22 exposes the explicit

@@ -88,12 +88,17 @@ the existing surface.
 |---|---|---|
 | `source::cell_dep(i)` (typed view) | implemented, executable | `src/parser/`, `src/ir/mod.rs` |
 | `source::header_dep(i)` | implemented, executable | `src/parser/`, `src/ir/mod.rs` |
-| `ckb::cell_data_hash(view)` | implemented, returns `Hash`, lowers to `LOAD_CELL_DATA` | `src/ir/mod.rs:4459-4470`; `src/codegen/mod.rs:16086` |
-| `ckb::cell_data_hash_at(view, offset)` | implemented | `src/ir/mod.rs:4468-4470` |
+| `ckb::cell_data_hash(view)` | implemented; BLAKE2b over at most 512 loaded bytes; larger Cell data fails | `emit_runtime_cell_data_hash_helper` in `src/codegen/runtime.rs` |
+| `ckb::cell_data_hash_at(view, offset)` | implemented; returns the 32 bytes at the offset as `Hash`, requires at least 32 remaining bytes, permits a longer suffix | `emit_runtime_cell_data_hash_at_helper` in `src/codegen/runtime.rs` |
 | `ckb::cell_data_size(view)` | implemented, returns `u64` | `src/ir/mod.rs:4658-4660`; `src/codegen/mod.rs:16037` |
 | `ckb::cell_capacity(view)` | implemented | `src/types/mod.rs:4904` |
 | `read_ref<T>()` (type-bound data dep) | implemented | `src/lib.rs:20800-20810` |
 | `read param: T` (action/lock entry) | implemented | `src/codegen/mod.rs:1849-1921` |
+
+The 512-byte bound belongs to the buffer-based `ckb::cell_data_hash` helper.
+`ckb::cell_data_hash_field(view)` and typed Cell views' `.data_hash` read the
+consensus `DATA_HASH` field directly; they do not copy the Cell data into that
+buffer. These existing interfaces retain their source and identity checks.
 
 The above is **not metadata-only**. `tests/ickb_diff.rs:3369-3396` compiles
 `ckb::cell_data_size(source::cell_dep(0))` to an ELF, places a 4-byte

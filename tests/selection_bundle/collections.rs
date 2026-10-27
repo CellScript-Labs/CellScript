@@ -280,7 +280,10 @@ fn allocated_multi_asset_transfer_matches_independent_model_and_all_group_execut
         let profile = key.split('-').next().unwrap();
         super::resources::check_ceiling(key, row, &fixture["ceilings"][profile]);
     }
-    assert_eq!(serde_json::to_value(observations).unwrap(), fixture["observations"], "resource identity drift requires review");
+    let observations = serde_json::to_value(observations).unwrap();
+    if !super::resources::refresh_observations("collection_transfer_resources.json", &observations) {
+        assert_eq!(observations, fixture["observations"], "resource identity drift requires review");
+    }
 }
 
 #[test]

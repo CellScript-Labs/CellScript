@@ -30,6 +30,8 @@ the defect.
 
 The hash helper deliberately retains its existing bounded-buffer design. It does
 not silently change to a consensus-field syscall or add streaming semantics.
+The separate `ckb::cell_data_hash_field` and typed `.data_hash` interfaces still
+read the consensus hash field and are not restricted by this 512-byte buffer.
 The original syscall source checks and runtime error families remain. Raw
 `witness::raw` intentionally zero-pads/truncates its fixed result and is distinct
 from a required complete structured field. Bounded WitnessArgs resolver/word and
@@ -84,8 +86,39 @@ stack adjustment was introduced. The preceding stack-layout inventory remains
 | Compiler and standalone checker all-target clippy, `-D warnings` | Passed in `/tmp/cellscript-v127-clippy.log` |
 | Commit hygiene gate | Passed in `/tmp/cellscript-v127-commit-gate.log`; does not substitute for integration gates |
 
-The full compiler suite and matching gates are still pending. Earlier v125/v126
-receipts are historical evidence and do not count as final v127 acceptance.
+The full compiler library suite passed all 1093 tests in
+`/tmp/cellscript-v127-lib.log`. The initial backend attempt on signed revision
+`59c147c90dd8ae889bf5b1ee8afba464e9f8cb9e` was interrupted after a separate
+transfer-resource identity check exposed stale frozen artifact identities. Its
+partial log `/tmp/cellscript-v127-backend.log` is not a gate pass.
+
+Intentional transaction resource refresh uses
+`CELLSCRIPT_UPDATE_SELECTION_RESOURCES=1` with the serialized `selection_bundle`
+tests (skip `frozen_transfer_resources` and `allocated_transfer_preallocation`
+during collection, then rebuild and run all 19 tests without update mode).
+The opt-in writer updates existing observation rows only, after the
+original numeric ceilings and actual transaction outcomes have passed. It cannot
+add cases or change ceilings. Rebuild and rerun the complete suite without that
+variable before accepting a refresh; the compiler identity and preallocation
+comparison tests must then agree with the new frozen observations.
+
+The refresh run passed 17 measurement/behavior tests in
+`/tmp/cellscript-v127-selection-refresh.log`. All 24 transfer and 35
+selection/migration observations changed only `__ckb_cell_capacity`'s declared
+frame (48 to 32 bytes) and the corresponding ELF SHA-256. Observed stack peaks,
+cycles, ELF lengths, transaction/witness bytes, capacity and verdicts did not
+change. All ceilings, sources and case keys remain identical. The structured
+delta receipt is `/tmp/cellscript-v127-resource-delta.json`; the two omitted
+frozen-comparison tests are included in the unfiltered verification run.
+That run passed all 19 tests with update mode disabled in
+`/tmp/cellscript-v127-selection-verified.log` (738.03 seconds), including
+preallocation, frozen identity, cross-package, editor, migration and settlement
+checks. Follow-up clippy and commit hygiene passed in
+`/tmp/cellscript-v127-resource-clippy.log` and
+`/tmp/cellscript-v127-resource-commit-gate.log`.
+
+Final matching gates are still pending. Earlier v125/v126 receipts are
+historical evidence and do not count as final v127 acceptance.
 These finite contracts are not arbitrary whole-program equivalence, a global
 stack/cycle bound or a proof of every indirect address in every legacy helper.
 Issue closure is tracked by the [admission review](CELLSCRIPT_BOUNDED_RUNTIME_ADMISSION.md).
