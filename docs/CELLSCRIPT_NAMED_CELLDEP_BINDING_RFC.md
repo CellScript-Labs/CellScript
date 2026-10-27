@@ -88,17 +88,21 @@ the existing surface.
 |---|---|---|
 | `source::cell_dep(i)` (typed view) | implemented, executable | `src/parser/`, `src/ir/mod.rs` |
 | `source::header_dep(i)` | implemented, executable | `src/parser/`, `src/ir/mod.rs` |
-| `ckb::cell_data_hash(view)` | implemented; BLAKE2b over at most 512 loaded bytes; larger Cell data fails | `emit_runtime_cell_data_hash_helper` in `src/codegen/runtime.rs` |
-| `ckb::cell_data_hash_at(view, offset)` | implemented; returns the 32 bytes at the offset as `Hash`, requires at least 32 remaining bytes, permits a longer suffix | `emit_runtime_cell_data_hash_at_helper` in `src/codegen/runtime.rs` |
+| `ckb::cell_data_hash(view)` / `ckb::cell_data_hash_field(view)` | implemented; read the consensus `DATA_HASH` field, including zero hash for empty data | `emit_runtime_cell_hash_field_helper` in `src/codegen/runtime.rs` |
+| `ckb::cell_data_bytes32(view, offset)` | implemented; copies 32 raw bytes as `Hash`; requires at least 32 remaining bytes and permits a longer suffix; `cell_data_hash_at` remains a compatibility alias | `emit_runtime_cell_data_bytes32_helper` in `src/codegen/runtime.rs` |
 | `ckb::cell_data_size(view)` | implemented, returns `u64` | `src/ir/mod.rs:4658-4660`; `src/codegen/mod.rs:16037` |
 | `ckb::cell_capacity(view)` | implemented | `src/types/mod.rs:4904` |
 | `read_ref<T>()` (type-bound data dep) | implemented | `src/lib.rs:20800-20810` |
 | `read param: T` (action/lock entry) | implemented | `src/codegen/mod.rs:1849-1921` |
 
-The 512-byte bound belongs to the buffer-based `ckb::cell_data_hash` helper.
-`ckb::cell_data_hash_field(view)` and typed Cell views' `.data_hash` read the
-consensus `DATA_HASH` field directly; they do not copy the Cell data into that
-buffer. These existing interfaces retain their source and identity checks.
+Both full-data hash spellings and typed Cell views' `.data_hash` read the same
+consensus field. There is no 512-byte limit or raw-data buffer on this path.
+Empty Cell data has a zero `Hash`, not BLAKE2b(empty). Input, Output, CellDep,
+GroupInput and GroupOutput are supported; HeaderDep is not a Cell source.
+Invalid handles, missing coordinates and failed field reads return runtime
+error 44, matching the existing field accessor. Slice reads do no hashing and
+reject short data with error 1. For hashing a custom range, use the existing
+bounded incremental `ckb::cell_data_blake2b_span(view, offset, length)` interface.
 
 The above is **not metadata-only**. `tests/ickb_diff.rs:3369-3396` compiles
 `ckb::cell_data_size(source::cell_dep(0))` to an ELF, places a 4-byte
@@ -544,7 +548,7 @@ Success looks like all of the following, all enforceable in CI.
 | `Cell.toml` with a `[[deploy.ckb.cell_deps]]` entry containing an `out_point` is rejected (or warned in dev) | package loader | `ci` |
 | `Deployed.toml` `[[deployments.cell_deps]]` whose `data_hash` does not match the policy `require_data_hash` is rejected | adapter | `ci` |
 | `Deployed.toml` resolves a `name` that the source does not declare → warning | adapter | `dev` |
-| `source::cell_dep(name)` lowers to the existing `__ckb_source_cell_dep` constructor; a hash accessor continues to use `__ckb_cell_data_hash`; no new helper emitted | codegen, opt-report | `backend` |
+| `source::cell_dep(name)` lowers to the existing `__ckb_source_cell_dep` constructor; a hash accessor continues to use `__ckb_cell_data_hash_field`; no new helper emitted | codegen, opt-report | `backend` |
 | `builder_required_assumption` is emitted in metadata for each named binding | metadata audit | `ci` |
 | An `evidence_tier` of `checked-runtime` is only emitted when the IR contains a `require ckb::cell_data_hash(view) == bound_hash` access | strict metadata validation | `ci` |
 | `checked-runtime` is rejected when the script does not generate a matching on-chain check; `builder-evidence-required` remains explicitly builder-only | strict metadata validation | `ci` |
@@ -615,7 +619,7 @@ Success looks like all of the following, all enforceable in CI.
 - `src/lib.rs:729-739` — `CkbCellDepMetadata`
 - `src/ir/mod.rs:4459-4470`, `4658-4660` — runtime helper lowering
 - `src/codegen/mod.rs:16037-16086` — `__ckb_cell_data_size` /
-  `__ckb_cell_data_hash` emission
+  `__ckb_cell_data_hash_field` emission
 - `tests/support/ckb_script_runner.rs:217-228` — CellDep VM fixture
 - `tests/ickb_diff.rs:3369-3396` — VM test that runs the fixture
 - `tests/cli.rs:2392-2425` — `dep::` namespace usage as package

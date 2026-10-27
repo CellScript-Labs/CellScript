@@ -902,6 +902,8 @@ impl LspServer {
                     ("raw_transaction_hash_without_cell_deps", "ckb::raw_transaction_hash_without_cell_deps()"),
                     ("transaction_u32_le", "ckb::transaction_u32_le(${1:0})"),
                     ("transaction_blake2b_gather", "ckb::transaction_blake2b_gather(${1:offsets}, ${2:lengths}, ${3:prefix}, ${4:suffix})"),
+                    ("cell_data_hash", "ckb::cell_data_hash(${1:source::cell_dep(0)})"),
+                    ("cell_data_bytes32", "ckb::cell_data_bytes32(${1:source::input(0)}, ${2:0})"),
                     ("cell_data_hash_field", "ckb::cell_data_hash_field(${1:source::cell_dep(0)})"),
                     ("cell_type_hash", "ckb::cell_type_hash(${1:source::group_input(0)})"),
                     ("cell_lock_code_hash", "ckb::cell_lock_code_hash(${1:source::group_input(0)})"),
@@ -4002,6 +4004,8 @@ mod tests {
         assert!(hash.iter().any(|item| item.label == "from_bytes"));
 
         let ckb = server.member_completions("file:///test.cell", "ckb");
+        assert!(ckb.iter().any(|item| item.label == "cell_data_hash"));
+        assert!(ckb.iter().any(|item| item.label == "cell_data_bytes32"));
         assert!(ckb.iter().any(|item| item.label == "input_since"));
         assert!(ckb.iter().any(|item| item.label == "since_epoch_relative"));
         assert!(ckb.iter().any(|item| item.label == "since_absolute_epoch"));

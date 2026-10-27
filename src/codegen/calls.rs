@@ -562,7 +562,7 @@ impl CodeGenerator {
         if self.emit_runtime_input_out_point_tx_hash_call(dest, func, args)? {
             return Ok(());
         }
-        if self.emit_runtime_cell_data_hash_at_call(dest, func, args)? {
+        if self.emit_runtime_cell_data_bytes32_call(dest, func, args)? {
             return Ok(());
         }
         if self.emit_runtime_span_hash_call(dest, func, args)? {
@@ -954,7 +954,6 @@ impl CodeGenerator {
             "__ckb_cell_lock_hash"
                 | "__ckb_cell_type_hash"
                 | "__ckb_cell_data_hash_field"
-                | "__ckb_cell_data_hash"
                 | "__ckb_cell_lock_code_hash"
                 | "__ckb_cell_type_code_hash"
                 | "__ckb_cell_lock_args_hash"
@@ -995,8 +994,8 @@ impl CodeGenerator {
         Ok(true)
     }
 
-    fn emit_runtime_cell_data_hash_at_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<bool> {
-        if func != "__ckb_cell_data_hash_at" {
+    fn emit_runtime_cell_data_bytes32_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<bool> {
+        if func != "__ckb_cell_data_bytes32" {
             return Ok(false);
         }
         let Some(dest) = dest else {
@@ -1023,8 +1022,8 @@ impl CodeGenerator {
         self.emit_operand_to_register("a1", &args[1]);
         self.emit_sp_addi("a2", buffer_offset);
         self.emit_sp_addi("a3", size_offset);
-        self.emit("call __ckb_cell_data_hash_at");
-        let ok_label = self.fresh_label("cell_data_hash_at_ok");
+        self.emit("call __ckb_cell_data_bytes32");
+        let ok_label = self.fresh_label("cell_data_bytes32_ok");
         self.emit(format!("beqz a0, {}", ok_label));
         self.emit_process_failure_status();
         self.emit_label(&ok_label);

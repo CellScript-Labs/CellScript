@@ -698,13 +698,12 @@ impl CodeGenerator {
                                 | "__ckb_cell_lock_hash"
                                 | "__ckb_cell_type_hash"
                                 | "__ckb_cell_data_hash_field"
-                                | "__ckb_cell_data_hash"
-                                | "__ckb_cell_data_hash_at"
+                                | "__ckb_cell_data_bytes32"
                                 | "__ckb_cell_lock_code_hash"
                                 | "__ckb_cell_type_code_hash"
                                 | "__ckb_cell_lock_args_hash"
                                 | "__ckb_cell_type_args_hash"
-                        ) && (args.len() == 1 || (func == "__ckb_cell_data_hash_at" && args.len() == 2))
+                        ) && (args.len() == 1 || (func == "__ckb_cell_data_bytes32" && args.len() == 2))
                             && (dest.ty == IrType::Hash || crate::ir::is_ckb_script_hash_property_result(func, &dest.ty)) =>
                     {
                         self.cell_buffer_size_offsets.insert(dest.id, next_cell_slot);

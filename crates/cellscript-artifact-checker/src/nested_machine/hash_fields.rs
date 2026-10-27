@@ -14,15 +14,26 @@ pub(super) fn field(owner: &str) -> Option<u32> {
 
 pub(crate) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf, owner: &str, field: u32) -> Result<(), CheckerError> {
     use Label::*;
-    let blocks = record.blocks.iter().filter(|block| block.owner_entry == owner).collect::<Vec<_>>();
+    let entry = record.entries.iter().find(|entry| entry.id == owner).ok_or_else(|| invalid("missing hash helper"))?;
+    let mut blocks = record.blocks.iter().filter(|block| block.owner_entry == owner).collect::<Vec<_>>();
+    blocks.sort_by_key(|block| block.range.start);
     let start = blocks.iter().map(|block| block.range.start).min().ok_or_else(|| invalid("hash helper has no body"))?;
     let end = blocks.iter().map(|block| block.range.end).max().unwrap();
-    if elf.control_flow.iter().any(|edge| start < edge.target && edge.target < end && !(start..end).contains(&edge.address)) {
+    if blocks[0].id != entry.entry_block
+        || blocks.windows(2).any(|pair| pair[0].range.end != pair[1].range.start)
+        || elf.control_flow.iter().any(|edge| start < edge.target && edge.target < end && !(start..end).contains(&edge.address))
+    {
         return Err(invalid("control flow enters a partial hash helper"));
     }
     let words = elf.instructions.iter().map(|instruction| (instruction.address, instruction.word)).collect();
     let targets = elf.control_flow.iter().map(|edge| (edge.address, edge.target)).collect();
     let mut c = Decoder { pc: start, words: &words, targets: &targets, labels: BTreeMap::new(), branches: Vec::new() };
+    // Disabled CKB targets may only return the established syscall failure.
+    if end - start == 8 {
+        c.li(10, 1)?;
+        c.exact(0x00008067)?;
+        return Ok(());
+    }
     c.addi(2, 2, -64)?;
     c.hash_store(1, 2, 56, false)?;
     c.hash_store(11, 2, 40, false)?;

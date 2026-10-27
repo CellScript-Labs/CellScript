@@ -17,7 +17,7 @@ without the four unconditional `*-artifact-proof` flags. Retain all nominal,
 codec, allocation, machine, control-flow, transport and lifetime checks. Older
 bundles carrying those flags still report their legacy admission restriction;
 they must be rebuilt and independently checked against the current contracts.
-Artifact-cache generation is v127. Numeric limits and wire formats remain
+Artifact-cache generation is v128. Numeric limits and wire formats remain
 unchanged; artifact admission does not authorize transaction submission.
 
 The surface classifier now recognizes typed named-role projections and bounded
@@ -101,6 +101,13 @@ all permitted programs. Full-maximum collection reservation exceeded existing
 small-case ceilings and was rejected rather than accommodated by raising budgets.
 
 ## Final validation receipt
+
+The v128 consensus DATA_HASH convergence supersedes the buffer-hash path. The
+backend run on `3b8df6c8257720cf540a6ab82c5a033f739e3b3d` was deliberately stopped
+after the compiler and collection suites passed, while the checker suite was
+still running. The queued dev/ci runs were cancelled before starting. These
+partial results do not count as final acceptance of the v128 change. The
+[read-boundary audit](CELLSCRIPT_READ_BOUNDARY_AUDIT.md) records the new contract.
 
 The backend run on `f34c175756b4d310812dad3dfae9bc8ff60724d3` passed all 1089
 compiler unit tests and 42 collection runtime tests, then stopped with 198

@@ -373,6 +373,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn wasm_cell_data_read_aliases_preserve_the_metadata_only_boundary() {
+        for (method, args, feature) in [
+            ("cell_data_hash", "source::input(0)", "ckb-consensus-data-hash-field"),
+            ("cell_data_hash_field", "source::input(0)", "ckb-consensus-data-hash-field"),
+            ("cell_data_bytes32", "source::input(0), 7", "ckb-cell-data-decode"),
+            ("cell_data_hash_at", "source::input(0), 7", "ckb-cell-data-decode"),
+        ] {
+            let source = format!(
+                "module browser_reads\naction verify() -> u64 {{ let value = ckb::{method}({args}) require value == value return 0 }}"
+            );
+            let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(&source, "2027", None)).unwrap();
+            assert!(result.get("error").is_none(), "{result}");
+            let metadata = cellscript::compile_metadata(&source, cellscript::NEXT_EDITION, None).unwrap();
+            assert_eq!(result["module"], "browser_reads");
+            assert_eq!(result["actions"][0]["name"], "verify");
+            assert_eq!(result["actions"][0]["ckb_runtime_features"], serde_json::json!(metadata.actions[0].ckb_runtime_features));
+            assert!(result["actions"][0]["ckb_runtime_features"].as_array().unwrap().iter().any(|value| value == feature));
+            assert_eq!(result["runtime"]["fail_closed_runtime_features"], serde_json::json!([]));
+            // Keep detailed native access records out of the browser summary.
+            assert!(result["runtime"].get("ckb_runtime_accesses").is_none());
+        }
+        let invalid =
+            "module browser_reads\naction verify() -> u64 { let value = ckb::cell_data_bytes32(source::input(0), true) return 0 }";
+        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(invalid, "2027", None)).unwrap();
+        assert_eq!(result["error_count"], 1);
+        assert!(result["diagnostics"][0]["message"].as_str().unwrap().contains("offset: u64"));
+    }
+
+    #[test]
     fn wasm_typed_byte_vec_constructor_compiles_and_preserves_primary_diagnostic() {
         for constructor in ["Vec::new()", "Vec::with_capacity(52)"] {
             let source = format!("module browser_bytes\naction verify() {{ verification\nlet mut context: Vec<u8> = {constructor}\ncontext.push(7 as u8)\nrequire context.len() == 1\n}}");

@@ -7883,13 +7883,10 @@ impl<'a> TypeChecker<'a> {
                             }
                             Type::Hash
                         }
-                        ("ckb", "cell_data_hash_at") => {
+                        ("ckb", "cell_data_bytes32" | "cell_data_hash_at") => {
                             self.validate_builtin_arity(name, 2, arg_types, call.span)?;
                             if !Self::is_cell_view_type(&arg_types[0]) || arg_types[1] != Type::U64 {
-                                return Err(CompileError::new(
-                                    "ckb::cell_data_hash_at expects (source_view: u64, offset: u64)",
-                                    call.span,
-                                ));
+                                return Err(CompileError::new(format!("{} expects (Cell source view, offset: u64)", name), call.span));
                             }
                             Type::Hash
                         }

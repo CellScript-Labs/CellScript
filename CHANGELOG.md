@@ -2,10 +2,21 @@
 
 ## Unreleased — 0.32
 
+Unify `ckb::cell_data_hash` with the consensus `DATA_HASH` field accessor. Remove
+the duplicate 512-byte buffer/hash path: the helper now uses 64 rather than
+544 bytes, accepts larger Cell data, and returns the consensus zero hash for
+empty data. Expose `cell_data_bytes32` for raw 32-byte slices while retaining
+`cell_data_hash_at` as a compatibility alias. Independently check field and
+slice bodies, including direct calls; canonicalize metadata and editor/browser
+surfaces. The current all-helper inventory covers 246 entries and 358 aligned,
+restored stack adjustments at O0/O3. Advance artifact-cache generation to v128;
+final gates remain pending.
+
 Separate read capacity, syscall-reported remaining length and published value
 length. Reject short fixed Cell-data slices and xUDT amount words, and reject
-oversized Cell-data hashes and legacy WitnessArgs projections before reading
-beyond their 512-byte buffers. Independently bind Cell-data hash/slice machine
+oversized legacy WitnessArgs projections before reading beyond their 512-byte
+buffers. The initial bounded Cell-data-hash repair is superseded by the
+consensus-field path above. Independently bind Cell-data hash/slice machine
 contracts and reject rebound capacity, length-branch and pointer mutations.
 Large-immediate expansion preserves unrelated live registers; implicit scratch
 use and scratch exhaustion fail compilation. Advance artifact-cache generation

@@ -806,6 +806,24 @@ requires `[Hash; 16]` siblings and a literal depth in `0..=16`. These helpers
 execute in CKB-VM; the latter is a Merkle primitive, not a complete Bitcoin SPV
 implementation.
 
+## Cell Data Hashes And Raw Slices
+
+`ckb::cell_data_hash(view)` reads the consensus `DATA_HASH` field, just like
+`ckb::cell_data_hash_field(view)` and typed Cell views' `.data_hash`. It does
+not copy the full Cell data into a temporary buffer, so there is no 512-byte
+limit. Empty Cell data has the consensus zero hash, not BLAKE2b(empty).
+
+`ckb::cell_data_bytes32(view, offset)` copies exactly 32 raw bytes into a Hash
+value; it does not compute a digest. At least 32 bytes must remain at the offset;
+a longer suffix is allowed. `cell_data_hash_at` remains a compatibility alias.
+Use `ckb::cell_data_blake2b_span(view, offset, length)` for bounded incremental
+hashing of an exact range instead.
+
+Both APIs accept Input, Output, CellDep, GroupInput and GroupOutput sources.
+HeaderDep is not a Cell source. Full-data field failures use error 44; short
+slice reads use error 1. Source selection still needs the application's normal
+identity and authority checks.
+
 ## Invariant Assertions
 
 Use `assert_invariant(...)` only inside top-level `invariant` declarations.

@@ -7554,18 +7554,9 @@ impl IrGenerator {
                     blocks,
                     vars,
                 ),
-                "ckb::cell_data_hash_field" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                "ckb::cell_data_hash" | "ckb::cell_data_hash_field" if call.args.len() == 1 => self.lower_simple_runtime_call(
                     "__ckb_cell_data_hash_field",
                     "cell_data_hash_field",
-                    IrType::Hash,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::cell_data_hash" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_cell_data_hash",
-                    "ckb_cell_data_hash",
                     IrType::Hash,
                     &call.args,
                     current,
@@ -7634,9 +7625,9 @@ impl IrGenerator {
                     };
                     self.lower_simple_runtime_call(helper, result_name, IrType::Hash, &call.args, current, blocks, vars)
                 }
-                "ckb::cell_data_hash_at" if call.args.len() == 2 => self.lower_simple_runtime_call(
-                    "__ckb_cell_data_hash_at",
-                    "ckb_cell_data_hash_at",
+                "ckb::cell_data_bytes32" | "ckb::cell_data_hash_at" if call.args.len() == 2 => self.lower_simple_runtime_call(
+                    "__ckb_cell_data_bytes32",
+                    "ckb_cell_data_bytes32",
                     IrType::Hash,
                     &call.args,
                     current,

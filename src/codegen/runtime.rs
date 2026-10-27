@@ -615,8 +615,7 @@ impl CodeGenerator {
             ("__ckb_cell_lock_hash", "SourceView lock hash full 32-byte read"),
             ("__ckb_cell_type_hash", "SourceView type hash full 32-byte read"),
             ("__ckb_cell_data_hash_field", "SourceView consensus DATA_HASH field, all 32 bytes"),
-            ("__ckb_cell_data_hash", "SourceView data hash full 32-byte read"),
-            ("__ckb_cell_data_hash_at", "SourceView cell data 32-byte read at byte offset"),
+            ("__ckb_cell_data_bytes32", "SourceView cell data 32-byte read at byte offset"),
             ("__ckb_cell_data_blake2b_span", "exact Cell data interval CKB Blake2b-256"),
             ("__ckb_witness_blake2b_span", "exact raw witness interval CKB Blake2b-256"),
             ("__ckb_raw_transaction_hash_without_cell_deps", "canonical RawTransaction hash with empty CellDepVec"),
@@ -840,11 +839,8 @@ impl CodeGenerator {
                 "__ckb_cell_data_hash_field" => {
                     self.emit_runtime_cell_hash_field_helper(name, detail, CKB_CELL_FIELD_DATA_HASH, enabled);
                 }
-                "__ckb_cell_data_hash" => {
-                    self.emit_runtime_cell_data_hash_helper(name, detail, enabled);
-                }
-                "__ckb_cell_data_hash_at" => {
-                    self.emit_runtime_cell_data_hash_at_helper(name, detail, enabled);
+                "__ckb_cell_data_bytes32" => {
+                    self.emit_runtime_cell_data_bytes32_helper(name, detail, enabled);
                 }
                 "__ckb_cell_data_blake2b_span" => self.emit_runtime_span_hash_helper(name, RuntimeByteSource::CellData, enabled),
                 "__ckb_witness_blake2b_span" => self.emit_runtime_span_hash_helper(name, RuntimeByteSource::Witness, enabled),
@@ -1145,7 +1141,6 @@ impl CodeGenerator {
                     | "__ckb_hash_blake2b_var"
                     | "__ckb_hash_blake2b_packed"
                     | "__ckb_script_hash"
-                    | "__ckb_cell_data_hash"
                     | "__ckb_cell_data_blake2b_span"
                     | "__ckb_witness_blake2b_span"
                     | "__ckb_witness_bounded_blake2b"
@@ -1193,7 +1188,6 @@ impl CodeGenerator {
             || referenced_helpers.contains("__ckb_script_hash")
             || referenced_helpers.contains("__ckb_hash_data_packed")
             || referenced_helpers.contains("__ckb_hash_blake2b_packed")
-            || referenced_helpers.contains("__ckb_cell_data_hash")
             || referenced_helpers.contains("__ckb_require_cell_lock_exact_handle")
             || referenced_helpers.contains("__ckb_require_cell_type_exact_handle")
             || referenced_helpers.contains("__ckb_require_cell_dep_exact_verifier_handle")
@@ -9542,78 +9536,7 @@ impl CodeGenerator {
         self.emit("ret");
     }
 
-    fn emit_runtime_cell_data_hash_helper(&mut self, symbol: &str, detail: &str, enabled: bool) {
-        self.emit_global(symbol);
-        self.emit_label(symbol);
-        self.emit(format!("# cellscript abi: CKB SourceView LOAD_CELL_DATA and Blake2b ({})", detail));
-        self.emit("# cellscript abi: args a0=SourceView, a1=out32_ptr, a2=size_ptr; returns a0=status");
-        if !enabled {
-            self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
-            self.emit("ret");
-            return;
-        }
-
-        const SIZE_OFFSET: usize = 0;
-        const BUFFER_OFFSET: usize = 8;
-        const OUT_PTR_OFFSET: usize = BUFFER_OFFSET + RUNTIME_CELL_BUFFER_SIZE;
-        const SIZE_PTR_OFFSET: usize = OUT_PTR_OFFSET + 8;
-        const RA_OFFSET: usize = SIZE_PTR_OFFSET + 8;
-        const FRAME_SIZE: usize = align_frame(RA_OFFSET + 8);
-
-        let invalid = self.fresh_label("cell_data_hash_source_invalid");
-        let bad_output = self.fresh_label("cell_data_hash_output_invalid");
-        let failed = self.fresh_label("cell_data_hash_load_failed");
-        let done = self.fresh_label("cell_data_hash_done");
-        let abi = self.runtime_abi();
-
-        self.emit_stack_adjustment(-(FRAME_SIZE as i64));
-        self.emit_stack_store("ra", RA_OFFSET);
-        self.emit_stack_store("a1", OUT_PTR_OFFSET);
-        self.emit_stack_store("a2", SIZE_PTR_OFFSET);
-        self.emit(format!("beqz a1, {}", bad_output));
-        self.emit(format!("beqz a2, {}", bad_output));
-
-        self.emit_decode_source_view_to_t1_t2(&invalid);
-        self.emit(format!("li t0, {}", RUNTIME_CELL_BUFFER_SIZE));
-        self.emit_stack_store("t0", SIZE_OFFSET);
-        self.emit_sp_addi("a0", BUFFER_OFFSET);
-        self.emit_sp_addi("a1", SIZE_OFFSET);
-        self.emit("li a2, 0");
-        self.emit("addi a3, t1, 0");
-        self.emit("addi a4, t2, 0");
-        self.emit(format!("li a7, {}", abi.load_cell_data));
-        self.emit("ecall");
-        self.emit(format!("bnez a0, {}", failed));
-        self.emit_sp_addi("a0", BUFFER_OFFSET);
-        self.emit_stack_load("a1", SIZE_OFFSET);
-        // LOAD_CELL_DATA reports the full remaining length, not copied bytes.
-        // This bounded helper may hash only bytes initialized in its buffer.
-        self.emit(format!("li t0, {}", RUNTIME_CELL_BUFFER_SIZE));
-        self.emit(format!("bltu t0, a1, {}", failed));
-        self.emit_stack_load("a2", OUT_PTR_OFFSET);
-        self.emit("call __ckb_hash_blake2b_var");
-        self.emit(format!("bnez a0, {}", failed));
-        self.emit_stack_load("t6", SIZE_PTR_OFFSET);
-        self.emit("li t0, 32");
-        self.emit("sd t0, 0(t6)");
-        self.emit("li a0, 0");
-        self.emit(format!("j {}", done));
-
-        self.emit_label(&invalid);
-        self.emit(format!("li a0, {}", CellScriptRuntimeError::CkbSourceViewInvalid.code()));
-        self.emit(format!("j {}", done));
-        self.emit_label(&bad_output);
-        self.emit(format!("li a0, {}", CellScriptRuntimeError::FixedByteComparisonUnresolved.code()));
-        self.emit(format!("j {}", done));
-        self.emit_label(&failed);
-        self.emit(format!("li a0, {}", CellScriptRuntimeError::CellLoadFailed.code()));
-        self.emit_label(&done);
-        self.emit_stack_load("ra", RA_OFFSET);
-        self.emit_stack_adjustment(FRAME_SIZE as i64);
-        self.emit("ret");
-    }
-
-    fn emit_runtime_cell_data_hash_at_helper(&mut self, symbol: &str, detail: &str, enabled: bool) {
+    fn emit_runtime_cell_data_bytes32_helper(&mut self, symbol: &str, detail: &str, enabled: bool) {
         const STACK_FRAME_BYTES: i64 = align_frame(32) as i64;
         self.emit_global(symbol);
         self.emit_label(symbol);
@@ -9623,10 +9546,10 @@ impl CodeGenerator {
             self.emit("ret");
             return;
         }
-        let invalid = self.fresh_label("cell_data_hash_at_source_invalid");
-        let failed = self.fresh_label("cell_data_hash_at_failed");
-        let loaded = self.fresh_label("cell_data_hash_at_loaded");
-        let done = self.fresh_label("cell_data_hash_at_done");
+        let invalid = self.fresh_label("cell_data_bytes32_source_invalid");
+        let failed = self.fresh_label("cell_data_bytes32_failed");
+        let loaded = self.fresh_label("cell_data_bytes32_loaded");
+        let done = self.fresh_label("cell_data_bytes32_done");
         let abi = self.runtime_abi();
 
         self.emit_stack_adjustment(-STACK_FRAME_BYTES);

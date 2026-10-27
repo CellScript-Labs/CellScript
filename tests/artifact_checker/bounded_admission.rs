@@ -3,9 +3,9 @@ use super::*;
 #[test]
 fn bounded_cell_read_helpers_reject_rebound_capacity_length_and_pointer_mutations() {
     for opt_level in [0, 3] {
-        for (call, name, capacity_word, guard_registers) in [
-            ("ckb::cell_data_hash(source::input(0))", "__ckb_cell_data_hash", 0x20000293, (5, 11)),
-            ("ckb::cell_data_hash_at(source::input(0), 7)", "__ckb_cell_data_hash_at", 0x02000293, (7, 6)),
+        for (call, name, guard_kind, guard_registers, output_word) in [
+            ("ckb::cell_data_hash(source::input(0))", "__ckb_cell_data_hash_field", 0x1063, (7, 0), 0x02813f83),
+            ("ckb::cell_data_bytes32(source::input(0), 7)", "__ckb_cell_data_bytes32", 0x6063, (7, 6), 0x00813503),
         ] {
             let source =
                 format!("module read_bounds\naction inspect() -> u64 {{ let value = {call} require value == value return 0 }}");
@@ -24,23 +24,31 @@ fn bounded_cell_read_helpers_reject_rebound_capacity_length_and_pointer_mutation
                 .iter()
                 .filter(|word| blocks.iter().any(|block| block.range.contains(word.address)))
                 .collect::<Vec<_>>();
-            let capacity = words.iter().find(|word| word.word == capacity_word).unwrap();
+            let capacity = words.iter().find(|word| word.word == 0x02000293).unwrap();
             let guard = words
                 .iter()
-                .find(|word| word.word & 0x707f == 0x6063 && (word.word >> 15 & 31, word.word >> 20 & 31) == guard_registers)
+                .find(|word| word.word & 0x707f == guard_kind && (word.word >> 15 & 31, word.word >> 20 & 31) == guard_registers)
                 .unwrap();
-            let output = words
-                .iter()
-                .find(|word| word.word & 0x000f_ffff == if name.ends_with("_at") { 0x00013503 } else { 0x00013603 })
-                .unwrap();
+            let output = words.iter().find(|word| word.word == output_word).unwrap();
             let returned_size = words.iter().rev().find(|word| word.word & 0x707f == 0x3023 && word.word >> 15 & 31 != 2).unwrap();
-            let mutations = [
+            valid.check().unwrap();
+            let restore = words.iter().rev().find(|word| word.word & 0x000f_ffff == 0x00013083).unwrap();
+            let syscall = words.iter().find(|word| word.word == 0x73).unwrap();
+            let mut mutations = vec![
                 (capacity.address, capacity.word.wrapping_add(1 << 20)),
                 (guard.address, guard.word ^ (1 << 12)), // signed/opposite relation cannot authorize the read
                 (guard.address, 0x00000013),             // omitted bound after outer hashes are rebound
                 (output.address, output.word.wrapping_add(8 << 20)),
                 (returned_size.address, returned_size.word ^ (1 << 20)),
+                (restore.address, restore.word.wrapping_sub(8 << 20)),
+                (syscall.address, 0x00000013),
             ];
+            if name == "__ckb_cell_data_hash_field" {
+                for (before, after) in [(0x00100793, 0x00300793), (0x02000393, 0x02100393), (0x00400f13, 0x00500f13)] {
+                    let instruction = words.iter().find(|word| word.word == before).unwrap();
+                    mutations.push((instruction.address, after));
+                }
+            }
             for (address, word) in mutations {
                 let mut rebound = valid.clone();
                 rebound.replace_machine_words(&[(address, word)]);
