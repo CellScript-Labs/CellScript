@@ -127,7 +127,7 @@ The all-examples inventory was also stale at 33 files instead of 39. It now
 compiles every discovered example, using standalone Edition 2027 compilation for
 the four named-declaration batch programs and preserving package compilation for
 the others. The targeted 39-file regression passes; its parent directory's legacy
-2026 manifest is unchanged. The remaining integration preflight is still pending.
+2026 manifest is unchanged.
 
 The optional fixed Cell scalar-field checker test also retained an obsolete
 compiler rejection for fixed nested projections. Its corrected O0–O3 regression
@@ -136,6 +136,14 @@ still requiring the narrower scalar-field profile to reject aggregate fields
 with V2420. Signed scalar fields and rebound load mutations remain rejected;
 no independent checker rule changed. All 77 policy artifact-checker tests pass
 in `/tmp/cellscript-v129-policy-checker-final.log`.
+
+The remaining 68-target integration preflight completed. Eight targets failed
+on the earlier test/fixture state (CLI, examples, external verifier, fungible,
+Order/AMM, policy artifact checker, policy lifecycle and temporal scenarios);
+each now has a separate passing repaired receipt. All 19 selection-bundle
+combinations and five stack-layout tests passed in that preflight. These mixed
+source results are diagnostic evidence only: the complete backend/dev/ci gates
+must still pass on the final clean signed source.
 
 The v129 candidate preserves distinct legacy BLAKE2b and consensus DATA_HASH
 semantics and fixes four fallible scalar callers. The v128 backend run on

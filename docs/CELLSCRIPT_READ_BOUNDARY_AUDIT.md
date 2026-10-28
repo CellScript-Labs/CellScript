@@ -101,6 +101,11 @@ were refreshed, and all three original tests passed in
 `/tmp/cellscript-v129-token-scenarios-final.log`. These are focused replay
 receipts, not substitutes for the final integration gates.
 
+The temporal suite needed only three metadata identities refreshed: lowering
+record, source map and verified bundle. Its ELF, all nine transaction identities
+and all expected outcomes remain unchanged. Four successful and five adversarial
+cases pass in `/tmp/cellscript-v129-temporal-final.log`.
+
 The Order/AMM scenario refresh likewise changes only artifact and transaction
 identities: the original four merge/swap cases pass in
 `/tmp/cellscript-v129-order-amm-final.log`, preserving replay, wrong-price and
