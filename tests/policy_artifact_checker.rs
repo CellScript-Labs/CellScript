@@ -1023,25 +1023,12 @@ fn fixed_cell_fields_accept_rebound_native_u64_and_reject_unknown_field_profiles
         let fixture = Fixture::new_source_with(signed, CellScriptEdition::Edition2026, opt, selected.clone());
         fixed_cell_storage(&fixture).unwrap();
         assert_eq!(fixed_cell_fields(&fixture).unwrap_err().code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
-        // Nested Cell access remains outside the production executable surface;
-        // do not weaken that boundary to manufacture a checker-positive bundle.
-        let directory = tempfile::tempdir().unwrap();
-        let source = directory.path().join("nested.cell");
-        std::fs::write(&source, "module nested_cell_fields\nstruct Inner has copy, drop, store, fixed, serializable, non_linear { x: u64 }\nresource Token has store, consume { inner: Inner }\naction burn(input token: Token) { verification require token.inner.x > 0 consume token }").unwrap();
-        let error = compile_path_with_executable_surface_policy(
-            source.to_str().unwrap(),
-            CompileOptions {
-                source_contracts: true,
-                edition: CellScriptEdition::Edition2026,
-                opt_level: opt,
-                target: Some("riscv64-elf".into()),
-                ..CompileOptions::default()
-            },
-            Some(CompileEntryScope::Artifact(selected.clone())),
-            ExecutableSurfacePolicy::DenyFailClosed,
-        )
-        .unwrap_err();
-        assert_eq!(error.code.as_deref(), Some("E2105"));
+        // Fixed nested projections are executable, but the optional direct
+        // unsigned-scalar field profile must still reject aggregate fields.
+        let nested = "module nested_cell_fields\nstruct Inner has copy, drop, store, fixed, serializable, non_linear { x: u64 }\nresource Token has store, consume { inner: Inner }\naction burn(input token: Token) { verification require token.inner.x > 0 consume token }";
+        let fixture = Fixture::new_source_with(nested, CellScriptEdition::Edition2026, opt, selected.clone());
+        fixed_cell_storage(&fixture).unwrap();
+        assert_eq!(fixed_cell_fields(&fixture).unwrap_err().code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
     }
 }
 

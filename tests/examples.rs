@@ -20,6 +20,12 @@ const BUNDLED_EXAMPLES: [&str; 9] = [
 ];
 const PACKAGE_EXAMPLES: [&str; 10] =
     ["amm_pool", "atomic_swap", "launch", "multi_phase_dao", "multisig", "nft", "registry", "timelock", "token", "vesting"];
+const EDITION_2027_LANGUAGE_EXAMPLES: [&str; 4] = [
+    "batches/mixed_settlement.cell",
+    "batches/multi_asset_transfer.cell",
+    "batches/nested_migration.cell",
+    "batches/record_migration.cell",
+];
 const TEMPORAL_BUSINESS_EXAMPLES: [(&str, &str); 6] = [
     ("timelock.cell", "timelock"),
     ("multi_phase_dao.cell", "DAO"),
@@ -480,12 +486,20 @@ fn all_checked_in_cell_examples_compile() {
     let files = checked_in_example_cell_files();
     assert_eq!(
         files.len(),
-        BUNDLED_EXAMPLES.len() + 1 + 23,
+        BUNDLED_EXAMPLES.len() + 1 + 29,
         "expected bundled examples, top-level registry.cell, and language examples"
     );
 
     for path in files {
-        compile_file(&path, CompileOptions::default()).unwrap_or_else(|err| panic!("{path} should compile: {}", err.message));
+        let result = if EDITION_2027_LANGUAGE_EXAMPLES.iter().any(|name| path == language_example_path(name)) {
+            // These standalone programs are not members of the surrounding
+            // legacy package; compile_file would select its 2026 manifest.
+            let source = std::fs::read_to_string(&path).unwrap();
+            cellscript::compile(&source, CompileOptions { edition: cellscript::NEXT_EDITION, ..CompileOptions::default() })
+        } else {
+            compile_file(&path, CompileOptions::default())
+        };
+        result.unwrap_or_else(|err| panic!("{path} should compile: {}", err.message));
     }
 }
 

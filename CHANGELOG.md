@@ -14,6 +14,15 @@ slice bodies, including direct calls; canonicalize metadata and editor/browser
 surfaces. Advance artifact-cache generation to v129;
 final gates remain pending.
 
+Refresh the canonical multi-Script anchor and persistent-policy artifact,
+transaction and bundle identities after the runtime changes. Preserve every
+numeric observation and resource ceiling; the original seven-test business
+suite passes with the refreshed references. The identified-source backend
+attempt stopped at the stale fixtures, so full integration gates remain pending.
+Update seven CLI policy rejection examples to use an unadmitted dynamic-vector
+helper result; retain their policy assertions and pair them with an accepted
+fixed Hash helper output. All 253 CLI tests pass without weakening admission.
+
 Separate read capacity, syscall-reported remaining length and published value
 length. Reject short fixed Cell-data slices and xUDT amount words, and reject
 oversized legacy WitnessArgs projections before reading beyond their 512-byte

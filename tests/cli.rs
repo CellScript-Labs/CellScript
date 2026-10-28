@@ -3333,6 +3333,7 @@ action add(x: u64, y: u64) -> u64 {
 
 #[test]
 fn cellc_verify_artifact_enforces_policy_flags() {
+    // A dynamic vector returned by a helper is not an admitted output value.
     let dir = tempfile::tempdir().unwrap();
     let input = dir.path().join("sample.cell");
     let output = dir.path().join("sample.s");
@@ -3340,14 +3341,14 @@ fn cellc_verify_artifact_enforces_policy_flags() {
 module test
 
 resource Fingerprint {
-    digest: Hash,
+    digest: Vec<u64>,
 }
 
-fn pass_digest(digest: Hash) -> Hash {
+fn pass_digest(digest: Vec<u64>) -> Vec<u64> {
     return digest
 }
 
-action issue(digest: Hash) -> Fingerprint {
+action issue(digest: Vec<u64>) -> Fingerprint {
     verification
         let dynamic_digest = pass_digest(digest)
         let token = create Fingerprint {
@@ -5635,6 +5636,7 @@ action now() -> u64 {
 
 #[test]
 fn cellc_check_production_rejects_fail_closed_runtime_paths() {
+    // A dynamic vector returned by a helper is not an admitted output value.
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
 
@@ -5655,14 +5657,14 @@ version = "0.1.0"
 module demo::main
 
 resource Fingerprint {
-    digest: Hash,
+    digest: Vec<u64>,
 }
 
-fn pass_digest(digest: Hash) -> Hash {
+fn pass_digest(digest: Vec<u64>) -> Vec<u64> {
     return digest
 }
 
-action issue(digest: Hash) -> Fingerprint {
+action issue(digest: Vec<u64>) -> Fingerprint {
     verification
         let dynamic_digest = pass_digest(digest)
         let token = create Fingerprint {
@@ -5791,7 +5793,8 @@ action append_schema_vec(items: Vec<Address>, owner: Address) -> u64 {
 }
 
 #[test]
-fn cellc_check_production_rejects_incomplete_output_verification() {
+fn cellc_check_production_distinguishes_fixed_and_dynamic_helper_outputs() {
+    // A dynamic vector returned by a helper is not an admitted output value.
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
 
@@ -5812,14 +5815,14 @@ version = "0.1.0"
 module demo::main
 
 resource Fingerprint {
-    digest: Hash,
+    digest: Vec<u64>,
 }
 
-fn pass_digest(digest: Hash) -> Hash {
+fn pass_digest(digest: Vec<u64>) -> Vec<u64> {
     return digest
 }
 
-action issue(digest: Hash) -> Fingerprint {
+action issue(digest: Vec<u64>) -> Fingerprint {
     verification
         let dynamic_digest = pass_digest(digest)
         let token = create Fingerprint {
@@ -5839,10 +5842,24 @@ action issue(digest: Hash) -> Fingerprint {
     assert!(stderr.contains("stopped before codegen"), "unexpected stderr: {}", stderr);
     assert!(stderr.contains("output-verification-incomplete"), "unexpected stderr: {}", stderr);
     assert!(stderr.contains("fail-closed"), "unexpected stderr: {}", stderr);
+
+    // The corresponding fixed-byte helper result is now fully checked.
+    let source_path = root.join("src/main.cell");
+    let fixed_source = std::fs::read_to_string(&source_path).unwrap().replace("Vec<u64>", "Hash");
+    std::fs::write(&source_path, fixed_source).unwrap();
+    let accepted =
+        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).args(["check", "--production", "--json"]).output().unwrap();
+    assert!(accepted.status.success(), "fixed Hash helper output must pass: {}", String::from_utf8_lossy(&accepted.stderr));
+    let report: serde_json::Value = serde_json::from_slice(&accepted.stdout).unwrap();
+    let target = &report["checked_targets"][0];
+    assert_eq!(target["runtime_required_transaction_runtime_input_requirements"], 0);
+    assert_eq!(target["checked_transaction_runtime_input_requirements"], 1);
+    assert_eq!(target["fail_closed_runtime_features"], serde_json::json!([]));
 }
 
 #[test]
 fn cellc_check_can_reject_runtime_required_obligations() {
+    // A dynamic vector returned by a helper is not an admitted output value.
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
 
@@ -5863,14 +5880,14 @@ version = "0.1.0"
 module demo::main
 
 resource Fingerprint {
-    digest: Hash,
+    digest: Vec<u64>,
 }
 
-fn pass_digest(digest: Hash) -> Hash {
+fn pass_digest(digest: Vec<u64>) -> Vec<u64> {
     return digest
 }
 
-action issue(digest: Hash) -> Fingerprint {
+action issue(digest: Vec<u64>) -> Fingerprint {
     verification
         let dynamic_digest = pass_digest(digest)
         let token = create Fingerprint {
@@ -6200,7 +6217,8 @@ action credit(ledger_before: Ledger, delta: u128) -> ledger_after: Ledger {
 }
 
 #[test]
-fn cellc_check_reports_settle_finalization_blocker_class() {
+fn cellc_check_reports_dynamic_output_blocker_class() {
+    // A dynamic vector returned by a helper is not an admitted output value.
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
 
@@ -6221,14 +6239,14 @@ version = "0.1.0"
 module demo::main
 
 resource Fingerprint {
-    digest: Hash,
+    digest: Vec<u64>,
 }
 
-fn pass_digest(digest: Hash) -> Hash {
+fn pass_digest(digest: Vec<u64>) -> Vec<u64> {
     return digest
 }
 
-action issue(digest: Hash) -> Fingerprint {
+action issue(digest: Vec<u64>) -> Fingerprint {
     verification
         let dynamic_digest = pass_digest(digest)
         let token = create Fingerprint {
@@ -7059,6 +7077,7 @@ version = "0.1.0"
 
 #[test]
 fn cellc_check_uses_manifest_policy_defaults() {
+    // A dynamic vector returned by a helper is not an admitted output value.
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
 
@@ -7082,14 +7101,14 @@ production = true
 module demo::main
 
 resource Fingerprint {
-    digest: Hash,
+    digest: Vec<u64>,
 }
 
-fn pass_digest(digest: Hash) -> Hash {
+fn pass_digest(digest: Vec<u64>) -> Vec<u64> {
     return digest
 }
 
-action issue(digest: Hash) -> Fingerprint {
+action issue(digest: Vec<u64>) -> Fingerprint {
     verification
         let dynamic_digest = pass_digest(digest)
         let token = create Fingerprint {
@@ -7426,6 +7445,7 @@ action main() -> u64 {
 
 #[test]
 fn cellc_test_subcommand_supports_policy_directives() {
+    // A dynamic vector returned by a helper is not an admitted output value.
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
 
@@ -7461,14 +7481,14 @@ action ping() -> u64 {
 module demo::tests::policy
 
 resource Fingerprint {
-    digest: Hash,
+    digest: Vec<u64>,
 }
 
-fn pass_digest(digest: Hash) -> Hash {
+fn pass_digest(digest: Vec<u64>) -> Vec<u64> {
     return digest
 }
 
-action issue(digest: Hash) -> Fingerprint {
+action issue(digest: Vec<u64>) -> Fingerprint {
     verification
         let dynamic_digest = pass_digest(digest)
         let token = create Fingerprint {

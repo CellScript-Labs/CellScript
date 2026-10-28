@@ -102,6 +102,41 @@ small-case ceilings and was rejected rather than accommodated by raising budgets
 
 ## Final validation receipt
 
+The identified-source backend run on signed
+`eb1c1fc767614c3f9d8b6a45548a2a9191a13424` passed 1,095 compiler unit tests,
+42 collection runtime tests, all 205 independent artifact-checker integration
+tests and 31 nested-data tests. It then failed three business-corpus cases
+because the frozen anchor artifact and transaction identities were stale.
+The queued `dev` and `ci` gates did not start; this is not a backend pass.
+Re-execution confirmed the positive transaction and five adversarial outcomes,
+with unchanged numeric resource observations and ceilings. The anchor fixture,
+its scenario-evidence references and persistent-policy resource identities were
+refreshed together. All seven original business-corpus tests then passed without
+measurement instrumentation. Final gates must run on the committed refresh;
+these focused results do not complete admission.
+
+The remaining-suite preflight also found seven CLI policy tests still using a
+fixed Hash helper result as an unsupported output example. That shape is now
+checked. Their rejection fixtures now use a dynamic `Vec<u64>` helper result,
+which still carries the incomplete-output obligation. Existing policy/error
+assertions remain, and a paired positive case checks the fixed Hash result.
+All 253 CLI tests pass after this test-only correction; no production policy or
+checker rule was weakened. The broader preflight and final gates remain separate.
+
+The all-examples inventory was also stale at 33 files instead of 39. It now
+compiles every discovered example, using standalone Edition 2027 compilation for
+the four named-declaration batch programs and preserving package compilation for
+the others. The targeted 39-file regression passes; its parent directory's legacy
+2026 manifest is unchanged. The remaining integration preflight is still pending.
+
+The optional fixed Cell scalar-field checker test also retained an obsolete
+compiler rejection for fixed nested projections. Its corrected O0–O3 regression
+requires successful executable compilation and bundle/storage checks, while
+still requiring the narrower scalar-field profile to reject aggregate fields
+with V2420. Signed scalar fields and rebound load mutations remain rejected;
+no independent checker rule changed. All 77 policy artifact-checker tests pass
+in `/tmp/cellscript-v129-policy-checker-final.log`.
+
 The v129 candidate preserves distinct legacy BLAKE2b and consensus DATA_HASH
 semantics and fixes four fallible scalar callers. The v128 backend run on
 `e4280a29d6af9b8828a98b4dab2dfcdbed72e010` was stopped during compiler tests

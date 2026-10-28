@@ -75,6 +75,44 @@ source-map and transaction identities were rebound; the complete twelve-test
 suite then passed without update mode. Full identified-source backend/dev/ci
 gates remain pending.
 
+The full backend attempt on signed
+`eb1c1fc767614c3f9d8b6a45548a2a9191a13424` subsequently passed all 205
+artifact-checker integration tests but failed three business-corpus cases on
+stale anchor identities. No queued `dev`/`ci` gate ran. Re-execution refreshed
+only artifact, transaction and bundle identities in `capability_anchor_cases`,
+the associated `business_scenario_evidence` records and the persistent-policy
+resource profile. Its numeric measurements and all ceilings are unchanged.
+The original seven-test business suite then passed in
+`/tmp/cellscript-v129-business-strict-final.log`; temporary measurement output
+was removed and the test source is unchanged. The failed backend log remains
+`/tmp/cellscript-v129-backend-final.log`, not a final acceptance receipt.
+
+The remaining-suite preflight also found stale external-verifier identities.
+Its two successful EXEC/SPAWN cases and eight adversarial cases executed before
+the frozen-record comparison failed. Only artifact/bundle/transaction hashes and
+their scenario references were refreshed; dependency identities, expected exit
+codes and rejection stages are unchanged. The original test then passed in
+`/tmp/cellscript-v129-external-scenarios-final.log` without instrumentation.
+
+The same preflight found stale authorization, fungible and NFT scenario
+identities. Their 31 executed cases retained every expected exit code, rejection
+stage and non-identity field. The three fixtures and their scenario references
+were refreshed, and all three original tests passed in
+`/tmp/cellscript-v129-token-scenarios-final.log`. These are focused replay
+receipts, not substitutes for the final integration gates.
+
+The Order/AMM scenario refresh likewise changes only artifact and transaction
+identities: the original four merge/swap cases pass in
+`/tmp/cellscript-v129-order-amm-final.log`, preserving replay, wrong-price and
+reordered-output rejection. The signed persistent-policy lifecycle executes
+six live-output transactions for each of eight Edition/optimization combinations.
+Its measured ELF decreased from 8,136 to 8,128 bytes; the recorded cycle sample
+is 6,309,501, under the unchanged 7,000,000 ceiling and existing
+signature-dependent measurement policy. Stack, witness, transaction and
+dependency sizes are unchanged. These refreshed observations do not raise any
+resource limit. Both lifecycle tests and the cryptographic resource inventory
+pass in `/tmp/cellscript-v129-lifecycle-final.log`.
+
 ## Historical v127 read contracts and reproduced defects
 
 The pinned CKB source is
