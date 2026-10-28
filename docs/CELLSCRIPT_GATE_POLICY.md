@@ -1,5 +1,16 @@
 # CellScript Gate Policy
 
+## One-version alpha publication exception — 2026-10-28
+
+The maintainer authorized `v0.33.0-alpha.1` publication after compiler integration
+testing, without CI or peripheral review. This does not count as a successful
+backend/dev/ci/release gate or stable admission. The exact alpha tag is excluded
+from automatic CI/release workflows; later tags retain the normal gates.
+The [alpha release notes](releases/CELLSCRIPT_0_33_ALPHA_1_RELEASE_NOTES.md) and
+[test receipt](reports/bounded-runtime-v129-alpha-tests.json) record what ran.
+Ordinary commit checks still apply to the packaging change.
+
+
 The [bounded-runtime admission candidate](CELLSCRIPT_BOUNDED_RUNTIME_ADMISSION.md)
 retires the four blanket proof flags for the existing checked profile. Final
 backend/dev/ci evidence must identify one unchanged candidate revision. Earlier

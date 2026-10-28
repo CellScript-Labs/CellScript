@@ -7,7 +7,8 @@ not be collapsed into one generic "collections are supported" claim.
 
 ## Support By Layer
 
-The #47–#49 bounded profile is an **admission candidate awaiting final gates**.
+The #47–#49 bounded profile is **available in 0.33.0-alpha.1; stable admission
+and full gates are deferred under the maintainer's alpha publication decision**.
 The [scope review](CELLSCRIPT_BOUNDED_RUNTIME_ADMISSION.md) records its checked
 contracts, initial authoring decision and remaining validation. Strict compilation
 accepts supported shapes without blanket experimental proof flags; native bundle

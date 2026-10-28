@@ -1,6 +1,8 @@
 # Stack layout audit — 2026-10-27
 
-**Status: historical v126 repair receipt; final integration acceptance pending.**
+**Status: historical v126 layout comparison; repairs included in 0.33.0-alpha.1.
+The [alpha receipt](CELLSCRIPT_BOUNDED_RUNTIME_ADMISSION.md#final-validation-receipt)
+records completed compiler tests and deferred full-gate acceptance.**
 
 Base revision: `f34c175756b4d310812dad3dfae9bc8ff60724d3`. This review incorporates
 the existing context-hash/ScriptHash composition repairs without reverting other

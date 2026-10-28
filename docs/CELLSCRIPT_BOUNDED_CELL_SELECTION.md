@@ -1,6 +1,7 @@
 # Bounded exact-role Cell selection and correspondence
 
-**Status: bounded fixed/table selection and coordinate reads; admission candidate awaiting final gates.**
+**Status: bounded fixed/table selection and coordinate reads available in
+0.33.0-alpha.1. Stable admission and full gates are deferred for this alpha.**
 This is the first semantic contract for [#49](https://github.com/CellScript-Labs/CellScript/issues/49),
 `cellscript-exact-role-cell-selection-fixed-v1`. The independent host model in
 [`tests/support/cell_selection_reference.rs`](../tests/support/cell_selection_reference.rs)

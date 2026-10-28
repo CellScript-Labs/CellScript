@@ -1,5 +1,15 @@
 # Branch Context
 
+## 0.33.0-alpha.1 — bounded runtime prerelease
+
+`v0.33.0-alpha.1` publishes `codex/bounded-runtime-foundations` under the
+maintainer's 2026-10-28 instruction. The full compiler test run identifies signed
+implementation source `309eb23e`; the later packaging commit updates native
+workspace versions and publication documentation. Complete backend/dev/ci and
+release gates are not claimed. This is an alpha with an evolving public API.
+See the [release scope](docs/releases/CELLSCRIPT_0_33_ALPHA_1_RELEASE_NOTES.md).
+The version/branch descriptions below retain their historical dates.
+
 ## 0.32 — cost research and exact ZK profile work
 
 `0.32` starts at `54d639a7230060cc0bcc009dcf26e1830e2011c6`, the signed

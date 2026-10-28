@@ -1,0 +1,1209 @@
+{
+  "source": "309eb23e5efd4276f4ac902d4979e43ca3e2ef01",
+  "result": "compiler coverage completed across original run and unchanged-source continuation",
+  "passed_total": 2445,
+  "ignored_total": 7,
+  "integration_target_count": 79,
+  "integration_targets": [
+    "allocated_runtime",
+    "artifact_checker",
+    "artifact_size",
+    "authoring_parity",
+    "authoring_replace",
+    "bounded_byte_context",
+    "bounded_cell_selection",
+    "bounded_group_input",
+    "bounded_nested",
+    "bounded_output_plan",
+    "business_corpus",
+    "cell_data_views",
+    "ckb_compat_runner",
+    "ckb_std_compat",
+    "cli",
+    "collection_budgets",
+    "commitment_opening",
+    "control_flow",
+    "cost_attribution",
+    "cost_corpus",
+    "cost_ir_experiments",
+    "cost_measurement",
+    "cost_toolchain",
+    "crypto_primitives",
+    "cryptographic_resource_budgets",
+    "deployment_line_runtime",
+    "e2e_registry_devnet",
+    "entry_selection",
+    "entry_witness_abi",
+    "exact_script_handles",
+    "examples",
+    "external_verifier_scenarios",
+    "fiber_compatibility",
+    "fixed_cell_builder",
+    "frozen_interface",
+    "fungible_scenarios",
+    "fuzzy_debug",
+    "ickb_benchmark",
+    "ickb_diff",
+    "interface_catalog",
+    "interface_inspection",
+    "interface_projection",
+    "ls_idl_upstream",
+    "myelin_handoff",
+    "native_group_binding",
+    "native_lifecycle_binding",
+    "nested_builder",
+    "order_amm_scenarios",
+    "owned_collections",
+    "policy_artifact_checker",
+    "policy_artifact_cli",
+    "policy_authorization",
+    "policy_imports",
+    "policy_lifecycle",
+    "policy_witness_codec_parity",
+    "protected_group_binding",
+    "provenance_aliases",
+    "read_ref_binding",
+    "registry",
+    "resolved_binding_metadata",
+    "runtime_read_bounds",
+    "schema_acknowledgement",
+    "script_hash",
+    "selection_bundle",
+    "sighash_deferred",
+    "sighash_zero_lock",
+    "stack_layout",
+    "syntax_compatibility",
+    "temporal_scenarios",
+    "trusted_external",
+    "typed_runtime_views",
+    "value_return_abi",
+    "vec_constructor",
+    "verifier_failure",
+    "zk_application_costs",
+    "zk_counter_set_resources",
+    "zk_resources",
+    "zk_transition",
+    "zk_vectors"
+  ],
+  "suite_summaries": [
+    {
+      "result": "ok",
+      "passed": 1095,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 42,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 205,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 13,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 12,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 31,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 9,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 13,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 253,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 14,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 14,
+      "failed": 0,
+      "ignored": 2
+    },
+    {
+      "result": "ok",
+      "passed": 13,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 25,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 17,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 35,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 47,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 6,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 220,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 10,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 9,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 9,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 77,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 11,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 25,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 9,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "FAILED",
+      "passed": 18,
+      "failed": 1,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 12,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 9,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 11,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 2
+    },
+    {
+      "result": "ok",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 1
+    },
+    {
+      "result": "ok",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 2
+    },
+    {
+      "result": "ok",
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "result": "ok",
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0
+    }
+  ],
+  "runs": [
+    {
+      "source": "309eb23e5efd4276f4ac902d4979e43ca3e2ef01",
+      "command": "cargo test --locked -p cellscript -- --test-threads=1",
+      "exit_code": 101,
+      "finished_utc": "2026-10-28T04:28:33.630972+00:00",
+      "log": "/tmp/cellscript-v129-309eb23e-backend.log",
+      "scope": "Compiler unit, integration and doc tests. Backend remainder, dev, ci and release gates cancelled by maintainer instruction; no full gate pass claimed.",
+      "log_sha256": "4ddef18c0e23d51c439609dfba455d8d015afdb6383df1cbe1c7d0d07464c3e6",
+      "log_bytes": 353544,
+      "suite_summaries": [
+        {
+          "result": "ok",
+          "passed": 1095,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 42,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 205,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 12,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 31,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 9,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 253,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 8,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 14,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 8,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 14,
+          "failed": 0,
+          "ignored": 2
+        },
+        {
+          "result": "ok",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 25,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 17,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 35,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 47,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 220,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 10,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 9,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 9,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 77,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 11,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 25,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 9,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "FAILED",
+          "passed": 18,
+          "failed": 1,
+          "ignored": 0
+        }
+      ],
+      "summary_start_marker": "==> cargo test --locked -p cellscript -- --test-threads=1"
+    },
+    {
+      "name": "selection-retry",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "cellscript",
+        "--test",
+        "selection_bundle",
+        "migration::nested_migration_cross_package_helpers_preserve_codec_and_transaction_outcomes",
+        "--",
+        "--exact",
+        "--test-threads=1"
+      ],
+      "log": "/tmp/cellscript-v129-alpha-selection-retry.log",
+      "started_utc": "2026-10-28T04:32:09.792Z",
+      "result": "passed",
+      "exit_code": 0,
+      "signal": null,
+      "finished_utc": "2026-10-28T04:33:49.599Z",
+      "log_sha256": "e0de7e828b3332e8888b66dad13897e947b7dfc3df99b97a44cbb4148d4141d0",
+      "log_bytes": 382,
+      "suite_summaries": [
+        {
+          "result": "ok",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        }
+      ]
+    },
+    {
+      "name": "remaining-tests",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "cellscript",
+        "--test",
+        "sighash_deferred",
+        "--test",
+        "sighash_zero_lock",
+        "--test",
+        "stack_layout",
+        "--test",
+        "syntax_compatibility",
+        "--test",
+        "temporal_scenarios",
+        "--test",
+        "trusted_external",
+        "--test",
+        "typed_runtime_views",
+        "--test",
+        "value_return_abi",
+        "--test",
+        "vec_constructor",
+        "--test",
+        "verifier_failure",
+        "--test",
+        "zk_application_costs",
+        "--test",
+        "zk_counter_set_resources",
+        "--test",
+        "zk_resources",
+        "--test",
+        "zk_transition",
+        "--test",
+        "zk_vectors",
+        "--no-fail-fast",
+        "--",
+        "--test-threads=1"
+      ],
+      "log": "/tmp/cellscript-v129-alpha-remaining-tests.log",
+      "started_utc": "2026-10-28T04:33:49.647Z",
+      "result": "passed",
+      "exit_code": 0,
+      "signal": null,
+      "finished_utc": "2026-10-28T04:35:12.314Z",
+      "log_sha256": "dc6a69f8373207f90bffb7b2e4eecbc82117bd07f9b01f247ba0ce672bf83214",
+      "log_bytes": 9397,
+      "suite_summaries": [
+        {
+          "result": "ok",
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 8,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 12,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 9,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 11,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 2
+        },
+        {
+          "result": "ok",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 1
+        },
+        {
+          "result": "ok",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 2
+        },
+        {
+          "result": "ok",
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "result": "ok",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        }
+      ]
+    },
+    {
+      "name": "doc-tests",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "cellscript",
+        "--doc",
+        "--",
+        "--test-threads=1"
+      ],
+      "log": "/tmp/cellscript-v129-alpha-doc-tests.log",
+      "started_utc": "2026-10-28T04:35:12.363Z",
+      "result": "passed",
+      "exit_code": 0,
+      "signal": null,
+      "finished_utc": "2026-10-28T04:35:15.613Z",
+      "log_sha256": "80fa034e7e3e89e2620776f96f0f2313e641d898571cf17263271f9aa31828ee",
+      "log_bytes": 759,
+      "suite_summaries": [
+        {
+          "result": "ok",
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        }
+      ]
+    }
+  ],
+  "environment": {
+    "TMPDIR": "/home/arthur/RustRoverProjects/CellScript/target/alpha-integration-tmp",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_BUILD_JOBS": "2"
+  },
+  "environment_failure": "The initial selection suite had 18 successful tests and one EDQUOT during file output. That exact failed test passed with TMPDIR on the project filesystem; its 18 filtered siblings were already successful. No code changed. The remaining integration targets and doc tests then passed.",
+  "scope": "Compiler unit, integration and doc test coverage only; full backend/dev/ci/release gates are not claimed.",
+  "release_version": "0.33.0-alpha.1",
+  "source_signature_status": "G",
+  "full_gates": {
+    "backend": "not completed: remainder cancelled by maintainer",
+    "dev": "not run: maintainer exception",
+    "ci": "not run: maintainer exception",
+    "release": "not run: maintainer exception"
+  },
+  "publication_authorization": "Maintainer explicitly authorized alpha publication after integration testing on 2026-10-28, without peripheral review or CI.",
+  "packaging_boundary": "Implementation tests precede the alpha version bump. Subsequent packaging changes must preserve compiler/checker Rust source and test source; commit gate and focused build/version checks are recorded separately.",
+  "counting_note": "The earlier four-test cost-toolchain preflight in the same log is excluded from compiler totals; it repeats the later full-suite target."
+}

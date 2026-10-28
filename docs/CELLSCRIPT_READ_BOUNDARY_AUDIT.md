@@ -1,6 +1,8 @@
 # Read boundary and scratch-register audit — 2026-10-27
 
-**Status: repaired candidate; final identified-source gates pending.**
+**Status: repairs included in 0.33.0-alpha.1; complete compiler tests passed.
+The [alpha receipt](CELLSCRIPT_BOUNDED_RUNTIME_ADMISSION.md#final-validation-receipt)
+records the maintainer's full-gate exception and the retained coverage limits.**
 
 This follows the [stack-layout audit](CELLSCRIPT_STACK_LAYOUT_AUDIT.md) on base
 `f34c175756b4d310812dad3dfae9bc8ff60724d3`. Current artifact-cache generation is v129.

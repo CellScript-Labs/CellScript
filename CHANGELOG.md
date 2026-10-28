@@ -1,6 +1,16 @@
 # Changelog
 
-## Unreleased — 0.32
+## 0.33.0-alpha.1 - 2026-10-28
+
+First 0.33 alpha, published under the maintainer's October 28 instruction after
+compiler integration tests. APIs may change. Full backend/dev/ci/release gates
+and peripheral review were explicitly deferred; no skipped check is a pass.
+See the [alpha release notes](docs/releases/CELLSCRIPT_0_33_ALPHA_1_RELEASE_NOTES.md)
+and [identified-source test receipt](docs/reports/bounded-runtime-v129-alpha-tests.json).
+The implementation entries below retain their historical validation status;
+the alpha receipt records the publication decision without claiming stability.
+
+### Implementation history since 0.31
 
 Declare runtime return conventions alongside helper dispatch and make scalar
 callers check `a1` for all fallible value getters, including the four legacy

@@ -1,7 +1,8 @@
 # Bounded runtime foundations: Cell sets, nested data and allocated values
 
-**Status**: bounded-profile admission candidate for #49, #48 and #47; final
-identified-source gates and issue closure remain pending. The
+**Status**: initial #49/#48/#47 profile available in 0.33.0-alpha.1 after compiler
+integration tests. Full gates and stable API admission were deferred by the
+maintainer for this alpha. The
 [admission review](CELLSCRIPT_BOUNDED_RUNTIME_ADMISSION.md) defines the current
 checked scope and supersedes blanket-blocker statements in the implementation
 history below. This document is not release or deployment acceptance.
@@ -2738,7 +2739,7 @@ revision; earlier progress paragraphs are historical evidence increments.
 | Editor/browser/package parity | Named navigation/rename, syntax seeds, browser summary and locked-package helpers | Named limits, helper views, formatter/diagnostics and locked-package helpers | Budget reports, formatter/diagnostics, browser summary and imported fixed-value generic copies |
 | Resources | 35 combined selection/migration observations, unchanged finite ceilings | Same selection/migration corpus; unavailable metrics remain explicit | 24 transfer/array observations and eight maximum sorted-construction observations, unchanged finite ceilings |
 | Strict executable-surface candidate | O0/O3 complete programs and erased-proof rejection | O0/O3 complete programs and erased-proof rejection | O0/O3 complete program and erased-proof rejection |
-| Applicable dev/backend/ci gates | pending on final source | pending on final source | pending on final source |
+| Applicable dev/backend/ci gates | deferred for alpha by maintainer; not passed | same explicit exception | same explicit exception |
 | Review disposition | implementation-author scope audit; no independent human review claimed | same shared disposition | same shared disposition |
 
 No issue will close based solely on host decoding, a design record, a compile

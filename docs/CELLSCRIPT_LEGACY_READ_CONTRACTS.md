@@ -1,6 +1,8 @@
 # Legacy read contracts and migration
 
-Status: implemented compatibility boundaries; final v129 integration gates pending.
+Status: implemented compatibility boundaries in 0.33.0-alpha.1. The
+[alpha receipt](CELLSCRIPT_BOUNDED_RUNTIME_ADMISSION.md#final-validation-receipt)
+records completed compiler tests and the explicit full-gate exception.
 The return type `Hash` describes a 32-byte value representation. It does not
 establish that an operation hashed its input.
 

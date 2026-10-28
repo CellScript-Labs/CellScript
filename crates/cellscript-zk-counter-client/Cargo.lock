@@ -580,7 +580,7 @@ dependencies = [
 
 [[package]]
 name = "cellscript"
-version = "0.31.0"
+version = "0.33.0-alpha.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -610,7 +610,7 @@ dependencies = [
 
 [[package]]
 name = "cellscript-artifact-checker"
-version = "0.31.0"
+version = "0.33.0-alpha.1"
 dependencies = [
  "blake2b_simd",
  "clap",
@@ -620,7 +620,7 @@ dependencies = [
 
 [[package]]
 name = "cellscript-ckb-adapter"
-version = "0.31.0"
+version = "0.33.0-alpha.1"
 dependencies = [
  "anyhow",
  "cellscript-artifact-checker",

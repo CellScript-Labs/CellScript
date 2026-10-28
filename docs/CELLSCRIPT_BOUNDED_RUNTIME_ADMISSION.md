@@ -1,7 +1,8 @@
 # Bounded runtime admission review
 
-**Status: candidate implementation; final identified-source backend/dev/ci gates
-are pending. Issues #47, #48 and #49 remain open.**
+**Status: initial bounded profile published as 0.33.0-alpha.1 under the
+maintainer's explicit integration-test-only publication decision. Stable API
+admission and full backend/dev/ci gates are not claimed.**
 
 Review date: 2026-10-27. Review disposition: implementation-author scope and
 evidence audit. No independent human review, inherited waiver, release acceptance
@@ -10,7 +11,7 @@ unchanged. This record supersedes the blanket-blocker status in earlier progress
 entries in the [foundations history](CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md);
 those entries describe the evidence available at each implementation step.
 
-## Candidate decision and boundaries
+## Alpha decision and boundaries
 
 Admit the existing bounded profile through the strict executable-surface policy,
 without the four unconditional `*-artifact-proof` flags. Retain all nominal,
@@ -101,6 +102,31 @@ all permitted programs. Full-maximum collection reservation exceeded existing
 small-case ceilings and was rejected rather than accommodated by raising budgets.
 
 ## Final validation receipt
+
+On 2026-10-28, compiler unit/integration/doc test coverage completed across the
+initial run and an unchanged-source continuation on
+signed source `309eb23e5efd4276f4ac902d4979e43ca3e2ef01` with a clean worktree.
+The [machine-readable receipt](reports/bounded-runtime-v129-alpha-tests.json)
+records every command, exit status, suite total and complete-log digest. The
+initial temporary-filesystem quota failure and its successful exact retry are
+both retained; they are not rewritten as a single successful invocation.
+Version-only packaging and documentation follow that tested implementation;
+they are not misrepresented as the source of this earlier run.
+
+The maintainer explicitly authorized `v0.33.0-alpha.1` publication after these
+tests and instructed that CI and peripheral review be skipped. The backend
+remainder and queued dev/ci gates were cancelled. None is marked passed.
+The #47–#49 implementation scope is closed for this alpha, with stable API
+freeze and complete-gate acceptance deferred. Historical acceptance checklists
+must preserve this exception rather than asserting all original conditions ran.
+No independent human review, production equivalence or deployment is claimed.
+See the [alpha release notes](releases/CELLSCRIPT_0_33_ALPHA_1_RELEASE_NOTES.md).
+
+## Historical validation attempts and focused repairs
+
+The pending and failed records below describe earlier attempts. Their results
+are retained; the limited alpha publication decision above supersedes the
+previous plan to wait for all three full gates.
 
 The identified-source backend run on signed
 `eb1c1fc767614c3f9d8b6a45548a2a9191a13424` passed 1,095 compiler unit tests,
