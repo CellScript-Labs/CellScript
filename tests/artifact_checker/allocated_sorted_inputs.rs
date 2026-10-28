@@ -26,10 +26,13 @@ action inspect({params}witness query: {key}, witness skip: bool) -> u64 {{
     )
 }
 
-fn compile_fixture(source: &str, opt_level: u8) -> Fixture {
+fn compile_fixture(source: &str, diagnostics: cellscript::CompilerDiagnostics) -> Fixture {
     Fixture::from_result(
-        compile(source, CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
-            .unwrap(),
+        compile(
+            source,
+            CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+        )
+        .unwrap(),
     )
 }
 
@@ -52,10 +55,10 @@ fn sorted_inputs_bind_typed_slots_counts_members_and_complete_preparation() {
     {
         for count in [0, 1, 4, 1024] {
             let bytes = if count <= 1 { 512 } else { 65536 };
-            for opt_level in [0, 3] {
-                let valid = compile_fixture(&source(key, value, count, bytes), opt_level);
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+                let valid = compile_fixture(&source(key, value, count, bytes), diagnostics);
                 let ranges = sorted_ranges(&valid);
-                assert_eq!(ranges.len(), usize::from(count != 0), "{key}/{value:?}/{count}/O{opt_level}");
+                assert_eq!(ranges.len(), usize::from(count != 0), "{key}/{value:?}/{count}/{diagnostics}");
                 for (label, _, start, end) in ranges {
                     let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
                     for instruction in elf.instructions.iter().filter(|instruction| (start..end).contains(&instruction.address)) {
@@ -89,7 +92,7 @@ fn sorted_inputs_bind_typed_slots_counts_members_and_complete_preparation() {
                         changed.rebind_sidecars();
                         assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
                     }
-                    if count == 1 && opt_level == 0 {
+                    if count == 1 && !diagnostics.is_standard() {
                         let branch = elf
                             .instructions
                             .iter()
@@ -114,10 +117,10 @@ fn sorted_input_substitution_changes_vm_result_and_rebound_artifact_rejects() {
     use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
     for (key, value) in [("u8", None), ("u64", None), ("u64", Some("u64"))] {
         for count in [1, 3] {
-            for opt_level in [0, 3] {
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let compiled = compile(
                     &source(key, value, count, 512),
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap();
                 let encode = |base: u64| {
@@ -186,7 +189,7 @@ fn sorted_input_substitution_changes_vm_result_and_rebound_artifact_rejects() {
                 let execute = |artifact: &[u8]| {
                     ckb_script_runner::execute_cellscript_script(cellscript::strip_vm_abi_trailer(artifact), &transaction)
                 };
-                assert_eq!(execute(&valid.artifact).exit_code, 0, "{key}/{value:?}/{count}/O{opt_level}");
+                assert_eq!(execute(&valid.artifact).exit_code, 0, "{key}/{value:?}/{count}/{diagnostics}");
                 assert_eq!(execute(&changed.artifact).exit_code, 5);
                 assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
             }
@@ -209,7 +212,7 @@ action inspect(witness input: [u8; 8]) -> u64 {
     return 0
 }"#;
     for holder in ["let mut holder = (input, 7)", "let holder = make(input)"] {
-        for opt in [0, 3] {
+        for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = compile_fixture(&template.replace("HOLDER", holder), opt);
             let (_, _, start, end) = sorted_ranges(&valid).remove(0);
             let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();

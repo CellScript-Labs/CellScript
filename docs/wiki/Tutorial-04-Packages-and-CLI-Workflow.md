@@ -379,6 +379,11 @@ cellc doc --json
 Generated docs summarize modules, actions, resources, receipts, locks,
 flow rules, and lowering metadata.
 
+Normal builds use one compilation strategy, including release builds. There are no
+optimization levels or compatibility aliases for the removed controls. Inspect the
+actual ELF and code hash for every compiler upgrade. Compiler developers can isolate
+optional passes through the internal diagnostic API; this is not a deployment profile.
+
 ## Audit And Evidence Reports
 
 When a package is ready for review, ask the compiler for the facts it already
@@ -390,7 +395,6 @@ cellc expand . --target riscv64-elf --target-profile ckb --json -o build/main.se
 cellc constraints . --target riscv64-elf --target-profile ckb -o build/main.constraints.json
 cellc abi . --target-profile ckb
 cellc scheduler-plan . --target-profile ckb --json
-cellc opt-report . --target riscv64-elf --target-profile ckb --json
 ```
 
 `cellc expand` exposes the canonical semantic foundation used by the 0.26b

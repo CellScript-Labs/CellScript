@@ -1,0 +1,16 @@
+version = 5
+schema = "cellscript-lock-v0.30-single-package-coordinate-v1"
+resolver_model = "single-package-coordinate-v1"
+
+[package]
+edition = "2026"
+name = "shared"
+version = "1.0.0"
+source_hash = "633446b02842d17f8096b019804d29bfb1e68b23c1223bd8ac251b02b4140670"
+compiler_requirement = ">=0.33.0-alpha.1"
+resolver_compiler_version = "0.33.0-alpha.1"
+
+[root]
+manifest_digest = "sha256:09087a67df65d6f5df06a8de702b5fa80d7d5b9297accfc7c6cde10e9c4a5dd6"
+
+[dependencies]

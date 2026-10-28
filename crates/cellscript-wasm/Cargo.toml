@@ -14,9 +14,9 @@ crate-type = ["cdylib", "rlib"]
 # Forwards to the cellscript dependency's wasm feature, which gates
 # out the cli/lsp/native modules.
 wasm = ["cellscript/wasm"]
-# The website keeps semantic completion/hover in the native VS Code extension
-# so the metadata compiler stays within its 600 KB gzip budget. Consumers that
-# accept the larger bundle may opt into the browser language service.
+# The default website keeps semantic completion/hover in the native VS Code
+# extension. Consumers may opt into the browser language service separately;
+# the canonical browser build has a 1500 KiB gzip budget.
 language-service = []
 
 [dependencies]

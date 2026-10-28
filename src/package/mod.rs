@@ -294,6 +294,7 @@ fn default_any_version() -> String {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BuildConfig {
     #[serde(default)]
     pub script: Option<String>,
@@ -4066,6 +4067,7 @@ actions = [{ tag = 10, action = "mint" }, { tag = 20, action = "burn" }]
         let missing = toml::from_str::<PackageManifest>(
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -4076,6 +4078,7 @@ version = "0.1.0"
         let unsupported = toml::from_str::<PackageManifest>(
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "unsupported"
 name = "demo"
 version = "0.1.0"
@@ -4088,6 +4091,7 @@ version = "0.1.0"
         let preview = toml::from_str::<PackageManifest>(
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2027"
 name = "demo"
 version = "0.1.0"
@@ -4146,6 +4150,7 @@ cellscript_version = ">=999.0.0"
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "1.0.0"
@@ -4159,6 +4164,7 @@ path = "deps/middle"
             root.join("deps/middle/Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "middle"
 version = "1.0.0"
@@ -4219,6 +4225,7 @@ cellscript_version = ">=999.0.0"
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "1.0.0"
@@ -4255,6 +4262,7 @@ path = "deps/future_b"
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "1.0.0"
@@ -4303,6 +4311,7 @@ path = "deps/shared"
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "1.0.0"
@@ -4326,7 +4335,7 @@ path = "deps/second"
             namespace: None,
             source_hash: Some(registry::compute_source_hash(root).unwrap()),
             compiler_source_hash: None,
-            compiler_requirement: "*".to_string(),
+            compiler_requirement: format!(">={}", crate::VERSION),
             resolver_compiler_version: crate::VERSION.to_string(),
         };
         lockfile.root.manifest_digest = compute_manifest_digest(root).unwrap();
@@ -4343,7 +4352,7 @@ path = "deps/second"
                 namespace: Some("cellscript".to_string()),
                 source_hash: Some(registry::compute_source_hash(&package_root).unwrap()),
                 manifest_digest: manifest_digest(&manifest),
-                compiler_requirement: "*".to_string(),
+                compiler_requirement: format!(">={}", crate::VERSION),
             };
             let node_id = package_node_id(&package, &ResolutionOptions::default(), None);
             lockfile.root.dependencies.insert(alias.to_string(), node_id.clone());
@@ -4390,6 +4399,7 @@ path = "deps/second"
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "1.0.0"
@@ -4498,6 +4508,7 @@ path = "deps/beta"
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "1.0.0"
@@ -4529,7 +4540,7 @@ path = "deps/right"
         let dependency_manifest = root.join("deps/math/Cell.toml");
         let dependency_source = std::fs::read_to_string(&dependency_manifest)
             .unwrap()
-            .replace("version = \"1.2.3\"", "version = \"1.2.3\"\ncellscript_version = \">=0.16\"");
+            .replace("cellscript_version = \">=0.33.0-alpha.1\"", "cellscript_version = \">=0.16, >=0.33.0-alpha.1\"");
         std::fs::write(&dependency_manifest, dependency_source).unwrap();
         std::fs::write(
             root.join("Cell.toml"),
@@ -4538,7 +4549,7 @@ path = "deps/right"
 edition = "2026"
 name = "app"
 version = "1.0.0"
-cellscript_version = ">=0.20"
+cellscript_version = ">=0.20, >=0.33.0-alpha.1"
 
 [dependencies.math]
 path = "deps/math"
@@ -4549,18 +4560,22 @@ version = "1.2.3"
 
         write_test_lock(root, &ResolutionOptions::default());
         let mut lockfile = Lockfile::read_from_root(root).unwrap().unwrap();
-        assert_eq!(lockfile.package.compiler_requirement, ">=0.20");
+        assert_eq!(lockfile.package.compiler_requirement, ">=0.20, >=0.33.0-alpha.1");
         assert_eq!(lockfile.package.resolver_compiler_version, crate::VERSION);
         let node = lockfile.root.dependencies.get("math").unwrap().clone();
         assert!(node.contains("compiler=3e3d302e3136"), "{node}");
         let dependency = lockfile.dependencies.get(&node).unwrap();
-        assert_eq!(dependency.compiler_requirement, ">=0.16");
+        assert_eq!(dependency.compiler_requirement, ">=0.16, >=0.33.0-alpha.1");
         assert_eq!(dependency.resolver_compiler_version, crate::VERSION);
 
         lockfile.dependencies.get_mut(&node).unwrap().compiler_requirement = "*".to_string();
         lockfile.write_to_root(root).unwrap();
         let error = PackageManager::new(root).resolve_locked_dependencies(&ResolutionOptions::default()).unwrap_err();
-        assert!(error.message.contains("compiler requirement '*' does not match Cell.toml '>=0.16'"), "{}", error.message);
+        assert!(
+            error.message.contains("compiler requirement '*' does not match Cell.toml '>=0.16, >=0.33.0-alpha.1'"),
+            "{}",
+            error.message
+        );
     }
 
     #[test]
@@ -4572,6 +4587,7 @@ version = "1.2.3"
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "1.0.0"
@@ -4587,7 +4603,7 @@ version = "1.2.3"
         let dependency_manifest = root.join("deps/math/Cell.toml");
         let future_manifest = std::fs::read_to_string(&dependency_manifest)
             .unwrap()
-            .replace("version = \"1.2.3\"", "version = \"1.2.3\"\ncellscript_version = \">=999.0.0\"");
+            .replace("cellscript_version = \">=0.33.0-alpha.1\"", "cellscript_version = \">=999.0.0\"");
         std::fs::write(&dependency_manifest, future_manifest).unwrap();
         std::fs::write(root.join("deps/math/src/lib.cell"), "this source must not be parsed").unwrap();
 
@@ -4687,6 +4703,7 @@ version = "1.2.3"
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "0.1.0"
@@ -4701,6 +4718,7 @@ path = "deps/math"
             root.join("deps/math/Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "math"
 version = "0.1.0"
@@ -4730,6 +4748,7 @@ version = "0.1.0"
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "0.1.0"
@@ -4743,6 +4762,7 @@ path = "deps/math"
             root.join("deps/math/Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "math"
 version = "0.2.0"
@@ -4768,6 +4788,7 @@ version = "0.2.0"
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "0.1.0"
@@ -4782,6 +4803,7 @@ path = "deps/math"
             root.join("deps/math/Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "math"
 version = "0.1.0"
@@ -4796,6 +4818,7 @@ path = "../util"
             root.join("deps/util/Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "util"
 version = "0.1.0"
@@ -4822,6 +4845,7 @@ version = "0.1.0"
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "0.1.0"
@@ -4835,6 +4859,7 @@ path = "deps/a"
             root.join("deps/a/Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "a"
 version = "0.1.0"
@@ -4848,6 +4873,7 @@ path = "../b"
             root.join("deps/b/Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "b"
 version = "0.1.0"
@@ -4889,7 +4915,7 @@ path = "../a"
         std::fs::create_dir_all(package.join("src")).unwrap();
         std::fs::write(
             package.join("Cell.toml"),
-            format!("[package]\nedition = \"2026\"\nname = \"{name}\"\nversion = \"{version}\"\n"),
+            format!("[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"{name}\"\nversion = \"{version}\"\n"),
         )
         .unwrap();
         std::fs::write(package.join("src/lib.cell"), format!("module {name};\n")).unwrap();
@@ -4904,6 +4930,7 @@ path = "../a"
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "0.1.0"
@@ -4971,6 +4998,7 @@ version = "^1.2.0"
             format!(
                 r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "0.1.0"
@@ -5023,6 +5051,7 @@ resolver = "local"
             format!(
                 r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "0.1.0"
@@ -5081,7 +5110,7 @@ branch = "main"
         let manifest_path = dependency_repo.join("Cell.toml");
         let manifest = std::fs::read_to_string(&manifest_path)
             .unwrap()
-            .replace("version = \"1.0.0\"", "version = \"1.0.0\"\ncellscript_version = \">=999.0.0\"");
+            .replace("cellscript_version = \">=0.33.0-alpha.1\"", "cellscript_version = \">=999.0.0\"");
         std::fs::write(&manifest_path, manifest).unwrap();
         std::fs::write(dependency_repo.join("src/lib.cell"), "this source must not be parsed").unwrap();
         for arguments in [
@@ -5100,6 +5129,7 @@ branch = "main"
             format!(
                 r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "1.0.0"
@@ -5134,6 +5164,7 @@ git = "{}"
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "0.1.0"
@@ -5190,6 +5221,7 @@ extended = ["dep:extra"]
             format!(
                 r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "0.1.0"
@@ -5265,7 +5297,7 @@ path = "deps/testnet"
         std::fs::write(
             root.join("deps/common/Cell.toml"),
             format!(
-                "[package]\nedition = \"2026\"\nname = \"common\"\nversion = \"1.0.0\"\n\n[environments.live]\nchain_id = \"ckb\"\ngenesis_hash = \"0x{genesis}\"\n"
+                "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"common\"\nversion = \"1.0.0\"\n\n[environments.live]\nchain_id = \"ckb\"\ngenesis_hash = \"0x{genesis}\"\n"
             ),
         )
         .unwrap();
@@ -5273,7 +5305,7 @@ path = "deps/testnet"
             std::fs::write(
                 root.join(relative).join("Cell.toml"),
                 format!(
-                    "[package]\nedition = \"2026\"\nname = \"{name}\"\nversion = \"1.0.0\"\n\n[dependencies.common]\npath = \"../common\"\n\n[environments.{local_environment}]\nchain_id = \"ckb\"\ngenesis_hash = \"0x{genesis}\"\n"
+                    "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"{name}\"\nversion = \"1.0.0\"\n\n[dependencies.common]\npath = \"../common\"\n\n[environments.{local_environment}]\nchain_id = \"ckb\"\ngenesis_hash = \"0x{genesis}\"\n"
                 ),
             )
             .unwrap();
@@ -5281,7 +5313,7 @@ path = "deps/testnet"
         std::fs::write(
             root.join("Cell.toml"),
             format!(
-                "[package]\nedition = \"2026\"\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies.left]\npath = \"deps/left\"\nuse_environment = \"production\"\n\n[dependencies.right]\npath = \"deps/right\"\n\n[environments.mainnet]\nchain_id = \"ckb\"\ngenesis_hash = \"0x{genesis}\"\n"
+                "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies.left]\npath = \"deps/left\"\nuse_environment = \"production\"\n\n[dependencies.right]\npath = \"deps/right\"\n\n[environments.mainnet]\nchain_id = \"ckb\"\ngenesis_hash = \"0x{genesis}\"\n"
             ),
         )
         .unwrap();
@@ -5319,7 +5351,7 @@ path = "deps/testnet"
         std::fs::write(
             root.join("deps/child/Cell.toml"),
             format!(
-                "[package]\nedition = \"2026\"\nname = \"child\"\nversion = \"1.0.0\"\n\n[dependencies.base]\npath = \"../base\"\n\n[environments.mainnet]\nchain_id = \"ckb\"\ngenesis_hash = \"0x{}\"\n\n[dependency_overrides.mainnet.base]\npath = \"../alternate\"\n",
+                "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"child\"\nversion = \"1.0.0\"\n\n[dependencies.base]\npath = \"../base\"\n\n[environments.mainnet]\nchain_id = \"ckb\"\ngenesis_hash = \"0x{}\"\n\n[dependency_overrides.mainnet.base]\npath = \"../alternate\"\n",
                 "22".repeat(32)
             ),
         )
@@ -5327,7 +5359,7 @@ path = "deps/testnet"
         std::fs::write(
             root.join("Cell.toml"),
             format!(
-                "[package]\nedition = \"2026\"\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies.child]\npath = \"deps/child\"\n\n[environments.mainnet]\nchain_id = \"ckb\"\ngenesis_hash = \"0x{}\"\n",
+                "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies.child]\npath = \"deps/child\"\n\n[environments.mainnet]\nchain_id = \"ckb\"\ngenesis_hash = \"0x{}\"\n",
                 "11".repeat(32)
             ),
         )
@@ -5339,7 +5371,7 @@ path = "deps/testnet"
         std::fs::write(
             root.join("deps/child/Cell.toml"),
             format!(
-                "[package]\nedition = \"2026\"\nname = \"child\"\nversion = \"1.0.0\"\n\n[dependencies.base]\npath = \"../base\"\n\n[environments.mainnet]\nchain_id = \"ckb-fork\"\ngenesis_hash = \"0x{}\"\n\n[dependency_overrides.mainnet.base]\npath = \"../alternate\"\n",
+                "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"child\"\nversion = \"1.0.0\"\n\n[dependencies.base]\npath = \"../base\"\n\n[environments.mainnet]\nchain_id = \"ckb-fork\"\ngenesis_hash = \"0x{}\"\n\n[dependency_overrides.mainnet.base]\npath = \"../alternate\"\n",
                 "11".repeat(32)
             ),
         )
@@ -5350,7 +5382,7 @@ path = "deps/testnet"
         std::fs::write(
             root.join("deps/child/Cell.toml"),
             format!(
-                "[package]\nedition = \"2026\"\nname = \"child\"\nversion = \"1.0.0\"\n\n[environments.one]\nchain_id = \"ckb\"\ngenesis_hash = \"0x{0}\"\n\n[environments.two]\nchain_id = \"ckb\"\ngenesis_hash = \"0x{0}\"\n",
+                "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"child\"\nversion = \"1.0.0\"\n\n[environments.one]\nchain_id = \"ckb\"\ngenesis_hash = \"0x{0}\"\n\n[environments.two]\nchain_id = \"ckb\"\ngenesis_hash = \"0x{0}\"\n",
                 "11".repeat(32)
             ),
         )
@@ -5369,7 +5401,7 @@ path = "deps/testnet"
         std::fs::write(
             root.join("deps/child/Cell.toml"),
             format!(
-                "[package]\nedition = \"2026\"\nname = \"child\"\nversion = \"1.0.0\"\n\n[dependencies.base]\npath = \"../base\"\n\n[environments.foreign]\nchain_id = \"ckb-fork\"\ngenesis_hash = \"0x{}\"\n\n[dependency_overrides.foreign.base]\npath = \"../alternate\"\n",
+                "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"child\"\nversion = \"1.0.0\"\n\n[dependencies.base]\npath = \"../base\"\n\n[environments.foreign]\nchain_id = \"ckb-fork\"\ngenesis_hash = \"0x{}\"\n\n[dependency_overrides.foreign.base]\npath = \"../alternate\"\n",
                 "22".repeat(32)
             ),
         )
@@ -5377,7 +5409,7 @@ path = "deps/testnet"
         std::fs::write(
             root.join("Cell.toml"),
             format!(
-                "[package]\nedition = \"2026\"\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies.child]\npath = \"deps/child\"\nenvironment_independent = true\n\n[environments.mainnet]\nchain_id = \"ckb\"\ngenesis_hash = \"0x{}\"\n",
+                "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies.child]\npath = \"deps/child\"\nenvironment_independent = true\n\n[environments.mainnet]\nchain_id = \"ckb\"\ngenesis_hash = \"0x{}\"\n",
                 "11".repeat(32)
             ),
         )
@@ -5399,14 +5431,14 @@ path = "deps/testnet"
         std::fs::write(
             root.join("deps/child/Cell.toml"),
             format!(
-                "[package]\nedition = \"2026\"\nname = \"child\"\nversion = \"1.0.0\"\n\n[environments.production]\nchain_id = \"ckb\"\ngenesis_hash = \"0x{genesis}\"\n"
+                "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"child\"\nversion = \"1.0.0\"\n\n[environments.production]\nchain_id = \"ckb\"\ngenesis_hash = \"0x{genesis}\"\n"
             ),
         )
         .unwrap();
         std::fs::write(
             root.join("Cell.toml"),
             format!(
-                "[package]\nedition = \"2026\"\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies.child]\npath = \"deps/child\"\n\n[environments.mainnet]\nchain_id = \"ckb\"\ngenesis_hash = \"0x{genesis}\"\n"
+                "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies.child]\npath = \"deps/child\"\n\n[environments.mainnet]\nchain_id = \"ckb\"\ngenesis_hash = \"0x{genesis}\"\n"
             ),
         )
         .unwrap();
@@ -5417,7 +5449,7 @@ path = "deps/testnet"
         std::fs::write(
             root.join("deps/child/Cell.toml"),
             format!(
-                "[package]\nedition = \"2026\"\nname = \"child\"\nversion = \"1.0.0\"\n\n[environments.renamed]\nchain_id = \"ckb\"\ngenesis_hash = \"0x{genesis}\"\n"
+                "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"child\"\nversion = \"1.0.0\"\n\n[environments.renamed]\nchain_id = \"ckb\"\ngenesis_hash = \"0x{genesis}\"\n"
             ),
         )
         .unwrap();
@@ -5453,7 +5485,7 @@ path = "deps/testnet"
         std::fs::write(
             owner.join("Cell.toml"),
             format!(
-                "[package]\nedition = \"2026\"\nname = \"owner\"\nversion = \"1.0.0\"\n\n[resolvers.local]\ncommand = \"{}\"\nsha256 = \"sha256:{digest}\"\n\n[dependencies.math]\nversion = \"^1.2.0\"\nresolver = \"local\"\n",
+                "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"owner\"\nversion = \"1.0.0\"\n\n[resolvers.local]\ncommand = \"{}\"\nsha256 = \"sha256:{digest}\"\n\n[dependencies.math]\nversion = \"^1.2.0\"\nresolver = \"local\"\n",
                 resolver_path.display()
             ),
         )
@@ -5487,6 +5519,7 @@ path = "deps/testnet"
         let manifest: PackageManifest = toml::from_str(
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "0.1.0"
@@ -5507,6 +5540,7 @@ codegen = "1.0.0"
         let manifest: PackageManifest = toml::from_str(
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "0.1.0"
@@ -5555,6 +5589,7 @@ path = "deps/math"
         let manifest: PackageManifest = toml::from_str(
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "0.1.0"
@@ -5566,6 +5601,7 @@ path = "deps/math"
         )
         .unwrap();
         let mut lockfile = Lockfile::new();
+        lockfile.package.compiler_requirement = manifest.package.cellscript_version.clone();
         lockfile.root.dependencies.insert("math".to_string(), "math-node".to_string());
         let math_edges = BTreeMap::from([("util".to_string(), "util-node".to_string())]);
         lockfile.dependencies.insert("math-node".to_string(), locked_path("math", "0.1.0", "deps/math", math_edges.clone()));
@@ -5658,6 +5694,7 @@ schema = "cellscript-lock-v0.24-graph-v1"
 resolver_model = "legacy"
 
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 
 [root]
@@ -5679,6 +5716,7 @@ edition = "2026"
             temp.path().join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "0.1.0"
@@ -5704,6 +5742,7 @@ remote = "1.2.3"
             temp.path().join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "0.1.0"
@@ -5801,6 +5840,7 @@ rev = "abc123"
 version = 1
 
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "token"
 version = "0.3.0"
@@ -5827,6 +5867,7 @@ version = 2
 schema = "cellscript-deployed-v0.23-edition-2026"
 
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "token"
 version = "0.3.0"

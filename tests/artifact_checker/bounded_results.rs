@@ -32,11 +32,11 @@ action inspect() -> u64 {{
     return 0
 }}"#
         );
-        for opt_level in [0, 3] {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -59,7 +59,7 @@ action inspect() -> u64 {{
             zeroed.replace_machine_word(combine.address, ((combine.word >> 7 & 31) << 7) | 0x13);
             use ckb_testtool::ckb_types::bytes::Bytes;
             let transaction = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
-            assert_eq!(ckb_script_runner::execute_cellscript_script(&valid.artifact, &transaction).exit_code, 0, "{ty}/O{opt_level}");
+            assert_eq!(ckb_script_runner::execute_cellscript_script(&valid.artifact, &transaction).exit_code, 0, "{ty}/{diagnostics}");
             assert_ne!(ckb_script_runner::execute_cellscript_script(&zeroed.artifact, &transaction).exit_code, 0);
             assert_code(&zeroed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
             let begin = valid
@@ -115,11 +115,11 @@ action inspect() -> u64 {
     require read(&work) == 2
     return 0
 }"#;
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -192,10 +192,10 @@ action inspect(witness index: u64, witness delta: u64) -> u64 {
     require twice(index, delta) == 9
     return 0
 }"#;
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile(
             source,
-            CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
         )
         .unwrap();
         let payload = compiled.metadata.actions[0]
@@ -242,7 +242,7 @@ action inspect(witness index: u64, witness delta: u64) -> u64 {
                     && valid.record.blocks.iter().any(|block| block.owner_entry == wrapper.id && block.range.contains(edge.address))
             })
             .collect::<Vec<_>>();
-        assert_eq!(calls.len(), 2, "both reads survive at O{opt_level}");
+        assert_eq!(calls.len(), 2, "both reads survive at {diagnostics}");
         for call in calls {
             let store = elf.instructions.iter().find(|instruction| instruction.address == call.address + 4).unwrap();
             assert_eq!(store.word & 0x01fff07f, (10 << 20) | (2 << 15) | (3 << 12) | 0x23);
@@ -287,12 +287,12 @@ action inspect(witness skip: bool, witness messages: Messages) -> u64 {{
     return 0
 }}"#
             );
-            for opt_level in [0, 3] {
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let compiled = compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
-                .unwrap_or_else(|error| panic!("{ty}/{padding}/O{opt_level}: {error}"));
+                .unwrap_or_else(|error| panic!("{ty}/{padding}/{diagnostics}: {error}"));
                 use cellscript::EntryWitnessArg as A;
                 use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
                 let messages = [15u32.to_le_bytes().as_slice(), &8u32.to_le_bytes(), &3u32.to_le_bytes(), &[1, 2, 3]].concat();
@@ -323,7 +323,7 @@ action inspect(witness skip: bool, witness messages: Messages) -> u64 {{
                 assert_ne!(
                     ckb_script_runner::execute_cellscript_script(&zeroed.artifact, &transaction).exit_code,
                     0,
-                    "zeroed result {ty}/{padding}/O{opt_level}"
+                    "zeroed result {ty}/{padding}/{diagnostics}"
                 );
                 let mut redirected = valid.clone();
                 redirected.replace_machine_word(store.address, store.word ^ (8 << 7));
@@ -361,11 +361,11 @@ fn bounded_call_results_cover_all_six_scalar_types() {
         fn barrier(view: InputView<Token>) -> u64 {{ return view.data.amount }}\n\
         action inspect() -> u64 {{ verification\nlet view = ckb::input<Token>(0)\n{checks}\nreturn 0 }}"
     );
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(
                 &source,
-                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -388,7 +388,7 @@ fn bounded_call_results_cover_all_six_scalar_types() {
             assert_ne!(
                 ckb_script_runner::execute_cellscript_script(&zeroed.artifact, &transaction).exit_code,
                 0,
-                "zeroed result {ty}/O{opt_level}"
+                "zeroed result {ty}/{diagnostics}"
             );
         }
     }

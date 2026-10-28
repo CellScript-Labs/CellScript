@@ -986,7 +986,7 @@ fn locked_build_info(metadata: &CompileMetadata) -> Result<LockedBuildInfo> {
         metadata_hash: Some(ckb_hash(metadata)?),
         schema_hash: Some(metadata.molecule_schema_manifest.manifest_hash.clone()),
         cell_data_codec_manifest_hash: Some(metadata.cell_data_codec_manifest.manifest_hash.clone()),
-        abi_hash: Some(crate::script_handle::compile_metadata_abi_hash(metadata)?),
+        abi_hash: Some(crate::metadata_abi::compile_metadata_abi_hash(metadata)?),
         constraints_hash: Some(ckb_hash(&metadata.constraints)?),
     })
 }

@@ -6,11 +6,11 @@ resolver_model = "single-package-coordinate-v1"
 edition = "2026"
 name = "spore-identity-adapter"
 version = "0.1.0"
-source_hash = "dde328d2a240144d0bf38f17fc2ab7bacf6c7bcd8d153adaace02e11801e97bf"
-compiler_requirement = "*"
-resolver_compiler_version = "0.26.0"
+source_hash = "8a0e3936a91f59325bcdc43bf90f40f425733b36cd6dade0cc07a5c0851ae0cd"
+compiler_requirement = ">=0.33.0-alpha.1"
+resolver_compiler_version = "0.33.0-alpha.1"
 
 [root]
-manifest_digest = "sha256:b90a106e1761fcce0e3c62fffe787624635d6cd67e81cbe2a19992cdb496a17d"
+manifest_digest = "sha256:746369e8dbeb26036e01c5eca7b1ee98d3692d773f6484e85933841d9b1ec09a"
 
 [dependencies]

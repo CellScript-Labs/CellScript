@@ -44,9 +44,6 @@ struct Cli {
     #[arg(value_name = "INPUT")]
     input: Option<String>,
 
-    #[arg(short = 'O', long, default_value = "0")]
-    opt: u8,
-
     #[arg(short, long, value_name = "FILE")]
     output: Option<String>,
 
@@ -199,12 +196,6 @@ fn main() {
         return;
     }
 
-    if cli.opt > 3 {
-        let error =
-            CompileError::without_span("optimization level must be between 0 and 3").with_category(CompileErrorCategory::Usage);
-        terminate_cli_error(&error, message_format, None, None);
-    }
-
     let input_file = cli.input.unwrap_or_else(|| ".".to_string());
     let resolved_input = match resolve_input_path(Utf8Path::new(&input_file)) {
         Ok(path) => path,
@@ -283,7 +274,7 @@ fn main() {
     let options = CompileOptions {
         source_contracts: false,
         edition: cellscript::CURRENT_EDITION,
-        opt_level: cli.opt,
+        diagnostics: cellscript::CompilerDiagnostics::default(),
         output: output.clone(),
         debug: cli.debug,
         target: cli.target,
@@ -806,7 +797,6 @@ fn print_top_level_help() {
         print_command_row(command.get_name(), &about);
     }
     println!("\nDirect options:");
-    println!("  -O, --opt <OPT>                  Optimization level 0..3 [default: 0]");
     println!("  -o, --output <FILE>              Write artifact to FILE");
     println!("  -d, --debug                      Include debug metadata where supported");
     println!("  -t, --target <TARGET>            Target: riscv64-asm or riscv64-elf");

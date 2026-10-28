@@ -2,10 +2,9 @@ use super::*;
 
 #[test]
 fn bounded_cell_read_helpers_reject_rebound_capacity_length_and_pointer_mutations() {
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for (call, name, capacity_word, guard_kind, guard_registers, output_word) in [
             ("ckb::cell_data_hash_field(source::input(0))", "__ckb_cell_data_hash_field", 0x02000293, 0x1063, (7, 0), 0x02813f83),
-            ("ckb::cell_data_hash(source::input(0))", "__ckb_cell_data_hash", 0x20000293, 0x6063, (5, 11), 0x20813603),
             ("ckb::cell_data_bytes32(source::input(0), 7)", "__ckb_cell_data_bytes32", 0x02000293, 0x6063, (7, 6), 0x00813503),
         ] {
             let source =
@@ -13,7 +12,7 @@ fn bounded_cell_read_helpers_reject_rebound_capacity_length_and_pointer_mutation
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -53,7 +52,7 @@ fn bounded_cell_read_helpers_reject_rebound_capacity_length_and_pointer_mutation
             for (address, word) in mutations {
                 let mut rebound = valid.clone();
                 rebound.replace_machine_words(&[(address, word)]);
-                assert!(rebound.check().is_err(), "{name} mutation at {address:#x}, O{opt_level}");
+                assert!(rebound.check().is_err(), "{name} mutation at {address:#x}, {diagnostics}");
             }
         }
     }
@@ -66,11 +65,11 @@ fn bounded_large_incoming_arguments_reject_rebound_load_offsets() {
     let source = format!(
         "module large_incoming_args\ncollections Work {{ limits {{ bytes: 128, allocations: 1 }}\nvalues: Vec<u64> {{ items: 4 }} }}\nfn last({parameters}, work: &Work) -> u64 {{ return p0 + p263 + p264 + p269 + work.values.len() }}\naction inspect() -> u64 {{ let work = Work::new() require last({arguments}, &work) == 1196 return 0 }}"
     );
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(
                 &source,
-                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -97,11 +96,11 @@ fn bounded_large_incoming_arguments_reject_rebound_load_offsets() {
 
 #[test]
 fn aligned_stack_discipline_rejects_rebound_balanced_but_misaligned_frames() {
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(
                 "module stack_alignment\nfn step(value: u64) -> u64 { return value + 1 }\naction inspect(witness value: u64) -> u64 { return step(value) }",
-                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -142,28 +141,28 @@ fn inspect(view: InputView<Token>) -> bool {
     let script = view.type_script
     let point = view.out_point
     let code = lock.code_hash
-    let args = lock.args_hash
+    let args = lock.args32
     let type_code = script.code_hash
-    let type_args = script.args_hash
+    let type_args = script.args32
     let transaction = point.tx_hash
     let witness = witness::args(0)
-    let witness_lock = witness.lock
-    let witness_input = witness.input_type
-    let witness_output = witness.output_type
-    return view.capacity > 0 && code == lock.code_hash && args == lock.args_hash
-        && type_code == script.code_hash && type_args == script.args_hash
+    let witness_lock = witness::lock_exact32(witness)
+    let witness_input = witness::input_type_exact32(witness)
+    let witness_output = witness::output_type_exact32(witness)
+    return view.capacity > 0 && code == lock.code_hash && args == lock.args32
+        && type_code == script.code_hash && type_args == script.args32
         && transaction == point.tx_hash
-        && witness_lock == witness.lock && witness_input == witness.input_type
-        && witness_output == witness.output_type
+        && witness_lock == witness::lock_exact32(witness) && witness_input == witness::input_type_exact32(witness)
+        && witness_output == witness::output_type_exact32(witness)
 }
 action check() -> u64 {
     require inspect(ckb::input<Token>(0))
     return 0
 }"#;
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = cellscript::compile_with_executable_surface_policy(
             source,
-            CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             cellscript::ExecutableSurfacePolicy::DenyFailClosed,
         )
         .unwrap();
@@ -188,13 +187,13 @@ action check() -> u64 {
         for name in [
             "__ckb_cell_lock_code_hash",
             "__ckb_cell_type_code_hash",
-            "__ckb_cell_lock_args_hash",
-            "__ckb_cell_type_args_hash",
+            "__ckb_cell_lock_args32",
+            "__ckb_cell_type_args32",
             "__ckb_input_out_point_tx_hash",
         ] {
             let owner = format!("runtime:{name}");
             let body = valid.record.blocks.iter().filter(|block| block.owner_entry == owner).collect::<Vec<_>>();
-            assert!(!body.is_empty(), "{name} must be exercised at O{opt_level}");
+            assert!(!body.is_empty(), "{name} must be exercised at {diagnostics}");
             let out_point = name == "__ckb_input_out_point_tx_hash";
             let copy_counter_limit = if out_point { 6 } else { 7 };
             let byte_source = if out_point { 29 } else { 30 };
@@ -232,7 +231,7 @@ action check() -> u64 {
         {
             let owner = format!("runtime:{name}");
             let body = valid.record.blocks.iter().filter(|block| block.owner_entry == owner).collect::<Vec<_>>();
-            assert!(!body.is_empty(), "{name} must be exercised at O{opt_level}");
+            assert!(!body.is_empty(), "{name} must be exercised at {diagnostics}");
             for (expected, bit) in [
                 // Change the resolver's requested field or maximum size.
                 ((field << 20) | (11 << 7) | 0x13, 1 << 20),
@@ -274,10 +273,10 @@ action inspect() -> u64 {
     require hashes(ckb::input<Token>(0))
     return 0
 }"#;
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = cellscript::compile_with_executable_surface_policy(
             source,
-            CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             cellscript::ExecutableSurfacePolicy::DenyFailClosed,
         )
         .unwrap();
@@ -370,13 +369,13 @@ fn complete_bounded_programs_require_machine_evidence_after_strict_admission() {
         ("byte migration", include_str!("../../examples/language/batches/nested_migration.cell"), false),
         ("record migration", include_str!("../../examples/language/batches/record_migration.cell"), false),
     ] {
-        for opt_level in [0, 3] {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = cellscript::compile_with_executable_surface_policy(
                 source,
-                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 cellscript::ExecutableSurfacePolicy::DenyFailClosed,
             )
-            .unwrap_or_else(|error| panic!("{name} O{opt_level}: {error}"));
+            .unwrap_or_else(|error| panic!("{name} {diagnostics}: {error}"));
             let valid = Fixture::from_result(compiled);
             assert_bounded_admitted(&valid);
 
@@ -389,7 +388,7 @@ fn complete_bounded_programs_require_machine_evidence_after_strict_admission() {
                 removed += labels.len();
                 labels.clear();
             }
-            assert!(removed > 0, "{name} O{opt_level} must exercise its machine evidence");
+            assert!(removed > 0, "{name} {diagnostics} must exercise its machine evidence");
             missing.rebind_sidecars();
             assert_code(&missing, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
         }
@@ -398,10 +397,10 @@ fn complete_bounded_programs_require_machine_evidence_after_strict_admission() {
 
 #[test]
 fn strict_nested_successors_still_require_complete_output_comparisons() {
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = cellscript::compile_with_executable_surface_policy(
             NESTED_CELL_CODEC_SOURCE,
-            CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             cellscript::ExecutableSurfacePolicy::DenyFailClosed,
         )
         .unwrap();
@@ -419,13 +418,13 @@ fn strict_nested_successors_still_require_complete_output_comparisons() {
 
 #[test]
 fn scalar_getter_status_and_caller_guards_reject_rebound_mutations() {
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for method in ["input_out_point_index", "input_out_point_tx_hash_low", "cell_lock_hash_low", "cell_type_hash_low"] {
             let source = format!("module scalar_status\naction inspect() -> u64 {{ let value = ckb::{method}(source::input(0)) require value == value return 0 }}");
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -453,8 +452,177 @@ fn scalar_getter_status_and_caller_guards_reject_rebound_mutations() {
             ] {
                 let mut rebound = valid.clone();
                 rebound.replace_machine_words(&[(address, word)]);
-                assert!(rebound.check().is_err(), "{method}, O{opt_level}, mutation at {address:#x}");
+                assert!(rebound.check().is_err(), "{method}, {diagnostics}, mutation at {address:#x}");
             }
         }
+    }
+}
+
+#[test]
+fn streaming_hashes_reject_rebound_bounds_source_capacity_output_and_restore_mutations() {
+    for source_kind in ["cell_data", "witness"] {
+        let source = format!("module streaming_hash_proof\naction inspect() -> u64 {{ verification\nlet value = {namespace}::{source_kind}_blake2b_span(source::input(0), 0, 600)\nrequire value == value return 0 }}", namespace = "ckb");
+        // The witness entry has its own public namespace and shorter name.
+        let source = source.replace("ckb::witness_blake2b_span", "witness::blake2b_span");
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+            let valid = Fixture::from_result(
+                compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            );
+            valid.check().unwrap();
+            let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+            let wrapper = format!("runtime:__ckb_{source_kind}_blake2b_span");
+            for (owner, expected, mask) in [
+                (wrapper.as_str(), 0x0062e063, 0x01ff_f07f), // unsigned total/offset or remaining/length check
+                (wrapper.as_str(), 0x01013703, u32::MAX),    // saved caller output loaded into a4
+                (wrapper.as_str(), 0x03813083, u32::MAX),    // saved return address
+                ("runtime:__cellscript_blake2b_transaction_span", 0x08000e13, u32::MAX), // max chunk = 128
+                ("runtime:__cellscript_blake2b_transaction_span", 0x0062e063, 0x01ff_f07f), // reported read length >= chunk
+                ("runtime:__cellscript_blake2b_transaction_span", 0x005fb023, u32::MAX), // first output store uses checked t6
+                ("runtime:__cellscript_blake2b_transaction_span", 0x18813083, u32::MAX), // restore on all exits
+            ] {
+                let ranges =
+                    valid.record.blocks.iter().filter(|block| block.owner_entry == owner).map(|block| block.range).collect::<Vec<_>>();
+                let instruction = elf
+                    .instructions
+                    .iter()
+                    .find(|word| ranges.iter().any(|range| range.contains(word.address)) && word.word & mask == expected & mask)
+                    .unwrap_or_else(|| panic!("missing {expected:#x} in {owner}"));
+                let mut changed = valid.clone();
+                changed.replace_machine_word(instruction.address, instruction.word ^ (1 << 20));
+                assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+            }
+        }
+    }
+}
+
+#[test]
+fn raw_witness_bytes_reject_rebound_capacity_length_pointer_and_syscall_mutations() {
+    let source = "module raw_witness_machine\naction inspect() -> u64 { verification\nlet bytes = witness::bytes32(source::input(0), 20)\nrequire bytes == bytes return 0 }";
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let valid = Fixture::from_result(
+            compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+        );
+        valid.check().unwrap();
+        let ranges = valid
+            .record
+            .blocks
+            .iter()
+            .filter(|block| block.owner_entry == "runtime:__ckb_witness_bytes32")
+            .map(|block| block.range)
+            .collect::<Vec<_>>();
+        let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+        for (expected, mask, bit) in [
+            (0x02000293, u32::MAX, 1 << 20),   // request size
+            (0x0062e063, 0x01fff07f, 1 << 12), // short-read rejection relation
+            (0x00813503, u32::MAX, 8 << 20),   // checked output pointer
+            (0x01813083, u32::MAX, 8 << 20),   // saved return address
+            (0x00000073, u32::MAX, 1 << 20),   // syscall
+            (0x00400f13, u32::MAX, 1 << 20),   // source decoder direct-tag boundary
+        ] {
+            let word = elf
+                .instructions
+                .iter()
+                .find(|word| ranges.iter().any(|range| range.contains(word.address)) && word.word & mask == expected & mask)
+                .unwrap();
+            let mut changed = valid.clone();
+            if expected == 0x73 {
+                changed.replace_machine_word(word.address, 0x13); // legal NOP, not an invalid instruction
+                assert!(changed.check().is_err(), "omitting the actual witness syscall must reject");
+            } else {
+                changed.replace_machine_word(word.address, word.word ^ bit);
+                assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
+            }
+        }
+    }
+}
+
+#[test]
+fn exact_witness_resolver_rejects_rebound_table_lengths_sources_owners_and_results() {
+    let source = "module witness_resolver_proof\naction inspect() -> u64 { verification\nlet bytes = witness::lock_exact32(source::input(0))\nrequire bytes == bytes return 0 }";
+    let valid =
+        Fixture::from_result(compile(source, CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() }).unwrap());
+    valid.check().unwrap();
+    let ranges = valid
+        .record
+        .blocks
+        .iter()
+        .filter(|block| block.owner_entry == "runtime:__cellscript_witness_bounded_resolve")
+        .map(|block| block.range)
+        .collect::<Vec<_>>();
+    let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+    for (expected, mask, bit) in [
+        (0x01000313, u32::MAX, 1 << 20),   // canonical header size
+        (0x00300293, u32::MAX, 1 << 20),   // owner/source limits and allowed syscall status
+        (0x01df6063, 0x01fff07f, 1 << 12), // selected offsets must be monotonically ordered
+        (0x01f2e063, 0x01fff07f, 1 << 12), // field end <= immutable witness total
+        (0x00731063, 0x01fff07f, 1 << 12), // BytesOpt payload length must exactly match enclosing field
+        (0x004e8513, u32::MAX, 1 << 20),   // return payload begins after four-byte length prefix
+        (0x00030593, u32::MAX, 1 << 15),   // checked coordinate/length return source
+        (0x06010113, u32::MAX, 16 << 20),  // exact frame restoration
+    ] {
+        let word = elf
+            .instructions
+            .iter()
+            .find(|word| ranges.iter().any(|range| range.contains(word.address)) && word.word & mask == expected & mask)
+            .unwrap_or_else(|| panic!("missing {expected:#x} in resolver"));
+        let mut changed = valid.clone();
+        changed.replace_machine_word(word.address, word.word ^ bit);
+        assert!(changed.check().is_err(), "resolver mutation at {:#x} must reject", word.address);
+    }
+}
+
+#[test]
+fn raw_byte_calls_cannot_be_relabelled_as_hashes_or_retired_runtime_aliases() {
+    fn rewrite(value: &mut Value, before: &str, after: &str, substring: bool) {
+        match value {
+            Value::String(text) if substring => *text = text.replace(before, after),
+            Value::String(text) if text == before => *text = after.into(),
+            Value::Array(items) => {
+                for item in items {
+                    rewrite(item, before, after, substring);
+                }
+            }
+            Value::Object(fields) => {
+                for item in fields.values_mut() {
+                    rewrite(item, before, after, substring);
+                }
+            }
+            _ => {}
+        }
+    }
+    let source = "module raw_domain_binding\naction inspect() -> u64 { verification\nlet bytes = witness::bytes32(source::input(0), 0)\nrequire bytes == bytes return 0 }";
+    let valid =
+        Fixture::from_result(compile(source, CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() }).unwrap());
+    valid.check().unwrap();
+    let mut changed = valid.clone();
+    let mut typed = serde_json::to_value(&changed.record.typed_semantics).unwrap();
+    for spelling in ["[u8; 32]", "[u8;32]"] {
+        rewrite(&mut typed, spelling, "hash", false);
+    }
+    changed.record.typed_semantics = serde_json::from_value(typed).unwrap();
+    changed.rebind_layered_identities();
+    assert!(changed.check().is_err(), "coherent 32-byte width does not make a raw read a digest");
+    for retired in [
+        "__ckb_witness_raw",
+        "__ckb_witness_lock",
+        "__ckb_witness_input_type",
+        "__ckb_witness_output_type",
+        "__ckb_cell_data_hash",
+        "__ckb_cell_data_hash_at",
+        "__ckb_cell_lock_args_hash",
+        "__ckb_cell_type_args_hash",
+        "__ckb_require_cell_lock_args_hash",
+        "__ckb_require_cell_type_args_hash",
+        "__ckb_require_cell_lock_args_prefix_hash",
+        "__ckb_require_cell_type_args_prefix_hash",
+        "__ckb_require_cell_lock_args_suffix_hash",
+        "__ckb_require_cell_type_args_suffix_hash",
+    ] {
+        let mut changed = valid.clone();
+        let mut record = serde_json::to_value(&changed.record).unwrap();
+        rewrite(&mut record, "__ckb_witness_bytes32", retired, true);
+        changed.record = serde_json::from_value(record).unwrap();
+        changed.rebind_layered_identities();
+        assert!(changed.check().is_err(), "removed runtime identity {retired} must reject even with rebound identities");
     }
 }

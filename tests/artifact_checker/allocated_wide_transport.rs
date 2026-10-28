@@ -3,11 +3,11 @@ use super::*;
 
 #[test]
 fn allocated_transport_binds_map_key_and_value_result_slices() {
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(
                 include_str!("../../examples/language/batches/multi_asset_transfer.cell"),
-                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -65,7 +65,7 @@ fn allocated_transport_binds_wide_copies_and_private_result_buffers() {
     ];
     for (ty, literal, declaration, width) in profiles {
         for bytes in [512, 65536] {
-            for opt_level in [0, 3] {
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let source = format!(
                     r#"module wide_collection_transport
 {declaration}
@@ -96,9 +96,14 @@ action inspect(witness flag: bool) -> u64 {{
                 let valid = Fixture::from_result(
                     compile(
                         &source,
-                        CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                        CompileOptions {
+                            edition: NEXT_EDITION,
+                            diagnostics,
+                            target: Some("riscv64-elf".into()),
+                            ..Default::default()
+                        },
                     )
-                    .unwrap_or_else(|error| panic!("{ty} bytes={bytes} O{opt_level}: {error}")),
+                    .unwrap_or_else(|error| panic!("{ty} bytes={bytes} {diagnostics}: {error}")),
                 );
                 let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
                 let mut count = 0;
@@ -246,8 +251,8 @@ action inspect(witness flag: bool) -> u64 {{
                         }
                     }
                 }
-                assert!(count >= 5, "{ty} bytes={bytes} O{opt_level}: {count}");
-                assert!(bounded_destination, "missing rebound destination mutation: {ty} bytes={bytes} O{opt_level}");
+                assert!(count >= 5, "{ty} bytes={bytes} {diagnostics}: {count}");
+                assert!(bounded_destination, "missing rebound destination mutation: {ty} bytes={bytes} {diagnostics}");
                 let mut erased = valid.clone();
                 for block in &mut erased.record.blocks {
                     block.allocated_lifecycle_labels.retain(|label| !label.starts_with(".Lallocated_result_"));

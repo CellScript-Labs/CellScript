@@ -381,14 +381,14 @@ impl StdLib {
                 return_type: Some(IrType::Bool),
             },
             StdFunction {
-                name: "ckb_cell_lock_args_hash".to_string(),
+                name: "ckb_cell_lock_args32".to_string(),
                 params: vec![("source_view".to_string(), IrType::U64)],
-                return_type: Some(IrType::Hash),
+                return_type: Some(IrType::Array(Box::new(IrType::U8), 32)),
             },
             StdFunction {
-                name: "ckb_cell_type_args_hash".to_string(),
+                name: "ckb_cell_type_args32".to_string(),
                 params: vec![("source_view".to_string(), IrType::U64)],
-                return_type: Some(IrType::Hash),
+                return_type: Some(IrType::Array(Box::new(IrType::U8), 32)),
             },
             StdFunction {
                 name: "ckb_input_out_point_index".to_string(),
@@ -427,33 +427,51 @@ impl StdLib {
                 return_type: None,
             },
             StdFunction {
-                name: "ckb_require_cell_lock_args_hash".to_string(),
-                params: vec![("source_view".to_string(), IrType::U64), ("expected_args_hash".to_string(), IrType::Hash)],
+                name: "ckb_require_cell_lock_args32".to_string(),
+                params: vec![
+                    ("source_view".to_string(), IrType::U64),
+                    ("expected_bytes".to_string(), IrType::Array(Box::new(IrType::U8), 32)),
+                ],
                 return_type: None,
             },
             StdFunction {
-                name: "ckb_require_cell_type_args_hash".to_string(),
-                params: vec![("source_view".to_string(), IrType::U64), ("expected_args_hash".to_string(), IrType::Hash)],
+                name: "ckb_require_cell_type_args32".to_string(),
+                params: vec![
+                    ("source_view".to_string(), IrType::U64),
+                    ("expected_bytes".to_string(), IrType::Array(Box::new(IrType::U8), 32)),
+                ],
                 return_type: None,
             },
             StdFunction {
-                name: "ckb_require_cell_lock_args_prefix_hash".to_string(),
-                params: vec![("source_view".to_string(), IrType::U64), ("expected_args_hash".to_string(), IrType::Hash)],
+                name: "ckb_require_cell_lock_args_prefix32".to_string(),
+                params: vec![
+                    ("source_view".to_string(), IrType::U64),
+                    ("expected_bytes".to_string(), IrType::Array(Box::new(IrType::U8), 32)),
+                ],
                 return_type: None,
             },
             StdFunction {
-                name: "ckb_require_cell_type_args_prefix_hash".to_string(),
-                params: vec![("source_view".to_string(), IrType::U64), ("expected_args_hash".to_string(), IrType::Hash)],
+                name: "ckb_require_cell_type_args_prefix32".to_string(),
+                params: vec![
+                    ("source_view".to_string(), IrType::U64),
+                    ("expected_bytes".to_string(), IrType::Array(Box::new(IrType::U8), 32)),
+                ],
                 return_type: None,
             },
             StdFunction {
-                name: "ckb_require_cell_lock_args_suffix_hash".to_string(),
-                params: vec![("source_view".to_string(), IrType::U64), ("expected_args_hash".to_string(), IrType::Hash)],
+                name: "ckb_require_cell_lock_args_suffix32".to_string(),
+                params: vec![
+                    ("source_view".to_string(), IrType::U64),
+                    ("expected_bytes".to_string(), IrType::Array(Box::new(IrType::U8), 32)),
+                ],
                 return_type: None,
             },
             StdFunction {
-                name: "ckb_require_cell_type_args_suffix_hash".to_string(),
-                params: vec![("source_view".to_string(), IrType::U64), ("expected_args_hash".to_string(), IrType::Hash)],
+                name: "ckb_require_cell_type_args_suffix32".to_string(),
+                params: vec![
+                    ("source_view".to_string(), IrType::U64),
+                    ("expected_bytes".to_string(), IrType::Array(Box::new(IrType::U8), 32)),
+                ],
                 return_type: None,
             },
             StdFunction {

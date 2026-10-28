@@ -149,12 +149,12 @@ fn issued_document_instances_require_real_issuer_custody_and_peer_execution() {
     package(&consumer, "client", OBSERVER, "[dependencies]\nlibrary = { path = \"../library\" }\n");
     lock(&consumer);
 
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compile_document = || {
             compile_module(
                 Utf8Path::from_path(&library).unwrap(),
                 "dev",
-                CompileOptions { opt_level, ..Default::default() },
+                CompileOptions { diagnostics, ..Default::default() },
                 EntrySelection::Action("verify".into()),
             )
             .unwrap()
@@ -182,7 +182,7 @@ fn issued_document_instances_require_real_issuer_custody_and_peer_execution() {
         let observer = compile_module(
             Utf8Path::from_path(&consumer).unwrap(),
             "dev",
-            CompileOptions { opt_level, ..Default::default() },
+            CompileOptions { diagnostics, ..Default::default() },
             EntrySelection::Lock("verify".into()),
         )
         .unwrap();
@@ -354,13 +354,13 @@ fn issued_document_instances_require_real_issuer_custody_and_peer_execution() {
             assert!(!ledger.live.contains_key(&points[0]), "retired document cannot be spent again");
         }
         eprintln!(
-            "document instances O{opt_level}: maximum_cycles={} maximum_tx_bytes={}",
+            "document instances {diagnostics}: maximum_cycles={} maximum_tx_bytes={}",
             ledger.maximum_cycles, ledger.maximum_transaction_bytes
         );
         assert!(ledger.maximum_transaction_bytes <= 2_400);
         let evidence = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("target/instance-policy-evidence/document")
-            .join(format!("O{opt_level}"));
+            .join(format!("{diagnostics}"));
         std::fs::create_dir_all(&evidence).unwrap();
         std::fs::write(evidence.join("document.cell"), std::fs::read(library.join("src/main.cell")).unwrap()).unwrap();
         std::fs::write(evidence.join("observer.cell"), OBSERVER).unwrap();
@@ -385,7 +385,7 @@ fn issued_document_instances_require_real_issuer_custody_and_peer_execution() {
             })
             .collect::<Vec<_>>();
         let report = serde_json::json!({
-            "schema": "cellscript-instance-document-evidence-v1", "opt_level": opt_level,
+            "schema": "cellscript-instance-document-evidence-v1", "diagnostics": diagnostics.to_string(),
             "compiler_version": env!("CARGO_PKG_VERSION"), "scope": "local-all-group-ckb-vm",
             "source_policy": policy.implementation().identity(), "instance_policy": policy.identity(),
             "policy_record": serde_json::from_slice::<serde_json::Value>(&policy.canonical_bytes().unwrap()).unwrap(),

@@ -65,15 +65,20 @@ pub(super) fn ranges(valid: &Fixture) -> Vec<(String, String, u64, u64)> {
 fn scalar_collection_arguments_bind_sources_widths_and_consumers() {
     for (key, value) in [("u8", "bool"), ("u16", "u8"), ("u32", "u16"), ("u64", "u32"), ("u64", "i32"), ("u64", "u64")] {
         for bytes in [512, 65536] {
-            for opt_level in [0, 3] {
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let valid = Fixture::from_result(
                     compile(
                         &source(key, value, bytes),
-                        CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                        CompileOptions {
+                            edition: NEXT_EDITION,
+                            diagnostics,
+                            target: Some("riscv64-elf".into()),
+                            ..Default::default()
+                        },
                     )
                     .unwrap(),
                 );
-                assert_argument_stages(&valid, bytes, opt_level);
+                assert_argument_stages(&valid, bytes, diagnostics);
             }
         }
     }
@@ -87,7 +92,7 @@ const WIDE_PROFILES: [(&str, &str, &str); 5] = [
     ("u64", "Value", "struct Value { bytes: [u8; 32] }"),
 ];
 
-fn wide_fixture(key: &str, value: &str, declaration: &str, bytes: u32, opt_level: u8) -> Fixture {
+fn wide_fixture(key: &str, value: &str, declaration: &str, bytes: u32, diagnostics: cellscript::CompilerDiagnostics) -> Fixture {
     let mut source = source(key, value, bytes).replace("module scalar_arguments", &format!("module wide_arguments\n{declaration}"));
     if value == "Value" {
         source = source
@@ -98,7 +103,7 @@ fn wide_fixture(key: &str, value: &str, declaration: &str, bytes: u32, opt_level
     Fixture::from_result(
         compile(
             &source,
-            CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
         )
         .unwrap(),
     )
@@ -108,9 +113,9 @@ fn wide_fixture(key: &str, value: &str, declaration: &str, bytes: u32, opt_level
 fn wide_collection_arguments_bind_sources_widths_and_consumers() {
     for (key, value, declaration) in WIDE_PROFILES {
         for bytes in [512, 65536] {
-            for opt_level in [0, 3] {
-                let valid = wide_fixture(key, value, declaration, bytes, opt_level);
-                assert_argument_stages(&valid, bytes, opt_level);
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+                let valid = wide_fixture(key, value, declaration, bytes, diagnostics);
+                assert_argument_stages(&valid, bytes, diagnostics);
             }
         }
     }
@@ -119,7 +124,7 @@ fn wide_collection_arguments_bind_sources_widths_and_consumers() {
 #[test]
 fn short_collection_arguments_bind_packed_values_and_pointer_producers() {
     for width in 1..=8 {
-        for opt_level in [0, 3] {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let ty = format!("[u8; {width}]");
             let mut text = source(&ty, &ty, if width % 2 == 0 { 65536 } else { 512 });
             // Ordinary arguments and helper ABI use packed words. Reassign the
@@ -134,11 +139,11 @@ fn short_collection_arguments_bind_packed_values_and_pointer_producers() {
             let valid = Fixture::from_result(
                 compile(
                     &text,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
-            assert_argument_stages(&valid, if width % 2 == 0 { 65536 } else { 512 }, opt_level);
+            assert_argument_stages(&valid, if width % 2 == 0 { 65536 } else { 512 }, diagnostics);
         }
     }
 }
@@ -149,15 +154,15 @@ fn short_collection_literal_arguments_bind_each_byte() {
         let ty = format!("[u8; {width}]");
         let literal = (0..width).map(|index| (255 - index).to_string()).collect::<Vec<_>>().join(", ");
         let text = source(&ty, &ty, 512).replace("work.values.push(value)", &format!("work.values.push([{literal}])"));
-        for opt_level in [0, 3] {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
                 compile(
                     &text,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
-            assert_argument_stages(&valid, 512, opt_level);
+            assert_argument_stages(&valid, 512, diagnostics);
         }
     }
 }
@@ -171,15 +176,20 @@ fn short_collection_indexed_arguments_bind_typed_element_pointer() {
             let text = source(&ty, &ty, 512)
                 .replace("witness skip: bool", &format!("witness pairs: [{ty}; 2], witness index: u64, witness skip: bool"))
                 .replace("work.values.push(value)", &format!("work.values.push(pairs[{index}])"));
-            for opt_level in [0, 3] {
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let valid = Fixture::from_result(
                     compile(
                         &text,
-                        CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                        CompileOptions {
+                            edition: NEXT_EDITION,
+                            diagnostics,
+                            target: Some("riscv64-elf".into()),
+                            ..Default::default()
+                        },
                     )
                     .unwrap(),
                 );
-                assert_argument_stages(&valid, 512, opt_level);
+                assert_argument_stages(&valid, 512, diagnostics);
             }
         }
     }
@@ -189,8 +199,8 @@ fn short_collection_indexed_arguments_bind_typed_element_pointer() {
 fn wide_collection_argument_copy_preserves_its_final_byte() {
     for (key, value, declaration) in WIDE_PROFILES {
         for bytes in [512, 65536] {
-            for opt_level in [0, 3] {
-                let valid = wide_fixture(key, value, declaration, bytes, opt_level);
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+                let valid = wide_fixture(key, value, declaration, bytes, diagnostics);
                 let (_, _, start, end) = ranges(&valid)
                     .into_iter()
                     .find(|(label, owner, _, _)| {
@@ -215,7 +225,7 @@ fn wide_collection_argument_copy_preserves_its_final_byte() {
     }
 }
 
-fn assert_argument_stages(valid: &Fixture, bytes: u32, opt_level: u8) {
+fn assert_argument_stages(valid: &Fixture, bytes: u32, diagnostics: cellscript::CompilerDiagnostics) {
     let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
     let ranges = ranges(valid);
     assert_eq!(ranges.len(), 14, "complete vector, map, set and readonly-helper argument inventory");
@@ -248,7 +258,7 @@ fn assert_argument_stages(valid: &Fixture, bytes: u32, opt_level: u8) {
     missing.rebind_sidecars();
     assert_code(&missing, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
 
-    if bytes == 512 && opt_level == 0 {
+    if bytes == 512 && !diagnostics.is_standard() {
         let (_, owner, start, end) = ranges
             .iter()
             .find(|(_, owner, _, _)| {
@@ -308,10 +318,10 @@ fn short_collection_key_cannot_substitute_another_typed_local() {
 
 fn substituted_key_changes_vm_outcome(key_type: &str) {
     let wide = key_type == "Hash";
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile(
             &source(key_type, if wide { "u128" } else { "u64" }, 512),
-            CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
         )
         .unwrap();
         use cellscript::EntryWitnessArg;

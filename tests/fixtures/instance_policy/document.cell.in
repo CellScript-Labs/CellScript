@@ -32,7 +32,7 @@ private fn check_issue(digest0: u64, digest1: u64, digest2: u64, digest3: u64) -
     let issuer = Hash::from_bytes(b"@ISSUER_LOCK_HASH@")
     ckb::require_cell_lock_hash(source::input(0), issuer)
     ckb::require_cell_lock_hash(output, issuer)
-    ckb::require_cell_type_args_hash(output, ckb::cell_data_hash_at(output, 0))
+    ckb::require_cell_type_args32(output, ckb::cell_data_bytes32(output, 0))
     let expected = DigestWords { word0: digest0, word1: digest1, word2: digest2, word3: digest3 }
     return ckb::cell_data_blake2b_span(output, 32, 32) == ckb::hash_data_packed(expected)
 }
@@ -41,7 +41,7 @@ private fn check_retire(digest0: u64, digest1: u64, digest2: u64, digest3: u64) 
     let input = source::group_input(0)
     if ckb::cell_data_size(input) != 64 { return false }
     ckb::require_cell_lock_hash(input, Hash::from_bytes(b"@ISSUER_LOCK_HASH@"))
-    ckb::require_cell_type_args_hash(input, ckb::cell_data_hash_at(input, 0))
+    ckb::require_cell_type_args32(input, ckb::cell_data_bytes32(input, 0))
     let expected = DigestWords { word0: digest0, word1: digest1, word2: digest2, word3: digest3 }
     return ckb::cell_data_blake2b_span(input, 32, 32) == ckb::hash_data_packed(expected)
 }

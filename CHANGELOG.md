@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased
+
+Unify normal compilation under one strategy and remove numeric optimization
+levels, old CLI controls and the four-level comparison command without
+compatibility aliases. Keep internal pass isolation for compiler diagnosis.
+Build/cache/evidence identities now name the strategy; rebuilt ELF/code hashes
+require explicit checking. Validation is in progress; see the
+[compilation policy](docs/CELLSCRIPT_COMPILATION_POLICY.md).
+
+Retire digest-shaped raw byte buffers and misleading read names. Exact Cell,
+Script-args and witness reads now return `[u8; 32]`; variable-size fields retain
+bounded complete views. Remove the legacy 512-byte whole-Cell hash buffer;
+choose consensus DATA_HASH or explicit streaming BLAKE2b, preserving their
+different empty-input semantics. Update source diagnostics, metadata, editor,
+browser source, examples and VM fixtures. Independently validate complete
+streaming/exact-witness machine contracts and retain rebound-mutation rejection.
+Raise the browser gzip budget from 600 to 1500 KiB under the maintainer's
+October 28 instruction. Rebuild the canonical browser bundle within that limit;
+its 63 interface checks pass. Browser summaries explicitly reject native proof
+and provenance records, while unbound external delegation remains rejected.
+Clean-source full backend acceptance remains deferred; see the
+[retirement record](docs/CELLSCRIPT_BYTE_BUFFER_RETIREMENT.md).
+
+Share U128 owned storage between fixed-byte and arithmetic emitters, and omit
+unused parameter scratch without changing the checked pointer/length ABI.
+A five-U128-argument fixture reduces its helper frame from 1632 to 1456 bytes
+with unchanged ELF size and successful execution cycles. Align nominal
+ScriptHash/SighashAllDigest parameter and result contracts without making them
+interchangeable with Hash. Preserve explicit hash construction and full-byte
+ScriptHash serialization. Prevent branch fusion from comparing packed epoch
+fractions as integers; equivalent fractions retain their semantic equality.
+See the [wide-value record](docs/CELLSCRIPT_WIDE_VALUE_ARGUMENTS.md).
+
 ## 0.33.0-alpha.1 - 2026-10-28
 
 First 0.33 alpha, published under the maintainer's October 28 instruction after

@@ -6,11 +6,11 @@ resolver_model = "single-package-coordinate-v1"
 edition = "2026"
 name = "registry"
 version = "0.1.0"
-source_hash = "6c28690e638297ccd4fe50f4fe566e0c83b0aa1bb9d08ea4b810d575bea0d8f5"
-compiler_requirement = "*"
-resolver_compiler_version = "0.26.0"
+source_hash = "882bcd6e197bb87ccc0fd03b9e93de5ba9a316f308487b39d7b5a5966f9d1137"
+compiler_requirement = ">=0.33.0-alpha.1"
+resolver_compiler_version = "0.33.0-alpha.1"
 
 [root]
-manifest_digest = "sha256:169bed8b030af587acba63fc57cdc1de6f452a9d0202f3575aad7dc33d6c6299"
+manifest_digest = "sha256:4adc7920e4fd01ca29b6e566c9bad15cc53ba6b70ce691d26a4793d67cf65680"
 
 [dependencies]

@@ -12,8 +12,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 pub const RESOLVE_GRAPH_SCHEMA: &str = "cellscript-resolve-graph-v1";
-pub const BUILD_PLAN_SCHEMA: &str = "cellscript-build-plan-v1";
+pub const BUILD_PLAN_SCHEMA: &str = "cellscript-build-plan-v2";
 pub const INSPECTION_SCHEMA_VERSION: u32 = 1;
+pub const BUILD_PLAN_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -134,7 +135,7 @@ pub struct BuildPlanSelection {
     pub target: String,
     pub artifact_format: String,
     pub target_profile: String,
-    pub optimization_level: u8,
+    pub compilation_policy: String,
     pub debug: bool,
     pub release: bool,
     pub primitive_compat: Option<String>,
@@ -227,6 +228,15 @@ pub fn validate_schema_version(version: u32) -> Result<()> {
     if version != INSPECTION_SCHEMA_VERSION {
         return Err(CompileError::without_span(format!(
             "unsupported inspection schema version {version}; expected {INSPECTION_SCHEMA_VERSION}"
+        )));
+    }
+    Ok(())
+}
+
+pub fn validate_build_plan_schema_version(version: u32) -> Result<()> {
+    if version != BUILD_PLAN_SCHEMA_VERSION {
+        return Err(CompileError::without_span(format!(
+            "unsupported build-plan schema version {version}; expected {BUILD_PLAN_SCHEMA_VERSION}"
         )));
     }
     Ok(())
@@ -500,7 +510,7 @@ pub fn build_plan(graph: &ResolveGraph, options: &BuildPlanOptions) -> Result<Bu
         let cache_options = CompileOptions {
             source_contracts: options.source_contracts,
             edition: manifest.package.edition,
-            opt_level: if options.release { 3 } else { 1 },
+            diagnostics: crate::CompilerDiagnostics::default(),
             output: None,
             debug: options.debug,
             target: options.target.clone(),
@@ -607,7 +617,7 @@ pub fn build_plan(graph: &ResolveGraph, options: &BuildPlanOptions) -> Result<Bu
         target,
         artifact_format,
         target_profile,
-        optimization_level: if options.release { 3 } else { 1 },
+        compilation_policy: crate::COMPILATION_POLICY.into(),
         debug: options.debug,
         release: options.release,
         primitive_compat: options.primitive_compat.clone(),
@@ -621,7 +631,7 @@ pub fn build_plan(graph: &ResolveGraph, options: &BuildPlanOptions) -> Result<Bu
     };
     let mut plan = BuildPlan {
         schema: BUILD_PLAN_SCHEMA.to_string(),
-        schema_version: INSPECTION_SCHEMA_VERSION,
+        schema_version: BUILD_PLAN_SCHEMA_VERSION,
         compiler_version: crate::VERSION.to_string(),
         plan_digest: String::new(),
         resolve_graph_schema: graph.schema.clone(),
@@ -819,7 +829,7 @@ fn build_unit_id(
         "entry": entry,
         "compile": {
             "edition": compile_options.edition,
-            "optimization_level": compile_options.opt_level,
+            "compilation_policy": crate::COMPILATION_POLICY,
             "debug": compile_options.debug,
             "target": compile_options.target,
             "target_profile": compile_options.target_profile,

@@ -54,7 +54,7 @@ fn mutate_source(seed: &str, rng: &mut Rng64) -> String {
         "witness ",
         "lock_args ",
         "source::group_input(0)",
-        "witness::lock(source::group_input(0))",
+        "witness::lock_exact32(source::group_input(0))",
         "env::sighash_all(source::group_input(0))",
         "Vec::<u64>",
         "[]",
@@ -154,10 +154,10 @@ lock owner(wallet: protected Wallet, owner: lock_args Address, claimed_owner: wi
     verification
         let input = source::group_input(0)
         let digest = env::sighash_all(input)
-        let witness_lock = witness::lock(input)
+        let witness_lock = witness::lock_exact32(input)
         require owner == wallet.owner
         require claimed_owner == owner
-        require witness_lock == digest
+        require witness_lock == digest.0
 }
 "#,
         include_str!("../examples/language/core/canonical_style.cell"),
@@ -367,6 +367,7 @@ fn fuzzy_unicode_hex_inputs_are_controlled_errors() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "fuzzy_cli_hex"
 version = "0.1.0"

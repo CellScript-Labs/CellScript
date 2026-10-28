@@ -748,11 +748,11 @@ lock owner_boundary(
 ) -> bool {
     verification
         let input = source::group_input(0)
-        let witness_lock = witness::lock(input)
+        let witness_lock = witness::lock_exact32(input)
         let digest = env::sighash_all(input)
         require wallet.owner == owner
         require claimed_owner == owner
-        require witness_lock == digest
+        require witness_lock == digest.0
 }
 ```
 
@@ -761,7 +761,7 @@ does not prove a signature. The example above is an inspectable deferred
 boundary, not an executable ownership Lock: canonical `env::sighash_all`
 construction is unimplemented. `DenyFailClosed` rejects it; audit artifacts
 terminate with `66 sighash-all-unsupported` when it executes, even if its result
-is discarded. `witness::lock(input)` is an executable witness-field read.
+is discarded. `witness::lock_exact32(input)` is an executable witness-field read.
 Treat `Address`,
 `lock_args Address`, and `witness Address` as data unless an explicit verifier
 result and key-to-authority binding prove otherwise.
@@ -776,15 +776,15 @@ count. It does not cover prefix-preserving multisig layouts. See the
 order and limits.
 
 These are two distinct witness uses. Entry parameters such as `claimed_owner`
-come from `WitnessArgs.input_type`; `witness::lock(input)` explicitly reads the
+come from `WitnessArgs.input_type`; `witness::lock_exact32(input)` explicitly reads the
 `lock` field. Sharing one serialized `WitnessArgs` does not make the fields
 interchangeable.
 
-The legacy `witness::lock(input)` projection loads a complete serialized
-`WitnessArgs` of at most 512 bytes and rejects a larger witness. Its selected
-field is zero-padded or truncated to 32 bytes. Exact-width and bounded structured
-witness APIs have their own checked contracts; the legacy projection is not a
-general arbitrary-length witness decoder.
+`witness::lock_exact32(input)` returns `[u8; 32]` and requires the complete
+selected field to be exactly 32 bytes. Larger sibling fields are allowed.
+For variable-length signatures or other payloads, use
+`witness::bounded_lock(input, maximum_bytes)` and read or hash the complete view.
+The former truncating and zero-padding projections have been removed.
 
 `lock_args Address` is already bound to the executing lock script's typed
 `Script.args` bytes. That makes it a stable script-argument value, but it still
@@ -810,29 +810,28 @@ implementation.
 
 `ckb::cell_data_hash_field(view)` and typed Cell views' `.data_hash` read the
 consensus `DATA_HASH` field without copying the full Cell data. They have no
-512-byte limit and return zero for empty data. The legacy
-`ckb::cell_data_hash(view)` instead hashes at most 512 bytes in memory and
-returns BLAKE2b(empty) for empty data; larger data fails with error 3. These
-interfaces are not aliases. Choose the field accessor for consensus identity;
-review empty-data behavior before migrating existing code.
+512-byte limit and return zero for empty data. Use this field accessor when
+the protocol requires the consensus identity.
 
-`ckb::cell_data_bytes32(view, offset)` copies exactly 32 raw bytes into a Hash
-value; it does not compute a digest. At least 32 bytes must remain at the offset;
-a longer suffix is allowed. `cell_data_hash_at` remains a compatibility alias.
-Use `ckb::cell_data_blake2b_span(view, offset, length)` for bounded incremental
-hashing of an exact range instead.
+`ckb::cell_data_bytes32(view, offset) -> [u8; 32]` copies exactly 32 raw bytes.
+At least 32 bytes must remain at the offset; a longer suffix is allowed.
+`ckb::cell_data_blake2b_span(view, offset, length) -> Hash` instead hashes the
+complete checked range incrementally. It supports ranges beyond 512 bytes and
+returns BLAKE2b(empty) for an empty range, which differs from empty DATA_HASH.
+The old `cell_data_hash` and `cell_data_hash_at` names have been removed.
 
 These APIs accept Input, Output, CellDep, GroupInput and GroupOutput sources.
-HeaderDep is not a Cell source. Full-data field failures use error 44; short
-slice reads use error 1. Source selection still needs the application's normal
-identity and authority checks.
+HeaderDep is not a Cell source. Field failures use error 44; short slice reads
+use error 1. Source selection still needs the application's identity and
+authority checks.
 
-Legacy ScriptRef `.args_hash` reads exactly 32 raw argument bytes; it does not
-hash them. Legacy witness projections truncate or zero-pad to 32 bytes, so
-equal results do not establish equality of the original fields. Prefer exact32
-reads when the protocol requires exactly 32 bytes, or bounded witness views and
-their explicit BLAKE2b operation for variable-length contents. See the
-[legacy read contracts and migration guide](../CELLSCRIPT_LEGACY_READ_CONTRACTS.md).
+ScriptRef `.args32` returns exactly 32 raw argument bytes as `[u8; 32]`.
+It does not hash them. Exact32 witness reads also return raw arrays; bounded
+witness views retain complete variable-length fields. Serialize a real digest
+with its explicit `.0` payload when comparing it to raw bytes. To interpret raw
+bytes as an ordinary `Hash`, use the explicit `Hash::from_bytes(bytes)`
+constructor; this does not compute a digest or confer authority. See the
+[read contracts and migration guide](../CELLSCRIPT_LEGACY_READ_CONTRACTS.md).
 
 ## Invariant Assertions
 

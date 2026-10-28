@@ -1,61 +1,57 @@
-# Legacy read contracts and migration
+# Byte reads, digests and migration
 
-Status: implemented compatibility boundaries in 0.33.0-alpha.1. The
-[alpha receipt](CELLSCRIPT_BOUNDED_RUNTIME_ADMISSION.md#final-validation-receipt)
-records completed compiler tests and the explicit full-gate exception.
-The return type `Hash` describes a 32-byte value representation. It does not
-establish that an operation hashed its input.
+Status: candidate breaking migration after `v0.33.0-alpha.1`; full integration
+acceptance remains pending. The published alpha's historical receipt describes
+that immutable release, not these uncommitted changes.
 
-| Interface | Reads / returns | Short input | Long input | Failure propagation |
-|---|---|---|---|---|
-| `ckb::cell_data_hash(view)` | Entire Cell data, BLAKE2b-256 digest | Empty input returns BLAKE2b(empty) | More than 512 bytes rejects before hashing | Checked a0 status; failed/oversized load uses error 3 |
-| `ckb::cell_data_hash_field(view)`, typed `.data_hash` | Consensus DATA_HASH field | Empty data returns zero32 | No 512-byte buffer limit | Checked field status; failed read uses error 44 |
-| `ckb::cell_data_bytes32(view, offset)`; legacy `cell_data_hash_at` | Raw 32-byte slice, no hashing | Fewer than 32 remaining bytes rejects | Suffix beyond the 32-byte slice is allowed | Checked a0 status; short read uses error 1 |
-| ScriptRef `.args_hash` | Exactly 32 raw Script argument bytes | Rejects args shorter than 32 | Rejects args longer than 32 | Checked output/status contract |
-| Legacy `witness::raw(view)` | First 32 raw witness bytes, zero-padded | Pads with zero | Truncates to 32 | Checked a0 status on syscall failure |
-| Legacy `witness::lock`, `input_type`, `output_type` | Selected WitnessArgs field projected to 32 bytes | Pads with zero | Field truncates to 32; complete serialized witness over 512 rejects before parsing | Checked a0 status on read/structure failure |
-| `witness::lock_exact32`, `input_type_exact32`, `output_type_exact32` | Exact 32-byte selected field | Rejects | Rejects field width other than 32 | Checked a0 status |
-| `ckb::input_out_point_index`, `input_out_point_tx_hash_low` | OutPoint index or low little-endian tx-hash word | Packed OutPoint must be exactly 36 bytes | Wrong packed width rejects | a1 must be zero before a0 is accepted; failures propagate error 44 |
-| `ckb::cell_lock_hash_low`, `cell_type_hash_low` | Low little-endian word of consensus Script hash | Protocol field has fixed width; absent Type Script rejects | Remaining hash bytes are intentionally omitted | a1 must be zero before a0 is accepted; failures propagate error 44 |
+Raw bytes and cryptographic digests have distinct contracts. Exact 32-byte
+reads return `[u8; 32]`; actual digests return `Hash` or a specific nominal hash
+domain. A matching width does not permit implicit conversion between them.
 
-Cell reads accept only their supported SourceView kinds; HeaderDep is not a
-Cell-data source. Source identity and authorization remain application rules.
-Raw SourceView handles do not grant authority. Missing coordinates and invalid
-sources reject according to each existing helper's error family.
+| Current interface | Result | Length and error contract |
+|---|---|---|
+| `ckb::cell_data_hash_field(view)`, typed `.data_hash` | Consensus DATA_HASH | Empty data returns zero32; no 512-byte buffer limit; field failure 44 |
+| `ckb::cell_data_blake2b_span(view, offset, length)` | BLAKE2b digest of the complete specified range | Requires offset <= total and length <= total-offset; streams blocks of at most 128 bytes; empty range returns BLAKE2b(empty) |
+| `ckb::cell_data_bytes32(view, offset)` | Raw `[u8; 32]` | At least 32 remaining bytes required; a longer suffix is allowed; short read 1 |
+| ScriptRef `.args32`, `ckb::cell_*_args32(view)` | Raw `[u8; 32]` | Args must be exactly 32 bytes; wrong width 38 |
+| `witness::bytes32(view, offset)` | Raw `[u8; 32]` | Requires the entire requested slice |
+| `witness::lock_exact32`, `input_type_exact32`, `output_type_exact32` | Raw `[u8; 32]` selected field | Requires exactly 32 payload bytes; no padding or truncation; larger siblings allowed |
+| `witness::bounded_raw`, `bounded_lock`, `bounded_entry`, `bounded_output_type` | Complete read-only bounded byte view | Preserves source and full length; selected field absent 67, declared maximum exceeded 68, malformed encoding 42/43 |
+| `ckb::input_out_point_index`, `input_out_point_tx_hash_low` | Index or low hash word | Exact 36-byte OutPoint required; caller checks a1 before accepting a0; failure 44 |
+| `ckb::cell_lock_hash_low`, `cell_type_hash_low` | Low word of actual Script hash | Missing Type Script rejects; caller checks a1; failure 44 |
 
-## Migration choices
+Low-word getters intentionally omit the other hash bytes and cannot prove full
+identity. SourceView coordinates identify a source; they do not authorize it.
+HeaderDep is not a Cell-data source.
 
-- For Cell identity, choose `.data_hash` or `cell_data_hash_field`. Review the
-  empty-data result and removal of the legacy size restriction before replacing
-  `cell_data_hash`; these are different contracts, not aliases.
-- For a raw 32-byte range, use `cell_data_bytes32`; renaming `cell_data_hash_at`
-  preserves machine behavior. Use `cell_data_blake2b_span` when a digest of an
-  exact bounded range is required.
-- Treat `.args_hash` as an exact-width raw args read. A full Script hash also
-  commits to code_hash and hash_type; it is a different operation. Arbitrary
-  argument protocols need their own explicit length/serialization contract.
-- Use exact32 witness reads for protocols requiring exactly 32 bytes. For
-  variable-length fields, use bounded witness views, checked lengths and their
-  explicit BLAKE2b operation, or exact byte comparisons over the required range.
-  See the [bounded runtime foundations](CELLSCRIPT_BOUNDED_RUNTIME_FOUNDATIONS.md).
-- Never infer full witness equality from equality of legacy projections: equal
-  first 32 bytes hide different suffixes, and zero-padding loses original length.
-  Low-word hash getters likewise cannot establish full hash identity.
+## Removed names
 
-Existing names and projection behavior remain available for compatibility.
-This guide is a migration notice, not a silent reinterpretation of stored values.
+`ckb::cell_data_hash`, `cell_data_hash_at`, Script `.args_hash`, the
+`cell_*_args_hash`/`require_cell_*_args_hash` families, and `witness::raw`,
+`lock`, `input_type`, `output_type` projections have been removed. The implicit
+WitnessArgsView field projections have also been removed. Compilation reports
+migration diagnostics; no callable runtime aliases remain.
 
-## Validation boundary
+- For consensus identity choose DATA_HASH. For BLAKE2b of raw data choose the
+  streaming span operation. Empty results differ; this is an explicit choice.
+- For raw exact reads choose `bytes32`, `args32` or the field's `*_exact32` read.
+- For variable-length fields choose a bounded complete view and exact byte
+  comparisons or its explicit BLAKE2b operation. Equal prefixes and padded
+  projections never proved complete field equality.
+- Exact/prefix/suffix Script requirements accept explicit bytes. Serialize an
+  expected digest with `.0`; this preserves the protocol's serialized bytes.
+- `Hash::from_bytes(bytes)` explicitly interprets a 32-byte array as an ordinary
+  Hash value. It does not hash, verify existence, or grant authorization.
 
-The independent checker validates complete machine bodies for the Cell-data
-field, bounded memory hash and raw slice paths, and the four scalar getters
-above, including their caller a1 guards. Compiler return conventions are not
-accepted as proof. O0/O3 VM cases cover successful reads, failed reads and the
-empty/512/oversized legacy hash distinction; rebound mutations must reject.
+## Validation scope
 
-The xUDT short-read and legacy WitnessArgs oversized-buffer fixes have VM
-regressions but no newly added complete independent machine profiles. The
-return-convention inventory checks coverage and status initialization; it is
-not a proof of all legacy helper semantics. Final gate status is tracked in the
-[admission receipt](CELLSCRIPT_BOUNDED_RUNTIME_ADMISSION.md) and
-[read-boundary audit](CELLSCRIPT_READ_BOUNDARY_AUDIT.md).
+The independent checker validates exact raw read domains, complete Cell-data
+slice and consensus-field machine bodies, selected exact32 witness reads,
+Script raw args, and scalar getter status guards. Streaming span contracts
+independently bind source selection, range checks, chunk capacity, reported
+length, output writes and both stack restoration paths; their compression body
+uses the existing independently pinned complete-body profile. These are bounded
+instruction contracts, not a general source-equivalence proof.
+
+Current VM and rebound-mutation results and any incomplete gate are recorded
+in the [retirement work record](CELLSCRIPT_BYTE_BUFFER_RETIREMENT.md).

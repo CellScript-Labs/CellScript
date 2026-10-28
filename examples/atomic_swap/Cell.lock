@@ -6,23 +6,23 @@ resolver_model = "single-package-coordinate-v1"
 edition = "2026"
 name = "atomic_swap"
 version = "0.1.0"
-source_hash = "3b00079d61ff85576ade83249847fa62bd43c9ddd60c0c5afa438ddda5e35f5b"
-compiler_requirement = "*"
-resolver_compiler_version = "0.26.0"
+source_hash = "c591f80b49e5c58887dcf5b73dbb7c0d89583195f9f8c9b8a2cef61496b90576"
+compiler_requirement = ">=0.33.0-alpha.1"
+resolver_compiler_version = "0.33.0-alpha.1"
 
 [root]
-manifest_digest = "sha256:e2a638007970156136b60e89f4e93af2ffbf2eb9dfec16060159e2f687537f12"
+manifest_digest = "sha256:9c8cf67e0240d5380b37ddc2985e54bdeb898fb6e02fb259830fe57d24bab3bd"
 
 [root.dependencies]
-token = "token@0.1.0|path:../token|compiler=2a|env=default|features=default"
+token = "token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default"
 
-[dependencies."token@0.1.0|path:../token|compiler=2a|env=default|features=default"]
+[dependencies."token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default"]
 name = "token"
 version = "0.1.0"
-source_hash = "d5ecb3241eeb97983005b9622cbe7a9540cbdec133ec22105c07955f99c7b889"
-manifest_digest = "sha256:3adaae2b8a70a8a49246c28c95a6bd3686fefaed383dfb598c7d35da2a2ad4f9"
-compiler_requirement = "*"
-resolver_compiler_version = "0.26.0"
+source_hash = "53c5e19396b91f310f5a286374861c98504730db154a8cc836c2c11079604cf0"
+manifest_digest = "sha256:8ffb252c81562ec747304ec3e34f4e2a58db2a713853074220a5763e4084dabd"
+compiler_requirement = ">=0.33.0-alpha.1"
+resolver_compiler_version = "0.33.0-alpha.1"
 
-[dependencies."token@0.1.0|path:../token|compiler=2a|env=default|features=default".source.Path]
+[dependencies."token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default".source.Path]
 path = "../token"

@@ -12,10 +12,10 @@ fn copied_cell_data_results_reject_intervening_body_writes() {
              action inspect() -> u64 {{ verification\n\
              require same(ckb::input<Token>(0), ckb::output<Token>(0), 4)\nreturn 0\n}}"
         );
-        for opt_level in [0, 3] {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = compile(
                 &source,
-                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap();
             // Reassigning current must preserve the earlier value in original.
@@ -44,7 +44,7 @@ fn copied_cell_data_results_reject_intervening_body_writes() {
                 fixture.outputs[0].data = encode(&[if equal { 0xab } else { 0 }; 32]).into();
                 let execution =
                     ckb_script_runner::execute_cellscript_script(cellscript::strip_vm_abi_trailer(&compiled.artifact_bytes), &fixture);
-                assert_eq!(execution.exit_code, if equal { 0 } else { 5 }, "O{opt_level} nested={nested} equal={equal}");
+                assert_eq!(execution.exit_code, if equal { 0 } else { 5 }, "{diagnostics} nested={nested} equal={equal}");
             }
             let valid = Fixture::from_result(compiled);
             let entry = valid.record.typed_semantics.entries.iter().find(|entry| entry.name.ends_with("same")).unwrap();
@@ -132,11 +132,16 @@ fn copied_cell_data_results_cannot_alias_after_coherent_rebinding() {
                  let after = ckb::output<Token>(0).data.value\n\
                  require before == after\nreturn 0\n}}"
             );
-            for opt_level in [0, 3] {
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let valid = Fixture::from_result(
                     compile(
                         &source,
-                        CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                        CompileOptions {
+                            edition: NEXT_EDITION,
+                            diagnostics,
+                            target: Some("riscv64-elf".into()),
+                            ..Default::default()
+                        },
                     )
                     .unwrap(),
                 );
@@ -233,7 +238,11 @@ fn copied_cell_data_results_cannot_alias_after_coherent_rebinding() {
                         &CheckerBudgets::default(),
                     )
                     .expect_err("coherently rebound copied Cell data results must not alias");
-                    assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "O{opt_level} {ty} nested={nested}");
+                    assert_eq!(
+                        error.code,
+                        CheckerRejectionCode::V2420TypedMachineBindingInvalid,
+                        "{diagnostics} {ty} nested={nested}"
+                    );
                     assert!(error.message.contains("copied Cell data results overlap"), "{error}");
                 }
             }

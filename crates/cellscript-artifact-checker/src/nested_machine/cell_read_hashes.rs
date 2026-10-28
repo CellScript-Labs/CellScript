@@ -1,19 +1,96 @@
-//! Fixed-slice and bounded-memory-hash contracts. Capacity, reported remaining
-//! length and published result length are independently bound to instructions.
+//! Exact raw Cell-data reads. Reported remaining length and the published
+//! 32-byte result length are independently bound to instructions.
 use super::*;
 
-pub(super) const HASH: &str = "runtime:__ckb_cell_data_hash";
 pub(super) const SLICE: &str = "runtime:__ckb_cell_data_bytes32";
 
 pub(crate) fn validate_all(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result<(), CheckerError> {
+    validate_raw_byte_domains(record)?;
     for entry in &record.entries {
+        if matches!(
+            entry.id.as_str(),
+            "runtime:__ckb_cell_data_hash"
+                | "runtime:__ckb_cell_data_hash_at"
+                | "runtime:__ckb_witness_raw"
+                | "runtime:__ckb_witness_lock"
+                | "runtime:__ckb_witness_input_type"
+                | "runtime:__ckb_witness_output_type"
+                | "runtime:__ckb_cell_lock_args_hash"
+                | "runtime:__ckb_cell_type_args_hash"
+                | "runtime:__ckb_require_cell_lock_args_hash"
+                | "runtime:__ckb_require_cell_type_args_hash"
+                | "runtime:__ckb_require_cell_lock_args_prefix_hash"
+                | "runtime:__ckb_require_cell_type_args_prefix_hash"
+                | "runtime:__ckb_require_cell_lock_args_suffix_hash"
+                | "runtime:__ckb_require_cell_type_args_suffix_hash"
+        ) {
+            return Err(invalid("removed legacy byte-buffer runtime entry"));
+        }
+        if streaming_hashes::syscall(&entry.id).is_some() {
+            streaming_hashes::validate(record, elf, &entry.id)?;
+        }
+        if entry.id == witness_exact_hash::RESOLVER {
+            witness_resolver::validate(record, elf)?;
+        }
+        if witness_exact_hash::field(&entry.id).is_some() {
+            witness_exact_hash::validate(record, elf, &entry.id)?;
+        }
+        if script_hash_fields::kind(&entry.id).is_some() {
+            script_hash_fields::validate(record, elf, &entry.id)?;
+        }
+        if entry.id == witness_bytes::OWNER {
+            witness_bytes::validate(record, elf)?;
+        }
         if entry.id == "runtime:__ckb_cell_data_hash_field" {
             hash_fields::validate(record, elf, &entry.id, 1)?;
         }
     }
-    for owner in [HASH, SLICE] {
-        if record.entries.iter().any(|entry| entry.id == owner) {
-            validate(record, elf, owner)?;
+    if record.entries.iter().any(|entry| entry.id == SLICE) {
+        validate(record, elf, SLICE)?;
+    }
+    Ok(())
+}
+
+fn validate_raw_byte_domains(record: &VerifiedLoweringRecord) -> Result<(), CheckerError> {
+    // This inventory and type check are independent of the compiler's runtime
+    // return/storage registry. Equal machine widths do not equate the domains.
+    let bytes32 = |ty: &str| ty.chars().filter(|c| !c.is_whitespace()).collect::<String>() == "[u8;32]";
+    for entry in &record.typed_semantics.entries {
+        for operation in entry.blocks.iter().flat_map(|block| &block.operations) {
+            let Some(call) = &operation.call else { continue };
+            let read_arity = match call.target.as_str() {
+                "__ckb_cell_data_bytes32" | "__ckb_witness_bytes32" => Some(2),
+                "__ckb_cell_lock_args32"
+                | "__ckb_cell_type_args32"
+                | "__ckb_witness_lock_exact32"
+                | "__ckb_witness_input_type_exact32"
+                | "__ckb_witness_output_type_exact32" => Some(1),
+                _ => None,
+            };
+            if let Some(arity) = read_arity
+                && (operation.operands.len() != arity
+                    || operation.destinations.len() != 1
+                    || !bytes32(&call.return_type)
+                    || call.params != operation.operands.iter().map(|operand| operand.ty.clone()).collect::<Vec<_>>()
+                    || !entry.locals.iter().any(|local| local.id == operation.destinations[0] && bytes32(&local.ty)))
+            {
+                return Err(invalid("raw byte read must return a declared [u8; 32] value, not a hash"));
+            }
+            if matches!(
+                call.target.as_str(),
+                "__ckb_require_cell_lock_args32"
+                    | "__ckb_require_cell_type_args32"
+                    | "__ckb_require_cell_lock_args_prefix32"
+                    | "__ckb_require_cell_type_args_prefix32"
+                    | "__ckb_require_cell_lock_args_suffix32"
+                    | "__ckb_require_cell_type_args_suffix32"
+            ) && (operation.operands.len() != 2
+                || !operation.destinations.is_empty()
+                || !bytes32(&operation.operands[1].ty)
+                || call.params != operation.operands.iter().map(|operand| operand.ty.clone()).collect::<Vec<_>>())
+            {
+                return Err(invalid("raw Script args comparison requires explicit [u8; 32] bytes"));
+            }
         }
     }
     Ok(())
@@ -21,8 +98,7 @@ pub(crate) fn validate_all(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> 
 
 pub(super) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf, owner: &str) -> Result<(), CheckerError> {
     use Label::*;
-    let slice = owner == SLICE;
-    if !slice && owner != HASH {
+    if owner != SLICE {
         return Err(invalid("unknown Cell read helper"));
     }
     let entry = record.entries.iter().find(|entry| entry.id == owner).ok_or_else(|| invalid("missing Cell read helper"))?;
@@ -46,24 +122,19 @@ pub(super) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf, owner: 
         c.exact(0x00008067)?;
         return Ok(());
     }
-    let frame = if slice { 32 } else { 544 };
+    let frame = 32;
     let ra = frame - 8;
     c.addi(2, 2, -(frame as i32))?;
     c.hash_store(1, 2, ra, false)?;
-    if slice {
-        for (reg, offset) in [(11, 0), (12, 8), (13, 16)] {
-            c.hash_store(reg, 2, offset, false)?;
-        }
-        c.branch(0, 12, 0, HashFailed)?;
-        c.branch(0, 13, 0, HashFailed)?;
-        c.li(5, 32)?;
-        c.hash_store(5, 13, 0, false)?;
-    } else {
-        c.hash_store(11, 2, 520, false)?;
-        c.hash_store(12, 2, 528, false)?;
-        c.branch(0, 11, 0, HashBadOutput)?;
-        c.branch(0, 12, 0, HashBadOutput)?;
+
+    for (reg, offset) in [(11, 0), (12, 8), (13, 16)] {
+        c.hash_store(reg, 2, offset, false)?;
     }
+    c.branch(0, 12, 0, HashFailed)?;
+    c.branch(0, 13, 0, HashFailed)?;
+    c.li(5, 32)?;
+    c.hash_store(5, 13, 0, false)?;
+
     c.immediate(0x13, 5, 5, 10, 32)?;
     c.immediate(0x13, 1, 6, 10, 32)?;
     c.immediate(0x13, 5, 6, 6, 32)?;
@@ -79,71 +150,34 @@ pub(super) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf, owner: 
     c.label(HashDirect);
     c.addi(7, 5, 0)?;
     c.label(HashDecoded);
-    if slice {
-        for (reg, offset) in [(10, 8), (11, 16), (12, 0)] {
-            c.immediate(3, 3, reg, 2, offset)?;
-        }
-    } else {
-        c.li(5, 512)?;
-        c.hash_store(5, 2, 0, false)?;
-        c.addi(10, 2, 8)?;
-        c.addi(11, 2, 0)?;
-        c.li(12, 0)?;
+
+    for (reg, offset) in [(10, 8), (11, 16), (12, 0)] {
+        c.immediate(3, 3, reg, 2, offset)?;
     }
+
     c.addi(13, 6, 0)?;
     c.addi(14, 7, 0)?;
     c.constant(17, 2092)?;
     c.exact(0x73)?;
-    if slice {
-        c.branch(0, 10, 0, Ready)?;
-        c.li(5, 3)?;
-        c.sub(6, 10, 5)?;
-        c.branch(1, 6, 0, HashFailed)?;
-        c.label(Ready);
-        c.immediate(3, 3, 5, 2, 16)?;
-        c.immediate(3, 3, 7, 5, 0)?;
-        c.li(6, 32)?;
-        c.branch(6, 7, 6, HashFailed)?;
-        c.hash_store(6, 5, 0, false)?;
-    } else {
-        c.branch(1, 10, 0, HashFailed)?;
-        c.addi(10, 2, 8)?;
-        c.immediate(3, 3, 11, 2, 0)?;
-        c.li(5, 512)?;
-        c.branch(6, 5, 11, HashFailed)?;
-        c.immediate(3, 3, 12, 2, 520)?;
-        crate::instance_machine::validate_memory_blake2b(record, elf)?;
-        let callee = record
-            .entries
-            .iter()
-            .find(|entry| entry.id == "runtime:__ckb_hash_blake2b_var")
-            .and_then(|entry| record.blocks.iter().find(|block| block.id == entry.entry_block))
-            .ok_or_else(|| invalid("missing bounded hash dependency"))?
-            .range
-            .start;
-        let upper = c.word()?;
-        let call = c.pc;
-        let lower = c.word()?;
-        if upper & 0xfff != 0x97 || lower & 0x000f_ffff != 0x000080e7 || c.targets.get(&call) != Some(&callee) {
-            return Err(invalid("bounded hash does not call the checked memory hash"));
-        }
-        c.branch(1, 10, 0, HashFailed)?;
-        c.immediate(3, 3, 31, 2, 528)?;
-        c.li(5, 32)?;
-        c.hash_store(5, 31, 0, false)?;
-    }
+
+    c.branch(0, 10, 0, Ready)?;
+    c.li(5, 3)?;
+    c.sub(6, 10, 5)?;
+    c.branch(1, 6, 0, HashFailed)?;
+    c.label(Ready);
+    c.immediate(3, 3, 5, 2, 16)?;
+    c.immediate(3, 3, 7, 5, 0)?;
+    c.li(6, 32)?;
+    c.branch(6, 7, 6, HashFailed)?;
+    c.hash_store(6, 5, 0, false)?;
+
     c.li(10, 0)?;
     c.hash_jump(Done)?;
     c.label(Invalid);
     c.li(10, 44)?;
     c.hash_jump(Done)?;
-    if !slice {
-        c.label(HashBadOutput);
-        c.li(10, 18)?;
-        c.hash_jump(Done)?;
-    }
     c.label(HashFailed);
-    c.li(10, if slice { 1 } else { 3 })?;
+    c.li(10, 1)?;
     c.label(Done);
     c.immediate(3, 3, 1, 2, ra as i32)?;
     c.addi(2, 2, frame as i32)?;

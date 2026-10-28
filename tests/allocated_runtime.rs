@@ -33,12 +33,12 @@ mod borrowed_collection_reads;
 fn allocated_borrowed_reads_execute_with_copied_records_and_missing_values() {
     for padding in [0, 7, 8] {
         for bytes in [512, 65536] {
-            for opt_level in [0, 3] {
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let compiled = cellscript::compile(
                     &borrowed_collection_reads::source(padding, bytes),
                     CompileOptions {
                         edition: CellScriptEdition::Edition2027,
-                        opt_level,
+                        diagnostics,
                         target: Some("riscv64-elf".into()),
                         ..Default::default()
                     },
@@ -49,7 +49,7 @@ fn allocated_borrowed_reads_execute_with_copied_records_and_missing_values() {
                         execute_compiled(&compiled, &[cellscript::EntryWitnessArg::U64(index), cellscript::EntryWitnessArg::U64(key)]);
                     assert_eq!(
                         outcome.exit_code, expected,
-                        "padding={padding}, bytes={bytes}, O{opt_level}, index={index}, key={key}: {outcome:?}"
+                        "padding={padding}, bytes={bytes}, {diagnostics}, index={index}, key={key}: {outcome:?}"
                     );
                 }
             }
@@ -59,13 +59,13 @@ fn allocated_borrowed_reads_execute_with_copied_records_and_missing_values() {
 
 const DECLARATION: &str = "module allocated_runtime\ncollections Work { limits { bytes: 2048, allocations: 16 }\nvalues: Vec<u64> { items: 8 }\ntotals: OrderedMap<u64, u64> { items: 8 }\nseen: OrderedSet<u64> { items: 8 } }\n";
 
-fn execute(source: &str, opt_level: u8) -> ckb_script_runner::CkbScriptExecutionResult {
-    execute_with_args(source, opt_level, &[])
+fn execute(source: &str, diagnostics: cellscript::CompilerDiagnostics) -> ckb_script_runner::CkbScriptExecutionResult {
+    execute_with_args(source, diagnostics, &[])
 }
 
 fn execute_with_args(
     source: &str,
-    opt_level: u8,
+    diagnostics: cellscript::CompilerDiagnostics,
     args: &[cellscript::EntryWitnessArg],
 ) -> ckb_script_runner::CkbScriptExecutionResult {
     let compiled = cellscript::compile(
@@ -73,7 +73,7 @@ fn execute_with_args(
         CompileOptions {
             edition: CellScriptEdition::Edition2027,
             target: Some("riscv64-elf".into()),
-            opt_level,
+            diagnostics,
             ..Default::default()
         },
     )
@@ -98,13 +98,13 @@ fn execute_compiled(
     ckb_script_runner::execute_cellscript_script(cellscript::strip_vm_abi_trailer(&compiled.artifact_bytes), &fixture)
 }
 
-fn compile_checked(source: &str, opt_level: u8) -> cellscript::CompileResult {
+fn compile_checked(source: &str, diagnostics: cellscript::CompilerDiagnostics) -> cellscript::CompileResult {
     let compiled = cellscript::compile_with_executable_surface_policy(
         source,
         CompileOptions {
             edition: CellScriptEdition::Edition2027,
             target: Some("riscv64-elf".into()),
-            opt_level,
+            diagnostics,
             ..Default::default()
         },
         cellscript::ExecutableSurfacePolicy::DenyFailClosed,
@@ -125,12 +125,12 @@ fn compile_checked(source: &str, opt_level: u8) -> cellscript::CompileResult {
 fn allocated_coordinate_helpers_execute_after_guarded_writes_with_register_and_stack_arguments() {
     for padding in [0, 5, 6] {
         for bytes in [512, 65536] {
-            for opt_level in [0, 3] {
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let compiled = cellscript::compile(
                     &collection_coordinate_helpers::source(padding, bytes),
                     CompileOptions {
                         edition: CellScriptEdition::Edition2027,
-                        opt_level,
+                        diagnostics,
                         target: Some("riscv64-elf".into()),
                         ..Default::default()
                     },
@@ -138,7 +138,7 @@ fn allocated_coordinate_helpers_execute_after_guarded_writes_with_register_and_s
                 .unwrap();
                 for value in [0, 7, 255] {
                     let result = execute_compiled(&compiled, &[cellscript::EntryWitnessArg::U64(value)]);
-                    assert_eq!(result.exit_code, 0, "padding={padding}, bytes={bytes}, O{opt_level}, value={value}: {result:?}");
+                    assert_eq!(result.exit_code, 0, "padding={padding}, bytes={bytes}, {diagnostics}, value={value}: {result:?}");
                 }
             }
         }
@@ -180,11 +180,11 @@ action inspect(witness input: Pair) -> u64 {
     require pair.left == 5
     return 0
 }"#;
-    for opt in [0, 3] {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile_checked(source, opt);
         let result =
             execute_compiled(&compiled, &[cellscript::EntryWitnessArg::Bytes([1u64.to_le_bytes(), 7u64.to_le_bytes()].concat())]);
-        assert_eq!(result.exit_code, 0, "O{opt}: {result:?}");
+        assert_eq!(result.exit_code, 0, "{opt}: {result:?}");
     }
 }
 
@@ -227,7 +227,7 @@ action inspect(witness input: Record, witness next: [u8; {width}], witness chang
     return 0
 }}"#
         );
-        for opt in [0, 3] {
+        for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = compile_checked(&source, opt);
             for change in [false, true] {
                 let result = execute_compiled(
@@ -240,7 +240,7 @@ action inspect(witness input: Record, witness next: [u8; {width}], witness chang
                         cellscript::EntryWitnessArg::Bool(change),
                     ],
                 );
-                assert_eq!(result.exit_code, 0, "width={width}/O{opt}/change={change}: {result:?}");
+                assert_eq!(result.exit_code, 0, "width={width}/{opt}/change={change}: {result:?}");
             }
         }
     }
@@ -271,7 +271,7 @@ action inspect() -> u64 {
     require work.values.get(3) == 17
     return 0
 }"#;
-    for opt in [0, 3] {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         assert_eq!(execute(source, opt).exit_code, 0);
     }
 }
@@ -318,7 +318,7 @@ action inspect(witness first: Batch, witness second: Batch) -> u64 {{
     return 0
 }}"#
         );
-        for opt in [0, 3] {
+        for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = compile_checked(&source, opt);
             let result = execute_compiled(
                 &compiled,
@@ -327,7 +327,7 @@ action inspect(witness first: Batch, witness second: Batch) -> u64 {{
                     cellscript::EntryWitnessArg::Bytes((101..101 + count).map(|i| i as u8).collect()),
                 ],
             );
-            assert_eq!(result.exit_code, 0, "{count}/O{opt}: {result:?}");
+            assert_eq!(result.exit_code, 0, "{count}/{opt}: {result:?}");
         }
     }
 }
@@ -350,7 +350,7 @@ action inspect(witness input: [(u16, u8); 1024], witness count: u64, witness sum
     require actual == sum
     return 0
 }"#;
-    for opt in [0, 3] {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for precharge in [false, true] {
             let text = source.replace("// PRECHARGE", if precharge { "work.padding.reserve(636)" } else { "" });
             let compiled = compile_checked(&text, opt);
@@ -385,9 +385,9 @@ action inspect(witness input: [(u16, u8); 1024], witness count: u64, witness sum
                 assert_eq!(
                     result.exit_code,
                     if invalid { 21 } else { 0 },
-                    "pattern={pattern}/precharge={precharge}/O{opt}: {result:?}"
+                    "pattern={pattern}/precharge={precharge}/{opt}: {result:?}"
                 );
-                if opt == 3 {
+                if opt.is_standard() {
                     let key = format!("precharge-{precharge}-pattern-{pattern}");
                     observations.insert(key, resources::observe(&compiled, &text, &arguments, &result));
                 }
@@ -433,9 +433,9 @@ action inspect(witness entries: [(u64, u64); 4], witness keys: [u64; 4], witness
             cellscript::EntryWitnessArg::Bytes(keys.into_iter().flat_map(u64::to_le_bytes).collect()),
             cellscript::EntryWitnessArg::U64(model.values().sum()),
         ];
-        for opt in [0, 3] {
+        for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let result = execute_with_args(source, opt, &args);
-            assert_eq!(result.exit_code, if keys.is_sorted() { 0 } else { 21 }, "{keys:?}/O{opt}: {result:?}");
+            assert_eq!(result.exit_code, if keys.is_sorted() { 0 } else { 21 }, "{keys:?}/{opt}: {result:?}");
         }
     }
     let literal = r#"module sorted_literals
@@ -449,7 +449,7 @@ require work.totals.get(1) == 11
 require work.totals.get(2) == 13
 return 0
 }"#;
-    for opt in [0, 3] {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         assert_eq!(execute(literal, opt).exit_code, 0);
         let small = literal.replace("u64, u64", "u8, u8");
         assert_eq!(execute(&small, opt).exit_code, 0);
@@ -479,8 +479,11 @@ return 0
 fn allocated_records_import_generic_values_and_helpers_without_losing_identity() {
     let directory = tempfile::tempdir().unwrap();
     let root = camino::Utf8Path::from_path(directory.path()).unwrap();
-    std::fs::write(root.join("Cell.toml"), "[package]\nname = \"imported-records\"\nversion = \"1.0.0\"\nedition = \"2027\"\n")
-        .unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nname = \"imported-records\"\nversion = \"1.0.0\"\nedition = \"2027\"\n",
+    )
+    .unwrap();
     let sources = root.join("src");
     std::fs::create_dir(&sources).unwrap();
     let root = sources.as_path();
@@ -522,14 +525,14 @@ action inspect(witness pair: Duo<u64>) -> u64 {
 "#,
     )
     .unwrap();
-    for opt in [0, 3] {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = cellscript::compile_file_with_entry_action(
             &input,
             CompileOptions {
                 edition: CellScriptEdition::Edition2027,
                 target: Some("riscv64-elf".into()),
                 source_contracts: true,
-                opt_level: opt,
+                diagnostics: opt,
                 ..Default::default()
             },
             "inspect",
@@ -545,7 +548,7 @@ action inspect(witness pair: Duo<u64>) -> u64 {
             &compiled,
             &[cellscript::EntryWitnessArg::Bytes([17u64, 29].into_iter().flat_map(u64::to_le_bytes).collect())],
         );
-        assert_eq!(result.exit_code, 0, "O{opt}: {result:?}");
+        assert_eq!(result.exit_code, 0, "{opt}: {result:?}");
     }
 }
 
@@ -584,7 +587,7 @@ action inspect(witness first: [u8; {width}], witness second: [u8; {width}], witn
             for initial in ["work.values.get(0)".into(), "first".into(), format!("b\"{}\"", "a".repeat(width)), "record.bytes".into()]
             {
                 let source = source.replace("let mut current = work.values.get(0)", &format!("let mut current = {initial}"));
-                for opt in [0, 3] {
+                for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                     let mut second = vec![0xfe; width];
                     second[width - 1] = 0xff;
                     let args = [
@@ -593,7 +596,7 @@ action inspect(witness first: [u8; {width}], witness second: [u8; {width}], witn
                         cellscript::EntryWitnessArg::Bytes(vec![b'a'; width]),
                     ];
                     let result = execute_with_args(&source, opt, &args);
-                    assert_eq!(result.exit_code, 0, "{width} bytes/O{opt}/annotated={annotated}/initial={initial}: {result:?}");
+                    assert_eq!(result.exit_code, 0, "{width} bytes/{opt}/annotated={annotated}/initial={initial}: {result:?}");
                 }
             }
         }
@@ -628,13 +631,13 @@ action inspect(witness record: Value, witness index: u64, witness expected: u8) 
 }}
 "#
         );
-        for opt in [0, 3] {
+        for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = cellscript::compile(
                 &source,
                 CompileOptions {
                     edition: CellScriptEdition::Edition2027,
                     target: Some("riscv64-elf".into()),
-                    opt_level: opt,
+                    diagnostics: opt,
                     ..Default::default()
                 },
             )
@@ -651,7 +654,7 @@ action inspect(witness record: Value, witness index: u64, witness expected: u8) 
                 } else {
                     cellscript::runtime_errors::CellScriptRuntimeError::BoundsCheckFailed.code() as i64
                 };
-                assert_eq!(result.exit_code, expected, "{width} bytes/O{opt}/index={index}: {result:?}");
+                assert_eq!(result.exit_code, expected, "{width} bytes/{opt}/index={index}: {result:?}");
             }
         }
     }
@@ -683,13 +686,13 @@ action inspect(witness input: [[u8; {width}]; 2], witness replacement: [[u8; {wi
 }}
 "#
             );
-            for opt in [0, 3] {
+            for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let compiled = cellscript::compile(
                     &source,
                     CompileOptions {
                         edition: CellScriptEdition::Edition2027,
                         target: Some("riscv64-elf".into()),
-                        opt_level: opt,
+                        diagnostics: opt,
                         ..Default::default()
                     },
                 )
@@ -715,7 +718,7 @@ action inspect(witness input: [[u8; {width}]; 2], witness replacement: [[u8; {wi
                     } else {
                         cellscript::runtime_errors::CellScriptRuntimeError::BoundsCheckFailed.code() as i64
                     };
-                    assert_eq!(result.exit_code, expected, "{width}/dynamic={dynamic}/index={index}/O{opt}: {result:?}");
+                    assert_eq!(result.exit_code, expected, "{width}/dynamic={dynamic}/index={index}/{opt}: {result:?}");
                 }
             }
         }
@@ -757,10 +760,10 @@ action inspect(witness first: Value, witness second: Value) -> u64 {{
 }}
 "#
         );
-        for opt in [0, 3] {
+        for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let args = [cellscript::EntryWitnessArg::Bytes(vec![17; width]), cellscript::EntryWitnessArg::Bytes(vec![29; width])];
             let result = execute_with_args(&source, opt, &args);
-            assert_eq!(result.exit_code, 0, "{width} bytes/O{opt}: {result:?}");
+            assert_eq!(result.exit_code, 0, "{width} bytes/{opt}: {result:?}");
         }
     }
 }
@@ -793,12 +796,12 @@ action inspect(witness first: Value, witness second: Value) -> u64 {{
 }}
 "#
             );
-            for opt in [0, 3] {
+            for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let mut second = vec![17; width];
                 second[width - 1] = 29;
                 let args = [cellscript::EntryWitnessArg::Bytes(vec![17; width]), cellscript::EntryWitnessArg::Bytes(second)];
                 let result = execute_with_args(&source, opt, &args);
-                assert_eq!(result.exit_code, 0, "{width} bytes/O{opt}/annotated={annotated}: {result:?}");
+                assert_eq!(result.exit_code, 0, "{width} bytes/{opt}/annotated={annotated}: {result:?}");
             }
         }
     }
@@ -829,13 +832,13 @@ action inspect(witness first: Value<[u8; {width}]>, witness second: Value<[u8; {
 }}
 "#
         );
-        for opt in [0, 3] {
+        for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let args = [cellscript::EntryWitnessArg::Bytes(vec![17; width]), cellscript::EntryWitnessArg::Bytes(vec![29; width])];
             let result = execute_with_args(&source, opt, &args);
-            assert_eq!(result.exit_code, 0, "{width} bytes/O{opt}: {result:?}");
+            assert_eq!(result.exit_code, 0, "{width} bytes/{opt}: {result:?}");
         }
     }
-    for opt in [0, 3] {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         assert_eq!(execute(include_str!("syntax_combo/seeds/collections-records.cell"), opt).exit_code, 0);
     }
 }
@@ -896,9 +899,9 @@ action inspect(witness first: Envelope, witness second: Envelope) -> u64 {
         cellscript::EntryWitnessArg::Bytes([17u64, 23, 31].into_iter().flat_map(u64::to_le_bytes).collect()),
         cellscript::EntryWitnessArg::Bytes([47u64, 53, 61].into_iter().flat_map(u64::to_le_bytes).collect()),
     ];
-    for opt in [0, 3] {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let result = execute_with_args(source, opt, &args);
-        assert_eq!(result.exit_code, 0, "O{opt}: {result:?}");
+        assert_eq!(result.exit_code, 0, "{opt}: {result:?}");
     }
 }
 
@@ -918,13 +921,13 @@ fn allocated_known_size_examples_reserve_once_without_changing_results() {
     ] {
         let unreserved = source.lines().filter(|line| !line.contains(".reserve(4)")).collect::<Vec<_>>().join("\n");
         assert_ne!(source, unreserved);
-        for opt in [0, 3] {
+        for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let before = execute_with_args(&unreserved, opt, &args);
             let after = execute_with_args(source, opt, &args);
             assert_eq!(before.exit_code, 0);
             assert_eq!(after.exit_code, 0);
-            assert!(after.cycles < before.cycles, "O{opt}: before={}, after={}", before.cycles, after.cycles);
-            eprintln!("source-reservation O{opt} before_cycles={} after_cycles={}", before.cycles, after.cycles);
+            assert!(after.cycles < before.cycles, "{opt}: before={}, after={}", before.cycles, after.cycles);
+            eprintln!("source-reservation {opt} before_cycles={} after_cycles={}", before.cycles, after.cycles);
         }
     }
 }
@@ -951,11 +954,11 @@ fn allocated_aggregation_and_deduplication_use_real_witnesses_and_host_oracles()
                 EntryWitnessArg::Bytes(amounts.into_iter().flat_map(u64::to_le_bytes).collect()),
                 EntryWitnessArg::U64(total as u64),
             ];
-            for opt in [0, 3] {
+            for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 assert_eq!(
                     execute_with_args(aggregation, opt, &args).exit_code,
                     if accepted { 0 } else { 5 },
-                    "{identifiers:?}/{amounts:?}/O{opt}"
+                    "{identifiers:?}/{amounts:?}/{opt}"
                 );
                 if accepted {
                     let mut wrong = args.clone();
@@ -965,11 +968,11 @@ fn allocated_aggregation_and_deduplication_use_real_witnesses_and_host_oracles()
             }
         }
         let distinct = hashes.iter().collect::<BTreeSet<_>>().len() == hashes.len();
-        for opt in [0, 3] {
+        for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             assert_eq!(
                 execute_with_args(deduplication, opt, &[EntryWitnessArg::Bytes(hashes.concat())]).exit_code,
                 if distinct { 0 } else { 5 },
-                "{identifiers:?}/O{opt}"
+                "{identifiers:?}/{opt}"
             );
         }
     }
@@ -1028,9 +1031,9 @@ action inspect() -> u64 {
 
 "#
     );
-    for opt in [0, 3] {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let result = execute(&source, opt);
-        assert_eq!(result.exit_code, 0, "O{opt}: {result:?}");
+        assert_eq!(result.exit_code, 0, "{opt}: {result:?}");
     }
 }
 
@@ -1069,9 +1072,9 @@ action inspect() -> u64 {
     return 0
 }
 "#;
-    for opt in [0, 3] {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let result = execute(source, opt);
-        assert_eq!(result.exit_code, 0, "O{opt}: {result:?}");
+        assert_eq!(result.exit_code, 0, "{opt}: {result:?}");
     }
 }
 
@@ -1091,9 +1094,9 @@ action inspect() -> u64 {
 }
 
 "#.replace("require work.values.remove(0) == 3", "let removed = work.values.remove(0)\nrequire removed == 3\nlet popped = work.values.pop()\nrequire popped == 9\nlet fresh = work.totals.insert(4, 10)\nrequire fresh\nlet replaced = work.totals.insert(4, 12)\nrequire !replaced\nrequire work.totals.get(4) == 12\nrequire work.totals.get_or(5, 17) == 17\nlet seen = work.seen.insert(4)\nrequire seen\nlet repeated = work.seen.insert(4)\nrequire !repeated\nlet moved = work\nrequire moved.seen.contains(4)\nborrow moved as view { require view.totals.len() == 1 }\nmoved.drop()");
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let result = execute(&format!("{DECLARATION}\n{body}"), opt);
-        assert_eq!(result.exit_code, 0, "O{opt}: {result:?}");
+        assert_eq!(result.exit_code, 0, "{opt}: {result:?}");
     }
 }
 
@@ -1127,7 +1130,7 @@ action inspect() -> u64 {
 "#
         .replace("\\n", "\n")
     );
-    for opt in [0, 3] {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let result = execute(&source, opt);
         assert_eq!(result.exit_code, 0, "{result:?}");
     }
@@ -1174,7 +1177,7 @@ action inspect() -> u64 {
     return 0
 }
 "#;
-    for opt in [0, 3] {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let result = execute(source, opt);
         assert_eq!(result.exit_code, 0, "{result:?}");
     }
@@ -1185,7 +1188,7 @@ fn allocated_source_bounds_and_shared_exhaustion_fail_deterministically() {
     for (operation, argument) in [("view.values.get(index)", 1), ("view.values.get(index)", u64::MAX), ("view.totals.get(index)", 99)]
     {
         let source = format!("{DECLARATION}\nfn read(view: &Work, index: u64) -> u64 {{ return {operation} }}\naction inspect(witness index: u64) -> u64 {{ let mut work = Work::new()\nwork.values.push(7)\nwork.totals.insert(0, 7)\nrequire read(&work, index) == 7\nreturn 0 }}");
-        for opt in [0, 3] {
+        for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             assert_eq!(execute_with_args(&source, opt, &[cellscript::EntryWitnessArg::U64(0)]).exit_code, 0);
             assert_eq!(execute_with_args(&source, opt, &[cellscript::EntryWitnessArg::U64(argument)]).exit_code, 21);
         }
@@ -1198,13 +1201,13 @@ fn allocated_source_bounds_and_shared_exhaustion_fail_deterministically() {
         "work.totals.get(99)",
     ] {
         let source = format!("{DECLARATION}\naction inspect() -> u64 {{ let mut work = Work::new()\n{body}\nreturn 0 }}");
-        let result = execute(&source, 3);
+        let result = execute(&source, cellscript::CompilerDiagnostics::default());
         assert_eq!(result.exit_code, 21, "{body}: {result:?}");
     }
     let source = "module exhaustion\ncollections Work { limits { bytes: 64, allocations: 1 }\na: Vec<u64> { items: 4 }\nb: OrderedSet<u64> { items: 4 } }\naction inspect() -> u64 { let mut work = Work::new()\nwork.a.push(1)\nwork.b.insert(1)\nreturn 0 }";
-    assert_eq!(execute(source, 3).exit_code, 21);
+    assert_eq!(execute(source, cellscript::CompilerDiagnostics::default()).exit_code, 21);
     let source = "module checked_wide_negation\ncollections Work { limits { bytes: 128, allocations: 2 }\nvalues: Vec<u128> { items: 2 } }\naction inspect() -> u64 { let mut work = Work::new()\nlet one: u128 = 1\nwork.values.push(-one)\nreturn 0 }";
-    assert_eq!(execute(source, 3).exit_code, 49);
+    assert_eq!(execute(source, cellscript::CompilerDiagnostics::default()).exit_code, 49);
 }
 
 #[test]
@@ -1231,7 +1234,7 @@ fn allocated_sorted_batch_copies_wide_values_and_compares_byte_keys() {
         } else {
             cellscript::EntryWitnessArg::Bytes(vec![13; value_bytes])
         };
-        for opt in [0, 3] {
+        for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             assert_eq!(
                 execute_with_args(&source, opt, &[cellscript::EntryWitnessArg::Bytes(entries.clone()), key.clone(), expected.clone()])
                     .exit_code,

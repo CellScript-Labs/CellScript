@@ -301,7 +301,7 @@ fn git_config_user(repo_dir: &Path) {
 fn create_package(dir: &Path, name: &str, version: &str, namespace: Option<&str>) {
     std::fs::create_dir_all(dir.join("src")).unwrap();
 
-    let mut toml = String::from("[package]\nedition = \"2026\"\n");
+    let mut toml = String::from("[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\n");
     toml.push_str(&format!("name = \"{}\"\n", name));
     toml.push_str(&format!("version = \"{}\"\n", version));
     if let Some(ns) = namespace {
@@ -325,7 +325,7 @@ fn create_package_with_dep(
 ) {
     std::fs::create_dir_all(dir.join("src")).unwrap();
 
-    let mut toml = String::from("[package]\nedition = \"2026\"\n");
+    let mut toml = String::from("[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\n");
     toml.push_str(&format!("name = \"{}\"\n", name));
     toml.push_str(&format!("version = \"{}\"\n", version));
     if let Some(ns) = namespace {
@@ -885,7 +885,7 @@ fn e2e_diamond_dependency_compatible_versions_unify() {
     // ── 4. Consumer "app" depends on both amm and vesting (the diamond) ──
     let app_dir = temp.path().join("consumer-app");
     std::fs::create_dir_all(app_dir.join("src")).unwrap();
-    let mut toml = String::from("[package]\nedition = \"2026\"\nname = \"app\"\nversion = \"0.1.0\"\nnamespace = \"cellscript\"\n");
+    let mut toml = String::from("[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"app\"\nversion = \"0.1.0\"\nnamespace = \"cellscript\"\n");
     toml.push_str("\n[dependencies.amm]\nversion = \"0.1.0\"\nnamespace = \"cellscript\"\n");
     toml.push_str("\n[dependencies.vesting]\nversion = \"0.1.0\"\nnamespace = \"cellscript\"\n");
     std::fs::write(app_dir.join("Cell.toml"), toml).unwrap();
@@ -959,7 +959,7 @@ fn e2e_diamond_dependency_incompatible_versions_fail_during_resolution() {
     // ── 4. Consumer "app" forms the conflicting diamond ──
     let app_dir = temp.path().join("consumer-app");
     std::fs::create_dir_all(app_dir.join("src")).unwrap();
-    let mut toml = String::from("[package]\nedition = \"2026\"\nname = \"app\"\nversion = \"0.1.0\"\nnamespace = \"cellscript\"\n");
+    let mut toml = String::from("[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"app\"\nversion = \"0.1.0\"\nnamespace = \"cellscript\"\n");
     toml.push_str("\n[dependencies.amm]\nversion = \"0.1.0\"\nnamespace = \"cellscript\"\n");
     toml.push_str("\n[dependencies.vesting]\nversion = \"0.1.0\"\nnamespace = \"cellscript\"\n");
     std::fs::write(app_dir.join("Cell.toml"), toml).unwrap();
@@ -1013,6 +1013,7 @@ fn e2e_transitive_registry_dependency_inherits_the_consuming_package_namespace()
     std::fs::write(
         app_dir.join("Cell.toml"),
         r#"[package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "1.0.0"
@@ -2251,6 +2252,7 @@ fn e2e_live_devnet_deploy_and_verify() {
         pkg_dir.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "devnet-contract"
 version = "0.1.0"
@@ -2534,6 +2536,7 @@ fn e2e_live_devnet_publish_deploy_verify_full_lifecycle() {
         app_repo.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app-contract"
 version = "0.1.0"
@@ -2901,6 +2904,7 @@ fn e2e_source_hash_cross_platform_determinism() {
     std::fs::write(
         pkg_dir.join("Cell.toml"),
         r#"[package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "multi-file"
 version = "0.1.0"
@@ -2930,6 +2934,7 @@ namespace = "cellscript"
     std::fs::write(
         pkg_dir.join("Cell.toml"),
         r#"[package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "multi-file"
 version = "0.2.0"
@@ -2952,6 +2957,7 @@ namespace = "cellscript"
     std::fs::write(
         pkg_dir2.join("Cell.toml"),
         r#"[package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "det-check"
 version = "0.1.0"

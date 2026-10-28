@@ -109,7 +109,6 @@ pub enum Command {
     ExplainGenerics(ExplainGenericsArgs),
     ExplainCollections(ExplainCollectionsArgs),
     ExplainGraph(ExplainGraphArgs),
-    OptReport(OptReportArgs),
     ProofDiff(ProofDiffArgs),
     Profile(ProfileArgs),
     TraceTx(TraceTxArgs),
@@ -511,14 +510,6 @@ pub struct ExplainGraphArgs {
     pub target_profile: Option<String>,
     pub json: bool,
     pub format: Option<String>,
-}
-
-#[derive(Debug, Default)]
-pub struct OptReportArgs {
-    pub input: Option<PathBuf>,
-    pub output: Option<PathBuf>,
-    pub target: Option<String>,
-    pub target_profile: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -1048,7 +1039,6 @@ impl CommandExecutor {
             Command::ExplainGenerics(args) => Self::explain_generics(args),
             Command::ExplainCollections(args) => Self::explain_collections(args),
             Command::ExplainGraph(args) => Self::explain_graph(args),
-            Command::OptReport(args) => Self::opt_report(args),
             Command::ProofDiff(args) => Self::proof_diff(args),
             Command::Profile(args) => Self::profile(args),
             Command::TraceTx(args) => Self::trace_tx(args),
@@ -1108,12 +1098,12 @@ impl CommandExecutor {
             }
         }
 
-        let opt_level = if args.release { 3 } else { 1 };
+        let diagnostics = crate::CompilerDiagnostics::default();
         let input = Utf8Path::new(".");
         let options = CompileOptions {
             source_contracts: args.source_contracts,
             edition: crate::CURRENT_EDITION,
-            opt_level,
+            diagnostics,
             output: None,
             debug: false,
             target: args.target.clone(),
@@ -1169,7 +1159,7 @@ impl CommandExecutor {
             "policy_artifact": args.artifact,
             "metadata": metadata_path.to_string(),
             "artifact_format": result.artifact_format.display_name(),
-            "opt_level": opt_level,
+            "compilation_policy": crate::COMPILATION_POLICY,
             "target_profile": result.metadata.target_profile.name.as_str(),
             "artifact_hash": result.metadata.artifact_hash,
             "artifact_size_bytes": result.artifact_bytes.len(),
@@ -1263,7 +1253,7 @@ impl CommandExecutor {
         let planned_units =
             inspected_plan.units.iter().map(|unit| (unit.package_name.clone(), unit.clone())).collect::<BTreeMap<_, _>>();
 
-        let opt_level = if args.release { 3 } else { 1 };
+        let diagnostics = crate::CompilerDiagnostics::default();
         let mut member_results = Vec::new();
         let mut human_lines = Vec::new();
         let mut failure_diagnostics = Vec::new();
@@ -1304,7 +1294,7 @@ impl CommandExecutor {
             let options = CompileOptions {
                 source_contracts: args.source_contracts,
                 edition: crate::CURRENT_EDITION,
-                opt_level,
+                diagnostics,
                 output: None,
                 debug: false,
                 target: args.target.clone(),
@@ -1510,7 +1500,7 @@ impl CommandExecutor {
                 CompileOptions {
                     source_contracts: false,
                     edition: crate::CURRENT_EDITION,
-                    opt_level: 0,
+                    diagnostics: crate::CompilerDiagnostics::default(),
                     output: None,
                     debug: false,
                     target: None,
@@ -1566,7 +1556,7 @@ impl CommandExecutor {
                 CompileOptions {
                     source_contracts: false,
                     edition: crate::CURRENT_EDITION,
-                    opt_level: 0,
+                    diagnostics: crate::CompilerDiagnostics::default(),
                     output: None,
                     debug: false,
                     target: expectation.target.clone(),
@@ -1734,7 +1724,7 @@ impl CommandExecutor {
             CompileOptions {
                 source_contracts: false,
                 edition: crate::CURRENT_EDITION,
-                opt_level: 0,
+                diagnostics: crate::CompilerDiagnostics::default(),
                 output: None,
                 debug: false,
                 target: None,
@@ -2052,7 +2042,7 @@ impl CommandExecutor {
             let compile_options = CompileOptions {
                 source_contracts: false,
                 edition: crate::CURRENT_EDITION,
-                opt_level: 0,
+                diagnostics: crate::CompilerDiagnostics::default(),
                 output: None,
                 debug: false,
                 target: target.map(str::to_string),
@@ -2208,7 +2198,7 @@ impl CommandExecutor {
                 let compile_options = CompileOptions {
                     source_contracts: false,
                     edition: crate::CURRENT_EDITION,
-                    opt_level: 0,
+                    diagnostics: crate::CompilerDiagnostics::default(),
                     output: None,
                     debug: false,
                     target: target.map(str::to_string),
@@ -2341,7 +2331,7 @@ impl CommandExecutor {
         let options = CompileOptions {
             source_contracts: false,
             edition: crate::CURRENT_EDITION,
-            opt_level: 0,
+            diagnostics: crate::CompilerDiagnostics::default(),
             output: None,
             debug: false,
             target: args.target,
@@ -2388,7 +2378,7 @@ impl CommandExecutor {
     }
 
     fn build_plan(args: BuildPlanArgs) -> Result<()> {
-        crate::package::inspection::validate_schema_version(args.schema_version)?;
+        crate::package::inspection::validate_build_plan_schema_version(args.schema_version)?;
         let input = args.input.as_deref().unwrap_or_else(|| Path::new("."));
         let resolution = inspection_resolution_options(
             &args.scope,
@@ -2427,7 +2417,7 @@ impl CommandExecutor {
         let options = CompileOptions {
             source_contracts: false,
             edition: crate::CURRENT_EDITION,
-            opt_level: 0,
+            diagnostics: crate::CompilerDiagnostics::default(),
             output: None,
             debug: false,
             target: args.target,
@@ -2555,7 +2545,7 @@ impl CommandExecutor {
             CompileOptions {
                 source_contracts: false,
                 edition: crate::CURRENT_EDITION,
-                opt_level: 0,
+                diagnostics: crate::CompilerDiagnostics::default(),
                 output: None,
                 debug: false,
                 target: args.target,
@@ -2624,7 +2614,7 @@ impl CommandExecutor {
                 CompileOptions {
                     source_contracts: false,
                     edition: crate::CURRENT_EDITION,
-                    opt_level: 0,
+                    diagnostics: crate::CompilerDiagnostics::default(),
                     output: None,
                     debug: false,
                     target: Some("riscv64-elf".to_string()),
@@ -2712,7 +2702,7 @@ impl CommandExecutor {
         let options = CompileOptions {
             source_contracts: false,
             edition: crate::CURRENT_EDITION,
-            opt_level: 0,
+            diagnostics: crate::CompilerDiagnostics::default(),
             output: None,
             debug: false,
             target: args.target,
@@ -2754,7 +2744,7 @@ impl CommandExecutor {
             CompileOptions {
                 source_contracts: false,
                 edition: crate::CURRENT_EDITION,
-                opt_level: 0,
+                diagnostics: crate::CompilerDiagnostics::default(),
                 output: None,
                 debug: false,
                 target: args.target,
@@ -2860,7 +2850,7 @@ impl CommandExecutor {
             CompileOptions {
                 source_contracts: false,
                 edition: crate::CURRENT_EDITION,
-                opt_level: 0,
+                diagnostics: crate::CompilerDiagnostics::default(),
                 output: None,
                 debug: false,
                 target: args.target,
@@ -3136,7 +3126,7 @@ impl CommandExecutor {
             CompileOptions {
                 source_contracts: false,
                 edition: crate::CURRENT_EDITION,
-                opt_level: 0,
+                diagnostics: crate::CompilerDiagnostics::default(),
                 output: None,
                 debug: false,
                 target: args.target,
@@ -3179,7 +3169,7 @@ impl CommandExecutor {
             CompileOptions {
                 source_contracts: false,
                 edition: crate::CURRENT_EDITION,
-                opt_level: 0,
+                diagnostics: crate::CompilerDiagnostics::default(),
                 output: None,
                 debug: false,
                 target: args.target,
@@ -3239,7 +3229,7 @@ impl CommandExecutor {
             CompileOptions {
                 source_contracts: false,
                 edition: crate::CURRENT_EDITION,
-                opt_level: 0,
+                diagnostics: crate::CompilerDiagnostics::default(),
                 output: None,
                 debug: false,
                 target: args.target,
@@ -3295,7 +3285,7 @@ impl CommandExecutor {
             CompileOptions {
                 source_contracts: false,
                 edition: crate::CURRENT_EDITION,
-                opt_level: 0,
+                diagnostics: crate::CompilerDiagnostics::default(),
                 output: None,
                 debug: false,
                 target: args.target,
@@ -3341,7 +3331,7 @@ impl CommandExecutor {
             CompileOptions {
                 source_contracts: false,
                 edition: crate::CURRENT_EDITION,
-                opt_level: 0,
+                diagnostics: crate::CompilerDiagnostics::default(),
                 output: None,
                 debug: false,
                 target: args.target,
@@ -3368,7 +3358,7 @@ impl CommandExecutor {
             CompileOptions {
                 source_contracts: false,
                 edition: crate::CURRENT_EDITION,
-                opt_level: 0,
+                diagnostics: crate::CompilerDiagnostics::default(),
                 output: None,
                 debug: false,
                 target: args.target,
@@ -3402,7 +3392,7 @@ impl CommandExecutor {
             CompileOptions {
                 source_contracts: false,
                 edition: crate::CURRENT_EDITION,
-                opt_level: 0,
+                diagnostics: crate::CompilerDiagnostics::default(),
                 output: None,
                 debug: false,
                 target: args.target,
@@ -3447,7 +3437,7 @@ impl CommandExecutor {
             CompileOptions {
                 source_contracts: false,
                 edition: crate::CURRENT_EDITION,
-                opt_level: 0,
+                diagnostics: crate::CompilerDiagnostics::default(),
                 output: None,
                 debug: false,
                 target: args.target,
@@ -3561,7 +3551,7 @@ impl CommandExecutor {
             CompileOptions {
                 source_contracts: false,
                 edition: crate::CURRENT_EDITION,
-                opt_level: 0,
+                diagnostics: crate::CompilerDiagnostics::default(),
                 output: None,
                 debug: false,
                 target: args.target,
@@ -3592,106 +3582,6 @@ impl CommandExecutor {
                 other
             ))),
         }
-    }
-
-    fn opt_report(args: OptReportArgs) -> Result<()> {
-        let input_path = args.input.unwrap_or_else(|| PathBuf::from("."));
-        let input = Utf8Path::from_path(&input_path)
-            .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
-        let mut rows = Vec::new();
-        for opt_level in 0..=3u8 {
-            let result = compile_path(
-                input,
-                CompileOptions {
-                    source_contracts: false,
-                    edition: crate::CURRENT_EDITION,
-                    opt_level,
-                    output: None,
-                    debug: false,
-                    target: args.target.clone(),
-                    target_profile: args.target_profile.clone(),
-                    primitive_compat: None,
-                },
-            )?;
-            let artifact = &result.metadata.constraints.artifact;
-            let estimated_cycles_total = result.metadata.actions.iter().map(|action| action.estimated_cycles).sum::<u64>();
-            let estimated_cycles_max_action =
-                result.metadata.actions.iter().map(|action| action.estimated_cycles).max().unwrap_or_default();
-            rows.push(serde_json::json!({
-                "opt_level": opt_level,
-                "artifact_format": result.metadata.artifact_format,
-                "target_profile": result.metadata.target_profile.name,
-                "artifact_size_bytes": result.artifact_bytes.len(),
-                "estimated_cycles_total": estimated_cycles_total,
-                "estimated_cycles_max_action": estimated_cycles_max_action,
-                "backend_shape": {
-                    "text_bytes": artifact.text_bytes,
-                    "rodata_bytes": artifact.rodata_bytes,
-                    "executable_text_op_count": artifact.executable_text_op_count,
-                    "covered_text_op_count": artifact.covered_text_op_count,
-                    "relaxed_branch_count": artifact.relaxed_branch_count,
-                    "max_cond_branch_abs_distance": artifact.max_cond_branch_abs_distance,
-                    "machine_block_count": artifact.machine_block_count,
-                    "max_machine_block_size": artifact.max_machine_block_size,
-                    "conditional_branch_block_count": artifact.conditional_branch_block_count,
-                    "labeled_machine_block_count": artifact.labeled_machine_block_count,
-                    "machine_cfg_edge_count": artifact.machine_cfg_edge_count,
-                    "machine_call_edge_count": artifact.machine_call_edge_count,
-                    "unreachable_machine_block_count": artifact.unreachable_machine_block_count,
-                    "layout_order_block_count": artifact.layout_order_block_count,
-                    "layout_order_text_size": artifact.layout_order_text_size,
-                },
-                "constraints_status": result.metadata.constraints.status,
-                "constraints_warnings": result.metadata.constraints.warnings.len(),
-                "constraints_failures": result.metadata.constraints.failures.len(),
-                "source_content_hash": result.metadata.source_content_hash,
-            }));
-        }
-        let baseline_size = rows.first().and_then(|row| row["artifact_size_bytes"].as_u64()).unwrap_or_default();
-        let baseline_text_bytes = rows.first().and_then(|row| row["backend_shape"]["text_bytes"].as_u64());
-        let baseline_executable_text_ops = rows.first().and_then(|row| row["backend_shape"]["executable_text_op_count"].as_u64());
-        let baseline_estimated_cycles_total = rows.first().and_then(|row| row["estimated_cycles_total"].as_u64()).unwrap_or_default();
-        let summary_rows = rows
-            .into_iter()
-            .map(|mut row| {
-                let size = row["artifact_size_bytes"].as_u64().unwrap_or_default();
-                row["artifact_size_delta_from_o0"] = serde_json::json!(size as i64 - baseline_size as i64);
-                row["text_bytes_delta_from_o0"] = match (row["backend_shape"]["text_bytes"].as_u64(), baseline_text_bytes) {
-                    (Some(value), Some(baseline)) => serde_json::json!(value as i64 - baseline as i64),
-                    _ => serde_json::Value::Null,
-                };
-                row["executable_text_op_count_delta_from_o0"] =
-                    match (row["backend_shape"]["executable_text_op_count"].as_u64(), baseline_executable_text_ops) {
-                        (Some(value), Some(baseline)) => serde_json::json!(value as i64 - baseline as i64),
-                        _ => serde_json::Value::Null,
-                    };
-                let estimated_cycles_total = row["estimated_cycles_total"].as_u64().unwrap_or_default();
-                row["estimated_cycles_total_delta_from_o0"] =
-                    serde_json::json!(estimated_cycles_total as i64 - baseline_estimated_cycles_total as i64);
-                row
-            })
-            .collect::<Vec<_>>();
-        let summary = serde_json::json!({
-            "status": "ok",
-            "policy": "cellscript-opt-report-v1",
-            "input": input_path.display().to_string(),
-            "baseline_opt_level": 0,
-            "rows": summary_rows,
-        });
-        let json = serde_json::to_string_pretty(&summary)
-            .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize opt report: {}", error)))?;
-
-        if let Some(output_path) = args.output {
-            if let Some(parent) = output_path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(&output_path, json)?;
-            println!("{}", "Optimization report generated".green());
-            println!("  Output: {}", output_path.display());
-        } else {
-            println!("{}", json);
-        }
-        Ok(())
     }
 
     fn explain_profile(args: ExplainProfileArgs) -> Result<()> {
@@ -3764,7 +3654,7 @@ impl CommandExecutor {
             CompileOptions {
                 source_contracts: false,
                 edition: crate::CURRENT_EDITION,
-                opt_level: 1,
+                diagnostics: crate::CompilerDiagnostics::default(),
                 output: None,
                 debug: false,
                 target: args.target,
@@ -4025,7 +3915,7 @@ impl CommandExecutor {
             let options = CompileOptions {
                 source_contracts: false,
                 edition: crate::CURRENT_EDITION,
-                opt_level: 1,
+                diagnostics: crate::CompilerDiagnostics::default(),
                 output: None,
                 debug: false,
                 target: None,
@@ -4116,7 +4006,7 @@ impl CommandExecutor {
             CompileOptions {
                 source_contracts: false,
                 edition: crate::CURRENT_EDITION,
-                opt_level: 0,
+                diagnostics: crate::CompilerDiagnostics::default(),
                 output: None,
                 debug: false,
                 target: args.target,
@@ -4628,13 +4518,13 @@ impl CommandExecutor {
     }
 
     fn run(args: RunArgs) -> Result<()> {
-        let opt_level = if args.release { 3 } else { 0 };
+        let diagnostics = crate::CompilerDiagnostics::default();
         let compile_result = compile_path(
             ".",
             CompileOptions {
                 source_contracts: false,
                 edition: crate::CURRENT_EDITION,
-                opt_level,
+                diagnostics,
                 output: None,
                 debug: false,
                 target: Some("riscv64-elf".to_string()),
@@ -16864,10 +16754,10 @@ impl CliParser {
                     .arg(Arg::new("no-default-features").long("no-default-features").action(ArgAction::SetTrue).help("Do not activate the default feature"))
                     .arg(Arg::new("environment").long("environment").value_name("NAME").help("Select an explicitly declared CKB dependency environment"))
                     .arg(Arg::new("offline").long("offline").action(ArgAction::SetTrue).help("Declare that the query must use only local locked sources; inspection is always read-only and effectively offline"))
-                    .arg(Arg::new("schema-version").long("schema-version").value_name("N").default_value("1").value_parser(clap::value_parser!(u32)).help("Requested inspection JSON schema version"))
+                    .arg(Arg::new("schema-version").long("schema-version").value_name("N").default_value("2").value_parser(clap::value_parser!(u32)).help("Requested inspection JSON schema version"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb or ckb-type-hash"))
-                    .arg(Arg::new("release").long("release").short('r').action(ArgAction::SetTrue).help("Plan optimization level 3"))
+                    .arg(Arg::new("release").long("release").short('r').action(ArgAction::SetTrue).help("Plan release output with the normal compilation strategy"))
                     .arg(Arg::new("debug").long("debug").action(ArgAction::SetTrue).help("Plan debug metadata"))
                     .arg(Arg::new("entry-action").long("entry-action").value_name("ACTION").help("Plan one action entrypoint"))
                     .arg(Arg::new("entry-lock").long("entry-lock").value_name("LOCK").conflicts_with("entry-action").help("Plan one lock entrypoint"))
@@ -17094,20 +16984,6 @@ impl CliParser {
                             .help("ProtocolGraph output format"),
                     )
                     ,
-            )
-            .subcommand(
-                ClapCommand::new("opt-report")
-                    .about("Compile O0..O3 and emit artifact-size/constraints comparison evidence")
-                    .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
-                    .arg(
-                        Arg::new("output")
-                            .long("output")
-                            .short('o')
-                            .value_name("FILE")
-                            .help("Write JSON optimization report to a file"),
-                    )
-                    .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
-                    .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb or ckb-type-hash")),
             )
             .subcommand(
                 ClapCommand::new("proof-diff")
@@ -18545,7 +18421,10 @@ impl CliParser {
                 no_default_features: m.get_flag("no-default-features"),
                 environment: m.get_one::<String>("environment").cloned(),
                 offline: m.get_flag("offline"),
-                schema_version: m.get_one::<u32>("schema-version").copied().unwrap_or(1),
+                schema_version: m
+                    .get_one::<u32>("schema-version")
+                    .copied()
+                    .unwrap_or(crate::package::inspection::BUILD_PLAN_SCHEMA_VERSION),
                 target: m.get_one::<String>("target").cloned(),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
                 release: m.get_flag("release"),
@@ -18714,12 +18593,6 @@ impl CliParser {
                     format: m.get_one::<String>("format").cloned(),
                 })
             }
-            Some(("opt-report", m)) => Command::OptReport(OptReportArgs {
-                input: m.get_one::<String>("input").map(PathBuf::from),
-                output: m.get_one::<String>("output").map(PathBuf::from),
-                target: m.get_one::<String>("target").cloned(),
-                target_profile: m.get_one::<String>("target-profile").cloned(),
-            }),
             Some(("proof-diff", m)) => Command::ProofDiff(ProofDiffArgs {
                 old: m.get_one::<String>("old").map(PathBuf::from).expect("required old metadata"),
                 new: m.get_one::<String>("new").map(PathBuf::from).expect("required new metadata"),

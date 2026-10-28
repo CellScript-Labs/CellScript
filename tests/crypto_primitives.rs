@@ -146,31 +146,31 @@ fn bounded_sha256_sha256d_and_merkle_execute_in_ckb_vm() {
 
     let witness = sha256_merkle_witness(expected_pair);
 
-    for opt_level in [0, 3] {
-        let elf = compile_sha256_stack_fixture(opt_level);
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let elf = compile_sha256_stack_fixture(diagnostics);
         let mut fixture = build_simple_fixture(Bytes::default(), 1, 1);
         fixture.witnesses = vec![witness.clone()];
         let result = execute_cellscript_script(&elf, &fixture);
-        assert_eq!(result.exit_code, 0, "O{opt_level} SHA-256/SHA256d/Merkle helpers: {:?}", result.captured_debug);
+        assert_eq!(result.exit_code, 0, "{diagnostics} SHA-256/SHA256d/Merkle helpers: {:?}", result.captured_debug);
         assert!(result.cycles > 0);
     }
 }
 
 #[test]
 fn bounded_merkle_rejects_wrong_root_in_ckb_vm() {
-    for opt_level in [0, 3] {
-        let elf = compile_sha256_stack_fixture(opt_level);
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let elf = compile_sha256_stack_fixture(diagnostics);
         let mut fixture = build_simple_fixture(Bytes::default(), 1, 1);
         fixture.witnesses = vec![sha256_merkle_witness([0x5a; 32])];
         let result = execute_cellscript_script(&elf, &fixture);
-        assert_eq!(result.exit_code, 64, "O{opt_level} wrong Merkle root: {:?}", result.captured_debug);
+        assert_eq!(result.exit_code, 64, "{diagnostics} wrong Merkle root: {:?}", result.captured_debug);
     }
 }
 
-fn compile_sha256_stack_fixture(opt_level: u8) -> Vec<u8> {
+fn compile_sha256_stack_fixture(diagnostics: cellscript::CompilerDiagnostics) -> Vec<u8> {
     cellscript::compile(
         SHA256_MERKLE_PROGRAM,
-        cellscript::CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+        cellscript::CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
     )
     .unwrap()
     .artifact_bytes
@@ -285,11 +285,11 @@ action verify() -> u64 {
     let witness = (1..=20).collect::<Vec<u8>>();
     let mut data = vec![0xa5; 8];
     data.extend_from_slice(&witness);
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = cellscript::compile(
             source,
             cellscript::CompileOptions {
-                opt_level,
+                diagnostics,
                 target: Some("riscv64-elf".to_string()),
                 target_profile: Some("ckb".to_string()),
                 ..Default::default()
@@ -301,7 +301,7 @@ action verify() -> u64 {
         fixture.inputs[0].data = Bytes::from(data.clone());
         fixture.witnesses = vec![Bytes::from(witness.clone())];
         let valid = execute_cellscript_script(elf, &fixture);
-        assert_eq!(valid.exit_code, 0, "opt level {opt_level}: {:?}", valid.captured_debug);
+        assert_eq!(valid.exit_code, 0, "opt level {diagnostics}: {:?}", valid.captured_debug);
         assert!(valid.cycles > 0);
 
         let mut changed = data.clone();
@@ -311,7 +311,7 @@ action verify() -> u64 {
         assert_eq!(
             invalid.exit_code,
             cellscript::runtime_errors::CellScriptRuntimeError::AssertionFailed as i64,
-            "opt level {opt_level}: final-byte mismatch must fail the source requirement"
+            "opt level {diagnostics}: final-byte mismatch must fail the source requirement"
         );
     }
 }

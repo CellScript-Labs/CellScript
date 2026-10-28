@@ -326,10 +326,12 @@ mod tests {
         let source = source(&role(), "64, 64, 32, 32768", "id: u64")
             .replace("ckb::verify_cell_roles(", "let selected = ckb::select_cell_roles(")
             .replace("return 0", "let alias = selected\nlet count = ckb::selected_input_count<Token>(alias, 0)\nlet input = ckb::selected_input<Token>(selected, 0, count - 1)\nlet output = ckb::selected_successor<Token>(alias, 0, 0)\nrequire input.capacity == output.capacity\nreturn ckb::selected_output_count<Token>(selected, 0)");
-        for opt_level in 0..=3 {
-            let compiled =
-                crate::compile(&source, crate::CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
-                    .unwrap_or_else(|error| panic!("O{opt_level}: {error}"));
+        for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
+            let compiled = crate::compile(
+                &source,
+                crate::CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+            )
+            .unwrap_or_else(|error| panic!("{diagnostics}: {error}"));
             assert!(!compiled
                 .metadata
                 .runtime

@@ -17,7 +17,7 @@ fn allocated_scalar_definitions_execute_against_integer_models_and_guards() {
     for (ty, bits) in [("u8", 8), ("u16", 16), ("u32", 32), ("i32", 32), ("u64", 64)] {
         let source = allocated_scalar_definitions::source(ty);
         let mask = u64::MAX >> (64 - bits);
-        for opt in [0, 3] {
+        for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = compile_checked(&source, opt);
             for (raw, shift) in [(17u64, 0), (mask, bits - 1), (1u64 << (bits - 1), 1)] {
                 let a = if ty == "i32" { raw as i32 as i64 as u64 } else { raw };
@@ -91,7 +91,7 @@ action inspect(witness input: [i32; 2], witness index: u64) -> u64 {
     if divide(input[0]) != -(1 as i32) { return 67 }
     return 0
 }"#;
-    for opt in [0, 3] {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile_checked(source, opt);
         for index in [0, 1] {
             let result = execute_compiled(
@@ -113,7 +113,7 @@ fn allocated_scalar_comparisons_match_signed_unsigned_and_boolean_models() {
         let source = allocated_scalar_definitions::comparison_source(ty);
         let max = u64::MAX >> (64 - bits);
         let high = 1u64 << (bits - 1);
-        for opt in [0, 3] {
+        for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = compile_checked(&source, opt);
             for (a, b) in [(0, 0), (0, 1), (1, 0), (max, max), (max, 0), (0, max), (high, high - 1), (high - 1, high)] {
                 let ordering = if ty == "i32" { (a as i32).cmp(&(b as i32)) } else { a.cmp(&b) };

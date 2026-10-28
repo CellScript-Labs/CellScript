@@ -7,11 +7,11 @@ fn typed_cell_properties_accept_immediate_coordinate_producers() {
             "module immediate_property\nresource Token has store {{ amount: u64 }}\n\
             action inspect() -> u64 {{ let view = ckb::output<Token>(0)\nreturn view.{property}\n}}"
         );
-        for opt_level in [0, 3] {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -33,11 +33,11 @@ action inspect() -> u64 {
     require view.capacity == 100000000000
     return 0
 }"#;
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -91,13 +91,18 @@ action inspect() -> u64 {{
     return 0
 }}"#
             );
-            for opt_level in [0, 3] {
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let valid = Fixture::from_result(
                     compile(
                         &source,
-                        CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                        CompileOptions {
+                            edition: NEXT_EDITION,
+                            diagnostics,
+                            target: Some("riscv64-elf".into()),
+                            ..Default::default()
+                        },
                     )
-                    .unwrap_or_else(|error| panic!("{property}/group={group}/O{opt_level}: {error}")),
+                    .unwrap_or_else(|error| panic!("{property}/group={group}/{diagnostics}: {error}")),
                 );
                 let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
                 let runtime = format!("runtime:__ckb_cell_{property}");
@@ -125,7 +130,7 @@ action inspect() -> u64 {{
                 assert_eq!(
                     ckb_script_runner::execute_cellscript_script(&valid.artifact, &transaction).exit_code,
                     5,
-                    "{property}/group={group}/O{opt_level}"
+                    "{property}/group={group}/{diagnostics}"
                 );
                 assert_eq!(ckb_script_runner::execute_cellscript_script(&zeroed.artifact, &transaction).exit_code, 0);
                 assert_code(&zeroed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);

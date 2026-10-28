@@ -81,7 +81,11 @@ fn package_policy_build_and_check_preserve_default_cache_and_inner_entry_bytes()
     let bytes_before_check = std::fs::read(root.join(policy["artifact"].as_str().unwrap())).unwrap();
     let scoped_metadata = cellscript::artifact::compile_path_artifact_metadata(
         camino::Utf8Path::from_path(root).unwrap(),
-        cellscript::CompileOptions { opt_level: 1, target: Some("riscv64-elf".to_string()), ..Default::default() },
+        cellscript::CompileOptions {
+            diagnostics: cellscript::CompilerDiagnostics::default(),
+            target: Some("riscv64-elf".to_string()),
+            ..Default::default()
+        },
         "token-policy",
     )
     .unwrap();

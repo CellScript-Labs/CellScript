@@ -61,22 +61,22 @@ action inspect(witness items: {ty}) -> u64 {{
     let mut transaction = build_simple_fixture(Bytes::default(), 1, 1);
     transaction.witnesses = vec![witness.as_bytes()];
     let mut observed_exit = None;
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = cellscript::compile(
             &source,
-            cellscript::CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            cellscript::CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
         )
         .unwrap();
         let action = compiled.metadata.actions.iter().find(|action| action.name == "inspect").unwrap();
         assert_eq!(
             action.fail_closed_runtime_features.iter().any(|feature| feature == "dynamic-length"),
             matches!(ty, "Vec<Vec<u8>>" | "Vec<Record>"),
-            "metadata must agree with the admitted codec at O{opt_level}"
+            "metadata must agree with the admitted codec at {diagnostics}"
         );
         let elf = cellscript::strip_vm_abi_trailer(&compiled.artifact_bytes);
         let result = execute_cellscript_script(elf, &transaction);
         if let Some(expected) = observed_exit {
-            assert_eq!(result.exit_code, expected, "vector cardinality behavior changed at O{opt_level}");
+            assert_eq!(result.exit_code, expected, "vector cardinality behavior changed at {diagnostics}");
         }
         observed_exit = Some(result.exit_code);
     }
@@ -101,16 +101,16 @@ action inspect(witness values: NestedValues<{element}, 3, 8, 128>) -> u64 {{
     )
 }
 
-fn execute_nested(source: &str, encoded: &[u8], opt_level: u8) -> (i64, u64) {
+fn execute_nested(source: &str, encoded: &[u8], diagnostics: cellscript::CompilerDiagnostics) -> (i64, u64) {
     let mut arguments = (encoded.len() as u32).to_le_bytes().to_vec();
     arguments.extend_from_slice(encoded);
-    execute_nested_arguments(source, &arguments, opt_level)
+    execute_nested_arguments(source, &arguments, diagnostics)
 }
 
-fn execute_nested_arguments(source: &str, arguments: &[u8], opt_level: u8) -> (i64, u64) {
+fn execute_nested_arguments(source: &str, arguments: &[u8], diagnostics: cellscript::CompilerDiagnostics) -> (i64, u64) {
     let compiled = cellscript::compile(
         source,
-        cellscript::CompileOptions { target: Some("riscv64-elf".into()), opt_level, ..Default::default() },
+        cellscript::CompileOptions { target: Some("riscv64-elf".into()), diagnostics, ..Default::default() },
     )
     .unwrap();
     execute_compiled_nested(&compiled, arguments)
@@ -171,14 +171,14 @@ fn named_data_shapes_preserve_witness_bytes_bounds_and_vm_results() {
         (arguments(&too_many, &entries, 0), 16),
         (arguments(&long_payload, &entries, 45), 16),
     ];
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compile = |source| {
             cellscript::compile(
                 source,
                 cellscript::CompileOptions {
                     edition: cellscript::NEXT_EDITION,
                     target: Some("riscv64-elf".into()),
-                    opt_level,
+                    diagnostics,
                     ..Default::default()
                 },
             )
@@ -189,12 +189,12 @@ fn named_data_shapes_preserve_witness_bytes_bounds_and_vm_results() {
         assert_eq!(
             cellscript::strip_vm_abi_trailer(&named.artifact_bytes),
             cellscript::strip_vm_abi_trailer(&concrete.artifact_bytes),
-            "transparent shape declarations must not change executable ELF at O{opt_level}"
+            "transparent shape declarations must not change executable ELF at {diagnostics}"
         );
         for (args, exit) in &cases {
             let actual = execute_compiled_nested(&named, args);
-            assert_eq!(actual.0, *exit, "named shape O{opt_level}");
-            assert_eq!(actual, execute_compiled_nested(&concrete, args), "wire, rejection and cycle parity O{opt_level}");
+            assert_eq!(actual.0, *exit, "named shape {diagnostics}");
+            assert_eq!(actual, execute_compiled_nested(&concrete, args), "wire, rejection and cycle parity {diagnostics}");
         }
     }
 }
@@ -232,12 +232,12 @@ fn check_nested_helpers(source: &str) {
             .replace("payload_total(entry.payload)", &format!("payload_total({args}entry.payload)"))
             .replace("fn record_total(entry:", &format!("fn record_total({params}entry:"))
             .replace("record_total(entry)", &format!("record_total({args}entry)"));
-        for opt_level in 0..=3 {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = cellscript::compile(
                 &source,
                 cellscript::CompileOptions {
                     edition: cellscript::NEXT_EDITION,
-                    opt_level,
+                    diagnostics,
                     target: Some("riscv64-elf".into()),
                     ..Default::default()
                 },
@@ -249,7 +249,7 @@ fn check_nested_helpers(source: &str) {
                 (arguments(&messages, &entries, 28), cellscript::runtime_errors::CellScriptRuntimeError::AssertionFailed as i64),
                 (arguments(&messages, &malformed, 27), 16),
             ] {
-                assert_eq!(execute_compiled_nested(&compiled, &args).0, exit, "prefix={prefix}, O{opt_level}");
+                assert_eq!(execute_compiled_nested(&compiled, &args).0, exit, "prefix={prefix}, {diagnostics}");
             }
         }
     }
@@ -266,10 +266,10 @@ fn nested_views_survive_register_and_stack_fixed_result_calls() {
         let source = format!("module nested_result_vm\nstruct Pair {{ left: u64, right: u64 }}\nfn make({params}) -> Pair {{ Pair {{ left: p{last}, right: p{last} + 1 }} }}\nfn wrap(at: u64) -> Pair {{ make({args}) }}\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>) {{ verification\nlet bytes = values[0]\nlet pair = wrap(bytes.len())\nrequire pair.left == 3\nrequire pair.right == 4\nrequire values.len() == 1\nrequire bytes.len() == 3\nrequire bytes[2] == 204 }}");
         let direct = source.replace("wrap(bytes.len())", &format!("make({})", vec!["bytes.len()"; count].join(", ")));
         for source in [source, direct] {
-            for opt_level in 0..=3 {
-                assert_eq!(execute_nested(&source, &encoded, opt_level).0, 0, "{count} args, O{opt_level}");
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+                assert_eq!(execute_nested(&source, &encoded, diagnostics).0, 0, "{count} args, {diagnostics}");
                 let rejecting = source.replace("pair.right == 4", "pair.right == 5");
-                assert_ne!(execute_nested(&rejecting, &encoded, opt_level).0, 0, "result must affect acceptance");
+                assert_ne!(execute_nested(&rejecting, &encoded, diagnostics).0, 0, "result must affect acceptance");
             }
         }
     }
@@ -308,10 +308,10 @@ fn nested_witness_transport_rejects_wrong_field_source_and_framing() {
     wrong_table[4] = 20;
     let wrong_lock = packed::WitnessArgs::new_builder().lock(Some(Bytes::from(payload.clone())).pack()).build().as_bytes();
     let wrong_output = packed::WitnessArgs::new_builder().output_type(Some(Bytes::from(payload.clone())).pack()).build().as_bytes();
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = cellscript::compile(
             &source,
-            cellscript::CompileOptions { target: Some("riscv64-elf".into()), opt_level, ..Default::default() },
+            cellscript::CompileOptions { target: Some("riscv64-elf".into()), diagnostics, ..Default::default() },
         )
         .unwrap();
         let execute = |witnesses: Vec<Bytes>| {
@@ -329,9 +329,9 @@ fn nested_witness_transport_rejects_wrong_field_source_and_framing() {
             ("trailing byte", wrap(trailing.clone())),
             ("magic", wrap(wrong_magic.clone())),
         ] {
-            assert_eq!(execute(vec![witness]), 25, "{name} O{opt_level}");
+            assert_eq!(execute(vec![witness]), 25, "{name} {diagnostics}");
         }
-        assert_eq!(execute(vec![Bytes::default(), canonical.clone()]), 25, "wrong witness index O{opt_level}");
+        assert_eq!(execute(vec![Bytes::default(), canonical.clone()]), 25, "wrong witness index {diagnostics}");
     }
 }
 
@@ -366,10 +366,10 @@ lock inspect(lock_args domain: u64, witness a: u64, witness b: u64,
     script_args.extend_from_slice(&[0; 32]);
     script_args.extend_from_slice(&9u16.to_le_bytes());
     script_args.extend_from_slice(&(-7i32).to_le_bytes());
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = cellscript::compile(
             source,
-            cellscript::CompileOptions { target: Some("riscv64-elf".into()), opt_level, ..Default::default() },
+            cellscript::CompileOptions { target: Some("riscv64-elf".into()), diagnostics, ..Default::default() },
         )
         .unwrap();
         let execute = |args: Vec<u8>, payload: Vec<u8>| {
@@ -397,21 +397,21 @@ lock inspect(lock_args domain: u64, witness a: u64, witness b: u64,
             assert_eq!(oracle.is_ok(), exit_code == 0, "Lock group replay disagrees with transaction: {oracle:?}");
             exit_code
         };
-        assert_eq!(execute(script_args.clone(), payload.clone()), 0, "mixed positive O{opt_level}");
+        assert_eq!(execute(script_args.clone(), payload.clone()), 0, "mixed positive {diagnostics}");
         for index in [0, 8, 39, 40, 42, 45] {
             let mut changed = script_args.clone();
             changed[index] ^= 1;
-            assert_ne!(execute(changed, payload.clone()), 0, "Script.args byte {index} O{opt_level}");
+            assert_ne!(execute(changed, payload.clone()), 0, "Script.args byte {index} {diagnostics}");
         }
         let mut trailing = script_args.clone();
         trailing.push(0);
-        assert_eq!(execute(trailing, payload.clone()), 25, "trailing Script.args O{opt_level}");
-        assert_eq!(execute(script_args[..45].to_vec(), payload.clone()), 25, "short Script.args O{opt_level}");
-        assert_eq!(execute(vec![0; 1024], payload.clone()), 25, "oversized Script O{opt_level}");
+        assert_eq!(execute(trailing, payload.clone()), 25, "trailing Script.args {diagnostics}");
+        assert_eq!(execute(script_args[..45].to_vec(), payload.clone()), 25, "short Script.args {diagnostics}");
+        assert_eq!(execute(vec![0; 1024], payload.clone()), 25, "oversized Script {diagnostics}");
         let mut misplaced = b"CSARGv1\0".to_vec();
         misplaced.extend_from_slice(&script_args);
         misplaced.extend_from_slice(&payload[8..]);
-        assert_eq!(execute(Vec::new(), misplaced), 25, "Script.args cannot move to witness O{opt_level}");
+        assert_eq!(execute(Vec::new(), misplaced), 25, "Script.args cannot move to witness {diagnostics}");
     }
 }
 
@@ -445,11 +445,11 @@ action inspect(witness values: NestedValues<Record, 2, 8, 256>, witness expected
     let mut arguments = (encoded.len() as u32).to_le_bytes().to_vec();
     arguments.extend_from_slice(&encoded);
     arguments.extend_from_slice(&digest);
-    for opt in 0..=3 {
-        assert_eq!(execute_nested_arguments(source, &arguments, opt).0, 0, "O{opt}");
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        assert_eq!(execute_nested_arguments(source, &arguments, opt).0, 0, "{opt}");
         let mut wrong = arguments.clone();
         *wrong.last_mut().unwrap() ^= 1;
-        assert_ne!(execute_nested_arguments(source, &wrong, opt).0, 0, "wide comparison O{opt}");
+        assert_ne!(execute_nested_arguments(source, &wrong, opt).0, 0, "wide comparison {opt}");
     }
 }
 
@@ -483,8 +483,8 @@ action inspect(witness left: NestedValues<Vec<u8>, 3, 8, 128>, witness right: Ne
     for value in 11u64..=16 {
         arguments.extend_from_slice(&value.to_le_bytes());
     }
-    for opt in 0..=3 {
-        assert_eq!(execute_nested_arguments(source, &arguments, opt).0, 0, "O{opt}");
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        assert_eq!(execute_nested_arguments(source, &arguments, opt).0, 0, "{opt}");
     }
 }
 
@@ -517,13 +517,13 @@ fn nested_witness_joint_maximum_respects_the_complete_entry_envelope() {
     fields[14].push(0xab);
     let oversized_witness = molecule_fields(&fields);
     assert_eq!(oversized_witness.len(), 4065);
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = execute_nested(&source, &encoded, opt);
         let invalid = execute_nested(&source, &late_invalid, opt);
-        assert_eq!(valid.0, 0, "joint maximum O{opt}");
-        assert_eq!(invalid.0, 16, "last payload count O{opt}");
-        assert_eq!(execute_nested(&source, &oversized_witness, opt).0, 25, "complete witness budget O{opt}");
-        eprintln!("nested witness O{opt}: 4096 witness bytes, valid {} cycles, late-invalid {} cycles", valid.1, invalid.1);
+        assert_eq!(valid.0, 0, "joint maximum {opt}");
+        assert_eq!(invalid.0, 16, "last payload count {opt}");
+        assert_eq!(execute_nested(&source, &oversized_witness, opt).0, 25, "complete witness budget {opt}");
+        eprintln!("nested witness {opt}: 4096 witness bytes, valid {} cycles, late-invalid {} cycles", valid.1, invalid.1);
     }
 }
 
@@ -538,7 +538,7 @@ fn nested_witness_enforces_count_payload_total_and_zero_budgets() {
     let total_source = source.replace("3, 8, 128", "3, 8, 11");
     let one_empty = molecule_fields(&[empty_payload]);
     let zero_source = source.replace("3, 8, 128", "0, 0, 4");
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         assert_eq!(execute_nested(&source, &too_many, opt).0, 16);
         assert_eq!(execute_nested(&source, &payload_exceeded, opt).0, 16);
         assert_eq!(execute_nested(&total_source, &one_empty, opt).0, 16);
@@ -562,8 +562,8 @@ fn declared_nested_bytes_witness_exposes_read_only_counts_and_indexed_bytes() {
     "#,
     );
     let encoded = hex::decode("1f0000001000000014000000190000000000000001000000ab020000000102").unwrap();
-    for opt in 0..=3 {
-        assert_eq!(execute_nested(&source, &encoded, opt).0, 0, "O{opt}");
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        assert_eq!(execute_nested(&source, &encoded, opt).0, 0, "{opt}");
     }
 }
 
@@ -583,8 +583,8 @@ fn declared_nested_record_witness_exposes_identity_fields_and_read_only_payload(
     "#,
     );
     let encoded = hex::decode("2100000008000000190000001000000011000000130000007f341202000000aabb").unwrap();
-    for opt in 0..=3 {
-        assert_eq!(execute_nested(&source, &encoded, opt).0, 0, "O{opt}");
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        assert_eq!(execute_nested(&source, &encoded, opt).0, 0, "{opt}");
     }
 }
 
@@ -592,15 +592,35 @@ fn declared_nested_record_witness_exposes_identity_fields_and_read_only_payload(
 fn nested_witness_is_validated_even_when_unused_and_indexes_are_checked() {
     let unused = nested_fixture_source("Vec<u8>", "");
     for encoded in ["", "00000000", "0400000000", "0c0000000800000001000000", "0c00000008000000ffffffff"] {
-        assert_eq!(execute_nested(&unused, &hex::decode(encoded).unwrap(), 0).0, 16, "{encoded}");
+        assert_eq!(
+            execute_nested(&unused, &hex::decode(encoded).unwrap(), cellscript::CompilerDiagnostics::without_optimizations()).0,
+            16,
+            "{encoded}"
+        );
     }
-    assert_eq!(execute_nested(&unused, &[4, 0, 0, 0], 0).0, 0);
+    assert_eq!(execute_nested(&unused, &[4, 0, 0, 0], cellscript::CompilerDiagnostics::without_optimizations()).0, 0);
     let bad_index = nested_fixture_source("Vec<u8>", "let value = values[0]");
-    assert_eq!(execute_nested(&bad_index, &[4, 0, 0, 0], 0).0, 21);
+    assert_eq!(execute_nested(&bad_index, &[4, 0, 0, 0], cellscript::CompilerDiagnostics::without_optimizations()).0, 21);
     let bad_byte = nested_fixture_source("Vec<u8>", "let value = values[0][0]");
-    assert_eq!(execute_nested(&bad_byte, &hex::decode("0c0000000800000000000000").unwrap(), 0).0, 21);
+    assert_eq!(
+        execute_nested(
+            &bad_byte,
+            &hex::decode("0c0000000800000000000000").unwrap(),
+            cellscript::CompilerDiagnostics::without_optimizations()
+        )
+        .0,
+        21
+    );
     let huge_index = nested_fixture_source("Vec<u8>", "let value = values[18446744073709551615]");
-    assert_eq!(execute_nested(&huge_index, &hex::decode("0c0000000800000000000000").unwrap(), 0).0, 21);
+    assert_eq!(
+        execute_nested(
+            &huge_index,
+            &hex::decode("0c0000000800000000000000").unwrap(),
+            cellscript::CompilerDiagnostics::without_optimizations()
+        )
+        .0,
+        21
+    );
 }
 
 #[test]
@@ -664,7 +684,7 @@ fn nested_types_survive_formatting_and_reject_invalid_editor_input() {
     let module = cellscript::parser::parse(&tokens).unwrap();
     let formatted = cellscript::fmt::format(&module, Default::default()).unwrap();
     let encoded = hex::decode("2100000008000000190000001000000011000000130000007f341202000000aabb").unwrap();
-    assert_eq!(execute_nested(&formatted, &encoded, 2).0, 0);
+    assert_eq!(execute_nested(&formatted, &encoded, cellscript::CompilerDiagnostics::default()).0, 0);
     for seed in [
         include_str!("syntax_combo/seeds/nested-view-mutation-reject.cell"),
         include_str!("syntax_combo/seeds/nested-bound-reject.cell"),
@@ -695,14 +715,21 @@ action roll(input before: Document, witness recipient: Address) -> after: Docume
 }
 "#;
 
-fn execute_nested_cell(source: &str, before: &[u8], after: &[u8], opt_level: u8) -> i64 {
-    execute_nested_cell_with_witness(source, before, after, &[], 100_000_000_000, opt_level)
+fn execute_nested_cell(source: &str, before: &[u8], after: &[u8], diagnostics: cellscript::CompilerDiagnostics) -> i64 {
+    execute_nested_cell_with_witness(source, before, after, &[], 100_000_000_000, diagnostics)
 }
 
-fn execute_nested_cell_with_witness(source: &str, before: &[u8], after: &[u8], extra: &[u8], capacity: u64, opt_level: u8) -> i64 {
+fn execute_nested_cell_with_witness(
+    source: &str,
+    before: &[u8],
+    after: &[u8],
+    extra: &[u8],
+    capacity: u64,
+    diagnostics: cellscript::CompilerDiagnostics,
+) -> i64 {
     let compiled = cellscript::compile(
         source,
-        cellscript::CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+        cellscript::CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
     )
     .unwrap();
     execute_compiled_nested_cell(&compiled, before, after, extra, capacity)
@@ -745,14 +772,14 @@ fn named_data_shapes_preserve_actual_cell_successors_and_capacity_checks() {
     let wrong_payload = molecule_fields(&[42u64.to_le_bytes().to_vec(), molecule_fields(&[vec![1, 0, 0, 0, 172]])]);
     let mut malformed = cell.clone();
     malformed[4] += 1;
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compile = |source| {
             cellscript::compile(
                 source,
                 cellscript::CompileOptions {
                     edition: cellscript::NEXT_EDITION,
                     target: Some("riscv64-elf".into()),
-                    opt_level,
+                    diagnostics,
                     ..Default::default()
                 },
             )
@@ -773,7 +800,7 @@ fn named_data_shapes_preserve_actual_cell_successors_and_capacity_checks() {
             (&cell, &cell, 1, false),
         ] {
             let result = execute_compiled_nested_cell(&named, before, after, &[], capacity);
-            assert_eq!(result == 0, accepted, "named successor O{opt_level}");
+            assert_eq!(result == 0, accepted, "named successor {diagnostics}");
             assert_eq!(result, execute_compiled_nested_cell(&concrete, before, after, &[], capacity));
         }
     }
@@ -806,12 +833,12 @@ fn nested_cell_input_and_successor_bind_canonical_data_and_exact_value() {
     )
     .unwrap();
     assert_eq!(cell, molecule_fields(&[42u64.to_le_bytes().to_vec(), values.clone()]));
-    for opt in 0..=3 {
-        assert_eq!(execute_nested_cell(NESTED_CELL_SOURCE, &cell, &cell, opt), 0, "O{opt}");
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        assert_eq!(execute_nested_cell(NESTED_CELL_SOURCE, &cell, &cell, opt), 0, "{opt}");
         let wrong_id = molecule_fields(&[43u64.to_le_bytes().to_vec(), values.clone()]);
-        assert_ne!(execute_nested_cell(NESTED_CELL_SOURCE, &cell, &wrong_id, opt), 0, "identity O{opt}");
+        assert_ne!(execute_nested_cell(NESTED_CELL_SOURCE, &cell, &wrong_id, opt), 0, "identity {opt}");
         let wrong_values = molecule_fields(&[42u64.to_le_bytes().to_vec(), molecule_fields(&[vec![1, 0, 0, 0, 172]])]);
-        assert_ne!(execute_nested_cell(NESTED_CELL_SOURCE, &cell, &wrong_values, opt), 0, "payload O{opt}");
+        assert_ne!(execute_nested_cell(NESTED_CELL_SOURCE, &cell, &wrong_values, opt), 0, "payload {opt}");
     }
 }
 
@@ -868,11 +895,11 @@ fn nested_cell_fixed_siblings_preserve_scalar_and_pointer_representations() {
         };
         let extra = if witness { expected.concat() } else { Vec::new() };
         let after = cell(&expected);
-        for opt in 0..=3 {
+        for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             assert_eq!(
                 execute_nested_cell_with_witness(&source, &before, &after, &extra, 1_000_000_000_000, opt),
                 0,
-                "witness={witness}, O{opt}"
+                "witness={witness}, {opt}"
             );
             for (index, _) in types.iter().enumerate() {
                 let mut altered = expected.clone();
@@ -880,7 +907,7 @@ fn nested_cell_fixed_siblings_preserve_scalar_and_pointer_representations() {
                 assert_eq!(
                     execute_nested_cell_with_witness(&source, &before, &cell(&altered), &extra, 1_000_000_000_000, opt),
                     if index < 4 { 3 } else { 32 },
-                    "field {index}, witness={witness}, O{opt}"
+                    "field {index}, witness={witness}, {opt}"
                 );
             }
         }
@@ -903,7 +930,7 @@ fn nested_cell_fixed_literal_successors_compare_complete_values() {
         }
     }
     let before = molecule_fields(&initial);
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         assert_eq!(execute_nested_cell_with_witness(&source, &before, &after, &[], 1_000_000_000_000, opt), 0);
         for index in 0..5 {
             let mut altered = fields.clone();
@@ -911,7 +938,7 @@ fn nested_cell_fixed_literal_successors_compare_complete_values() {
             assert_eq!(
                 execute_nested_cell_with_witness(&source, &before, &molecule_fields(&altered), &[], 1_000_000_000_000, opt),
                 if index == 0 { 3 } else { 32 },
-                "constant field {index}, O{opt}"
+                "constant field {index}, {opt}"
             );
         }
     }
@@ -930,7 +957,7 @@ fn nested_cell_fixed_successors_accept_computed_scalars_and_wide_carry() {
     let previous = u128::from(u64::MAX);
     let before = molecule_fields(&[42u64.to_le_bytes().to_vec(), previous.to_le_bytes().to_vec(), values.clone()]);
     let fields = vec![43u64.to_le_bytes().to_vec(), (previous + 1).to_le_bytes().to_vec(), values];
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         assert_eq!(execute_nested_cell_with_witness(&source, &before, &molecule_fields(&fields), &[], 1_000_000_000_000, opt), 0);
         for index in 0..2 {
             let mut altered = fields.clone();
@@ -961,7 +988,7 @@ fn nested_cell_replacement_validates_unused_input_and_actual_capacity() {
         "let prior = before.entries\nrequire prior.len() == replacement.len()\nlet original = replacement",
     );
     for source in [source, mixed] {
-        for opt in 0..=3 {
+        for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             assert_eq!(execute_nested_cell_with_witness(&source, &initial, &replacement, &extra, 100_000_000_000, opt), 0);
             assert_eq!(execute_nested_cell_with_witness(&source, &malformed, &replacement, &extra, 100_000_000_000, opt), 16);
             assert_ne!(execute_nested_cell_with_witness(&source, &initial, &initial, &extra, 100_000_000_000, opt), 0);
@@ -997,8 +1024,8 @@ fn nested_cell_supports_the_full_codec_limit_above_legacy_buffers() {
     let mut bad_fixed = 42u64.to_le_bytes().to_vec();
     bad_fixed.push(0);
     let wrong_width = molecule_fields(&[bad_fixed, values]);
-    for opt in 0..=3 {
-        assert_eq!(execute_nested_cell_with_witness(&source, &cell, &cell, &[], 1_000_000_000_000, opt), 0, "large Cell O{opt}");
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        assert_eq!(execute_nested_cell_with_witness(&source, &cell, &cell, &[], 1_000_000_000_000, opt), 0, "large Cell {opt}");
         assert_eq!(execute_nested_cell_with_witness(&source, &malformed, &cell, &[], 1_000_000_000_000, opt), 16);
         assert_eq!(execute_nested_cell_with_witness(&source, &cell, &malformed, &[], 1_000_000_000_000, opt), 16);
         assert_ne!(execute_nested_cell_with_witness(&source, &wrong_width, &cell, &[], 1_000_000_000_000, opt), 0);
@@ -1033,7 +1060,7 @@ fn nested_record_cells_and_standalone_creates_use_the_same_checked_codec() {
         .replace("-> after: Document", "-> u64")
         .replace("create after = Document", "create Document")
         .replace("with_lock(recipient)", "with_lock(recipient)\nreturn 0");
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         assert_eq!(execute_nested_cell(&source, &cell, &cell, opt), 0);
         assert_eq!(execute_nested_cell(&standalone, &cell, &cell, opt), 0);
         let mut malformed = cell.clone();
@@ -1058,7 +1085,7 @@ fn nested_cell_multiple_fields_keep_distinct_buffers_and_views() {
     let swapped = molecule_fields(&[42u64.to_le_bytes().to_vec(), second, first]);
     let different_bounds = source.replace("spare: NestedValues<Vec<u8>, 32, 256, 4096>", "spare: NestedValues<Vec<u8>, 1, 5, 32>");
     for source in [source, different_bounds] {
-        for opt in 0..=3 {
+        for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             assert_eq!(execute_nested_cell(&source, &cell, &cell, opt), 0);
             assert_ne!(execute_nested_cell(&source, &cell, &swapped, opt), 0);
         }
@@ -1103,14 +1130,14 @@ fn borrowed_nested_cell_helpers_retain_checked_transport_without_a_blanket_block
                     .unwrap();
             let helper = compiled.metadata.functions.iter().find(|function| function.name == "count").unwrap();
             assert!(!helper.fail_closed_runtime_features.iter().any(|feature| feature == "nested-values-artifact-proof"));
-            for opt in 0..=3 {
+            for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 assert_eq!(execute_nested_cell(&source, &cell, &cell, opt), 0);
             }
         }
     }
     let mixed = format!("{}\n#[effect(ReadOnly)]\nfn count(values: NestedValues<Vec<u8>, 32, 256, 4096>, document: &Document) -> u64 {{ return values.len() + document.entries.len() }}\n",
         NESTED_CELL_SOURCE.replace("require original.len() == 1", "require count(original, &before) == 2"));
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         assert_eq!(execute_nested_cell(&mixed, &cell, &cell, opt), 0);
         assert_ne!(execute_nested_cell(&mixed.replace("== 2", "== 3"), &cell, &cell, opt), 0);
     }
@@ -1160,11 +1187,11 @@ action second(input token: Token, witness a: u64, witness b: u64, witness c: u64
         data.extend_from_slice(&[0; 32]);
         data
     };
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile_artifact(
             source,
             cellscript::CompileOptions {
-                opt_level,
+                diagnostics,
                 target: Some("riscv64-elf".into()),
                 target_profile: Some("ckb".into()),
                 ..Default::default()
@@ -1215,8 +1242,8 @@ action second(input token: Token, witness a: u64, witness b: u64, witness c: u64
             assert_eq!(i64::from(exit_code), result.exit_code);
             result.exit_code
         };
-        assert_eq!(run(40, args(&first), false, false), 0, "first O{opt_level}");
-        assert_eq!(run(10, args(&second), false, false), 0, "second O{opt_level}");
+        assert_eq!(run(40, args(&first), false, false), 0, "first {diagnostics}");
+        assert_eq!(run(10, args(&second), false, false), 0, "second {diagnostics}");
         assert_eq!(run(40, args(&second), false, false), 16, "selected nested bound");
         assert_ne!(run(10, args(&first), false, false), 0, "selected action predicate");
         for offset in [8, 16, 24, 32, 40, args(&first).len() - 1] {

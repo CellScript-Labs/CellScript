@@ -42,8 +42,8 @@ pub(crate) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Resu
     validate_profile(record, elf, &PROFILE)
 }
 
-pub(crate) fn validate_memory_blake2b(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result<(), CheckerError> {
-    validate_profile(record, elf, &PROFILE[2..4])
+pub(crate) fn validate_compression(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result<(), CheckerError> {
+    validate_profile(record, elf, &PROFILE[3..4])
 }
 
 fn validate_profile(record: &VerifiedLoweringRecord, elf: &ParsedElf, profile: &[(&str, &str)]) -> Result<(), CheckerError> {

@@ -65,7 +65,7 @@ fn declaration() -> ArtifactDeclaration {
 fn options(edition: CellScriptEdition) -> CompileOptions {
     CompileOptions {
         edition,
-        opt_level: 0,
+        diagnostics: cellscript::CompilerDiagnostics::without_optimizations(),
         target: Some("riscv64-elf".into()),
         target_profile: Some("ckb".into()),
         ..Default::default()
@@ -174,7 +174,7 @@ fn package_and_virtual_policy_imports_share_the_same_resolved_contract() {
 #[test]
 fn imported_scalar_arithmetic_and_cast_guards_are_retained_across_compile_modes() {
     for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
-        for opt_level in 0..=3 {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             for (body, operator, cast_guard) in [
                 ("return value + 1 > value", "add", false),
                 ("return 100 / value > 0", "div", false),
@@ -182,7 +182,7 @@ fn imported_scalar_arithmetic_and_cast_guards_are_retained_across_compile_modes(
             ] {
                 let mut sources = sources();
                 sources[2].source = HELPERS.replace("return value > 0", body);
-                let options = CompileOptions { opt_level, ..options(edition) };
+                let options = CompileOptions { diagnostics, ..options(edition) };
                 let full = compile_sources_artifact(
                     &sources,
                     "src/main.cell",
@@ -190,7 +190,7 @@ fn imported_scalar_arithmetic_and_cast_guards_are_retained_across_compile_modes(
                     declaration(),
                     ExecutableSurfacePolicy::DenyFailClosed,
                 )
-                .unwrap_or_else(|error| panic!("{edition:?} opt{opt_level} {body}: {error}"));
+                .unwrap_or_else(|error| panic!("{edition:?} opt{diagnostics} {body}: {error}"));
                 let metadata = compile_sources_artifact_metadata(&sources, "src/main.cell", options, declaration()).unwrap();
                 full.validate().unwrap();
                 assert_same_contract(&full.metadata, &metadata);
@@ -198,7 +198,7 @@ fn imported_scalar_arithmetic_and_cast_guards_are_retained_across_compile_modes(
                 let helper = metadata.typed_semantics.entries.iter().find(|entry| entry.name == "is_positive").unwrap();
                 assert!(helper.blocks.iter().flat_map(|block| &block.operations).any(|operation| {
                     matches!(&operation.detail, TypedSemanticOperationDetail::BinaryOperator { operator: actual } if actual == operator)
-                }), "{edition:?} opt{opt_level} must retain {operator} in the imported helper");
+                }), "{edition:?} opt{diagnostics} must retain {operator} in the imported helper");
                 if cast_guard {
                     assert!(
                         helper.blocks.iter().any(|block| block.runtime_error.as_ref().is_some_and(|error| error.code == 20)),
@@ -322,7 +322,12 @@ fn template_declaration() -> ArtifactDeclaration {
     }
 }
 
-fn compile_template_case(main: &'static str, a: &'static str, b: Option<&'static str>, opt: u8) -> cellscript::CompileResult {
+fn compile_template_case(
+    main: &'static str,
+    a: &'static str,
+    b: Option<&'static str>,
+    opt: cellscript::CompilerDiagnostics,
+) -> cellscript::CompileResult {
     let mut sources = vec![InMemorySource { path: "src/main.cell".into(), source: main.into(), role: None }];
     if let Some(b_source) = b {
         sources.push(InMemorySource { path: "src/b.cell".into(), source: b_source.into(), role: None });
@@ -334,7 +339,7 @@ fn compile_template_case(main: &'static str, a: &'static str, b: Option<&'static
         "src/main.cell",
         CompileOptions {
             edition: CellScriptEdition::Edition2027,
-            opt_level: opt,
+            diagnostics: opt,
             target: Some("riscv64-elf".into()),
             target_profile: Some("ckb".into()),
             source_contracts: true,
@@ -364,9 +369,9 @@ fn project_template_case(compiled: &cellscript::CompileResult) -> cellscript_art
 /// or without an explicit `has` clause, and the consumer's checks resolve it.
 #[test]
 fn imported_template_arguments_carry_value_ability_evidence() {
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for a in [TEMPLATE_A, TEMPLATE_A_DERIVED] {
-            let compiled = compile_template_case(HOLDER_MAIN, a, None, opt_level);
+            let compiled = compile_template_case(HOLDER_MAIN, a, None, diagnostics);
             let typed = &compiled.metadata.typed_semantics;
             assert!(typed.instantiations.iter().any(|instance| instance.module == "qual::a" && instance.template == "Pair"));
             assert!(typed
@@ -383,8 +388,8 @@ fn imported_template_arguments_carry_value_ability_evidence() {
 /// cannot silently swap which owner supplies an argument.
 #[test]
 fn same_named_imported_templates_resolve_through_qualified_identities() {
-    for opt_level in 0..=3 {
-        let compiled = compile_template_case(AMBIGUOUS_MAIN, TEMPLATE_A_DERIVED, Some(TEMPLATE_B), opt_level);
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let compiled = compile_template_case(AMBIGUOUS_MAIN, TEMPLATE_A_DERIVED, Some(TEMPLATE_B), diagnostics);
         let typed = &compiled.metadata.typed_semantics;
         assert_eq!(
             typed
@@ -407,8 +412,8 @@ fn same_named_imported_templates_resolve_through_qualified_identities() {
             .replace("use qual::b::Pair as OtherPair", "use qual::b::Pair")
             .replace("Pair<u64> { left: value, right: value }", "Pair<u64> { amount: value }")
             .replace("OtherPair<u64> { amount: value }", "OtherPair<u64> { left: value, right: value }");
-        let candidate = compile_template_case(rebound.leak(), TEMPLATE_A_DERIVED, Some(TEMPLATE_B), opt_level);
-        assert!(projection.check_required_contracts(&project_template_case(&candidate)).is_err(), "opt={opt_level}");
+        let candidate = compile_template_case(rebound.leak(), TEMPLATE_A_DERIVED, Some(TEMPLATE_B), diagnostics);
+        assert!(projection.check_required_contracts(&project_template_case(&candidate)).is_err(), "opt={diagnostics}");
     }
 }
 
@@ -437,7 +442,7 @@ action verify(input token: Token, witness value: u64) {
 /// forwarded argument evidence, and the consumer references both.
 #[test]
 fn imported_template_nested_under_imported_template_materializes_across_owners() {
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let sources = [
             ("src/main.cell", NESTED_MAIN),
             ("src/a.cell", TEMPLATE_A_DERIVED),
@@ -452,7 +457,7 @@ fn imported_template_nested_under_imported_template_materializes_across_owners()
             "src/main.cell",
             CompileOptions {
                 edition: CellScriptEdition::Edition2027,
-                opt_level,
+                diagnostics,
                 target: Some("riscv64-elf".into()),
                 target_profile: Some("ckb".into()),
                 source_contracts: true,
@@ -488,7 +493,7 @@ public action verify(input token: Token, witness value: u64) {
 /// against the source-closure scopes.
 #[test]
 fn interface_designation_marker_binds_imported_modules() {
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let sources = [("src/main.cell", MARKER_MAIN), ("src/types.cell", TEMPLATE_TOKEN)]
             .into_iter()
             .map(|(path, source)| InMemorySource { path: path.into(), source: source.into(), role: None })
@@ -498,7 +503,7 @@ fn interface_designation_marker_binds_imported_modules() {
             "src/main.cell",
             CompileOptions {
                 edition: CellScriptEdition::Edition2027,
-                opt_level,
+                diagnostics,
                 target: Some("riscv64-elf".into()),
                 target_profile: Some("ckb".into()),
                 source_contracts: true,
@@ -536,7 +541,7 @@ fn interface_designation_marker_rejects_invalid_bindings() {
         ("value-type-spelling", "Wrapper<ScriptHandle<Script>>"),
     ];
     for (label, application) in cases {
-        for opt_level in 0..=3 {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let source = MARKER_MAIN.replace("ScriptHandle<qual::types>", application);
             let sources = [("src/main.cell", source.leak() as &'static str), ("src/types.cell", TEMPLATE_TOKEN as &'static str)]
                 .into_iter()
@@ -547,7 +552,7 @@ fn interface_designation_marker_rejects_invalid_bindings() {
                 "src/main.cell",
                 CompileOptions {
                     edition: CellScriptEdition::Edition2027,
-                    opt_level,
+                    diagnostics,
                     target: Some("riscv64-elf".into()),
                     target_profile: Some("ckb".into()),
                     source_contracts: true,
@@ -559,14 +564,14 @@ fn interface_designation_marker_rejects_invalid_bindings() {
             .map_err(|error| error.to_string().lines().next().unwrap_or("").to_string());
             let message = match result {
                 Err(message) => message,
-                Ok(_) => panic!("{label} opt={opt_level} unexpectedly compiled"),
+                Ok(_) => panic!("{label} opt={diagnostics} unexpectedly compiled"),
             };
             assert!(
                 message.contains("designate")
                     || message.contains("designation")
                     || message.contains("interface parameter")
                     || message.contains("type argument"),
-                "{label} opt={opt_level}: {message}"
+                "{label} opt={diagnostics}: {message}"
             );
         }
     }
@@ -574,7 +579,7 @@ fn interface_designation_marker_rejects_invalid_bindings() {
 
 #[test]
 fn handle_designation_mutations_reject_after_rebinding() {
-    let compile = |opt: u8| {
+    let compile = |opt: cellscript::CompilerDiagnostics| {
         let sources = [("src/main.cell", MARKER_MAIN), ("src/types.cell", TEMPLATE_TOKEN)]
             .into_iter()
             .map(|(path, source)| InMemorySource { path: path.into(), source: source.into(), role: None })
@@ -584,7 +589,7 @@ fn handle_designation_mutations_reject_after_rebinding() {
             "src/main.cell",
             CompileOptions {
                 edition: CellScriptEdition::Edition2027,
-                opt_level: opt,
+                diagnostics: opt,
                 target: Some("riscv64-elf".into()),
                 target_profile: Some("ckb".into()),
                 source_contracts: true,
@@ -595,8 +600,8 @@ fn handle_designation_mutations_reject_after_rebinding() {
         )
         .unwrap()
     };
-    for opt_level in 0..=3 {
-        let compiled = compile(opt_level);
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let compiled = compile(diagnostics);
         let mut record = compiled.verified_lowering_record.clone().unwrap();
         for instance in &mut record.typed_semantics.instantiations {
             for argument in &mut instance.type_arguments {
@@ -648,7 +653,7 @@ fn handle_designation_mutations_reject_after_rebinding() {
         assert!(
             error.message.contains("does not name a module of the checked source closure")
                 || error.message.contains("non-canonical identity"),
-            "opt={opt_level}: {error}"
+            "opt={diagnostics}: {error}"
         );
     }
 }
@@ -669,7 +674,7 @@ public action verify(input token: Token, witness handle: ScriptHandle<qual::type
 /// body use fails closed until the versioned runtime helper exists.
 #[test]
 fn open_handle_witness_parameters_carry_the_bounded_encoding() {
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let sources = [("src/main.cell", WITNESS_HANDLE_MAIN), ("src/types.cell", TEMPLATE_TOKEN)]
             .into_iter()
             .map(|(path, source)| InMemorySource { path: path.into(), source: source.into(), role: None })
@@ -679,7 +684,7 @@ fn open_handle_witness_parameters_carry_the_bounded_encoding() {
             "src/main.cell",
             CompileOptions {
                 edition: CellScriptEdition::Edition2027,
-                opt_level,
+                diagnostics,
                 target: Some("riscv64-elf".into()),
                 target_profile: Some("ckb".into()),
                 source_contracts: true,
@@ -695,13 +700,13 @@ fn open_handle_witness_parameters_carry_the_bounded_encoding() {
             params.iter().find(|param| param["name"] == "handle").cloned().unwrap_or_else(|| panic!("params: {params:?}"));
         assert!(
             handle_param.as_object().is_some_and(|object| object.values().any(|value| value == "ScriptHandle<qual::types>")),
-            "opt={opt_level} handle param: {handle_param:?}"
+            "opt={diagnostics} handle param: {handle_param:?}"
         );
         assert!(
             handle_param.get("fixed_byte_len").and_then(|value| value.as_u64()) == Some(656)
                 || handle_param.get("fixed_width").and_then(|value| value.as_u64()) == Some(656)
                 || handle_param.get("width").and_then(|value| value.as_u64()) == Some(656),
-            "opt={opt_level} handle param: {handle_param}"
+            "opt={diagnostics} handle param: {handle_param}"
         );
         let inspection = cellscript_artifact_checker::interface::inspect_bundle(
             &compiled.artifact_bytes,
@@ -725,7 +730,7 @@ fn open_handle_witness_parameters_carry_the_bounded_encoding() {
             "src/main.cell",
             CompileOptions {
                 edition: CellScriptEdition::Edition2027,
-                opt_level,
+                diagnostics,
                 target: Some("riscv64-elf".into()),
                 target_profile: Some("ckb".into()),
                 ..Default::default()
@@ -737,7 +742,7 @@ fn open_handle_witness_parameters_carry_the_bounded_encoding() {
         let message = format!("{error:?}");
         assert!(
             message.contains("identity-only") || message.contains("input") || message.contains("Cell"),
-            "opt={opt_level}: {message}"
+            "opt={diagnostics}: {message}"
         );
     }
 }

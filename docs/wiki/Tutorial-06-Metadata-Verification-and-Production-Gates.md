@@ -877,7 +877,7 @@ The maintainer waived external human review for #28 and #29; independent artifac
 checking and their remaining technical acceptance requirements still apply.
 
 The bounded constrained-instance extension keeps that old path intact.
-Use request schema `cellscript-protocol-instance-admission-input-v1` with the
+Use request schema `cellscript-protocol-instance-admission-input-v2` with the
 same CLI option, and add the canonical `instance_policy` to each instance
 binding. `InstanceScriptHandle<I>` selections are 1768 bytes and their CSARG
 payloads are 1776 bytes. Generated builders expose separate

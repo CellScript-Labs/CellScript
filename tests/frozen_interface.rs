@@ -13,7 +13,7 @@ use std::path::Path;
 const SOURCE: &str = "module client\npublic struct Value has copy, drop, store, fixed, serializable, non_linear { amount: u64 }\npublic action verify(witness value: Value) { verification require value.amount > 0 }\n";
 fn package(root: &Path, name: &str, source: &str, extra: &str) {
     std::fs::create_dir_all(root.join("src")).unwrap();
-    std::fs::write(root.join("Cell.toml"), format!("[package]\nedition = \"2027\"\nname = \"{name}\"\nversion = \"1.0.0\"\n[environments.dev]\nchain_id = \"test-chain\"\ngenesis_hash = \"0x{}\"\n{extra}", "11".repeat(32))).unwrap();
+    std::fs::write(root.join("Cell.toml"), format!("[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"{name}\"\nversion = \"1.0.0\"\n[environments.dev]\nchain_id = \"test-chain\"\ngenesis_hash = \"0x{}\"\n{extra}", "11".repeat(32))).unwrap();
     std::fs::write(root.join("src/main.cell"), source).unwrap();
 }
 fn lock(root: &Path) {
@@ -26,11 +26,11 @@ fn lock(root: &Path) {
         String::from_utf8_lossy(&output.stderr)
     );
 }
-fn compile(root: &Path, opt_level: u8) -> FrozenPackageModule {
+fn compile(root: &Path, diagnostics: cellscript::CompilerDiagnostics) -> FrozenPackageModule {
     compile_module(
         Utf8Path::from_path(root).unwrap(),
         "dev",
-        CompileOptions { opt_level, ..CompileOptions::default() },
+        CompileOptions { diagnostics, ..CompileOptions::default() },
         EntrySelection::Action("verify".into()),
     )
     .unwrap()
@@ -48,7 +48,7 @@ fn native_catalog_owns_actual_source_snapshots_and_checked_bundles() {
     package(&candidate, "client", &format!("{SOURCE}public struct Extra has copy, drop, store {{ value: u8 }}\n"), "");
     lock(&original);
     lock(&candidate);
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         std::fs::write(original.join("src/main.cell"), SOURCE).unwrap();
         let required = compile(&original, opt);
         let required_context = required.context_identity().to_owned();
@@ -84,17 +84,22 @@ fn native_catalog_rejects_other_pinned_networks_missing_candidates_and_narrow_bu
         std::fs::write(manifest, text).unwrap();
         lock(&candidate);
         let error = freeze_module_catalog(
-            compile(&original, 0),
-            vec![compile(&candidate, 0)],
+            compile(&original, cellscript::CompilerDiagnostics::without_optimizations()),
+            vec![compile(&candidate, cellscript::CompilerDiagnostics::without_optimizations())],
             &cellscript_artifact_checker::CheckerBudgets::default(),
         )
         .unwrap_err();
         assert!(error.message.contains("conflicting pinned chain identities"));
     }
-    assert!(freeze_module_catalog(compile(&original, 0), Vec::new(), &cellscript_artifact_checker::CheckerBudgets::default()).is_err());
     assert!(freeze_module_catalog(
-        compile(&original, 0),
-        vec![compile(&original, 0)],
+        compile(&original, cellscript::CompilerDiagnostics::without_optimizations()),
+        Vec::new(),
+        &cellscript_artifact_checker::CheckerBudgets::default()
+    )
+    .is_err());
+    assert!(freeze_module_catalog(
+        compile(&original, cellscript::CompilerDiagnostics::without_optimizations()),
+        vec![compile(&original, cellscript::CompilerDiagnostics::without_optimizations())],
         &cellscript_artifact_checker::CheckerBudgets { instructions: 1, ..Default::default() }
     )
     .is_err());
@@ -107,7 +112,7 @@ fn frozen_context_binds_actual_sources_and_pinned_environment_without_lock_write
     lock(directory.path());
     let lock_bytes = std::fs::read(directory.path().join("Cell.lock")).unwrap();
     let mut identity = None;
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile(directory.path(), opt);
         let value = context(&compiled);
         assert_eq!(value["entry_module"], "client");
@@ -147,8 +152,8 @@ fn portable_local_snapshot_uses_defining_sources_without_physical_directory_iden
     lock(&original);
     package(&moved, "client", SOURCE, "");
     std::fs::copy(original.join("Cell.lock"), moved.join("Cell.lock")).unwrap();
-    let first = compile(&original, 1);
-    let second = compile(&moved, 1);
+    let first = compile(&original, cellscript::CompilerDiagnostics::default());
+    let second = compile(&moved, cellscript::CompilerDiagnostics::default());
     assert_eq!(first.context_identity(), second.context_identity());
     assert_eq!(first.context_bytes().unwrap(), second.context_bytes().unwrap());
     assert_eq!(first.projection().identity(), second.projection().identity());
@@ -167,7 +172,7 @@ fn imported_aliases_bind_one_actual_locked_defining_package_and_detect_source_ch
     );
     package(&client, "client", "module client\nuse foreign::Payload as Value\npublic action verify(witness value: Value) { verification require value.amount > 0 }\n", "[dependencies]\nleft = { package = \"library\", path = \"../library\" }\nright = { package = \"library\", path = \"../library\" }\n");
     lock(&client);
-    let snapshot = compile(&client, 1);
+    let snapshot = compile(&client, cellscript::CompilerDiagnostics::default());
     let value = context(&snapshot);
     assert_eq!(value["packages"].as_object().unwrap().len(), 2);
     assert_eq!(value["modules"].as_object().unwrap().len(), 2);
@@ -194,9 +199,6 @@ fn missing_or_stale_frozen_inputs_never_repin_or_create_contexts() {
     lock(directory.path());
     let pinned = std::fs::read(directory.path().join("Cell.lock")).unwrap();
     assert!(compile_module(root, "unknown", CompileOptions::default(), EntrySelection::Default).is_err());
-    assert!(
-        compile_module(root, "dev", CompileOptions { opt_level: 4, ..CompileOptions::default() }, EntrySelection::Default).is_err()
-    );
     assert!(compile_module(
         root,
         "dev",
@@ -284,11 +286,11 @@ fn code_package(root: &Path, source: &str) {
     manager.write_manifest(&manifest).unwrap();
     lock(root);
 }
-fn compile_code(root: &Path, opt: u8) -> FrozenPackageModule {
+fn compile_code(root: &Path, opt: cellscript::CompilerDiagnostics) -> FrozenPackageModule {
     compile_module(
         Utf8Path::from_path(root).unwrap(),
         "dev",
-        CompileOptions { opt_level: opt, ..Default::default() },
+        CompileOptions { diagnostics: opt, ..Default::default() },
         EntrySelection::Artifact("code-policy".into()),
     )
     .unwrap()
@@ -331,7 +333,7 @@ fn native_code_catalog_binds_every_source_codec_and_actual_deployment_byte_tuple
     code_package(&original, CODE_SOURCE);
     // Equal public contracts do not imply equal predicates or source bytes.
     code_package(&changed, &CODE_SOURCE.replace("value > 0", "value == 7"));
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         std::fs::write(original.join("src/main.cell"), CODE_SOURCE).unwrap();
         let required = compile_code(&original, opt);
         let required_id = required.context_identity().to_owned();
@@ -394,7 +396,7 @@ fn native_code_catalog_rejects_unselected_bad_origins_interfaces_and_networks() 
     let manifest = other_genesis.join("Cell.toml");
     std::fs::write(&manifest, std::fs::read_to_string(&manifest).unwrap().replace(&"11".repeat(32), &"22".repeat(32))).unwrap();
     lock(&other_genesis);
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for case in ["raw", "script", "output", "data", "interface", "network", "genesis"] {
             let root = match case {
                 "interface" => &narrow,
@@ -416,7 +418,7 @@ fn native_code_catalog_rejects_unselected_bad_origins_interfaces_and_networks() 
                 &CheckerBudgets::default(),
             )
             .unwrap_err();
-            assert!(!error.message.is_empty(), "case {case}, O{opt}");
+            assert!(!error.message.is_empty(), "case {case}, {opt}");
             if matches!(case, "network" | "genesis") {
                 assert!(error.message.contains("conflicting pinned chain identities"));
             }
@@ -433,7 +435,7 @@ fn native_code_catalog_requires_finite_receipts_for_unselected_and_final_members
     let constant = directory.path().join("constant");
     code_package(&original, CODE_SOURCE);
     code_package(&constant, &format!("{CODE_SOURCE}\npublic const LABEL: String = \"sealed\""));
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let invalid = code_candidate(compile_code(&constant, opt), vec![2]);
         // A constant outside the proven-value grammar cannot construct its
         // finite receipt at all: the origin check itself fails closed.
@@ -454,12 +456,18 @@ fn native_code_catalog_requires_finite_receipts_for_unselected_and_final_members
         .unwrap_err();
         assert!(error.message.contains("constant"), "{error:?}");
     }
-    let mut inputs = (0..31).map(|index| code_candidate(compile_code(&original, 0), vec![index])).collect::<Vec<_>>();
-    inputs.push(code_candidate(compile_code(&constant, 0), vec![31]));
-    assert!(freeze_code_catalog(compile_code(&original, 0), inputs, &CheckerBudgets::default())
-        .unwrap_err()
-        .message
-        .contains("constant"));
+    let mut inputs = (0..31)
+        .map(|index| code_candidate(compile_code(&original, cellscript::CompilerDiagnostics::without_optimizations()), vec![index]))
+        .collect::<Vec<_>>();
+    inputs.push(code_candidate(compile_code(&constant, cellscript::CompilerDiagnostics::without_optimizations()), vec![31]));
+    assert!(freeze_code_catalog(
+        compile_code(&original, cellscript::CompilerDiagnostics::without_optimizations()),
+        inputs,
+        &CheckerBudgets::default()
+    )
+    .unwrap_err()
+    .message
+    .contains("constant"));
 }
 
 #[test]
@@ -470,7 +478,7 @@ fn native_code_catalog_rejects_wrong_vm_hash_types_in_unselected_members() {
     let directory = tempfile::tempdir().unwrap();
     code_package(directory.path(), CODE_SOURCE);
     let root = directory.path();
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for hash_type in [0u8, 2] {
             let mut bad = code_candidate(compile_code(root, opt), vec![2]);
             bad.selected_script = packed::Script::from_slice(&bad.selected_script)
@@ -495,16 +503,22 @@ fn native_code_catalog_rejects_wrong_vm_hash_types_in_unselected_members() {
                 &CheckerBudgets::default(),
             )
             .unwrap_err();
-            assert!(error.message.contains("selected Script hash type differs"), "O{opt}, hash_type={hash_type}: {error:?}");
+            assert!(error.message.contains("selected Script hash type differs"), "{opt}, hash_type={hash_type}: {error:?}");
         }
     }
-    let mut inputs = (0..32).map(|index| code_candidate(compile_code(root, 0), vec![index])).collect::<Vec<_>>();
+    let mut inputs = (0..32)
+        .map(|index| code_candidate(compile_code(root, cellscript::CompilerDiagnostics::without_optimizations()), vec![index]))
+        .collect::<Vec<_>>();
     inputs[31].selected_script =
         packed::Script::from_slice(&inputs[31].selected_script).unwrap().as_builder().hash_type(2u8).build().as_slice().to_vec();
-    assert!(freeze_code_catalog(compile_code(root, 0), inputs, &CheckerBudgets::default())
-        .unwrap_err()
-        .message
-        .contains("selected Script hash type differs"));
+    assert!(freeze_code_catalog(
+        compile_code(root, cellscript::CompilerDiagnostics::without_optimizations()),
+        inputs,
+        &CheckerBudgets::default()
+    )
+    .unwrap_err()
+    .message
+    .contains("selected Script hash type differs"));
 }
 
 #[test]
@@ -514,12 +528,28 @@ fn native_code_catalog_bounds_all_inputs_before_parsing_and_returns_no_partial_c
     let directory = tempfile::tempdir().unwrap();
     code_package(directory.path(), CODE_SOURCE);
     let root = directory.path();
-    assert!(freeze_code_catalog(compile_code(root, 0), vec![], &CheckerBudgets::default()).unwrap_err().message.contains("1..=32"));
-    let too_many = (0..33).map(|index| code_candidate(compile_code(root, 0), vec![index])).collect();
-    assert!(freeze_code_catalog(compile_code(root, 0), too_many, &CheckerBudgets::default()).unwrap_err().message.contains("1..=32"));
+    assert!(freeze_code_catalog(
+        compile_code(root, cellscript::CompilerDiagnostics::without_optimizations()),
+        vec![],
+        &CheckerBudgets::default()
+    )
+    .unwrap_err()
+    .message
+    .contains("1..=32"));
+    let too_many = (0..33)
+        .map(|index| code_candidate(compile_code(root, cellscript::CompilerDiagnostics::without_optimizations()), vec![index]))
+        .collect();
+    assert!(freeze_code_catalog(
+        compile_code(root, cellscript::CompilerDiagnostics::without_optimizations()),
+        too_many,
+        &CheckerBudgets::default()
+    )
+    .unwrap_err()
+    .message
+    .contains("1..=32"));
     for which in ["artifact", "record", "source-map", "large-raw", "large-script", "shared"] {
         let mut budgets = CheckerBudgets::default();
-        let mut inputs = vec![code_candidate(compile_code(root, 0), vec![1])];
+        let mut inputs = vec![code_candidate(compile_code(root, cellscript::CompilerDiagnostics::without_optimizations()), vec![1])];
         // Malformed first member must not obscure a later shared-budget error.
         inputs[0].raw_transaction = vec![0];
         match which {
@@ -530,14 +560,17 @@ fn native_code_catalog_bounds_all_inputs_before_parsing_and_returns_no_partial_c
             "large-script" => inputs[0].selected_script = vec![0; 4 * 1024 * 1024 + 1],
             "shared" => {
                 for index in 2..=6 {
-                    let mut input = code_candidate(compile_code(root, 0), vec![index]);
+                    let mut input =
+                        code_candidate(compile_code(root, cellscript::CompilerDiagnostics::without_optimizations()), vec![index]);
                     input.raw_transaction = vec![0; 4 * 1024 * 1024];
                     inputs.push(input);
                 }
             }
             _ => unreachable!(),
         }
-        let error = freeze_code_catalog(compile_code(root, 0), inputs, &budgets).unwrap_err();
+        let error =
+            freeze_code_catalog(compile_code(root, cellscript::CompilerDiagnostics::without_optimizations()), inputs, &budgets)
+                .unwrap_err();
         assert!(error.message.contains("shared 16 MiB or per-file/caller byte budgets"), "{which}: {error:?}");
     }
 }
@@ -549,8 +582,15 @@ fn native_code_catalog_checks_all_32_members_and_distinguishes_complete_script_a
     let directory = tempfile::tempdir().unwrap();
     code_package(directory.path(), CODE_SOURCE);
     let root = directory.path();
-    let inputs = (0..32).map(|index| code_candidate(compile_code(root, 0), vec![index])).collect();
-    let checked = freeze_code_catalog(compile_code(root, 0), inputs, &CheckerBudgets::default()).unwrap();
+    let inputs = (0..32)
+        .map(|index| code_candidate(compile_code(root, cellscript::CompilerDiagnostics::without_optimizations()), vec![index]))
+        .collect();
+    let checked = freeze_code_catalog(
+        compile_code(root, cellscript::CompilerDiagnostics::without_optimizations()),
+        inputs,
+        &CheckerBudgets::default(),
+    )
+    .unwrap();
     assert_eq!(checked.candidates().len(), 32);
     let first = checked.candidates()[0].origin();
     let second = checked.candidates()[1].origin();
@@ -558,17 +598,30 @@ fn native_code_catalog_checks_all_32_members_and_distinguishes_complete_script_a
     assert_eq!(first.output_index(), second.output_index());
     assert_ne!(first.selected_script_hash(), second.selected_script_hash());
     assert_ne!(first.identity(), second.identity());
-    let mut inputs = (0..32).map(|index| code_candidate(compile_code(root, 0), vec![index])).collect::<Vec<_>>();
+    let mut inputs = (0..32)
+        .map(|index| code_candidate(compile_code(root, cellscript::CompilerDiagnostics::without_optimizations()), vec![index]))
+        .collect::<Vec<_>>();
     inputs[31].output_index = 1;
-    assert!(freeze_code_catalog(compile_code(root, 0), inputs, &CheckerBudgets::default())
-        .unwrap_err()
-        .message
-        .contains("code output index is absent"));
-    let duplicate = vec![code_candidate(compile_code(root, 0), vec![1]), code_candidate(compile_code(root, 0), vec![1])];
-    assert!(freeze_code_catalog(compile_code(root, 0), duplicate, &CheckerBudgets::default())
-        .unwrap_err()
-        .message
-        .contains("duplicate concrete Script/code deployment"));
+    assert!(freeze_code_catalog(
+        compile_code(root, cellscript::CompilerDiagnostics::without_optimizations()),
+        inputs,
+        &CheckerBudgets::default()
+    )
+    .unwrap_err()
+    .message
+    .contains("code output index is absent"));
+    let duplicate = vec![
+        code_candidate(compile_code(root, cellscript::CompilerDiagnostics::without_optimizations()), vec![1]),
+        code_candidate(compile_code(root, cellscript::CompilerDiagnostics::without_optimizations()), vec![1]),
+    ];
+    assert!(freeze_code_catalog(
+        compile_code(root, cellscript::CompilerDiagnostics::without_optimizations()),
+        duplicate,
+        &CheckerBudgets::default()
+    )
+    .unwrap_err()
+    .message
+    .contains("duplicate concrete Script/code deployment"));
 }
 
 fn owned_code_package(root: &Path, name: &str) {
@@ -587,7 +640,7 @@ fn consuming_package(root: &Path, library_name: &str, library_path: &str, aliase
     package(root,"client","module client\nuse foreign::Token as Value\npublic action verify(input token: Value) { verification require token.amount > 0 consume token }\n",&format!("[dependencies]\n{dependencies}"));
     lock(root);
 }
-fn one_code_catalog(root: &Path, opt: u8) -> cellscript::package::frozen_interface::FrozenCodeCatalog {
+fn one_code_catalog(root: &Path, opt: cellscript::CompilerDiagnostics) -> cellscript::package::frozen_interface::FrozenCodeCatalog {
     cellscript::package::frozen_interface::freeze_code_catalog(
         compile_code(root, opt),
         vec![code_candidate(compile_code(root, opt), vec![1])],
@@ -606,7 +659,7 @@ fn resolved_code_catalog_uses_actual_locked_defining_owner_across_dependency_ali
     owned_code_package(&library, "library");
     consuming_package(&first, "library", "../library", &["left", "right"]);
     consuming_package(&second, "library", "../library", &["renamed"]);
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let first = resolve_code_catalog_source(compile(&first, opt), one_code_catalog(&library, opt)).unwrap();
         let second = resolve_code_catalog_source(compile(&second, opt), one_code_catalog(&library, opt)).unwrap();
         assert_eq!(first.source_owner_identity(), second.source_owner_identity());
@@ -641,7 +694,7 @@ fn resolved_code_catalog_keeps_same_name_and_shape_from_different_owners_distinc
     owned_code_package(&right, "library-right");
     consuming_package(&app_left, "library-left", "../left", &["library"]);
     consuming_package(&app_right, "library-right", "../right", &["library"]);
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let left_bound = resolve_code_catalog_source(compile(&app_left, opt), one_code_catalog(&left, opt)).unwrap();
         let right_bound = resolve_code_catalog_source(compile(&app_right, opt), one_code_catalog(&right, opt)).unwrap();
         assert_eq!(left_bound.catalog().required().projection().identity(), right_bound.catalog().required().projection().identity());
@@ -665,7 +718,7 @@ fn resolved_code_catalog_rejects_changed_definitions_versions_networks_and_absen
         let library = directory.path().join("library");
         let app = directory.path().join("app");
         owned_code_package(&library, "library");
-        let baseline = one_code_catalog(&library, 0);
+        let baseline = one_code_catalog(&library, cellscript::CompilerDiagnostics::without_optimizations());
         match case {
             "source" => std::fs::write(
                 library.join("src/main.cell"),
@@ -697,7 +750,7 @@ fn resolved_code_catalog_rejects_changed_definitions_versions_networks_and_absen
             std::fs::write(path, text).unwrap();
             lock(&app);
         }
-        let consumer = compile(&app, 0);
+        let consumer = compile(&app, cellscript::CompilerDiagnostics::without_optimizations());
         let error = resolve_code_catalog_source(consumer, baseline).unwrap_err();
         let expected = match case {
             "source" | "version" => "defining package differs",
@@ -749,8 +802,12 @@ fn resolved_code_catalog_preserves_transitive_git_pins_even_for_identical_source
     manager.write_manifest(&manifest).unwrap();
     lock(&library);
     consuming_package(&first, "library", "../library", &["library"]);
-    let baseline = one_code_catalog(&library, 0);
-    let checked = resolve_code_catalog_source(compile(&first, 0), one_code_catalog(&library, 0)).unwrap();
+    let baseline = one_code_catalog(&library, cellscript::CompilerDiagnostics::without_optimizations());
+    let checked = resolve_code_catalog_source(
+        compile(&first, cellscript::CompilerDiagnostics::without_optimizations()),
+        one_code_catalog(&library, cellscript::CompilerDiagnostics::without_optimizations()),
+    )
+    .unwrap();
     let first_context = context(checked.consumer());
     let first_package = first_context["modules"]["auxiliary"]["package"].as_str().unwrap();
     assert_eq!(first_context["packages"][first_package]["source"]["revision"], first_revision);
@@ -761,7 +818,7 @@ fn resolved_code_catalog_preserves_transitive_git_pins_even_for_identical_source
     let second_revision = source_owner_git(&auxiliary, &["rev-parse", "HEAD"]);
     assert_ne!(first_revision, second_revision);
     consuming_package(&second, "library", "../library", &["library"]);
-    let consumer = compile(&second, 0);
+    let consumer = compile(&second, cellscript::CompilerDiagnostics::without_optimizations());
     let second_context = context(&consumer);
     let second_package = second_context["modules"]["auxiliary"]["package"].as_str().unwrap();
     assert_eq!(second_context["packages"][second_package]["source"]["revision"], second_revision);
@@ -810,10 +867,18 @@ fn resolved_code_catalog_counts_the_consumer_before_any_ownership_traversal() {
     // Deliberately lacks the foreign defining module; budget error must win.
     package(&absent, "client", SOURCE, "");
     lock(&absent);
-    let consumer = compile(&absent, 0);
+    let consumer = compile(&absent, cellscript::CompilerDiagnostics::without_optimizations());
     let consumer_bytes = consumer.bundle().iter().map(|bytes| bytes.len()).sum::<usize>();
-    let required = compile_code(&library, 0);
-    let mut inputs = (0..4).map(|index| padded_source_owner_candidate(compile_code(&library, 0), vec![index], 0)).collect::<Vec<_>>();
+    let required = compile_code(&library, cellscript::CompilerDiagnostics::without_optimizations());
+    let mut inputs = (0..4)
+        .map(|index| {
+            padded_source_owner_candidate(
+                compile_code(&library, cellscript::CompilerDiagnostics::without_optimizations()),
+                vec![index],
+                0,
+            )
+        })
+        .collect::<Vec<_>>();
     let base = required.bundle().iter().map(|bytes| bytes.len()).sum::<usize>()
         + inputs
             .iter()
@@ -827,7 +892,11 @@ fn resolved_code_catalog_counts_the_consumer_before_any_ownership_traversal() {
     let padding = target.checked_sub(base).unwrap();
     for (index, input) in inputs.iter_mut().enumerate() {
         let size = padding / 4 + usize::from(index < padding % 4);
-        let replacement = padded_source_owner_candidate(compile_code(&library, 0), vec![index as u8], size);
+        let replacement = padded_source_owner_candidate(
+            compile_code(&library, cellscript::CompilerDiagnostics::without_optimizations()),
+            vec![index as u8],
+            size,
+        );
         assert!(replacement.raw_transaction.len() <= 4 * 1024 * 1024);
         *input = replacement;
     }
@@ -857,7 +926,7 @@ fn parsed_source_closure_matches_native_compilation_and_detects_repinning() {
     lock(root);
     let pinned = std::fs::read(root.join("Cell.lock")).unwrap();
     let parsed = freeze_package_sources(Utf8Path::from_path(root).unwrap(), "dev").unwrap();
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile(root, opt);
         assert_eq!(parsed.context_identity(), compiled.context_identity());
         assert_eq!(parsed.context_bytes().unwrap(), compiled.context_bytes().unwrap());
@@ -881,9 +950,17 @@ fn source_catalog_binds_defining_owner_before_consumer_typechecking() {
     let consumer = directory.path().join("consumer");
     owned_code_package(&library, "library");
     consuming_package(&consumer, "library", "../library", &["left", "right"]);
-    let compiled = resolve_code_catalog_source(compile(&consumer, 0), one_code_catalog(&library, 0)).unwrap();
+    let compiled = resolve_code_catalog_source(
+        compile(&consumer, cellscript::CompilerDiagnostics::without_optimizations()),
+        one_code_catalog(&library, cellscript::CompilerDiagnostics::without_optimizations()),
+    )
+    .unwrap();
     let root = Utf8Path::from_path(&consumer).unwrap();
-    let parsed = resolve_source_catalog(freeze_package_sources(root, "dev").unwrap(), one_code_catalog(&library, 0)).unwrap();
+    let parsed = resolve_source_catalog(
+        freeze_package_sources(root, "dev").unwrap(),
+        one_code_catalog(&library, cellscript::CompilerDiagnostics::without_optimizations()),
+    )
+    .unwrap();
     assert_eq!(parsed.source_owner_identity(), compiled.source_owner_identity());
     assert_eq!(parsed.source_owner_bytes().unwrap(), compiled.source_owner_bytes().unwrap());
     assert_eq!(parsed.sources().context_identity(), compiled.consumer().context_identity());
@@ -901,7 +978,11 @@ fn source_catalog_binds_defining_owner_before_consumer_typechecking() {
     std::fs::write(&path, source).unwrap();
     lock(&consumer);
     assert!(parsed.check_unchanged_sources().is_err());
-    let untyped = resolve_source_catalog(freeze_package_sources(root, "dev").unwrap(), one_code_catalog(&library, 0)).unwrap();
+    let untyped = resolve_source_catalog(
+        freeze_package_sources(root, "dev").unwrap(),
+        one_code_catalog(&library, cellscript::CompilerDiagnostics::without_optimizations()),
+    )
+    .unwrap();
     assert_eq!(untyped.source_owner_identity(), compiled.source_owner_identity());
     let error = compile_module(root, "dev", CompileOptions::default(), EntrySelection::Action("verify".into())).unwrap_err();
     assert!(
@@ -921,13 +1002,15 @@ fn source_catalog_rechecks_actual_files_before_ownership_binding() {
     consuming_package(&consumer, "library", "../library", &["library"]);
     let root = Utf8Path::from_path(&consumer).unwrap();
     let sources = freeze_package_sources(root, "dev").unwrap();
-    let catalog = one_code_catalog(&library, 0);
+    let catalog = one_code_catalog(&library, cellscript::CompilerDiagnostics::without_optimizations());
     std::fs::write(consumer.join("src/main.cell"), "module replaced\npublic action verify() { require true }\n").unwrap();
     lock(&consumer);
     let error = resolve_source_catalog(sources, catalog).unwrap_err();
     assert!(error.message.contains("frozen source closure changed"));
     let fresh = freeze_package_sources(root, "dev").unwrap();
-    assert!(resolve_source_catalog(fresh, one_code_catalog(&library, 0)).is_ok());
+    assert!(
+        resolve_source_catalog(fresh, one_code_catalog(&library, cellscript::CompilerDiagnostics::without_optimizations())).is_ok()
+    );
     // Only source ownership is certified. A module need not execute a peer to
     // have that actual dependency in its locked closure.
 }
@@ -985,7 +1068,7 @@ fn policy_sources(
     library: &Path,
     candidate: &Path,
     consumer: &Path,
-    opt: u8,
+    opt: cellscript::CompilerDiagnostics,
     count: usize,
 ) -> cellscript::package::frozen_interface::ResolvedSourceCatalog {
     use cellscript::package::frozen_interface::{freeze_code_catalog, freeze_package_sources, resolve_source_catalog};
@@ -1059,7 +1142,7 @@ fn code_policy_binds_actual_all_member_receipts_and_selects_exact_or_compatible(
     use cellscript::package::frozen_interface::freeze_code_policy;
     use cellscript_artifact_checker::open_handle_policy::AuthorizationSet;
     let (_directory, library, candidate, consumer) = policy_fixture();
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for exact in [false, true] {
             let sources = policy_sources(&library, &candidate, &consumer, opt, 2);
             let source_id = sources.identity().to_owned();
@@ -1110,7 +1193,7 @@ fn code_policy_rejects_rebound_headers_and_every_unselected_member_identity() {
     use cellscript::package::frozen_interface::freeze_code_policy;
     use cellscript_artifact_checker::open_handle_policy::*;
     let (_directory, library, candidate, consumer) = policy_fixture();
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for axis in 0..12 {
             let sources = policy_sources(&library, &candidate, &consumer, opt, 2);
             let (mut header, mut members) = policy_records(&sources, true);
@@ -1136,7 +1219,7 @@ fn code_policy_rejects_rebound_headers_and_every_unselected_member_identity() {
             }
             let wire_only = AuthorizationSet::new(header, &members).unwrap();
             let error = freeze_code_policy(sources, wire_only).unwrap_err();
-            assert!(error.message.contains("code policy"), "axis {axis} O{opt}: {error}");
+            assert!(error.message.contains("code policy"), "axis {axis} {opt}: {error}");
         }
     }
 }
@@ -1145,7 +1228,7 @@ fn code_policy_checks_final_member_and_rejects_missing_or_substituted_members() 
     use cellscript::package::frozen_interface::freeze_code_policy;
     use cellscript_artifact_checker::open_handle_policy::*;
     let (_directory, library, candidate, consumer) = policy_fixture();
-    let sources = policy_sources(&library, &candidate, &consumer, 0, 32);
+    let sources = policy_sources(&library, &candidate, &consumer, cellscript::CompilerDiagnostics::without_optimizations(), 32);
     let (header, members) = policy_records(&sources, false);
     let checked = freeze_code_policy(sources, AuthorizationSet::new(header, &members).unwrap()).unwrap();
     for member in &members {
@@ -1153,7 +1236,7 @@ fn code_policy_checks_final_member_and_rejects_missing_or_substituted_members() 
         let selected = checked.check_selection(&witness).unwrap();
         assert_eq!(policy_hash(selected.candidate().receipt().identity()), member.receipt);
     }
-    let sources = policy_sources(&library, &candidate, &consumer, 0, 32);
+    let sources = policy_sources(&library, &candidate, &consumer, cellscript::CompilerDiagnostics::without_optimizations(), 32);
     let (header, mut members) = policy_records(&sources, false);
     members[31].script[0] ^= 1;
     assert!(freeze_code_policy(sources, AuthorizationSet::new(header, &members).unwrap())
@@ -1161,7 +1244,7 @@ fn code_policy_checks_final_member_and_rejects_missing_or_substituted_members() 
         .message
         .contains("complete Script"));
     for count in [1, 2] {
-        let sources = policy_sources(&library, &candidate, &consumer, 0, 2);
+        let sources = policy_sources(&library, &candidate, &consumer, cellscript::CompilerDiagnostics::without_optimizations(), 2);
         let (mut header, mut members) = policy_records(&sources, false);
         if count == 1 {
             members.pop();
@@ -1177,7 +1260,7 @@ fn code_policy_keeps_snapshot_status_floors_and_root_separate_from_host_byte_bin
     use cellscript::package::frozen_interface::freeze_code_policy;
     use cellscript_artifact_checker::open_handle_policy::*;
     let (_directory, library, candidate, consumer) = policy_fixture();
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for yanked in [false, true] {
             let sources = policy_sources(&library, &candidate, &consumer, opt, 2);
             let (header, mut members) = policy_records(&sources, false);
@@ -1202,7 +1285,7 @@ fn code_policy_detects_later_receipt_input_and_real_source_substitution() {
     use cellscript::package::frozen_interface::freeze_code_policy;
     use cellscript_artifact_checker::open_handle_policy::*;
     let (_directory, library, candidate, consumer) = policy_fixture();
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let original = CODE_SOURCE.replace("module client", "module foreign");
         std::fs::write(library.join("src/main.cell"), &original).unwrap();
         let sources = policy_sources(&library, &candidate, &consumer, opt, 2);
@@ -1257,12 +1340,12 @@ fn code_policy_rejects_actual_type_hash_receipts_without_authenticated_history()
     use cellscript_artifact_checker::open_handle_policy::*;
     use ckb_testtool::ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*};
     let (_directory, library, _candidate, consumer) = policy_fixture();
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let make_module = || {
             compile_module(
                 Utf8Path::from_path(&library).unwrap(),
                 "dev",
-                CompileOptions { opt_level: opt, target_profile: Some("ckb-type-hash".into()), ..Default::default() },
+                CompileOptions { diagnostics: opt, target_profile: Some("ckb-type-hash".into()), ..Default::default() },
                 EntrySelection::Artifact("code-policy".into()),
             )
             .unwrap()
@@ -1323,13 +1406,13 @@ fn source_policy_binds_type_id_history_and_the_exact_final_dependency() {
     use ckb_testtool::ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*};
 
     let (_directory, library, _candidate, consumer) = policy_fixture();
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for count in [1usize, 2, 32] {
             let compile = || {
                 compile_module(
                     Utf8Path::from_path(&library).unwrap(),
                     "dev",
-                    CompileOptions { opt_level: opt, target_profile: Some("ckb-type-hash".into()), ..Default::default() },
+                    CompileOptions { diagnostics: opt, target_profile: Some("ckb-type-hash".into()), ..Default::default() },
                     EntrySelection::Artifact("code-policy".into()),
                 )
                 .unwrap()
@@ -1560,15 +1643,15 @@ fn open_verifier_target_claim_rejects_unbound_or_conditional_delegation() {
     for (case, body) in bodies.iter().enumerate() {
         package(&app, "client", &format!("module client\nuse foreign::verify\npublic action accept(witness handle: VerifierHandle<foreign>) {{ verification let mut bytes = Vec::new() bytes.push(0 as u8) {body} }}\n"), "[dependencies]\nlibrary = { path = \"../library\" }\n");
         lock(&app);
-        for opt_level in 0..=3 {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let error = compile_module(
                 Utf8Path::from_path(&app).unwrap(),
                 "dev",
-                CompileOptions { opt_level, ..Default::default() },
+                CompileOptions { diagnostics, ..Default::default() },
                 EntrySelection::Action("accept".into()),
             )
             .unwrap_err();
-            assert!(error.to_string().contains("spawn"), "case={case} O{opt_level}: {error}");
+            assert!(error.to_string().contains("spawn"), "case={case} {diagnostics}: {error}");
         }
     }
 }
@@ -1586,7 +1669,8 @@ fn open_lock_and_verifier_profiles_materialize_and_execute_identical_transaction
     use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
     let hex = |bytes: &[u8]| format!("0x{}", cellscript_artifact_checker::hex_encode(bytes));
     let script_json = |script: &packed::Script| serde_json::json!({"code_hash": hex(script.code_hash().as_slice()), "hash_type": "data2", "args": hex(&script.args().raw_data())});
-    for opt in 0..=3 {
+    {
+        let opt = cellscript::CompilerDiagnostics::default();
         for verifier in [false, true] {
             for consumer_lock in [false, true] {
                 let directory = tempfile::tempdir().unwrap();
@@ -1620,7 +1704,7 @@ fn open_lock_and_verifier_profiles_materialize_and_execute_identical_transaction
                     compile_module(
                         Utf8Path::from_path(root).unwrap(),
                         "dev",
-                        CompileOptions { opt_level: opt, ..Default::default() },
+                        CompileOptions { diagnostics: opt, ..Default::default() },
                         if is_lock { EntrySelection::Lock(name.into()) } else { EntrySelection::Action(name.into()) },
                     )
                     .unwrap()
@@ -1817,7 +1901,7 @@ fn open_lock_and_verifier_profiles_materialize_and_execute_identical_transaction
                     );
                 }
                 let cycles = context.verify_tx(&materialized, 3_000_000).unwrap();
-                eprintln!("open Lock/verifier O{opt} verifier={verifier} consumer_lock={consumer_lock}: {cycles} cycles");
+                eprintln!("open Lock/verifier {opt} verifier={verifier} consumer_lock={consumer_lock}: {cycles} cycles");
                 assert_eq!(report.bundle.open_handles[0].verifier_invocation.is_some(), verifier);
                 assert_eq!(report.bundle.open_handles[0].peer_input_indices, if verifier { vec![] } else { vec![1] });
                 if verifier {
@@ -1939,12 +2023,12 @@ fn open_lock_and_verifier_profiles_materialize_and_execute_identical_transaction
                 std::fs::write(root.join("bundle-input.json"), serde_json::to_vec(&input).unwrap()).unwrap();
                 std::fs::write(root.join("transaction.bin"), tx.as_slice()).unwrap();
                 std::fs::write(root.join("creation.bin"), chosen.candidate().raw_transaction()).unwrap();
-                let provider_request = serde_json::json!({"package": "library", "environment": "dev", "entry_kind": if verifier { "action" } else { "lock" }, "entry": "verify", "opt_level": opt});
-                let request = serde_json::json!({"schema": "cellscript-protocol-open-admission-input-v1", "transaction_file": "transaction.bin",
+                let provider_request = serde_json::json!({"package": "library", "environment": "dev", "entry_kind": if verifier { "action" } else { "lock" }, "entry": "verify"});
+                let request = serde_json::json!({"schema": "cellscript-protocol-open-admission-input-v2", "transaction_file": "transaction.bin",
                     "inputs": inputs.iter().map(|c| serde_json::json!({"out_point": hex(&c.out_point), "output": hex(c.output), "data": hex(c.data)})).collect::<Vec<_>>(),
                     "dependencies": deps.iter().map(|c| serde_json::json!({"out_point": hex(&c.out_point), "output": hex(c.output), "data": hex(c.data)})).collect::<Vec<_>>(),
                     "bindings": [{"consumer": "consumer", "parameter": "handle", "participant": "provider",
-                        "consumer_module": {"package": "app", "environment": "dev", "entry_kind": declaration, "entry": "accept", "opt_level": opt},
+                        "consumer_module": {"package": "app", "environment": "dev", "entry_kind": declaration, "entry": "accept"},
                         "required": provider_request, "candidates": [{"module": provider_request, "creation_transaction_file": "creation.bin", "output_index": 0, "selected_script": hex(chosen.candidate().selected_script())}],
                         "policy_header": hex(&policy.policy().header().encode().unwrap()), "policy_members": policy.policy().members().iter().map(|m| hex(&m.encode().unwrap())).collect::<Vec<_>>(), "selection": hex(&selection)}]});
                 std::fs::write(root.join("open-input.json"), serde_json::to_vec(&request).unwrap()).unwrap();
@@ -2037,7 +2121,7 @@ fn source_code_receipts_bind_actual_context_versions_and_change_wire_roots() {
     use cellscript::package::frozen_interface::freeze_source_code_policy;
     use cellscript_artifact_checker::open_handle_policy::AuthorizationSet;
     let (_directory, library, candidate, consumer) = policy_fixture();
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let mut previous = None;
         for version in ["1.0.0", "1.0.1+source.a"] {
             source_version(&candidate, version);
@@ -2108,7 +2192,7 @@ fn source_code_policy_enforces_semver_precedence_for_both_selection_modes() {
     let (_directory, library, candidate, consumer) = policy_fixture();
     source_version(&library, "1.0.0+z");
     lock(&consumer);
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for (version, compatible_ok, exact_ok) in [
             ("0.9.9", false, false),
             ("1.0.0-alpha", false, false),
@@ -2123,7 +2207,7 @@ fn source_code_policy_enforces_semver_precedence_for_both_selection_modes() {
                 let (header, members) = source_policy_records(&sources, exact, 1);
                 let result = freeze_source_code_policy(sources, AuthorizationSet::new(header, &members).unwrap());
                 let expected = if exact { exact_ok } else { compatible_ok };
-                assert_eq!(result.is_ok(), expected, "O{opt}, {version}, exact={exact}: {result:?}");
+                assert_eq!(result.is_ok(), expected, "{opt}, {version}, exact={exact}: {result:?}");
                 if let Ok(checked) = result {
                     let witness = checked.policy().selection(&members[1].receipt).unwrap();
                     checked.check_selection(&witness).unwrap();
@@ -2138,7 +2222,7 @@ fn source_code_policy_enforces_semver_precedence_for_both_selection_modes() {
     source_version(&library, "1.0.0-alpha");
     lock(&consumer);
     source_version(&candidate, "1.0.0");
-    let sources = policy_sources(&library, &candidate, &consumer, 0, 2);
+    let sources = policy_sources(&library, &candidate, &consumer, cellscript::CompilerDiagnostics::without_optimizations(), 2);
     let (header, members) = source_policy_records(&sources, false, 1);
     assert!(freeze_source_code_policy(sources, AuthorizationSet::new(header, &members).unwrap())
         .unwrap_err()
@@ -2153,7 +2237,7 @@ fn source_code_policy_retains_unselectable_history_without_relaxing_coordinates(
     let (_directory, library, candidate, consumer) = policy_fixture();
     source_version(&candidate, "0.9.0");
     for state in 0..4 {
-        let sources = policy_sources(&library, &candidate, &consumer, 0, 2);
+        let sources = policy_sources(&library, &candidate, &consumer, cellscript::CompilerDiagnostics::without_optimizations(), 2);
         let (header, mut members) = source_policy_records(&sources, state == 3, 0);
         match state {
             0 => members[1].status = MemberStatus::Yanked,
@@ -2178,7 +2262,7 @@ fn source_code_policy_retains_unselectable_history_without_relaxing_coordinates(
         manifest.package.namespace = if coordinate == "namespace" { Some("other".into()) } else { None };
         manager.write_manifest(&manifest).unwrap();
         lock(&candidate);
-        let sources = policy_sources(&library, &candidate, &consumer, 0, 2);
+        let sources = policy_sources(&library, &candidate, &consumer, cellscript::CompilerDiagnostics::without_optimizations(), 2);
         let (header, mut members) = source_policy_records(&sources, true, 0);
         members[1].status = MemberStatus::Yanked;
         assert!(freeze_source_code_policy(sources, AuthorizationSet::new(header, &members).unwrap())
@@ -2194,7 +2278,7 @@ fn source_code_policy_rejects_artifact_only_bindings_and_stale_source_versions()
     use cellscript_artifact_checker::open_handle_policy::AuthorizationSet;
     let (_directory, library, candidate, consumer) = policy_fixture();
     for axis in 0..3 {
-        let sources = policy_sources(&library, &candidate, &consumer, 0, 2);
+        let sources = policy_sources(&library, &candidate, &consumer, cellscript::CompilerDiagnostics::without_optimizations(), 2);
         let (mut header, mut members) = source_policy_records(&sources, true, 0);
         match axis {
             0 => header.required_interface = policy_hash(sources.catalog().required().projection().identity()),
@@ -2203,7 +2287,7 @@ fn source_code_policy_rejects_artifact_only_bindings_and_stale_source_versions()
         }
         assert!(freeze_source_code_policy(sources, AuthorizationSet::new(header, &members).unwrap()).is_err());
     }
-    let sources = policy_sources(&library, &candidate, &consumer, 0, 2);
+    let sources = policy_sources(&library, &candidate, &consumer, cellscript::CompilerDiagnostics::without_optimizations(), 2);
     let (header, members) = source_policy_records(&sources, false, 0);
     let checked = freeze_source_code_policy(sources, AuthorizationSet::new(header.clone(), &members).unwrap()).unwrap();
     let witness = checked.policy().selection(&members[1].receipt).unwrap();
@@ -2212,7 +2296,7 @@ fn source_code_policy_rejects_artifact_only_bindings_and_stale_source_versions()
     // filesystem promise. Selection rechecks the consumer's pinned closure.
     let retained = checked.check_selection(&witness).unwrap();
     assert_eq!(retained.candidate().source_receipt().package_version().to_string(), "1.0.0");
-    let refreshed = policy_sources(&library, &candidate, &consumer, 0, 2);
+    let refreshed = policy_sources(&library, &candidate, &consumer, cellscript::CompilerDiagnostics::without_optimizations(), 2);
     // A newly constructed valid Merkle tree using old source identities still
     // fails against actual newly captured candidate source facts.
     assert!(freeze_source_code_policy(refreshed, AuthorizationSet::new(header, &members).unwrap())
@@ -2226,23 +2310,27 @@ fn source_code_policy_checks_all_32_source_receipts_and_bounds_version_text() {
     use cellscript::package::frozen_interface::{freeze_code_catalog, freeze_source_code_policy};
     use cellscript_artifact_checker::open_handle_policy::AuthorizationSet;
     let (_directory, library, candidate, consumer) = policy_fixture();
-    let sources = policy_sources(&library, &candidate, &consumer, 0, 32);
+    let sources = policy_sources(&library, &candidate, &consumer, cellscript::CompilerDiagnostics::without_optimizations(), 32);
     let (header, members) = source_policy_records(&sources, false, 0);
     let checked = freeze_source_code_policy(sources, AuthorizationSet::new(header, &members).unwrap()).unwrap();
     for member in &members {
         let witness = checked.policy().selection(&member.receipt).unwrap();
         checked.check_selection(&witness).unwrap();
     }
-    let sources = policy_sources(&library, &candidate, &consumer, 0, 32);
+    let sources = policy_sources(&library, &candidate, &consumer, cellscript::CompilerDiagnostics::without_optimizations(), 32);
     let (header, mut members) = source_policy_records(&sources, true, 0);
     members[31].receipt[0] ^= 1;
     assert!(freeze_source_code_policy(sources, AuthorizationSet::new(header, &members).unwrap()).is_err());
     source_version(&candidate, &format!("1.0.0+{}", "a".repeat(129)));
-    let oversized = code_candidate(compile_code(&candidate, 0), vec![1]);
-    assert!(freeze_code_catalog(compile_code(&library, 0), vec![oversized], &Default::default())
-        .unwrap_err()
-        .message
-        .contains("text limits"));
+    let oversized = code_candidate(compile_code(&candidate, cellscript::CompilerDiagnostics::without_optimizations()), vec![1]);
+    assert!(freeze_code_catalog(
+        compile_code(&library, cellscript::CompilerDiagnostics::without_optimizations()),
+        vec![oversized],
+        &Default::default()
+    )
+    .unwrap_err()
+    .message
+    .contains("text limits"));
 }
 
 fn final_code_dependency(
@@ -2269,7 +2357,7 @@ fn source_dependency_binds_source_versions_membership_and_actual_final_raw_input
     use cellscript::package::frozen_interface::{freeze_source_code_policy, FrozenSourceCodeDependency, FrozenSourceCodePolicy};
     use cellscript_artifact_checker::{code_origin::SuppliedDependencyCell, open_handle_policy::AuthorizationSet};
     let (_directory, library, candidate, consumer) = policy_fixture();
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for exact in [false, true] {
             let sources = policy_sources(&library, &candidate, &consumer, opt, 2);
             let (header, members) = source_policy_records(&sources, exact, 1);
@@ -2310,7 +2398,7 @@ fn source_dependency_rechecks_consumer_sources_before_binding_and_later_material
     use cellscript::package::frozen_interface::freeze_source_code_policy;
     use cellscript_artifact_checker::{code_origin::SuppliedDependencyCell, open_handle_policy::AuthorizationSet};
     let (_directory, library, candidate, consumer) = policy_fixture();
-    let sources = policy_sources(&library, &candidate, &consumer, 0, 2);
+    let sources = policy_sources(&library, &candidate, &consumer, cellscript::CompilerDiagnostics::without_optimizations(), 2);
     let (header, members) = source_policy_records(&sources, false, 0);
     let policy = freeze_source_code_policy(sources, AuthorizationSet::new(header, &members).unwrap()).unwrap();
     let witness = policy.policy().selection(&members[0].receipt).unwrap();
@@ -2336,7 +2424,7 @@ fn source_type_group_binds_final_witnesses_and_rechecks_consumer_sources() {
     };
     use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
     let (_directory, library, candidate, consumer) = policy_fixture();
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for exact in [false, true] {
             let sources = policy_sources(&library, &candidate, &consumer, opt, 2);
             let (header, members) = source_policy_records(&sources, exact, 1);
@@ -2434,7 +2522,7 @@ fn instance_selection_binds_private_sources_actual_code_and_concrete_script_grou
     };
     use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
     let (_directory, library, candidate, consumer) = policy_fixture();
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for exact_implementation in [false, true] {
             let sources = policy_sources(&library, &candidate, &consumer, opt, 2);
             let (header, members) = source_policy_records(&sources, exact_implementation, 1);
@@ -2578,7 +2666,7 @@ fn exact_instance_admission_preserves_the_original_private_receipt() {
     use ckb_testtool::ckb_types::{packed, prelude::*};
     let (_directory, library, candidate, consumer) = policy_fixture();
     for exact_implementation in [false, true] {
-        let sources = policy_sources(&library, &candidate, &consumer, 0, 2);
+        let sources = policy_sources(&library, &candidate, &consumer, cellscript::CompilerDiagnostics::without_optimizations(), 2);
         let (header, members) = source_policy_records(&sources, exact_implementation, 1);
         let implementation = freeze_source_code_policy(sources, AuthorizationSet::new(header, &members).unwrap()).unwrap();
         let original = &implementation.sources().catalog().candidates()[1];
@@ -2655,7 +2743,8 @@ fn protocol_admission_binds_private_receipts_to_complete_transaction_bytes(insta
     lock(&consumer);
     let hex = |bytes: &[u8]| format!("0x{}", cellscript_artifact_checker::hex_encode(bytes));
     let script_json = |script: &packed::Script| serde_json::json!({"code_hash": hex(script.code_hash().as_slice()), "hash_type": match script.hash_type().as_slice()[0] {4 => "data2", 2 => "data1", 1 => "type", _ => "data"}, "args": hex(&script.args().raw_data())});
-    for opt in 0..=3 {
+    {
+        let opt = cellscript::CompilerDiagnostics::default();
         let sources = policy_sources(&library, &candidate, &consumer, opt, 2);
         let (header, members) = source_policy_records(&sources, false, 1);
         let policy = freeze_source_code_policy(sources, AuthorizationSet::new(header, &members).unwrap()).unwrap();
@@ -2863,7 +2952,7 @@ fn protocol_admission_binds_private_receipts_to_complete_transaction_bytes(insta
         // proofs. Exported proof IDs or a producer's verified flag cannot enter.
         let module_request = |package: &str, kind: &str, entry: &str| {
             serde_json::json!({
-                "package": package, "environment": "dev", "entry_kind": kind, "entry": entry, "opt_level": opt,
+                "package": package, "environment": "dev", "entry_kind": kind, "entry": entry,
             })
         };
         let mut candidate_requests = Vec::new();
@@ -2879,7 +2968,7 @@ fn protocol_admission_binds_private_receipts_to_complete_transaction_bytes(insta
         std::fs::write(root.join("transaction.molecule"), tx.as_slice()).unwrap();
         std::fs::write(root.join("bundle-input.json"), serde_json::to_vec(&input).unwrap()).unwrap();
         let mut open_request = serde_json::json!({
-            "schema": if instance { "cellscript-protocol-instance-admission-input-v1" } else { "cellscript-protocol-open-admission-input-v1" }, "transaction_file": "transaction.molecule",
+            "schema": if instance { "cellscript-protocol-instance-admission-input-v2" } else { "cellscript-protocol-open-admission-input-v2" }, "transaction_file": "transaction.molecule",
             "inputs": inputs.iter().map(|cell| serde_json::json!({"out_point": hex(&cell.out_point), "output": hex(cell.output), "data": hex(cell.data)})).collect::<Vec<_>>(),
             "dependencies": deps.iter().map(|cell| serde_json::json!({"out_point": hex(&cell.out_point), "output": hex(cell.output), "data": hex(cell.data)})).collect::<Vec<_>>(),
             "bindings": [{
@@ -2912,15 +3001,15 @@ fn protocol_admission_binds_private_receipts_to_complete_transaction_bytes(insta
             .unwrap();
         assert!(
             cli.status.success(),
-            "open admission CLI O{opt}: {} {}",
+            "open admission CLI {opt}: {} {}",
             String::from_utf8_lossy(&cli.stdout),
             String::from_utf8_lossy(&cli.stderr)
         );
         let cli_report: Value = serde_json::from_slice(&std::fs::read(root.join("open-cli-report.json")).unwrap()).unwrap();
-        assert_eq!(cli_report, serde_json::to_value(&report).unwrap(), "CLI/native private admission parity O{opt}");
+        assert_eq!(cli_report, serde_json::to_value(&report).unwrap(), "CLI/native private admission parity {opt}");
         if instance {
             let mut downgraded = open_request.clone();
-            downgraded["schema"] = serde_json::json!("cellscript-protocol-open-admission-input-v1");
+            downgraded["schema"] = serde_json::json!("cellscript-protocol-open-admission-input-v2");
             std::fs::write(root.join("downgraded-input.json"), serde_json::to_vec(&downgraded).unwrap()).unwrap();
             assert!(
                 cellscript::protocol_bundle::check_protocol_bundle_with_open_handles_file(
@@ -2999,11 +3088,11 @@ assert.throws(() => instanceHandleWitnessFromCheckedBundle(missingInstance, arti
         }
         std::fs::write(&smoke, smoke_source).unwrap();
         let node = std::process::Command::new("node").arg("--experimental-strip-types").arg(&smoke).output().unwrap();
-        assert!(node.status.success(), "generated open witness O{opt}: {}", String::from_utf8_lossy(&node.stderr));
+        assert!(node.status.success(), "generated open witness {opt}: {}", String::from_utf8_lossy(&node.stderr));
 
         let (materialized, evidence) =
             cellscript_ckb_adapter::materialize_protocol_bundle_report(&serde_json::to_vec(&report).unwrap()).unwrap();
-        assert_eq!(materialized.data().as_slice(), tx.as_slice(), "O{opt}: existing SDK serializer must reproduce all admitted bytes");
+        assert_eq!(materialized.data().as_slice(), tx.as_slice(), "{opt}: existing SDK serializer must reproduce all admitted bytes");
         assert_eq!(evidence.serialized_transaction_hash, hex(&cellscript_artifact_checker::ckb_blake2b256(tx.as_slice())));
         let mut context = ckb_testtool::context::Context::default();
         for cell in &deps {
@@ -3071,7 +3160,7 @@ assert.throws(() => instanceHandleWitnessFromCheckedBundle(missingInstance, arti
         assert!(signing.entry_witness_fields_preserved && signing.all_lock_groups_processed);
         assert!(context.verify_tx(&materialized, 3_000_000).is_err(), "unsigned transaction must not pass its real Lock group");
         let cycles = context.verify_tx(&signed, 3_000_000).unwrap();
-        eprintln!("open admission signed all-group O{opt}: cycles={cycles} tx={}", signing.signed_serialized_transaction_hash);
+        eprintln!("open admission signed all-group {opt}: cycles={cycles} tx={}", signing.signed_serialized_transaction_hash);
         // Even a field unused by the Type scripts is covered by the signature.
         let signed_witness = packed::WitnessArgs::from_slice(signed.witnesses().get(0).unwrap().raw_data().as_ref()).unwrap();
         let changed_witness = signed_witness.as_builder().output_type(Some(Bytes::from_static(b"after-signing")).pack()).build();
@@ -3173,7 +3262,7 @@ assert.throws(() => instanceHandleWitnessFromCheckedBundle(missingInstance, arti
                 );
             assert!(
                 cellscript_ckb_adapter::materialize_protocol_bundle_report(&serde_json::to_vec(&rebound).unwrap()).is_err(),
-                "rebound report O{opt}: {pointer}"
+                "rebound report {opt}: {pointer}"
             );
         }
 
@@ -3191,7 +3280,7 @@ assert.throws(() => instanceHandleWitnessFromCheckedBundle(missingInstance, arti
             let mut changed = skeleton.clone();
             let value = changed.pointer_mut(pointer).unwrap();
             *value = if value.is_number() { serde_json::json!(999) } else { serde_json::json!("0xff") };
-            assert!(check_protocol_transaction(tx.as_slice(), &inputs, &changed, &Default::default()).is_err(), "O{opt} {pointer}");
+            assert!(check_protocol_transaction(tx.as_slice(), &inputs, &changed, &Default::default()).is_err(), "{opt} {pointer}");
         }
         let mut malformed_since = skeleton.clone();
         malformed_since["inputs"][0]["since"] = serde_json::json!("zero");
@@ -3201,7 +3290,7 @@ assert.throws(() => instanceHandleWitnessFromCheckedBundle(missingInstance, arti
             changed.pointer_mut(pointer).unwrap().as_array_mut().unwrap().push(serde_json::json!({}));
             assert!(
                 check_protocol_transaction(tx.as_slice(), &inputs, &changed, &Default::default()).is_err(),
-                "O{opt} {pointer} cardinality"
+                "{opt} {pointer} cardinality"
             );
         }
         let mut changed = input.clone();

@@ -62,15 +62,14 @@ action test_witness_args() -> u64 {
         let view = source::input(0)
         let size = witness::size(view)
         ckb::require_witness_size_at_least(view, 16)
-        let raw = witness::raw(view)
+        let raw = witness::bounded_raw(view, 16)
         if size != 16 {
             return 1
         }
-        if raw == Hash::zero() {
+        if witness::u32_le(raw, 0) != 16 {
             return 2
         }
-        let lock_field = witness::lock(view)
-        if lock_field != Hash::zero() {
+        if witness::u32_le(raw, 4) != 16 || witness::u32_le(raw, 8) != 16 || witness::u32_le(raw, 12) != 16 {
             return 3
         }
         return 0
@@ -95,18 +94,18 @@ const VM_HARNESS_WITNESS_SIZE_TOO_SMALL_ACTION: &str = "test_witness_size_too_sm
 const VM_HARNESS_WITNESS_SHORT_LOCK_PROGRAM: &str = r#"
 module vm_harness_witness_short_lock
 
-action test_witness_short_lock_zero_padded() -> u64 {
+action test_witness_short_lock_rejected() -> u64 {
     verification
         let view = source::input(0)
-        let lock_field = witness::lock(view)
-        if lock_field != Hash::zero() {
+        let lock_field = witness::lock_exact32(view)
+        if lock_field != Hash::zero().0 {
             return 1
         }
         return 0
 }
 "#;
 
-const VM_HARNESS_WITNESS_SHORT_LOCK_ACTION: &str = "test_witness_short_lock_zero_padded";
+const VM_HARNESS_WITNESS_SHORT_LOCK_ACTION: &str = "test_witness_short_lock_rejected";
 
 const VM_HARNESS_WITNESS_TYPED_FIELDS_PROGRAM: &str = r#"
 module vm_harness_witness_typed_fields
@@ -114,16 +113,16 @@ module vm_harness_witness_typed_fields
 action test_witness_typed_fields() -> u64 {
     verification
         let witness_args = witness::args(0)
-        let lock_field = witness_args.lock
-        let input_type = witness_args.input_type
-        let output_type = witness_args.output_type
-        if lock_field == Hash::zero() {
+        let lock_field = witness::lock_exact32(witness_args)
+        let input_type = witness::input_type_exact32(witness_args)
+        let output_type = witness::output_type_exact32(witness_args)
+        if lock_field == Hash::zero().0 {
             return 1
         }
-        if input_type == Hash::zero() {
+        if input_type == Hash::zero().0 {
             return 2
         }
-        if output_type == Hash::zero() {
+        if output_type == Hash::zero().0 {
             return 3
         }
         if lock_field == input_type {
@@ -147,7 +146,7 @@ module vm_harness_witness_typed_lock_large_sibling
 action test_witness_typed_lock_large_sibling() -> u64 {
     verification
         let witness_args = witness::args(0)
-        if witness_args.lock == Hash::zero() {
+        if witness::lock_exact32(witness_args) == Hash::zero().0 {
             return 1
         }
         return 0
@@ -162,8 +161,8 @@ module vm_harness_witness_typed_short_lock
 action test_witness_typed_short_lock() -> u64 {
     verification
         let witness_args = witness::args(0)
-        let lock_field = witness_args.lock
-        if lock_field == Hash::zero() {
+        let lock_field = witness::lock_exact32(witness_args)
+        if lock_field == Hash::zero().0 {
             return 1
         }
         return 0
@@ -178,8 +177,8 @@ module vm_harness_witness_malformed
 action test_witness_malformed() -> u64 {
     verification
         let view = source::input(0)
-        let lock_field = witness::lock(view)
-        if lock_field == Hash::zero() {
+        let lock_field = witness::lock_exact32(view)
+        if lock_field == Hash::zero().0 {
             return 1
         }
         return 0
@@ -1735,16 +1734,16 @@ action test_dao_three_input_witness_shape() -> u64 {
         if witness2_bytes != 28 {
             return 45
         }
-        let witness0_input_type = witness::input_type(input0)
-        if witness0_input_type == Hash::zero() {
+        let witness0_input_type = witness::u64_le(witness::bounded_entry(input0, 8), 0)
+        if witness0_input_type == 0 {
             return 46
         }
-        let witness1_input_type = witness::input_type(input1)
-        if witness1_input_type == Hash::zero() {
+        let witness1_input_type = witness::u64_le(witness::bounded_entry(input1, 8), 0)
+        if witness1_input_type == 0 {
             return 47
         }
-        let witness2_input_type = witness::input_type(input2)
-        if witness2_input_type == Hash::zero() {
+        let witness2_input_type = witness::u64_le(witness::bounded_entry(input2, 8), 0)
+        if witness2_input_type == 0 {
             return 49
         }
         let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
@@ -1794,12 +1793,12 @@ action test_dao_three_input_witness_index() -> u64 {
         if witness2_bytes != 28 {
             return 45
         }
-        let expected_deposit_header_index = Hash::from_bytes(b"\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00")
-        let witness1_input_type = witness::input_type(input1)
+        let expected_deposit_header_index = 1
+        let witness1_input_type = witness::u64_le(witness::bounded_entry(input1, 8), 0)
         if witness1_input_type != expected_deposit_header_index {
             return 48
         }
-        let witness2_input_type = witness::input_type(input2)
+        let witness2_input_type = witness::u64_le(witness::bounded_entry(input2, 8), 0)
         if witness2_input_type != expected_deposit_header_index {
             return 46
         }
@@ -1839,12 +1838,12 @@ action test_dao_two_input_witness_shape() -> u64 {
         if witness1_bytes != 28 {
             return 44
         }
-        let witness0_input_type = witness::input_type(input0)
-        if witness0_input_type == Hash::zero() {
+        let witness0_input_type = witness::u64_le(witness::bounded_entry(input0, 8), 0)
+        if witness0_input_type == 0 {
             return 42
         }
-        let witness1_input_type = witness::input_type(input1)
-        if witness1_input_type == Hash::zero() {
+        let witness1_input_type = witness::u64_le(witness::bounded_entry(input1, 8), 0)
+        if witness1_input_type == 0 {
             return 45
         }
         let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
@@ -1883,8 +1882,8 @@ action test_dao_two_input_witness_index() -> u64 {
         if witness1_bytes != 28 {
             return 44
         }
-        let expected_deposit_header_index = Hash::from_bytes(b"\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00")
-        let witness1_input_type = witness::input_type(input1)
+        let expected_deposit_header_index = 1
+        let witness1_input_type = witness::u64_le(witness::bounded_entry(input1, 8), 0)
         if witness1_input_type != expected_deposit_header_index {
             return 46
         }
@@ -2123,8 +2122,8 @@ action test_dao_withdrawal_witness_input_type() -> u64 {
         }
         dao::require_input_since_at_least(input, 2306942530136048371)
         dao::require_header_dep_for_input(input, source::header_dep(0))
-        let deposit_header_index = witness::input_type(input)
-        if deposit_header_index == Hash::zero() {
+        let deposit_header_index = witness::u64_le(witness::bounded_entry(input, 8), 0)
+        if deposit_header_index == 0 {
             return 42
         }
         let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
@@ -2152,8 +2151,8 @@ action test_dao_withdrawal_witness_input_type_width() -> u64 {
         if witness_bytes != 28 {
             return 43
         }
-        let deposit_header_index = witness::input_type(input)
-        if deposit_header_index == Hash::zero() {
+        let deposit_header_index = witness::u64_le(witness::bounded_entry(input, 8), 0)
+        if deposit_header_index == 0 {
             return 42
         }
         let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
@@ -3415,7 +3414,7 @@ fn cellscript_witness_args_empty_lock_passes_in_ckb_vm() {
     let result = execute_cellscript_script(&elf, &fixture);
     assert_eq!(
         result.exit_code, 0,
-        "CellScript witness::size/raw/lock should pass with empty WitnessArgs, got exit_code={}, debug={:?}",
+        "Complete raw witness reads should preserve an empty WitnessArgs table, got exit_code={}, debug={:?}",
         result.exit_code, result.captured_debug
     );
     assert!(result.cycles > 0, "should consume some cycles");
@@ -3440,7 +3439,7 @@ fn cellscript_require_witness_size_at_least_rejects_too_small_in_ckb_vm() {
 }
 
 #[test]
-fn cellscript_witness_args_short_lock_is_zero_padded_in_ckb_vm() {
+fn cellscript_witness_args_short_lock_rejects_in_ckb_vm() {
     let elf = compile_cellscript_source_to_elf(VM_HARNESS_WITNESS_SHORT_LOCK_PROGRAM, VM_HARNESS_WITNESS_SHORT_LOCK_ACTION, None);
 
     let mut fixture = build_simple_fixture(Bytes::default(), 1, 1);
@@ -3448,11 +3447,12 @@ fn cellscript_witness_args_short_lock_is_zero_padded_in_ckb_vm() {
 
     let result = execute_cellscript_script(&elf, &fixture);
     assert_eq!(
-        result.exit_code, 0,
-        "witness::lock should zero-pad short BytesOpt fields to a 32-byte Hash, got exit_code={}, debug={:?}",
-        result.exit_code, result.captured_debug
+        result.exit_code,
+        cellscript::runtime_errors::CellScriptRuntimeError::ExactSizeMismatch.code() as i64,
+        "exact witness lock must reject a short field, got exit_code={}, debug={:?}",
+        result.exit_code,
+        result.captured_debug
     );
-    assert!(result.cycles > 0, "should consume some cycles");
 }
 
 #[test]

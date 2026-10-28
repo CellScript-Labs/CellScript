@@ -786,7 +786,7 @@ impl LspServer {
                         insert_text: Some(format!("witness::{}(${{1:witness::args(0)}}, ${{2:4096}})", name)),
                     });
                 }
-                for name in ["raw", "lock", "input_type", "output_type", "size"] {
+                for name in ["lock_exact32", "input_type_exact32", "output_type_exact32", "size"] {
                     items.push(CompletionItem {
                         label: name.to_string(),
                         kind: CompletionItemKind::Function,
@@ -902,7 +902,6 @@ impl LspServer {
                     ("raw_transaction_hash_without_cell_deps", "ckb::raw_transaction_hash_without_cell_deps()"),
                     ("transaction_u32_le", "ckb::transaction_u32_le(${1:0})"),
                     ("transaction_blake2b_gather", "ckb::transaction_blake2b_gather(${1:offsets}, ${2:lengths}, ${3:prefix}, ${4:suffix})"),
-                    ("cell_data_hash", "ckb::cell_data_hash(${1:source::cell_dep(0)})"),
                     ("cell_data_bytes32", "ckb::cell_data_bytes32(${1:source::input(0)}, ${2:0})"),
                     ("cell_data_hash_field", "ckb::cell_data_hash_field(${1:source::cell_dep(0)})"),
                     ("cell_type_hash", "ckb::cell_type_hash(${1:source::group_input(0)})"),
@@ -912,8 +911,8 @@ impl LspServer {
                     ("cell_type_hash_type", "ckb::cell_type_hash_type(${1:source::group_input(0)})"),
                     ("cell_lock_args_empty", "ckb::cell_lock_args_empty(${1:source::group_input(0)})"),
                     ("cell_type_args_empty", "ckb::cell_type_args_empty(${1:source::group_input(0)})"),
-                    ("cell_lock_args_hash", "ckb::cell_lock_args_hash(${1:source::group_input(0)})"),
-                    ("cell_type_args_hash", "ckb::cell_type_args_hash(${1:source::group_input(0)})"),
+                    ("cell_lock_args32", "ckb::cell_lock_args32(${1:source::group_input(0)})"),
+                    ("cell_type_args32", "ckb::cell_type_args32(${1:source::group_input(0)})"),
                     ("require_cell_lock_hash", "ckb::require_cell_lock_hash(${1:source::group_input(0)}, ${2:expected_lock_hash})"),
                     ("require_cell_type_hash", "ckb::require_cell_type_hash(${1:source::group_input(0)}, ${2:expected_type_hash})"),
                     ("require_cell_data_hash", "ckb::require_cell_data_hash(${1:source::cell_dep(0)}, ${2:expected_data_hash})"),
@@ -969,28 +968,28 @@ impl LspServer {
                     ("require_cell_lock_args_empty", "ckb::require_cell_lock_args_empty(${1:source::group_input(0)})"),
                     ("require_cell_type_args_empty", "ckb::require_cell_type_args_empty(${1:source::group_input(0)})"),
                     (
-                        "require_cell_lock_args_hash",
-                        "ckb::require_cell_lock_args_hash(${1:source::group_input(0)}, ${2:expected_args_hash})",
+                        "require_cell_lock_args32",
+                        "ckb::require_cell_lock_args32(${1:source::group_input(0)}, ${2:expected_args_bytes})",
                     ),
                     (
-                        "require_cell_type_args_hash",
-                        "ckb::require_cell_type_args_hash(${1:source::group_input(0)}, ${2:expected_args_hash})",
+                        "require_cell_type_args32",
+                        "ckb::require_cell_type_args32(${1:source::group_input(0)}, ${2:expected_args_bytes})",
                     ),
                     (
-                        "require_cell_lock_args_prefix_hash",
-                        "ckb::require_cell_lock_args_prefix_hash(${1:source::group_input(0)}, ${2:expected_args_hash})",
+                        "require_cell_lock_args_prefix32",
+                        "ckb::require_cell_lock_args_prefix32(${1:source::group_input(0)}, ${2:expected_args_bytes})",
                     ),
                     (
-                        "require_cell_type_args_prefix_hash",
-                        "ckb::require_cell_type_args_prefix_hash(${1:source::group_input(0)}, ${2:expected_args_hash})",
+                        "require_cell_type_args_prefix32",
+                        "ckb::require_cell_type_args_prefix32(${1:source::group_input(0)}, ${2:expected_args_bytes})",
                     ),
                     (
-                        "require_cell_lock_args_suffix_hash",
-                        "ckb::require_cell_lock_args_suffix_hash(${1:source::group_input(0)}, ${2:expected_args_hash})",
+                        "require_cell_lock_args_suffix32",
+                        "ckb::require_cell_lock_args_suffix32(${1:source::group_input(0)}, ${2:expected_args_bytes})",
                     ),
                     (
-                        "require_cell_type_args_suffix_hash",
-                        "ckb::require_cell_type_args_suffix_hash(${1:source::group_input(0)}, ${2:expected_args_hash})",
+                        "require_cell_type_args_suffix32",
+                        "ckb::require_cell_type_args_suffix32(${1:source::group_input(0)}, ${2:expected_args_bytes})",
                     ),
                     (
                         "require_cell_lock_script_hash_type",
@@ -3987,7 +3986,8 @@ mod tests {
         assert!(source.iter().any(|item| item.label == "group_input"));
 
         let witness = server.member_completions("file:///test.cell", "witness");
-        assert!(witness.iter().any(|item| item.label == "lock"));
+        assert!(witness.iter().any(|item| item.label == "lock_exact32"));
+        assert!(!witness.iter().any(|item| item.label == "lock"));
         assert!(witness.iter().any(|item| item.label == "bounded_entry"));
         assert!(witness.iter().any(|item| item.label == "blake2b"));
         assert!(witness.iter().any(|item| item.label == "blake2b_span"));
@@ -4004,7 +4004,8 @@ mod tests {
         assert!(hash.iter().any(|item| item.label == "from_bytes"));
 
         let ckb = server.member_completions("file:///test.cell", "ckb");
-        assert!(ckb.iter().any(|item| item.label == "cell_data_hash"));
+        assert!(ckb.iter().any(|item| item.label == "cell_data_hash_field"));
+        assert!(!ckb.iter().any(|item| item.label == "cell_data_hash"));
         assert!(ckb.iter().any(|item| item.label == "cell_data_bytes32"));
         assert!(ckb.iter().any(|item| item.label == "input_since"));
         assert!(ckb.iter().any(|item| item.label == "since_epoch_relative"));
@@ -4026,9 +4027,9 @@ mod tests {
         assert!(ckb.iter().any(|item| item.label == "epoch_duration_to_u64"));
         assert!(ckb.iter().any(|item| item.label == "timestamp_millis_to_u64"));
         assert!(ckb.iter().any(|item| item.label == "cell_lock_code_hash"));
-        assert!(ckb.iter().any(|item| item.label == "cell_type_args_hash"));
-        assert!(ckb.iter().any(|item| item.label == "require_cell_lock_args_prefix_hash"));
-        assert!(ckb.iter().any(|item| item.label == "require_cell_type_args_suffix_hash"));
+        assert!(ckb.iter().any(|item| item.label == "cell_type_args32"));
+        assert!(ckb.iter().any(|item| item.label == "require_cell_lock_args_prefix32"));
+        assert!(ckb.iter().any(|item| item.label == "require_cell_type_args_suffix32"));
         assert!(ckb.iter().any(|item| item.label == "require_cell_lock_args_empty"));
         assert!(ckb.iter().any(|item| item.label == "require_bounded_cell_dep_data_hash"));
         assert!(ckb.iter().any(|item| item.label == "hash_sha256d"));
@@ -4655,7 +4656,7 @@ action update(amount: u64) -> u64 {
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(
             root.join("Cell.toml"),
-            "[package]\nedition = \"2027\"\nname = \"preview\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n",
+            "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"preview\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n",
         )
         .unwrap();
         let source = "module preview\naction main(value: u64) -> u64 { return value }\n";
@@ -4740,7 +4741,7 @@ lock_script VaultOwner on lock_group {
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(
             root.join("Cell.toml"),
-            "[package]\nedition = \"2026\"\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n",
+            "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n",
         )
         .unwrap();
         std::fs::write(root.join("src/types.cell"), "module demo::types\n\nresource Token {\n    amount: u64,\n}\n").unwrap();
@@ -4765,7 +4766,7 @@ lock_script VaultOwner on lock_group {
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(
             root.join("Cell.toml"),
-            "[package]\nedition = \"2026\"\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n",
+            "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n",
         )
         .unwrap();
         let types_source = "module demo::types\n\nresource Token {\n    amount: u64,\n}\n";
@@ -4792,7 +4793,7 @@ lock_script VaultOwner on lock_group {
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(
             root.join("Cell.toml"),
-            "[package]\nedition = \"2026\"\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n",
+            "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n",
         )
         .unwrap();
         let types_source = "module demo::types\n\nresource Token {\n    amount: u64,\n}\n";

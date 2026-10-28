@@ -6,11 +6,11 @@ resolver_model = "single-package-coordinate-v1"
 edition = "2027"
 name = "lock-script-2027"
 version = "0.1.0"
-source_hash = "5a24190b6850b777d7121f26f7b6fbed3a6fe7348a052db3642d2c6ce8605949"
-compiler_requirement = "*"
-resolver_compiler_version = "0.26.0"
+source_hash = "deae8cbd9aa84c4ec3dc83671e8aa0d9f9b09f9de56b1c5c7421aadb56f64e17"
+compiler_requirement = ">=0.33.0-alpha.1"
+resolver_compiler_version = "0.33.0-alpha.1"
 
 [root]
-manifest_digest = "sha256:3384cf010161718ba90618516896888faa082346ffc034b30a2b96c8cdd8b49a"
+manifest_digest = "sha256:3dbc9336c5cb0d0081ad5494db48eeaf85fd42c255e75ccf02fa48f8957f0b4f"
 
 [dependencies]

@@ -24,10 +24,10 @@ fn typed_vec_constructors_compile_and_check_without_heap_semantics() {
             let source = format!(
                 "module typed_vec\nstruct Item {{ number: u64 }}\naction verify() {{ verification\nlet mut values: Vec<{ty}> = {constructor}\nrequire values.len() == 0\nrequire values.capacity() == {capacity}\nvalues.push({value})\nrequire values.len() == 1\n}}"
             );
-            for opt_level in 0..=3 {
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let compiled = compile_with_executable_surface_policy(
                     &source,
-                    CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                     ExecutableSurfacePolicy::DenyFailClosed,
                 )
                 .unwrap();
@@ -51,7 +51,7 @@ fn typed_vec_constructors_compile_and_check_without_heap_semantics() {
                 let fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
                 let execution =
                     ckb_script_runner::execute_cellscript_script(cellscript::strip_vm_abi_trailer(&compiled.artifact_bytes), &fixture);
-                assert_eq!(execution.exit_code, 0, "{ty}, {constructor}, O{opt_level}: {:?}", execution.captured_debug);
+                assert_eq!(execution.exit_code, 0, "{ty}, {constructor}, {diagnostics}: {:?}", execution.captured_debug);
             }
         }
     }

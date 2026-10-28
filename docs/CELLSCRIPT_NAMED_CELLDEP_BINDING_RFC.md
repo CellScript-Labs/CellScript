@@ -89,15 +89,17 @@ the existing surface.
 | `source::cell_dep(i)` (typed view) | implemented, executable | `src/parser/`, `src/ir/mod.rs` |
 | `source::header_dep(i)` | implemented, executable | `src/parser/`, `src/ir/mod.rs` |
 | `ckb::cell_data_hash_field(view)` | implemented; read the consensus `DATA_HASH` field, including zero hash for empty data | `emit_runtime_cell_hash_field_helper` in `src/codegen/runtime.rs` |
-| `ckb::cell_data_bytes32(view, offset)` | implemented; copies 32 raw bytes as `Hash`; requires at least 32 remaining bytes and permits a longer suffix; `cell_data_hash_at` remains a compatibility alias | `emit_runtime_cell_data_bytes32_helper` in `src/codegen/runtime.rs` |
+| `ckb::cell_data_bytes32(view, offset)` | implemented; copies 32 raw bytes as `[u8; 32]`; requires at least 32 remaining bytes and permits a longer suffix; the misleading `cell_data_hash_at` alias has been removed | `emit_runtime_cell_data_bytes32_helper` in `src/codegen/runtime.rs` |
 | `ckb::cell_data_size(view)` | implemented, returns `u64` | `src/ir/mod.rs:4658-4660`; `src/codegen/mod.rs:16037` |
 | `ckb::cell_capacity(view)` | implemented | `src/types/mod.rs:4904` |
 | `read_ref<T>()` (type-bound data dep) | implemented | `src/lib.rs:20800-20810` |
 | `read param: T` (action/lock entry) | implemented | `src/codegen/mod.rs:1849-1921` |
 
 The field accessor and typed Cell views' `.data_hash` read the same
-consensus field. Legacy `ckb::cell_data_hash(view)` instead computes BLAKE2b
-over at most 512 bytes, including the nonzero BLAKE2b(empty); it is not an alias. There is no 512-byte limit or raw-data buffer on this path.
+consensus field. The former `ckb::cell_data_hash(view)` buffer path has been
+removed. Explicit streaming BLAKE2b spans still return nonzero BLAKE2b(empty),
+which differs from the consensus empty-data rule. There is no 512-byte limit or
+raw-data buffer on the field-read path.
 Empty Cell data has a zero `Hash`, not BLAKE2b(empty). Input, Output, CellDep,
 GroupInput and GroupOutput are supported; HeaderDep is not a Cell source.
 Invalid handles, missing coordinates and failed field reads return runtime

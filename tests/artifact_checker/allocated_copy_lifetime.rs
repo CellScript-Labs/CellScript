@@ -26,10 +26,10 @@ fn collection_copies_reject_intervening_buffer_and_pointer_writes() {
                      require value != 9\nrequire copied == {literal}\nreturn 0 }}"
                 )
             };
-            for opt_level in [0, 3] {
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let compiled = compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap();
                 let payload = compiled.metadata.actions[0].entry_witness_args(&[cellscript::EntryWitnessArg::U8(1)]).unwrap();
@@ -98,11 +98,11 @@ action inspect() -> u64 {
     require original.right == 7
     return 0
 }"#;
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );

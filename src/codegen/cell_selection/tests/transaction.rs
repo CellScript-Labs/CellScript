@@ -152,7 +152,7 @@ fn named_source(contract: &Contract) -> String {
 
 fn source_program(
     contract: &Contract,
-    opt_level: u8,
+    diagnostics: crate::CompilerDiagnostics,
     nested: bool,
     reads: Option<SelectionReads>,
     form: CatalogForm,
@@ -265,7 +265,7 @@ fn source_program(
     }
     let formatted = crate::fmt::format_default(&ast).unwrap();
     assert_eq!(crate::fmt::format_default(&crate::frontend::parse(&formatted, edition).unwrap()).unwrap(), formatted);
-    let options = crate::CompileOptions { edition, opt_level, target: Some("riscv64-elf".into()), ..Default::default() };
+    let options = crate::CompileOptions { edition, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() };
     let compiled = crate::compile_with_executable_surface_policy(&source, options, crate::ExecutableSurfacePolicy::DenyFailClosed)
         .unwrap_or_else(|error| panic!("{error}\n{source}"));
     assert!(!compiled
@@ -277,7 +277,7 @@ fn source_program(
     compiled
 }
 
-fn execute(maximum: bool, change: Change, source_opt: Option<u8>) -> std::result::Result<u64, String> {
+fn execute(maximum: bool, change: Change, source_opt: Option<crate::CompilerDiagnostics>) -> std::result::Result<u64, String> {
     execute_case(maximum, change, source_opt, None)
 }
 
@@ -291,7 +291,7 @@ enum NestedWitness {
 fn execute_case(
     maximum: bool,
     change: Change,
-    source_opt: Option<u8>,
+    source_opt: Option<crate::CompilerDiagnostics>,
     nested: Option<NestedWitness>,
 ) -> std::result::Result<u64, String> {
     execute_with_reads(maximum, change, source_opt, nested, None)
@@ -300,7 +300,7 @@ fn execute_case(
 fn execute_with_reads(
     maximum: bool,
     change: Change,
-    source_opt: Option<u8>,
+    source_opt: Option<crate::CompilerDiagnostics>,
     nested: Option<NestedWitness>,
     reads: Option<SelectionReads>,
 ) -> std::result::Result<u64, String> {
@@ -310,7 +310,7 @@ fn execute_with_reads(
 fn execute_program(
     maximum: bool,
     change: Change,
-    source_opt: Option<u8>,
+    source_opt: Option<crate::CompilerDiagnostics>,
     nested: Option<NestedWitness>,
     reads: Option<SelectionReads>,
     form: CatalogForm,
@@ -435,7 +435,7 @@ fn execute_program(
 
 #[test]
 fn nested_role_source_real_ckb_checks_codecs_coordinates_and_live_witnesses() {
-    for opt in 0..=3 {
+    for opt in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
         for form in [CatalogForm::NestedSource, CatalogForm::NestedPositional] {
             execute_program(false, Change::None, Some(opt), None, Some(SelectionReads::Valid), form).unwrap();
         }
@@ -444,7 +444,7 @@ fn nested_role_source_real_ckb_checks_codecs_coordinates_and_live_witnesses() {
         let cycles = execute_program(
             maximum,
             Change::None,
-            Some(3),
+            Some(crate::CompilerDiagnostics::default()),
             Some(NestedWitness::Valid),
             Some(SelectionReads::Valid),
             CatalogForm::NestedSource,
@@ -452,8 +452,15 @@ fn nested_role_source_real_ckb_checks_codecs_coordinates_and_live_witnesses() {
         .unwrap();
         eprintln!("[nested-role source transaction] maximum={maximum} cycles={cycles}");
         for (change, code) in [(Change::NestedPayload, 16), (Change::Custody, 41), (Change::Pair, 7), (Change::PeerReject, 71)] {
-            let error =
-                execute_program(maximum, change, Some(3), None, Some(SelectionReads::Valid), CatalogForm::NestedSource).unwrap_err();
+            let error = execute_program(
+                maximum,
+                change,
+                Some(crate::CompilerDiagnostics::default()),
+                None,
+                Some(SelectionReads::Valid),
+                CatalogForm::NestedSource,
+            )
+            .unwrap_err();
             assert!(error.contains(&format!("error code {code}")), "{change:?}: {error}");
         }
     }
@@ -499,11 +506,11 @@ fn exact_role_machine_real_ckb_runs_all_groups_and_rejects_substitutions() {
 
 #[test]
 fn named_cell_roles_read_aliases_in_full_transactions() {
-    for opt in 0..=3 {
+    for opt in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
         for maximum in [false, true] {
             let cycles =
                 execute_program(maximum, Change::None, Some(opt), None, Some(SelectionReads::Valid), CatalogForm::Named).unwrap();
-            eprintln!("[named role selection] O{opt} maximum={maximum} cycles={cycles}");
+            eprintln!("[named role selection] {opt} maximum={maximum} cycles={cycles}");
             for reads in [SelectionReads::End, SelectionReads::High] {
                 let error = execute_program(maximum, Change::None, Some(opt), None, Some(reads), CatalogForm::Named).unwrap_err();
                 assert!(error.contains("ValidationFailure: see error code 21 "), "{error}");
@@ -517,11 +524,11 @@ fn named_cell_roles_read_aliases_in_full_transactions() {
 
 #[test]
 fn named_cell_roles_reorder_and_rename_preserve_full_transaction_role_bindings() {
-    for opt in 0..=3 {
+    for opt in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
         for maximum in [false, true] {
             for form in [CatalogForm::Reordered, CatalogForm::Renamed] {
                 execute_program(maximum, Change::None, Some(opt), None, Some(SelectionReads::Valid), form)
-                    .unwrap_or_else(|error| panic!("{form:?}, O{opt}, maximum={maximum}: {error}"));
+                    .unwrap_or_else(|error| panic!("{form:?}, {opt}, maximum={maximum}: {error}"));
                 for (change, code) in [(Change::Pair, 7), (Change::Custody, 41), (Change::PeerReject, 71)] {
                     let error = execute_program(maximum, change, Some(opt), None, Some(SelectionReads::Valid), form).unwrap_err();
                     assert!(error.contains(&format!("ValidationFailure: see error code {code} ")), "{form:?}: {error}");
@@ -533,11 +540,11 @@ fn named_cell_roles_reorder_and_rename_preserve_full_transaction_role_bindings()
 
 #[test]
 fn named_cell_roles_execute_identical_full_transaction_checks() {
-    for opt in [0, 3] {
+    for opt in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
         for maximum in [false, true] {
             let named = execute_program(maximum, Change::None, Some(opt), None, None, CatalogForm::Named).unwrap();
             let primitive = execute(maximum, Change::None, Some(opt)).unwrap();
-            assert_eq!(named, primitive, "the declaration must not add VM work: O{opt}, maximum={maximum}");
+            assert_eq!(named, primitive, "the declaration must not add VM work: {opt}, maximum={maximum}");
             for (change, code) in [(Change::Layout, 4), (Change::Custody, 41), (Change::PeerReject, 71)] {
                 let error = execute_program(maximum, change, Some(opt), None, None, CatalogForm::Named).unwrap_err();
                 assert!(error.contains(&format!("ValidationFailure: see error code {code} ")), "{error}");
@@ -548,7 +555,7 @@ fn named_cell_roles_execute_identical_full_transaction_checks() {
 
 #[test]
 fn exact_role_source_executes_typed_catalogs_under_strict_admission() {
-    for opt in 0..=3 {
+    for opt in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
         for maximum in [false, true] {
             let cycles = execute(maximum, Change::None, Some(opt)).unwrap();
             eprintln!("[exact-role source transaction, two verifications] opt={opt} maximum={maximum} cycles={cycles}");
@@ -562,7 +569,7 @@ fn exact_role_source_executes_typed_catalogs_under_strict_admission() {
 
 #[test]
 fn exact_role_source_keeps_nested_witness_views_live_across_repeated_scans() {
-    for opt in 0..=3 {
+    for opt in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
         for maximum in [false, true] {
             let cycles = execute_case(maximum, Change::None, Some(opt), Some(NestedWitness::Valid)).unwrap();
             eprintln!("[exact-role source with live nested views] opt={opt} maximum={maximum} cycles={cycles}");
@@ -583,7 +590,7 @@ fn exact_role_source_keeps_nested_witness_views_live_across_repeated_scans() {
 
 #[test]
 fn exact_role_selected_views_keep_catalogs_coordinates_and_partners_separate() {
-    for opt in 0..=3 {
+    for opt in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
         for maximum in [false, true] {
             let cycles = execute_with_reads(maximum, Change::None, Some(opt), None, Some(SelectionReads::Valid)).unwrap();
             eprintln!("[selected typed views] opt={opt} maximum={maximum} cycles={cycles}");
@@ -599,7 +606,7 @@ fn exact_role_selected_views_keep_catalogs_coordinates_and_partners_separate() {
 
 #[test]
 fn exact_role_selected_views_compose_with_live_nested_witness_reads() {
-    for opt in 0..=3 {
+    for opt in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
         for maximum in [false, true] {
             for nested in [NestedWitness::Valid, NestedWitness::WrongValue, NestedWitness::Malformed] {
                 let result = execute_with_reads(maximum, Change::None, Some(opt), Some(nested), Some(SelectionReads::Valid));

@@ -26,7 +26,7 @@ fn repeated_pure_expression_probe_preserves_values_and_rejections() {
         let compiled = cellscript::compile_with_executable_surface_policy(
             &source,
             CompileOptions {
-                opt_level: 3,
+                diagnostics: cellscript::CompilerDiagnostics::default(),
                 edition: cellscript::CellScriptEdition::Edition2027,
                 target: Some("riscv64-elf".into()),
                 target_profile: Some("ckb".into()),

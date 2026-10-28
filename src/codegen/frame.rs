@@ -427,7 +427,7 @@ impl CodeGenerator {
             } else if named_type_name(&param.ty).is_some_and(|name| self.cell_type_names.contains(name)) {
                 self.schema_pointer_size_offsets.insert(param.binding.id, next_cell_slot);
                 next_cell_slot += 8;
-            } else if self.generic_value_type_width(&param.ty).is_some()
+            } else if self.fixed_named_parameter_width(&param.ty).is_some()
                 || fixed_byte_pointer_param_width(&param.ty).is_some()
                 || fixed_aggregate_pointer_param_width(&param.ty).is_some()
             {
@@ -685,7 +685,7 @@ impl CodeGenerator {
                         next_cell_slot += 8 + align_up(self.cell_buffer_capacity(dest.id), 8);
                     }
                     IrInstruction::Call { dest: Some(dest), func, args }
-                        if func == "__ckb_sighash_all_zero_lock" && args.len() == 4 && dest.ty == IrType::Hash =>
+                        if crate::ir::is_ckb_sighash_all_result(func, &dest.ty) && args.len() == 4 =>
                     {
                         self.cell_buffer_size_offsets.insert(dest.id, next_cell_slot);
                         self.cell_buffer_offsets.insert(dest.id, next_cell_slot + 8);
@@ -698,14 +698,19 @@ impl CodeGenerator {
                                 | "__ckb_cell_lock_hash"
                                 | "__ckb_cell_type_hash"
                                 | "__ckb_cell_data_hash_field"
-                                | "__ckb_cell_data_hash"
                                 | "__ckb_cell_data_bytes32"
                                 | "__ckb_cell_lock_code_hash"
                                 | "__ckb_cell_type_code_hash"
-                                | "__ckb_cell_lock_args_hash"
-                                | "__ckb_cell_type_args_hash"
+                                | "__ckb_cell_lock_args32"
+                                | "__ckb_cell_type_args32"
                         ) && (args.len() == 1 || (func == "__ckb_cell_data_bytes32" && args.len() == 2))
-                            && (dest.ty == IrType::Hash || crate::ir::is_ckb_script_hash_property_result(func, &dest.ty)) =>
+                            && (crate::ir::is_raw_bytes32_runtime_result(func, &dest.ty)
+                                || (dest.ty == IrType::Hash
+                                    && !matches!(
+                                        func.as_str(),
+                                        "__ckb_cell_data_bytes32" | "__ckb_cell_lock_args32" | "__ckb_cell_type_args32"
+                                    ))
+                                || crate::ir::is_ckb_script_hash_property_result(func, &dest.ty)) =>
                     {
                         self.cell_buffer_size_offsets.insert(dest.id, next_cell_slot);
                         self.cell_buffer_offsets.insert(dest.id, next_cell_slot + 8);
@@ -714,15 +719,9 @@ impl CodeGenerator {
                     IrInstruction::Call { dest: Some(dest), func, args }
                         if matches!(
                             func.as_str(),
-                            "__ckb_witness_raw"
-                                | "__ckb_witness_lock"
-                                | "__ckb_witness_input_type"
-                                | "__ckb_witness_output_type"
-                                | "__ckb_witness_lock_exact32"
-                                | "__ckb_witness_input_type_exact32"
-                                | "__ckb_witness_output_type_exact32"
+                            "__ckb_witness_lock_exact32" | "__ckb_witness_input_type_exact32" | "__ckb_witness_output_type_exact32"
                         ) && args.len() == 1
-                            && dest.ty == IrType::Hash =>
+                            && crate::ir::is_raw_bytes32_runtime_result(func, &dest.ty) =>
                     {
                         self.cell_buffer_size_offsets.insert(dest.id, next_cell_slot);
                         self.cell_buffer_offsets.insert(dest.id, next_cell_slot + 8);
@@ -736,7 +735,8 @@ impl CodeGenerator {
                             || (func == "__ckb_witness_bytes32" && args.len() == 2)
                             || (func == "__ckb_witness_bounded_blake2b" && args.len() == 3)
                             || (func == "__ckb_witness_blake2b_select_chunks" && args.len() == 6))
-                            && dest.ty == IrType::Hash =>
+                            && ((dest.ty == IrType::Hash && func != "__ckb_witness_bytes32")
+                                || crate::ir::is_raw_bytes32_runtime_result(func, &dest.ty)) =>
                     {
                         self.cell_buffer_size_offsets.insert(dest.id, next_cell_slot);
                         self.cell_buffer_offsets.insert(dest.id, next_cell_slot + 8);
@@ -763,12 +763,9 @@ impl CodeGenerator {
             }
         }
 
-        let mut u128_value_ids = BTreeSet::new();
-        for param in params {
-            if param.ty == IrType::U128 {
-                u128_value_ids.insert(param.binding.id);
-            }
-        }
+        let u128_parameter_ids =
+            params.iter().filter(|param| param.ty == IrType::U128).map(|param| param.binding.id).collect::<BTreeSet<_>>();
+        let mut u128_value_ids = u128_parameter_ids.clone();
         for block in &body.blocks {
             for instruction in &block.instructions {
                 self.collect_u128_instruction_vars(instruction, &mut u128_value_ids);
@@ -776,8 +773,17 @@ impl CodeGenerator {
             self.collect_u128_terminator_vars(&block.terminator, &mut u128_value_ids);
         }
         for var_id in u128_value_ids {
-            self.u128_value_offsets.insert(var_id, next_cell_slot);
-            next_cell_slot += 16;
+            if let Some(offset) = self.fixed_byte_local_offsets.get(&var_id).copied() {
+                // Both emitters materialize the same logical 16-byte value.
+                // Keep one owned buffer instead of reserving a second bank.
+                self.u128_value_offsets.insert(var_id, offset);
+            } else if !u128_parameter_ids.contains(&var_id) {
+                self.u128_value_offsets.insert(var_id, next_cell_slot);
+                next_cell_slot += 16;
+            }
+            // Unwritten parameters keep their incoming pointer and checked
+            // length. A parameter assigned in the body has an owned buffer
+            // above, so changing it cannot overwrite the caller's storage.
         }
 
         if self.current_function_owns_exact_read_cache && self.module_uses_exact_read_cache {
@@ -1064,7 +1070,7 @@ impl CodeGenerator {
                 ));
                 self.emit_spill_abi_arg(abi_index, self.scalar_slot_offset(param.binding.id));
                 abi_index += 2;
-            } else if let Some(width) = self.generic_value_type_width(&param.ty) {
+            } else if let Some(width) = self.fixed_named_parameter_width(&param.ty) {
                 self.emit(format!(
                     "# cellscript abi: fixed named-value param {} pointer={} length={} size={}",
                     param.name,

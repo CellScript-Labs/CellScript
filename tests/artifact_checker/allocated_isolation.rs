@@ -16,10 +16,10 @@ action inspect(witness bytes: [u8; 9]) -> u64 {
     require work.values.get(0) == 7
     return 0
 }"#;
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile(
             source,
-            CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
         )
         .unwrap();
         use cellscript::EntryWitnessArg as A;
@@ -94,10 +94,10 @@ action inspect(witness zero: u64) -> u64 {{
     return 0
 }}"#
         );
-        for opt_level in [0, 3] {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = compile(
                 &source,
-                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap();
             use cellscript::EntryWitnessArg as A;
@@ -154,7 +154,7 @@ action inspect(witness zero: u64) -> u64 {{
                 assert_ne!(
                     ckb_script_runner::execute_cellscript_script(&corrupted.artifact, &transaction).exit_code,
                     0,
-                    "arena={bytes} offset={relative} O{opt_level}"
+                    "arena={bytes} offset={relative} {diagnostics}"
                 );
             }
         }

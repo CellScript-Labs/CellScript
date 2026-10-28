@@ -2,7 +2,7 @@
 //! today's source fixtures, and inspect actual decoded machine instructions.
 use super::*;
 
-fn runtime_inventory(opt_level: u8) -> (Vec<String>, MachineLayoutEvidence) {
+fn runtime_inventory(diagnostics: crate::CompilerDiagnostics) -> (Vec<String>, MachineLayoutEvidence) {
     // Discover literal helper names in the dispatch source so adding a helper
     // cannot silently leave it out of this all-helpers generation test.
     let mut names = include_str!("../runtime.rs")
@@ -22,7 +22,7 @@ fn runtime_inventory(opt_level: u8) -> (Vec<String>, MachineLayoutEvidence) {
         generic_contracts: Default::default(),
         source_type_origins: Default::default(),
     };
-    let mut generator = CodeGenerator::new(CodegenOptions { opt_level, ..Default::default() });
+    let mut generator = CodeGenerator::new(CodegenOptions { diagnostics, ..Default::default() });
     generator.emit_section(".text");
     generator.emit_global("stack_inventory");
     generator.emit_label("stack_inventory");
@@ -57,8 +57,8 @@ fn runtime_inventory(opt_level: u8) -> (Vec<String>, MachineLayoutEvidence) {
 
 #[test]
 fn all_runtime_and_stdlib_machine_frames_are_aligned_and_restored() {
-    for opt_level in [0, 3] {
-        let (assembly, evidence) = runtime_inventory(opt_level);
+    for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
+        let (assembly, evidence) = runtime_inventory(diagnostics);
         let artifact = assembler::assemble_generated_elf(&assembly).unwrap();
         let elf = cellscript_artifact_checker::parse_elf(&artifact, 1_000_000).unwrap();
         let mut problems = Vec::new();
@@ -130,9 +130,9 @@ fn all_runtime_and_stdlib_machine_frames_are_aligned_and_restored() {
                 ));
             }
         }
-        eprintln!("O{opt_level}: {} runtime/stdlib entries, {} machine stack adjustments", owners.len(), elf.stack_adjustments.len());
+        eprintln!("{diagnostics}: {} runtime/stdlib entries, {} machine stack adjustments", owners.len(), elf.stack_adjustments.len());
         assert!(owners.len() > 150, "inventory unexpectedly lost helpers: {}", owners.len());
-        assert!(problems.is_empty(), "O{opt_level} stack inventory:\n{}", problems.join("\n"));
+        assert!(problems.is_empty(), "{diagnostics} stack inventory:\n{}", problems.join("\n"));
     }
 }
 
@@ -141,7 +141,7 @@ fn compacted_instance_profiles_only_change_owned_frame_extents() {
     // Independently retain the previously admitted complete-body identities.
     // Restoring only the two SP immediates must reproduce each old identity;
     // updating a profile pin cannot silently bless another instruction change.
-    let (assembly, evidence) = runtime_inventory(0);
+    let (assembly, evidence) = runtime_inventory(crate::CompilerDiagnostics::without_optimizations());
     let artifact = assembler::assemble_generated_elf(&assembly).unwrap();
     let elf = cellscript_artifact_checker::parse_elf(&artifact, 1_000_000).unwrap();
     let owners = evidence
@@ -209,7 +209,7 @@ fn compacted_instance_profiles_only_change_owned_frame_extents() {
 
 #[test]
 fn all_runtime_entries_have_explicit_return_conventions() {
-    let (_, evidence) = runtime_inventory(0);
+    let (_, evidence) = runtime_inventory(crate::CompilerDiagnostics::without_optimizations());
     let missing = evidence
         .globals
         .iter()
@@ -221,7 +221,7 @@ fn all_runtime_entries_have_explicit_return_conventions() {
 #[test]
 fn scalar_status_contracts_write_status_on_every_returning_path() {
     use runtime_contract::RuntimeReturnAbi;
-    let (assembly, evidence) = runtime_inventory(0);
+    let (assembly, evidence) = runtime_inventory(crate::CompilerDiagnostics::without_optimizations());
     let artifact = assembler::assemble_generated_elf(&assembly).unwrap();
     let elf = cellscript_artifact_checker::parse_elf(&artifact, 1_000_000).unwrap();
     let words = elf.instructions.iter().map(|word| (word.address, word.word)).collect::<BTreeMap<_, _>>();

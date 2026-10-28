@@ -25,7 +25,7 @@ const AMM_SWAP_SOURCE: &str = include_str!("fixtures/order_amm_swap.cell");
 fn options() -> CompileOptions {
     CompileOptions {
         edition: CellScriptEdition::Edition2027,
-        opt_level: 3,
+        diagnostics: cellscript::CompilerDiagnostics::default(),
         target: Some("riscv64-elf".to_string()),
         target_profile: Some("ckb".to_string()),
         ..Default::default()

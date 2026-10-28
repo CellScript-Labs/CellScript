@@ -220,7 +220,7 @@ module resource_budget::sighash
 
 action verify() -> u64 {
     let digest = env::sighash_all_zero_lock(64, 256, 64, 65536)
-    require Hash::from_sighash_all(digest) == witness::args(0).lock
+    require Hash::from_sighash_all(digest).0 == witness::lock_exact32(witness::args(0))
     return 0
 }
 "#;

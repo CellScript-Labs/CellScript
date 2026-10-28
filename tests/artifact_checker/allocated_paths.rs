@@ -12,10 +12,10 @@ action inspect(witness take: bool) -> u64 {
     require work.values.len() == 1
     return 0
 }"#;
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile(
             source,
-            CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
         )
         .unwrap();
         let payload = compiled.metadata.actions[0].entry_witness_args(&[cellscript::EntryWitnessArg::Bool(true)]).unwrap();
@@ -119,11 +119,11 @@ action inspect() -> u64 {
     require work.values.len() == 2
     return 0
 }"#;
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -166,7 +166,7 @@ action inspect() -> u64 {
                 checked += 1;
             }
         }
-        assert!(checked > 0, "O{opt_level}: no source loop backedge");
+        assert!(checked > 0, "{diagnostics}: no source loop backedge");
     }
 }
 
@@ -183,10 +183,10 @@ action inspect(witness value: u64) -> u64 {
     require work.values.len() == 1
     return 0
 }"#;
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile(
             source,
-            CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
         )
         .unwrap();
         let payload = compiled.metadata.actions[0].entry_witness_args(&[cellscript::EntryWitnessArg::U64(7)]).unwrap();
@@ -231,11 +231,11 @@ fn owner_drop_cannot_skip_one_member_retirement() {
             "module owner_drop_path\ncollections Work {{ limits {{ bytes: 512, allocations: 4 }}\n{declarations}}}\n\
             action inspect() -> u64 {{ let work = Work::new()\nwork.drop()\nreturn 0 }}"
         );
-        for opt_level in [0, 3] {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -287,11 +287,11 @@ action inspect_queries() -> u64 {
     require inspect(&work) == 2
     return 0
 }"#;
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );

@@ -14,10 +14,10 @@ action inspect(witness i: u64, witness j: u64) -> u64 {
     require plain(0, 0, 0, 0, 0, 0, 0, 0, i, j) == 3
     return 0
 }"#;
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile(
             source,
-            CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
         )
         .unwrap();
         let payload = compiled.metadata.actions[0]
@@ -83,12 +83,12 @@ action inspect(witness a: u64, witness b: u64, witness skip: bool, witness bytes
     return 0
 }}"#
             );
-            for opt_level in [0, 3] {
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let compiled = compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
-                .unwrap_or_else(|error| panic!("{ty}/{padding}/O{opt_level}: {error}"));
+                .unwrap_or_else(|error| panic!("{ty}/{padding}/{diagnostics}: {error}"));
                 use cellscript::EntryWitnessArg as A;
                 use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
                 let messages = [15u32.to_le_bytes().as_slice(), &8u32.to_le_bytes(), &3u32.to_le_bytes(), &[1, 2, 3]].concat();

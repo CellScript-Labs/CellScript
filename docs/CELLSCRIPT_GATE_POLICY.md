@@ -1,5 +1,11 @@
 # CellScript Gate Policy
 
+The [unified compilation strategy](CELLSCRIPT_COMPILATION_POLICY.md) removes
+user-facing optimization levels. Current differential tests compare the normal
+strategy with internal diagnostic builds. Earlier O0/O3 descriptions below
+record the historical implementation and frozen measurements. They do not
+expose supported level selectors in the current compiler.
+
 ## One-version alpha publication exception — 2026-10-28
 
 The maintainer authorized `v0.33.0-alpha.1` publication after compiler integration
@@ -1159,7 +1165,7 @@ to its runtime helpers require the backend gate; merge-readiness still requires
 the complete `ci` gate.
 
 The experimental #80 instance extension uses the same CLI option with the
-separate `cellscript-protocol-instance-admission-input-v1` request schema.
+separate `cellscript-protocol-instance-admission-input-v2` request schema.
 Its 848-byte instance policy, 1768-byte selection and 208-byte committed
 consumer configuration do not reinterpret the old root or witness formats.
 Native/CLI/generated-builder/SDK parity must include actual signed all-group

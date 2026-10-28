@@ -177,7 +177,7 @@ fn named_package_policy_binds_receipt_key_and_dependency_before_codegen() {
     let root = camino::Utf8Path::from_path(dir.path()).unwrap();
     std::fs::write(root.join("main.cell"), &source).unwrap();
     let document = format!(
-        "[package]\nname = \"zk_package\"\nversion = \"0.1.0\"\nedition = \"2026\"\nentry = \"main.cell\"\n\n{}",
+        "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nname = \"zk_package\"\nversion = \"0.1.0\"\nedition = \"2026\"\nentry = \"main.cell\"\n\n{}",
         toml::to_string(&DeployConfig { ckb: Some(deploy) }).unwrap().replace("[ckb", "[deploy.ckb")
     );
     std::fs::write(root.join("Cell.toml"), document).unwrap();

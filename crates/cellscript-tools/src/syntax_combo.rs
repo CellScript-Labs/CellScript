@@ -989,7 +989,12 @@ fn audit_case(root: &Path, case: &AuditCase, run_dir: &Path, cellc: &Path) -> Re
     }
     fs::write(
         edition_root.join("Cell.toml"),
-        format!("[package]\nedition = \"{}\"\nname = \"syntax-combo-{}\"\nversion = \"0.0.0\"\n", case.edition, case_id),
+        format!(
+            "[package]\nedition = \"{}\"\ncellscript_version = \"={}\"\nname = \"syntax-combo-{}\"\nversion = \"0.0.0\"\n",
+            case.edition,
+            cellscript::VERSION,
+            case_id
+        ),
     )?;
     fs::write(&case_path, &case.source)?;
     let cellc = cellc.display().to_string();

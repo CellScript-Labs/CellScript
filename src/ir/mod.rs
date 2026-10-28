@@ -47,11 +47,30 @@ pub(crate) fn is_ckb_fixed_hash_domain_name(name: &str) -> bool {
     CKB_FIXED_HASH_DOMAIN_TYPE_NAMES.contains(&name)
 }
 
+/// Raw exact-width reads return byte arrays, independently of their physical
+/// width matching a digest. No implicit hash-domain conversion is admitted.
+pub(crate) fn is_raw_bytes32_runtime_result(func: &str, ty: &IrType) -> bool {
+    matches!(
+        func,
+        "__ckb_cell_data_bytes32"
+            | "__ckb_cell_lock_args32"
+            | "__ckb_cell_type_args32"
+            | "__ckb_witness_bytes32"
+            | "__ckb_witness_lock_exact32"
+            | "__ckb_witness_input_type_exact32"
+            | "__ckb_witness_output_type_exact32"
+    ) && matches!(ty, IrType::Array(item, 32) if item.as_ref() == &IrType::U8)
+}
+
 /// Typed Cell and ScriptRef properties retain the full-Script hash domain.
 /// Raw SourceView hash calls and data hashes keep their ordinary Hash result.
 pub(crate) fn is_ckb_script_hash_property_result(func: &str, ty: &IrType) -> bool {
     matches!(func, "__ckb_cell_lock_hash" | "__ckb_cell_type_hash")
         && matches!(ty, IrType::Named(name) if name == CKB_SCRIPT_HASH_TYPE)
+}
+
+pub(crate) fn is_ckb_sighash_all_result(func: &str, ty: &IrType) -> bool {
+    func == "__ckb_sighash_all_zero_lock" && matches!(ty, IrType::Named(name) if name == CKB_SIGHASH_ALL_DIGEST_TYPE)
 }
 
 pub(crate) const CKB_WITNESS_OWNER_RAW: u64 = 0;
@@ -6190,6 +6209,15 @@ impl IrGenerator {
             return lowered_base;
         };
 
+        if field.field == "0"
+            && let IrOperand::Const(IrConst::Hash(bytes) | IrConst::Address(bytes)) = &lowered_base.operand
+        {
+            return LoweredExpr {
+                operand: IrOperand::Const(IrConst::Array(bytes.iter().copied().map(IrConst::U8).collect())),
+                current: Some(active),
+            };
+        }
+
         if let IrOperand::Var(base_var) = &lowered_base.operand {
             if let IrType::Named(owner) = &base_var.ty
                 && let Some(projected) = crate::cell_selection::project_role_type(owner, &field.field)
@@ -7026,7 +7054,13 @@ impl IrGenerator {
                 "Hash::from_bytes" | "VerificationKeyCommitment::from_bytes" if call.args.len() == 1 => {
                     Some(self.lower_hash_from_bytes(&call.args[0], current, blocks, vars, call.span))
                 }
-                "Hash::from_sighash_all" if call.args.len() == 1 => Some(self.lower_expr(&call.args[0], current, blocks, vars)),
+                "Hash::from_sighash_all" if call.args.len() == 1 => {
+                    let lowered = self.lower_expr(&call.args[0], current, blocks, vars);
+                    let active = lowered.current?;
+                    let dest = self.new_var("sighash_as_hash", IrType::Hash);
+                    self.block_mut(blocks, active).instructions.push(IrInstruction::Move { dest: dest.clone(), src: lowered.operand });
+                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
+                }
                 "script::hash_type_data" if call.args.is_empty() => {
                     Some(LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) })
                 }
@@ -7073,7 +7107,7 @@ impl IrGenerator {
                 "env::sighash_all_zero_lock" if call.args.len() == 4 => self.lower_simple_runtime_call(
                     "__ckb_sighash_all_zero_lock",
                     "sighash_all_zero_lock",
-                    IrType::Hash,
+                    IrType::Named(CKB_SIGHASH_ALL_DIGEST_TYPE.to_string()),
                     &call.args,
                     current,
                     blocks,
@@ -7563,15 +7597,6 @@ impl IrGenerator {
                     blocks,
                     vars,
                 ),
-                "ckb::cell_data_hash" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_cell_data_hash",
-                    "ckb_cell_data_hash",
-                    IrType::Hash,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
                 "ckb::raw_transaction_hash_without_cell_deps" if call.args.is_empty() => self.lower_simple_runtime_call(
                     "__ckb_raw_transaction_hash_without_cell_deps",
                     "raw_transaction_hash_without_cell_deps",
@@ -7602,7 +7627,7 @@ impl IrGenerator {
                 "witness::bytes32" if call.args.len() == 2 => self.lower_simple_runtime_call(
                     "__ckb_witness_bytes32",
                     "witness_bytes32",
-                    IrType::Hash,
+                    IrType::Array(Box::new(IrType::U8), 32),
                     &call.args,
                     current,
                     blocks,
@@ -7634,10 +7659,10 @@ impl IrGenerator {
                     };
                     self.lower_simple_runtime_call(helper, result_name, IrType::Hash, &call.args, current, blocks, vars)
                 }
-                "ckb::cell_data_bytes32" | "ckb::cell_data_hash_at" if call.args.len() == 2 => self.lower_simple_runtime_call(
+                "ckb::cell_data_bytes32" if call.args.len() == 2 => self.lower_simple_runtime_call(
                     "__ckb_cell_data_bytes32",
                     "ckb_cell_data_bytes32",
-                    IrType::Hash,
+                    IrType::Array(Box::new(IrType::U8), 32),
                     &call.args,
                     current,
                     blocks,
@@ -7697,37 +7722,19 @@ impl IrGenerator {
                     blocks,
                     vars,
                 ),
-                "ckb::cell_lock_args_hash" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_cell_lock_args_hash",
-                    "ckb_cell_lock_args_hash",
-                    IrType::Hash,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
                 "ckb::cell_lock_args32" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_cell_lock_args_hash",
+                    "__ckb_cell_lock_args32",
                     "ckb_cell_lock_args32",
-                    IrType::Hash,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::cell_type_args_hash" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_cell_type_args_hash",
-                    "ckb_cell_type_args_hash",
-                    IrType::Hash,
+                    IrType::Array(Box::new(IrType::U8), 32),
                     &call.args,
                     current,
                     blocks,
                     vars,
                 ),
                 "ckb::cell_type_args32" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_cell_type_args_hash",
+                    "__ckb_cell_type_args32",
                     "ckb_cell_type_args32",
-                    IrType::Hash,
+                    IrType::Array(Box::new(IrType::U8), 32),
                     &call.args,
                     current,
                     blocks,
@@ -7857,23 +7864,23 @@ impl IrGenerator {
                 "ckb::require_cell_type_args_empty" if call.args.len() == 1 => {
                     self.lower_void_runtime_call("__ckb_require_cell_type_args_empty", &call.args, current, blocks, vars)
                 }
-                "ckb::require_cell_lock_args_hash" if call.args.len() == 2 => {
-                    self.lower_void_runtime_call("__ckb_require_cell_lock_args_hash", &call.args, current, blocks, vars)
+                "ckb::require_cell_lock_args32" if call.args.len() == 2 => {
+                    self.lower_void_runtime_call("__ckb_require_cell_lock_args32", &call.args, current, blocks, vars)
                 }
-                "ckb::require_cell_type_args_hash" if call.args.len() == 2 => {
-                    self.lower_void_runtime_call("__ckb_require_cell_type_args_hash", &call.args, current, blocks, vars)
+                "ckb::require_cell_type_args32" if call.args.len() == 2 => {
+                    self.lower_void_runtime_call("__ckb_require_cell_type_args32", &call.args, current, blocks, vars)
                 }
-                "ckb::require_cell_lock_args_prefix_hash" if call.args.len() == 2 => {
-                    self.lower_void_runtime_call("__ckb_require_cell_lock_args_prefix_hash", &call.args, current, blocks, vars)
+                "ckb::require_cell_lock_args_prefix32" if call.args.len() == 2 => {
+                    self.lower_void_runtime_call("__ckb_require_cell_lock_args_prefix32", &call.args, current, blocks, vars)
                 }
-                "ckb::require_cell_type_args_prefix_hash" if call.args.len() == 2 => {
-                    self.lower_void_runtime_call("__ckb_require_cell_type_args_prefix_hash", &call.args, current, blocks, vars)
+                "ckb::require_cell_type_args_prefix32" if call.args.len() == 2 => {
+                    self.lower_void_runtime_call("__ckb_require_cell_type_args_prefix32", &call.args, current, blocks, vars)
                 }
-                "ckb::require_cell_lock_args_suffix_hash" if call.args.len() == 2 => {
-                    self.lower_void_runtime_call("__ckb_require_cell_lock_args_suffix_hash", &call.args, current, blocks, vars)
+                "ckb::require_cell_lock_args_suffix32" if call.args.len() == 2 => {
+                    self.lower_void_runtime_call("__ckb_require_cell_lock_args_suffix32", &call.args, current, blocks, vars)
                 }
-                "ckb::require_cell_type_args_suffix_hash" if call.args.len() == 2 => {
-                    self.lower_void_runtime_call("__ckb_require_cell_type_args_suffix_hash", &call.args, current, blocks, vars)
+                "ckb::require_cell_type_args_suffix32" if call.args.len() == 2 => {
+                    self.lower_void_runtime_call("__ckb_require_cell_type_args_suffix32", &call.args, current, blocks, vars)
                 }
                 "ckb::require_cell_lock_script_hash_type" if call.args.len() == 3 => {
                     self.lower_void_runtime_call("__ckb_require_cell_lock_script_hash_type", &call.args, current, blocks, vars)
@@ -8156,31 +8163,28 @@ impl IrGenerator {
                     self.lower_witness_scalar_read(name.as_str(), call, current, blocks, vars)
                 }
                 "witness::blake2b" if call.args.len() == 1 => self.lower_bounded_witness_blake2b(call, current, blocks, vars),
-                "witness::raw" if call.args.len() == 1 => {
-                    self.lower_simple_runtime_call("__ckb_witness_raw", "witness_raw", IrType::Hash, &call.args, current, blocks, vars)
-                }
-                "witness::lock" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_witness_lock",
-                    "witness_lock",
-                    IrType::Hash,
+                "witness::lock_exact32" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_witness_lock_exact32",
+                    "witness_lock_exact32",
+                    IrType::Array(Box::new(IrType::U8), 32),
                     &call.args,
                     current,
                     blocks,
                     vars,
                 ),
-                "witness::input_type" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_witness_input_type",
-                    "witness_input_type",
-                    IrType::Hash,
+                "witness::input_type_exact32" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_witness_input_type_exact32",
+                    "witness_input_type_exact32",
+                    IrType::Array(Box::new(IrType::U8), 32),
                     &call.args,
                     current,
                     blocks,
                     vars,
                 ),
-                "witness::output_type" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_witness_output_type",
-                    "witness_output_type",
-                    IrType::Hash,
+                "witness::output_type_exact32" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_witness_output_type_exact32",
+                    "witness_output_type_exact32",
+                    IrType::Array(Box::new(IrType::U8), 32),
                     &call.args,
                     current,
                     blocks,
@@ -9060,7 +9064,11 @@ impl IrGenerator {
         }
 
         let hash = self.new_var("hash_from_bytes", IrType::Hash);
-        self.block_mut(blocks, active).instructions.push(IrInstruction::Move { dest: hash.clone(), src: lowered.operand.clone() });
+        // The explicit constructor wraps one complete byte value. A Move would
+        // erase the conversion and incorrectly claim implicit assignability.
+        self.block_mut(blocks, active)
+            .instructions
+            .push(IrInstruction::Tuple { dest: hash.clone(), fields: vec![lowered.operand.clone()] });
         self.copy_aggregate_metadata(&lowered.operand, hash.id);
         LoweredExpr { operand: IrOperand::Var(hash), current: Some(active) }
     }
@@ -9797,6 +9805,7 @@ impl IrGenerator {
                 "is_empty" => Some(IrType::Bool),
                 _ => None,
             },
+            IrType::Named(name) if name == CKB_SCRIPT_HASH_TYPE && field == "0" => Some(IrType::Array(Box::new(IrType::U8), 32)),
             IrType::Named(name) => self.type_fields.get(name).and_then(|fields| fields.get(field)).cloned(),
             IrType::Ref(inner) | IrType::MutRef(inner) => self.lookup_field_ir_type(inner, field),
             IrType::Address | IrType::Hash if field == "0" => Some(IrType::Array(Box::new(IrType::U8), 32)),
@@ -10013,7 +10022,8 @@ const CKB_TYPE_SCRIPT_REF_TYPE: &str = "__ckb_type_script_ref";
 const CKB_INPUT_OUT_POINT_REF_TYPE: &str = "__ckb_input_out_point_ref";
 const CKB_SCRIPT_ARGS_TYPE: &str = "ScriptArgs";
 const CKB_SCRIPT_VALUE_TYPE: &str = "Script";
-const CKB_SCRIPT_HASH_TYPE: &str = "ScriptHash";
+pub(crate) const CKB_SCRIPT_HASH_TYPE: &str = "ScriptHash";
+const CKB_SIGHASH_ALL_DIGEST_TYPE: &str = "SighashAllDigest";
 
 fn typed_view_property_runtime_helper(ty: &IrType, field: &str) -> Option<(&'static str, &'static str, IrType)> {
     let IrType::Named(name) = ty else {
@@ -10043,9 +10053,6 @@ fn typed_view_property_runtime_helper(ty: &IrType, field: &str) -> Option<(&'sta
             Some(("__ckb_cell_type_hash", "typed_view_type_hash", IrType::Named(CKB_SCRIPT_HASH_TYPE.to_string())))
         }
         ("WitnessArgsView", "size") => Some(("__ckb_witness_size", "typed_witness_size", IrType::U64)),
-        ("WitnessArgsView", "lock") => Some(("__ckb_witness_lock_exact32", "typed_witness_lock", IrType::Hash)),
-        ("WitnessArgsView", "input_type") => Some(("__ckb_witness_input_type_exact32", "typed_witness_input_type", IrType::Hash)),
-        ("WitnessArgsView", "output_type") => Some(("__ckb_witness_output_type_exact32", "typed_witness_output_type", IrType::Hash)),
         ("HeaderDepView", "epoch_number") => {
             Some(("__ckb_header_dep_epoch_number", "typed_header_epoch_number", IrType::Named("EpochNumber".to_string())))
         }
@@ -10112,10 +10119,10 @@ fn script_ref_property_runtime_helper(ty: &IrType, field: &str) -> Option<(&'sta
             if lock_script { "ckb_cell_lock_args_empty" } else { "ckb_cell_type_args_empty" },
             IrType::Bool,
         )),
-        "args_hash" => Some((
-            if lock_script { "__ckb_cell_lock_args_hash" } else { "__ckb_cell_type_args_hash" },
-            if lock_script { "ckb_cell_lock_args_hash" } else { "ckb_cell_type_args_hash" },
-            IrType::Hash,
+        "args32" => Some((
+            if lock_script { "__ckb_cell_lock_args32" } else { "__ckb_cell_type_args32" },
+            if lock_script { "ckb_cell_lock_args32" } else { "ckb_cell_type_args32" },
+            IrType::Array(Box::new(IrType::U8), 32),
         )),
         _ => None,
     }

@@ -53,7 +53,13 @@ fn child() -> Bytes {
     Bytes::from(elf)
 }
 
-fn parent(hash: [u8; 32], looped: bool, delegated: bool, mutation: &str, opt_level: u8) -> CompileResult {
+fn parent(
+    hash: [u8; 32],
+    looped: bool,
+    delegated: bool,
+    mutation: &str,
+    diagnostics: cellscript::CompilerDiagnostics,
+) -> CompileResult {
     let mut encoding = String::new();
     if looped {
         let range = if mutation == "out_of_range" { "18..54" } else { "8..44" };
@@ -124,7 +130,7 @@ action verify(witness deposit_height: u64, witness proposal_height: u64, witness
     let root = camino::Utf8Path::from_path(directory.path()).unwrap();
     let result = cellscript::compile_path_with_executable_surface_policy(
         root,
-        CompileOptions { opt_level, target: Some("riscv64-elf".into()), target_profile: Some("ckb".into()), ..Default::default() },
+        CompileOptions { diagnostics, target: Some("riscv64-elf".into()), target_profile: Some("ckb".into()), ..Default::default() },
         Some(CompileEntryScope::Action("verify".into())),
         ExecutableSurfacePolicy::DenyFailClosed,
     )
@@ -213,10 +219,10 @@ fn fixed_context_matches_rust_bytes_and_the_real_parent_child_vm() {
     let child = child();
     let hash = blake2b_256(&child);
     let mut measurements = Vec::new();
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for looped in [false, true] {
             for delegated in [false, true] {
-                let compiled = parent(hash, looped, delegated, "", opt_level);
+                let compiled = parent(hash, looped, delegated, "", diagnostics);
                 for heights in [[0, 0], [u64::MAX, u64::MAX], [0x333231302f2e2d2c, 0x3b3a393837363534]] {
                     let (execution, trace) = execute(&compiled, &child, heights, "");
                     assert_eq!(execution.exit_code, 0, "looped={looped}, delegated={delegated}: {:?}", execution.captured_debug);
@@ -229,7 +235,9 @@ fn fixed_context_matches_rust_bytes_and_the_real_parent_child_vm() {
                         .unwrap()
                         .iter()
                         .find(|ceiling| {
-                            ceiling["opt_level"] == opt_level && ceiling["looped"] == looped && ceiling["delegated"] == delegated
+                            ceiling["diagnostics"] == diagnostics.to_string()
+                                && ceiling["looped"] == looped
+                                && ceiling["delegated"] == delegated
                         })
                         .unwrap();
                     assert!(
@@ -241,7 +249,7 @@ fn fixed_context_matches_rust_bytes_and_the_real_parent_child_vm() {
                         let metric = if vm.vm_id == 0 { "parent_stack_bytes" } else { "child_stack_bytes" };
                         assert!(vm.observed_stack_bytes <= ceiling[metric].as_u64().unwrap());
                     }
-                    measurements.push(serde_json::json!({"opt_level":opt_level,"looped":looped,"delegated":delegated,"heights_hex":heights.map(|height| format!("{height:016x}")),
+                    measurements.push(serde_json::json!({"diagnostics":diagnostics.to_string(),"looped":looped,"delegated":delegated,"heights_hex":heights.map(|height| format!("{height:016x}")),
                     "lowering_record_hash":compiled.metadata.verified_artifact.lowering_record_hash,
                     "source_map_hash":compiled.metadata.verified_artifact.source_map_hash,
                     "verified_bundle_id":compiled.metadata.verified_artifact.verified_bundle_id,
@@ -283,10 +291,15 @@ fn agoraseal_vote_template_and_generated_source_share_the_checked_encoding() {
         std::fs::read_to_string(root.join("Cell.toml.in")).unwrap().replace("@CONTEXT_HASH@", &code_hash),
         std::fs::read_to_string(root.join("Cell.toml")).unwrap()
     );
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = cellscript::compile_path_with_executable_surface_policy(
             &root,
-            CompileOptions { opt_level, target: Some("riscv64-elf".into()), target_profile: Some("ckb".into()), ..Default::default() },
+            CompileOptions {
+                diagnostics,
+                target: Some("riscv64-elf".into()),
+                target_profile: Some("ckb".into()),
+                ..Default::default()
+            },
             Some(CompileEntryScope::Action("cast".into())),
             ExecutableSurfacePolicy::DenyFailClosed,
         )
@@ -299,8 +312,8 @@ fn agoraseal_vote_template_and_generated_source_share_the_checked_encoding() {
 fn context_and_verifier_negatives_fail_closed() {
     let child = child();
     let hash = blake2b_256(&child);
-    for opt_level in 0..=3 {
-        let ordinary = parent(hash, true, true, "", opt_level);
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let ordinary = parent(hash, true, true, "", diagnostics);
         for mutation in ["truncated", "wrong_oracle", "wrong_outpoint", "false_height", "missing_header"] {
             let (execution, trace) = execute(&ordinary, &child, [17, 91], mutation);
             assert_ne!(execution.exit_code, 0, "{mutation}");
@@ -308,12 +321,12 @@ fn context_and_verifier_negatives_fail_closed() {
             assert_ne!(trace.exit_code, Some(0));
         }
         for mutation in ["out_of_range", "overflow", "bad_length", "bad_dependency"] {
-            let compiled = parent(hash, true, true, mutation, opt_level);
+            let compiled = parent(hash, true, true, mutation, diagnostics);
             let (execution, trace) = execute(&compiled, &child, [17, 91], "");
             assert_ne!(execution.exit_code, 0, "{mutation}");
             assert_eq!(trace.status, "measured", "{mutation}: {trace:?}");
         }
-        let wrong_hash = parent([0x42; 32], true, true, "", opt_level);
+        let wrong_hash = parent([0x42; 32], true, true, "", diagnostics);
         assert_ne!(execute(&wrong_hash, &child, [17, 91], "").0.exit_code, 0);
     }
 }

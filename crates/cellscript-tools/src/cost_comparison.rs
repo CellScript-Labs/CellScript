@@ -172,7 +172,7 @@ pub fn run(root: &Path, before: &Path, before_multi: &Path, after: &Path, after_
         "target",
         "target_profile",
         "edition",
-        "opt_level",
+        "compilation_policy",
         "rust_reference_profile",
         "vm_configuration",
         "measurement_fixture_sha256",
@@ -182,7 +182,7 @@ pub fn run(root: &Path, before: &Path, before_multi: &Path, after: &Path, after_
     let mut comparison = Comparison::default();
     comparison.corpus(&baseline, &candidate)?;
     comparison.multi(&read(before_multi)?, &read(after_multi)?)?;
-    let report = json!({"schema":"cellscript-cost-comparison-v2","baseline":baseline["provenance"],
+    let report = json!({"schema":"cellscript-cost-comparison-v3","baseline":baseline["provenance"],
         "candidate":candidate["provenance"],"comparisons":comparison.count,"regressions":comparison.regressions,
         "scalar_static_memory":comparison.scalar,"status":if comparison.regressions.is_empty(){"passed"}else{"failed"}});
     fs::write(output, serde_json::to_vec_pretty(&report)?)?;

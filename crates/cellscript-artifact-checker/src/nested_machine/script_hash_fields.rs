@@ -7,8 +7,8 @@ pub(super) fn kind(owner: &str) -> Option<(u32, bool)> {
     match owner {
         "runtime:__ckb_cell_lock_code_hash" => Some((2, false)),
         "runtime:__ckb_cell_type_code_hash" => Some((4, false)),
-        "runtime:__ckb_cell_lock_args_hash" => Some((2, true)),
-        "runtime:__ckb_cell_type_args_hash" => Some((4, true)),
+        "runtime:__ckb_cell_lock_args32" => Some((2, true)),
+        "runtime:__ckb_cell_type_args32" => Some((4, true)),
         _ => None,
     }
 }

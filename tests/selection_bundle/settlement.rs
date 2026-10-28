@@ -28,7 +28,7 @@ fn mixed_settlement_cross_package_helpers_preserve_transaction_and_authority() {
     }
     let baseline = tempfile::tempdir().unwrap();
     let (baseline_compiled, baseline_artifacts) = artifacts(baseline.path());
-    for opt in [0, 3] {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path();
         let main = super::support::compile_package(root, &application, &library, opt).unwrap();
@@ -62,7 +62,7 @@ fn mixed_settlement_cross_package_helpers_preserve_transaction_and_authority() {
                 assert_eq!(materialized.script_groups.len(), 4);
                 let fixture = context(&input, &compiled, None);
                 fixture.verify_tx(&tx, 20_000_000).unwrap();
-                if opt == 3 {
+                if opt.is_standard() {
                     super::resources::measure_package(
                         &format!("Settlement-{count}-{reverse}-valid"),
                         &fixture,
@@ -74,7 +74,7 @@ fn mixed_settlement_cross_package_helpers_preserve_transaction_and_authority() {
                 }
                 for peer in [1, 2, 3] {
                     let error = context(&input, &compiled, Some(peer)).verify_tx(&tx, 20_000_000).unwrap_err();
-                    assert!(format!("{error:?}").contains("error code 5"), "O{opt}/{count}/{reverse} peer {peer}: {error:?}");
+                    assert!(format!("{error:?}").contains("error code 5"), "{opt}/{count}/{reverse} peer {peer}: {error:?}");
                 }
                 if count == 6 && !reverse {
                     for bad_order in [false, true] {
@@ -102,10 +102,10 @@ fn mixed_settlement_cross_package_helpers_preserve_transaction_and_authority() {
 }
 
 fn artifacts(root: &Path) -> (Vec<CompileResult>, Vec<Value>) {
-    artifacts_at(root, true, 3)
+    artifacts_at(root, true, cellscript::CompilerDiagnostics::default())
 }
 
-fn artifacts_at(root: &Path, named: bool, opt_level: u8) -> (Vec<CompileResult>, Vec<Value>) {
+fn artifacts_at(root: &Path, named: bool, diagnostics: cellscript::CompilerDiagnostics) -> (Vec<CompileResult>, Vec<Value>) {
     let mut source = if named {
         include_str!("../../examples/language/batches/mixed_settlement.cell")
     } else {
@@ -118,10 +118,10 @@ fn artifacts_at(root: &Path, named: bool, opt_level: u8) -> (Vec<CompileResult>,
     }
     let asset = include_str!("../fixtures/mixed_settlement_asset.cell");
     let compiled = vec![
-        compile_at(&source, opt_level),
-        compile_at(asset, opt_level),
-        compile_at(asset, opt_level),
-        compile_at("module auth\nlock authorize() -> bool { return true }", opt_level),
+        compile_at(&source, diagnostics),
+        compile_at(asset, diagnostics),
+        compile_at(asset, diagnostics),
+        compile_at("module auth\nlock authorize() -> bool { return true }", diagnostics),
     ];
     let artifacts = participants(
         root,
@@ -206,17 +206,17 @@ fn input(compiled: &[CompileResult], artifacts: &[Value], count: usize, reverse:
 
 #[test]
 fn mixed_settlement_bundle_materializes_canonical_bytes_and_executes_every_group() {
-    for opt_level in [0, 3] {
-        let named = run_bundle(true, opt_level);
-        let positional = run_bundle(false, opt_level);
-        assert_eq!(named, positional, "named/positional complete settlement transaction bytes O{opt_level}");
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let named = run_bundle(true, diagnostics);
+        let positional = run_bundle(false, diagnostics);
+        assert_eq!(named, positional, "named/positional complete settlement transaction bytes {diagnostics}");
     }
 }
 
-fn run_bundle(named: bool, opt_level: u8) -> Vec<Vec<u8>> {
+fn run_bundle(named: bool, diagnostics: cellscript::CompilerDiagnostics) -> Vec<Vec<u8>> {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
-    let (compiled, artifacts) = artifacts_at(root, named, opt_level);
+    let (compiled, artifacts) = artifacts_at(root, named, diagnostics);
     let mut transactions = Vec::new();
     for count in [1, 3, 6] {
         for reverse in [false, true] {
@@ -234,7 +234,7 @@ fn run_bundle(named: bool, opt_level: u8) -> Vec<Vec<u8>> {
             let vm_tx = packed::Transaction::from_slice(tx.data().as_slice()).unwrap().into_view();
             let fixture = context(&input, &compiled, None);
             let cycles = fixture.verify_tx(&vm_tx, 20_000_000).unwrap();
-            if opt_level == 3 {
+            if diagnostics.is_standard() {
                 if named {
                     super::resources::measure(
                         &format!("Settlement-{count}-{reverse}-valid"),
@@ -256,7 +256,7 @@ fn run_bundle(named: bool, opt_level: u8) -> Vec<Vec<u8>> {
                 }
             }
             eprintln!(
-                "mixed settlement bundle: named={named} O{opt_level} count={count} reverse={reverse} bytes={} cycles={cycles}",
+                "mixed settlement bundle: named={named} {diagnostics} count={count} reverse={reverse} bytes={} cycles={cycles}",
                 tx.data().as_slice().len()
             );
             if count != 6 || reverse {
@@ -332,7 +332,7 @@ fn run_bundle(named: bool, opt_level: u8) -> Vec<Vec<u8>> {
                 cellscript_ckb_adapter::materialize_protocol_bundle_report(&serde_json::to_vec(&bad_report).unwrap()).unwrap();
             let bad_vm_tx = packed::Transaction::from_slice(bad_tx.data().as_slice()).unwrap().into_view();
             assert!(context(&bad, &compiled, None).verify_tx(&bad_vm_tx, 20_000_000).is_err());
-            if named && opt_level == 3 {
+            if named && diagnostics.is_standard() {
                 super::resources::measure("Settlement-6-false-late-amount", &fixture, &bad, &compiled, &bad_vm_tx, &[5, 0, 5, 0]);
                 super::resources::scan_limits("Settlement", 6, &input, &compiled, root, &bad, &[5, 0, 5, 0]);
             }

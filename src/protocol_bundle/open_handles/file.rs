@@ -64,7 +64,6 @@ struct Module {
     environment: String,
     entry_kind: String,
     entry: String,
-    opt_level: u8,
     #[serde(default)]
     target_profile: Option<String>,
 }
@@ -80,13 +79,13 @@ impl Module {
             "artifact" => EntrySelection::Artifact(self.entry.clone()),
             _ => return Err(invalid("unknown frozen source entry kind")),
         };
-        if self.opt_level > 3 || self.environment.is_empty() || self.entry.is_empty() {
-            return Err(invalid("source module requires an environment, entry and optimization level 0..=3"));
+        if self.environment.is_empty() || self.entry.is_empty() {
+            return Err(invalid("source module requires an environment and entry"));
         }
         compile_module(
             &self.root(base)?,
             &self.environment,
-            crate::CompileOptions { opt_level: self.opt_level, target_profile: self.target_profile.clone(), ..Default::default() },
+            crate::CompileOptions { target_profile: self.target_profile.clone(), ..Default::default() },
             selection,
         )
     }
@@ -164,8 +163,8 @@ fn read_file(path: &Path, limit: usize) -> Result<Vec<u8>> {
 pub fn check_protocol_bundle_with_open_handles_file(bundle_path: &Path, request_path: &Path) -> Result<ProtocolBundleReport> {
     let input: ProtocolBundleInput = serde_json::from_slice(&read_file(bundle_path, MAX_MANIFEST_BYTES as usize)?)?;
     let request: Request = serde_json::from_slice(&read_file(request_path, 16 * 1024 * 1024)?)?;
-    let instance_schema = request.schema == "cellscript-protocol-instance-admission-input-v1";
-    if (!instance_schema && request.schema != "cellscript-protocol-open-admission-input-v1")
+    let instance_schema = request.schema == "cellscript-protocol-instance-admission-input-v2";
+    if (!instance_schema && request.schema != "cellscript-protocol-open-admission-input-v2")
         || instance_schema != request.bindings.iter().any(|binding| binding.instance_policy.is_some())
         || request.bindings.is_empty()
         || request.bindings.len() > 32
@@ -271,4 +270,20 @@ pub fn check_protocol_bundle_with_open_handles_file(bundle_path: &Path, request_
         bundle_path.parent().filter(|path| !path.as_os_str().is_empty()).unwrap_or_else(|| Path::new(".")),
         |artifacts, metadata| admit_bindings(&input, artifacts, metadata, &supplied, &bindings),
     )
+}
+
+#[cfg(test)]
+mod compilation_request_tests {
+    use super::Module;
+
+    #[test]
+    fn only_the_unified_strategy_is_available_in_source_requests() {
+        let request = serde_json::json!({"package":"app", "environment":"dev", "entry_kind":"action", "entry":"verify"});
+        assert!(serde_json::from_value::<Module>(request.clone()).is_ok());
+        for field in ["opt_level", "optimization_level", "diagnostics"] {
+            let mut legacy = request.clone();
+            legacy[field] = serde_json::json!(0);
+            assert!(serde_json::from_value::<Module>(legacy).is_err(), "accepted {field}");
+        }
+    }
 }

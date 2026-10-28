@@ -53,7 +53,7 @@ fn compile_policy() -> CompileResult {
         SOURCE,
         CompileOptions {
             edition: CellScriptEdition::Edition2027,
-            opt_level: 2,
+            diagnostics: cellscript::CompilerDiagnostics::default(),
             target: Some("riscv64-elf".to_string()),
             ..Default::default()
         },
@@ -79,7 +79,7 @@ fn compile_nft_policy() -> CompileResult {
         NFT_SOURCE,
         CompileOptions {
             edition: CellScriptEdition::Edition2027,
-            opt_level: 2,
+            diagnostics: cellscript::CompilerDiagnostics::default(),
             target: Some("riscv64-elf".to_string()),
             ..Default::default()
         },

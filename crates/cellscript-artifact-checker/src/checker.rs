@@ -2899,8 +2899,9 @@ fn validate_typed_operation(
             let named_field_type =
                 owner.and_then(|owner| owner.fields.iter().find(|field| field.name == *name)).map(|field| field.ty.as_str());
             let tuple_field_type = tuple_field_type(owner_type, name);
-            let builtin_bytes_field_type =
-                (name == "0" && matches!(canonical_abi_type(owner_type).as_str(), "address" | "hash")).then_some("[u8; 32]");
+            let builtin_bytes_field_type = (name == "0"
+                && matches!(canonical_abi_type(owner_type).as_str(), "address" | "hash" | "ScriptHash"))
+            .then_some("[u8; 32]");
             let nested_field = nested_record_field_type(owner_type, name, types);
             let data_field = crate::cell_data_view::field_type(owner_type, name, types);
             let selected_role = crate::cell_selection::project_role_type(owner_type, name);
@@ -3323,7 +3324,7 @@ fn validate_typed_operation(
                 if call.contract != "versioned-runtime-helper"
                     || call.effect != "runtime-contract"
                     || call.params != ["u64", "u64", "u64", "u64"]
-                    || call.return_type != "hash"
+                    || call.return_type != "SighashAllDigest"
                     || !valid_bounds
                 {
                     return typed_error("bounded zero-lock sighash call does not declare its canonical runtime contract".to_string());
@@ -4034,6 +4035,7 @@ fn tuple_field_type(ty: &str, field: &str) -> Option<String> {
 
 fn builtin_tuple_contract_matches(destination: &str, operands: &[TypedSemanticOperand]) -> bool {
     match (destination, operands) {
+        ("hash", [bytes]) => bytes.ty == "[u8; 32]",
         ("ScriptArgs", [bytes, len, is_empty]) => {
             (canonical_abi_type(&bytes.ty) == "hash"
                 || (bytes.ty.starts_with('[') && collection_element_type(&bytes.ty).as_deref() == Some("u8")))
@@ -5408,7 +5410,7 @@ fn commitment_machine_field_offset(ty: &str, field: &str, types: &[TypedSemantic
     if let Some(layout) = types.iter().find(|layout| canonical_abi_type(&layout.name) == ty) {
         return layout.fields.iter().find(|candidate| candidate.name == field).map(|candidate| i64::from(candidate.offset));
     }
-    if matches!(ty.as_str(), "address" | "hash") && field == "0" {
+    if matches!(ty.as_str(), "address" | "hash" | "ScriptHash") && field == "0" {
         return Some(0);
     }
     if let Some(body) = ty.strip_prefix('[').and_then(|value| value.strip_suffix(']')) {
@@ -5627,7 +5629,7 @@ pub(crate) fn committed_state_type_width(ty: &str, types: &[TypedSemanticType]) 
         "u32" | "i32" => Some(4),
         "u64" => Some(8),
         "u128" => Some(16),
-        "address" | "hash" => Some(32),
+        "address" | "hash" | "ScriptHash" | "SighashAllDigest" => Some(32),
         _ => None,
     };
     if primitive.is_some() {

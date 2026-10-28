@@ -13,10 +13,10 @@ private fn check_reserve() -> bool {
     if ckb::cell_count(source::group_input(0)) != 1 { return false }
     let reserve = source::group_input(0)
     if ckb::cell_data_size(reserve) != 104 { return false }
-    ckb::require_cell_lock_args_hash(reserve, ckb::cell_data_blake2b_span(reserve, 8, 96))
-    let pool = ckb::cell_data_hash_at(reserve, 8)
-    let controller = ckb::cell_data_hash_at(reserve, 40)
-    let asset = ckb::cell_data_hash_at(reserve, 72)
+    ckb::require_cell_lock_args32(reserve, ckb::cell_data_blake2b_span(reserve, 8, 96).0)
+    let pool = Hash::from_bytes(ckb::cell_data_bytes32(reserve, 8))
+    let controller = Hash::from_bytes(ckb::cell_data_bytes32(reserve, 40))
+    let asset = Hash::from_bytes(ckb::cell_data_bytes32(reserve, 72))
     ckb::require_cell_type_hash(reserve, asset)
     let inputs = ckb::cell_count(source::input(0))
     let outputs = ckb::cell_count(source::output(0))

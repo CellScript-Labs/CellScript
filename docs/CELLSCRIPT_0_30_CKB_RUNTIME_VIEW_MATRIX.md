@@ -8,6 +8,11 @@
 public publication remains separate under #27. Independent review was
 explicitly waived by the maintainer, not performed or reported as passed.
 
+The acceptance statement above is historical. The API table below follows the
+current post-alpha candidate, including raw `[u8; 32]` reads and removal of
+implicit witness fields. It does not extend the 0.30 acceptance receipt to the
+current uncommitted compiler. See the [retirement work record](CELLSCRIPT_BYTE_BUFFER_RETIREMENT.md).
+
 Compile metadata schema 72 records the view contract name in
 `runtime.ckb_runtime_view_contract` and binds
 `cellscript-ckb-runtime-access-provenance-v1` in
@@ -62,21 +67,21 @@ indexed item fails through the field-specific terminal error.
 | `ckb::group_output<T>(i)` | GroupOutput | Same field set as `OutputView<T>` | `OutputView<T>` | Same fixed widths; current Script-group-relative index. |
 | `ckb::cell_dep(i)` | CellDep | `capacity`, `occupied_capacity`, `unoccupied_capacity`, `data_size`, `data_hash`, `lock_hash`, `type_hash`, `lock`, `type_script` | `CellDepView` | Same fixed widths. Resolved dep position is runtime evidence; original DepGroup/OutPoint identity remains builder or manifest evidence. |
 | `ckb::header_dep(i)` | HeaderDep | `epoch_number: EpochNumber`, `epoch_start_block_number: BlockNumber`, `epoch_length: EpochLength`, `block_number: BlockNumber`, `timestamp: TimestampMillis` | `HeaderDepView` | Epoch fields are exact 8-byte `LOAD_HEADER_BY_FIELD` reads. Block/timestamp fields require an exact 208-byte `LOAD_HEADER` result and fixed RawHeader offsets. Bad source uses error 44, malformed size uses error 4, and missing/one-past-last HeaderDep uses error 45. |
-| `witness::args(i)` | Witness/Input | `size`, fixed 32-byte `lock`, `input_type`, `output_type` projections | `WitnessArgsView` | `size` is 8 bytes. Field projections stream the selected bytes and are executable only when that Molecule field is exactly 32 bytes, regardless of sibling-field or total WitnessArgs size; absent or non-32-byte values use error 4 and malformed/truncated values use errors 42/43. |
+| `witness::args(i)` | Witness/Input | `size`; explicit `witness::*_exact32(view)` reads | `WitnessArgsView` | `size` is 8 bytes. Field projections stream the selected bytes and are executable only when that Molecule field is exactly 32 bytes, regardless of sibling-field or total WitnessArgs size; absent or non-32-byte values use error 4 and malformed/truncated values use errors 42/43. |
 | `witness::bounded_raw(view, max)` | inherited Input/Output/GroupInput/GroupOutput | `size`, exact byte/u32/u64 reads, full-view CKB Blake2b | `WitnessBytesView<raw,max>` | `max` is a literal in `0..=65536`; the logical value is the complete serialized witness. Reads and hashing stream from `LOAD_WITNESS` without materializing the value. |
 | `witness::bounded_lock(view, max)` | inherited witness source | Same bounded operations over `WitnessArgs.lock` | `WitnessBytesView<lock,max>` | Missing differs from `Some(empty)`; absent uses error 67, values above `max` use 68, and malformed field encoding uses 42/43. This read-only view does not grant signer authority. |
 | `witness::bounded_entry(view, max)` | inherited witness source | Same bounded operations over the one `WitnessArgs.input_type` value | `WitnessBytesView<entry,max>` | The logical bytes are the existing `CSARGv1` entry envelope when that ABI is used. This is the shared owner for bounded plan, authorization, and entry consumers, not a second payload. |
 | `witness::bounded_output_type(view, max)` | inherited witness source | Same bounded operations over `WitnessArgs.output_type` | `WitnessBytesView<output_type,max>` | The owner is distinct from `lock` and `entry`; all offsets are relative to the selected field payload. |
 | `ckb::input_out_point(input)` or `input.out_point` | inherited Input/GroupInput | `tx_hash`, `index` | `OutPoint` | 32-byte transaction hash plus the exact 4-byte CKB `u32` index; incompatible source or malformed width terminates. |
-| `ckb::lock_script(cell)` or `cell.lock` | inherited Cell source | `hash`, `code_hash`, `hash_type`, `args_empty`, `args_hash` | `ScriptView` | Complete `hash` is `ScriptHash`; `code_hash` is raw `Hash`; `args_hash` is the exact 32-byte args projection represented as `Hash`, not a digest over arbitrary args. Scalar fields are bounded and Molecule-checked. |
+| `ckb::lock_script(cell)` or `cell.lock` | inherited Cell source | `hash`, `code_hash`, `hash_type`, `args_empty`, `args32` | `ScriptView` | Complete `hash` is `ScriptHash`; `code_hash` is raw `Hash`; `args32` is the exact 32-byte args projection returned as `[u8; 32]`, not a digest over arbitrary args. Scalar fields are bounded and Molecule-checked. |
 | `ckb::type_script(cell)` or `cell.type_script` | inherited Cell source | Same as Lock `ScriptView` | `ScriptView` | An absent Type Script is not fabricated. Use `ckb::cell_has_type(cell)` before a conditional read. |
 
-`ScriptHash`, `Hash`, and `Address` are separate source domains. `args_hash`
+`ScriptHash`, `Hash`, and `Address` are separate source domains. `args32`
 requires Script args of exactly 32 bytes and returns error 38 for any other
 width; `args_empty` handles the arbitrary-width empty/nonempty distinction.
 A complete
 Lock/Type Script hash from a typed view is `ScriptHash`. A code hash, data hash,
-transaction hash, or args hash is `Hash`. `ckb::script_hash(hash)` is an
+or transaction hash is `Hash`. Raw Script args are `[u8; 32]`. `ckb::script_hash(hash)` is an
 explicit assertion that already trusted raw bytes represent a complete Script
 hash; it does not prove existence, deployment, or authorization.
 

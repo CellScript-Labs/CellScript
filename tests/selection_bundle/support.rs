@@ -59,15 +59,15 @@ pub(super) fn packed_script(script: &ProtocolScriptIdentity) -> packed::Script {
 }
 
 pub(super) fn compile(source: &str) -> CompileResult {
-    compile_at(source, 3)
+    compile_at(source, cellscript::CompilerDiagnostics::default())
 }
 
-pub(super) fn compile_at(source: &str, opt_level: u8) -> CompileResult {
+pub(super) fn compile_at(source: &str, diagnostics: cellscript::CompilerDiagnostics) -> CompileResult {
     cellscript::compile_with_executable_surface_policy(
         source,
         CompileOptions {
             edition: NEXT_EDITION,
-            opt_level,
+            diagnostics,
             target: Some("riscv64-elf".into()),
             target_profile: Some("ckb-type-hash".into()),
             ..Default::default()
@@ -83,7 +83,7 @@ pub(super) fn compile_package(
     root: &Path,
     application: &str,
     library: &str,
-    opt_level: u8,
+    diagnostics: cellscript::CompilerDiagnostics,
 ) -> cellscript::error::Result<CompileResult> {
     for (name, source, dependencies) in
         [("rules", library, ""), ("application", application, "\n[dependencies]\nrules = { path = \"../rules\" }\n")]
@@ -92,7 +92,7 @@ pub(super) fn compile_package(
         std::fs::create_dir_all(package.join("src")).unwrap();
         std::fs::write(
             package.join("Cell.toml"),
-            format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2027\"\n{dependencies}"),
+            format!("[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2027\"\n{dependencies}"),
         )
         .unwrap();
         std::fs::write(package.join("src/main.cell"), source).unwrap();
@@ -105,7 +105,7 @@ pub(super) fn compile_package(
         camino::Utf8Path::from_path(&application).unwrap(),
         CompileOptions {
             edition: NEXT_EDITION,
-            opt_level,
+            diagnostics,
             target: Some("riscv64-elf".into()),
             target_profile: Some("ckb-type-hash".into()),
             ..Default::default()

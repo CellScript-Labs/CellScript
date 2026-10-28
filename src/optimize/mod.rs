@@ -6,6 +6,7 @@
 
 use crate::ast::*;
 use crate::error::Result;
+use crate::{CompilerDiagnostics, OptimizationPass};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,13 +19,13 @@ enum ConstValue {
 }
 
 /// Optimize a module in place.
-pub fn optimize_module(module: &mut Module, level: u8) -> Result<()> {
-    Optimizer::new(level).optimize_module(module)
+pub fn optimize_module(module: &mut Module, diagnostics: CompilerDiagnostics) -> Result<()> {
+    Optimizer::new(diagnostics).optimize_module(module)
 }
 
 /// Syntax-local optimizer.
 pub struct Optimizer {
-    level: u8,
+    diagnostics: CompilerDiagnostics,
     // A None entry is a lexical binding, not a missing constant. It prevents
     // a parameter or a nonconstant local from exposing an outer constant.
     scopes: Vec<HashMap<String, Option<ConstValue>>>,
@@ -40,18 +41,16 @@ struct InlineFunction {
 }
 
 impl Optimizer {
-    pub fn new(level: u8) -> Self {
-        Self { level, scopes: vec![HashMap::new()], pure_functions: HashSet::new(), inline_functions: HashMap::new() }
+    pub fn new(diagnostics: CompilerDiagnostics) -> Self {
+        Self { diagnostics, scopes: vec![HashMap::new()], pure_functions: HashSet::new(), inline_functions: HashMap::new() }
     }
 
     pub fn optimize_module(&mut self, module: &mut Module) -> Result<()> {
-        if self.level == 0 {
-            return Ok(());
+        if self.diagnostics.enabled(OptimizationPass::ConstantFolding) {
+            self.seed_top_level_constants(module);
         }
-
-        self.seed_top_level_constants(module);
         self.seed_pure_functions(module);
-        if self.level >= 1 {
+        if self.diagnostics.enabled(OptimizationPass::Inlining) {
             self.seed_inline_functions(module);
         }
 
@@ -86,7 +85,7 @@ impl Optimizer {
             }
         }
 
-        if self.level >= 2 {
+        if self.diagnostics.enabled(OptimizationPass::DeadCode) {
             eliminate_unused_functions(module);
         }
 
@@ -107,7 +106,7 @@ impl Optimizer {
         for stmt in stmts {
             optimized.extend(self.optimize_stmt(stmt)?);
         }
-        if self.level >= 2 {
+        if self.diagnostics.enabled(OptimizationPass::DeadCode) {
             Ok(eliminate_unused_lets(optimized, &self.pure_functions))
         } else {
             Ok(optimized)
@@ -147,7 +146,9 @@ impl Optimizer {
                     None
                 };
 
-                if let Some(ConstValue::Bool(value)) = self.try_eval_const(&condition) {
+                if self.diagnostics.enabled(OptimizationPass::ConstantFolding)
+                    && let Some(ConstValue::Bool(value)) = self.try_eval_const(&condition)
+                {
                     if value {
                         return Ok(then_branch);
                     }
@@ -168,7 +169,9 @@ impl Optimizer {
             })]),
             Stmt::While(while_stmt) => {
                 let condition = self.optimize_expr(&while_stmt.condition)?;
-                if matches!(self.try_eval_const(&condition), Some(ConstValue::Bool(false))) {
+                if self.diagnostics.enabled(OptimizationPass::ConstantFolding)
+                    && matches!(self.try_eval_const(&condition), Some(ConstValue::Bool(false)))
+                {
                     return Ok(Vec::new());
                 }
                 Ok(vec![Stmt::While(WhileStmt {
@@ -195,7 +198,11 @@ impl Optimizer {
     fn optimize_expr(&mut self, expr: &Expr) -> Result<Expr> {
         match expr {
             Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) => Ok(expr.clone()),
-            Expr::Identifier(name) => Ok(self.lookup_const(name).map(const_to_expr).unwrap_or_else(|| expr.clone())),
+            Expr::Identifier(name) => Ok(if self.diagnostics.enabled(OptimizationPass::ConstantFolding) {
+                self.lookup_const(name).map(const_to_expr).unwrap_or_else(|| expr.clone())
+            } else {
+                expr.clone()
+            }),
             Expr::Assign(assign) => Ok(Expr::Assign(AssignExpr {
                 target: Box::new(self.optimize_assignment_target(&assign.target)?),
                 op: assign.op,
@@ -210,7 +217,9 @@ impl Optimizer {
                 {
                     return Ok(const_to_expr(value));
                 }
-                if let Some(simplified) = simplify_binary(bin.op, &left, &right) {
+                if self.diagnostics.enabled(OptimizationPass::ConstantFolding)
+                    && let Some(simplified) = simplify_binary(bin.op, &left, &right)
+                {
                     return Ok(simplified);
                 }
                 Ok(Expr::Binary(BinaryExpr { op: bin.op, left: Box::new(left), right: Box::new(right), span: bin.span }))
@@ -220,7 +229,8 @@ impl Optimizer {
                 if let Some(value) = self.try_eval_const(&inner).and_then(|value| fold_unary(unary.op, &value)) {
                     return Ok(const_to_expr(value));
                 }
-                if unary.op == UnaryOp::Not
+                if self.diagnostics.enabled(OptimizationPass::ConstantFolding)
+                    && unary.op == UnaryOp::Not
                     && let Expr::Unary(nested) = &inner
                     && nested.op == UnaryOp::Not
                 {
@@ -313,7 +323,9 @@ impl Optimizer {
                 let condition = self.optimize_expr(&if_expr.condition)?;
                 let then_branch = self.optimize_expr(&if_expr.then_branch)?;
                 let else_branch = self.optimize_expr(&if_expr.else_branch)?;
-                if let Some(ConstValue::Bool(value)) = self.try_eval_const(&condition) {
+                if self.diagnostics.enabled(OptimizationPass::ConstantFolding)
+                    && let Some(ConstValue::Bool(value)) = self.try_eval_const(&condition)
+                {
                     return Ok(if value { then_branch } else { else_branch });
                 }
                 Ok(Expr::If(IfExpr {
@@ -376,6 +388,9 @@ impl Optimizer {
     }
 
     fn try_eval_const(&self, expr: &Expr) -> Option<ConstValue> {
+        if !self.diagnostics.enabled(OptimizationPass::ConstantFolding) {
+            return None;
+        }
         match expr {
             Expr::Integer(value) => Some(u64::try_from(*value).map(ConstValue::U64).unwrap_or(ConstValue::U128(*value))),
             Expr::Bool(value) => Some(ConstValue::Bool(*value)),
@@ -691,7 +706,9 @@ fn eliminate_unused_functions(module: &mut Module) {
         }
     }
 
+    let local_prefix = format!("{}::", module.name);
     while let Some(name) = pending.pop() {
+        let name = name.strip_prefix(&local_prefix).unwrap_or(&name).to_string();
         if !reachable.insert(name.clone()) {
             continue;
         }
@@ -1235,7 +1252,7 @@ mod tests {
 
     #[test]
     fn folds_integer_arithmetic() {
-        let mut optimizer = Optimizer::new(1);
+        let mut optimizer = Optimizer::new(CompilerDiagnostics::default());
         let expr = Expr::Binary(BinaryExpr {
             op: BinaryOp::Add,
             left: Box::new(Expr::Integer(2)),
@@ -1256,7 +1273,7 @@ mod tests {
             (BinaryOp::Sub, u64::MAX as u128 + 1, u128::MAX),
             (BinaryOp::Mul, u128::MAX, u128::MAX),
         ] {
-            let mut optimizer = Optimizer::new(1);
+            let mut optimizer = Optimizer::new(CompilerDiagnostics::default());
             let expr = Expr::Binary(BinaryExpr {
                 op,
                 left: Box::new(Expr::Integer(left)),
@@ -1273,7 +1290,7 @@ mod tests {
 
     #[test]
     fn folds_boolean_expressions() {
-        let mut optimizer = Optimizer::new(1);
+        let mut optimizer = Optimizer::new(CompilerDiagnostics::default());
         let expr = Expr::Unary(UnaryExpr {
             op: UnaryOp::Not,
             expr: Box::new(Expr::Binary(BinaryExpr {
@@ -1320,7 +1337,7 @@ mod tests {
             span: Span::default(),
         };
 
-        optimize_module(&mut module, 1).unwrap();
+        optimize_module(&mut module, CompilerDiagnostics::default()).unwrap();
 
         let Item::Action(action) = &module.items[0] else {
             panic!("expected action");
@@ -1410,7 +1427,7 @@ mod tests {
             span: Span::default(),
         };
 
-        optimize_module(&mut module, 2).unwrap();
+        optimize_module(&mut module, CompilerDiagnostics::default()).unwrap();
 
         assert!(
             module.items.iter().all(|item| !matches!(item, Item::Function(function) if function.name == "unused")),
@@ -1442,7 +1459,7 @@ action check() {
     let unused_wrapper = wrapper()
 }
 "#;
-        for level in [2, 3, 0, 1] {
+        for level in [CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()] {
             let mut module = crate::frontend::parse(source, crate::CellScriptEdition::Edition2026).unwrap();
             optimize_module(&mut module, level).unwrap();
             let action = module
@@ -1453,7 +1470,7 @@ action check() {
                     _ => None,
                 })
                 .unwrap();
-            assert_eq!(action.body.len(), 4, "deferred calls disappeared at optimization level {level}");
+            assert_eq!(action.body.len(), 4, "deferred calls disappeared at strategy {level}");
             let mut calls = Vec::new();
             collect_call_names_from_stmts(&action.body, &mut calls);
             assert_eq!(calls.iter().filter(|name| *name == "env::sighash_all").count(), 2);
@@ -1475,7 +1492,7 @@ action check() -> u64 {
     return ignore(wrapper())
 }
 "#;
-        for level in 0..=3 {
+        for level in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
             let mut module = crate::frontend::parse(source, crate::CellScriptEdition::Edition2026).unwrap();
             optimize_module(&mut module, level).unwrap();
             let action = module
@@ -1486,7 +1503,7 @@ action check() -> u64 {
                     _ => None,
                 })
                 .unwrap();
-            assert_eq!(action.body.len(), 2, "deferred argument disappeared at optimization level {level}");
+            assert_eq!(action.body.len(), 2, "deferred argument disappeared at strategy {level}");
             let mut calls = Vec::new();
             collect_call_names_from_stmts(&action.body, &mut calls);
             assert!(calls.iter().any(|name| name == "env::sighash_all"));
@@ -1509,7 +1526,7 @@ action check() {
     let _ = ignore(imported_digest())
 }
 "#;
-        for level in 0..=3 {
+        for level in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
             let mut module = crate::frontend::parse(source, crate::CellScriptEdition::Edition2026).unwrap();
             optimize_module(&mut module, level).unwrap();
             let action = module
@@ -1520,7 +1537,7 @@ action check() {
                     _ => None,
                 })
                 .unwrap();
-            assert_eq!(action.body.len(), 3, "imported calls disappeared at optimization level {level}");
+            assert_eq!(action.body.len(), 3, "imported calls disappeared at strategy {level}");
             let mut calls = Vec::new();
             collect_call_names_from_stmts(&action.body, &mut calls);
             assert_eq!(calls.iter().filter(|name| *name == "imported_digest").count(), 2);
@@ -1541,7 +1558,8 @@ action check() -> u64 {
     return wrapper(40)
 }
 "#;
-        for level in [2, 3] {
+        {
+            let level = crate::CompilerDiagnostics::default();
             let mut module = crate::frontend::parse(source, crate::CellScriptEdition::Edition2026).unwrap();
             optimize_module(&mut module, level).unwrap();
             assert!(module.items.iter().all(|item| !matches!(item, Item::Function(_))));

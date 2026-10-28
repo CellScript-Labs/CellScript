@@ -5,10 +5,10 @@ use cellscript_artifact_checker::{
     CheckerBudgets,
 };
 
-fn project(source: &str, opt_level: u8) -> CheckedModuleProjection {
+fn project(source: &str, diagnostics: cellscript::CompilerDiagnostics) -> CheckedModuleProjection {
     let compiled = compile_with_executable_surface_policy(
         source,
-        CompileOptions { source_contracts: true, target: Some("riscv64-elf".into()), opt_level, ..CompileOptions::default() },
+        CompileOptions { source_contracts: true, target: Some("riscv64-elf".into()), diagnostics, ..CompileOptions::default() },
         ExecutableSurfacePolicy::DenyFailClosed,
     )
     .unwrap();
@@ -57,7 +57,7 @@ public action verify(witness value: Envelope) {
 /// argument nominal itself, so a candidate cannot silently swap them.
 #[test]
 fn retained_private_instances_project_phantom_identity_dependencies() {
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let required = project(PHANTOM_IDENTITIES, opt);
         let wire: serde_json::Value = serde_json::from_slice(&required.canonical_bytes().unwrap()).unwrap();
         for key in [
@@ -100,7 +100,7 @@ fn retained_private_instances_project_phantom_identity_dependencies() {
 
 #[test]
 fn directional_projection_preserves_required_contracts_and_allows_candidate_additions() {
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let required = project(BASE, opt);
         let alternative = project(&BASE.replace("value.count > 0", "value.count > 1"), opt);
         assert_eq!(required.identity(), alternative.identity());
@@ -163,7 +163,7 @@ fn coherent_incompatible_sources_reject_after_successful_independent_inspection(
         ("public-omission", BASE.replace("public fn unused", "private fn unused")),
         ("module-owner", BASE.replace("module projection", "module other")),
     ];
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let required = project(BASE, opt);
         for (mutation, source) in &mutations {
             let candidate = project(source, opt);
@@ -174,9 +174,9 @@ fn coherent_incompatible_sources_reject_after_successful_independent_inspection(
 
 #[test]
 fn optimizer_pruned_helpers_keep_declarations_without_inventing_execution() {
-    let first = project(BASE, 0);
+    let first = project(BASE, cellscript::CompilerDiagnostics::without_optimizations());
     let baseline: serde_json::Value = serde_json::from_slice(&first.canonical_bytes().unwrap()).unwrap();
-    for opt in 1..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let next = project(BASE, opt);
         let wire: serde_json::Value = serde_json::from_slice(&next.canonical_bytes().unwrap()).unwrap();
         for key in [
@@ -192,14 +192,14 @@ fn optimizer_pruned_helpers_keep_declarations_without_inventing_execution() {
             assert_eq!(helper["dispatch"]["kind"], "retained-helper");
         }
     }
-    let optimized = project(BASE, 3);
+    let optimized = project(BASE, cellscript::CompilerDiagnostics::default());
     let wire: serde_json::Value = serde_json::from_slice(&optimized.canonical_bytes().unwrap()).unwrap();
     assert!(wire["contracts"].get("effective:projection::unused").is_none());
 }
 
 #[test]
 fn inferred_effects_may_only_become_more_restrictive() {
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let pure = project("module effects\npublic action verify() { verification require true }", opt);
         let read = project("module effects\npublic action verify() { verification let amount = ckb::cell_capacity(source::input(0)) require amount > 0 }", opt);
         let pure_wire: serde_json::Value = serde_json::from_slice(&pure.canonical_bytes().unwrap()).unwrap();
@@ -219,7 +219,7 @@ fn inferred_effects_may_only_become_more_restrictive() {
 /// it), never demand a new one.
 #[test]
 fn binder_constraints_may_only_relax_directionally() {
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let required = project(&BASE.replace("Marker<phantom T: copy>", "Marker<phantom T: copy + drop>"), opt);
         let relaxed = project(BASE, opt);
         required.check_required_contracts(&relaxed).unwrap();
@@ -240,11 +240,16 @@ fn policy_dispatch_tags_are_required_but_unrelated_candidate_variants_are_allowe
     let path = directory.path().join("main.cell");
     let source = "module dispatch\nresource Token has store, consume { amount: u64 }\naction mint(witness amount: u64, witness recipient: Address) { verification require amount > 0 create Token { amount: amount } with_lock(recipient) }\naction burn(input token: Token) { verification consume token }\naction extra(input token: Token) { verification consume token }";
     std::fs::write(&path, source).unwrap();
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compile = |actions: Vec<ArtifactAction>| {
             let compiled = compile_path_with_executable_surface_policy(
                 path.to_str().unwrap(),
-                CompileOptions { source_contracts: true, target: Some("riscv64-elf".into()), opt_level, ..CompileOptions::default() },
+                CompileOptions {
+                    source_contracts: true,
+                    target: Some("riscv64-elf".into()),
+                    diagnostics,
+                    ..CompileOptions::default()
+                },
                 Some(CompileEntryScope::Artifact(ArtifactDeclaration {
                     name: "token-policy".into(),
                     context: ArtifactContext::TypeGroup { resource: "Token".into() },
@@ -279,12 +284,12 @@ fn policy_dispatch_tags_are_required_but_unrelated_candidate_variants_are_allowe
 
 #[test]
 fn source_contracts_are_explicit_evidence_and_do_not_change_machine_code() {
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let mut bundles = Vec::new();
         for source_contracts in [false, true] {
             let compiled = compile_with_executable_surface_policy(
                 BASE,
-                CompileOptions { source_contracts, target: Some("riscv64-elf".into()), opt_level, ..CompileOptions::default() },
+                CompileOptions { source_contracts, target: Some("riscv64-elf".into()), diagnostics, ..CompileOptions::default() },
                 ExecutableSurfacePolicy::DenyFailClosed,
             )
             .unwrap();
@@ -302,7 +307,7 @@ fn source_contracts_are_explicit_evidence_and_do_not_change_machine_code() {
             assert!(!inspection.report().semantic_equivalence_claimed);
             bundles.push(compiled);
         }
-        assert_eq!(bundles[0].artifact_bytes, bundles[1].artifact_bytes, "opt={opt_level}");
+        assert_eq!(bundles[0].artifact_bytes, bundles[1].artifact_bytes, "opt={diagnostics}");
         assert_eq!(bundles[0].metadata.public_interface, bundles[1].metadata.public_interface);
         assert_eq!(bundles[0].metadata.interface_hash, bundles[1].metadata.interface_hash);
         assert_ne!(bundles[0].metadata.typed_semantics_hash, bundles[1].metadata.typed_semantics_hash);

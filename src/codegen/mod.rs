@@ -357,7 +357,6 @@ fn is_v014_runtime_helper(func: &str) -> bool {
             | "__ckb_cell_lock_hash"
             | "__ckb_cell_type_hash"
             | "__ckb_cell_data_hash_field"
-            | "__ckb_cell_data_hash"
             | "__ckb_cell_data_bytes32"
             | "__ckb_cell_data_blake2b_span"
             | "__ckb_witness_blake2b_span"
@@ -372,8 +371,8 @@ fn is_v014_runtime_helper(func: &str) -> bool {
             | "__ckb_cell_type_hash_type"
             | "__ckb_cell_lock_args_empty"
             | "__ckb_cell_type_args_empty"
-            | "__ckb_cell_lock_args_hash"
-            | "__ckb_cell_type_args_hash"
+            | "__ckb_cell_lock_args32"
+            | "__ckb_cell_type_args32"
             | "__ckb_require_cell_lock_hash"
             | "__ckb_require_cell_type_hash"
             | "__ckb_require_cell_lock_exact_handle"
@@ -393,14 +392,14 @@ fn is_v014_runtime_helper(func: &str) -> bool {
             | "__ckb_require_current_script_args_empty"
             | "__ckb_require_cell_lock_args_empty"
             | "__ckb_require_cell_type_args_empty"
-            | "__ckb_require_cell_lock_args_hash"
-            | "__ckb_require_cell_type_args_hash"
+            | "__ckb_require_cell_lock_args32"
+            | "__ckb_require_cell_type_args32"
             | "__ckb_require_cell_lock_args_exact"
             | "__ckb_require_cell_type_args_exact"
-            | "__ckb_require_cell_lock_args_prefix_hash"
-            | "__ckb_require_cell_type_args_prefix_hash"
-            | "__ckb_require_cell_lock_args_suffix_hash"
-            | "__ckb_require_cell_type_args_suffix_hash"
+            | "__ckb_require_cell_lock_args_prefix32"
+            | "__ckb_require_cell_type_args_prefix32"
+            | "__ckb_require_cell_lock_args_suffix32"
+            | "__ckb_require_cell_type_args_suffix32"
             | "__ckb_require_cell_lock_script_hash_type"
             | "__ckb_require_cell_type_script_hash_type"
             | "__c256_require_u128_product_lte"
@@ -440,10 +439,6 @@ fn is_v014_runtime_helper(func: &str) -> bool {
             | "__xudt_require_group_amount_conserved"
             | "__xudt_require_group_amount_minted"
             | "__xudt_require_group_amount_burned"
-            | "__ckb_witness_raw"
-            | "__ckb_witness_lock"
-            | "__ckb_witness_input_type"
-            | "__ckb_witness_output_type"
             | "__ckb_witness_lock_exact32"
             | "__ckb_witness_input_type_exact32"
             | "__ckb_witness_output_type_exact32"
@@ -560,7 +555,7 @@ enum ScriptScalarFieldRead {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum ScriptArgsHashRequirementMode {
+enum ScriptArgsBytes32RequirementMode {
     Exact32,
     Prefix32,
     Suffix32,
@@ -789,17 +784,6 @@ fn fixed_scalar_operand_width(operand: &IrOperand) -> Option<usize> {
     }
 }
 
-fn simple_scalar_operand(operand: &IrOperand) -> bool {
-    match operand {
-        IrOperand::Const(IrConst::Bool(_) | IrConst::U8(_) | IrConst::U16(_) | IrConst::U32(_) | IrConst::U64(_)) => true,
-        IrOperand::Var(var) => {
-            matches!(var.ty, IrType::Bool | IrType::U8 | IrType::U16 | IrType::U32 | IrType::I32 | IrType::U64)
-                || is_ckb_temporal_scalar_ir_type(&var.ty)
-        }
-        _ => false,
-    }
-}
-
 fn ckb_epoch_since_operand_type(operand: &IrOperand) -> Option<&str> {
     let IrOperand::Var(var) = operand else {
         return None;
@@ -998,12 +982,14 @@ fn aggregate_type_label(ty: &IrType) -> String {
         IrType::Array(_, len) => format!("array{}", len),
         IrType::Address => "Address".to_string(),
         IrType::Hash => "Hash".to_string(),
+        IrType::Named(name) if is_ckb_fixed_hash_domain_name(name) => name.clone(),
         other => format!("{:?}", other),
     }
 }
 
 fn aggregate_field_layout(ty: &IrType, field: &str) -> Option<SchemaFieldLayout> {
     match ty {
+        IrType::Named(name) if name == CKB_SCRIPT_HASH_TYPE && field == "0" => aggregate_field_layout(&IrType::Hash, field),
         IrType::Tuple(items) => {
             let index = field.parse::<usize>().ok()?;
             let field_ty = items.get(index)?.clone();
@@ -1142,7 +1128,7 @@ struct EntryWitnessPayloadArg {
 
 #[derive(Debug, Clone)]
 pub struct CodegenOptions {
-    pub opt_level: u8,
+    pub diagnostics: crate::CompilerDiagnostics,
     pub debug: bool,
     /// Artifact target profile. CKB selects the CKB syscall/source ABI.
     pub target_profile: TargetProfile,
@@ -1150,7 +1136,7 @@ pub struct CodegenOptions {
 
 impl Default for CodegenOptions {
     fn default() -> Self {
-        Self { opt_level: 0, debug: false, target_profile: TargetProfile::Ckb }
+        Self { diagnostics: crate::CompilerDiagnostics::default(), debug: false, target_profile: TargetProfile::Ckb }
     }
 }
 
@@ -1354,10 +1340,13 @@ impl CodeGenerator {
         }
     }
 
-    fn generic_value_type_width(&self, ty: &IrType) -> Option<usize> {
+    fn fixed_named_parameter_width(&self, ty: &IrType) -> Option<usize> {
         let IrType::Named(name) = ty else {
             return None;
         };
+        if is_ckb_fixed_hash_domain_name(name) {
+            return Some(32);
+        }
         name.contains("__mono__").then(|| self.fixed_named_type_width(ty)).flatten()
     }
 
@@ -1581,8 +1570,8 @@ impl CodeGenerator {
             .filter(|instruction| matches!(instruction, IrInstruction::Call { func, .. } if is_cached_exact_read_helper(func)))
             .count();
         self.module_uses_exact_read_cache = exact_read_sites > 0;
-        self.module_uses_exact_read_hot_cache =
-            self.options.opt_level > 0 && exact_read_sites >= RUNTIME_EXACT_READ_HOT_SITE_THRESHOLD;
+        self.module_uses_exact_read_hot_cache = self.options.diagnostics.enabled(crate::OptimizationPass::ExactReadHotCache)
+            && exact_read_sites >= RUNTIME_EXACT_READ_HOT_SITE_THRESHOLD;
         self.auto_aggregate_runtime_helpers_by_action = auto_lowered_aggregate_runtime_helpers_by_action(ir);
         for item in &ir.items {
             if let IrItem::TypeDef(type_def) = item {
@@ -1679,7 +1668,7 @@ impl CodeGenerator {
             return Err(CompileError::without_span(message));
         }
 
-        if self.options.opt_level > 0 {
+        if self.options.diagnostics.enabled(crate::OptimizationPass::StackReloads) {
             eliminate_immediate_stack_reloads(&mut self.assembly);
         }
 
@@ -1698,7 +1687,12 @@ impl CodeGenerator {
 
     fn emit_header(&mut self) {
         self.assembly.push("# CellScript Generated Assembly".to_string());
-        self.assembly.push(format!("# opt_level={}, debug={}", self.options.opt_level, self.options.debug));
+        self.assembly.push(format!(
+            "# compilation_policy={}, diagnostics={}, debug={}",
+            crate::COMPILATION_POLICY,
+            self.options.diagnostics,
+            self.options.debug
+        ));
         self.assembly.push(".option arch, +rv64imac_zbb".to_string());
         self.assembly.push("".to_string());
     }
@@ -2216,7 +2210,7 @@ impl CodeGenerator {
                 continue;
             } else if named_type_name(&param.ty).is_some_and(|name| self.cell_type_names.contains(name)) {
                 self.schema_pointer_vars.insert(param.binding.id);
-            } else if self.generic_value_type_width(&param.ty).is_some()
+            } else if self.fixed_named_parameter_width(&param.ty).is_some()
                 || fixed_byte_pointer_param_width(&param.ty).is_some()
                 || fixed_aggregate_pointer_param_width(&param.ty).is_some()
             {
@@ -3434,7 +3428,7 @@ impl CodeGenerator {
     }
 
     fn can_fuse_branch(&self, instruction: &IrInstruction, terminator: &IrTerminator) -> bool {
-        if self.options.opt_level == 0 {
+        if !self.options.diagnostics.enabled(crate::OptimizationPass::BranchFusion) {
             return false;
         }
         let IrInstruction::Binary { dest, op, left, right } = instruction else {
@@ -3446,8 +3440,11 @@ impl CodeGenerator {
         dest.id == cond.id
             && self.branch_only_vars.contains(&dest.id)
             && matches!(dest.ty, IrType::Bool)
-            && simple_scalar_operand(left)
-            && simple_scalar_operand(right)
+            // Nominal temporal values may need semantic comparison (epoch
+            // fractions in particular), rather than comparing packed words.
+            // Only the primitive scalar instruction contract can be fused.
+            && scalar_values::scalar_operand(left)
+            && scalar_values::scalar_operand(right)
             && matches!(op, BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge)
     }
 
@@ -3846,7 +3843,7 @@ impl CodeGenerator {
     }
 
     fn emit_fixed_aggregate_tuple(&mut self, dest: &IrVar, fields: &[IrOperand]) -> bool {
-        if !matches!(dest.ty, IrType::Tuple(_) | IrType::Array(_, _)) {
+        if !matches!(dest.ty, IrType::Tuple(_) | IrType::Array(_, _) | IrType::Hash) {
             return false;
         }
         let Some(width) = type_static_length(&dest.ty).filter(|width| *width > 0) else {

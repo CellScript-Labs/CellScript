@@ -2,14 +2,14 @@ use super::*;
 
 const PREFIX: &str = ".Lallocated_scalar_";
 
-fn fixture(ty: &str, opt_level: u8) -> Fixture {
+fn fixture(ty: &str, diagnostics: cellscript::CompilerDiagnostics) -> Fixture {
     let source = crate::allocated_scalar_definitions::source(ty);
     Fixture::from_result(
         compile(
             &source,
-            CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
         )
-        .unwrap_or_else(|error| panic!("{ty}/O{opt_level}: {error}")),
+        .unwrap_or_else(|error| panic!("{ty}/{diagnostics}: {error}")),
     )
 }
 
@@ -41,10 +41,10 @@ fn ranges(valid: &Fixture) -> Vec<(String, u64, u64)> {
         .collect()
 }
 
-fn check_arithmetic_operands_guards_and_destinations(ty: &str, opt: u8) {
+fn check_arithmetic_operands_guards_and_destinations(ty: &str, opt: cellscript::CompilerDiagnostics) {
     let valid = fixture(ty, opt);
     let ranges = ranges(&valid);
-    assert!(ranges.len() >= 16, "{ty}/O{opt}");
+    assert!(ranges.len() >= 16, "{ty}/{opt}");
     let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
     for (label, start, end) in ranges {
         for instruction in elf.instructions.iter().filter(|instruction| (start..end).contains(&instruction.address)) {
@@ -54,7 +54,7 @@ fn check_arithmetic_operands_guards_and_destinations(ty: &str, opt: u8) {
             assert!(
                 rejected == CheckerRejectionCode::V2420TypedMachineBindingInvalid
                     || (matches!(instruction.word & 0x7f, 0x63 | 0x6f) && rejected == CheckerRejectionCode::V2414ControlFlowInvalid),
-                "{ty}/O{opt}/{label}/{:#x}: {rejected:?}",
+                "{ty}/{opt}/{label}/{:#x}: {rejected:?}",
                 instruction.address
             );
             if instruction.word & 0x7f == 0x63 {
@@ -77,7 +77,7 @@ fn check_arithmetic_operands_guards_and_destinations(ty: &str, opt: u8) {
 // type/optimization Cartesian product while letting the test runner schedule
 // cases separately; no instruction mutation or assertion is sampled or skipped.
 macro_rules! arithmetic_cases {
-    ($(($name:ident, $ty:literal, $opt:literal)),+ $(,)?) => {
+    ($(($name:ident, $ty:literal, $opt:expr)),+ $(,)?) => {
         $(#[test]
         fn $name() {
             check_arithmetic_operands_guards_and_destinations($ty, $opt);
@@ -86,21 +86,21 @@ macro_rules! arithmetic_cases {
 }
 
 arithmetic_cases! {
-    (scalar_definitions_bind_arithmetic_u8_o0, "u8", 0),
-    (scalar_definitions_bind_arithmetic_u8_o3, "u8", 3),
-    (scalar_definitions_bind_arithmetic_u16_o0, "u16", 0),
-    (scalar_definitions_bind_arithmetic_u16_o3, "u16", 3),
-    (scalar_definitions_bind_arithmetic_u32_o0, "u32", 0),
-    (scalar_definitions_bind_arithmetic_u32_o3, "u32", 3),
-    (scalar_definitions_bind_arithmetic_i32_o0, "i32", 0),
-    (scalar_definitions_bind_arithmetic_i32_o3, "i32", 3),
-    (scalar_definitions_bind_arithmetic_u64_o0, "u64", 0),
-    (scalar_definitions_bind_arithmetic_u64_o3, "u64", 3),
+    (scalar_definitions_bind_arithmetic_u8_diagnostic, "u8", cellscript::CompilerDiagnostics::without_optimizations()),
+    (scalar_definitions_bind_arithmetic_u8_standard, "u8", cellscript::CompilerDiagnostics::default()),
+    (scalar_definitions_bind_arithmetic_u16_diagnostic, "u16", cellscript::CompilerDiagnostics::without_optimizations()),
+    (scalar_definitions_bind_arithmetic_u16_standard, "u16", cellscript::CompilerDiagnostics::default()),
+    (scalar_definitions_bind_arithmetic_u32_diagnostic, "u32", cellscript::CompilerDiagnostics::without_optimizations()),
+    (scalar_definitions_bind_arithmetic_u32_standard, "u32", cellscript::CompilerDiagnostics::default()),
+    (scalar_definitions_bind_arithmetic_i32_diagnostic, "i32", cellscript::CompilerDiagnostics::without_optimizations()),
+    (scalar_definitions_bind_arithmetic_i32_standard, "i32", cellscript::CompilerDiagnostics::default()),
+    (scalar_definitions_bind_arithmetic_u64_diagnostic, "u64", cellscript::CompilerDiagnostics::without_optimizations()),
+    (scalar_definitions_bind_arithmetic_u64_standard, "u64", cellscript::CompilerDiagnostics::default()),
 }
 
 #[test]
 fn scalar_definitions_require_complete_inventory_and_typed_coordinates() {
-    for opt in [0, 3] {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = fixture("u64", opt);
         let mut missing = valid.clone();
         for block in &mut missing.record.blocks {
@@ -130,8 +130,8 @@ fn scalar_definitions_require_complete_inventory_and_typed_coordinates() {
 
 #[test]
 fn scalar_definitions_reject_rebound_semantics_and_guard_entry() {
-    for opt_level in [0, 3] {
-        let valid = fixture("u64", opt_level);
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let valid = fixture("u64", diagnostics);
         for substitute_operand in [false, true] {
             let mut changed = valid.clone();
             let op = changed
@@ -165,7 +165,7 @@ action inspect(witness a: u64, witness b: u64, witness skip: bool) -> u64 {
         let valid = Fixture::from_result(
             compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -216,11 +216,11 @@ action inspect(witness a: u64) -> u64 {{
     return 0
 }}"#
     );
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(
                 &source,
-                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -256,10 +256,10 @@ action inspect(witness skip: bool) -> u64 {
     work.values.push(7)
     return read(&work, 2, 4, skip)
 }"#;
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile(
             source,
-            CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
         )
         .unwrap();
         let valid = Fixture::from_result(compiled.clone());
@@ -290,7 +290,7 @@ action inspect(witness skip: bool) -> u64 {
             assert_eq!(original, if skip { 7 } else { 6 });
             differs |= ckb_script_runner::execute_cellscript_script(&bypass.artifact, &transaction).exit_code != original;
         }
-        assert!(differs, "O{opt_level}: bypass must change actual execution");
+        assert!(differs, "{diagnostics}: bypass must change actual execution");
         assert_code(&bypass, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
     }
 }
@@ -313,10 +313,10 @@ action inspect(witness left: Hash, witness right: Hash) -> u64 {
     work.values.push(7)
     return read(&work, 2, 4, left, right)
 }"#;
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile(
             source,
-            CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
         )
         .unwrap();
         let valid = Fixture::from_result(compiled.clone());
@@ -387,11 +387,11 @@ action inspect(witness left: Hash, witness right: Hash) -> u64 {
 #[test]
 fn scalar_comparisons_bind_results_predicates_and_successors() {
     for ty in ["bool", "u64", "i32"] {
-        for opt_level in [0, 3] {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
                 compile(
                     &crate::allocated_scalar_definitions::comparison_source(ty),
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -454,7 +454,7 @@ fn scalar_comparisons_bind_results_predicates_and_successors() {
                             rejection == CheckerRejectionCode::V2420TypedMachineBindingInvalid
                                 || (matches!(instruction.word & 0x7f, 0x63 | 0x6f)
                                     && rejection == CheckerRejectionCode::V2414ControlFlowInvalid),
-                            "{ty}/O{opt_level}/{label}/{:#x}: {rejection:?}",
+                            "{ty}/{diagnostics}/{label}/{:#x}: {rejection:?}",
                             instruction.address
                         );
                     }
@@ -470,7 +470,7 @@ fn scalar_comparisons_bind_results_predicates_and_successors() {
                 }
             }
             let count = if ty == "bool" { 2 } else { 6 };
-            assert_eq!((materialized, fused), if opt_level == 0 { (count * 2, 0) } else { (count, count) });
+            assert_eq!((materialized, fused), if !diagnostics.is_standard() { (count * 2, 0) } else { (count, count) });
         }
     }
 }

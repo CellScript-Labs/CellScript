@@ -25,7 +25,7 @@ fn same_nominal_type(left: &str, right: &str, aliases: &BTreeMap<&str, String>) 
 fn result_width<'a>(record: &'a VerifiedLoweringRecord, entry: &'a TypedSemanticEntry) -> Option<(&'a str, u32)> {
     let name = entry.return_type.as_str();
     let canonical = canonical_abi_type(name);
-    if matches!(canonical.as_str(), "hash" | "address") {
+    if matches!(canonical.as_str(), "hash" | "address" | "ScriptHash" | "SighashAllDigest") {
         return Some((name, 32));
     }
     if let Some(count) = canonical.strip_prefix("[u8;").and_then(|ty| ty.strip_suffix(']')).and_then(|count| count.parse::<u32>().ok())
@@ -256,25 +256,30 @@ fn validate_source(
     if base.id == local.id {
         require(source.field_offset == 0, "direct source has a field offset")?;
     } else {
-        let layout = record
-            .typed_semantics
-            .types
-            .iter()
-            .find(|layout| canonical_abi_type(&layout.name) == canonical_abi_type(&base.ty))
-            .ok_or_else(|| error("source base has no fixed layout"))?;
+        // ScriptHash exposes exactly its full raw-byte payload at field 0.
+        // This builtin layout is independently defined here, without trusting
+        // compiler-provided type layouts or identifying it with ordinary Hash.
+        let script_bytes =
+            base.ty == "ScriptHash" && canonical_abi_type(&local.ty) == "[u8;32]" && source.field_offset == 0 && abi.width_bytes == 32;
+        let layout =
+            record.typed_semantics.types.iter().find(|layout| canonical_abi_type(&layout.name) == canonical_abi_type(&base.ty));
         require(
-            layout.encoded_size.is_some()
-                && typed.blocks.iter().flat_map(|block| &block.operations).any(|operation| {
-                    let TypedSemanticOperationDetail::Field { name } = &operation.detail else { return false };
-                    operation.destinations.contains(&local.id)
-                        && operation.operands.iter().any(|operand| operand.local == Some(base.id))
-                        && layout.fields.iter().any(|field| {
-                            &field.name == name
-                                && field.offset == source.field_offset
-                                && field.width_bytes == Some(abi.width_bytes)
-                                && same_nominal_type(&field.ty, &local.ty, aliases)
-                        })
-                }),
+            typed.blocks.iter().flat_map(|block| &block.operations).any(|operation| {
+                let TypedSemanticOperationDetail::Field { name } = &operation.detail else { return false };
+                operation.destinations.contains(&local.id)
+                    && operation.operands.iter().any(|operand| operand.local == Some(base.id))
+                    && ((script_bytes && name == "0")
+                        || (base.ty != "ScriptHash"
+                            && layout.is_some_and(|layout| {
+                                layout.encoded_size.is_some()
+                                    && layout.fields.iter().any(|field| {
+                                        &field.name == name
+                                            && field.offset == source.field_offset
+                                            && field.width_bytes == Some(abi.width_bytes)
+                                            && same_nominal_type(&field.ty, &local.ty, aliases)
+                                    })
+                            })))
+            }),
             "source field differs from its typed layout",
         )?;
     }

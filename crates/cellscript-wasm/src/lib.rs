@@ -5,8 +5,8 @@
 //! via `wasm-bindgen`. It does NOT expose the ELF codegen path in v1. The
 //! default bundle returns a bounded authoring summary rather than the native
 //! public-interface, typed-semantics, ProofPlan, or verified-artifact records.
-//! Those records and the optional semantic language service would inflate the
-//! default bundle beyond the 600 KB budget.
+//! Native records and the optional semantic language service stay outside the
+//! default summary; its canonical build enforces a 1500 KiB gzip budget.
 //!
 //! The primary `compile_metadata_json` function takes source text, a mandatory
 //! edition, and an optional target profile, and returns a JSON string.
@@ -373,12 +373,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn wasm_cell_data_read_aliases_preserve_the_metadata_only_boundary() {
+    fn wasm_explicit_cell_data_reads_preserve_the_metadata_only_boundary() {
         for (method, args, feature) in [
-            ("cell_data_hash", "source::input(0)", "ckb-cell-data-decode"),
             ("cell_data_hash_field", "source::input(0)", "ckb-consensus-data-hash-field"),
             ("cell_data_bytes32", "source::input(0), 7", "ckb-cell-data-decode"),
-            ("cell_data_hash_at", "source::input(0), 7", "ckb-cell-data-decode"),
+            ("cell_data_blake2b_span", "source::input(0), 0, 600", "ckb-exact-span-hash"),
         ] {
             let source = format!(
                 "module browser_reads\naction verify() -> u64 {{ let value = ckb::{method}({args}) require value == value return 0 }}"
@@ -393,6 +392,15 @@ mod tests {
             assert_eq!(result["runtime"]["fail_closed_runtime_features"], serde_json::json!([]));
             // Keep detailed native access records out of the browser summary.
             assert!(result["runtime"].get("ckb_runtime_accesses").is_none());
+        }
+        for method in ["cell_data_hash", "cell_data_hash_at"] {
+            let args = if method.ends_with("_at") { "source::input(0), 0" } else { "source::input(0)" };
+            let source = format!(
+                "module browser_removed\naction inspect() -> u64 {{ verification\nlet bytes = ckb::{method}({args}) return 0 }}"
+            );
+            let result: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(&source, "2027", None)).unwrap();
+            assert_eq!(result["error_count"], 1);
+            assert!(result["diagnostics"][0]["message"].as_str().unwrap().contains("removed legacy byte-buffer API"));
         }
         let invalid =
             "module browser_reads\naction verify() -> u64 { let value = ckb::cell_data_bytes32(source::input(0), true) return 0 }";
@@ -1045,5 +1053,52 @@ action inspect() -> bool {
         let result: serde_json::Value =
             serde_json::from_str(&compile_metadata_json_sources(&sources, "a.cell", "2026", None)).unwrap();
         assert!(result["diagnostics"][0]["message"].as_str().is_some_and(|message| message.contains("source set exceeds")));
+    }
+
+    #[test]
+    fn wasm_summary_rejects_native_proof_and_provenance_records() {
+        let source = "module boundary\naction inspect() -> u64 { verification return 0 }";
+        let base = cellscript::compile_metadata(source, cellscript::CURRENT_EDITION, None).unwrap();
+        assert_eq!(base.runtime.proof_plan_soundness, cellscript::ProofPlanSoundnessReport::default());
+        let access = cellscript::CkbRuntimeAccessMetadata {
+            operation: "cell-data-bytes32".into(),
+            syscall: "LOAD_CELL_DATA".into(),
+            source: "Input".into(),
+            index: 0,
+            binding: "input".into(),
+            provenance: Default::default(),
+        };
+        let mut module_access = base.clone();
+        module_access.runtime.ckb_runtime_accesses.push(access.clone());
+        let mut action_access = base.clone();
+        action_access.actions[0].ckb_runtime_accesses.push(access.clone());
+        let mut paired_access = action_access.clone();
+        paired_access.runtime.ckb_runtime_accesses.push(access);
+        let mut claimed_proof = base.clone();
+        claimed_proof.runtime.proof_plan_soundness.status = "passed".into();
+        let mut typed_record = base.clone();
+        typed_record.typed_semantics.schema = "cellscript-typed-semantics-v1".into();
+        let mut native_vm = base.clone();
+        native_vm.runtime.vm_target = "ckb-vm".into();
+        for changed in [module_access, action_access, paired_access, claimed_proof, typed_record, native_vm] {
+            let error = cellscript::validate_compile_metadata(&changed, cellscript::ArtifactFormat::RiscvAssembly).unwrap_err();
+            assert!(error.message.contains("browser metadata cannot carry native proof or provenance records"), "{error}");
+        }
+    }
+
+    #[test]
+    fn wasm_trusted_delegation_still_requires_an_authenticated_manifest() {
+        let source = "module unbound\naction inspect() -> u64 { verification\nckb::trusted_exec_cell_dep_u8_args(0, Hash::zero(), 0, 0, 0, 0, 0)\nreturn 0 }";
+        for edition in ["2026", "2027"] {
+            let report: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(source, edition, None)).unwrap();
+            assert!(report["error_count"].as_u64().unwrap() > 0, "{report}");
+            assert!(
+                report["diagnostics"].as_array().unwrap().iter().any(|item| {
+                    item["code"] == "E2113"
+                        && item["message"].as_str().is_some_and(|message| message.contains("no exact Cell.toml binding"))
+                }),
+                "{report}"
+            );
+        }
     }
 }

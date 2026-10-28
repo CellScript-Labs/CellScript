@@ -20,8 +20,8 @@ module signing::zero_lock
 action inspect() -> u64 {
     verification
         let digest = env::sighash_all_zero_lock(4, 8, 4, 4096)
-        let expected = witness::args(0).lock
-        require Hash::from_sighash_all(digest) == expected
+        let expected = witness::lock_exact32(witness::args(0))
+        require Hash::from_sighash_all(digest).0 == expected
         return 0
 }
 "#;
@@ -29,29 +29,29 @@ action inspect() -> u64 {
 const HELPER_SOURCE: &str = r#"
 module signing::zero_lock_helper
 
-fn signing_message_matches(expected: Hash) -> bool {
+fn signing_message_matches(expected: [u8; 32]) -> bool {
     let digest = env::sighash_all_zero_lock(4, 8, 4, 4096)
-    return Hash::from_sighash_all(digest) == expected
+    return Hash::from_sighash_all(digest).0 == expected
 }
 
 action inspect() -> u64 {
     verification
-        let expected = witness::args(0).lock
+        let expected = witness::lock_exact32(witness::args(0))
         require signing_message_matches(expected)
         return 0
 }
 "#;
 
 fn compile(source: &str) -> cellscript::CompileResult {
-    compile_at(source, 0)
+    compile_at(source, cellscript::CompilerDiagnostics::without_optimizations())
 }
 
-fn compile_at(source: &str, opt_level: u8) -> cellscript::CompileResult {
+fn compile_at(source: &str, diagnostics: cellscript::CompilerDiagnostics) -> cellscript::CompileResult {
     compile_with_executable_surface_policy(
         source,
         CompileOptions {
             edition: CellScriptEdition::Edition2027,
-            opt_level,
+            diagnostics,
             target: Some("riscv64-elf".to_string()),
             target_profile: Some("ckb".to_string()),
             ..Default::default()
@@ -92,8 +92,8 @@ fn install_sdk_message(tx: TransactionView, script: packed::Script) -> Transacti
 
 #[test]
 fn bounded_zero_lock_digest_matches_ckb_sdk_and_binds_metadata() {
-    for opt_level in 0..=3 {
-        let result = compile_at(SOURCE, opt_level);
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let result = compile_at(SOURCE, diagnostics);
         let execution = execute_cellscript_script_with_transaction_transform(
             strip_vm_abi_trailer(&result.artifact_bytes),
             &fixture(),
@@ -101,7 +101,7 @@ fn bounded_zero_lock_digest_matches_ckb_sdk_and_binds_metadata() {
         );
         assert_eq!(
             execution.exit_code, 0,
-            "CellScript digest must equal ckb-sdk-rust generate_message at O{opt_level}: {:?}",
+            "CellScript digest must equal ckb-sdk-rust generate_message at {diagnostics}: {:?}",
             execution.captured_debug
         );
     }
@@ -265,4 +265,36 @@ fn zero_lock_domain_requires_literal_supported_bounds_and_distinct_digest_type()
     )
     .expect_err("a signing-domain digest must not silently become a generic Hash");
     assert!(error.message.contains("type mismatch"), "unexpected digest-domain diagnostic: {error}");
+}
+
+#[test]
+fn computed_signing_digest_survives_nominal_parameters_results_and_later_calls() {
+    let source = r#"module signing::returned_domain
+fn copy(value: SighashAllDigest) -> SighashAllDigest {
+    let snapshot = value
+    return snapshot
+}
+fn compute() -> SighashAllDigest {
+    let digest = env::sighash_all_zero_lock(4, 8, 4, 4096)
+    return copy(digest)
+}
+action inspect() -> u64 {
+    verification
+    let retained = compute()
+    let later = compute()
+    let expected = witness::lock_exact32(witness::args(0))
+    require Hash::from_sighash_all(retained).0 == expected
+    require Hash::from_sighash_all(later).0 == expected
+    return 0
+}"#;
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let result = compile_at(source, diagnostics);
+        let execution = execute_cellscript_script_with_transaction_transform(
+            strip_vm_abi_trailer(&result.artifact_bytes),
+            &fixture(),
+            install_sdk_message,
+        );
+        assert_eq!(execution.exit_code, 0, "{diagnostics}: {:?}", execution.captured_debug);
+        assert_eq!(result.metadata.runtime.signing_message_domains.len(), 1);
+    }
 }

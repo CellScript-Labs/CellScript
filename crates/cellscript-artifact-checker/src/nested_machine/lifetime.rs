@@ -1132,10 +1132,19 @@ impl Proof<'_> {
                             }
                             state.forget(buffer, 32);
                             state.forget(size, 8);
-                        } else if matches!(callee.as_str(), cell_read_hashes::HASH | cell_read_hashes::SLICE) {
-                            // Complete bodies and the memory-hash dependency
-                            // are validated even without bounded callers.
-                            let output = if callee == cell_read_hashes::SLICE { 12 } else { 11 };
+                        } else if callee == witness_bytes::OWNER {
+                            let buffer = write(state.registers[13], 32, 0, frame - 16, &protected, pc)?;
+                            state.forget(buffer, 32);
+                        } else if streaming_hashes::syscall(&callee).is_some() {
+                            if !self.done.contains(&callee) {
+                                streaming_hashes::validate(self.record, self.elf, &callee)?;
+                                self.done.insert(callee.clone());
+                            }
+                            let buffer = write(state.registers[13], 32, 0, frame - 16, &protected, pc)?;
+                            state.forget(buffer, 32);
+                        } else if callee == cell_read_hashes::SLICE {
+                            // The complete exact-read body is independently validated.
+                            let output = 12;
                             let buffer = write(state.registers[output], 32, 0, frame - 16, &protected, pc)?;
                             let size = write(state.registers[output + 1], 8, 0, frame - 16, &protected, pc)?;
                             if buffer < size + 8 && size < buffer + 32 {

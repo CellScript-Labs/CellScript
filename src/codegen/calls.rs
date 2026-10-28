@@ -343,6 +343,9 @@ impl CodeGenerator {
     }
 
     pub(super) fn emit_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<()> {
+        if crate::legacy_bytes::removed_runtime(func) {
+            return Err(CompileError::without_span(format!("removed legacy byte-buffer runtime helper '{func}'")));
+        }
         if let Some(deferred) = crate::ir::IrDeferredRuntimeFeature::from_helper(func) {
             self.emit(format!("# cellscript deferred runtime contract: {}", deferred.feature()));
             self.emit_process_failure(deferred.runtime_error());
@@ -880,7 +883,7 @@ impl CodeGenerator {
         let Some(dest) = dest else {
             return Ok(false);
         };
-        if args.len() != 4 || dest.ty != IrType::Hash {
+        if args.len() != 4 || !crate::ir::is_ckb_sighash_all_result(func, &dest.ty) {
             return Ok(false);
         }
         let Some(size_offset) = self.cell_buffer_size_offsets.get(&dest.id).copied() else {
@@ -954,18 +957,23 @@ impl CodeGenerator {
             "__ckb_cell_lock_hash"
                 | "__ckb_cell_type_hash"
                 | "__ckb_cell_data_hash_field"
-                | "__ckb_cell_data_hash"
                 | "__ckb_cell_lock_code_hash"
                 | "__ckb_cell_type_code_hash"
-                | "__ckb_cell_lock_args_hash"
-                | "__ckb_cell_type_args_hash"
+                | "__ckb_cell_lock_args32"
+                | "__ckb_cell_type_args32"
         ) {
             return Ok(false);
         }
         let Some(dest) = dest else {
             return Ok(false);
         };
-        if args.len() != 1 || (dest.ty != IrType::Hash && !crate::ir::is_ckb_script_hash_property_result(func, &dest.ty)) {
+        let raw_args = matches!(func, "__ckb_cell_lock_args32" | "__ckb_cell_type_args32");
+        let valid_result = if raw_args {
+            crate::ir::is_raw_bytes32_runtime_result(func, &dest.ty)
+        } else {
+            dest.ty == IrType::Hash || crate::ir::is_ckb_script_hash_property_result(func, &dest.ty)
+        };
+        if args.len() != 1 || !valid_result {
             return Ok(false);
         }
         let Some(size_offset) = self.cell_buffer_size_offsets.get(&dest.id).copied() else {
@@ -1002,21 +1010,21 @@ impl CodeGenerator {
         let Some(dest) = dest else {
             return Ok(false);
         };
-        if args.len() != 2 || dest.ty != IrType::Hash {
+        if args.len() != 2 || !crate::ir::is_raw_bytes32_runtime_result(func, &dest.ty) {
             return Ok(false);
         }
         let Some(size_offset) = self.cell_buffer_size_offsets.get(&dest.id).copied() else {
-            self.emit("# cellscript abi: cell data hash-at destination has no 32-byte storage; fail closed");
+            self.emit("# cellscript abi: cell data bytes32 destination has no 32-byte storage; fail closed");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
             return Ok(true);
         };
         let Some(buffer_offset) = self.cell_buffer_offsets.get(&dest.id).copied() else {
-            self.emit("# cellscript abi: cell data hash-at destination has no buffer storage; fail closed");
+            self.emit("# cellscript abi: cell data bytes32 destination has no buffer storage; fail closed");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
             return Ok(true);
         };
 
-        self.emit("# cellscript abi: load 32 bytes from SourceView cell data into addressable Hash");
+        self.emit("# cellscript abi: load 32 raw bytes from SourceView cell data into [u8; 32]");
         self.emit("li t0, 32");
         self.emit_schema_size_store("t0", size_offset);
         self.emit_operand_to_register("a0", &args[0]);
@@ -1091,7 +1099,7 @@ impl CodeGenerator {
             } else {
                 3
             }
-            || dest.ty != IrType::Hash
+            || if bytes32 { !crate::ir::is_raw_bytes32_runtime_result(func, &dest.ty) } else { dest.ty != IrType::Hash }
         {
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
             return Ok(true);
@@ -1125,36 +1133,27 @@ impl CodeGenerator {
     }
 
     fn emit_runtime_witness_hash_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<bool> {
-        if !matches!(
-            func,
-            "__ckb_witness_raw"
-                | "__ckb_witness_lock"
-                | "__ckb_witness_input_type"
-                | "__ckb_witness_output_type"
-                | "__ckb_witness_lock_exact32"
-                | "__ckb_witness_input_type_exact32"
-                | "__ckb_witness_output_type_exact32"
-        ) {
+        if !matches!(func, "__ckb_witness_lock_exact32" | "__ckb_witness_input_type_exact32" | "__ckb_witness_output_type_exact32") {
             return Ok(false);
         }
         let Some(dest) = dest else {
             return Ok(false);
         };
-        if args.len() != 1 || dest.ty != IrType::Hash {
+        if args.len() != 1 || !crate::ir::is_raw_bytes32_runtime_result(func, &dest.ty) {
             return Ok(false);
         }
         let Some(size_offset) = self.cell_buffer_size_offsets.get(&dest.id).copied() else {
-            self.emit("# cellscript abi: witness hash destination has no 32-byte storage; fail closed");
+            self.emit("# cellscript abi: exact witness bytes destination has no 32-byte storage; fail closed");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
             return Ok(true);
         };
         let Some(buffer_offset) = self.cell_buffer_offsets.get(&dest.id).copied() else {
-            self.emit("# cellscript abi: witness hash destination has no buffer storage; fail closed");
+            self.emit("# cellscript abi: exact witness bytes destination has no buffer storage; fail closed");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
             return Ok(true);
         };
 
-        self.emit("# cellscript abi: load witness hash into addressable Hash");
+        self.emit("# cellscript abi: load an exact WitnessArgs field into [u8; 32]");
         self.emit("li t0, 32");
         self.emit_schema_size_store("t0", size_offset);
         self.emit_operand_to_register("a0", &args[0]);
@@ -1175,12 +1174,12 @@ impl CodeGenerator {
             "__ckb_require_cell_lock_hash"
                 | "__ckb_require_cell_type_hash"
                 | "__ckb_require_cell_data_hash"
-                | "__ckb_require_cell_lock_args_hash"
-                | "__ckb_require_cell_type_args_hash"
-                | "__ckb_require_cell_lock_args_prefix_hash"
-                | "__ckb_require_cell_type_args_prefix_hash"
-                | "__ckb_require_cell_lock_args_suffix_hash"
-                | "__ckb_require_cell_type_args_suffix_hash"
+                | "__ckb_require_cell_lock_args32"
+                | "__ckb_require_cell_type_args32"
+                | "__ckb_require_cell_lock_args_prefix32"
+                | "__ckb_require_cell_type_args_prefix32"
+                | "__ckb_require_cell_lock_args_suffix32"
+                | "__ckb_require_cell_type_args_suffix32"
                 | "__ckb_require_input_out_point_tx_hash"
                 | "__xudt_require_owner_mode_input_type"
         ) {
@@ -1195,8 +1194,8 @@ impl CodeGenerator {
             Some(ExpectedFixedByteSource::Const(bytes)) => {
                 let size_offset = self.runtime_scratch_size_offset();
                 let buffer_offset = self.runtime_scratch_buffer_offset();
-                let hash: [u8; 32] = bytes.as_slice().try_into().expect("expected fixed hash width");
-                self.emit_store_fixed_byte_const_to_scratch(&IrOperand::Const(IrConst::Hash(hash)), size_offset, buffer_offset, 32);
+                let value = IrOperand::Const(IrConst::Array(bytes.into_iter().map(IrConst::U8).collect()));
+                self.emit_store_fixed_byte_const_to_scratch(&value, size_offset, buffer_offset, 32);
                 self.emit_sp_addi("a1", buffer_offset);
                 self.emit("li a2, 32");
             }
@@ -1912,7 +1911,7 @@ impl CodeGenerator {
             *abi_index += 1;
             return true;
         }
-        if let Some(width) = self.generic_value_type_width(&param.ty) {
+        if let Some(width) = self.fixed_named_parameter_width(&param.ty) {
             self.emit(format!(
                 "# cellscript abi: call {} fixed named-value param {} pointer={} length={} size={}",
                 func,

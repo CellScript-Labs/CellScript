@@ -31,7 +31,7 @@ action inspect(witness input: Record, witness next: [u8; 8]) -> u64 {
     require record.tail == input.tail
     return 0
 }"#;
-    for opt in [0, 3] {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile_checked(source, opt);
         let result = execute_compiled(
             &compiled,
@@ -69,7 +69,7 @@ action inspect() -> u64 {
     require value.1 == 7
     return 0
 }"#;
-    for opt in [0, 3] {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile_checked(source, opt);
         assert_eq!(execute_compiled(&compiled, &[]).exit_code, 0, "O{opt}");
     }
@@ -101,7 +101,7 @@ action inspect() -> u64 {{
     return 0
 }}"#
         );
-        for opt in [0, 3] {
+        for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = compile_checked(&source, opt);
             assert_eq!(execute_compiled(&compiled, &[]).exit_code, 0, "{element}/O{opt}");
         }
@@ -161,7 +161,7 @@ action inspect(witness change: bool) -> u64 {
     require pair.0 == 3
     return 0
 }"#;
-    for opt in [0, 3] {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile_checked(source, opt);
         for change in [false, true] {
             let result = execute_compiled(&compiled, &[cellscript::EntryWitnessArg::Bool(change)]);
@@ -219,7 +219,7 @@ action inspect(witness input: [u8; {width}], witness first: bool) -> u64 {{
     return 0
 }}"#
         );
-        for opt in [0, 3] {
+        for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = compile_checked(&source, opt);
             for first in [false, true] {
                 let result = execute_compiled(
@@ -262,7 +262,7 @@ action inspect(witness input: [u8; {count}]) -> u64 {{
             current_last = if count == 1 { 16 } else { 18 },
             distinct = if count == 1 { 1 } else { 2 },
         );
-        for opt in [0, 3] {
+        for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = compile_checked(&source, opt);
             let result = execute_compiled(&compiled, &[cellscript::EntryWitnessArg::Bytes(vec![17; count])]);
             assert_eq!(result.exit_code, 0, "{count}/O{opt}: {result:?}");

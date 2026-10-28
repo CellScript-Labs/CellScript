@@ -7,6 +7,6 @@ action inspect() -> u64 {
         let digest = ckb::cell_data_hash_field(view)
         let bytes = ckb::cell_data_bytes32(view, 7)
         require digest == ckb::cell_data_hash_field(view)
-        require bytes == ckb::cell_data_hash_at(view, 7)
+        require bytes == ckb::cell_data_bytes32(view, 7)
         return 0
 }

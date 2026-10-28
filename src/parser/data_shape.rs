@@ -98,13 +98,13 @@ mod tests {
         let Item::Action(action) = concrete.items.last().unwrap() else { panic!("missing action") };
         assert_eq!(crate::generics::render_type(&action.params[0].ty), "NestedValues<Vec<u8>, 3, 8, 128>");
         assert_eq!(crate::generics::render_type(&action.params[1].ty), "NestedValues<Entry, 3, 8, 128>");
-        for opt_level in [0, 3] {
+        for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
             let compiled = crate::compile(
                 SOURCE,
                 CompileOptions {
                     edition: CellScriptEdition::Edition2027,
                     target: Some("riscv64-elf".into()),
-                    opt_level,
+                    diagnostics,
                     ..Default::default()
                 },
             )

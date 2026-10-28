@@ -6,11 +6,11 @@ resolver_model = "single-package-coordinate-v1"
 edition = "2027"
 name = "semantic-foundation-2027"
 version = "0.1.0"
-source_hash = "855e6f44c89d2d9083f2a74bb280b761b0659b878f3851db077a9a33b0696e38"
-compiler_requirement = "*"
-resolver_compiler_version = "0.26.0"
+source_hash = "99efda19ea03d7b21cb5297adac09d9a010020fcfc5eec54838fc3d831079c89"
+compiler_requirement = ">=0.33.0-alpha.1"
+resolver_compiler_version = "0.33.0-alpha.1"
 
 [root]
-manifest_digest = "sha256:fbf5ca16f485f4713e71188c79796bd467dbbb743ba8d00c0cbc837c6466a12a"
+manifest_digest = "sha256:56e0ff7ee1f08a5bbfa96f4cd38665e5999b365d0971571aef389321cd66fa43"
 
 [dependencies]

@@ -73,7 +73,7 @@ fn fixed_external_codec(
         &CheckerBudgets::default(),
     )
 }
-fn external_fixture(source: &str, opt: u8) -> Fixture {
+fn external_fixture(source: &str, opt: cellscript::CompilerDiagnostics) -> Fixture {
     let mut selected = declaration();
     selected.actions.retain(|action| action.action == "burn");
     selected.common_checks.clear();
@@ -88,7 +88,7 @@ action burn(input token: Token, witness value: u64) {
 "#;
 #[test]
 fn fixed_external_codec_checks_complete_available_public_scalar_profile() {
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for ty in ["u8", "u16", "u32", "u64", "i32"] {
             let source = if ty == "i32" {
                 EXTERNAL_SOURCE
@@ -119,7 +119,7 @@ fn fixed_external_codec_checks_complete_available_public_scalar_profile() {
     }
 }
 
-fn single_entry_fixture(lock: bool, witness: bool, opt_level: u8) -> Fixture {
+fn single_entry_fixture(lock: bool, witness: bool, diagnostics: cellscript::CompilerDiagnostics) -> Fixture {
     let param = if witness { "witness value: u64" } else { "" };
     let predicate = if witness { "value > 7" } else { "true" };
     let body = if lock {
@@ -133,7 +133,7 @@ fn single_entry_fixture(lock: bool, witness: bool, opt_level: u8) -> Fixture {
             source_contracts: true,
             target_profile: Some("ckb".into()),
             edition: CellScriptEdition::Edition2027,
-            opt_level,
+            diagnostics,
             target: Some("riscv64-elf".into()),
             ..CompileOptions::default()
         },
@@ -149,11 +149,11 @@ fn single_entry_fixture(lock: bool, witness: bool, opt_level: u8) -> Fixture {
 
 #[test]
 fn single_entry_codec_proves_lock_and_action_witness_decoders() {
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for lock in [false, true] {
             for witness in [false, true] {
                 let fixture = single_entry_fixture(lock, witness, opt);
-                fixed_external_codec(&fixture).unwrap_or_else(|e| panic!("O{opt} lock={lock} witness={witness}: {e}"));
+                fixed_external_codec(&fixture).unwrap_or_else(|e| panic!("{opt} lock={lock} witness={witness}: {e}"));
             }
         }
     }
@@ -161,7 +161,7 @@ fn single_entry_codec_proves_lock_and_action_witness_decoders() {
 
 #[test]
 fn single_entry_codec_rejects_rebound_envelope_and_argument_instructions() {
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let fixture = single_entry_fixture(true, true, opt);
         fixed_external_codec(&fixture).unwrap();
         let elf = parse_elf(&fixture.artifact, CheckerBudgets::default().instructions).unwrap();
@@ -183,13 +183,13 @@ fn single_entry_codec_rejects_rebound_envelope_and_argument_instructions() {
             let mut changed = fixture.clone();
             let word = elf.instructions.iter().find(|i| i.address == address).unwrap().word;
             changed.replace_machine_word(address, word ^ (1 << 20));
-            assert!(fixed_external_codec(&changed).is_err(), "O{opt} mutation {prefix} admitted");
+            assert!(fixed_external_codec(&changed).is_err(), "{opt} mutation {prefix} admitted");
         }
     }
 }
 #[test]
 fn fixed_external_codec_does_not_grant_pruned_helpers_outputs_or_unsupported_layouts() {
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for extra in [
             "public fn extra() { }",
             "public struct Extra { value: bool }",
@@ -219,7 +219,7 @@ fn fixed_external_codec_does_not_grant_pruned_helpers_outputs_or_unsupported_lay
 }
 #[test]
 fn fixed_external_codec_generic_instances_are_not_declaration_only() {
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let declaration = "public struct Pair<T: fixed_value> { value: T }";
         let absent = external_fixture(&format!("{EXTERNAL_SOURCE}\n{declaration}"), opt);
         let checked = fixed_external_codec(&absent).unwrap();
@@ -262,7 +262,7 @@ fn fixed_external_codec_generic_instances_are_not_declaration_only() {
 
 #[test]
 fn fixed_external_codec_binds_machine_bytes_without_claiming_predicate_equivalence() {
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let required = external_fixture(EXTERNAL_SOURCE, opt);
         let other = external_fixture(&EXTERNAL_SOURCE.replace("token.amount > 0", "token.amount == 7"), opt);
         let required_checked = fixed_external_codec(&required).unwrap();
@@ -331,7 +331,7 @@ fn fixed_policy_receipt(
 }
 #[test]
 fn fixed_policy_receipt_recomputes_complete_finite_fields_from_actual_inputs() {
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for target in ["ckb", "ckb-type-hash"] {
             let mut declaration = declaration();
             declaration.actions.retain(|action| action.action == "burn");
@@ -372,7 +372,7 @@ fn fixed_policy_receipt_recomputes_complete_finite_fields_from_actual_inputs() {
 }
 #[test]
 fn fixed_policy_receipts_compare_directionally_without_predicate_or_deployment_equivalence() {
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let required = fixed_policy_receipt(&external_fixture(EXTERNAL_SOURCE, opt), vec![1]).unwrap();
         let other =
             fixed_policy_receipt(&external_fixture(&EXTERNAL_SOURCE.replace("token.amount > 0", "token.amount == 7"), opt), vec![2])
@@ -401,7 +401,7 @@ fn fixed_policy_receipts_compare_directionally_without_predicate_or_deployment_e
 }
 #[test]
 fn fixed_policy_receipt_admits_proven_constants_and_rejects_unproven_ones() {
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         // A constant inside the closed grammar is independently re-evaluated
         // and admitted through the finite external codec.
         let fixture = external_fixture(&format!("{EXTERNAL_SOURCE}\npublic const LIMIT: u64 = 3 * 7"), opt);
@@ -432,7 +432,7 @@ fn fixed_policy_receipt_admits_proven_constants_and_rejects_unproven_ones() {
 #[test]
 fn fixed_policy_receipt_detects_postcheck_substitution_of_every_exact_input() {
     use cellscript_artifact_checker::fixed_policy_receipt::check_fixed_policy_receipt;
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let fixture = external_fixture(EXTERNAL_SOURCE, opt);
         let checked = fixed_policy_receipt(&fixture, vec![1]).unwrap();
         let original = receipt_bundle(&fixture);
@@ -464,7 +464,7 @@ fn fixed_policy_receipt_detects_postcheck_substitution_of_every_exact_input() {
 #[test]
 fn fixed_policy_receipt_bounds_creation_and_substitution_checks_before_any_parser_or_hash() {
     use cellscript_artifact_checker::fixed_policy_receipt::check_fixed_policy_receipt;
-    let fixture = external_fixture(EXTERNAL_SOURCE, 0);
+    let fixture = external_fixture(EXTERNAL_SOURCE, cellscript::CompilerDiagnostics::without_optimizations());
     let checked = fixed_policy_receipt(&fixture, vec![1]).unwrap();
     let original = receipt_bundle(&fixture);
     let (raw, script) = receipt_deployment(&fixture, vec![1]);
@@ -527,7 +527,7 @@ fn code_origin(
 #[test]
 fn code_cell_origin_recomputes_sdk_transaction_script_and_code_identities() {
     use ckb_testtool::ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*};
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let fixture = external_fixture(EXTERNAL_SOURCE, opt);
         let lock =
             packed::Script::new_builder().code_hash([9u8; 32].pack()).hash_type(2u8).args(Bytes::from(vec![1, 2, 3]).pack()).build();
@@ -590,7 +590,7 @@ fn code_cell_origin_recomputes_sdk_transaction_script_and_code_identities() {
 fn code_cell_target_requires_the_actual_checked_profile_even_for_valid_byte_origins() {
     use cellscript_artifact_checker::code_origin::check_code_cell_target;
     use ckb_testtool::ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*};
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for (target, accepted) in [("ckb", 4u8), ("ckb-type-hash", 1u8)] {
             let mut declaration = declaration();
             declaration.actions.retain(|action| action.action == "burn");
@@ -654,7 +654,7 @@ fn code_cell_target_requires_the_actual_checked_profile_even_for_valid_byte_orig
 #[test]
 fn code_cell_origin_rejects_noncanonical_and_unselected_transaction_structures() {
     use ckb_testtool::ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*};
-    let fixture = external_fixture(EXTERNAL_SOURCE, 3);
+    let fixture = external_fixture(EXTERNAL_SOURCE, cellscript::CompilerDiagnostics::default());
     let lock = packed::Script::new_builder().code_hash([9u8; 32].pack()).hash_type(2u8).args(Bytes::new().pack()).build();
     let code = packed::CellOutput::new_builder().capacity(1000000000000u64).lock(lock.clone()).build();
     let tx = TransactionBuilder::default()
@@ -693,7 +693,7 @@ fn code_cell_origin_rejects_noncanonical_and_unselected_transaction_structures()
 #[test]
 fn code_cell_origin_has_exact_script_count_and_preparse_byte_bounds() {
     use ckb_testtool::ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*};
-    let fixture = external_fixture(EXTERNAL_SOURCE, 3);
+    let fixture = external_fixture(EXTERNAL_SOURCE, cellscript::CompilerDiagnostics::default());
     let lock = packed::Script::new_builder().code_hash([9u8; 32].pack()).hash_type(2u8).args(Bytes::new().pack()).build();
     let code = packed::CellOutput::new_builder().capacity(1000000000000u64).lock(lock.clone()).build();
     let code_hash = packed::CellOutput::calc_data_hash(&fixture.artifact);
@@ -779,7 +779,7 @@ fn code_cell_origin_has_exact_script_count_and_preparse_byte_bounds() {
 #[test]
 fn code_cell_origin_rejects_duplicate_and_overbound_dependency_input_sets() {
     use ckb_testtool::ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*};
-    let fixture = external_fixture(EXTERNAL_SOURCE, 3);
+    let fixture = external_fixture(EXTERNAL_SOURCE, cellscript::CompilerDiagnostics::default());
     let lock = packed::Script::new_builder().code_hash([9u8; 32].pack()).hash_type(2u8).args(Bytes::new().pack()).build();
     let code = packed::CellOutput::new_builder().capacity(1000000000000u64).lock(lock.clone()).build();
     let selected = lock.as_builder().code_hash(packed::CellOutput::calc_data_hash(&fixture.artifact)).build();
@@ -880,12 +880,12 @@ fn fixed_cell_fields_decode_direct_unsigned_layouts_and_reject_rebound_bytes() {
         let mut selected = declaration();
         selected.actions.retain(|action| action.action == "burn");
         selected.common_checks.clear();
-        for opt in 0..=3 {
+        for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let fixture = Fixture::new_source_with(&source, CellScriptEdition::Edition2026, opt, selected.clone());
             let checked = fixed_cell_fields(&fixture).unwrap();
             let value: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
             let fields = value["fields"].as_array().unwrap();
-            coverage.push(serde_json::json!({"opt":opt,"members":members,"sites":fields.len()}));
+            coverage.push(serde_json::json!({"diagnostics":opt.to_string(),"members":members,"sites":fields.len()}));
             let actual = fields.iter().map(|field| field["width"].as_u64().unwrap()).collect::<std::collections::BTreeSet<_>>();
             assert_eq!(actual, widths.iter().map(|width| *width as u64).collect());
             let elf = parse_elf(&fixture.artifact, CheckerBudgets::default().instructions).unwrap();
@@ -932,7 +932,7 @@ fn fixed_cell_fields_reject_membership_helper_memory_and_register_substitutions(
     let mut selected = declaration();
     selected.actions.retain(|action| action.action == "burn");
     selected.common_checks.clear();
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let fixture = Fixture::new_source_with(&source, CellScriptEdition::Edition2026, opt, selected.clone());
         fixed_cell_fields(&fixture).unwrap();
         let blocks = fixture
@@ -990,7 +990,7 @@ fn fixed_cell_fields_accept_rebound_native_u64_and_reject_unknown_field_profiles
     selected.actions.retain(|action| action.action == "burn");
     selected.common_checks.clear();
     let source = SOURCE.replace("verification consume token", "verification require token.amount == 7 consume token");
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let mut fixture = Fixture::new_source_with(&source, CellScriptEdition::Edition2026, opt, selected.clone());
         let bytes = fixed_cell_fields(&fixture).unwrap().canonical_bytes().unwrap();
         let record: Value = serde_json::from_slice(&bytes).unwrap();
@@ -1038,7 +1038,7 @@ fn fixed_cell_fields_check_inline_capacity_and_hash_observation_memory() {
     let mut selected = declaration();
     selected.actions.retain(|action| action.action == "burn");
     selected.common_checks.clear();
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let fixture = Fixture::new_source_with(&source, CellScriptEdition::Edition2026, opt, selected.clone());
         fixed_cell_fields(&fixture).unwrap();
         let elf = parse_elf(&fixture.artifact, CheckerBudgets::default().instructions).unwrap();
@@ -1140,7 +1140,7 @@ fn fixed_cell_fields_reject_unproved_owner_syscalls_after_native_materialization
     let mut selected = declaration();
     selected.actions.retain(|action| action.action == "burn");
     selected.common_checks.clear();
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let mut fixture = Fixture::new_source_with(&source, CellScriptEdition::Edition2026, opt, selected.clone());
         let checked = fixed_cell_fields(&fixture).unwrap();
         let fields: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
@@ -1201,7 +1201,12 @@ fn fixed_cell_fields_enforce_256_sites_without_raising_variant_or_read_limits() 
             let tail = if extra && index == 0 { "require token.e == 17" } else { "" };
             source.push_str(&format!("action {name}(input token: Token) {{ verification require token.a == 42 require token.b == 513 require token.c == 67305985 require token.d == 123456789012345 {tail} consume token }}\n"));
         }
-        let fixture = Fixture::new_source_with(&source, CellScriptEdition::Edition2026, 0, selected);
+        let fixture = Fixture::new_source_with(
+            &source,
+            CellScriptEdition::Edition2026,
+            cellscript::CompilerDiagnostics::without_optimizations(),
+            selected,
+        );
         fixed_cell_storage(&fixture).unwrap();
         if extra {
             assert_eq!(fixed_cell_fields(&fixture).unwrap_err().code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
@@ -1214,7 +1219,7 @@ fn fixed_cell_fields_enforce_256_sites_without_raising_variant_or_read_limits() 
 
 #[test]
 fn fixed_cell_parameter_storage_binds_source_ids_and_actual_pointer_reception() {
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let fixture = Fixture::new_with(CellScriptEdition::Edition2026, opt, declaration());
         let checked = fixed_cell_storage(&fixture).unwrap();
         let value: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
@@ -1258,7 +1263,7 @@ fn fixed_cell_parameter_storage_rejects_overlapping_argument_spills_and_output_o
         "action burn(input token: Token) { verification consume token }",
         "action burn(input token: Token, witness n: u64) { verification require n > 0 consume token }",
     );
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let fixture = Fixture::new_source_with(&source, CellScriptEdition::Edition2026, opt, declaration());
         let checked = fixed_cell_storage(&fixture).unwrap();
         let value: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
@@ -1284,7 +1289,7 @@ fn fixed_cell_parameter_storage_rejects_overlapping_argument_spills_and_output_o
 
 #[test]
 fn fixed_cell_reads_check_actual_source_size_and_error_gates() {
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let fixture = Fixture::new_with(CellScriptEdition::Edition2026, opt, declaration());
         let checked = fixed_cell_reads(&fixture).unwrap();
         let value: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
@@ -1301,7 +1306,7 @@ fn fixed_cell_reads_check_actual_source_size_and_error_gates() {
 
 #[test]
 fn fixed_cell_reads_reject_rebound_machine_setup_and_length_mutations() {
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let fixture = Fixture::new_with(CellScriptEdition::Edition2026, opt, declaration());
         let value: Value = serde_json::from_slice(&fixed_cell_reads(&fixture).unwrap().canonical_bytes().unwrap()).unwrap();
         let read = &value["reads"][0];
@@ -1339,7 +1344,12 @@ fn fixed_cell_reads_reject_missing_source_contracts_and_noncanonical_boolean_lay
     let mut selected = declaration();
     selected.actions.retain(|action| action.action == "mint");
     selected.common_checks.clear();
-    let fixture = Fixture::new_source_with(source, CellScriptEdition::Edition2026, 0, selected);
+    let fixture = Fixture::new_source_with(
+        source,
+        CellScriptEdition::Edition2026,
+        cellscript::CompilerDiagnostics::without_optimizations(),
+        selected,
+    );
     assert!(fixed_cell_reads(&fixture).unwrap_err().message.contains("boolean canonicality"));
     let mut missing = Fixture::new(CellScriptEdition::Edition2026);
     missing.record.typed_semantics.nominal_declarations = None;
@@ -1363,7 +1373,8 @@ fn fixed_cell_reads_have_real_read_count_and_instruction_budget_limits() {
             actions: (0..64).map(|index| ArtifactAction { tag: index, action: format!("read_{index}") }).collect(),
             common_checks: Vec::new(),
         };
-        let fixture = Fixture::new_source_with(&source, CellScriptEdition::Edition2026, 3, selected);
+        let fixture =
+            Fixture::new_source_with(&source, CellScriptEdition::Edition2026, cellscript::CompilerDiagnostics::default(), selected);
         if count == 64 {
             let checked = fixed_cell_reads(&fixture).unwrap();
             let value: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
@@ -1391,7 +1402,7 @@ fn fixed_cell_reads_have_real_read_count_and_instruction_budget_limits() {
 #[test]
 fn fixed_policy_parameter_decoders_bind_actual_offsets_and_source_contracts() {
     let mut identity = None;
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let fixture = Fixture::new_with(CellScriptEdition::Edition2026, opt, declaration());
         let checked = cellscript_artifact_checker::entry_codec::check_fixed_policy_parameter_decoders(
             &fixture.artifact,
@@ -1418,7 +1429,7 @@ fn fixed_policy_parameter_decoders_bind_actual_offsets_and_source_contracts() {
 
 #[test]
 fn fixed_decoder_rejects_rebound_parameter_instructions_that_ordinary_inspection_does_not_certify() {
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let fixture = Fixture::new_with(CellScriptEdition::Edition2026, opt, declaration());
         let params = fixture
             .record
@@ -1456,7 +1467,7 @@ fn fixed_decoder_rejects_rebound_parameter_instructions_that_ordinary_inspection
                 &CheckerBudgets::default(),
             )
             .unwrap_err();
-            assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "O{opt} mutation {kind}: {error}");
+            assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{opt} mutation {kind}: {error}");
         }
     }
 }
@@ -1470,7 +1481,12 @@ fn fixed_decoder_evidence_never_downgrades_unsupported_codec_or_stack_profiles()
         let mut artifact = declaration();
         artifact.actions.retain(|action| action.action == "mint");
         artifact.common_checks.clear();
-        let fixture = Fixture::new_source_with(&source, CellScriptEdition::Edition2026, 0, artifact);
+        let fixture = Fixture::new_source_with(
+            &source,
+            CellScriptEdition::Edition2026,
+            cellscript::CompilerDiagnostics::without_optimizations(),
+            artifact,
+        );
         assert!(cellscript_artifact_checker::entry_codec::check_fixed_policy_parameter_decoders(
             &fixture.artifact,
             &serde_json::to_vec(&fixture.metadata).unwrap(),
@@ -1486,7 +1502,7 @@ fn fixed_decoder_evidence_never_downgrades_unsupported_codec_or_stack_profiles()
 fn fixed_decoder_checks_signed_extension_small_aggregates_and_shared_variants() {
     let source = SOURCE.replace("witness amount: u64, witness recipient: Address", "witness amount: u64, witness recipient: Address, witness signed: i32, witness bytes: [u8; 4], witness pair: (u16, u8)")
         + "\naction other(witness amount: u64, witness recipient: Address, witness signed: i32, witness bytes: [u8; 4], witness pair: (u16, u8)) { verification require amount > 0 create Token { amount: amount } with_lock(recipient) }\n";
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let mut declaration = declaration();
         declaration.actions.push(ArtifactAction { tag: 11, action: "other".into() });
         let fixture = Fixture::new_source_with(&source, CellScriptEdition::Edition2026, opt, declaration);
@@ -1510,7 +1526,7 @@ fn fixed_decoder_checks_signed_extension_small_aggregates_and_shared_variants() 
         let mut changed = fixture.clone();
         changed.replace_machine_word(signed.address, signed.word & !(0x400 << 20));
         changed.check().unwrap();
-        assert!(certify_fixed_decoder(&changed).is_err(), "unsigned substitute cannot certify i32 at O{opt}");
+        assert!(certify_fixed_decoder(&changed).is_err(), "unsigned substitute cannot certify i32 at {opt}");
     }
 }
 
@@ -1522,16 +1538,27 @@ fn fixed_decoder_profile_limits_are_exact_and_never_raise_checker_budgets() {
     for (padding, accepted) in [(1496, true), (1497, false)] {
         let source =
             SOURCE.replace("witness recipient: Address)", &format!("witness recipient: Address, witness padding: [u8; {padding}])"));
-        let fixture = Fixture::new_source_with(&source, CellScriptEdition::Edition2026, 0, single.clone());
+        let fixture = Fixture::new_source_with(
+            &source,
+            CellScriptEdition::Edition2026,
+            cellscript::CompilerDiagnostics::without_optimizations(),
+            single.clone(),
+        );
         assert_eq!(certify_fixed_decoder(&fixture).is_ok(), accepted, "padding={padding}");
     }
     for (extra, accepted) in [(5, true), (6, false)] {
         let parameters = (0..extra).map(|index| format!(", witness p{index}: u8")).collect::<String>();
         let source = SOURCE.replace("witness recipient: Address)", &format!("witness recipient: Address{parameters})"));
-        let fixture = Fixture::new_source_with(&source, CellScriptEdition::Edition2026, 0, single.clone());
+        let fixture = Fixture::new_source_with(
+            &source,
+            CellScriptEdition::Edition2026,
+            cellscript::CompilerDiagnostics::without_optimizations(),
+            single.clone(),
+        );
         assert_eq!(certify_fixed_decoder(&fixture).is_ok(), accepted, "extra={extra}");
     }
-    let fixture = Fixture::new_with(CellScriptEdition::Edition2026, 0, declaration());
+    let fixture =
+        Fixture::new_with(CellScriptEdition::Edition2026, cellscript::CompilerDiagnostics::without_optimizations(), declaration());
     let budgets = CheckerBudgets { instructions: 1, ..CheckerBudgets::default() };
     assert!(cellscript_artifact_checker::entry_codec::check_fixed_policy_parameter_decoders(
         &fixture.artifact,
@@ -1565,21 +1592,26 @@ fn certify_fixed_decoder(
 
 impl Fixture {
     fn new(edition: CellScriptEdition) -> Self {
-        Self::new_with(edition, 0, declaration())
+        Self::new_with(edition, cellscript::CompilerDiagnostics::without_optimizations(), declaration())
     }
 
-    fn new_with(edition: CellScriptEdition, opt_level: u8, declaration: ArtifactDeclaration) -> Self {
-        Self::new_source_with(SOURCE, edition, opt_level, declaration)
+    fn new_with(edition: CellScriptEdition, diagnostics: cellscript::CompilerDiagnostics, declaration: ArtifactDeclaration) -> Self {
+        Self::new_source_with(SOURCE, edition, diagnostics, declaration)
     }
 
-    fn new_source_with(source_text: &str, edition: CellScriptEdition, opt_level: u8, declaration: ArtifactDeclaration) -> Self {
-        Self::new_source_with_target(source_text, edition, opt_level, declaration, "ckb")
+    fn new_source_with(
+        source_text: &str,
+        edition: CellScriptEdition,
+        diagnostics: cellscript::CompilerDiagnostics,
+        declaration: ArtifactDeclaration,
+    ) -> Self {
+        Self::new_source_with_target(source_text, edition, diagnostics, declaration, "ckb")
     }
 
     fn new_source_with_target(
         source_text: &str,
         edition: CellScriptEdition,
-        opt_level: u8,
+        diagnostics: cellscript::CompilerDiagnostics,
         declaration: ArtifactDeclaration,
         target: &str,
     ) -> Self {
@@ -1592,7 +1624,7 @@ impl Fixture {
                 source_contracts: true,
                 target_profile: Some(target.into()),
                 edition,
-                opt_level,
+                diagnostics,
                 target: Some("riscv64-elf".to_string()),
                 ..CompileOptions::default()
             },
@@ -1795,12 +1827,12 @@ action verify() {
 }
 
 "#;
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         // This prototype belongs to the single-entry ABI. Keep policy-witness
         // helper-call admission separate from its typed constructor contract.
         let compiled = cellscript::compile_with_executable_surface_policy(
             source,
-            CompileOptions { source_contracts: true, opt_level, target: Some("riscv64-elf".into()), ..CompileOptions::default() },
+            CompileOptions { source_contracts: true, diagnostics, target: Some("riscv64-elf".into()), ..CompileOptions::default() },
             ExecutableSurfacePolicy::DenyFailClosed,
         )
         .unwrap();
@@ -1829,8 +1861,8 @@ action verify() {
         changed.metadata["typed_semantics_hash"] = changed.record.typed_semantics_hash.clone().into();
         changed.rebind_sidecars();
         let error = changed.check().unwrap_err();
-        assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid, "O{opt_level}: {error}");
-        assert!(error.message.contains("'tuple'"), "O{opt_level}: {error}");
+        assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid, "{diagnostics}: {error}");
+        assert!(error.message.contains("'tuple'"), "{diagnostics}: {error}");
     }
 }
 
@@ -1961,7 +1993,12 @@ action verify(witness pair: Pair<u64>, witness twin: Twin<u64>) {
 "#;
     let compiled = cellscript::compile_with_executable_surface_policy(
         source,
-        CompileOptions { source_contracts: true, opt_level: 0, target: Some("riscv64-elf".into()), ..CompileOptions::default() },
+        CompileOptions {
+            source_contracts: true,
+            diagnostics: cellscript::CompilerDiagnostics::without_optimizations(),
+            target: Some("riscv64-elf".into()),
+            ..CompileOptions::default()
+        },
         ExecutableSurfacePolicy::DenyFailClosed,
     )
     .unwrap();
@@ -1998,7 +2035,12 @@ fn private_generic_shapes_reject_rebound_layout_signature_and_phantom_mutations(
     let source = format!("{SOURCE}\nprivate struct Pair<T: fixed_value> {{ left: T, right: T }}\nprivate enum Choice<T: fixed_value> {{ First(Pair<T>), Second([T; 2]) }}\nprivate struct Marker<phantom T> {{ value: u64 }}\nprivate fn first<T: fixed_value>(value: T) -> T {{ value }}")
         .replace("witness recipient: Address)", "witness recipient: Address, witness pair: Pair<u64>, witness choice: Choice<Hash>, witness marker: Marker<Hash>)")
         .replace("require amount > 0", "require amount > 0\nrequire first<u64>(pair.left) == pair.left");
-    let baseline = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, 0, declaration());
+    let baseline = Fixture::new_source_with(
+        &source,
+        CellScriptEdition::Edition2027,
+        cellscript::CompilerDiagnostics::without_optimizations(),
+        declaration(),
+    );
     baseline.assert_interface_inspection();
     for mutation in [
         "missing",
@@ -2070,7 +2112,12 @@ fn private_generic_contracts_cannot_be_omitted_or_forged_after_rebinding() {
     let source = format!("{SOURCE}\nprivate struct Pair<T: fixed_value> {{ left: T, right: T }}\nprivate fn first<T: fixed_value>(value: T) -> T {{ value }}")
         .replace("witness recipient: Address)", "witness recipient: Address, witness pair: Pair<u64>)")
         .replace("require amount > 0", "require amount > 0\nrequire first<u64>(pair.left) == pair.left");
-    let baseline = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, 0, declaration());
+    let baseline = Fixture::new_source_with(
+        &source,
+        CellScriptEdition::Edition2027,
+        cellscript::CompilerDiagnostics::without_optimizations(),
+        declaration(),
+    );
     baseline.assert_interface_inspection();
     assert!(baseline.metadata["public_interface"]["callables"].as_array().unwrap().iter().all(|entry| entry["name"] != "first"));
     for mutation in
@@ -2104,7 +2151,12 @@ fn private_generic_contracts_cannot_be_omitted_or_forged_after_rebinding() {
 fn typed_value_abilities_reject_field_contradictions_after_hash_rebinding() {
     let source = format!("{SOURCE}\npublic struct Value has copy, drop, store, fixed, serializable, non_linear {{ amount: u64 }}")
         .replace("witness recipient: Address)", "witness recipient: Address, witness value: Value)");
-    let baseline = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, 0, declaration());
+    let baseline = Fixture::new_source_with(
+        &source,
+        CellScriptEdition::Edition2027,
+        cellscript::CompilerDiagnostics::without_optimizations(),
+        declaration(),
+    );
     baseline.assert_interface_inspection();
     for mutation in ["cell-kind", "ordinary-cell", "missing-field-evidence"] {
         let mut changed = baseline.clone();
@@ -2145,8 +2197,8 @@ fn typed_value_abilities_reject_field_contradictions_after_hash_rebinding() {
 fn uninstantiated_generic_catalog_rejects_rebound_shape_and_bound_mutations() {
     use cellscript_artifact_checker::TypedSemanticGenericDeclaration as Declaration;
     let source = format!("{SOURCE}\npublic struct Pair<T: fixed_value> {{ left: T, right: T }}\npublic enum Choice<T: fixed_value> {{ First(T), Empty }}\npublic fn first<T: fixed_value>(value: T) -> T {{ value }}");
-    for opt_level in 0..=3 {
-        let baseline = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, opt_level, declaration());
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let baseline = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, diagnostics, declaration());
         baseline.assert_interface_inspection();
         assert!(baseline.record.typed_semantics.instantiations.is_empty());
         assert!(!baseline.record.typed_semantics.entries.iter().any(|entry| entry.name.contains("first")));
@@ -2233,9 +2285,9 @@ fn uninstantiated_generic_catalog_rejects_rebound_shape_and_bound_mutations() {
                     error.code,
                     CheckerRejectionCode::V2410MetadataBindingMismatch | CheckerRejectionCode::V2419TypedSemanticsInvalid
                 ),
-                "opt={opt_level} {mutation}: {error}"
+                "opt={diagnostics} {mutation}: {error}"
             );
-            assert!(error.message.contains("generic") || error.message.contains("nominal"), "opt={opt_level} {mutation}: {error}");
+            assert!(error.message.contains("generic") || error.message.contains("nominal"), "opt={diagnostics} {mutation}: {error}");
         }
     }
 }
@@ -2246,8 +2298,8 @@ fn private_absent_template_declarations_reject_rebound_universal_mutations() {
     let source = format!(
         "{SOURCE}\nprivate struct Sealed<T: fixed_value> has copy, drop, store, fixed, serializable, non_linear {{ inner: T }}\nprivate fn select<T: fixed_value>(value: T) -> T {{ value }}"
     );
-    for opt_level in 0..=3 {
-        let baseline = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, opt_level, declaration());
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let baseline = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, diagnostics, declaration());
         baseline.assert_interface_inspection();
         let inspected = cellscript_artifact_checker::interface::inspect_bundle(
             &baseline.artifact,
@@ -2258,7 +2310,7 @@ fn private_absent_template_declarations_reject_rebound_universal_mutations() {
         )
         .unwrap();
         // The private templates stay declaration-only: no instantiation or
-        // lowered entry exercises them at any optimization level.
+        // lowered entry exercises them at either standard or diagnostic builds.
         assert!(baseline
             .record
             .typed_semantics
@@ -2317,12 +2369,12 @@ fn private_absent_template_declarations_reject_rebound_universal_mutations() {
             // pass that layer and reject exactly at the universal sweep.
             if matches!(mutation, "ability-order" | "field-missing") {
                 let error = inspected.unwrap_err();
-                assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid, "opt={opt_level} {mutation}: {error}");
+                assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid, "opt={diagnostics} {mutation}: {error}");
                 continue;
             }
             let error = inspected.unwrap().validate_symbolic_declarations().unwrap_err();
-            assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid, "opt={opt_level} {mutation}: {error}");
-            assert!(error.message.contains("universal"), "opt={opt_level} {mutation}: {error}");
+            assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid, "opt={diagnostics} {mutation}: {error}");
+            assert!(error.message.contains("universal"), "opt={diagnostics} {mutation}: {error}");
         }
     }
 }
@@ -2330,8 +2382,8 @@ fn private_absent_template_declarations_reject_rebound_universal_mutations() {
 #[test]
 fn nominal_catalog_rejects_rebound_scopes_shapes_and_public_omissions() {
     let source = format!("{SOURCE}\npublic struct Snapshot {{ z: u64, a: Hash }}\npublic enum Event {{ First(u64), Second(Hash) }}\npublic fn view(value: Snapshot) -> u64 {{ value.z }}");
-    for opt_level in 0..=3 {
-        let baseline = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, opt_level, declaration());
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let baseline = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, diagnostics, declaration());
         baseline.assert_interface_inspection();
         assert!(baseline.metadata["public_interface"]["callables"].as_array().unwrap().iter().any(|entry| entry["name"] == "view"));
         for mutation in [
@@ -2435,10 +2487,10 @@ fn nominal_catalog_rejects_rebound_scopes_shapes_and_public_omissions() {
                     error.code,
                     CheckerRejectionCode::V2410MetadataBindingMismatch | CheckerRejectionCode::V2419TypedSemanticsInvalid
                 ),
-                "O{opt_level} {mutation}: {error}"
+                "{diagnostics} {mutation}: {error}"
             );
             if mutation.starts_with("public-") && mutation != "public-callable-duplicate" {
-                assert!(error.message.contains("public declaration set"), "O{opt_level} {mutation}: {error}");
+                assert!(error.message.contains("public declaration set"), "{diagnostics} {mutation}: {error}");
             }
         }
     }
@@ -2448,8 +2500,8 @@ fn nominal_catalog_rejects_rebound_scopes_shapes_and_public_omissions() {
 fn universal_abilities_reject_weakened_parameter_minima_without_any_concrete_instance() {
     use cellscript_artifact_checker::TypedSemanticGenericDeclaration as Declaration;
     let source = format!("{SOURCE}\npublic struct Pair<T: fixed_value> {{ left: T, right: T }}");
-    for opt_level in 0..=3 {
-        let baseline = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, opt_level, declaration());
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let baseline = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, diagnostics, declaration());
         let inspect = |fixture: &Fixture| {
             cellscript_artifact_checker::interface::inspect_bundle(
                 &fixture.artifact,
@@ -2482,7 +2534,7 @@ fn universal_abilities_reject_weakened_parameter_minima_without_any_concrete_ins
             .unwrap_err();
             assert!(
                 error.message.contains("requires a bounded") || error.message.contains("defining contract"),
-                "O{opt_level} {missing}: {error}"
+                "{diagnostics} {missing}: {error}"
             );
         }
         let mut changed = baseline.clone();
@@ -2505,7 +2557,7 @@ fn universal_abilities_reject_weakened_parameter_minima_without_any_concrete_ins
         // supply a universal copy guarantee when its parameter lacks copy.
         let error = inspect(&changed).validate_symbolic_declarations().unwrap_err();
         assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid);
-        assert!(error.message.contains("parameter minima"), "O{opt_level}: {error}");
+        assert!(error.message.contains("parameter minima"), "{diagnostics}: {error}");
 
         let mut recursive = baseline.clone();
         let pair = recursive
@@ -2535,7 +2587,7 @@ fn universal_abilities_reject_weakened_parameter_minima_without_any_concrete_ins
         .into();
         recursive.rebind_interface_identity();
         let error = inspect(&recursive).validate_symbolic_declarations().unwrap_err();
-        assert!(error.message.contains("recursive"), "O{opt_level}: {error}");
+        assert!(error.message.contains("recursive"), "{diagnostics}: {error}");
     }
 }
 
@@ -2560,14 +2612,14 @@ fn imported_nominal_layouts_reject_same_width_owner_and_alias_substitution() {
             role: None,
         },
     ];
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile_sources_artifact(
             &sources,
             "main.cell",
             CompileOptions {
                 source_contracts: true,
                 edition: CellScriptEdition::Edition2027,
-                opt_level,
+                diagnostics,
                 target: Some("riscv64-elf".into()),
                 ..CompileOptions::default()
             },
@@ -2613,8 +2665,8 @@ fn imported_nominal_layouts_reject_same_width_owner_and_alias_substitution() {
             }
             changed.rebind_policy_identity();
             let error = changed.check().unwrap_err();
-            assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid, "O{opt_level} {mutation}: {error}");
-            assert!(error.message.contains("nominal"), "O{opt_level} {mutation}: {error}");
+            assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid, "{diagnostics} {mutation}: {error}");
+            assert!(error.message.contains("nominal"), "{diagnostics} {mutation}: {error}");
         }
     }
 }
@@ -2626,7 +2678,12 @@ fn instantiated_interface_templates_reject_rebound_layout_and_signature_substitu
     )
     .replace("witness recipient: Address)", "witness recipient: Address, witness choice: Choice<Hash>, witness pair: Pair<u64>)")
     .replace("require amount > 0", "require amount > 0\nrequire first<u64>(pair.left) == pair.left");
-    let baseline = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, 0, declaration());
+    let baseline = Fixture::new_source_with(
+        &source,
+        CellScriptEdition::Edition2027,
+        cellscript::CompilerDiagnostics::without_optimizations(),
+        declaration(),
+    );
     baseline.assert_interface_inspection();
     assert!(baseline.record.typed_semantics.entries.iter().any(|entry| entry.name.starts_with("first__mono__")));
     for mutation in [
@@ -2752,7 +2809,12 @@ fn interface_cell_capabilities_cannot_be_forged_by_rebinding_outer_hashes() {
 fn interface_variant_cardinality_cannot_be_forged_by_rebinding_layout_hashes() {
     let source = format!("{SOURCE}\npublic enum Choice {{ First(u64), Second(Hash) }}")
         .replace("witness recipient: Address)", "witness recipient: Address, witness choice: Choice)");
-    let baseline = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, 0, declaration());
+    let baseline = Fixture::new_source_with(
+        &source,
+        CellScriptEdition::Edition2027,
+        cellscript::CompilerDiagnostics::without_optimizations(),
+        declaration(),
+    );
     baseline.assert_interface_inspection();
     assert!(baseline.record.typed_semantics.types.iter().any(|ty| ty.name == "Choice"));
     for mutation in ["omit", "reorder", "rename", "payload", "same-width-type"] {
@@ -2800,7 +2862,12 @@ fn interface_nested_type_arguments_cannot_be_forged_by_rebinding_layout_hashes()
         "{SOURCE}\npublic struct Pair<T: fixed_value> {{ left: T, right: T }}\npublic struct Envelope {{ pairs: [Pair<Hash>; 2] }}\npublic enum Choice {{ Nested(Envelope), Direct(Pair<Address>) }}"
     )
     .replace("witness recipient: Address)", "witness recipient: Address, witness choice: Choice)");
-    let baseline = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, 0, declaration());
+    let baseline = Fixture::new_source_with(
+        &source,
+        CellScriptEdition::Edition2027,
+        cellscript::CompilerDiagnostics::without_optimizations(),
+        declaration(),
+    );
     baseline.assert_interface_inspection();
     assert!(baseline.record.typed_semantics.types.iter().any(|ty| ty.name == "Envelope"));
     assert!(baseline.record.typed_semantics.types.iter().any(|ty| ty.name == "Choice"));
@@ -2837,8 +2904,8 @@ fn interface_nested_type_arguments_cannot_be_forged_by_rebinding_layout_hashes()
 #[test]
 fn policy_dispatch_machine_contract_covers_editions_optimizers_tag_extremes_and_no_common_checks() {
     for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
-        for opt_level in 0..=3 {
-            Fixture::new_with(edition, opt_level, declaration()).check().unwrap();
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+            Fixture::new_with(edition, diagnostics, declaration()).check().unwrap();
         }
     }
 
@@ -2848,16 +2915,16 @@ fn policy_dispatch_machine_contract_covers_editions_optimizers_tag_extremes_and_
     let mut one_payload_free = declaration();
     one_payload_free.actions = vec![ArtifactAction { tag: 7, action: "burn".into() }];
     one_payload_free.common_checks.clear();
-    for opt_level in 0..=3 {
-        Fixture::new_with(CellScriptEdition::Edition2027, opt_level, one_payload.clone()).check().unwrap();
-        Fixture::new_with(CellScriptEdition::Edition2027, opt_level, one_payload_free.clone()).check().unwrap();
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        Fixture::new_with(CellScriptEdition::Edition2027, diagnostics, one_payload.clone()).check().unwrap();
+        Fixture::new_with(CellScriptEdition::Edition2027, diagnostics, one_payload_free.clone()).check().unwrap();
     }
 
     let mut extreme = declaration();
     extreme.actions = vec![ArtifactAction { tag: u32::MAX, action: "burn".into() }, ArtifactAction { tag: 0, action: "mint".into() }];
     extreme.common_checks.clear();
-    for opt_level in 0..=3 {
-        Fixture::new_with(CellScriptEdition::Edition2027, opt_level, extreme.clone()).check().unwrap();
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        Fixture::new_with(CellScriptEdition::Edition2027, diagnostics, extreme.clone()).check().unwrap();
     }
 }
 
@@ -2867,8 +2934,8 @@ fn low_mask_policy_tags_reject_rebound_shift_and_seed_mutations() {
     policy.actions =
         vec![ArtifactAction { tag: 0x7fff_ffff, action: "burn".into() }, ArtifactAction { tag: u32::MAX, action: "mint".into() }];
     for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
-        for opt_level in 0..=3 {
-            let valid = Fixture::new_with(edition, opt_level, policy.clone());
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+            let valid = Fixture::new_with(edition, diagnostics, policy.clone());
             let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
             let sequences: Vec<_> = elf
                 .instructions
@@ -3001,7 +3068,12 @@ fn typed_outgoing_stack_args_are_bound_to_the_policy_adapter_frame() {
         actions: vec![ArtifactAction { tag: 1, action: "mint".into() }],
         common_checks: Vec::new(),
     };
-    let valid = Fixture::new_source_with(STACK_ARGS_SOURCE, CellScriptEdition::Edition2027, 3, declaration);
+    let valid = Fixture::new_source_with(
+        STACK_ARGS_SOURCE,
+        CellScriptEdition::Edition2027,
+        cellscript::CompilerDiagnostics::default(),
+        declaration,
+    );
     let adapter = valid.record.entries.iter().find(|entry| entry.name.starts_with(".Lpolicy_action_adapter_")).unwrap();
     // 104 payload bytes + 8-byte CSARG header + length/RA slots,
     // aligned to 16, plus the 32-byte outgoing argument reservation.
@@ -3030,7 +3102,8 @@ fn shared_decoder_preserves_private_return_storage_with_outgoing_stack_arguments
         actions: vec![ArtifactAction { tag: 1, action: "mint".into() }, ArtifactAction { tag: 2, action: "mint_other".into() }],
         common_checks: Vec::new(),
     };
-    let valid = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, 3, declaration);
+    let valid =
+        Fixture::new_source_with(&source, CellScriptEdition::Edition2027, cellscript::CompilerDiagnostics::default(), declaration);
     let decoders: Vec<_> = valid.record.entries.iter().filter(|entry| entry.name.starts_with(".Lpolicy_shared_decoder_")).collect();
     assert_eq!(decoders.len(), 1);
     assert_eq!(decoders[0].frame_size_bytes, 0);
@@ -3166,7 +3239,12 @@ fn typed_policy_counts_payload_identity_and_selector_require_concrete_evidence()
 #[test]
 fn interface_callable_signature_cannot_be_forged_after_outer_hash_rebinding() {
     let source = SOURCE.replace("require amount > 0", "require echo(amount) > 0") + "\npublic fn echo(value: u64) -> u64 { value }\n";
-    let baseline = Fixture::new_source_with(&source, CellScriptEdition::Edition2027, 0, declaration());
+    let baseline = Fixture::new_source_with(
+        &source,
+        CellScriptEdition::Edition2027,
+        cellscript::CompilerDiagnostics::without_optimizations(),
+        declaration(),
+    );
     baseline.assert_interface_inspection();
     assert!(baseline.record.typed_semantics.entries.iter().any(|entry| entry.name == "echo" && entry.kind == "helper"));
     for mutation in
@@ -3239,7 +3317,7 @@ fn interface_callable_signature_cannot_be_forged_after_outer_hash_rebinding() {
     assert_eq!(error.message, "interface callable return type differs from checked entry");
 }
 
-fn fixed_result_fixture(opt_level: u8) -> Fixture {
+fn fixed_result_fixture(diagnostics: cellscript::CompilerDiagnostics) -> Fixture {
     let source = r#"
 module checked_result
 struct Pair { left: u64, right: u64 }
@@ -3255,7 +3333,7 @@ action verify(witness value: Pair, witness expected: Pair) {
 "#;
     let compiled = cellscript::compile_with_executable_surface_policy(
         source,
-        CompileOptions { source_contracts: true, opt_level, target: Some("riscv64-elf".into()), ..CompileOptions::default() },
+        CompileOptions { source_contracts: true, diagnostics, target: Some("riscv64-elf".into()), ..CompileOptions::default() },
         ExecutableSurfacePolicy::DenyFailClosed,
     )
     .unwrap();
@@ -3271,8 +3349,8 @@ action verify(witness value: Pair, witness expected: Pair) {
 
 #[test]
 fn fixed_result_contracts_reject_rebound_placement_extent_and_coverage_mutations() {
-    for opt_level in 0..=3 {
-        let valid = fixed_result_fixture(opt_level);
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let valid = fixed_result_fixture(diagnostics);
         for mutation in 0..19 {
             let mut changed = valid.clone();
             let helper = changed.record.entries.iter().position(|entry| entry.name == "build").unwrap();
@@ -3307,7 +3385,7 @@ fn fixed_result_contracts_reject_rebound_placement_extent_and_coverage_mutations
             }
             changed.rebind_sidecars();
             let error = changed.check().expect_err("rebound fixed result contract must fail independently");
-            assert_eq!(error.code, CheckerRejectionCode::V2407AbiOrStackInvalid, "O{opt_level}, mutation {mutation}: {error}");
+            assert_eq!(error.code, CheckerRejectionCode::V2407AbiOrStackInvalid, "{diagnostics}, mutation {mutation}: {error}");
             assert!(error.message.contains("fixed struct result ABI"), "{error}");
         }
     }
@@ -3315,8 +3393,8 @@ fn fixed_result_contracts_reject_rebound_placement_extent_and_coverage_mutations
 
 #[test]
 fn fixed_result_machine_mutations_reject_after_elf_and_sidecars_are_rebound() {
-    for opt_level in 0..=3 {
-        let valid = fixed_result_fixture(opt_level);
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let valid = fixed_result_fixture(diagnostics);
         let helper = valid.record.entries.iter().find(|entry| entry.name == "build").unwrap();
         let abi = helper.fixed_result_abi.as_ref().unwrap();
         let call = &valid.record.entries.iter().find(|entry| entry.name == "verify").unwrap().fixed_result_calls[0];
@@ -3353,7 +3431,7 @@ fn fixed_result_machine_mutations_reject_after_elf_and_sidecars_are_rebound() {
             let mut changed = valid.clone();
             changed.replace_machine_word(address, word);
             let error = changed.check().expect_err("machine ABI mutation must fail after complete hash rebinding");
-            assert_eq!(error.code, CheckerRejectionCode::V2407AbiOrStackInvalid, "O{opt_level}, address {address:#x}: {error}");
+            assert_eq!(error.code, CheckerRejectionCode::V2407AbiOrStackInvalid, "{diagnostics}, address {address:#x}: {error}");
             assert!(error.message.contains("fixed struct result ABI"), "{error}");
         }
     }
@@ -3376,7 +3454,7 @@ fn dependency_inputs(snapshots: &[DependencySnapshot]) -> Vec<cellscript_artifac
         .collect()
 }
 fn direct_dependency_fixture(
-    opt: u8,
+    opt: cellscript::CompilerDiagnostics,
 ) -> (cellscript_artifact_checker::code_origin::CheckedTargetCodeCellOrigin, Vec<u8>, Vec<DependencySnapshot>) {
     use ckb_testtool::ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*};
     let fixture = external_fixture(EXTERNAL_SOURCE, opt);
@@ -3425,7 +3503,7 @@ fn direct_dependency_fixture(
 fn direct_code_dependency_binds_actual_outpoints_outputs_and_independent_orders() {
     use cellscript_artifact_checker::code_origin::check_direct_code_dependency;
     use ckb_testtool::ckb_types::{packed, prelude::*};
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let (target, raw, cells) = direct_dependency_fixture(opt);
         let inputs = dependency_inputs(&cells);
         let proof = check_direct_code_dependency(&target, &raw, &inputs, &CheckerBudgets::default()).unwrap();
@@ -3461,7 +3539,7 @@ fn direct_code_dependency_binds_actual_outpoints_outputs_and_independent_orders(
 fn direct_code_dependency_rejects_missing_copied_duplicate_and_unselected_cells() {
     use cellscript_artifact_checker::code_origin::check_direct_code_dependency;
     use ckb_testtool::ckb_types::{packed, prelude::*};
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let (target, raw, cells) = direct_dependency_fixture(opt);
         for axis in 0..12 {
             let mut changed = cells.clone();
@@ -3512,7 +3590,7 @@ fn direct_code_dependency_rejects_missing_copied_duplicate_and_unselected_cells(
             assert!(
                 check_direct_code_dependency(&target, tx.as_slice(), &dependency_inputs(&changed), &CheckerBudgets::default())
                     .is_err(),
-                "O{opt} axis {axis}"
+                "{opt} axis {axis}"
             );
         }
     }
@@ -3520,7 +3598,7 @@ fn direct_code_dependency_rejects_missing_copied_duplicate_and_unselected_cells(
 #[test]
 fn direct_code_dependency_preflights_all_snapshot_inputs_before_parsing() {
     use cellscript_artifact_checker::code_origin::check_direct_code_dependency;
-    let (target, raw, cells) = direct_dependency_fixture(0);
+    let (target, raw, cells) = direct_dependency_fixture(cellscript::CompilerDiagnostics::without_optimizations());
     let proof = check_direct_code_dependency(&target, &raw, &dependency_inputs(&cells), &CheckerBudgets::default()).unwrap();
     for count in [0, 65] {
         let oversized = vec![cells[0].clone(); count];
@@ -3561,7 +3639,7 @@ fn direct_code_dependency_preflights_all_snapshot_inputs_before_parsing() {
 fn direct_code_dependency_rejects_actual_checked_type_targets_without_history() {
     use cellscript_artifact_checker::code_origin::{check_code_cell_target, check_direct_code_dependency, SuppliedDependencyCell};
     use ckb_testtool::ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*};
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let mut contract = declaration();
         contract.actions.retain(|action| action.action == "burn");
         contract.common_checks.clear();
@@ -3585,7 +3663,7 @@ fn direct_code_dependency_rejects_actual_checked_type_targets_without_history() 
 fn direct_code_dependency_binds_all_64_cells_including_the_final_snapshot() {
     use cellscript_artifact_checker::code_origin::check_direct_code_dependency;
     use ckb_testtool::ckb_types::{core::TransactionBuilder, packed, prelude::*};
-    let (target, _raw, mut cells) = direct_dependency_fixture(0);
+    let (target, _raw, mut cells) = direct_dependency_fixture(cellscript::CompilerDiagnostics::without_optimizations());
     for index in 0..62u32 {
         let point = packed::OutPoint::new_builder().tx_hash([21u8; 32].pack()).index(index).build();
         cells.push(DependencySnapshot {
@@ -3627,12 +3705,12 @@ fn supplied_inputs(cells: &[DependencySnapshot]) -> Vec<cellscript_artifact_chec
         })
         .collect()
 }
-fn type_group_fixture(opt: u8) -> TypeGroupFixture {
+fn type_group_fixture(opt: cellscript::CompilerDiagnostics) -> TypeGroupFixture {
     let mut args = b"CSARGv1\0".to_vec();
     args.extend_from_slice(&7u64.to_le_bytes());
     type_group_fixture_with(EXTERNAL_SOURCE, opt, args)
 }
-fn type_group_fixture_with(source: &str, opt: u8, args: Vec<u8>) -> TypeGroupFixture {
+fn type_group_fixture_with(source: &str, opt: cellscript::CompilerDiagnostics, args: Vec<u8>) -> TypeGroupFixture {
     use cellscript::policy_witness::{encode_policy_witness_bundle, PolicyScriptRole, PolicyWitnessRecord};
     use ckb_testtool::ckb_types::{bytes::Bytes, core::TransactionBuilder, packed, prelude::*};
     let fixture = external_fixture(source, opt);
@@ -3713,7 +3791,7 @@ fn check_type_group(f: &TypeGroupFixture) -> Result<cellscript_artifact_checker:
 fn direct_type_group_binds_actual_role_full_script_raw_indices_and_complete_witness_bytes() {
     use cellscript_artifact_checker::code_origin::SuppliedTypeGroupTransaction;
     use ckb_testtool::ckb_types::{bytes::Bytes, prelude::*};
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let f = type_group_fixture(opt);
         let proof = check_type_group(&f).unwrap();
         assert_eq!(proof.group_inputs(), &[1]);
@@ -3802,7 +3880,7 @@ fn direct_type_group_binds_actual_role_full_script_raw_indices_and_complete_witn
 #[test]
 fn direct_type_group_rejects_missing_duplicate_foreign_role_and_changed_args_inputs() {
     use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for axis in 0..8 {
             let mut f = type_group_fixture(opt);
             match axis {
@@ -3839,7 +3917,7 @@ fn direct_type_group_rejects_missing_duplicate_foreign_role_and_changed_args_inp
                 }
                 _ => unreachable!(),
             }
-            assert!(check_type_group(&f).is_err(), "O{opt} axis {axis}");
+            assert!(check_type_group(&f).is_err(), "{opt} axis {axis}");
         }
     }
 }
@@ -3847,7 +3925,7 @@ fn direct_type_group_rejects_missing_duplicate_foreign_role_and_changed_args_inp
 fn direct_type_group_rejects_unknown_ambiguous_misplaced_or_wrong_width_policy_records() {
     use cellscript::policy_witness::{encode_policy_witness_bundle, PolicyScriptRole, PolicyWitnessRecord};
     use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for axis in 0..10 {
             let mut f = type_group_fixture(opt);
             let mut records = cellscript::policy_witness::decode_policy_witness_bundle(
@@ -3891,7 +3969,7 @@ fn direct_type_group_rejects_unknown_ambiguous_misplaced_or_wrong_width_policy_r
                 witnesses.swap(0, 1);
             }
             f.transaction = f.transaction.as_builder().witnesses(witnesses.pack()).build();
-            assert!(check_type_group(&f).is_err(), "O{opt} axis {axis}");
+            assert!(check_type_group(&f).is_err(), "{opt} axis {axis}");
         }
     }
 }
@@ -3902,7 +3980,7 @@ fn direct_type_group_preflights_complete_shared_inputs_and_rejects_substitution(
         check_direct_code_dependency, check_direct_type_group, SuppliedTypeGroupTransaction,
     };
     use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
-    let f = type_group_fixture(0);
+    let f = type_group_fixture(cellscript::CompilerDiagnostics::without_optimizations());
     let deps = dependency_inputs(&f.dependencies);
     let inputs = supplied_inputs(&f.inputs);
     let dependency = || {
@@ -3970,7 +4048,9 @@ fn direct_type_group_preflights_complete_shared_inputs_and_rejects_substitution(
             )
             .is_err());
     }
-    let foreign = fixed_policy_receipt(&external_fixture(EXTERNAL_SOURCE, 0), vec![18]).unwrap();
+    let foreign =
+        fixed_policy_receipt(&external_fixture(EXTERNAL_SOURCE, cellscript::CompilerDiagnostics::without_optimizations()), vec![18])
+            .unwrap();
     assert!(check_direct_type_group(
         &foreign,
         dependency(),
@@ -4073,7 +4153,7 @@ fn direct_type_group_checks_all_256_inputs_and_all_eight_policy_records() {
         decode_policy_witness_bundle, encode_policy_witness_bundle, PolicyScriptRole, PolicyWitnessRecord,
     };
     use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let mut f = type_group_fixture(opt);
         let foreign = f.inputs[1].clone();
         let selected = f.inputs[0].clone();
@@ -4114,7 +4194,7 @@ fn direct_type_group_checks_all_256_inputs_and_all_eight_policy_records() {
         assert_eq!(proof.witness_index(), 255);
         let saved = f.inputs[255].output.clone();
         f.inputs[255].output = vec![0];
-        assert!(check_type_group(&f).is_err(), "malformed final unselected input O{opt}");
+        assert!(check_type_group(&f).is_err(), "malformed final unselected input {opt}");
         f.inputs[255].output = saved;
         // Final record participates in strict role/key/length checking, even
         // though the selected group is a distinct independently checked key.
@@ -4142,7 +4222,7 @@ fn direct_type_group_checks_all_256_inputs_and_all_eight_policy_records() {
 fn direct_type_group_uses_checked_scalar_widths_and_exact_empty_argument_case() {
     use cellscript::policy_witness::{decode_policy_witness_bundle, encode_policy_witness_bundle};
     use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for (ty, width) in [("u8", 1), ("u16", 2), ("u32", 4), ("u64", 8), ("unit", 0)] {
             let source = if width == 0 {
                 EXTERNAL_SOURCE.replace(", witness value: u64", "").replace(" require value > 0", "")
@@ -4170,7 +4250,7 @@ fn direct_type_group_uses_checked_scalar_widths_and_exact_empty_argument_case() 
             let mut witnesses = f.transaction.witnesses().into_iter().collect::<Vec<_>>();
             witnesses[1] = witness.as_bytes().pack();
             f.transaction = f.transaction.as_builder().witnesses(witnesses.pack()).build();
-            assert!(check_type_group(&f).is_err(), "O{opt} {ty} wrong checked args length");
+            assert!(check_type_group(&f).is_err(), "{opt} {ty} wrong checked args length");
         }
     }
 }
@@ -4181,8 +4261,8 @@ fn direct_type_group_rejects_actual_receipt_bundle_byte_substitution() {
         check_direct_code_dependency, check_direct_type_group, SuppliedTypeGroupTransaction,
     };
     use ckb_testtool::ckb_types::prelude::*;
-    let f = type_group_fixture(0);
-    let fixture = external_fixture(EXTERNAL_SOURCE, 0);
+    let f = type_group_fixture(cellscript::CompilerDiagnostics::without_optimizations());
+    let fixture = external_fixture(EXTERNAL_SOURCE, cellscript::CompilerDiagnostics::without_optimizations());
     let mut bundle = receipt_bundle(&fixture);
     // Both are actual independently checked bundles; JSON whitespace retains
     // API shape/code bytes but changes bound machine-byte provenance identities.
@@ -4231,7 +4311,7 @@ action burn(input token: Token, witness value: u64) {
     consume token
 }
 "#;
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let fixture = external_fixture(NESTED_SOURCE, opt);
         let checked = fixed_external_codec(&fixture).unwrap();
         let record: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
@@ -4293,7 +4373,7 @@ action burn(input token: Token, witness value: u64) {
 #[test]
 fn constant_value_catalog_rejects_rebound_mutations() {
     use cellscript_artifact_checker::{ConstantExpression, ConstantValueContract};
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let fixture = external_fixture(&format!("{EXTERNAL_SOURCE}\npublic const LIMIT: u64 = 3 * 7"), opt);
         fixed_external_codec(&fixture).unwrap();
         for mutation in ["value", "expression", "div-zero", "deep", "missing-catalog", "undeclared"] {
@@ -4346,11 +4426,11 @@ fn constant_value_catalog_rejects_rebound_mutations() {
 
 #[test]
 fn nominal_catalog_rejects_reserved_open_handle_class_names() {
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let baseline = Fixture::new_source_with(
             &format!("{SOURCE}\npublic struct Snapshot {{ z: u64 }}"),
             CellScriptEdition::Edition2027,
-            opt_level,
+            diagnostics,
             declaration(),
         );
         baseline.assert_interface_inspection();
@@ -4366,6 +4446,6 @@ fn nominal_catalog_rejects_reserved_open_handle_class_names() {
             &CheckerBudgets::default(),
         )
         .unwrap_err();
-        assert!(error.message.contains("reserved open-handle class name"), "opt={opt_level}: {error}");
+        assert!(error.message.contains("reserved open-handle class name"), "opt={diagnostics}: {error}");
     }
 }

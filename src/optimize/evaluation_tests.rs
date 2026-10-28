@@ -25,7 +25,7 @@ action check(witness value: u128, witness divisor: u128, witness amount: u64, wi
 }
 "#;
     for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
-        for level in 0..=3 {
+        for level in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
             let mut module = crate::frontend::parse(source, edition).unwrap();
             optimize_module(&mut module, level).unwrap();
             assert_eq!(action(&module).body.len(), 10, "{edition:?} level {level} erased potentially failing evaluation");
@@ -51,7 +51,7 @@ action check(witness value: u64, witness divisor: u64, witness values: [u64; 2],
 }
 "#;
     for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
-        for level in 0..=3 {
+        for level in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
             let mut module = crate::frontend::parse(source, edition).unwrap();
             optimize_module(&mut module, level).unwrap();
             let mut calls = Vec::new();
@@ -76,7 +76,7 @@ action check() {
 }
 "#;
     for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
-        for level in 0..=3 {
+        for level in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
             let mut module = crate::frontend::parse(source, edition).unwrap();
             crate::types::check(&module).unwrap();
             optimize_module(&mut module, level).unwrap();
@@ -102,7 +102,7 @@ action check() {
 }
 "#;
     for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
-        for level in 0..=3 {
+        for level in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
             let mut module = crate::frontend::parse(source, edition).unwrap();
             crate::types::check(&module).unwrap();
             optimize_module(&mut module, level).unwrap();
@@ -132,7 +132,8 @@ action check() -> bool {
 }
 "#;
     for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
-        for level in [2, 3] {
+        {
+            let level = crate::CompilerDiagnostics::default();
             let mut module = crate::frontend::parse(source, edition).unwrap();
             crate::types::check(&module).unwrap();
             optimize_module(&mut module, level).unwrap();
@@ -163,7 +164,7 @@ action check(witness value: u64, witness wide: u128) {
 }
 "#;
     for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
-        for level in 0..=3 {
+        for level in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
             let mut module = crate::frontend::parse(source, edition).unwrap();
             optimize_module(&mut module, level).unwrap();
             assert_eq!(action(&module).body.len(), 3, "{edition:?} level {level}");
@@ -194,7 +195,8 @@ action check(witness divisor: u64, witness value: u64) {
 }
 "#;
     for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
-        for level in 1..=3 {
+        {
+            let level = crate::CompilerDiagnostics::default();
             let mut module = crate::frontend::parse(source, edition).unwrap();
             optimize_module(&mut module, level).unwrap();
             let divisions = action(&module)

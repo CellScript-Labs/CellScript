@@ -44,7 +44,7 @@ fn repo_root() -> PathBuf {
 fn options() -> CompileOptions {
     CompileOptions {
         edition: CellScriptEdition::Edition2027,
-        opt_level: 3,
+        diagnostics: cellscript::CompilerDiagnostics::default(),
         target: Some("riscv64-elf".into()),
         target_profile: Some("ckb".into()),
         ..Default::default()

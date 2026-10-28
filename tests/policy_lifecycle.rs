@@ -85,10 +85,10 @@ const MAX_CYCLES: u64 = 100_000_000;
 const SIGNATURE_OFFSET: usize = 4 + 2 * 20;
 const SOURCE_VIEW_SHIFT: u64 = 1 << 32;
 
-fn compile_policy(edition: CellScriptEdition, opt_level: u8) -> CompileResult {
+fn compile_policy(edition: CellScriptEdition, diagnostics: cellscript::CompilerDiagnostics) -> CompileResult {
     let compiled = compile_artifact(
         SOURCE,
-        CompileOptions { edition, opt_level, target: Some("riscv64-elf".to_string()), ..Default::default() },
+        CompileOptions { edition, diagnostics, target: Some("riscv64-elf".to_string()), ..Default::default() },
         ArtifactDeclaration {
             name: "IssuerAuthorizedToken".to_string(),
             context: ArtifactContext::TypeGroup { resource: "Token".to_string() },
@@ -102,7 +102,7 @@ fn compile_policy(edition: CellScriptEdition, opt_level: u8) -> CompileResult {
         },
         ExecutableSurfacePolicy::DenyFailClosed,
     )
-    .unwrap_or_else(|error| panic!("issuer policy {edition:?}/opt{opt_level}: {error}"));
+    .unwrap_or_else(|error| panic!("issuer policy {edition:?}/opt{diagnostics}: {error}"));
     compiled.validate().expect("independent bounded artifact validation");
     compiled
 }
@@ -493,8 +493,8 @@ fn signed_persistent_policy_executes_six_transactions_with_live_prior_outputs() 
         dependency_bytes: multisig_dependency_bytes,
     };
     for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
-        for opt_level in 0..=3 {
-            let compiled = compile_policy(edition, opt_level);
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+            let compiled = compile_policy(edition, diagnostics);
             measured.elf_bytes = measured.elf_bytes.max(strip_vm_abi_trailer(&compiled.artifact_bytes).len());
             measured.max_stack_frame_bytes = measured.max_stack_frame_bytes.max(
                 compiled
@@ -518,7 +518,7 @@ fn signed_persistent_policy_executes_six_transactions_with_live_prior_outputs() 
                 let extra_output = lifecycle.prepare(action, &consumed, &[amount, amount], Actor::Alice);
                 lifecycle.assert_rejects(&extra_output.signed, "Type");
                 let outputs =
-                    lifecycle.commit(&valid.signed).unwrap_or_else(|error| panic!("{edition:?}/opt{opt_level} mint: {error}"));
+                    lifecycle.commit(&valid.signed).unwrap_or_else(|error| panic!("{edition:?}/opt{diagnostics} mint: {error}"));
                 minted.push(outputs[1].clone());
                 lifecycle.issuer = outputs[2].clone();
                 let count = lifecycle.live.len();
@@ -535,7 +535,7 @@ fn signed_persistent_policy_executes_six_transactions_with_live_prior_outputs() 
                     lifecycle.assert_rejects(&invalid.signed, "Type");
                 }
                 let outputs =
-                    lifecycle.commit(&valid.signed).unwrap_or_else(|error| panic!("{edition:?}/opt{opt_level} transfer: {error}"));
+                    lifecycle.commit(&valid.signed).unwrap_or_else(|error| panic!("{edition:?}/opt{diagnostics} transfer: {error}"));
                 transferred.push(outputs[1].clone());
             }
             let merge = lifecycle.prepare(Action::Merge, &transferred, &[12], Actor::Bob);
@@ -547,13 +547,14 @@ fn signed_persistent_policy_executes_six_transactions_with_live_prior_outputs() 
             }
             let missing_input = lifecycle.prepare(Action::Merge, &transferred[..1], &[12], Actor::Bob);
             lifecycle.assert_rejects(&missing_input.signed, "Type");
-            let outputs = lifecycle.commit(&merge.signed).unwrap_or_else(|error| panic!("{edition:?}/opt{opt_level} merge: {error}"));
+            let outputs =
+                lifecycle.commit(&merge.signed).unwrap_or_else(|error| panic!("{edition:?}/opt{diagnostics} merge: {error}"));
             let consumed = [outputs[1].clone()];
             let burn = lifecycle.prepare(Action::Burn, &consumed, &[], Actor::Bob);
             lifecycle.assert_authorization(&burn);
             let surviving = lifecycle.prepare(Action::Burn, &consumed, &[12], Actor::Bob);
             lifecycle.assert_rejects(&surviving.signed, "Type");
-            lifecycle.commit(&burn.signed).unwrap_or_else(|error| panic!("{edition:?}/opt{opt_level} burn: {error}"));
+            lifecycle.commit(&burn.signed).unwrap_or_else(|error| panic!("{edition:?}/opt{diagnostics} burn: {error}"));
             assert_eq!(lifecycle.committed, 6);
             assert_eq!(lifecycle.policy, original_policy);
             assert!(lifecycle.live.values().all(|(output, _)| output.type_().to_opt().is_none()), "no live Token remains after burn");
@@ -561,7 +562,7 @@ fn signed_persistent_policy_executes_six_transactions_with_live_prior_outputs() 
             measured.witness_bytes = measured.witness_bytes.max(lifecycle.max_witness_bytes);
             measured.transaction_bytes = measured.transaction_bytes.max(lifecycle.max_tx_bytes);
             eprintln!(
-                "lifecycle {edition:?}/opt{opt_level}: {} committed txs, max cycles={}, max serialized tx bytes={}, max output occupied bytes={}",
+                "lifecycle {edition:?}/opt{diagnostics}: {} committed txs, max cycles={}, max serialized tx bytes={}, max output occupied bytes={}",
                 lifecycle.committed, lifecycle.max_cycles, lifecycle.max_tx_bytes, lifecycle.max_occupied_bytes
             );
         }
@@ -573,8 +574,8 @@ fn signed_persistent_policy_executes_six_transactions_with_live_prior_outputs() 
 #[test]
 fn canonical_issuer_full_lock_hash_and_checked_merge_are_enforced() {
     for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
-        for opt_level in 0..=3 {
-            let compiled = compile_policy(edition, opt_level);
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+            let compiled = compile_policy(edition, diagnostics);
             let mut lifecycle = Lifecycle::new(&compiled);
             assert_eq!(Actor::Issuer.lock().code_hash(), Actor::Bob.lock().code_hash());
             assert_eq!(Actor::Issuer.lock().hash_type(), Actor::Bob.lock().hash_type());
@@ -615,7 +616,7 @@ fn canonical_issuer_full_lock_hash_and_checked_merge_are_enforced() {
                 let valid =
                     lifecycle.prepare(Action::Mint { issuer_input: 1, amount }, &[lifecycle.issuer.clone()], &[amount], Actor::Alice);
                 let outputs =
-                    lifecycle.commit(&valid.signed).unwrap_or_else(|error| panic!("{edition:?}/opt{opt_level} large mint: {error}"));
+                    lifecycle.commit(&valid.signed).unwrap_or_else(|error| panic!("{edition:?}/opt{diagnostics} large mint: {error}"));
                 tokens.push(outputs[1].clone());
                 lifecycle.issuer = outputs[2].clone();
             }

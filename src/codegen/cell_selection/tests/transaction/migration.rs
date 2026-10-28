@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 const SOURCE: &str = include_str!("../../../../../examples/language/batches/nested_migration.cell");
 
-fn compile_migration(opt_level: u8) -> crate::CompileResult {
+fn compile_migration(diagnostics: crate::CompilerDiagnostics) -> crate::CompileResult {
     let mut source = SOURCE.to_string();
     for (placeholder, actual) in
         [("11", script(&code_identity(1), 0)), ("22", script(&code_identity(2), 0)), ("33", script(&code_identity(3), 0))]
@@ -19,9 +19,9 @@ fn compile_migration(opt_level: u8) -> crate::CompileResult {
     assert_eq!(crate::fmt::format_default(&crate::frontend::parse(&formatted, crate::NEXT_EDITION).unwrap()).unwrap(), formatted);
     let compiled = crate::compile(
         &source,
-        crate::CompileOptions { edition: crate::NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+        crate::CompileOptions { edition: crate::NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
     )
-    .unwrap_or_else(|error| panic!("migration O{opt_level}: {error}"));
+    .unwrap_or_else(|error| panic!("migration {diagnostics}: {error}"));
     for blocker in ["nested-values-artifact-proof", "cell-data-view-artifact-proof", "exact-role-selection-artifact-proof"] {
         assert!(!compiled.metadata.runtime.fail_closed_runtime_features.iter().any(|feature| feature == blocker));
     }
@@ -149,18 +149,18 @@ fn run_migration(
 
 #[test]
 fn nested_migration_business_transaction_preserves_history_and_checks_every_group() {
-    for opt in 0..=3 {
+    for opt in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile_migration(opt);
         for count in [1, 3, 8] {
             let cycles = run_migration(&compiled, count, count == 8, Mutation::None).unwrap();
-            eprintln!("[nested migration] O{opt} documents={count} cycles={cycles}");
+            eprintln!("[nested migration] {opt} documents={count} cycles={cycles}");
         }
         // The changed final note remains canonically encoded and fails only
         // after the maximum batch's history comparisons have executed.
         let late = run_migration(&compiled, 8, true, Mutation::Note).unwrap_err();
-        assert!(late.contains("error code 5"), "O{opt} late maximum failure: {late}");
+        assert!(late.contains("error code 5"), "{opt} late maximum failure: {late}");
         let over = run_migration(&compiled, 9, false, Mutation::None).unwrap_err();
-        assert!(over.contains("error code 21"), "O{opt} over-count: {over}");
+        assert!(over.contains("error code 21"), "{opt} over-count: {over}");
         for mutation in [
             Mutation::History,
             Mutation::Note,
@@ -181,7 +181,7 @@ fn nested_migration_business_transaction_preserves_history_and_checks_every_grou
                 Mutation::Malformed => 16,
                 _ => 5,
             };
-            assert!(error.contains(&format!("error code {code}")), "O{opt} {mutation:?}: {error}");
+            assert!(error.contains(&format!("error code {code}")), "{opt} {mutation:?}: {error}");
         }
     }
 }

@@ -38,7 +38,7 @@ private fn check_asset(i0: u64, i1: u64, i2: u64, i3: u64, o0: u64, o1: u64, o2:
     if i0 > 1000000000 || i1 > 1000000000 || i2 > 1000000000 || i3 > 1000000000 { return false }
     if o0 > 1000000000 || o1 > 1000000000 || o2 > 1000000000 || o3 > 1000000000 { return false }
     if ckb::cell_count(source::group_input(0)) == 0 {
-        ckb::require_cell_type_args_hash(source::group_output(0), ckb::cell_lock_hash(source::input(0)))
+        ckb::require_cell_type_args32(source::group_output(0), ckb::cell_lock_hash(source::input(0)).0)
         return o0 + o1 + o2 + o3 > 0
     }
     return i0 + i1 + i2 + i3 == o0 + o1 + o2 + o3

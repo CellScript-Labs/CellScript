@@ -4,7 +4,7 @@ action inspect() -> u64 {
     verification
         // Bounds: group inputs, all inputs, extra witnesses, bytes per witness.
         let digest = env::sighash_all_zero_lock(4, 8, 4, 4096)
-        let expected = witness::args(0).lock
-        require Hash::from_sighash_all(digest) == expected
+        let expected = witness::lock_exact32(witness::args(0))
+        require Hash::from_sighash_all(digest).0 == expected
         return 0
 }

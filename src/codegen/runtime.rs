@@ -637,7 +637,6 @@ impl CodeGenerator {
                 "__ckb_cell_data_hash_field" => {
                     self.emit_runtime_cell_hash_field_helper(name, detail, CKB_CELL_FIELD_DATA_HASH, enabled);
                 }
-                "__ckb_cell_data_hash" => self.emit_runtime_cell_data_hash_helper(name, detail, enabled),
                 "__ckb_cell_data_bytes32" => {
                     self.emit_runtime_cell_data_bytes32_helper(name, detail, enabled);
                 }
@@ -662,7 +661,7 @@ impl CodeGenerator {
                         enabled,
                     );
                 }
-                "__ckb_cell_lock_args_hash" => {
+                "__ckb_cell_lock_args32" => {
                     self.emit_runtime_cell_script_hash_field_helper(
                         name,
                         detail,
@@ -671,7 +670,7 @@ impl CodeGenerator {
                         enabled,
                     );
                 }
-                "__ckb_cell_type_args_hash" => {
+                "__ckb_cell_type_args32" => {
                     self.emit_runtime_cell_script_hash_field_helper(
                         name,
                         detail,
@@ -809,18 +808,18 @@ impl CodeGenerator {
                 "__ckb_require_cell_type_args_empty" => {
                     self.emit_runtime_cell_script_args_empty_requirement_helper(name, detail, CKB_CELL_FIELD_TYPE, enabled)
                 }
-                "__ckb_require_cell_lock_args_hash" => self.emit_runtime_cell_script_args_hash_requirement_helper(
+                "__ckb_require_cell_lock_args32" => self.emit_runtime_cell_script_args_bytes32_requirement_helper(
                     name,
                     detail,
                     CKB_CELL_FIELD_LOCK,
-                    ScriptArgsHashRequirementMode::Exact32,
+                    ScriptArgsBytes32RequirementMode::Exact32,
                     enabled,
                 ),
-                "__ckb_require_cell_type_args_hash" => self.emit_runtime_cell_script_args_hash_requirement_helper(
+                "__ckb_require_cell_type_args32" => self.emit_runtime_cell_script_args_bytes32_requirement_helper(
                     name,
                     detail,
                     CKB_CELL_FIELD_TYPE,
-                    ScriptArgsHashRequirementMode::Exact32,
+                    ScriptArgsBytes32RequirementMode::Exact32,
                     enabled,
                 ),
                 "__ckb_require_cell_lock_args_exact" => {
@@ -829,32 +828,32 @@ impl CodeGenerator {
                 "__ckb_require_cell_type_args_exact" => {
                     self.emit_runtime_cell_script_args_exact_requirement_helper(name, detail, CKB_CELL_FIELD_TYPE, enabled)
                 }
-                "__ckb_require_cell_lock_args_prefix_hash" => self.emit_runtime_cell_script_args_hash_requirement_helper(
+                "__ckb_require_cell_lock_args_prefix32" => self.emit_runtime_cell_script_args_bytes32_requirement_helper(
                     name,
                     detail,
                     CKB_CELL_FIELD_LOCK,
-                    ScriptArgsHashRequirementMode::Prefix32,
+                    ScriptArgsBytes32RequirementMode::Prefix32,
                     enabled,
                 ),
-                "__ckb_require_cell_type_args_prefix_hash" => self.emit_runtime_cell_script_args_hash_requirement_helper(
+                "__ckb_require_cell_type_args_prefix32" => self.emit_runtime_cell_script_args_bytes32_requirement_helper(
                     name,
                     detail,
                     CKB_CELL_FIELD_TYPE,
-                    ScriptArgsHashRequirementMode::Prefix32,
+                    ScriptArgsBytes32RequirementMode::Prefix32,
                     enabled,
                 ),
-                "__ckb_require_cell_lock_args_suffix_hash" => self.emit_runtime_cell_script_args_hash_requirement_helper(
+                "__ckb_require_cell_lock_args_suffix32" => self.emit_runtime_cell_script_args_bytes32_requirement_helper(
                     name,
                     detail,
                     CKB_CELL_FIELD_LOCK,
-                    ScriptArgsHashRequirementMode::Suffix32,
+                    ScriptArgsBytes32RequirementMode::Suffix32,
                     enabled,
                 ),
-                "__ckb_require_cell_type_args_suffix_hash" => self.emit_runtime_cell_script_args_hash_requirement_helper(
+                "__ckb_require_cell_type_args_suffix32" => self.emit_runtime_cell_script_args_bytes32_requirement_helper(
                     name,
                     detail,
                     CKB_CELL_FIELD_TYPE,
-                    ScriptArgsHashRequirementMode::Suffix32,
+                    ScriptArgsBytes32RequirementMode::Suffix32,
                     enabled,
                 ),
                 "__ckb_require_cell_lock_script_hash_type" => {
@@ -919,13 +918,9 @@ impl CodeGenerator {
                 "__ckb_witness_u32_le" => self.emit_runtime_exact_byte_word_helper(name, RuntimeByteSource::Witness, 4, enabled),
                 "__ckb_witness_u64_le" => self.emit_runtime_exact_byte_word_helper(name, RuntimeByteSource::Witness, 8, enabled),
                 "__ckb_require_witness_size_at_least" => self.emit_runtime_require_witness_size_at_least_helper(enabled),
-                "__ckb_witness_raw" => self.emit_runtime_witness_raw_helper(enabled),
-                "__ckb_witness_lock" => self.emit_runtime_witness_args_field_helper(name, detail, 0, false, enabled),
-                "__ckb_witness_input_type" => self.emit_runtime_witness_args_field_helper(name, detail, 1, false, enabled),
-                "__ckb_witness_output_type" => self.emit_runtime_witness_args_field_helper(name, detail, 2, false, enabled),
-                "__ckb_witness_lock_exact32" => self.emit_runtime_witness_args_field_helper(name, detail, 0, true, enabled),
-                "__ckb_witness_input_type_exact32" => self.emit_runtime_witness_args_field_helper(name, detail, 1, true, enabled),
-                "__ckb_witness_output_type_exact32" => self.emit_runtime_witness_args_field_helper(name, detail, 2, true, enabled),
+                "__ckb_witness_lock_exact32" => self.emit_runtime_witness_args_exact32_helper(name, detail, 0, enabled),
+                "__ckb_witness_input_type_exact32" => self.emit_runtime_witness_args_exact32_helper(name, detail, 1, enabled),
+                "__ckb_witness_output_type_exact32" => self.emit_runtime_witness_args_exact32_helper(name, detail, 2, enabled),
                 "__ckb_witness_bounded_size" => self.emit_runtime_bounded_witness_size(enabled),
                 "__ckb_witness_bounded_u8" => self.emit_runtime_bounded_witness_word(name, 1, enabled),
                 "__ckb_witness_bounded_u32_le" => self.emit_runtime_bounded_witness_word(name, 4, enabled),
@@ -959,7 +954,6 @@ impl CodeGenerator {
                     | "__ckb_hash_blake2b_var"
                     | "__ckb_hash_blake2b_packed"
                     | "__ckb_script_hash"
-                    | "__ckb_cell_data_hash"
                     | "__ckb_cell_data_blake2b_span"
                     | "__ckb_witness_blake2b_span"
                     | "__ckb_witness_bounded_blake2b"
@@ -1004,7 +998,6 @@ impl CodeGenerator {
             self.emit_runtime_blake2b_hash32(enabled);
         }
         if referenced_helpers.contains("__ckb_hash_blake2b_var")
-            || referenced_helpers.contains("__ckb_cell_data_hash")
             || referenced_helpers.contains("__ckb_script_hash")
             || referenced_helpers.contains("__ckb_hash_data_packed")
             || referenced_helpers.contains("__ckb_hash_blake2b_packed")
@@ -3842,304 +3835,6 @@ impl CodeGenerator {
         self.emit_label(&done);
         self.emit("li a0, 0");
         self.emit(format!("ld ra, {}(sp)", RA_OFFSET));
-        self.emit_stack_adjustment(FRAME_SIZE as i64);
-        self.emit("ret");
-    }
-
-    fn emit_runtime_witness_raw_helper(&mut self, enabled: bool) {
-        const OUTPTR_OFFSET: usize = 8;
-        const SIZE_OFFSET: usize = 16;
-        const RA_OFFSET: usize = 24;
-        const FRAME_SIZE: usize = 32;
-
-        self.emit_global("__ckb_witness_raw");
-        self.emit_label("__ckb_witness_raw");
-        self.emit("# cellscript abi: load raw witness bytes (first 32) into caller buffer");
-        self.emit("# cellscript abi: args a0=SourceView, a1=out32_ptr; returns a0=status");
-        if !enabled {
-            self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
-            self.emit("ret");
-            return;
-        }
-        let invalid = self.fresh_label("witness_raw_source_invalid");
-        let failed = self.fresh_label("witness_raw_load_failed");
-        let status_ok = self.fresh_label("witness_raw_status_ok");
-        let done = self.fresh_label("witness_raw_done");
-        let abi = self.runtime_abi();
-
-        self.emit_stack_adjustment(-(FRAME_SIZE as i64));
-        self.emit(format!("sd ra, {}(sp)", RA_OFFSET));
-        self.emit(format!("sd a1, {}(sp)", OUTPTR_OFFSET));
-        self.emit("# cellscript abi: zero-fill caller witness Hash buffer before raw prefix load");
-        self.emit(format!("ld t0, {}(sp)", OUTPTR_OFFSET));
-        self.emit("li t1, 0");
-        let zero_loop = self.fresh_label("witness_raw_zero_loop");
-        let zero_done = self.fresh_label("witness_raw_zero_done");
-        self.emit_label(&zero_loop);
-        self.emit("li t2, 32");
-        self.emit("sltu t3, t1, t2");
-        self.emit(format!("beqz t3, {}", zero_done));
-        self.emit("add t4, t0, t1");
-        self.emit("sb zero, 0(t4)");
-        self.emit("addi t1, t1, 1");
-        self.emit(format!("j {}", zero_loop));
-        self.emit_label(&zero_done);
-        self.emit_decode_source_view_to_t1_t2(&invalid);
-        self.emit("# cellscript abi: LOAD_WITNESS raw first 32 bytes into caller buffer");
-        self.emit("li t0, 32");
-        self.emit(format!("sd t0, {}(sp)", SIZE_OFFSET));
-        self.emit(format!("ld a0, {}(sp)", OUTPTR_OFFSET));
-        self.emit(format!("addi a1, sp, {}", SIZE_OFFSET));
-        self.emit("li a2, 0");
-        self.emit("addi a3, t1, 0");
-        self.emit("addi a4, t2, 0");
-        self.emit(format!("li a7, {}", abi.load_witness));
-        self.emit("ecall");
-        self.emit(format!("li t0, {}", CKB_LENGTH_NOT_ENOUGH));
-        self.emit("sub t1, a0, t0");
-        self.emit(format!("beqz t1, {}", status_ok));
-        self.emit(format!("beqz a0, {}", status_ok));
-        self.emit(format!("j {}", failed));
-
-        self.emit_label(&status_ok);
-        self.emit(format!("j {}", done));
-
-        self.emit_label(&invalid);
-        self.emit(format!("li a0, {}", CellScriptRuntimeError::CkbSourceViewInvalid.code()));
-        self.emit(format!("ld ra, {}(sp)", RA_OFFSET));
-        self.emit_stack_adjustment(FRAME_SIZE as i64);
-        self.emit("ret");
-
-        self.emit_label(&failed);
-        self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
-        self.emit(format!("ld ra, {}(sp)", RA_OFFSET));
-        self.emit_stack_adjustment(FRAME_SIZE as i64);
-        self.emit("ret");
-
-        self.emit_label(&done);
-        self.emit("li a0, 0");
-        self.emit(format!("ld ra, {}(sp)", RA_OFFSET));
-        self.emit_stack_adjustment(FRAME_SIZE as i64);
-        self.emit("ret");
-    }
-
-    fn emit_runtime_witness_args_field_helper(&mut self, symbol: &str, detail: &str, field_index: u64, exact_32: bool, enabled: bool) {
-        if exact_32 {
-            self.emit_runtime_witness_args_exact32_helper(symbol, detail, field_index, enabled);
-            return;
-        }
-
-        const OUTPTR_OFFSET: usize = 0;
-        const SIZE_OFFSET: usize = 8;
-        const FULL_BUFFER_OFFSET: usize = 16;
-        const FULL_BUFFER_SIZE: usize = 512;
-        const FIELD_BUF_OFFSET: usize = FULL_BUFFER_OFFSET + FULL_BUFFER_SIZE;
-        const FIELD_BUF_SIZE: usize = 32;
-        const HEADER_READ_OFFSET: usize = FIELD_BUF_OFFSET + FIELD_BUF_SIZE;
-        const HEADER_READ_SIZE: usize = 24;
-        const RA_OFFSET: usize = HEADER_READ_OFFSET + HEADER_READ_SIZE;
-        const FRAME_SIZE: usize = align_frame(RA_OFFSET + 8);
-
-        self.emit_global(symbol);
-        self.emit_label(symbol);
-        self.emit(format!("# cellscript abi: extract WitnessArgs field {} ({})", field_index, detail));
-        self.emit("# cellscript abi: args a0=SourceView, a1=out32_ptr; returns a0=status");
-        if !enabled {
-            self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
-            self.emit("ret");
-            return;
-        }
-        let invalid = self.fresh_label("witness_field_source_invalid");
-        let failed = self.fresh_label("witness_field_load_failed");
-        let malformed = self.fresh_label("witness_field_malformed");
-        let truncated = self.fresh_label("witness_field_truncated");
-        let field_absent = self.fresh_label("witness_field_absent");
-        let ok = self.fresh_label("witness_field_ok");
-        let done = self.fresh_label("witness_field_done");
-        let abi = self.runtime_abi();
-
-        self.emit_stack_adjustment(-(FRAME_SIZE as i64));
-        self.emit_stack_store("ra", RA_OFFSET);
-        self.emit_stack_store("a1", OUTPTR_OFFSET);
-        self.emit("# cellscript abi: zero-fill extracted WitnessArgs Hash buffer before parsing");
-        self.emit("li t0, 0");
-        let zero_field_loop = self.fresh_label("witness_field_prezero_loop");
-        let zero_field_done = self.fresh_label("witness_field_prezero_done");
-        self.emit_label(&zero_field_loop);
-        self.emit("li t1, 32");
-        self.emit("sltu t2, t0, t1");
-        self.emit(format!("beqz t2, {}", zero_field_done));
-        self.emit_sp_addi("t3", FIELD_BUF_OFFSET);
-        self.emit("add t3, t3, t0");
-        self.emit("sb zero, 0(t3)");
-        self.emit("addi t0, t0, 1");
-        self.emit(format!("j {}", zero_field_loop));
-        self.emit_label(&zero_field_done);
-        self.emit_decode_source_view_to_t1_t2(&invalid);
-
-        // Load full witness
-        self.emit(format!("li t0, {}", FULL_BUFFER_SIZE));
-        self.emit_stack_store("t0", SIZE_OFFSET);
-        self.emit_sp_addi("a0", FULL_BUFFER_OFFSET);
-        self.emit_sp_addi("a1", SIZE_OFFSET);
-        self.emit("li a2, 0");
-        self.emit("addi a3, t1, 0");
-        self.emit("addi a4, t2, 0");
-        self.emit(format!("li a7, {}", abi.load_witness));
-        self.emit("ecall");
-        self.emit(format!("beqz a0, {}", ok));
-        self.emit(format!("j {}", failed));
-
-        self.emit_label(&ok);
-        self.emit_stack_load("t0", SIZE_OFFSET);
-        self.emit(format!("li t1, {}", FULL_BUFFER_SIZE));
-        self.emit(format!("bltu t1, t0, {}", truncated));
-
-        // Parse Molecule WitnessArgs table header (minimum 4 + 3*4 = 16 bytes)
-        // Table encoding: total_size (4 bytes) + offsets[0..N-1] (4 bytes each)
-        // field_count = (offset0 / 4) - 1
-        self.emit("li t1, 16");
-        self.emit("sltu t2, t0, t1");
-        self.emit(format!("bnez t2, {}", malformed));
-
-        self.emit_sp_addi("t3", FULL_BUFFER_OFFSET);
-        self.emit("# cellscript abi: WitnessArgs total_size must match loaded witness size");
-        self.emit_u32_le_from_base_to("t4", "t3", 0, "t5");
-        self.emit("sub t2, t4, t0");
-        self.emit(format!("bnez t2, {}", malformed));
-
-        // For the current 3-field WitnessArgs table, offset0 must be 16.
-        self.emit_u32_le_from_base_to("t4", "t3", 4, "t5");
-        self.emit("li t5, 16");
-        self.emit("sub t2, t4, t5");
-        self.emit(format!("bnez t2, {}", malformed));
-
-        // Read field offsets from header (offsets at bytes 4, 8, 12)
-        self.emit_u32_le_from_base_to("t4", "t3", 4, "t2");
-        self.emit_stack_store("t4", HEADER_READ_OFFSET);
-        self.emit_u32_le_from_base_to("t5", "t3", 8, "t2");
-        self.emit_stack_store("t5", HEADER_READ_OFFSET + 8);
-        self.emit_u32_le_from_base_to("t6", "t3", 12, "t2");
-        self.emit_stack_store("t6", HEADER_READ_OFFSET + 16);
-
-        self.emit("# cellscript abi: validate all WitnessArgs field offsets are monotonic and in bounds");
-        self.emit_stack_load("t4", HEADER_READ_OFFSET);
-        self.emit_stack_load("t5", HEADER_READ_OFFSET + 8);
-        self.emit("sltu t2, t5, t4");
-        self.emit(format!("bnez t2, {}", malformed));
-        self.emit_stack_load("t4", HEADER_READ_OFFSET + 8);
-        self.emit_stack_load("t5", HEADER_READ_OFFSET + 16);
-        self.emit("sltu t2, t5, t4");
-        self.emit(format!("bnez t2, {}", malformed));
-        self.emit("sltu t2, t0, t5");
-        self.emit(format!("bnez t2, {}", truncated));
-
-        // Select field offset and next field offset
-        let field_offsets_offset = HEADER_READ_OFFSET + (field_index * 8) as usize;
-        let next_offsets_offset = HEADER_READ_OFFSET + ((field_index + 1) * 8) as usize;
-        self.emit_stack_load("t4", field_offsets_offset);
-        if field_index < 2 {
-            self.emit_stack_load("t5", next_offsets_offset);
-        } else {
-            self.emit("addi t5, t0, 0".to_string());
-        }
-
-        // Check field offset bounds: field_offset <= next_offset <= total_size.
-        // BytesOpt None is an empty span, so adjacent offsets may be equal.
-        self.emit("sltu t2, t5, t4");
-        self.emit(format!("bnez t2, {}", malformed));
-        self.emit("sltu t2, t0, t5");
-        self.emit(format!("bnez t2, {}", truncated));
-
-        // Calculate BytesOpt field span. Empty span is None.
-        self.emit("sub t2, t5, t4");
-        self.emit(format!("beqz t2, {}", field_absent));
-        self.emit("li t6, 4");
-        self.emit("sltu t3, t2, t6");
-        self.emit(format!("bnez t3, {}", malformed));
-        self.emit("addi t2, t2, -4");
-
-        // Read Some(Bytes) length at field_offset and require exact Bytes size.
-        self.emit_sp_addi("t3", FULL_BUFFER_OFFSET);
-        self.emit("add t6, t3, t4");
-        self.emit_u32_le_from_base_to("t1", "t6", 0, "t3");
-        self.emit("sub t3, t2, t1");
-        self.emit(format!("bnez t3, {}", malformed));
-
-        // Legacy projections zero-pad/truncate to 32 bytes; exact-width
-        // projections returned through the separate resolver above.
-        self.emit("li t3, 32");
-        self.emit("sltu t5, t3, t1");
-        let copy_count_ready = self.fresh_label("witness_field_copy_count_ready");
-        self.emit(format!("beqz t5, {}", copy_count_ready));
-        self.emit("addi t1, t3, 0");
-        self.emit_label(&copy_count_ready);
-        self.emit_sp_addi("t2", FIELD_BUF_OFFSET);
-        self.emit("addi t4, t6, 4");
-        // Copy loop
-        self.emit("li t3, 0");
-        let copy_loop = self.fresh_label("witness_field_copy_loop");
-        let copy_done = self.fresh_label("witness_field_copy_done");
-        self.emit_label(&copy_loop);
-        self.emit("sltu t5, t3, t1");
-        self.emit(format!("beqz t5, {}", copy_done));
-        self.emit("add t5, t4, t3");
-        self.emit("lbu t6, 0(t5)");
-        self.emit("add t5, t2, t3");
-        self.emit("sb t6, 0(t5)");
-        self.emit("addi t3, t3, 1");
-        self.emit(format!("j {}", copy_loop));
-        self.emit_label(&copy_done);
-        self.emit(format!("j {}", done));
-
-        self.emit_label(&field_absent);
-        self.emit("# cellscript abi: BytesOpt None leaves pre-zeroed Hash buffer");
-        self.emit(format!("j {}", done));
-
-        self.emit_label(&malformed);
-        self.emit(format!("li a0, {}", CellScriptRuntimeError::WitnessMalformed.code()));
-        self.emit_stack_load("ra", RA_OFFSET);
-        self.emit_stack_adjustment(FRAME_SIZE as i64);
-        self.emit("ret");
-
-        self.emit_label(&truncated);
-        self.emit(format!("li a0, {}", CellScriptRuntimeError::WitnessFieldTruncated.code()));
-        self.emit_stack_load("ra", RA_OFFSET);
-        self.emit_stack_adjustment(FRAME_SIZE as i64);
-        self.emit("ret");
-
-        self.emit_label(&invalid);
-        self.emit(format!("li a0, {}", CellScriptRuntimeError::CkbSourceViewInvalid.code()));
-        self.emit_stack_load("ra", RA_OFFSET);
-        self.emit_stack_adjustment(FRAME_SIZE as i64);
-        self.emit("ret");
-
-        self.emit_label(&failed);
-        self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
-        self.emit_stack_load("ra", RA_OFFSET);
-        self.emit_stack_adjustment(FRAME_SIZE as i64);
-        self.emit("ret");
-
-        self.emit_label(&done);
-        // Copy 32 bytes from FIELD_BUF_OFFSET to caller's buffer (outptr)
-        self.emit_stack_load("t0", OUTPTR_OFFSET);
-        self.emit("li t1, 0");
-        let copy_out = self.fresh_label("witness_field_copy_out_loop");
-        let copy_out_done = self.fresh_label("witness_field_copy_out_done");
-        self.emit_label(&copy_out);
-        self.emit("li t2, 32");
-        self.emit("sltu t3, t1, t2");
-        self.emit(format!("beqz t3, {}", copy_out_done));
-        self.emit_sp_addi("t2", FIELD_BUF_OFFSET);
-        self.emit("add t2, t2, t1");
-        self.emit("lbu t3, 0(t2)");
-        self.emit("add t4, t0, t1");
-        self.emit("sb t3, 0(t4)");
-        self.emit("addi t1, t1, 1");
-        self.emit(format!("j {}", copy_out));
-        self.emit_label(&copy_out_done);
-        self.emit("li a0, 0");
-        self.emit_stack_load("ra", RA_OFFSET);
         self.emit_stack_adjustment(FRAME_SIZE as i64);
         self.emit("ret");
     }
@@ -7909,26 +7604,26 @@ impl CodeGenerator {
         self.emit("ret");
     }
 
-    fn emit_runtime_cell_script_args_hash_requirement_helper(
+    fn emit_runtime_cell_script_args_bytes32_requirement_helper(
         &mut self,
         symbol: &str,
         detail: &str,
         field_id: u64,
-        mode: ScriptArgsHashRequirementMode,
+        mode: ScriptArgsBytes32RequirementMode,
         enabled: bool,
     ) {
         self.emit_global(symbol);
         self.emit_label(symbol);
         self.emit(format!("# cellscript abi: CKB SourceView Script 32-byte args requirement ({})", detail));
-        self.emit("# cellscript abi: args a0=SourceView, a1=expected_args_hash_ptr, a2=expected_args_hash_len");
+        self.emit("# cellscript abi: args a0=SourceView, a1=expected_args_bytes_ptr, a2=expected_args_bytes_len");
         match mode {
-            ScriptArgsHashRequirementMode::Exact32 => {
+            ScriptArgsBytes32RequirementMode::Exact32 => {
                 self.emit("# cellscript abi: expects Molecule Script args Bytes length == 32 and payload == expected hash");
             }
-            ScriptArgsHashRequirementMode::Prefix32 => {
+            ScriptArgsBytes32RequirementMode::Prefix32 => {
                 self.emit("# cellscript abi: expects Molecule Script args Bytes length >= 32 and first 32 bytes == expected hash");
             }
-            ScriptArgsHashRequirementMode::Suffix32 => {
+            ScriptArgsBytes32RequirementMode::Suffix32 => {
                 self.emit("# cellscript abi: expects Molecule Script args Bytes length >= 32 and last 32 bytes == expected hash");
             }
         }
@@ -7949,14 +7644,14 @@ impl CodeGenerator {
         const SCRIPT_PREFIX_SIZE: u64 = 53;
         const HASH_ARGS_SCRIPT_SIZE: u64 = 85;
 
-        let invalid = self.fresh_label("script_args_hash_source_invalid");
-        let bad_expected = self.fresh_label("script_args_hash_expected_invalid");
-        let loaded = self.fresh_label("script_args_hash_loaded");
-        let suffix_loaded = self.fresh_label("script_args_hash_suffix_loaded");
-        let failed = self.fresh_label("script_args_hash_load_failed");
-        let mismatch = self.fresh_label("script_args_hash_mismatch");
-        let malformed = self.fresh_label("script_args_hash_malformed");
-        let done = self.fresh_label("script_args_hash_done");
+        let invalid = self.fresh_label("script_args32_source_invalid");
+        let bad_expected = self.fresh_label("script_args32_expected_invalid");
+        let loaded = self.fresh_label("script_args32_loaded");
+        let suffix_loaded = self.fresh_label("script_args32_suffix_loaded");
+        let failed = self.fresh_label("script_args32_load_failed");
+        let mismatch = self.fresh_label("script_args32_mismatch");
+        let malformed = self.fresh_label("script_args32_malformed");
+        let done = self.fresh_label("script_args32_done");
         let abi = self.runtime_abi();
 
         self.emit_stack_adjustment(-(FRAME_SIZE as i64));
@@ -7972,8 +7667,8 @@ impl CodeGenerator {
         self.emit_stack_store("t1", SOURCE_INDEX_OFFSET);
         self.emit_stack_store("t2", SOURCE_KIND_OFFSET);
         let requested_size = match mode {
-            ScriptArgsHashRequirementMode::Exact32 | ScriptArgsHashRequirementMode::Prefix32 => 128u64,
-            ScriptArgsHashRequirementMode::Suffix32 => SCRIPT_PREFIX_SIZE,
+            ScriptArgsBytes32RequirementMode::Exact32 | ScriptArgsBytes32RequirementMode::Prefix32 => 128u64,
+            ScriptArgsBytes32RequirementMode::Suffix32 => SCRIPT_PREFIX_SIZE,
         };
         self.emit(format!("li t0, {}", requested_size));
         self.emit_stack_store("t0", SCRIPT_SIZE_OFFSET);
@@ -8009,7 +7704,7 @@ impl CodeGenerator {
 
         self.emit_stack_u32_le_to("t0", SCRIPT_BUFFER_OFFSET + 49);
         match mode {
-            ScriptArgsHashRequirementMode::Exact32 => {
+            ScriptArgsBytes32RequirementMode::Exact32 => {
                 self.emit("li t1, 32");
                 self.emit("sub t2, t0, t1");
                 self.emit(format!("bnez t2, {}", mismatch));
@@ -8018,7 +7713,7 @@ impl CodeGenerator {
                 self.emit(format!("bnez t2, {}", malformed));
                 self.emit_sp_addi("a0", ARGS_PAYLOAD_OFFSET);
             }
-            ScriptArgsHashRequirementMode::Prefix32 => {
+            ScriptArgsBytes32RequirementMode::Prefix32 => {
                 self.emit("li t1, 32");
                 self.emit("sltu t2, t0, t1");
                 self.emit(format!("bnez t2, {}", mismatch));
@@ -8028,7 +7723,7 @@ impl CodeGenerator {
                 self.emit(format!("bnez t2, {}", malformed));
                 self.emit_sp_addi("a0", ARGS_PAYLOAD_OFFSET);
             }
-            ScriptArgsHashRequirementMode::Suffix32 => {
+            ScriptArgsBytes32RequirementMode::Suffix32 => {
                 self.emit("li t1, 32");
                 self.emit("sltu t2, t0, t1");
                 self.emit(format!("bnez t2, {}", mismatch));
@@ -9352,77 +9047,6 @@ impl CodeGenerator {
         self.emit(format!("li a0, {}", CellScriptRuntimeError::CellLoadFailed.code()));
         self.emit_label(&done);
         self.emit(format!("ld ra, {}(sp)", RA_OFFSET));
-        self.emit_stack_adjustment(FRAME_SIZE as i64);
-        self.emit("ret");
-    }
-
-    fn emit_runtime_cell_data_hash_helper(&mut self, symbol: &str, detail: &str, enabled: bool) {
-        self.emit_global(symbol);
-        self.emit_label(symbol);
-        self.emit(format!("# cellscript abi: CKB SourceView LOAD_CELL_DATA and Blake2b ({})", detail));
-        self.emit("# cellscript abi: args a0=SourceView, a1=out32_ptr, a2=size_ptr; returns a0=status");
-        if !enabled {
-            self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
-            self.emit("ret");
-            return;
-        }
-
-        const SIZE_OFFSET: usize = 0;
-        const BUFFER_OFFSET: usize = 8;
-        const OUT_PTR_OFFSET: usize = BUFFER_OFFSET + RUNTIME_CELL_BUFFER_SIZE;
-        const SIZE_PTR_OFFSET: usize = OUT_PTR_OFFSET + 8;
-        const RA_OFFSET: usize = SIZE_PTR_OFFSET + 8;
-        const FRAME_SIZE: usize = align_frame(RA_OFFSET + 8);
-
-        let invalid = self.fresh_label("cell_data_hash_source_invalid");
-        let bad_output = self.fresh_label("cell_data_hash_output_invalid");
-        let failed = self.fresh_label("cell_data_hash_load_failed");
-        let done = self.fresh_label("cell_data_hash_done");
-        let abi = self.runtime_abi();
-
-        self.emit_stack_adjustment(-(FRAME_SIZE as i64));
-        self.emit_stack_store("ra", RA_OFFSET);
-        self.emit_stack_store("a1", OUT_PTR_OFFSET);
-        self.emit_stack_store("a2", SIZE_PTR_OFFSET);
-        self.emit(format!("beqz a1, {}", bad_output));
-        self.emit(format!("beqz a2, {}", bad_output));
-
-        self.emit_decode_source_view_to_t1_t2(&invalid);
-        self.emit(format!("li t0, {}", RUNTIME_CELL_BUFFER_SIZE));
-        self.emit_stack_store("t0", SIZE_OFFSET);
-        self.emit_sp_addi("a0", BUFFER_OFFSET);
-        self.emit_sp_addi("a1", SIZE_OFFSET);
-        self.emit("li a2, 0");
-        self.emit("addi a3, t1, 0");
-        self.emit("addi a4, t2, 0");
-        self.emit(format!("li a7, {}", abi.load_cell_data));
-        self.emit("ecall");
-        self.emit(format!("bnez a0, {}", failed));
-        self.emit_sp_addi("a0", BUFFER_OFFSET);
-        self.emit_stack_load("a1", SIZE_OFFSET);
-        // LOAD_CELL_DATA reports the full remaining length, not copied bytes.
-        // This bounded helper may hash only bytes initialized in its buffer.
-        self.emit(format!("li t0, {}", RUNTIME_CELL_BUFFER_SIZE));
-        self.emit(format!("bltu t0, a1, {}", failed));
-        self.emit_stack_load("a2", OUT_PTR_OFFSET);
-        self.emit("call __ckb_hash_blake2b_var");
-        self.emit(format!("bnez a0, {}", failed));
-        self.emit_stack_load("t6", SIZE_PTR_OFFSET);
-        self.emit("li t0, 32");
-        self.emit("sd t0, 0(t6)");
-        self.emit("li a0, 0");
-        self.emit(format!("j {}", done));
-
-        self.emit_label(&invalid);
-        self.emit(format!("li a0, {}", CellScriptRuntimeError::CkbSourceViewInvalid.code()));
-        self.emit(format!("j {}", done));
-        self.emit_label(&bad_output);
-        self.emit(format!("li a0, {}", CellScriptRuntimeError::FixedByteComparisonUnresolved.code()));
-        self.emit(format!("j {}", done));
-        self.emit_label(&failed);
-        self.emit(format!("li a0, {}", CellScriptRuntimeError::CellLoadFailed.code()));
-        self.emit_label(&done);
-        self.emit_stack_load("ra", RA_OFFSET);
         self.emit_stack_adjustment(FRAME_SIZE as i64);
         self.emit("ret");
     }

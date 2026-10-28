@@ -729,8 +729,22 @@ fn inspect() -> u64 {
         assert!(candidate.source.contains(
             "ckb::since_to_raw(ckb::since_relative_epoch(ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number), 1, 4))"
         ));
-        let original = compile(source, CompileOptions::default()).unwrap();
-        let migrated = compile(&candidate.source, CompileOptions::default()).unwrap();
+        let original = compile(
+            source,
+            CompileOptions {
+                diagnostics: crate::CompilerDiagnostics::default().without(crate::OptimizationPass::DeadCode),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let migrated = compile(
+            &candidate.source,
+            CompileOptions {
+                diagnostics: crate::CompilerDiagnostics::default().without(crate::OptimizationPass::DeadCode),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(original.metadata.functions[0].return_type, migrated.metadata.functions[0].return_type);
         assert!(legacy_temporal_migration_diagnostics(&candidate.source).is_empty());
         let diagnostics = legacy_temporal_migration_diagnostics(source);

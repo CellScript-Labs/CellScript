@@ -357,7 +357,7 @@ The selected concrete Script remains bound even when several instances satisfy
 policy: accepting A does not authorize substituting policy-valid B.
 
 For this profile, the `--open-admission` file uses
-`cellscript-protocol-instance-admission-input-v1`; each instance binding includes
+`cellscript-protocol-instance-admission-input-v2`; each instance binding includes
 its canonical `instance_policy`. The selection is 1768 bytes, with a 1776-byte
 CSARG payload. Generated builders expose `encodeInstanceHandleWitness` and
 `instanceHandleWitnessFromCheckedBundle`. Do not feed these bytes to the old

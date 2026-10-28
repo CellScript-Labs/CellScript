@@ -227,7 +227,7 @@ fn git_tag(repo_dir: &Path, tag: &str) {
 fn create_minimal_package(dir: &Path, name: &str, version: &str, namespace: Option<&str>) {
     std::fs::create_dir_all(dir.join("src")).unwrap();
 
-    let mut toml = String::from("[package]\nedition = \"2026\"\n");
+    let mut toml = String::from("[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\n");
     toml.push_str(&format!("name = \"{}\"\n", name));
     toml.push_str(&format!("version = \"{}\"\n", version));
     if let Some(ns) = namespace {
@@ -274,7 +274,7 @@ fn compute_source_hash_includes_cell_toml() {
 
     let hash1 = compute_source_hash(temp.path()).unwrap();
 
-    let mut toml = String::from("[package]\n");
+    let mut toml = String::from("[package]\ncellscript_version = \">=0.33.0-alpha.1\"\n");
     toml.push_str("name = \"hash-test\"\n");
     toml.push_str("version = \"0.2.0\"\n");
     std::fs::write(temp.path().join("Cell.toml"), toml).unwrap();
@@ -291,6 +291,7 @@ fn compute_source_hash_includes_configured_source_roots() {
         temp.path().join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "hash-test"
 version = "0.1.0"
@@ -682,6 +683,7 @@ fn deployed_manifest_rejects_legacy_minimal() {
 version = 1
 
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "minimal"
 version = "0.1.0"
@@ -803,6 +805,7 @@ fn lockfile_consistency_with_registry_source() {
     let manifest: PackageManifest = toml::from_str(
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "0.1.0"
@@ -1022,6 +1025,7 @@ fn package_manager_resolves_artifact_api_dependency_with_source_hash() {
         consumer.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "consumer"
 version = "0.1.0"
@@ -1108,6 +1112,7 @@ fn package_manager_rejects_unverified_registry_entry_by_default() {
         consumer.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "consumer"
 version = "0.1.0"
@@ -1186,6 +1191,7 @@ fn package_manager_persists_unverified_registry_policy_in_dependency_manifest() 
         consumer.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "consumer"
 version = "0.1.0"
@@ -1264,6 +1270,7 @@ fn package_manager_rejects_registry_source_hash_mismatch() {
         consumer.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "consumer"
 version = "0.1.0"
@@ -1329,6 +1336,7 @@ fn lockfile_consistency_rejects_wrong_registry_namespace() {
     let manifest: PackageManifest = toml::from_str(
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "0.1.0"
@@ -1380,6 +1388,7 @@ fn lockfile_consistency_accepts_matching_registry_source() {
     let manifest: PackageManifest = toml::from_str(
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "0.1.0"

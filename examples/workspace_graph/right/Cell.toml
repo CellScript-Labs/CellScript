@@ -2,7 +2,7 @@
 edition = "2026"
 name = "right"
 version = "1.0.0"
-cellscript_version = ">=0.26.0"
+cellscript_version = ">=0.33.0-alpha.1"
 
 [dependencies.shared]
 path = "../shared"

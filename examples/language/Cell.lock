@@ -6,11 +6,11 @@ resolver_model = "single-package-coordinate-v1"
 edition = "2026"
 name = "language"
 version = "0.1.0"
-source_hash = "1144971351564a15e0b22b0aafb89d1efd7a5455d369d01a7ab65a86433a1920"
-compiler_requirement = "*"
-resolver_compiler_version = "0.26.0"
+source_hash = "724d031d79bf4397437f54984300424463da756245ba478718347f6b4b51a773"
+compiler_requirement = ">=0.33.0-alpha.1"
+resolver_compiler_version = "0.33.0-alpha.1"
 
 [root]
-manifest_digest = "sha256:6933e8e1d59ab812f7d2906a21a2bedf26b2a9d37a4207923f808dc050cdad09"
+manifest_digest = "sha256:91834a5fcbd2f815382448a07ce9d409c9a38de38d56cc8b7e610b71212767bb"
 
 [dependencies]

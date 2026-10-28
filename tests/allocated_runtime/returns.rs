@@ -26,11 +26,11 @@ action inspect(witness key: u64) -> u64 {{
     return 0
 }}"#
             );
-            for opt_level in [0, 3] {
-                let compiled = compile_checked(&source, opt_level);
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+                let compiled = compile_checked(&source, diagnostics);
                 for key in [7, 9] {
                     let result = execute_compiled(&compiled, &[cellscript::EntryWitnessArg::U64(key)]);
-                    assert_eq!(result.exit_code, 0, "{ty}/padding={padding}/O{opt_level}/key={key}: {result:?}");
+                    assert_eq!(result.exit_code, 0, "{ty}/padding={padding}/{diagnostics}/key={key}: {result:?}");
                 }
             }
         }
@@ -65,11 +65,11 @@ action inspect(witness input: u64) -> u64 {
     require work.values.get(1) == input + 7
     return 0
 }"#;
-    for opt in [0, 3] {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile_checked(source, opt);
         for input in [1, 29] {
             let result = execute_compiled(&compiled, &[cellscript::EntryWitnessArg::U64(input)]);
-            assert_eq!(result.exit_code, 0, "O{opt}/input={input}: {result:?}");
+            assert_eq!(result.exit_code, 0, "{opt}/input={input}: {result:?}");
         }
     }
 }
@@ -117,7 +117,7 @@ action inspect(witness bytes: [u8; {width}], witness other: [u8; {width}], witne
     return 0
 }}"#
         );
-        for opt in [0, 3] {
+        for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = compile_checked(&source, opt);
             for change in [false, true] {
                 let result = execute_compiled(
@@ -128,7 +128,7 @@ action inspect(witness bytes: [u8; {width}], witness other: [u8; {width}], witne
                         cellscript::EntryWitnessArg::Bool(change),
                     ],
                 );
-                assert_eq!(result.exit_code, 0, "width={width}/O{opt}/change={change}: {result:?}");
+                assert_eq!(result.exit_code, 0, "width={width}/{opt}/change={change}: {result:?}");
             }
         }
     }
@@ -166,7 +166,7 @@ action inspect(witness a: [u8; 1024], witness b: [u8; 1024], witness c: [u8; 9],
     require work.values.get(0) == 17
     return 0
 }"#;
-    for opt in [0, 3] {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile_checked(source, opt);
         let result = execute_compiled(
             &compiled,
@@ -177,7 +177,7 @@ action inspect(witness a: [u8; 1024], witness b: [u8; 1024], witness c: [u8; 9],
                 cellscript::EntryWitnessArg::U128((1u128 << 97) + 53),
             ],
         );
-        assert_eq!(result.exit_code, 0, "O{opt}: {result:?}");
+        assert_eq!(result.exit_code, 0, "{opt}: {result:?}");
     }
 }
 
@@ -213,10 +213,10 @@ action inspect(witness input: u8, witness signed_input: i32) -> u64 {
     require work.values.get(1) == 7
     return 0
 }"#;
-    for opt in [0, 3] {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile_checked(source, opt);
         let result = execute_compiled(&compiled, &[cellscript::EntryWitnessArg::U8(251), cellscript::EntryWitnessArg::I32(-7)]);
-        assert_eq!(result.exit_code, 0, "O{opt}: {result:?}");
+        assert_eq!(result.exit_code, 0, "{opt}: {result:?}");
     }
 }
 
@@ -236,13 +236,13 @@ action inspect() -> u64 {
     require values.0 == 1
     return 0
 }"#;
-    for opt in [0, 3] {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile_checked(source, opt);
         let result = execute_compiled(&compiled, &[]);
         assert_eq!(
             result.exit_code,
             cellscript::runtime_errors::CellScriptRuntimeError::FixedByteComparisonUnresolved.code() as i64,
-            "O{opt}: {result:?}"
+            "{opt}: {result:?}"
         );
     }
 }

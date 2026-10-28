@@ -129,7 +129,7 @@ to their own directory. Compilation uses existing lockfiles, pinned environments
 and offline resolution; it cannot repin a dependency. A serialized receipt ID
 or `verified` flag cannot replace recompilation and independent artifact checks.
 
-The open input uses schema `cellscript-protocol-open-admission-input-v1`:
+The open input uses schema `cellscript-protocol-open-admission-input-v2`:
 
 | Field | Required content |
 | --- | --- |

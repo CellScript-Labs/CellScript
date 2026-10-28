@@ -213,8 +213,8 @@ action burn(input token: Token) { consume token }
 
     #[test]
     fn policy_transport_full_and_metadata_share_one_resolved_contract() {
-        for opt_level in [0, 1, 2, 3] {
-            let options = CompileOptions { opt_level, ..options() };
+        for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
+            let options = CompileOptions { diagnostics, ..options() };
             let full = compile_artifact(SOURCE, options.clone(), declaration(), ExecutableSurfacePolicy::DenyFailClosed).unwrap();
             let metadata = compile_artifact_metadata(SOURCE, options.clone(), declaration()).unwrap();
             let virtual_full = compile_sources_artifact(

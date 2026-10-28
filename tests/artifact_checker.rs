@@ -115,10 +115,10 @@ fn exact_cached_reads_preserve_borrowed_caches_across_helpers_and_cfg_joins() {
         let source = cached_nested_source(hot)
             .replace("action verify", "fn read_one(index: u64) -> u64 { let view = ckb::input<Token>(index)\nreturn ckb::cell_data_u64_le(view, 0) }\nfn read_twice(index: u64) -> u64 { return read_one(index) + read_one(index) }\naction verify")
             .replace("let view = ckb::input<Token>(0)", "let view = ckb::input<Token>(0)\nif first.len() > 0 { require read_twice(0) == 0 }\nrequire read_one(0) == 0");
-        for opt_level in [0, 3] {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
-                compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
-                    .unwrap_or_else(|error| panic!("cache helper hot={hot} O{opt_level}: {error}")),
+                compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() })
+                    .unwrap_or_else(|error| panic!("cache helper hot={hot} {diagnostics}: {error}")),
             );
             let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
             let helper = valid
@@ -153,11 +153,13 @@ fn exact_cached_reads_preserve_borrowed_caches_across_helpers_and_cfg_joins() {
 
 #[test]
 fn exact_cached_reads_bind_initialization_regions_and_complete_helper_bodies() {
-    for (opt_level, hot) in [(0, false), (3, true)] {
+    for (diagnostics, hot) in
+        [(cellscript::CompilerDiagnostics::without_optimizations(), false), (cellscript::CompilerDiagnostics::default(), true)]
+    {
         let valid = Fixture::from_result(
             compile(
                 &cached_nested_source(hot),
-                CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap_or_else(|error| panic!("cache hot={hot}: {error}")),
         );
@@ -303,9 +305,9 @@ fn selected_roles_source() -> String {
 #[test]
 fn cell_data_field_instructions_reject_rebound_source_length_copy_and_branch_changes() {
     let source = "module typed_data_proof\nresource Token has store { prefix: [u8; 256], padding: [u8; 216], id: u64, owner: Hash }\naction inspect() -> u64 { verification\nlet input = ckb::input<Token>(0)\nrequire input.data.owner == Hash::zero()\nreturn input.data.id }";
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
-            compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
         );
         let ranges = valid
             .record
@@ -347,7 +349,7 @@ fn cell_data_field_instructions_reject_rebound_source_length_copy_and_branch_cha
             };
             let mut changed = valid.clone();
             changed.replace_machine_word(instruction.address, word ^ mask);
-            assert!(changed.check().is_err(), "O{opt_level} accepted changed data field at {:#x}", instruction.address);
+            assert!(changed.check().is_err(), "{diagnostics} accepted changed data field at {:#x}", instruction.address);
             mutations += 1;
         }
         assert!(mutations > 150, "source tags, exact size, wide copy and scalar assembly must all be exercised");
@@ -384,10 +386,10 @@ fn cell_view_helpers_compose_with_branches_repeated_calls_and_wide_arguments() {
         .replace("action inspect()", "struct Check { ok: bool }\naction inspect()")
         .replace("ckb::output<Token>(0))", "ckb::output<Token>(0)).ok");
     for (case, source) in [&branched, &wide, &same_kind, &fixed_result].into_iter().enumerate() {
-        for opt_level in [0, 3] {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             Fixture::from_result(
-                compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
-                    .unwrap_or_else(|error| panic!("view composition case={case} O{opt_level}: {error}")),
+                compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() })
+                    .unwrap_or_else(|error| panic!("view composition case={case} {diagnostics}: {error}")),
             );
         }
     }
@@ -396,9 +398,9 @@ fn cell_view_helpers_compose_with_branches_repeated_calls_and_wide_arguments() {
 #[test]
 fn cell_view_values_bind_constructors_aliases_and_caller_slot_lifetimes() {
     let source = "module coordinates\nresource Token has store { id: u64 }\nfn inspect(before: InputView<Token>, after: OutputView<Token>) -> bool { let input = before\nlet data = input.data\nlet alias = data\nreturn alias.id == after.data.id }\naction verify(index: u64, noise: u64) -> u64 { verification\nif noise == 0 { return 0 }\nlet first = ckb::input<Token>(index)\nlet second = ckb::input<Token>(0)\nlet before = first\nlet ordinary = index + 1\nrequire ordinary > 0\nrequire inspect(before, ckb::output<Token>(0))\nrequire second.capacity > 0\nreturn 0 }";
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
-            compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
         );
         let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
         let reject = |fixture: &Fixture| {
@@ -523,9 +525,9 @@ fn cell_view_values_bind_constructors_aliases_and_caller_slot_lifetimes() {
 #[test]
 fn cell_view_constructor_inventory_survives_erased_markers_without_data_reads() {
     let source = "module coordinates\nresource Token has store { id: u64 }\naction inspect() -> u64 { verification\nlet view = ckb::input<Token>(0)\nreturn view.capacity }";
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let mut changed = Fixture::from_result(
-            compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
         );
         assert!(changed.record.blocks.iter().any(|block| !block.cell_view_value_labels.is_empty()));
         for block in &mut changed.record.blocks {
@@ -540,13 +542,13 @@ fn cell_view_constructor_inventory_survives_erased_markers_without_data_reads() 
 fn named_cell_roles_bind_role_projections_and_aliases_independently() {
     use cellscript_artifact_checker::cell_selection::Read;
     let source = include_str!("syntax_combo/seeds/named-role-selection.cell");
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(
                 source,
                 CompileOptions {
                     edition: cellscript::CellScriptEdition::Edition2027,
-                    opt_level,
+                    diagnostics,
                     target: Some("riscv64-elf".into()),
                     ..Default::default()
                 },
@@ -618,7 +620,7 @@ fn named_cell_roles_bind_role_projections_and_aliases_independently() {
             };
             let mut changed = valid.clone();
             changed.replace_machine_word(instruction.address, instruction.word ^ mask);
-            assert!(changed.check().is_err(), "O{opt_level} accepted named-role machine substitution at {:#x}", instruction.address);
+            assert!(changed.check().is_err(), "{diagnostics} accepted named-role machine substitution at {:#x}", instruction.address);
             mutations += 1;
         }
         assert!(mutations > 40, "exercise projections, aliases and reads");
@@ -628,13 +630,13 @@ fn named_cell_roles_bind_role_projections_and_aliases_independently() {
 #[test]
 fn named_cell_roles_verify_with_independent_machine_checks() {
     let source = include_str!("syntax_combo/seeds/named-role-verification.cell");
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         Fixture::from_result(
             compile(
                 source,
                 CompileOptions {
                     edition: cellscript::CellScriptEdition::Edition2027,
-                    opt_level,
+                    diagnostics,
                     target: Some("riscv64-elf".into()),
                     ..Default::default()
                 },
@@ -649,9 +651,9 @@ fn cell_view_helper_calls_reject_same_schema_source_substitution() {
     let source = include_str!("../examples/language/ckb/typed_cell_predicate.cell")
         .replace("OutputView<Token>", "InputView<Token>")
         .replace("ckb::output<Token>(0)", "ckb::input<Token>(0)");
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let mut changed = Fixture::from_result(
-            compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
         );
         let forward = changed.record.typed_semantics.entries.iter_mut().find(|entry| entry.name.ends_with("forward")).unwrap();
         let call = forward
@@ -679,9 +681,9 @@ fn cell_view_helpers_bind_register_and_stack_transport_to_typed_slots() {
             .replace("before: InputView", &format!("{params}before: InputView"))
             .replace("matches(before", &format!("matches({forwarded}before"))
             .replace("forward(ckb::input", &format!("forward({arguments}ckb::input"));
-        for opt_level in [0, 3] {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
-                compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+                compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
             );
             let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
             for name in ["matches", "forward"] {
@@ -783,10 +785,10 @@ fn cell_view_helper_coordinates_cannot_be_overwritten_by_body_stores() {
                     "before.capacity <= after.capacity",
                 )
             };
-            for opt_level in [0, 3] {
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let valid = Fixture::from_result(
-                    compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
-                        .unwrap_or_else(|error| panic!("padding={padding} data={data_projection} O{opt_level}: {error}")),
+                    compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() })
+                        .unwrap_or_else(|error| panic!("padding={padding} data={data_projection} {diagnostics}: {error}")),
                 );
                 let typed = valid.record.typed_semantics.entries.iter().find(|entry| entry.name.ends_with("matches")).unwrap();
                 let binary = typed.blocks.iter().flat_map(|block| &block.operations).find(|op| op.opcode == "binary").unwrap();
@@ -833,11 +835,11 @@ fn cell_view_helper_coordinates_cannot_be_overwritten_by_body_stores() {
 #[test]
 fn nested_migration_mixed_helper_parameters_keep_coordinate_spills_bound() {
     let source = include_str!("../examples/language/batches/nested_migration.cell");
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -877,11 +879,11 @@ fn nested_migration_mixed_helper_parameters_keep_coordinate_spills_bound() {
 #[test]
 fn record_migration_helpers_reject_rebound_paired_payload_substitution() {
     let source = include_str!("../examples/language/batches/record_migration.cell");
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -945,9 +947,9 @@ fn record_migration_helpers_reject_rebound_paired_payload_substitution() {
 #[test]
 fn cell_data_helper_fields_preserve_independent_machine_checks() {
     let source = include_str!("../examples/language/ckb/typed_cell_predicate.cell");
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
-            compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
         );
         let helper = valid.record.entries.iter().find(|entry| entry.name.ends_with("matches")).unwrap();
         let ranges = valid.record.blocks.iter().filter(|block| block.owner_entry == helper.id).collect::<Vec<_>>();
@@ -1017,9 +1019,9 @@ fn exact_role_lifetime_rejects_entry_into_a_read_before_construction() {
     let (prefix, tail) = base.split_once("action verify()").unwrap();
     let call = tail.split_once("ckb::verify_cell_roles(").unwrap().1.split_once("    return 0").unwrap().0;
     let source = format!("{prefix}action verify(witness at: u64) -> u64 {{\nverification\nif at > 0 {{\nlet selected = ckb::select_cell_roles({call}\nif at > 1 {{ return ckb::selected_input_count<Order>(selected, 0) }}\n}}\nreturn 0\n}}");
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
-            compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
         );
         let producer = valid
             .record
@@ -1081,7 +1083,7 @@ fn exact_role_lifetime_rejects_entry_into_a_read_before_construction() {
         )
         .unwrap_err();
         assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
-        assert!(error.message.contains("selection read has no constructed handle provenance"), "O{opt_level}: {error}");
+        assert!(error.message.contains("selection read has no constructed handle provenance"), "{diagnostics}: {error}");
     }
 }
 
@@ -1093,10 +1095,10 @@ fn exact_role_lifetime_preserves_handles_and_tables_across_calls_and_branches() 
             "let alias = selected",
             "let marker = at + 7\nrequire marker > at\nif at > 0 { require bump(at) > at }\nlet alias = selected",
         );
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
-            compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
-                .unwrap_or_else(|error| panic!("selection lifetime O{opt_level}: {error}")),
+            compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() })
+                .unwrap_or_else(|error| panic!("selection lifetime {diagnostics}: {error}")),
         );
         let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
         let mut ranges = Vec::new();
@@ -1134,7 +1136,7 @@ fn exact_role_lifetime_preserves_handles_and_tables_across_calls_and_branches() 
             .filter(|local| local.ty.starts_with("ExactCellSelection<"))
             .map(|local| local.source_id as i32 * 8)
             .collect::<Vec<_>>();
-        assert!(handles.len() >= 2 && tables.len() == 2, "O{opt_level}: handles {handles:?}, tables {tables:?}");
+        assert!(handles.len() >= 2 && tables.len() == 2, "{diagnostics}: handles {handles:?}, tables {tables:?}");
         // Rebind a second typed handle and all its actual pointer loads/stores
         // to the first one's slot. Both individual instruction grammars still
         // match; the enclosing proof must reject the physical alias.
@@ -1174,7 +1176,7 @@ fn exact_role_lifetime_preserves_handles_and_tables_across_calls_and_branches() 
         )
         .unwrap_err();
         assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
-        assert!(error.message.contains("selection pointer slot aliases"), "O{opt_level}: {error}");
+        assert!(error.message.contains("selection pointer slot aliases"), "{diagnostics}: {error}");
         let store = elf
             .instructions
             .iter()
@@ -1210,7 +1212,7 @@ fn exact_role_lifetime_preserves_handles_and_tables_across_calls_and_branches() 
                 )
                 .unwrap_err();
                 assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
-                assert!(error.message.contains("unverified write overlaps"), "O{opt_level} offset={offset}: {error}");
+                assert!(error.message.contains("unverified write overlaps"), "{diagnostics} offset={offset}: {error}");
             }
         }
         // A computed alias must retain the same protection as an SP-relative write.
@@ -1226,10 +1228,13 @@ fn exact_role_lifetime_preserves_handles_and_tables_across_calls_and_branches() 
 #[test]
 fn exact_role_selected_reads_reject_rebound_words_and_typed_operand_substitutions() {
     use cellscript_artifact_checker::cell_selection::Read;
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
-            compile(&selected_roles_source(), CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
-                .unwrap_or_else(|error| panic!("O{opt_level}: {error}")),
+            compile(
+                &selected_roles_source(),
+                CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+            )
+            .unwrap_or_else(|error| panic!("{diagnostics}: {error}")),
         );
         let mut ranges = Vec::new();
         for block in &valid.record.blocks {
@@ -1270,7 +1275,7 @@ fn exact_role_selected_reads_reject_rebound_words_and_typed_operand_substitution
             };
             let mut changed = valid.clone();
             changed.replace_machine_word(instruction.address, word ^ mask);
-            assert!(changed.check().is_err(), "O{opt_level} accepted changed read at {:#x}", instruction.address);
+            assert!(changed.check().is_err(), "{diagnostics} accepted changed read at {:#x}", instruction.address);
             mutations += 1;
         }
         assert!(mutations > 60, "all five reads and local aliases must be exercised");
@@ -1324,10 +1329,10 @@ fn selected_hash_reads_prove_caller_writes_while_nested_views_remain_live() {
             "require input.capacity == partner.capacity",
             "require input.type_hash == partner.type_hash\nrequire input.lock_hash == partner.lock_hash\nrequire input.data_hash == partner.data_hash\nrequire first[0] == 170",
         );
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
-            compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
-                .unwrap_or_else(|error| panic!("hash with nested O{opt_level}: {error}")),
+            compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() })
+                .unwrap_or_else(|error| panic!("hash with nested {diagnostics}: {error}")),
         );
         let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
         let blocks =
@@ -1391,12 +1396,12 @@ fn selected_hash_reads_prove_caller_writes_while_nested_views_remain_live() {
 #[test]
 fn nested_transaction_data_views_bind_complete_tables_and_retained_results() {
     let source = include_str!("syntax_combo/seeds/named-nested-data-views.cell");
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let result = compile(
             source,
-            CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
         )
-        .unwrap_or_else(|error| panic!("nested data O{opt_level}: {error}"));
+        .unwrap_or_else(|error| panic!("nested data {diagnostics}: {error}"));
         let valid = Fixture::from_result(result);
         assert_bounded_admitted(&valid);
         let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
@@ -1440,11 +1445,11 @@ fn nested_data_view_buffers_cannot_alias_after_coherent_machine_and_marker_rebin
         .unwrap()
         .replace("encoded_bytes: 4096", "encoded_bytes: 128");
     let source = format!("{source}\naction verify() -> u64 {{ let before = ckb::input<Batch>(1).data.messages\nlet after = ckb::output<Batch>(0).data.messages\nrequire before[0][0] == 1\nrequire after[0][0] == 4\nreturn 0\n}}");
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(
                 &source,
-                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -1528,13 +1533,13 @@ fn nested_data_view_buffers_cannot_alias_after_coherent_machine_and_marker_rebin
 #[test]
 fn nested_role_selection_checks_profiles_layouts_and_complete_machine_code() {
     let source = include_str!("syntax_combo/seeds/named-nested-selection.cell");
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
-            .unwrap_or_else(|error| panic!("nested selection O{opt_level}: {error}")),
+            .unwrap_or_else(|error| panic!("nested selection {diagnostics}: {error}")),
         );
         let profiles = valid
             .record
@@ -1644,15 +1649,15 @@ fn exact_role_declarations_reject_rebound_substitutions_after_admission() {
 #[test]
 fn exact_role_instruction_contract_checks_each_lifecycle_and_local_authority() {
     let source = include_str!("../examples/language/ckb/exact_role_verification.cell");
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for mode in ["preserve", "create", "burn", "merge"] {
             let mut source = source.replace("\"preserve\"", &format!("\"{mode}\""));
             if mode == "merge" {
                 source = source.replace("1, 16, 1, 16", "2, 16, 1, 1, b\"0123456789abcdef\"");
             }
             source = source.replacen("\"observe\"", "\"local-type\"", 1);
-            let valid = compile(&source, CompileOptions { target: Some("riscv64-elf".into()), opt_level, ..Default::default() })
-                .unwrap_or_else(|error| panic!("{mode} O{opt_level}: {error}"));
+            let valid = compile(&source, CompileOptions { target: Some("riscv64-elf".into()), diagnostics, ..Default::default() })
+                .unwrap_or_else(|error| panic!("{mode} {diagnostics}: {error}"));
             Fixture::from_result(valid);
         }
     }
@@ -1765,9 +1770,9 @@ fn exact_role_machine_binds_verification_order_and_conditional_block_ownership()
 
     let conditional = format!("{}if flag {{\n{}}}\n{}", &source[..begin], &source[begin..end], &source[end..])
         .replace("verify()", "verify(witness flag: bool)");
-    for opt_level in [0, 3] {
-        let compiled = compile(&conditional, CompileOptions { target: Some("riscv64-elf".into()), opt_level, ..Default::default() })
-            .unwrap_or_else(|error| panic!("conditional O{opt_level}: {error}"));
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let compiled = compile(&conditional, CompileOptions { target: Some("riscv64-elf".into()), diagnostics, ..Default::default() })
+            .unwrap_or_else(|error| panic!("conditional {diagnostics}: {error}"));
         Fixture::from_result(compiled);
     }
 }
@@ -1787,10 +1792,10 @@ fn exact_role_scratch_preserves_nested_views_and_rejects_rebound_aliases() {
         .replace("let first = items[0]", "let items = document.entries\n    let first = items[0]")
         .replace("return 0", "consume document\n    return 0");
     for (source, cell) in [(&source, false), (&cell_source, true)] {
-        for opt_level in 0..=3 {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
-                compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
-                    .unwrap_or_else(|error| panic!("nested selection O{opt_level}: {error}")),
+                compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() })
+                    .unwrap_or_else(|error| panic!("nested selection {diagnostics}: {error}")),
             );
             let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
             let (block, label) = valid
@@ -1877,7 +1882,7 @@ fn exact_role_scratch_preserves_nested_views_and_rejects_rebound_aliases() {
             )
             .unwrap_err();
             assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
-            assert!(error.message.contains("overlaps protected runtime storage"), "O{opt_level}: {error:?}");
+            assert!(error.message.contains("overlaps protected runtime storage"), "{diagnostics}: {error:?}");
         }
     }
 }
@@ -1894,10 +1899,10 @@ fn exact_role_nested_lifetime_handles_empty_branches_and_rejects_helper_escape()
     let conditional = format!("{prefix}if before == 2 {{\n{selection}}}\n{suffix}");
     let helper = format!("{prefix}verify_roles()\n{suffix}")
         .replace("action verify(", &format!("fn verify_roles() {{\n{selection}}}\naction verify("));
-    for opt_level in 0..=3 {
-        let options = CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() };
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let options = CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() };
         let compiled = compile(&conditional, options.clone())
-            .unwrap_or_else(|error| panic!("nested selection control flow O{opt_level}: {error}"));
+            .unwrap_or_else(|error| panic!("nested selection control flow {diagnostics}: {error}"));
         let valid = Fixture::from_result(compiled);
         let selection_end = valid
             .record
@@ -1973,7 +1978,7 @@ fn policy_fixture_with_layouts(count: u32, distinct_layouts: bool) -> CompileRes
             edition: NEXT_EDITION,
             target: Some("riscv64-elf".into()),
             target_profile: Some("ckb".into()),
-            opt_level: 3,
+            diagnostics: cellscript::CompilerDiagnostics::default(),
             ..Default::default()
         },
         ArtifactDeclaration {
@@ -2918,7 +2923,7 @@ fn checker_binds_header_dep_fields_widths_syscalls_and_terminal_errors_to_machin
         assert_eq!(changed.check(), Err(CheckerRejectionCode::V2414ControlFlowInvalid), "terminal error delta {delta}");
     }
 
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let fixture = Fixture::from_result(
             compile(
                 HEADER_DEP_SOURCE,
@@ -2926,7 +2931,7 @@ fn checker_binds_header_dep_fields_widths_syscalls_and_terminal_errors_to_machin
                     edition: NEXT_EDITION,
                     target: Some("riscv64-elf".to_string()),
                     target_profile: Some("ckb".to_string()),
-                    opt_level,
+                    diagnostics,
                     ..Default::default()
                 },
             )
@@ -2935,7 +2940,7 @@ fn checker_binds_header_dep_fields_widths_syscalls_and_terminal_errors_to_machin
         assert_eq!(
             fixture.record.syscall_sites.iter().filter(|site| site.contract.starts_with("ckb-header-dep-")).count(),
             5,
-            "optimization level {opt_level} must retain every specialized HeaderDep syscall site"
+            "strategy {diagnostics} must retain every specialized HeaderDep syscall site"
         );
     }
 
@@ -3030,7 +3035,7 @@ fn checker_binds_canonical_script_hash_metadata_types_and_machine_serialization(
         assert_eq!(changed.check(), Err(CheckerRejectionCode::V2417SyscallContractInvalid), "machine delta {delta}");
     }
 
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let fixture = Fixture::from_result(
             compile(
                 SCRIPT_HASH_SOURCE,
@@ -3038,13 +3043,13 @@ fn checker_binds_canonical_script_hash_metadata_types_and_machine_serialization(
                     edition: NEXT_EDITION,
                     target: Some("riscv64-elf".to_string()),
                     target_profile: Some("ckb".to_string()),
-                    opt_level,
+                    diagnostics,
                     ..Default::default()
                 },
             )
             .unwrap(),
         );
-        assert_eq!(fixture.check(), Ok(()), "optimization level {opt_level} must preserve the Script hash machine contract");
+        assert_eq!(fixture.check(), Ok(()), "strategy {diagnostics} must preserve the Script hash machine contract");
     }
 }
 
@@ -3172,8 +3177,16 @@ fn terminal_verifier_failures_reject_hash_rebound_machine_and_record_mutations()
     let source = "module fatal_checker\naction main(value: u64) { verification require value > 0 }";
     for edition in [cellscript::CellScriptEdition::Edition2026, NEXT_EDITION] {
         let valid = Fixture::from_result(
-            compile(source, CompileOptions { edition, target: Some("riscv64-elf".into()), opt_level: 0, ..Default::default() })
-                .unwrap(),
+            compile(
+                source,
+                CompileOptions {
+                    edition,
+                    target: Some("riscv64-elf".into()),
+                    diagnostics: cellscript::CompilerDiagnostics::without_optimizations(),
+                    ..Default::default()
+                },
+            )
+            .unwrap(),
         );
         let failure = valid.record.verifier_failure_exits.iter().find(|exit| exit.code == 5).unwrap().clone();
         let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
@@ -3274,8 +3287,16 @@ fn terminal_verifier_operations_cannot_be_inserted_before_continuation_after_reb
     let source = "module fatal_operation_checker\naction main(value: u64) { verification require value > 0 }";
     for edition in [cellscript::CellScriptEdition::Edition2026, NEXT_EDITION] {
         let valid = Fixture::from_result(
-            compile(source, CompileOptions { edition, target: Some("riscv64-elf".into()), opt_level: 0, ..Default::default() })
-                .unwrap(),
+            compile(
+                source,
+                CompileOptions {
+                    edition,
+                    target: Some("riscv64-elf".into()),
+                    diagnostics: cellscript::CompilerDiagnostics::without_optimizations(),
+                    ..Default::default()
+                },
+            )
+            .unwrap(),
         );
         let failure = valid
             .record
@@ -3352,7 +3373,12 @@ action burn(input token: Token) { verification consume token }
         let valid = Fixture::from_result(
             compile_artifact(
                 source,
-                CompileOptions { edition, target: Some("riscv64-elf".into()), opt_level: 0, ..Default::default() },
+                CompileOptions {
+                    edition,
+                    target: Some("riscv64-elf".into()),
+                    diagnostics: cellscript::CompilerDiagnostics::without_optimizations(),
+                    ..Default::default()
+                },
                 ArtifactDeclaration {
                     name: "TokenPolicy".into(),
                     context: ArtifactContext::TypeGroup { resource: "Token".into() },
@@ -3599,7 +3625,12 @@ fn signed_literal_rejects_unsigned_overflow_after_rebinding() {
     let valid = Fixture::from_result(
         compile(
             source,
-            CompileOptions { edition: NEXT_EDITION, target: Some("riscv64-elf".into()), opt_level: 0, ..Default::default() },
+            CompileOptions {
+                edition: NEXT_EDITION,
+                target: Some("riscv64-elf".into()),
+                diagnostics: cellscript::CompilerDiagnostics::without_optimizations(),
+                ..Default::default()
+            },
         )
         .unwrap(),
     );
@@ -3680,13 +3711,13 @@ action inspect(witness value: Value) -> u64 {
 
 #[test]
 fn allocated_allocations_reject_rebound_budget_state_and_zeroing_mutations() {
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for bytes in [64, 65536] {
             let source = format!("module allocation\ncollections Work {{ limits {{ bytes: {bytes}, allocations: 2 }}\nvalues: Vec<u64> {{ items: 4 }} }}\naction inspect() -> u64 {{ let mut first = Work::new()\nfirst.values.reserve(1)\nlet mut moved = first\nmoved.values.push(7)\nlet mut second = Work::new()\nsecond.values.push(8)\nrequire moved.values.get(0) == 7\nreturn second.values.get(0) }}");
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -3781,13 +3812,13 @@ fn allocated_allocations_reject_rebound_budget_state_and_zeroing_mutations() {
 
 #[test]
 fn allocated_lifecycle_rejects_rebound_lookup_copy_and_retirement_mutations() {
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for bytes in [512, 65536] {
             let source = format!("module lifecycle\ncollections Work {{ limits {{ bytes: {bytes}, allocations: 8 }}\nvalues: Vec<u64> {{ items: 8 }}\nseen: OrderedSet<u64> {{ items: 8 }}\ntotals: OrderedMap<u64, u128> {{ items: 8 }} }}\naction inspect() -> u64 {{ let mut first = Work::new()\nfirst.values.push(7)\nlet mut second = Work::new()\nsecond.values.push(8)\nsecond.values.push(9)\nsecond.values.reserve(8)\nrequire second.values.get(0) == 8\nrequire second.values.get(1) == 9\nsecond.drop()\nfirst.drop()\nreturn 0 }}");
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -3918,13 +3949,13 @@ fn allocated_lifecycle_rejects_rebound_lookup_copy_and_retirement_mutations() {
 
 #[test]
 fn allocated_descriptors_bind_member_growth_publication_and_drop() {
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for bytes in [512, 65536] {
             let source = format!("module descriptors\nstruct Record {{ amount: u128, flag: u64 }}\ncollections Work {{ limits {{ bytes: {bytes}, allocations: 8 }}\nvalues: Vec<Record> {{ items: 4 }}\ntotals: OrderedMap<u64, Record> {{ items: 6 }}\nseen: OrderedSet<Hash> {{ items: 5 }} }}\naction inspect(flag: bool) -> u64 {{ if flag {{ return 0 }}\nlet mut first = Work::new()\nlet mut second = Work::new()\nsecond.values.reserve(4)\nsecond.totals.reserve(6)\nsecond.seen.reserve(5)\nsecond.drop()\nfirst.drop()\nreturn 0 }}");
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -4060,13 +4091,13 @@ fn allocated_descriptors_bind_member_growth_publication_and_drop() {
 
 #[test]
 fn allocated_elements_bind_copy_direction_extent_and_length_transitions() {
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for bytes in [512, 65536] {
             let source = format!("module elements\nstruct Item {{ amount: u128, tag: u64 }}\ncollections Work {{ limits {{ bytes: {bytes}, allocations: 16 }}\nvalues: Vec<Item> {{ items: 4 }}\ntotals: OrderedMap<u64, u128> {{ items: 4 }}\nseen: OrderedSet<u64> {{ items: 4 }} }}\naction inspect(flag: bool) -> u64 {{ if flag {{ return 0 }}\nlet mut first = Work::new()\nlet mut second = Work::new()\nsecond.values.push(Item {{ amount: 3, tag: 4 }})\nsecond.values.insert(0, Item {{ amount: 5, tag: 6 }})\nsecond.values.set(1, Item {{ amount: 7, tag: 8 }})\nlet removed = second.values.remove(0)\nrequire removed.tag == 6\nlet popped = second.values.pop()\nrequire popped.tag == 8\nsecond.totals.insert(1, 2)\nsecond.totals.insert(1, 3)\nsecond.totals.remove(1)\nsecond.seen.insert(1)\nsecond.seen.remove(1)\nsecond.drop()\nfirst.drop()\nreturn 0 }}");
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -4197,7 +4228,7 @@ fn allocated_elements_bind_copy_direction_extent_and_length_transitions() {
 
 #[test]
 fn allocated_ordered_searches_bind_key_order_bounds_and_update_selection() {
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for bytes in [512, 65536] {
             let source = format!(
                 r#"module ordered_proof
@@ -4245,7 +4276,7 @@ action inspect(flag: bool, hash: Hash) -> u64 {{
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -4416,11 +4447,16 @@ action inspect(key: {key}) -> u64 {{
     return 0
 }}"#
             );
-            for opt_level in [0, 3] {
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let valid = Fixture::from_result(
                     compile(
                         &source,
-                        CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                        CompileOptions {
+                            edition: NEXT_EDITION,
+                            diagnostics,
+                            target: Some("riscv64-elf".into()),
+                            ..Default::default()
+                        },
                     )
                     .unwrap(),
                 );
@@ -4431,7 +4467,7 @@ action inspect(key: {key}) -> u64 {{
                     .flat_map(|block| &block.allocated_lifecycle_labels)
                     .filter(|label| label.starts_with(".Lallocated_find_") && label.ends_with("_begin"))
                     .count();
-                assert_eq!(starts, 3, "{member} at O{opt_level}");
+                assert_eq!(starts, 3, "{member} at {diagnostics}");
             }
         }
     }
@@ -4472,11 +4508,11 @@ action inspect(witness delta: u64) -> u64 {{
     return 0
 }}"#
         );
-        for opt_level in [0, 3] {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -4559,11 +4595,16 @@ fn allocated_borrowed_reads_bind_descriptors_searches_and_copied_results() {
     let prefix = ".Lallocated_borrowed_";
     for padding in [0, 7, 8] {
         for bytes in [512, 65536] {
-            for opt_level in [0, 3] {
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let valid = Fixture::from_result(
                     compile(
                         &borrowed_collection_reads::source(padding, bytes),
-                        CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                        CompileOptions {
+                            edition: NEXT_EDITION,
+                            diagnostics,
+                            target: Some("riscv64-elf".into()),
+                            ..Default::default()
+                        },
                     )
                     .unwrap(),
                 );
@@ -4678,7 +4719,7 @@ fn allocated_borrowed_reads_bind_descriptors_searches_and_copied_results() {
 #[test]
 fn allocated_transport_binds_indices_results_and_adjacent_primitives() {
     for bytes in [512, 65536] {
-        for opt_level in [0, 3] {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let source = format!(
                 r#"module collection_transport
 collections Work {{ limits {{ bytes: {bytes}, allocations: 8 }}
@@ -4710,7 +4751,7 @@ action inspect(witness index: u64, witness other: u64, witness flag: bool) -> u6
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -4760,7 +4801,7 @@ action inspect(witness index: u64, witness other: u64, witness flag: bool) -> u6
                             assert_eq!(
                                 error.code,
                                 CheckerRejectionCode::V2420TypedMachineBindingInvalid,
-                                "{prefix} O{opt_level} bytes={bytes} {word:#x}->{replacement:#x}: {error}"
+                                "{prefix} {diagnostics} bytes={bytes} {word:#x}->{replacement:#x}: {error}"
                             );
                         }
                         if counts[kind] == 1 {
@@ -4842,7 +4883,7 @@ action inspect(witness index: u64, witness other: u64, witness flag: bool) -> u6
                 // O3 may forward every variable index with ADDI instead of LD.
                 assert!(
                     mutated_classes.len() >= if kind == 0 { 1 } else { 5 },
-                    "missing transport instruction coverage: {prefix} O{opt_level}: {mutated_classes:?}"
+                    "missing transport instruction coverage: {prefix} {diagnostics}: {mutated_classes:?}"
                 );
                 assert!(bypass_checked, "missing transport bypass mutation");
                 let mut erased = valid.clone();
@@ -4860,7 +4901,7 @@ action inspect(witness index: u64, witness other: u64, witness flag: bool) -> u6
 #[test]
 fn allocated_transport_checks_scalar_widths_and_signed_publication() {
     for ty in ["bool", "u8", "u16", "u32", "i32", "u64"] {
-        for opt_level in [0, 3] {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let literal = if ty == "bool" { "true" } else { "7" };
             let source = format!(
                 r#"module scalar_collection_transport
@@ -4881,7 +4922,7 @@ action inspect(witness index: u64) -> u64 {{
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -4935,11 +4976,11 @@ action inspect(witness delta: u64) -> u64 {
     return 0
 }
 "#;
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -5025,11 +5066,16 @@ action inspect(witness delta: u64) -> u64 {{
     return 0
 }}"#
             );
-            for opt_level in [0, 3] {
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let valid = Fixture::from_result(
                     compile(
                         &source,
-                        CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                        CompileOptions {
+                            edition: NEXT_EDITION,
+                            diagnostics,
+                            target: Some("riscv64-elf".into()),
+                            ..Default::default()
+                        },
                     )
                     .unwrap(),
                 );
@@ -5238,11 +5284,11 @@ action inspect(witness delta: u64) -> u64 {{
     return 0
 }}"#
         );
-        for opt_level in [0, 3] {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -5317,11 +5363,16 @@ action inspect(witness delta: u64) -> u64 {{
 fn allocated_coordinate_calls_bind_guard_spills_bounds_and_restoration() {
     for padding in [0, 5, 6] {
         for bytes in [512, 65536] {
-            for opt_level in [0, 3] {
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let valid = Fixture::from_result(
                     compile(
                         &collection_coordinate_helpers::source(padding, bytes),
-                        CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                        CompileOptions {
+                            edition: NEXT_EDITION,
+                            diagnostics,
+                            target: Some("riscv64-elf".into()),
+                            ..Default::default()
+                        },
                     )
                     .unwrap(),
                 );
@@ -5385,7 +5436,7 @@ fn allocated_coordinate_calls_bind_guard_spills_bounds_and_restoration() {
                             changed.replace_machine_word(pc, word);
                             let code = match changed.check() {
                                 Err(code) => code,
-                                Ok(()) => panic!("accepted {name} O{opt_level}, padding={padding}, bytes={bytes}, start={start:#x}, pc={pc:#x}, old={:#x}, new={word:#x}", words[&pc]),
+                                Ok(()) => panic!("accepted {name} {diagnostics}, padding={padding}, bytes={bytes}, start={start:#x}, pc={pc:#x}, old={:#x}, new={word:#x}", words[&pc]),
                             };
                             assert!(
                                 matches!(
@@ -5463,11 +5514,11 @@ action inspect(witness items: NestedValues<Vec<u8>, 2, 8, 32>) -> u64 {
     require forward(&work, before, items) > 0
     return 0
 }"#;
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -5506,7 +5557,7 @@ action inspect(witness items: NestedValues<Vec<u8>, 2, 8, 32>) -> u64 {
 
 #[test]
 fn allocated_reads_bind_copy_buffers_pop_and_missing_key_behavior() {
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for bytes in [512, 65536] {
             let source = format!(
                 r#"module read_proof
@@ -5541,7 +5592,7 @@ action inspect(flag: bool) -> u64 {{
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -5560,7 +5611,7 @@ action inspect(flag: bool) -> u64 {{
 
 #[test]
 fn allocated_sorted_bodies_bind_counts_order_overlap_and_last_value_copy() {
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for bytes in [512, 65536] {
             let source = format!(
                 r#"module sorted_proof
@@ -5585,7 +5636,7 @@ action inspect(flag: bool, witness entries: [(u64, u128); 4], witness keys: [Has
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -5601,12 +5652,12 @@ action inspect(flag: bool, witness entries: [(u64, u128); 4], witness keys: [Has
         }
     }
     for input in ["[]", "[(1, 7)]"] {
-        for opt_level in [0, 3] {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let source = format!("module short_sorted\ncollections Work {{ limits {{ bytes: 256, allocations: 2 }}\nvalues: OrderedMap<u64, u64> {{ items: 4 }} }}\naction inspect() -> u64 {{ let mut work = Work::new()\nwork.values.reserve(4)\nwork.values.load_sorted({input})\nreturn 0 }}");
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -5744,13 +5795,13 @@ fn allocated_body_mutations(valid: &Fixture, prefix: &str, children: &[&str], mi
 
 #[test]
 fn allocated_initializers_bind_every_state_word_and_reject_rebound_bypasses() {
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for bytes in [512, 65536] {
             let source = format!("module initialization\ncollections Work {{ limits {{ bytes: {bytes}, allocations: 8 }}\nvalues: Vec<u64> {{ items: 4 }}\ntotals: OrderedMap<Hash, u128> {{ items: 4 }}\nseen: OrderedSet<u64> {{ items: 4 }} }}\naction inspect(flag: bool) -> u64 {{ if flag {{ return 0 }}\nlet mut first = Work::new()\nfirst.values.push(7)\nlet mut second = Work::new()\nsecond.values.push(8)\nrequire first.values.get(0) == 7\nrequire second.values.get(0) == 8\nreturn 0 }}");
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -5889,11 +5940,11 @@ fn allocated_values_owner_lifetimes_reject_rebound_stale_and_borrowed_handles() 
         let boundary = if signature_rejection { "invalid signature contract" } else { "allocated owner lifetime" };
         assert!(error.to_string().contains(boundary), "mutation missed {boundary}: {error}");
     };
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -5958,7 +6009,7 @@ fn allocated_values_owner_lifetimes_reject_rebound_stale_and_borrowed_handles() 
         let mut changed = Fixture::from_result(
             compile(
                 &evaluation,
-                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -5987,13 +6038,13 @@ fn allocated_values_lifetimes_follow_joins_backedges_and_lexical_loans() {
         "action inspect() -> u64 { let work = Work::new()\nlet mut other = Work::new()\nborrow work as view { borrow view as inner { other.values.push(9)\nrequire inner.values.len() == 0 } }\nreturn 0 }",
         "action inspect(flag: bool) -> u64 { let mut work = Work::new()\nif flag { borrow work as view { require view.values.len() == 0 } }\nwork.values.push(1)\nreturn 0 }",
     ];
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for (case, body) in bodies.iter().enumerate() {
             let source = format!("{prefix}{body}");
             let mut changed = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -6033,8 +6084,8 @@ fn allocated_values_lifetimes_follow_joins_backedges_and_lexical_loans() {
                 &CheckerBudgets::default(),
             )
             .unwrap_err();
-            assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid, "case {case}/O{opt_level}: {error}");
-            assert!(error.to_string().contains("allocated owner lifetime"), "case {case}/O{opt_level}: {error}");
+            assert_eq!(error.code, CheckerRejectionCode::V2419TypedSemanticsInvalid, "case {case}/{diagnostics}: {error}");
+            assert!(error.to_string().contains("allocated owner lifetime"), "case {case}/{diagnostics}: {error}");
         }
     }
 }
@@ -6098,7 +6149,16 @@ fn allocated_values_keep_structured_contract_after_admission_and_rebinding() {
 fn fixed_byte_result_contract_rejects_rebound_width_and_missing_copy() {
     let source = "module byte_copy_proof\nfn bytes() -> [u8; 9] { return b\"constant!\" }\naction inspect() -> u64 { require bytes() == b\"constant!\"\nreturn 0 }";
     let valid = Fixture::from_result(
-        compile(source, CompileOptions { edition: NEXT_EDITION, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+        compile(
+            source,
+            CompileOptions {
+                edition: NEXT_EDITION,
+                diagnostics: cellscript::CompilerDiagnostics::default().without(cellscript::OptimizationPass::Inlining),
+                target: Some("riscv64-elf".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap(),
     );
     valid.check().unwrap();
     for mutation in 0..4 {
@@ -6113,6 +6173,64 @@ fn fixed_byte_result_contract_rejects_rebound_width_and_missing_copy() {
         changed.rebind_sidecars();
         assert_code(&changed, CheckerRejectionCode::V2407AbiOrStackInvalid);
     }
+}
+
+#[test]
+fn explicit_hash_constructor_rejects_implicit_retyping_extra_fields_and_wrong_copy_source() {
+    let source = "module hash_constructor\nfn make(bytes: [u8; 32]) -> Hash { return Hash::from_bytes(bytes) }\naction inspect(witness bytes: [u8; 32]) -> u64 { verification require make(bytes) == Hash::from_bytes(b\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\") return 0 }";
+    let valid = Fixture::from_result(
+        compile(
+            source,
+            CompileOptions {
+                diagnostics: cellscript::CompilerDiagnostics::default().without(cellscript::OptimizationPass::Inlining),
+                target: Some("riscv64-elf".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap(),
+    );
+    let constructor = valid
+        .record
+        .typed_semantics
+        .entries
+        .iter()
+        .enumerate()
+        .find_map(|(entry_index, entry)| {
+            entry.blocks.iter().enumerate().find_map(|(block_index, block)| {
+                block.operations.iter().enumerate().find_map(|(operation_index, operation)| {
+                    (operation.opcode == "tuple"
+                        && operation.destinations.len() == 1
+                        && entry.locals.iter().any(|local| local.id == operation.destinations[0] && local.ty == "hash"))
+                    .then_some((entry_index, block_index, operation_index))
+                })
+            })
+        })
+        .expect("explicit constructor retained in typed semantics");
+    for extra_field in [false, true] {
+        let mut changed = valid.clone();
+        let operation = &mut changed.record.typed_semantics.entries[constructor.0].blocks[constructor.1].operations[constructor.2];
+        if extra_field {
+            operation.operands.push(operation.operands[0].clone());
+        } else {
+            operation.opcode = "move".into();
+        }
+        changed.rebind_layered_identities();
+        assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
+    }
+    let abi = valid.record.entries.iter().find(|entry| entry.name == "make").unwrap().fixed_result_abi.as_ref().unwrap();
+    let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+    let load = elf
+        .instructions
+        .iter()
+        .find(|instruction| {
+            abi.copy_sources.iter().any(|source| source.range.contains(instruction.address))
+                && instruction.word & 0x7f == 0x03
+                && (instruction.word >> 7) & 31 == 10
+        })
+        .expect("owned result source-pointer load");
+    let mut changed = valid.clone();
+    changed.replace_machine_word(load.address, load.word & !(31 << 15));
+    assert!(changed.check().is_err(), "absolute memory cannot replace the proved owned source pointer");
 }
 
 #[test]
@@ -6710,7 +6828,15 @@ action main() -> u64 {
 }
 "#;
     let fixture = Fixture::from_result(
-        compile(source, CompileOptions { opt_level: 0, target: Some("riscv64-elf".to_string()), ..Default::default() }).unwrap(),
+        compile(
+            source,
+            CompileOptions {
+                diagnostics: cellscript::CompilerDiagnostics::without_optimizations(),
+                target: Some("riscv64-elf".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap(),
     );
     for effect in ["runtime-contract", "deferred-runtime-fail-closed:0:ckb-sighash-all-deferred", "Pure"] {
         let mut changed = fixture.clone();
@@ -6746,7 +6872,7 @@ fn exact_handle_contract_cannot_be_reclassified_after_hash_rebinding() {
             EXACT_HANDLE_SOURCE,
             CompileOptions {
                 edition: NEXT_EDITION,
-                opt_level: 0,
+                diagnostics: cellscript::CompilerDiagnostics::without_optimizations(),
                 target: Some("riscv64-elf".to_string()),
                 target_profile: Some("ckb".to_string()),
                 ..Default::default()
@@ -6790,7 +6916,7 @@ fn deployment_line_handle_contract_cannot_be_reclassified_after_hash_rebinding()
             DEPLOYMENT_LINE_HANDLE_SOURCE,
             CompileOptions {
                 edition: NEXT_EDITION,
-                opt_level: 0,
+                diagnostics: cellscript::CompilerDiagnostics::without_optimizations(),
                 target: Some("riscv64-elf".to_string()),
                 target_profile: Some("ckb".to_string()),
                 ..Default::default()
@@ -7160,13 +7286,13 @@ fn named_data_shapes_retain_independent_codec_bounds_and_source_checks() {
         assert_bounded_admitted(&Fixture::from_source(source));
     }
     let source = include_str!("syntax_combo/seeds/named-data-shapes.cell");
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(
                 source,
                 CompileOptions {
                     edition: cellscript::NEXT_EDITION,
-                    opt_level,
+                    diagnostics,
                     target: Some("riscv64-elf".into()),
                     ..Default::default()
                 },
@@ -7222,13 +7348,13 @@ fn named_data_shapes_retain_independent_codec_bounds_and_source_checks() {
 #[test]
 fn nested_value_helpers_bind_validated_spans_through_calls() {
     let source = include_str!("syntax_combo/seeds/named-nested-helpers.cell");
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         Fixture::from_result(
             compile(
                 source,
                 CompileOptions {
                     edition: cellscript::NEXT_EDITION,
-                    opt_level,
+                    diagnostics,
                     target: Some("riscv64-elf".into()),
                     ..Default::default()
                 },
@@ -7241,13 +7367,13 @@ fn nested_value_helpers_bind_validated_spans_through_calls() {
 #[test]
 fn nested_derived_helpers_bind_validated_elements_through_calls() {
     let source = include_str!("syntax_combo/seeds/named-derived-helpers.cell");
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         Fixture::from_result(
             compile(
                 source,
                 CompileOptions {
                     edition: cellscript::NEXT_EDITION,
-                    opt_level,
+                    diagnostics,
                     target: Some("riscv64-elf".into()),
                     ..Default::default()
                 },
@@ -7266,9 +7392,9 @@ fn nested_value_helpers_bind_cell_fields_alongside_borrowed_cells() {
         let source = format!(
             "module mixed_nested_helpers\nresource Document has store, consume {{ entries: {shape} }}\n#[effect(ReadOnly)]\nfn count({params}values: {shape}, document: &Document) -> u64 {{ let alias = values\nreturn alias.len() + document.entries.len() }}\n#[effect(ReadOnly)]\nfn forward(document: &Document) -> u64 {{ let values = document.entries\nreturn count({args}values, document) }}\naction inspect(input before: Document) {{ verification\nlet values = before.entries\nrequire count({args}values, &before) == 2\nrequire forward(&before) == 2\nconsume before }}"
         );
-        for opt_level in [0, 3] {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             Fixture::from_result(
-                compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+                compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
             );
         }
     }
@@ -7291,9 +7417,10 @@ fn nested_value_helpers_reject_rebound_sources_spills_and_paired_arguments() {
             let params = (0..padding).map(|i| format!("p{i}: u64, ")).collect::<String>();
             let args = "0, ".repeat(padding);
             let source = format!("module nested_helper_binding\n{declaration}\nfn first({params}values: {parameter}) -> u64 {{ return {read} as u64 }}\nfn forward(a: {shape}, b: {shape}) -> u64 {{ let alias = a\nlet left_value = alias{argument}\nlet right_value = b{argument}\nlet left = first({args}left_value)\nlet right = first({args}right_value)\nreturn left + right }}\naction inspect(witness a: {shape}, witness b: {shape}, witness expected: u64) {{ verification require forward(a, b) == expected }}");
-            for opt_level in [0, 3] {
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let valid = Fixture::from_result(
-                    compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+                    compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() })
+                        .unwrap(),
                 );
                 let forward = valid.record.typed_semantics.entries.iter().find(|entry| entry.name.ends_with("forward")).unwrap();
                 let mut changed = valid.clone();
@@ -7427,9 +7554,9 @@ fn nested_witness_decoder_rejects_rehashed_instruction_and_marker_changes() {
         ),
     ] {
         let source = format!("module nested_machine\n{declarations}\naction inspect(witness values: NestedValues<{element}, 32, 256, 4096>) -> u64 {{ verification return 0 }}");
-        for opt_level in 0..=3 {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
-                compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+                compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
             );
             let start = valid
                 .record
@@ -7460,7 +7587,7 @@ fn nested_witness_decoder_rejects_rehashed_instruction_and_marker_changes() {
                 assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
                 count += 1;
             }
-            assert!(count >= 80, "complete decoder mutation coverage for {element} O{opt_level}");
+            assert!(count >= 80, "complete decoder mutation coverage for {element} {diagnostics}");
             let mut changed = valid.clone();
             changed.record.blocks.iter_mut().find(|block| block.id == start.id).unwrap().machine_label = None;
             changed.rebind_sidecars();
@@ -7472,9 +7599,9 @@ fn nested_witness_decoder_rejects_rehashed_instruction_and_marker_changes() {
 #[test]
 fn nested_witness_machine_contract_covers_zero_bounds_and_multiple_parameters() {
     let source = "module nested_multiple\naction inspect(witness empty: NestedValues<Vec<u8>, 0, 0, 4>, witness nonempty: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 { verification return 0 }";
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         Fixture::from_result(
-            compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
         );
     }
 }
@@ -7490,9 +7617,9 @@ fn nested_witness_inputs_bind_register_stack_and_mixed_width_arguments() {
     ];
     for prefix in prefixes {
         let source = format!("module nested_abi\naction inspect({prefix}witness first: NestedValues<Vec<u8>, 2, 3, 32>, witness second: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 {{ verification return 0 }}");
-        for opt_level in 0..=3 {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
-                compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+                compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
             );
             let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
             let decoders = valid
@@ -7574,9 +7701,9 @@ fn nested_witness_inputs_bind_register_stack_and_mixed_width_arguments() {
 #[test]
 fn nested_witness_transport_rejects_rehashed_envelope_and_argument_mutations() {
     let source = "module nested_transport\naction inspect(witness salt: u64, witness values: NestedValues<Vec<u8>, 2, 3, 32>, witness tail: Hash) -> u64 { verification return 0 }";
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
-            compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
         );
         let wrapper = valid.record.entries.iter().find(|entry| entry.name == "_cellscript_entry").unwrap();
         let blocks = valid.record.blocks.iter().filter(|block| block.owner_entry == wrapper.id).collect::<Vec<_>>();
@@ -7605,16 +7732,16 @@ fn nested_witness_transport_rejects_rehashed_envelope_and_argument_mutations() {
             assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
             mutations += 1;
         }
-        assert!(mutations >= 60, "complete envelope and positional source checks at O{opt_level}");
+        assert!(mutations >= 60, "complete envelope and positional source checks at {diagnostics}");
     }
 }
 
 #[test]
 fn nested_mixed_script_args_transport_binds_disjoint_buffers_and_live_cursors() {
     let source = "module mixed_transport\nlock inspect(lock_args domain: u64, witness a: u64, witness b: u64, witness c: u64, witness d: u64, witness e: u64, witness f: u64, witness values: NestedValues<Vec<u8>, 2, 3, 32>, lock_args owner: Hash, lock_args nonce: u16, lock_args delta: i32) -> bool { verification true }";
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
-            compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
         );
         let wrapper = valid.record.entries.iter().find(|entry| entry.name == "_cellscript_entry").unwrap();
         let blocks = valid.record.blocks.iter().filter(|block| block.owner_entry == wrapper.id).collect::<Vec<_>>();
@@ -7649,7 +7776,7 @@ fn nested_mixed_script_args_transport_binds_disjoint_buffers_and_live_cursors() 
             assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
             mutations += 1;
         }
-        assert!(mutations >= 100, "mixed transport mutations at O{opt_level}");
+        assert!(mutations >= 100, "mixed transport mutations at {diagnostics}");
         // Rewrite all uses of one address-helper scratch register together.
         // Its address calculation remains internally consistent, but t3 still
         // owns the Script total length and must survive the args-offset read.
@@ -8455,7 +8582,19 @@ fn typed_semantics_rejects_borrow_ownership_cfg_and_reference_mutations() {
     changed.rebind_typed_semantics();
     assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 
-    let mut changed = Fixture::from_source(REFERENCE_ENTRY_SOURCE);
+    // This mutation inspects an unused helper ABI; retain it in this
+    // diagnostic fixture instead of disabling normal dead-code elimination.
+    let mut changed = Fixture::from_result(
+        compile(
+            REFERENCE_ENTRY_SOURCE,
+            CompileOptions {
+                diagnostics: cellscript::CompilerDiagnostics::default().without(cellscript::OptimizationPass::DeadCode),
+                target: Some("riscv64-elf".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap(),
+    );
     let entry = changed
         .record
         .typed_semantics
@@ -8521,12 +8660,12 @@ action second(input token: Token, witness values: NestedValues<Vec<u8>, 3, 5, 64
     consume token
 }
 "#;
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile_artifact(
                 source,
                 CompileOptions {
-                    opt_level,
+                    diagnostics,
                     target: Some("riscv64-elf".into()),
                     target_profile: Some("ckb".into()),
                     ..Default::default()
@@ -8588,7 +8727,7 @@ action second(input token: Token, witness values: NestedValues<Vec<u8>, 3, 5, 64
                 assert_code(&changed, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
                 mutations += 1;
             }
-            assert!(mutations >= 35, "selected adapter mutations at O{opt_level}: {mutations}");
+            assert!(mutations >= 35, "selected adapter mutations at {diagnostics}: {mutations}");
         }
     }
 }
@@ -8615,9 +8754,9 @@ action inspect(witness values: NestedValues<Row, 3, 8, 512>, witness at: u64, wi
     return values.len()
 }
 "#;
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
-            compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
         );
         let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
         let mut mutations = 0;
@@ -8656,8 +8795,8 @@ action inspect(witness values: NestedValues<Row, 3, 8, 512>, witness at: u64, wi
                 assert_code(&missing, CheckerRejectionCode::V2420TypedMachineBindingInvalid);
             }
         }
-        assert!(sites >= 12, "nested read coverage at O{opt_level}: {sites}");
-        assert!(mutations >= 100, "nested read mutations at O{opt_level}: {mutations}");
+        assert!(sites >= 12, "nested read coverage at {diagnostics}: {sites}");
+        assert!(mutations >= 100, "nested read mutations at {diagnostics}: {mutations}");
     }
 }
 
@@ -8665,14 +8804,14 @@ action inspect(witness values: NestedValues<Row, 3, 8, 512>, witness at: u64, wi
 fn nested_read_contract_preserves_large_offsets_and_high_unsigned_indexes() {
     let fields = (0..8).map(|index| format!("f{index}: [u8; 256]")).collect::<Vec<_>>().join(", ");
     let source = format!("module wide_nested_read\nstruct Row {{ {fields}, payload: Vec<u8> }}\naction inspect(witness values: NestedValues<Row, 1, 3, 4096>, witness expected: [u8; 256]) -> u64 {{ verification\nlet row = values[0]\nrequire row.f7 == expected\nlet payload = row.payload\nreturn payload.len() }}");
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         Fixture::from_result(
-            compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
         );
         for index in [305419896u64, u64::MAX] {
             let source = format!("module high_nested_index\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 {{ verification\nlet item = values[{index}]\nreturn item.len() }}");
             Fixture::from_result(
-                compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+                compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
             );
         }
     }
@@ -8681,9 +8820,9 @@ fn nested_read_contract_preserves_large_offsets_and_high_unsigned_indexes() {
 #[test]
 fn nested_independent_views_cannot_share_a_coherently_rewritten_length_slot() {
     let source = "module nested_view_slots\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 { verification\nlet first = values[0]\nlet second = values[1]\nreturn first.len() + second.len() }";
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
-            compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
         );
         let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
         let indexes = valid
@@ -8748,9 +8887,9 @@ fn nested_independent_views_cannot_share_a_coherently_rewritten_length_slot() {
 #[test]
 fn nested_lifetime_rejects_ordinary_full_partial_and_aliased_stack_clobbers() {
     let source = "module nested_lifetime\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>, witness at: u64) -> u64 { verification\nlet bytes = values[at]\nlet marker = at + 7\nrequire marker > at\nreturn bytes.len() + values.len() }";
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
-            compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
         );
         let typed = valid.record.typed_semantics.entries.iter().find(|entry| entry.name == "inspect").unwrap();
         let frame = valid.record.entries.iter().find(|entry| entry.id == typed.id).unwrap().frame_size_bytes as i32;
@@ -8832,9 +8971,9 @@ fn nested_lifetime_rejects_a_rebound_branch_that_skips_the_view_definition() {
     let cell_source =
         NESTED_CELL_CODEC_SOURCE.replace("let values = before.entries", "require before.id == 42\nlet values = before.entries");
     for (source, producer_prefix) in [(source, ".Lnested_use_index_"), (cell_source.as_str(), ".Lnested_use_cellfield_")] {
-        for opt_level in 0..=3 {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
-                compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+                compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
             );
             let producer = valid
                 .record
@@ -8918,12 +9057,12 @@ fn nested_lifetime_accepts_caller_owned_fixed_results() {
         let source = format!("module nested_result\nstruct Pair {{ left: u64, right: u64 }}\nfn make({params}) -> Pair {{ Pair {{ left: {value}, right: {value} + 1 }} }}\nfn wrap(at: u64) -> Pair {{ make({args}) }}\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 {{ verification\nlet bytes = values[0]\nlet pair = wrap(bytes.len())\nrequire pair.right > pair.left\nreturn bytes.len() }}");
         let direct = source.replace("wrap(bytes.len())", &format!("make({})", vec!["bytes.len()"; count].join(", ")));
         for source in [source, direct] {
-            for opt_level in 0..=3 {
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let valid = Fixture::from_result(
-                    compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
-                        .unwrap_or_else(|error| panic!("{count} args, O{opt_level}: {error}")),
+                    compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() })
+                        .unwrap_or_else(|error| panic!("{count} args, {diagnostics}: {error}")),
                 );
-                if count == 9 && opt_level == 0 {
+                if count == 9 && !diagnostics.is_standard() {
                     let mut unsorted = valid.clone();
                     let block = unsorted.record.blocks.iter_mut().find(|block| block.nested_read_labels.len() > 1).unwrap();
                     block.nested_read_labels.swap(0, 1);
@@ -8963,11 +9102,11 @@ fn nested_cell_two_fields_source() -> String {
 
 #[test]
 fn nested_output_comparisons_bind_spans_expected_values_and_byte_loops() {
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(
                 &nested_cell_two_fields_source(),
-                CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -9020,9 +9159,9 @@ fn nested_output_fixed_fields_bind_all_widths_and_literal_bytes() {
         "id: 18446744073709551615, big: 0 as u128, hash: Hash::zero(), owner: Address::zero(), pad: b\"abcdefghi\", entries: values",
     );
     for source in [copied, literals] {
-        for opt_level in 0..=3 {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
-                compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+                compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
             );
             let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
             let mut mutations = 0;
@@ -9076,9 +9215,10 @@ fn nested_output_small_byte_arguments_keep_inline_abi_through_aliases() {
                     "id: id, entries: values",
                     if alias { "id: id, tiny: copy, entries: values" } else { "id: id, tiny: bytes, entries: values" },
                 );
-            for opt_level in 0..=3 {
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let valid = Fixture::from_result(
-                    compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+                    compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() })
+                        .unwrap(),
                 );
                 let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
                 let start = valid
@@ -9129,9 +9269,9 @@ fn nested_output_comparisons_cannot_be_bypassed_on_a_rebound_success_path() {
         (NESTED_CELL_CODEC_SOURCE, true, "bypasses a declared nested successor comparison"),
         (standalone.as_str(), false, "precedes its loaded Cell or expected value definition"),
     ] {
-        for opt_level in 0..=3 {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
-                compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+                compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
             );
             let end = valid
                 .record
@@ -9206,9 +9346,9 @@ fn nested_cell_borrow_calls_bind_register_stack_and_forwarded_views() {
         let forwarded = (0..count).map(|i| format!("p{i}, ")).collect::<String>();
         let source = format!("{}\n#[effect(ReadOnly)]\nfn count({params}document: &Document) -> u64 {{ return document.entries.len() }}\n#[effect(ReadOnly)]\nfn wrap({params}document: &Document) -> u64 {{ return count({forwarded}document) }}\n",
             NESTED_CELL_CODEC_SOURCE.replace("require values.len() == 1", &format!("require wrap({arguments}&before) == 1\nrequire count({arguments}&before) == 1")));
-        for opt_level in 0..=3 {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
-                compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+                compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
             );
             if count > 0 {
                 let mut changed = valid.clone();
@@ -9262,7 +9402,7 @@ fn nested_cell_borrow_calls_bind_register_stack_and_forwarded_views() {
                             })
                             .take(if register == 5 && count >= 8 { 2 } else { 1 })
                             .collect::<Vec<_>>();
-                        assert!(!loads.is_empty(), "caller O{opt_level}, {count} args");
+                        assert!(!loads.is_empty(), "caller {diagnostics}, {count} args");
                         for load in loads {
                             mutations.insert((load.address, ((register as u32) << 7) | 0x13));
                         }
@@ -9297,7 +9437,7 @@ fn nested_cell_borrow_calls_bind_register_stack_and_forwarded_views() {
                     }
                 }
             }
-            assert!(mutations.len() >= 6, "O{opt_level}, {count} args: {}", mutations.len());
+            assert!(mutations.len() >= 6, "{diagnostics}, {count} args: {}", mutations.len());
             for (address, word) in mutations {
                 let mut changed = valid.clone();
                 changed.replace_machine_word(address, word);
@@ -9312,7 +9452,7 @@ fn nested_cell_borrow_calls_bind_register_stack_and_forwarded_views() {
                 assert_eq!(
                     error.code,
                     CheckerRejectionCode::V2420TypedMachineBindingInvalid,
-                    "O{opt_level}, {count} args, {address:#x}: {error}"
+                    "{diagnostics}, {count} args, {address:#x}: {error}"
                 );
             }
         }
@@ -9321,10 +9461,13 @@ fn nested_cell_borrow_calls_bind_register_stack_and_forwarded_views() {
 
 #[test]
 fn nested_cell_lifetime_rejects_buffer_pointer_and_size_clobbers() {
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
-            compile(NESTED_CELL_CODEC_SOURCE, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
-                .unwrap(),
+            compile(
+                NESTED_CELL_CODEC_SOURCE,
+                CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+            )
+            .unwrap(),
         );
         let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
         let projection = valid
@@ -9411,9 +9554,9 @@ fn nested_cell_borrow_rejects_another_valid_cell_with_the_same_layout() {
             .replace("require values.len() == 1", "require count(&before) == 1")
             .replace("consume before", "consume peer\nconsume before")
     );
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
-            compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
         );
         let typed = valid.record.typed_semantics.entries.iter().find(|entry| entry.name == "roll").unwrap();
         let peer = typed.params.iter().find(|param| param.name == "peer").unwrap();
@@ -9469,11 +9612,11 @@ fn nested_cell_borrow_rejects_another_valid_cell_with_the_same_layout() {
 
 #[test]
 fn nested_cell_field_views_bind_spans_lengths_and_load_initialization() {
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(
                 &nested_cell_two_fields_source(),
-                CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -9532,18 +9675,18 @@ fn nested_cell_field_views_bind_spans_lengths_and_load_initialization() {
                 &CheckerBudgets::default(),
             )
             .unwrap_err();
-            assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "O{opt_level} at {address:#x}: {error}");
+            assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{diagnostics} at {address:#x}: {error}");
         }
     }
 }
 
 #[test]
 fn nested_cell_field_order_is_explicit_and_authenticated() {
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(
                 &nested_cell_two_fields_source(),
-                CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -9629,10 +9772,13 @@ fn nested_cell_field_order_is_explicit_and_authenticated() {
 
 #[test]
 fn nested_cell_codec_rejects_rehashed_load_table_and_decoder_mutations() {
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
-            compile(NESTED_CELL_CODEC_SOURCE, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
-                .unwrap(),
+            compile(
+                NESTED_CELL_CODEC_SOURCE,
+                CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+            )
+            .unwrap(),
         );
         let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
         let mut mutations = std::collections::BTreeSet::new();
@@ -9695,7 +9841,7 @@ fn nested_cell_codec_rejects_rehashed_load_table_and_decoder_mutations() {
                 &CheckerBudgets::default(),
             )
             .unwrap_err();
-            assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "O{opt_level}, {address:#x}: {error}");
+            assert_eq!(error.code, CheckerRejectionCode::V2420TypedMachineBindingInvalid, "{diagnostics}, {address:#x}: {error}");
         }
     }
 }
@@ -9704,12 +9850,12 @@ fn nested_cell_codec_rejects_rehashed_load_table_and_decoder_mutations() {
 fn nested_cell_codec_requires_markers_for_unused_fields_and_group_roles() {
     use cellscript::artifact::{compile_artifact, ArtifactAction, ArtifactContext, ArtifactDeclaration, ArtifactDispatch};
     let source = "module unused_nested_cell\nresource Document has store, consume { id: u64, entries: NestedValues<Vec<u8>, 2, 3, 32> }\naction remove(input before: Document) { verification\nconsume before }";
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile_artifact(
                 source,
                 CompileOptions {
-                    opt_level,
+                    diagnostics,
                     target: Some("riscv64-elf".into()),
                     target_profile: Some("ckb".into()),
                     ..Default::default()
@@ -9749,10 +9895,13 @@ fn nested_cell_codec_requires_markers_for_unused_fields_and_group_roles() {
 
 #[test]
 fn nested_cell_codec_rejects_a_rebound_entry_after_the_syscall() {
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
-            compile(NESTED_CELL_CODEC_SOURCE, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
-                .unwrap(),
+            compile(
+                NESTED_CELL_CODEC_SOURCE,
+                CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
+            )
+            .unwrap(),
         );
         let target = valid
             .record
@@ -9819,9 +9968,9 @@ fn nested_cell_codec_rejects_a_rebound_entry_after_the_syscall() {
 #[test]
 fn nested_lifetime_preserves_hidden_result_pointer_provenance() {
     let source = "module nested_result_write\nstruct Pair { left: u64, right: u64 }\nfn make(at: u64) -> Pair { Pair { left: at, right: at + 1 } }\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 { verification\nlet bytes = values[0]\nlet pair = make(bytes.len())\nrequire pair.right > pair.left\nreturn bytes.len() }";
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
-            compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
         );
         let callee = valid.record.entries.iter().find(|entry| entry.name == "make").unwrap();
         assert_eq!(callee.fixed_result_abi.as_ref().unwrap().hidden_argument_index, 1);
@@ -9885,7 +10034,15 @@ fn nested_lifetime_preserves_hidden_result_pointer_provenance() {
 fn nested_lifetime_checks_transitive_callee_memory_effects() {
     let source = "module nested_callee\nfn bump(at: u64) -> u64 { return at + 1 }\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>, witness at: u64) -> u64 { verification\nlet bytes = values[at]\nrequire bump(at) > at\nreturn bytes.len() }";
     let valid = Fixture::from_result(
-        compile(source, CompileOptions { opt_level: 0, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+        compile(
+            source,
+            CompileOptions {
+                diagnostics: cellscript::CompilerDiagnostics::without_optimizations(),
+                target: Some("riscv64-elf".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap(),
     );
     let callee = valid.record.entries.iter().find(|entry| entry.name == "bump").unwrap();
     let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
@@ -9911,12 +10068,12 @@ fn nested_lifetime_checks_transitive_callee_memory_effects() {
 fn nested_lifetime_checks_fixed_copy_destinations_after_hash_rebinding() {
     use cellscript::artifact::{compile_artifact, ArtifactAction, ArtifactContext, ArtifactDeclaration, ArtifactDispatch};
     let source = "module nested_copy_effects\nresource Token has store, consume { expected: Hash }\naction inspect(input token: Token, witness values: NestedValues<Vec<u8>, 2, 3, 32>, witness expected: Hash) { verification\nrequire values.len() > 0\nrequire token.expected == expected\nconsume token }";
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile_artifact(
                 source,
                 CompileOptions {
-                    opt_level,
+                    diagnostics,
                     target: Some("riscv64-elf".into()),
                     target_profile: Some("ckb".into()),
                     ..Default::default()
@@ -9988,9 +10145,9 @@ fn nested_lifetime_checks_fixed_copy_destinations_after_hash_rebinding() {
 #[test]
 fn nested_lifetime_rejects_coherent_derived_pointer_aliasing_of_a_root_slot() {
     let source = "module nested_physical_alias\naction inspect(witness values: NestedValues<Vec<u8>, 2, 3, 32>) -> u64 { verification\nlet bytes = values[0]\nreturn bytes.len() + values.len() }";
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
-            compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
         );
         let typed = valid.record.typed_semantics.entries.iter().find(|entry| entry.name == "inspect").unwrap();
         let root = typed.locals.iter().find(|local| local.id == typed.params[0].binding_id).unwrap().source_id;
@@ -10143,11 +10300,11 @@ action inspect() -> u64 {
     return 0
 }
 "#;
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -10198,7 +10355,7 @@ action inspect() -> u64 {
                     7 => CheckerRejectionCode::V2407AbiOrStackInvalid,
                     _ => CheckerRejectionCode::V2420TypedMachineBindingInvalid,
                 }),
-                "O{opt_level}/guard mutation {mutation} did not fail independent machine binding"
+                "{diagnostics}/guard mutation {mutation} did not fail independent machine binding"
             );
         }
     }
@@ -10207,11 +10364,11 @@ action inspect() -> u64 {
 #[test]
 fn mixed_settlement_shared_return_tails_reject_skipped_restores_and_field_checks() {
     let source = include_str!("../examples/language/batches/mixed_settlement.cell");
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let valid = Fixture::from_result(
             compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
             .unwrap(),
         );
@@ -10271,4 +10428,82 @@ fn mixed_settlement_shared_return_tails_reject_skipped_restores_and_field_checks
         changed.replace_machine_word(read.range.start, encode_jal((tail.range.start as i64 - read.range.start as i64) as i32));
         assert!(changed.check().is_err(), "return-tail recognition must not bypass a field check");
     }
+}
+
+#[test]
+fn nominal_wide_result_contract_rejects_retyping_wrong_width_and_hidden_pointer() {
+    for (ty, other) in [("ScriptHash", "SighashAllDigest"), ("SighashAllDigest", "ScriptHash")] {
+        let source = format!("module nominal_result\nfn copy(value: {ty}) -> {ty} {{ let snapshot = value\nreturn snapshot }}\naction inspect(witness value: {ty}) -> u64 {{ verification require copy(value) == value return 0 }}");
+        for diagnostics in [
+            cellscript::CompilerDiagnostics::default().without(cellscript::OptimizationPass::Inlining),
+            cellscript::CompilerDiagnostics::without_optimizations(),
+        ] {
+            let valid = Fixture::from_result(
+                compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap(),
+            );
+            valid.check().unwrap();
+            for mutation in 0..6 {
+                let mut changed = valid.clone();
+                let abi =
+                    changed.record.entries.iter_mut().find(|entry| entry.name == "copy").unwrap().fixed_result_abi.as_mut().unwrap();
+                match mutation {
+                    0 => abi.width_bytes = 31,
+                    1 => abi.hidden_argument_index += 1,
+                    2 => abi.copy_ranges.clear(),
+                    3 => abi.type_name = "hash".into(),
+                    4 => abi.type_name = other.into(),
+                    _ => abi.copy_sources[0].field_offset = 1,
+                }
+                changed.rebind_sidecars();
+                assert_code(&changed, CheckerRejectionCode::V2407AbiOrStackInvalid);
+            }
+            let abi = valid.record.entries.iter().find(|entry| entry.name == "copy").unwrap().fixed_result_abi.as_ref().unwrap();
+            let elf = parse_elf(&valid.artifact, CheckerBudgets::default().instructions).unwrap();
+            let load = elf
+                .instructions
+                .iter()
+                .find(|word| {
+                    abi.copy_sources.iter().any(|source| source.range.contains(word.address))
+                        && word.word & 0x7f == 3
+                        && word.word >> 7 & 31 == 10
+                })
+                .unwrap();
+            let mut changed = valid.clone();
+            changed.replace_machine_word(load.address, load.word & !(31 << 15));
+            assert!(changed.check().is_err(), "{ty} result cannot read an unproved absolute pointer");
+        }
+    }
+}
+
+#[test]
+fn computed_sighash_result_cannot_be_relabelled_as_an_ordinary_hash() {
+    let valid = Fixture::from_source(SIGHASH_ZERO_LOCK_SOURCE);
+    valid.check().unwrap();
+    let mut changed = valid.clone();
+    for entry in &mut changed.record.typed_semantics.entries {
+        for local in &mut entry.locals {
+            if local.ty == "SighashAllDigest" {
+                local.ty = "hash".into();
+            }
+        }
+        for operation in entry.blocks.iter_mut().flat_map(|block| &mut block.operations) {
+            for operand in &mut operation.operands {
+                if operand.ty == "SighashAllDigest" {
+                    operand.ty = "hash".into();
+                }
+            }
+            if let Some(call) = &mut operation.call {
+                for param in &mut call.params {
+                    if param == "SighashAllDigest" {
+                        *param = "hash".into();
+                    }
+                }
+                if call.return_type == "SighashAllDigest" {
+                    call.return_type = "hash".into();
+                }
+            }
+        }
+    }
+    changed.rebind_layered_identities();
+    assert_code(&changed, CheckerRejectionCode::V2419TypedSemanticsInvalid);
 }

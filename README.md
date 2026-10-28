@@ -334,7 +334,7 @@ Frequently used reports and tools include:
 | `cellc tx validate` / `tx solve` | Check transaction shape or generate a transaction template |
 | `cellc deploy plan` / `deploy verify` | Plan or verify deployment identity |
 | `cellc verify-artifact` | Independently check the complete ELF bundle |
-| `cellc profile` / `opt-report` / `audit-bundle` | Inspect cost, optimization, and audit reports |
+| `cellc profile` / `audit-bundle` | Inspect cost and audit reports |
 | `cellc fmt` / `doc` | Format source or generate documentation |
 | `cellc package verify` / `cellc registry verify --live` | Verify package or live deployment identities |
 | `cellc artifact ls-idl validate\|bind\|fetch\|bundle` | Work with byte-exact Lock Script interfaces |

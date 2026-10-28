@@ -5,7 +5,7 @@
   "plan_hash": "sha256:fixture",
   "workspace_root": ".",
   "resolve_graph_schema": "cellscript-resolve-graph-v1",
-  "build_plan_schema": "cellscript-build-plan-v1",
+  "build_plan_schema": "cellscript-build-plan-v2",
   "selection": {
     "package": null,
     "precise": null,

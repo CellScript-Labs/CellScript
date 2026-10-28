@@ -901,10 +901,10 @@ action verify(witness mixed: Mixed<()>) -> u64 {
     return 0
 }
 "#;
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = cellscript::compile_with_executable_surface_policy(
             source,
-            cellscript::CompileOptions { target: Some("riscv64-elf".into()), opt_level, ..Default::default() },
+            cellscript::CompileOptions { target: Some("riscv64-elf".into()), diagnostics, ..Default::default() },
             cellscript::ExecutableSurfacePolicy::DenyFailClosed,
         )
         .unwrap();
@@ -920,7 +920,7 @@ action verify(witness mixed: Mixed<()>) -> u64 {
             let mut fixture = build_simple_fixture(Bytes::default(), 1, 1);
             fixture.witnesses = vec![witness.as_bytes()];
             let result = execute_cellscript_script(elf, &fixture);
-            assert_eq!(result.exit_code, expected_exit, "opt={opt_level}, mixed unit/scalar layout: {:?}", result.captured_debug);
+            assert_eq!(result.exit_code, expected_exit, "opt={diagnostics}, mixed unit/scalar layout: {:?}", result.captured_debug);
         }
     }
 }

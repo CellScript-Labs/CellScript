@@ -92,8 +92,8 @@ fn cases() -> Vec<String> {
         .collect()
 }
 
-fn options(edition: CellScriptEdition, opt_level: u8) -> CompileOptions {
-    CompileOptions { edition, opt_level, target: Some("riscv64-elf".to_string()), ..Default::default() }
+fn options(edition: CellScriptEdition, diagnostics: cellscript::CompilerDiagnostics) -> CompileOptions {
+    CompileOptions { edition, diagnostics, target: Some("riscv64-elf".to_string()), ..Default::default() }
 }
 
 fn source_for_edition(source: &str, edition: CellScriptEdition) -> String {
@@ -104,10 +104,10 @@ fn source_for_edition(source: &str, edition: CellScriptEdition) -> String {
     }
 }
 
-fn compile_audit(source: &str, edition: CellScriptEdition, opt_level: u8) -> CompileResult {
+fn compile_audit(source: &str, edition: CellScriptEdition, diagnostics: cellscript::CompilerDiagnostics) -> CompileResult {
     compile_with_executable_surface_policy(
         &source_for_edition(source, edition),
-        options(edition, opt_level),
+        options(edition, diagnostics),
         ExecutableSurfacePolicy::AllowFailClosed,
     )
     .expect("deferred syntax remains inspectable")
@@ -116,15 +116,15 @@ fn compile_audit(source: &str, edition: CellScriptEdition, opt_level: u8) -> Com
 #[test]
 fn sighash_calls_are_rejected_by_production_policy_independently_of_result_use() {
     for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
-        for opt_level in 0..=3 {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             for source in cases() {
                 let error = compile_with_executable_surface_policy(
                     &source_for_edition(&source, edition),
-                    options(edition, opt_level),
+                    options(edition, diagnostics),
                     ExecutableSurfacePolicy::DenyFailClosed,
                 )
                 .err()
-                .unwrap_or_else(|| panic!("deferred call disappeared: edition={edition:?}, opt={opt_level}, source={source}"));
+                .unwrap_or_else(|| panic!("deferred call disappeared: edition={edition:?}, opt={diagnostics}, source={source}"));
                 assert!(error.message.contains("ckb-sighash-all-deferred"), "{}", error.message);
             }
         }
@@ -134,9 +134,9 @@ fn sighash_calls_are_rejected_by_production_policy_independently_of_result_use()
 #[test]
 fn audit_artifacts_terminate_before_returning_or_passing_a_digest_in_ckb_vm() {
     for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
-        for opt_level in [0, 3] {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             for source in cases().into_iter().filter(|source| source != LOCK) {
-                let compiled = compile_audit(&source, edition, opt_level);
+                let compiled = compile_audit(&source, edition, diagnostics);
                 compiled.validate().expect("deferred runtime artifact retains valid typed lowering evidence");
                 let mut fixture = build_simple_fixture(Bytes::new(), 1, 1);
                 fixture.current_type_script_input_indices = vec![0];
@@ -150,7 +150,7 @@ fn audit_artifacts_terminate_before_returning_or_passing_a_digest_in_ckb_vm() {
                 let result = execute_cellscript_script(strip_vm_abi_trailer(&compiled.artifact_bytes), &fixture);
                 assert_eq!(
                     result.exit_code, 66,
-                    "a deferred call must exit the process, not return an error as a Hash: {result:?}, edition={edition:?}, opt={opt_level}, source={source}"
+                    "a deferred call must exit the process, not return an error as a Hash: {result:?}, edition={edition:?}, opt={diagnostics}, source={source}"
                 );
             }
         }
@@ -160,7 +160,7 @@ fn audit_artifacts_terminate_before_returning_or_passing_a_digest_in_ckb_vm() {
 #[test]
 fn lock_cannot_convert_deferred_failure_into_boolean_success_in_ckb_vm() {
     for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
-        let compiled = compile_audit(LOCK, edition, 3);
+        let compiled = compile_audit(LOCK, edition, cellscript::CompilerDiagnostics::default());
         let mut context = Context::new_with_deterministic_rng();
         let code = context.deploy_cell(Bytes::copy_from_slice(strip_vm_abi_trailer(&compiled.artifact_bytes)));
         let lock = context.build_script(&code, Bytes::new()).unwrap();
@@ -180,7 +180,8 @@ fn lock_cannot_convert_deferred_failure_into_boolean_success_in_ckb_vm() {
 
 #[test]
 fn deferred_classification_is_visible_without_claiming_a_digest_syscall() {
-    let compiled = compile_audit(DIRECT_VERIFIER, CellScriptEdition::Edition2026, 0);
+    let compiled =
+        compile_audit(DIRECT_VERIFIER, CellScriptEdition::Edition2026, cellscript::CompilerDiagnostics::without_optimizations());
     let feature = "ckb-sighash-all-deferred";
     assert!(compiled.metadata.runtime.fail_closed_runtime_features.iter().any(|item| item == feature));
     assert!(compiled.metadata.actions[0].fail_closed_runtime_features.iter().any(|item| item == feature));
@@ -202,9 +203,10 @@ fn deferred_classification_is_visible_without_claiming_a_digest_syscall() {
     assert!(calls.filter_map(|operation| operation.call.as_ref()).any(|call| {
         call.target == "__ckb_sighash_all" && call.effect == "deferred-runtime-fail-closed:66:ckb-sighash-all-deferred"
     }));
-    let helper = compile_audit(HELPER_RETURN, CellScriptEdition::Edition2026, 0);
+    let helper =
+        compile_audit(HELPER_RETURN, CellScriptEdition::Edition2026, cellscript::CompilerDiagnostics::without_optimizations());
     assert!(helper.metadata.functions.iter().any(|item| item.fail_closed_runtime_features.iter().any(|item| item == feature)));
-    let lock = compile_audit(LOCK, CellScriptEdition::Edition2026, 0);
+    let lock = compile_audit(LOCK, CellScriptEdition::Edition2026, cellscript::CompilerDiagnostics::without_optimizations());
     assert!(lock.metadata.locks[0].fail_closed_runtime_features.iter().any(|item| item == feature));
 }
 
@@ -220,7 +222,7 @@ fn imported_digest_aliases_and_local_wrappers_retain_deferred_execution() {
             std::fs::write(
                 temp.path().join("Cell.toml"),
                 format!(
-                    "[package]\nname = \"deferred_test\"\nversion = \"0.1.0\"\nedition = \"{}\"\n",
+                    "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nname = \"deferred_test\"\nversion = \"0.1.0\"\nedition = \"{}\"\n",
                     if edition == CellScriptEdition::Edition2026 { "2026" } else { "2027" }
                 ),
             )
@@ -230,25 +232,25 @@ fn imported_digest_aliases_and_local_wrappers_retain_deferred_execution() {
             let entry = source_dir.join("main.cell");
             std::fs::write(&entry, source_for_edition(&source, edition)).unwrap();
             std::fs::write(source_dir.join("helper.cell"), helper).unwrap();
-            for opt_level in 0..=3 {
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let policy_compile = |policy| {
                     cellscript::compile_path_with_executable_surface_policy(
                         entry.to_str().unwrap(),
-                        options(edition, opt_level),
+                        options(edition, diagnostics),
                         Some(cellscript::CompileEntryScope::Action("verify".to_string())),
                         policy,
                     )
                 };
                 let error = policy_compile(ExecutableSurfacePolicy::DenyFailClosed)
                     .err()
-                    .unwrap_or_else(|| panic!("imported deferred call vanished: {invocation}, opt={opt_level}"));
+                    .unwrap_or_else(|| panic!("imported deferred call vanished: {invocation}, opt={diagnostics}"));
                 assert!(error.message.contains("ckb-sighash-all-deferred"), "{}", error.message);
                 let compiled = policy_compile(ExecutableSurfacePolicy::AllowFailClosed).expect("inspect imported deferred call");
                 compiled.validate().expect("imported lowering evidence validates");
                 let mut fixture = build_simple_fixture(Bytes::new(), 1, 1);
                 fixture.current_type_script_input_indices = vec![0];
                 let result = execute_cellscript_script(strip_vm_abi_trailer(&compiled.artifact_bytes), &fixture);
-                assert_eq!(result.exit_code, 66, "imported helper failure must not be swallowed: {invocation}, opt={opt_level}");
+                assert_eq!(result.exit_code, 66, "imported helper failure must not be swallowed: {invocation}, opt={diagnostics}");
             }
         }
     }

@@ -1,0 +1,243 @@
+{
+  "schema": "cellscript-browser-byte-retirement-v1",
+  "status": "implemented-and-verified-under-current-no-commit-no-CI-scope",
+  "compiler": "0.33.0-alpha.1",
+  "source": {
+    "base_commit": "6b38d68871a1a6f4864f80c735b090fe3f3a07e2",
+    "dirty": true,
+    "sha256": {
+      "src/lib.rs": "26c7f1971d5432e9e14db9c8e41f0e238d53f2fb4f8d9c4fd167552604869a38",
+      "crates/cellscript-wasm/src/lib.rs": "8a8ae78d703e8f8ec202201be0346291899a1d523478b03e487f9a5b160f67d5",
+      "website/scripts/build-wasm.sh": "f563f4af48625f42297f0f318437c6f64a8540ce91073089b4fd46075bdf4c50",
+      "website/scripts/test-playground-compiler.mjs": "939106832fc372fd22e32e4129c07ffff2c181c35588185bf4e5c4af7ad33f36"
+    }
+  },
+  "canonical_build": {
+    "command": "CELLSCRIPT_WASM_DOCKER_NETWORK=host website/scripts/build-wasm.sh",
+    "status": "passed",
+    "platform": "linux/amd64",
+    "builder_image": "cellscript-wasm-builder:rust-1.97.1-wasm-bindgen-0.2.121-binaryen-131",
+    "builder_image_id": "sha256:519efe4972066ac72b93b0c7bd8e929ea3813dca6fa3edc788718f65171927c9",
+    "post_link_passes": [
+      "-Oz",
+      "--flatten --rereloop -Oz --converge"
+    ],
+    "budget_unchanged": true,
+    "canonical_rebuild_after_test_only_formatting_identical": true,
+    "log_sha256": "87a1e17e76a53287275a01719adccfccc26b44a63ff2c81a2eb01d52c356af73"
+  },
+  "bundle": {
+    "raw_bytes": 1606472,
+    "gzip_bytes": 612606,
+    "gzip_budget_bytes": 614400,
+    "sha256": "d9847d38fab900ab6c827e88714ef310e2e8eb550fcd07834235158226f9345d",
+    "matches_separate_transform_execution": true
+  },
+  "browser_contracts": {
+    "command": "npm run test:playground-compiler",
+    "passed": 63,
+    "failed": 0,
+    "skipped": 0,
+    "scope": "both editions; single-source, diagnostic and source-set exports; raw byte and true digest domains; all removed calls and fields; unbound and mixed external delegation"
+  },
+  "control_flow_parity": {
+    "cases": 158,
+    "exports_per_case": 3,
+    "results_compared": 474,
+    "accepted": 72,
+    "rejected": 86,
+    "identical": true,
+    "before_sha256": "eef1126341b3800aa4200e8dcbabea917c0be9fcd3c61f43e96872148290c3a0",
+    "after_sha256": "eef1126341b3800aa4200e8dcbabea917c0be9fcd3c61f43e96872148290c3a0",
+    "source_files": 79
+  },
+  "parity_sources": {
+    "tests/syntax_combo/seeds/authoring-action.cell": "5156c9093dc294833fda336d0756b8c133ae6e9b7c29a24aafd01889fc598475",
+    "tests/syntax_combo/seeds/authoring-lock.cell": "c27ed9471935af2a2fa1e8341fe7174316335a7e99f81c7c8b6aa52abd12592f",
+    "tests/syntax_combo/seeds/authoring-replace-relation.cell": "83560d855a1c08a25d6d18a4dd6d100f3db4fbd985e6b9af5f181a5d1ffc6448",
+    "tests/syntax_combo/seeds/bitwise-shift-range-reject.cell": "f19546cc448e7d9ef0737b96164fbc4004d9039c38988b671f833a1961f09a80",
+    "tests/syntax_combo/seeds/bitwise-shift.cell": "a06ed516a9a13569303d1eecf61acb9051771e113d4974278b13791b62fe63d3",
+    "tests/syntax_combo/seeds/borrow-path-reborrow.cell": "ab9c3cec1105899eb08e0dfa42cb889811c557df5823a755de44e02a9e36ad35",
+    "tests/syntax_combo/seeds/bounded-collection-duplicate-consume-reject.cell": "118b4ff5ec17611e708ef28fde823b9c8dcc12f5abbd2a5d29c97be7844fc4e8",
+    "tests/syntax_combo/seeds/bounded-collection-missing-cardinality-reject.cell": "29339583882284409db519efb39735660029df5e90fb26364a33969f37ff38d3",
+    "tests/syntax_combo/seeds/bounded-collection-vec-resource-reject.cell": "1880917096452bc9f655e55ce43d244abdf289b07c6dd8816a5a6327de26c527",
+    "tests/syntax_combo/seeds/bounded-collection.cell": "f531107f22623b27a609e97280be5bf4aaad311d6253e9a2a58e3956f7ec6e76",
+    "tests/syntax_combo/seeds/bounded-quantifier-unbounded-reject.cell": "b87b36c63e909d632542d67337e012db534786f96deba7b59f6be9791949d198",
+    "tests/syntax_combo/seeds/bounded-quantifier.cell": "679ccaa863a241da4b02feadfb01395f6d1ca3fa6156e9e8519c849b01403f12",
+    "tests/syntax_combo/seeds/bounded-witness-view.cell": "40dda764a12e13be2748253cc04b66c34a7c139fc86db9622301e4d7f537098c",
+    "tests/syntax_combo/seeds/capability-entailment.cell": "9c62d9f216a73e6933dae648d3af4884f57fa8efa40d50d229db56087ed06ab4",
+    "tests/syntax_combo/seeds/capability-missing-identity-reject.cell": "baebe26d065dcf744ab6eedf49f5424de84af5d87be5254d2c2912a545f7487b",
+    "tests/syntax_combo/seeds/capability-transitive-grant-reject.cell": "a3eef0a06c16391ba975a1d4b97e6a142fd4c0ac0e5faeb36652fae190b8e307",
+    "tests/syntax_combo/seeds/cell-data-hash-and-slice.cell": "1abe48060c7796cfe1d0719daf0359857b33c51af5d5e34e7b5510fa3be61d7d",
+    "tests/syntax_combo/seeds/cell-data-view-mutation-reject.cell": "958effbc0df6a2f1c12bdc272744eddfa142b286b5b298464926c7938190bdb7",
+    "tests/syntax_combo/seeds/collections-aggregation.cell": "2af3f7b4013182ea4cd829591108687346d3c8e8ae76f76f0e38d5bedc0cc6c0",
+    "tests/syntax_combo/seeds/collections-construction.cell": "5ac412bbd2c042202939fabcbec7249d4b43dda2a17a221c3c0f62905100aac2",
+    "tests/syntax_combo/seeds/collections-deduplication.cell": "bc338a8668ae104b9b59feefc9199cc8517f956b747118cfb52bd27132595787",
+    "tests/syntax_combo/seeds/collections-records.cell": "947760463a3e6080163e50e5d82278feaec5daf5e8bd9f5a459a2f06405601c9",
+    "tests/syntax_combo/seeds/collections-sorted.cell": "d7dce26cda129bd87f3a744fa733536e397abd3d24caa3f6796b73ebcb8260f6",
+    "tests/syntax_combo/seeds/complete-patterns.cell": "ee570482e1d71d9f0c83827e5dbbc0d5d316383531d7806f0192a5e67b9b3e87",
+    "tests/syntax_combo/seeds/deployment-line-handle.cell": "5f2335121e99219ed44616ede13b4150c4b7e6e584d8de38dc36bfd2e622cdc9",
+    "tests/syntax_combo/seeds/edition-2027-lock-script.cell": "74f6472587b641a99f7c724b1f0dd848613803a12875e6ad7ff2f1a81fc0570f",
+    "tests/syntax_combo/seeds/edition-2027-pool.cell": "f9075703c4b9ac5dcdeaaf10a91d82a075cb0683803df4b79c98ff7d373d613d",
+    "tests/syntax_combo/seeds/edition-2027-retire-fresh.cell": "eae59165e511cf1aceec30a8bd4706900862a38ede02e00ffbe128cdc9d7fc8b",
+    "tests/syntax_combo/seeds/edition-2027-script-hash.cell": "e8860872698d47a595c33d33c1b8057c5a54626638da11e441dc69177343cfb4",
+    "tests/syntax_combo/seeds/edition-2027-type-script.cell": "2544295a3c115e526f4882b0e61616a94ff0d7c272acef16e0e18622ccfbe0f2",
+    "tests/syntax_combo/seeds/exact-role-runtime-policy-reject.cell": "4f8b53d5621e5e5c8de23a5ffb6336ba7694cf27750bb113c6e8d0add90b0b1c",
+    "tests/syntax_combo/seeds/exact-script-handle.cell": "c7b2db4f8c535345723df996479024ddf07b17e25f7926d9af098faa5f8886da",
+    "tests/syntax_combo/seeds/explicit-borrow-cross-consume-reject.cell": "d380bf6fa868464a4cfc698f0590e013cd5eb56cbddf5a50cafc80aced95fa8f",
+    "tests/syntax_combo/seeds/explicit-borrow-effect-reject.cell": "a910a51d5fee095b5da5cb05060413b7b3c7ebc37c59ab701673f064061d69b5",
+    "tests/syntax_combo/seeds/explicit-borrow-escape-reject.cell": "db3e0c118f1c32b5e7bd9d79493ed78282702cc97742fc88121fc5173cfe1971",
+    "tests/syntax_combo/seeds/explicit-borrow.cell": "b7d483fd18e8b2ce3700691095effc5bf2142c1acb531f443481dfe55d527790",
+    "tests/syntax_combo/seeds/field-commas-canonical.cell": "5a01d917532b188ede6d3d5cb08546745ce2662d018398c0e7f742b180b2b3dd",
+    "tests/syntax_combo/seeds/field-commas-compatibility.cell": "142758dd058e2aebbd94bffcca445320c558ae5a0253fd0449909670eb3947b3",
+    "tests/syntax_combo/seeds/function-effect-signature.cell": "7147c48ae3c29121574e6f0b235eaaef66e9ade67d8ec2193b988799ced30192",
+    "tests/syntax_combo/seeds/generic-value.cell": "3e02adfbb3bc87ab32dfb08c215b7d32a4b434fe030d30f92fe90fbe565e84fa",
+    "tests/syntax_combo/seeds/instance-handle-nominal-reject.cell": "6a7d73946f972ad8f20b2674176413a1ae243d08ad29be8500c781b5b45e143d",
+    "tests/syntax_combo/seeds/labeled-loop-control.cell": "75d0537046190ac63022163cf01a7ee70a949412ed8c7b0645b69d591159c860",
+    "tests/syntax_combo/seeds/named-collections.cell": "27936adf2a0e45487dbf1c702ba67e6a1ca0de3893d49e919cf2487c27acc423",
+    "tests/syntax_combo/seeds/named-data-shapes.cell": "49556abcc05c891f329396d5f5970b675df823a732e43c886e533ea94a9554c1",
+    "tests/syntax_combo/seeds/named-derived-helpers.cell": "276c011081f28b49b99d3e575548e7bf9fc0e06364fc849eab36d33478c6de1b",
+    "tests/syntax_combo/seeds/named-nested-data-views.cell": "f4692fe61853f7f2b70093232b805da3c3df980b5f8950745832aed30aa5e935",
+    "tests/syntax_combo/seeds/named-nested-helpers.cell": "42439b922183ed26310254904f2768a926d4177f88ced01aec6219d4519421cd",
+    "tests/syntax_combo/seeds/named-nested-selection.cell": "1b190bcf3bfcdac7cc680aa6c5fe4ad15d12530610ad2a4da9984a90f7c13feb",
+    "tests/syntax_combo/seeds/named-role-selection.cell": "acfdbfa1df25e2985fd80b90cbf425ec45cb651496852903de74cd4c15762414",
+    "tests/syntax_combo/seeds/named-role-verification.cell": "103b1b86a19755bd7738463920116fbd7ce36e16c32e2cc8c31aab260650fdb1",
+    "tests/syntax_combo/seeds/nested-bound-reject.cell": "71cb61bfbec8fb69557dfac2255be59f89e0e8a643a0aff9ddc3e4d05e1b6fbf",
+    "tests/syntax_combo/seeds/nested-view-mutation-reject.cell": "64a7dcc43d935b32396db721d19fefd35c6d470c6b051d575a0ba369d1bbfd4f",
+    "tests/syntax_combo/seeds/payload-enum-dynamic-reject.cell": "428b2d95eecadbd8506680d04458c0deaec931a403418deb15d19e5702316f69",
+    "tests/syntax_combo/seeds/payload-enum-generic-reject.cell": "30d68b2ade4c96bc91f228ad54e00538201e74f246c161c06a9ef1ab73091a5a",
+    "tests/syntax_combo/seeds/payload-enum-linear-drop-reject.cell": "baba18eee2aebb22d9dae6eb2d3d70231c954d4c5fb3fed5c270f9617b769202",
+    "tests/syntax_combo/seeds/payload-enum-nonexhaustive-reject.cell": "96e36cdb5d826c5949994bf6c56476bd283cb6ec237bdadf9cd947d60460dfa8",
+    "tests/syntax_combo/seeds/payload-enum.cell": "0f7451fe5c02b562a083d008674f4bbc814ca9164d35fe5f21e1ba31ba317f7b",
+    "tests/syntax_combo/seeds/protocolgraph-role-conflict.cell": "a0a1a71d8a846e88f62816b884adb7913fdad573570a7127611b76e5c3a179ff",
+    "tests/syntax_combo/seeds/protocolgraph-role-weak.cell": "78695b4e4a43f1e635a860b69f651c840baf3b12b95d8befd4938223661a6aed",
+    "tests/syntax_combo/seeds/require-block-lifecycle.cell": "7bde069fbe2c651d227e9333d5d09c8eee83c1aef9b5daaf13129e2913f81284",
+    "tests/syntax_combo/seeds/script-hash.cell": "3cffca63ac257bf3bcec7ddce77541eba6886fba14dee077cd21a288ec2c4251",
+    "tests/syntax_combo/seeds/sighash-all-zero-lock.cell": "132edda2c1cb7f2331724669ea53178f271ba0b76965fce0b42dee6b6d7e38b6",
+    "tests/syntax_combo/seeds/terminal-flow-metadata.cell": "524fc7b39b8914b1dad88845c93dabc8886ad5c2ad7e2b1b8c62eb6a4749ef84",
+    "tests/syntax_combo/seeds/terminal-flow-outgoing-reject.cell": "b25be22a428cc1cbe17a7c88bb8ad871e7a9111e720fa757f8c1814350928210",
+    "tests/syntax_combo/seeds/trusted-external-missing-manifest-reject.cell": "6bafe6dc9650ef7f02ea1ec16195e3683c15d25b49a0cd63266f81e6615b8522",
+    "tests/syntax_combo/seeds/type-validity-unknown-env-reject.cell": "1c0efef928a26b9f1fd35ffbf71d20a2eb023a7ae679706038cc6ebf458a6eac",
+    "tests/syntax_combo/seeds/type-validity.cell": "39d260cfe7f352a96ebc8f0c3277486a5f6e1a490aeb2fd091e6f3824541b220",
+    "tests/syntax_combo/seeds/typed-vec-capacity-reject.cell": "f15e1198c3a041d3437a27bc74c6f12f6f855cf31eea1193c3022f026005e33f",
+    "tests/syntax_combo/seeds/typed-vec-constructor.cell": "727828f01ba91759efc12989d33fb003e43b99eee29f4d697aa65d05fde20426",
+    "tests/syntax_combo/seeds/typed-vec-element-reject.cell": "8cdbd1dcc580014ceaaa1aafb16d05b6a20eecded777c686f05929152162716e",
+    "examples/amm_pool.cell": "b014fd011407f86c702a191439c179302ba4854b7e2ce62cef29109c1f6db43e",
+    "examples/atomic_swap.cell": "2c38f899caccd2438e5377f471b465e750dbaa426df1f1cdf798e934b1e76e54",
+    "examples/launch.cell": "9dfc901b4293e33183c6c4db86f52a40d8301cd6eefd5fc7936a84809ed30134",
+    "examples/multi_phase_dao.cell": "82dc124b9a5efc25f5644a990ebafbe7ecf9aa5b4bfc8110ebfc5edee4d1b789",
+    "examples/multisig.cell": "a50da1fd81b3b2d426682a6982f615a03b1ecccc5eb239a2b6abcef2c7aa99c7",
+    "examples/nft.cell": "df3badfcba5747546addbf19fec142dfeb08e86c74e2bc6fdd956c8e4e0abb5d",
+    "examples/timelock.cell": "88bd5da95808635d854e66536165a7f21f25806d7fe9cc0f020dbaff3b693a93",
+    "examples/token.cell": "bb99cb4219a016fd065d3e91ffe547c4f7af524bbe9e4ea95a10d5753777d47e",
+    "examples/vesting.cell": "efe8458426b7cc5583badf2cee900818cd8f54eee899dd49f096850a158bc8e0"
+  },
+  "current_native_checks": {
+    "compiler_library": {
+      "passed": 1096,
+      "failed": 0
+    },
+    "trusted_external_vm_and_checker": {
+      "passed": 8,
+      "failed": 0
+    },
+    "wasm_crate": [
+      {
+        "status": "ok",
+        "passed": 30,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "status": "ok",
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    ],
+    "cli": [
+      {
+        "status": "ok",
+        "passed": 254,
+        "failed": 0,
+        "ignored": 0
+      }
+    ],
+    "native_clippy": "passed",
+    "wasm_core_clippy": "passed",
+    "wasm_wrapper_clippy": "passed",
+    "commit_gate": "passed on final source"
+  },
+  "scope_limits": [
+    "Full 212-test checker run passed before browser-only boundary refinement/shared trusted-call inventory extraction; independent checker and on-chain lowering were not changed by that refinement.",
+    "No clean-source full backend/release gate receipt; no commits, pushes, issue changes, CI or TAC.",
+    "Published alpha tag and existing Talk draft are unchanged."
+  ],
+  "final_source_snapshot": {
+    "base_commit": "6b38d68871a1a6f4864f80c735b090fe3f3a07e2",
+    "dirty": true,
+    "files": 1048,
+    "format": "sorted repository-relative paths; for each path, u64 big-endian path-byte length, UTF-8 path, u64 big-endian content-byte length, file content",
+    "length_prefixed_sha256": "47d6c2b63acdd352ad9ad6123d17a712097e42074a97049787272c9bf741e3a8",
+    "scope": "regular tracked and untracked files under src, crates, scripts, tests and examples plus Cargo manifests/lock, toolchain and repository instructions; excludes docs and submodule contents",
+    "website_diff_sha256": "9e95207b8bb99418de38a34c2d70dae967cd3b6993232b8bfbc85d62de0ccf46",
+    "website_untracked": {
+      "scripts/test-playground-compiler.mjs": "939106832fc372fd22e32e4129c07ffff2c181c35588185bf4e5c4af7ad33f36"
+    }
+  },
+  "budget_policy_update": {
+    "date": "2026-10-28",
+    "authorization": "maintainer requested 1500k instead of 600k",
+    "gzip_budget_kib": 1500,
+    "gzip_budget_bytes": 1536000,
+    "previous_gzip_budget_bytes": 614400,
+    "script_sha256": "7f8c8af09e1fa89b8c94c2b0e07c2bdf25fe13aaf709aa8f80034e3cb64a908b",
+    "verification": "Executed the real build script size-check block, including its budget declarations, against the existing bundle and deterministic incompressible fixtures; no WASM rebuild or runtime behavior changes.",
+    "cases": [
+      {
+        "case": "current_bundle",
+        "raw_bytes": 1606472,
+        "gzip_bytes": 612606,
+        "exit_code": 0,
+        "expected_exit_code": 0,
+        "status": "passed"
+      },
+      {
+        "case": "above_old_limit",
+        "raw_bytes": 1000000,
+        "gzip_bytes": 1000197,
+        "exit_code": 0,
+        "expected_exit_code": 0,
+        "status": "passed"
+      },
+      {
+        "case": "just_under_new_limit",
+        "raw_bytes": 1535000,
+        "gzip_bytes": 1535277,
+        "exit_code": 0,
+        "expected_exit_code": 0,
+        "status": "passed"
+      },
+      {
+        "case": "above_new_limit",
+        "raw_bytes": 1537000,
+        "gzip_bytes": 1537277,
+        "exit_code": 1,
+        "expected_exit_code": 1,
+        "status": "passed"
+      }
+    ],
+    "commit_gate": {
+      "status": "passed",
+      "log_sha256": "0948f139d49ac0827d72920188ad59cba18cc6d0a2a299079a6d62d99d38bd7e"
+    },
+    "current_policy_source_sha256": {
+      "website/scripts/build-wasm.sh": "7f8c8af09e1fa89b8c94c2b0e07c2bdf25fe13aaf709aa8f80034e3cb64a908b",
+      "AGENTS.md": "05c1f9e05c74060dd49fa2f4931a0dae4d74eeecdcf1798eaddf2d0dc53d1792",
+      "crates/cellscript-wasm/Cargo.toml": "c88802b2ccd4c47220e9194bb5728061ca4b2eef28bda5a75735f644ffd66223",
+      "crates/cellscript-wasm/src/lib.rs": "9018af631ea52dbf15eb8d4ab9734d591c95615fcd27f3ffb19a46828df61afa"
+    },
+    "wasm_sha256_unchanged": "d9847d38fab900ab6c827e88714ef310e2e8eb550fcd07834235158226f9345d"
+  },
+  "publication_scope": "This receipt records the earlier working-tree build/test phase. Signed commits and pushes were subsequently authorized on 2026-10-28; they do not turn deferred gates into passes. Exact source/submodule pins are recorded separately."
+}

@@ -6,11 +6,11 @@ resolver_model = "single-package-coordinate-v1"
 edition = "2026"
 name = "multisig"
 version = "0.1.0"
-source_hash = "fcfa155c8d64353a33db828a5ef1094c440e0803cc34b84383a6efb22191ae3f"
-compiler_requirement = "*"
-resolver_compiler_version = "0.26.0"
+source_hash = "92243834754bc7515232e209d580496e99216d2935cf8e8a70264f99ed91dc3c"
+compiler_requirement = ">=0.33.0-alpha.1"
+resolver_compiler_version = "0.33.0-alpha.1"
 
 [root]
-manifest_digest = "sha256:d109f09c75f68286d1e15c79ab1bf9ad64b261fc7fc43c2c2835578b4362c3e9"
+manifest_digest = "sha256:28cc1392bdae2d5a0093e6cdcef8807e14e81b5c0d0c20472de8c33029573b18"
 
 [dependencies]

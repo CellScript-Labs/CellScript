@@ -489,7 +489,7 @@ check_package_inspection_schemas() {
     run cargo run --quiet --locked -p cellscript --bin cellc -- \
         resolve-graph examples/package_graph --environment mainnet --offline --schema-version 1 --json
     run cargo run --quiet --locked -p cellscript --bin cellc -- \
-        build-plan examples/workspace_graph --package app --offline --schema-version 1 --json
+        build-plan examples/workspace_graph --package app --offline --schema-version 2 --json
     local update_plan="$ROOT_DIR/target/cellscript-upgrade-plan-gate.json"
     local lock_snapshot="$ROOT_DIR/target/cellscript-upgrade-plan-gate.Cell.lock"
     run cp examples/package_graph/Cell.lock "$lock_snapshot"

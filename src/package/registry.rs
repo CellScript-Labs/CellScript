@@ -1958,6 +1958,7 @@ mod tests {
     fn package_manifest_hash_is_independent_of_map_insertion_order() {
         let first: PackageManifest = toml::from_str(
             r#"[package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "1.2.3"
@@ -1974,6 +1975,7 @@ right = "b"
         .unwrap();
         let second: PackageManifest = toml::from_str(
             r#"[package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "1.2.3"
@@ -2051,7 +2053,7 @@ left = "a"
     fn generated_source_snapshot_materialization_checks_paths_and_file_hashes() {
         use base64::Engine as _;
 
-        let manifest = b"[package]\nname = \"demo\"\nversion = \"1.2.3\"\nnamespace = \"cellscript\"\nedition = \"2026\"\nentry = \"src/main.cell\"\n";
+        let manifest = b"[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nname = \"demo\"\nversion = \"1.2.3\"\nnamespace = \"cellscript\"\nedition = \"2026\"\nentry = \"src/main.cell\"\n";
         let source = b"script Demo {}\n";
         let file = |path: &str, content: &[u8]| {
             serde_json::json!({
@@ -2106,7 +2108,7 @@ left = "a"
 
         let source_root = tempfile::tempdir().unwrap();
         std::fs::create_dir(source_root.path().join("src")).unwrap();
-        let manifest = b"[package]\nedition = \"2026\"\nname = \"demo\"\nnamespace = \"cellscript\"\nversion = \"1.2.3\"\nentry = \"src/main.cell\"\n";
+        let manifest = b"[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"demo\"\nnamespace = \"cellscript\"\nversion = \"1.2.3\"\nentry = \"src/main.cell\"\n";
         let source = b"script Demo {}\n";
         std::fs::write(source_root.path().join("Cell.toml"), manifest).unwrap();
         std::fs::write(source_root.path().join("src/main.cell"), source).unwrap();
@@ -2185,7 +2187,7 @@ left = "a"
                     yanked_reason: None,
                     replaced_by: None,
                     audit: None,
-                    compiler_requirement: "*".to_string(),
+                    compiler_requirement: format!(">={}", crate::VERSION),
                 },
                 RegistryVersion {
                     edition: crate::CURRENT_EDITION,
@@ -2205,7 +2207,7 @@ left = "a"
                     yanked_reason: None,
                     replaced_by: None,
                     audit: None,
-                    compiler_requirement: "*".to_string(),
+                    compiler_requirement: format!(">={}", crate::VERSION),
                 },
                 RegistryVersion {
                     edition: crate::CURRENT_EDITION,
@@ -2225,7 +2227,7 @@ left = "a"
                     yanked_reason: None,
                     replaced_by: None,
                     audit: None,
-                    compiler_requirement: "*".to_string(),
+                    compiler_requirement: format!(">={}", crate::VERSION),
                 },
             ],
         };
@@ -2252,7 +2254,7 @@ left = "a"
             tag: "v1.0.0".to_string(),
             source_hash: "compatible".to_string(),
             cellscript_version: crate::VERSION.to_string(),
-            compiler_requirement: "*".to_string(),
+            compiler_requirement: format!(">={}", crate::VERSION),
             dependencies: BTreeMap::new(),
             abi_index: None,
             schema_hash: None,
@@ -2359,7 +2361,7 @@ left = "a"
                 yanked_reason: None,
                 replaced_by: None,
                 audit: None,
-                compiler_requirement: "*".to_string(),
+                compiler_requirement: format!(">={}", crate::VERSION),
             }],
         };
 
@@ -2392,7 +2394,7 @@ left = "a"
             yanked_reason: Some("security advisory".to_string()),
             replaced_by: Some("1.2.1".to_string()),
             audit: None,
-            compiler_requirement: "*".to_string(),
+            compiler_requirement: format!(">={}", crate::VERSION),
         };
 
         let json = serde_json::to_string_pretty(&yanked).unwrap();
@@ -2442,7 +2444,7 @@ left = "a"
                     yanked_reason: None,
                     replaced_by: None,
                     audit: None,
-                    compiler_requirement: "*".to_string(),
+                    compiler_requirement: format!(">={}", crate::VERSION),
                 },
                 RegistryVersion {
                     edition: crate::CURRENT_EDITION,
@@ -2462,7 +2464,7 @@ left = "a"
                     yanked_reason: None,
                     replaced_by: None,
                     audit: None,
-                    compiler_requirement: "*".to_string(),
+                    compiler_requirement: format!(">={}", crate::VERSION),
                 },
                 RegistryVersion {
                     edition: crate::CURRENT_EDITION,
@@ -2482,7 +2484,7 @@ left = "a"
                     yanked_reason: None,
                     replaced_by: None,
                     audit: None,
-                    compiler_requirement: "*".to_string(),
+                    compiler_requirement: format!(">={}", crate::VERSION),
                 },
             ],
         };
@@ -2603,7 +2605,7 @@ left = "a"
                     report_hash: Some("blake2b:0x5555".to_string()),
                     acceptance_gate: Some("passed".to_string()),
                 }),
-                compiler_requirement: "*".to_string(),
+                compiler_requirement: format!(">={}", crate::VERSION),
             }],
         };
 

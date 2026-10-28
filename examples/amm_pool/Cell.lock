@@ -6,23 +6,23 @@ resolver_model = "single-package-coordinate-v1"
 edition = "2026"
 name = "amm_pool"
 version = "0.1.0"
-source_hash = "3931af98c3db3e68e166ddd4f7f367679ddbc1144243d9475a60f62348e760c6"
-compiler_requirement = "*"
-resolver_compiler_version = "0.26.0"
+source_hash = "194708e0afbffa4400421caf842019a280d94e8ff0a8fb446df5870f6577d176"
+compiler_requirement = ">=0.33.0-alpha.1"
+resolver_compiler_version = "0.33.0-alpha.1"
 
 [root]
-manifest_digest = "sha256:f3899870aed3db9e1fbfe237b0425f90f5fcbd2953d7d929da9833f136191d06"
+manifest_digest = "sha256:6bc6f6d2637b1347b6cc6ee808b04da04f1f392262462c1bd5b1bf53b2872d6b"
 
 [root.dependencies]
-token = "token@0.1.0|path:../token|compiler=2a|env=default|features=default"
+token = "token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default"
 
-[dependencies."token@0.1.0|path:../token|compiler=2a|env=default|features=default"]
+[dependencies."token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default"]
 name = "token"
 version = "0.1.0"
-source_hash = "d5ecb3241eeb97983005b9622cbe7a9540cbdec133ec22105c07955f99c7b889"
-manifest_digest = "sha256:3adaae2b8a70a8a49246c28c95a6bd3686fefaed383dfb598c7d35da2a2ad4f9"
-compiler_requirement = "*"
-resolver_compiler_version = "0.26.0"
+source_hash = "53c5e19396b91f310f5a286374861c98504730db154a8cc836c2c11079604cf0"
+manifest_digest = "sha256:8ffb252c81562ec747304ec3e34f4e2a58db2a713853074220a5763e4084dabd"
+compiler_requirement = ">=0.33.0-alpha.1"
+resolver_compiler_version = "0.33.0-alpha.1"
 
-[dependencies."token@0.1.0|path:../token|compiler=2a|env=default|features=default".source.Path]
+[dependencies."token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default".source.Path]
 path = "../token"

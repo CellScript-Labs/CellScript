@@ -6796,9 +6796,12 @@ impl<'a> TypeChecker<'a> {
                 if base_name == CKB_WITNESS_ARGS_VIEW_TYPE {
                     return match field {
                         "size" => Ok(Type::U64),
-                        "lock" | "input_type" | "output_type" => Ok(Type::Hash),
+                        "lock" | "input_type" | "output_type" => Err(CompileError::new(
+                            format!("removed legacy byte-buffer field '{field}'; use a bounded witness field view or witness::{field}_exact32(view)"),
+                            span,
+                        )),
                         _ => Err(CompileError::new(
-                            format!("unknown WitnessArgsView field '{}'; expected size, lock, input_type, or output_type", field),
+                            format!("unknown WitnessArgsView field '{}'; expected size; use bounded field views or explicit exact32 reads", field),
                             span,
                         )),
                     };
@@ -6819,12 +6822,17 @@ impl<'a> TypeChecker<'a> {
                 if base_name == CKB_SCRIPT_VIEW_TYPE {
                     return match field {
                         "hash" => Ok(Type::Named(CKB_SCRIPT_HASH_TYPE.to_string())),
-                        "code_hash" | "args_hash" => Ok(Type::Hash),
+                        "code_hash" => Ok(Type::Hash),
+                        "args32" => Ok(Type::Array(Box::new(Type::U8), 32)),
+                        "args_hash" => Err(CompileError::new(
+                            "removed legacy byte-buffer field 'args_hash'; use args32 for exactly 32 raw argument bytes",
+                            span,
+                        )),
                         "hash_type" => Ok(Type::U64),
                         "args_empty" => Ok(Type::Bool),
                         _ => Err(CompileError::new(
                             format!(
-                                "unknown ScriptView field '{}'; expected hash, code_hash, hash_type, args_empty, or args_hash",
+                                "unknown ScriptView field '{}'; expected hash, code_hash, hash_type, args_empty, or args32",
                                 field
                             ),
                             span,
@@ -6836,11 +6844,16 @@ impl<'a> TypeChecker<'a> {
                 }
                 if base_name == CKB_LOCK_SCRIPT_REF_TYPE || base_name == CKB_TYPE_SCRIPT_REF_TYPE {
                     return match field {
-                        "code_hash" | "args_hash" => Ok(Type::Hash),
+                        "code_hash" => Ok(Type::Hash),
+                        "args32" => Ok(Type::Array(Box::new(Type::U8), 32)),
+                        "args_hash" => Err(CompileError::new(
+                            "removed legacy byte-buffer field 'args_hash'; use args32 for exactly 32 raw argument bytes",
+                            span,
+                        )),
                         "hash_type" => Ok(Type::U64),
                         "args_empty" => Ok(Type::Bool),
                         _ => Err(CompileError::new(
-                            format!("unknown ScriptRef field '{}'; expected code_hash, hash_type, args_empty, or args_hash", field),
+                            format!("unknown ScriptRef field '{}'; expected code_hash, hash_type, args_empty, or args32", field),
                             span,
                         )),
                     };
@@ -7215,6 +7228,9 @@ impl<'a> TypeChecker<'a> {
     fn infer_call_type(&mut self, env: &mut TypeEnv, call: &CallExpr, arg_types: &[Type]) -> Result<Type> {
         match call.func.as_ref() {
             Expr::Identifier(name) => {
+                if let Some(replacement) = crate::legacy_bytes::replacement(name) {
+                    return Err(CompileError::new(format!("removed legacy byte-buffer API '{name}'; {replacement}"), call.span));
+                }
                 if let Some(view_type) = self.infer_transaction_view_constructor(name, call, arg_types)? {
                     return Ok(view_type);
                 }
@@ -7883,12 +7899,12 @@ impl<'a> TypeChecker<'a> {
                             }
                             Type::Hash
                         }
-                        ("ckb", "cell_data_bytes32" | "cell_data_hash_at") => {
+                        ("ckb", "cell_data_bytes32") => {
                             self.validate_builtin_arity(name, 2, arg_types, call.span)?;
                             if !Self::is_cell_view_type(&arg_types[0]) || arg_types[1] != Type::U64 {
                                 return Err(CompileError::new(format!("{} expects (Cell source view, offset: u64)", name), call.span));
                             }
-                            Type::Hash
+                            Type::Array(Box::new(Type::U8), 32)
                         }
                         ("ckb", "cell_data_u8" | "cell_data_u32_le" | "cell_data_u64_le" | "cell_lock_u8" | "cell_type_u8") => {
                             self.validate_builtin_arity(name, 2, arg_types, call.span)?;
@@ -7902,13 +7918,8 @@ impl<'a> TypeChecker<'a> {
                             "cell_lock_hash"
                             | "cell_type_hash"
                             | "cell_data_hash_field"
-                            | "cell_data_hash"
                             | "cell_lock_code_hash"
-                            | "cell_type_code_hash"
-                            | "cell_lock_args32"
-                            | "cell_type_args32"
-                            | "cell_lock_args_hash"
-                            | "cell_type_args_hash",
+                            | "cell_type_code_hash",
                         ) => {
                             self.validate_builtin_arity(name, 1, arg_types, call.span)?;
                             if !Self::is_cell_view_type(&arg_types[0]) {
@@ -7918,6 +7929,13 @@ impl<'a> TypeChecker<'a> {
                                 ));
                             }
                             Type::Hash
+                        }
+                        ("ckb", "cell_lock_args32" | "cell_type_args32") => {
+                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
+                            if !Self::is_cell_view_type(&arg_types[0]) {
+                                return Err(CompileError::new(format!("{name} expects a Cell source view"), call.span));
+                            }
+                            Type::Array(Box::new(Type::U8), 32)
                         }
                         ("ckb", "cell_lock_args_empty" | "cell_type_args_empty" | "cell_has_type") => {
                             self.validate_builtin_arity(name, 1, arg_types, call.span)?;
@@ -7980,17 +7998,17 @@ impl<'a> TypeChecker<'a> {
                         }
                         (
                             "ckb",
-                            "require_cell_lock_args_hash"
-                            | "require_cell_type_args_hash"
-                            | "require_cell_lock_args_prefix_hash"
-                            | "require_cell_type_args_prefix_hash"
-                            | "require_cell_lock_args_suffix_hash"
-                            | "require_cell_type_args_suffix_hash",
+                            "require_cell_lock_args32"
+                            | "require_cell_type_args32"
+                            | "require_cell_lock_args_prefix32"
+                            | "require_cell_type_args_prefix32"
+                            | "require_cell_lock_args_suffix32"
+                            | "require_cell_type_args_suffix32",
                         ) => {
                             self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if !Self::is_cell_view_type(&arg_types[0]) || arg_types[1] != Type::Hash {
+                            if !Self::is_cell_view_type(&arg_types[0]) || arg_types[1] != Type::Array(Box::new(Type::U8), 32) {
                                 return Err(CompileError::new(
-                                    format!("{} expects (source_view: u64, expected_args_hash: Hash)", name),
+                                    format!("{} expects (source_view: u64, expected_bytes: [u8; 32])", name),
                                     call.span,
                                 ));
                             }
@@ -8309,10 +8327,17 @@ impl<'a> TypeChecker<'a> {
                                 return Err(CompileError::new(format!("{} expects (witness_view, offset: u64)", name), call.span));
                             }
                             if suffix == "bytes32" {
-                                Type::Hash
+                                Type::Array(Box::new(Type::U8), 32)
                             } else {
                                 Type::U64
                             }
+                        }
+                        ("witness", "lock_exact32" | "input_type_exact32" | "output_type_exact32") => {
+                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
+                            if !Self::is_witness_args_view_type(&arg_types[0]) {
+                                return Err(CompileError::new(format!("{name} expects a witness source view"), call.span));
+                            }
+                            Type::Array(Box::new(Type::U8), 32)
                         }
                         ("witness", "blake2b") => {
                             self.validate_builtin_arity(name, 1, arg_types, call.span)?;
@@ -8321,7 +8346,7 @@ impl<'a> TypeChecker<'a> {
                             }
                             Type::Hash
                         }
-                        ("witness", "raw" | "lock" | "input_type" | "output_type" | "size") => {
+                        ("witness", "size") => {
                             self.validate_builtin_arity(name, 1, arg_types, call.span)?;
                             if !Self::is_witness_args_view_type(&arg_types[0]) {
                                 return Err(CompileError::new(
@@ -8329,11 +8354,7 @@ impl<'a> TypeChecker<'a> {
                                     call.span,
                                 ));
                             }
-                            if suffix == "size" {
-                                Type::U64
-                            } else {
-                                Type::Hash
-                            }
+                            Type::U64
                         }
                         ("ckb", "require_witness_size_at_least") => {
                             self.validate_builtin_arity(name, 2, arg_types, call.span)?;
@@ -11396,8 +11417,8 @@ action inspect() -> bool {
         let script = input.lock
         let complete: ScriptHash = script.hash
         let code: Hash = script.code_hash
-        let args: Hash = script.args_hash
-        return complete.0 == code.0 || code == args
+        let args: [u8; 32] = script.args32
+        return complete.0 == code.0 || code.0 == args
 }
 "#,
         );

@@ -16,12 +16,12 @@ fn incoming_stack_arguments_cross_the_signed_immediate_boundary() {
     let source = format!(
         "module large_incoming_args\nfn last({parameters}) -> u64 {{ return p0 + p263 + p264 + p269 }}\naction inspect() -> u64 {{ require last({arguments}) == 1196 return 0 }}"
     );
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile_with_executable_surface_policy(
             &source,
             CompileOptions {
                 edition: CellScriptEdition::Edition2027,
-                opt_level,
+                diagnostics,
                 target: Some("riscv64-elf".into()),
                 ..Default::default()
             },
@@ -30,24 +30,24 @@ fn incoming_stack_arguments_cross_the_signed_immediate_boundary() {
         .unwrap();
         let fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
         let execution = ckb_script_runner::execute_cellscript_script(&compiled.artifact_bytes, &fixture);
-        assert_eq!(execution.exit_code, 0, "O{opt_level}: {execution:?}");
+        assert_eq!(execution.exit_code, 0, "{diagnostics}: {execution:?}");
     }
 }
 
 #[test]
-fn legacy_witness_frames_preserve_padding_truncation_and_field_boundaries() {
-    for width in [0usize, 1, 32, 33, 492] {
+fn exact_witness_frames_preserve_copies_and_reject_other_field_widths() {
+    for width in [0usize, 1, 31, 32, 33, 492, 600] {
         let payload = (0..width).map(|index| (index + 1) as u8).collect::<Vec<_>>();
         let mut expected = [0u8; 32];
         let count = width.min(32);
         expected[..count].copy_from_slice(&payload[..count]);
         let literal = expected.iter().map(|byte| format!("\\x{byte:02x}")).collect::<String>();
         let source = format!(
-            r#"module legacy_witness_stack
+            r#"module exact_witness_stack
 action inspect() -> u64 {{
-    let first = witness::lock(source::input(0))
-    let second = witness::lock(source::input(0))
-    require first == Hash::from_bytes(b"{literal}")
+    let first = witness::lock_exact32(source::input(0))
+    let second = witness::lock_exact32(source::input(0))
+    require first == b"{literal}"
     require second == first
     return 0
 }}"#
@@ -57,12 +57,12 @@ action inspect() -> u64 {{
             witness.extend_from_slice(&word.to_le_bytes());
         }
         witness.extend_from_slice(&payload);
-        for opt_level in [0, 3] {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = compile_with_executable_surface_policy(
                 &source,
                 CompileOptions {
                     edition: CellScriptEdition::Edition2027,
-                    opt_level,
+                    diagnostics,
                     target: Some("riscv64-elf".into()),
                     ..Default::default()
                 },
@@ -75,12 +75,12 @@ action inspect() -> u64 {{
                 .unwrap()
                 .entries
                 .iter()
-                .find(|entry| entry.name == "__ckb_witness_lock")
+                .find(|entry| entry.name == "__ckb_witness_lock_exact32")
                 .unwrap();
-            assert_eq!(entry.frame_size_bytes, 592);
+            assert_eq!(entry.frame_size_bytes % 16, 0);
             let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
             fixture.witnesses = vec![witness.clone().into()];
-            assert_eq!(ckb_script_runner::execute_cellscript_script(&compiled.artifact_bytes, &fixture).exit_code, 0);
+            assert_eq!(ckb_script_runner::execute_cellscript_script(&compiled.artifact_bytes, &fixture).exit_code == 0, width == 32);
             let mut malformed = witness.clone();
             malformed[8..12].copy_from_slice(&15u32.to_le_bytes());
             fixture.witnesses = vec![malformed.into()];
@@ -108,7 +108,7 @@ action inspect() -> u64 {
     require products(a, b) == 0
     return 0
 }"#;
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for (source, succeeds) in [
             (source.to_string(), true),
             (source.replace("require_input_out_point(input, hash, 0)", "require_input_out_point(input, hash, 1)"), false),
@@ -122,7 +122,7 @@ action inspect() -> u64 {
                 &source,
                 CompileOptions {
                     edition: CellScriptEdition::Edition2027,
-                    opt_level,
+                    diagnostics,
                     target: Some("riscv64-elf".into()),
                     ..Default::default()
                 },
@@ -140,19 +140,19 @@ action inspect() -> u64 {
             }
             let fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
             let execution = ckb_script_runner::execute_cellscript_script(&compiled.artifact_bytes, &fixture);
-            assert_eq!(execution.exit_code == 0, succeeds, "O{opt_level}: {execution:?}");
+            assert_eq!(execution.exit_code == 0, succeeds, "{diagnostics}: {execution:?}");
         }
     }
 }
 
 #[test]
-fn compact_cell_data_hash_frames_preserve_nested_calls_and_fixed_results() {
-    for width in [0, 1, 512] {
+fn streaming_cell_data_hash_preserves_nested_calls_and_fixed_results() {
+    for width in [0, 1, 512, 513, 600] {
         let data = vec![0x5au8; width];
         let expected = blake2b_256(&data).iter().map(|byte| format!("\\x{byte:02x}")).collect::<String>();
         let source = format!(
             r#"module stack_hash_frames
-fn digest() -> Hash {{ return ckb::cell_data_hash(source::input(0)) }}
+fn digest() -> Hash {{ return ckb::cell_data_blake2b_span(source::input(0), 0, {width}) }}
 action inspect() -> u64 {{
     let saved = digest()
     let again = digest()
@@ -161,12 +161,12 @@ action inspect() -> u64 {{
     return 0
 }}"#
         );
-        for opt_level in [0, 3] {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let result = compile_with_executable_surface_policy(
                 &source,
                 CompileOptions {
                     edition: CellScriptEdition::Edition2027,
-                    opt_level,
+                    diagnostics,
                     target: Some("riscv64-elf".into()),
                     ..Default::default()
                 },
@@ -179,14 +179,21 @@ action inspect() -> u64 {{
                 .unwrap()
                 .entries
                 .iter()
-                .find(|entry| entry.name == "__ckb_cell_data_hash")
+                .find(|entry| entry.name == "__ckb_cell_data_blake2b_span")
                 .unwrap();
-            assert_eq!(hash.frame_size_bytes, 544);
+            assert_eq!(hash.frame_size_bytes % 16, 0);
+            assert!(!result
+                .verified_lowering_record
+                .as_ref()
+                .unwrap()
+                .entries
+                .iter()
+                .any(|entry| entry.name == "__ckb_cell_data_hash"));
             let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
             fixture.inputs[0].data = data.clone().into();
             assert_eq!(ckb_script_runner::execute_cellscript_script(&result.artifact_bytes, &fixture).exit_code, 0);
-            fixture.inputs[0].data = vec![0; 513].into();
-            assert_ne!(ckb_script_runner::execute_cellscript_script(&result.artifact_bytes, &fixture).exit_code, 0);
+            fixture.inputs[0].data = vec![0; width + 1].into();
+            assert_eq!(ckb_script_runner::execute_cellscript_script(&result.artifact_bytes, &fixture).exit_code == 0, width == 0);
         }
     }
 }
@@ -219,12 +226,12 @@ action inspect() -> u64 {
     require lookup(0, 0, 0, 0, 0, 0, 0, 0, &work, 9) == saved
     return 0
 }"#;
-    for opt_level in [0, 3] {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let result = compile_with_executable_surface_policy(
             source,
             CompileOptions {
                 edition: CellScriptEdition::Edition2027,
-                opt_level,
+                diagnostics,
                 target: Some("riscv64-elf".into()),
                 ..Default::default()
             },

@@ -8,7 +8,7 @@ fn editor_cross_package_budget_hover_matches_cli_and_unsaved_record_layouts() {
     let library = "module shared::rules\npublic struct Pair<T: fixed_value> { left: T, right: T }";
     let application = "module application\nuse shared::rules::Pair\ncollections Work { limits { bytes: 256, allocations: 3 }\nrows: Vec<Pair<u64>> { items: 3 }\n}\naction inspect() -> u64 { return 0 }";
     let temp = tempfile::tempdir().unwrap();
-    super::support::compile_package(temp.path(), application, library, 3).unwrap();
+    super::support::compile_package(temp.path(), application, library, cellscript::CompilerDiagnostics::default()).unwrap();
     let main_uri = format!("file://{}", temp.path().join("application/src/main.cell").display());
     let library_uri = format!("file://{}", temp.path().join("rules/src/main.cell").display());
     let position = after(application, "collections Wor");
@@ -67,7 +67,7 @@ fn editor_cross_package_migration_fields_follow_imports_and_open_buffers() {
             application.push_str("fn inspect_payload(value: Messages::Item) -> u64 { return value.payload.len() }\n");
         }
         let temp = tempfile::tempdir().unwrap();
-        super::support::compile_package(temp.path(), &application, &library, 3).unwrap();
+        super::support::compile_package(temp.path(), &application, &library, cellscript::CompilerDiagnostics::default()).unwrap();
         // Neither matching spelling nor directory order makes this an import.
         std::fs::write(
             temp.path().join("application/src/decoy.cell"),

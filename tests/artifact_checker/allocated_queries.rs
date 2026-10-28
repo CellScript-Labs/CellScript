@@ -39,13 +39,13 @@ action inspect_queries() -> u64 {{
     return 0
 }}"#
         );
-        for opt_level in [0, 3] {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
-                .unwrap_or_else(|error| panic!("{bytes}/O{opt_level}: {error}")),
+                .unwrap_or_else(|error| panic!("{bytes}/{diagnostics}: {error}")),
             );
             use ckb_testtool::ckb_types::bytes::Bytes;
             let transaction = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
@@ -113,7 +113,7 @@ action inspect_queries() -> u64 {{
                     }
                 }
             }
-            assert_eq!(results, 22, "owned and borrowed Vec/Map/Set queries {bytes}/O{opt_level}");
+            assert_eq!(results, 22, "owned and borrowed Vec/Map/Set queries {bytes}/{diagnostics}");
             assert_eq!(descriptors, 9);
         }
     }

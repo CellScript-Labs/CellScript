@@ -9,6 +9,12 @@ pub mod assumptions;
 pub mod ast;
 pub mod ckb_abi;
 mod commitment_contract;
+mod legacy_bytes;
+mod metadata_abi;
+mod optimization_policy;
+pub use optimization_policy::COMPILATION_POLICY;
+#[doc(hidden)]
+pub use optimization_policy::{CompilerDiagnostics, OptimizationPass};
 // CLI, LSP, REPL, incremental, and debug tooling are gated out of the
 // wasm build: they depend on tokio/tower-lsp/clap/colored/env_logger,
 // which pull native I/O (mio/std::net) that wasm32 cannot link. The
@@ -96,8 +102,9 @@ pub struct CompileOptions {
     /// Source-language edition for in-memory or standalone-file compilation.
     /// Package compilation uses the mandatory edition in `Cell.toml`.
     pub edition: CellScriptEdition,
-    /// Optimization level (0-3)
-    pub opt_level: u8,
+    /// Internal compiler diagnostics; normal clients use the default strategy.
+    #[doc(hidden)]
+    pub diagnostics: crate::CompilerDiagnostics,
     /// Output file path
     pub output: Option<String>,
     /// Whether to generate debug information
@@ -148,9 +155,6 @@ fn validate_compile_options(options: &CompileOptions) -> Result<()> {
         return Err(CompileError::without_span(
             "source declaration contracts require the native compiler; the browser summary does not emit interface evidence",
         ));
-    }
-    if options.opt_level > 3 {
-        return Err(CompileError::without_span(format!("optimization level must be between 0 and 3, got {}", options.opt_level)));
     }
     if let Some(mode) = options.primitive_compat.as_deref() {
         match mode {
@@ -252,7 +256,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
-const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v129-0.32-runtime-return-contracts";
+const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v134-0.33-explicit-bytes-unified-wide-contracts";
 pub const METADATA_SCHEMA_VERSION: u32 = 72;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 2;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -1307,6 +1311,27 @@ fn append_vm_abi_trailer(mut artifact: Vec<u8>, abi_version: u16) -> Vec<u8> {
     artifact
 }
 
+#[cfg(feature = "wasm")]
+fn validate_browser_record_boundary(metadata: &CompileMetadata) -> Result<()> {
+    let native_entry_records =
+        metadata.actions.iter().any(|entry| !entry.ckb_runtime_accesses.is_empty() || !entry.proof_plan.is_empty())
+            || metadata.functions.iter().any(|entry| !entry.ckb_runtime_accesses.is_empty() || !entry.proof_plan.is_empty())
+            || metadata.locks.iter().any(|entry| !entry.ckb_runtime_accesses.is_empty() || !entry.proof_plan.is_empty());
+    if native_entry_records
+        || !metadata.runtime.vm_target.is_empty()
+        || !metadata.runtime.ckb_runtime_accesses.is_empty()
+        || !metadata.runtime.transaction_view_handles.is_empty()
+        || !metadata.runtime.proof_plan.is_empty()
+        || !metadata.runtime.trusted_external_verifiers.is_empty()
+        || metadata.runtime.proof_plan_soundness != ProofPlanSoundnessReport::default()
+        || !metadata.typed_semantics.schema.is_empty()
+        || !metadata.typed_semantics.entries.is_empty()
+    {
+        return Err(CompileError::without_span("browser metadata cannot carry native proof or provenance records"));
+    }
+    Ok(())
+}
+
 pub fn validate_compile_metadata(metadata: &CompileMetadata, artifact_format: ArtifactFormat) -> Result<()> {
     if metadata.metadata_schema_version != METADATA_SCHEMA_VERSION {
         return Err(CompileError::without_span(format!(
@@ -1347,8 +1372,13 @@ pub fn validate_compile_metadata(metadata: &CompileMetadata, artifact_format: Ar
             metadata.runtime.ckb_runtime_access_provenance_contract, CKB_RUNTIME_ACCESS_PROVENANCE_CONTRACT
         )));
     }
-    validate_ckb_runtime_access_metadata(metadata)?;
-    validate_transaction_view_handle_metadata(metadata)?;
+    #[cfg(not(feature = "wasm"))]
+    {
+        validate_ckb_runtime_access_metadata(metadata)?;
+        validate_transaction_view_handle_metadata(metadata)?;
+    }
+    #[cfg(feature = "wasm")]
+    validate_browser_record_boundary(metadata)?;
     validate_ckb_signing_message_domain_metadata(metadata)?;
     #[cfg(not(feature = "wasm"))]
     {
@@ -3164,14 +3194,7 @@ struct TrustedExternalInvocation {
     code_hash: String,
 }
 
-fn apply_trusted_external_verifiers(
-    metadata: &mut CompileMetadata,
-    ir: &ir::IrModule,
-    declarations: &[CkbTrustedExternalVerifierConfig],
-) -> Result<()> {
-    if declarations.len() > 1_024 {
-        return Err(CompileError::without_span("trusted external verifier declaration count exceeds 1024").with_code("E2113"));
-    }
+fn trusted_external_invocations(ir: &ir::IrModule) -> Result<Vec<TrustedExternalInvocation>> {
     let mut invocations = Vec::new();
     for item in &ir.items {
         let (scope, body) = match item {
@@ -3213,6 +3236,43 @@ fn apply_trusted_external_verifiers(
     if invocations.len() > 1_024 {
         return Err(CompileError::without_span("trusted external verifier call-site count exceeds 1024").with_code("E2113"));
     }
+
+    Ok(invocations)
+}
+
+#[cfg(feature = "wasm")]
+fn apply_trusted_external_verifiers(
+    _metadata: &mut CompileMetadata,
+    ir: &ir::IrModule,
+    declarations: &[CkbTrustedExternalVerifierConfig],
+) -> Result<()> {
+    // Browser source sets have no authenticated Cell.toml/deployment binding.
+    // Keep the shared call inventory checks, then reject unbound delegation.
+    if !declarations.is_empty() {
+        return Err(
+            CompileError::without_span("browser metadata cannot bind native external verifier declarations").with_code("E2113")
+        );
+    }
+    if let Some(invocation) = trusted_external_invocations(ir)?.first() {
+        return Err(CompileError::without_span(format!(
+            "trusted external verifier call in '{}' has no exact Cell.toml binding for operation '{}', adapter '{}', and code hash '{}'",
+            invocation.scope, invocation.operation, invocation.adapter, invocation.code_hash
+        ))
+        .with_code("E2113"));
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "wasm"))]
+fn apply_trusted_external_verifiers(
+    metadata: &mut CompileMetadata,
+    ir: &ir::IrModule,
+    declarations: &[CkbTrustedExternalVerifierConfig],
+) -> Result<()> {
+    if declarations.len() > 1_024 {
+        return Err(CompileError::without_span("trusted external verifier declaration count exceeds 1024").with_code("E2113"));
+    }
+    let invocations = trusted_external_invocations(ir)?;
 
     let mut declaration_keys = BTreeSet::new();
     let mut declaration_names = BTreeSet::new();
@@ -4517,7 +4577,9 @@ fn validate_canonical_script_hash_runtime_access(prefix: &str, access: &CkbRunti
 }
 
 fn validate_ckb_signing_message_domain_metadata(metadata: &CompileMetadata) -> Result<()> {
-    let browser_summary = metadata.runtime.vm_target.is_empty() && metadata.typed_semantics.schema.is_empty();
+    // WASM metadata has already rejected native records at the entry boundary.
+    let browser_summary =
+        cfg!(feature = "wasm") || (metadata.runtime.vm_target.is_empty() && metadata.typed_semantics.schema.is_empty());
     let accesses = metadata
         .runtime
         .ckb_runtime_accesses
@@ -8151,9 +8213,21 @@ fn prepare_compile_ir(
     }
     flow::check(ast)?;
 
-    let optimized_ast = if options.opt_level > 0 {
+    // Validate source lowering before optional rewrites can erase declarations.
+    // Effect annotations and invalid helper bodies must not become acceptable
+    // merely because inlining or dead-code elimination removes their evidence.
+    let generate_ir = |module: &ast::Module| match resolver {
+        Some((resolver, module_name)) => ir::generate_with_resolver(module, resolver, module_name),
+        None => ir::generate(module),
+    };
+    let source_ir = generate_ir(ast)?;
+
+    let optimized_ast = if options.diagnostics.enabled(OptimizationPass::ConstantFolding)
+        || options.diagnostics.enabled(OptimizationPass::Inlining)
+        || options.diagnostics.enabled(OptimizationPass::DeadCode)
+    {
         let mut optimized = ast.clone();
-        optimize::optimize_module(&mut optimized, options.opt_level)?;
+        optimize::optimize_module(&mut optimized, options.diagnostics)?;
         if let Some((resolver, module_name)) = resolver {
             types::check_with_resolver(&optimized, resolver, module_name)?;
         } else {
@@ -8167,17 +8241,15 @@ fn prepare_compile_ir(
     let lowering_ast = optimized_ast.as_ref().unwrap_or(ast);
 
     // 4. Generate IR
-    let ir = if let Some((resolver, module_name)) = resolver {
-        ir::generate_with_resolver(lowering_ast, resolver, module_name)?
-    } else {
-        ir::generate(lowering_ast)?
-    };
+    let ir = if optimized_ast.is_some() { generate_ir(lowering_ast)? } else { source_ir };
     let mut ir = match entry_scope {
         Some(scope) => scope_ir_to_entry(&ir, scope)?,
         None => ir,
     };
-    if options.opt_level > 0 {
+    if options.diagnostics.enabled(OptimizationPass::ExactCellEquality) {
         ir::optimize_exact_cell_data_equality(&mut ir);
+    }
+    if options.diagnostics.enabled(OptimizationPass::SourceByteEquality) {
         ir::optimize_source_byte_equality(&mut ir);
     }
     executable_surface::validate_ir_module(&ir)?;
@@ -8220,7 +8292,7 @@ fn compile_ast_with_build(
     validate_executable_surface(&metadata, executable_surface_policy)?;
 
     // 5. Code generation
-    let codegen_options = codegen::CodegenOptions { opt_level: options.opt_level, debug: options.debug, target_profile };
+    let codegen_options = codegen::CodegenOptions { diagnostics: options.diagnostics, debug: options.debug, target_profile };
     let generated = codegen::generate_with_evidence(ir, &codegen_options, artifact_format).map_err(|error| {
         if error.code.is_some() {
             error
@@ -8827,7 +8899,8 @@ fn incremental_cache_key(cache_units: &[SourceUnitMetadata], options: &CompileOp
     ));
     key_input.push_str(&format!("-artifact-cache-{}", ARTIFACT_CACHE_VERSION));
     key_input.push_str(&source_set_hash(cache_units));
-    key_input.push_str(&format!("-O{}", options.opt_level));
+    key_input.push_str(COMPILATION_POLICY);
+    key_input.push_str(&format!("-diagnostic-{}", options.diagnostics.cache_bits()));
     key_input.push_str(&format!("-{}", options.target.as_deref().unwrap_or("default")));
     key_input.push_str(&format!("-{}", options.target_profile.as_deref().unwrap_or("default")));
     key_input.push_str(&format!("-edition-{}", options.edition));
@@ -17791,7 +17864,10 @@ fn metadata_prelude_availability(
                     }
                 }
                 ir::IrInstruction::Call { dest: Some(dest), func, args }
-                    if dest.ty == ir::IrType::Hash || ir::is_ckb_script_hash_property_result(func, &dest.ty) =>
+                    if dest.ty == ir::IrType::Hash
+                        || ir::is_ckb_script_hash_property_result(func, &dest.ty)
+                        || ir::is_ckb_sighash_all_result(func, &dest.ty)
+                        || ir::is_raw_bytes32_runtime_result(func, &dest.ty) =>
                 {
                     let fixed_hash_result = match func.as_str() {
                         "__ckb_hash_chain" | "__ckb_hash_blake2b" | "__ckb_hash_sha256" | "__ckb_hash_sha256d" => {
@@ -17824,15 +17900,10 @@ fn metadata_prelude_availability(
                         | "__ckb_cell_lock_hash"
                         | "__ckb_cell_type_hash"
                         | "__ckb_cell_data_hash_field"
-                        | "__ckb_cell_data_hash"
                         | "__ckb_cell_lock_code_hash"
                         | "__ckb_cell_type_code_hash"
-                        | "__ckb_cell_lock_args_hash"
-                        | "__ckb_cell_type_args_hash"
-                        | "__ckb_witness_raw"
-                        | "__ckb_witness_lock"
-                        | "__ckb_witness_input_type"
-                        | "__ckb_witness_output_type"
+                        | "__ckb_cell_lock_args32"
+                        | "__ckb_cell_type_args32"
                         | "__ckb_witness_lock_exact32"
                         | "__ckb_witness_input_type_exact32"
                         | "__ckb_witness_output_type_exact32" => args.len() == 1,
@@ -17846,6 +17917,15 @@ fn metadata_prelude_availability(
                     };
                     if fixed_hash_result {
                         availability.fixed_value_vars.insert(dest.id);
+                        if dest.ty == ir::IrType::Hash
+                            || matches!(&dest.ty, ir::IrType::Named(name) if ir::is_ckb_fixed_hash_domain_name(name))
+                        {
+                            // A checked 32-byte hash result also owns the storage
+                            // used by its explicit `.0` byte serialization.
+                            availability
+                                .aggregate_pointer_vars
+                                .insert(dest.id, MetadataAggregatePointerSource { ty: dest.ty.clone() });
+                        }
                     }
                 }
                 ir::IrInstruction::Call { dest: Some(dest), .. }
@@ -18169,7 +18249,12 @@ fn metadata_prelude_availability(
                         if availability.schema_pointer_vars.contains(&src_var.id) && named_type_name(&dest.ty).is_some() {
                             availability.schema_pointer_vars.insert(dest.id);
                         }
-                        if let Some(source) = availability.aggregate_pointer_vars.get(&src_var.id).cloned() {
+                        // An explicit domain conversion owns storage typed as
+                        // its destination. Do not overwrite that proof with
+                        // the source's previous nominal type.
+                        if !availability.aggregate_pointer_vars.contains_key(&dest.id)
+                            && let Some(source) = availability.aggregate_pointer_vars.get(&src_var.id).cloned()
+                        {
                             availability.aggregate_pointer_vars.insert(dest.id, source);
                         }
                         if availability.dynamic_collection_vars.contains(&src_var.id) && dest.ty == src_var.ty {
@@ -18905,6 +18990,9 @@ fn metadata_ir_type_fixed_width(ty: &ir::IrType, type_layouts: &MetadataTypeLayo
 
 fn metadata_aggregate_field_layout(ty: &ir::IrType, field: &str) -> Option<MetadataFieldLayout> {
     match ty {
+        ir::IrType::Named(name) if name == ir::CKB_SCRIPT_HASH_TYPE && field == "0" => {
+            metadata_aggregate_field_layout(&ir::IrType::Hash, field)
+        }
         ir::IrType::Tuple(items) => {
             let index = field.parse::<usize>().ok()?;
             let field_ty = items.get(index)?.clone();
@@ -19253,14 +19341,14 @@ fn body_ckb_runtime_features(
                             | "__ckb_cell_type_hash_type"
                             | "__ckb_cell_lock_args_empty"
                             | "__ckb_cell_type_args_empty"
-                            | "__ckb_cell_lock_args_hash"
-                            | "__ckb_cell_type_args_hash"
+                            | "__ckb_cell_lock_args32"
+                            | "__ckb_cell_type_args32"
                             | "__ckb_require_cell_lock_hash"
                             | "__ckb_require_cell_type_hash"
                             | "__ckb_require_cell_lock_args_empty"
                             | "__ckb_require_cell_type_args_empty"
-                            | "__ckb_require_cell_lock_args_hash"
-                            | "__ckb_require_cell_type_args_hash"
+                            | "__ckb_require_cell_lock_args32"
+                            | "__ckb_require_cell_type_args32"
                             | "__ckb_require_cell_lock_args_exact"
                             | "__ckb_require_cell_type_args_exact"
                             | "__ckb_require_cell_lock_exact_handle"
@@ -19269,13 +19357,12 @@ fn body_ckb_runtime_features(
                             | "__ckb_require_cell_lock_deployment_line_handle"
                             | "__ckb_require_cell_type_deployment_line_handle"
                             | "__ckb_require_cell_dep_deployment_line_verifier_handle"
-                            | "__ckb_require_cell_lock_args_prefix_hash"
-                            | "__ckb_require_cell_type_args_prefix_hash"
-                            | "__ckb_require_cell_lock_args_suffix_hash"
-                            | "__ckb_require_cell_type_args_suffix_hash"
+                            | "__ckb_require_cell_lock_args_prefix32"
+                            | "__ckb_require_cell_type_args_prefix32"
+                            | "__ckb_require_cell_lock_args_suffix32"
+                            | "__ckb_require_cell_type_args_suffix32"
                             | "__ckb_require_cell_lock_script_hash_type"
                             | "__ckb_require_cell_type_script_hash_type"
-                            | "__ckb_cell_data_hash"
                             | "__ckb_cell_data_bytes32"
                             | "__ckb_cell_data_size"
                             | "__ckb_cell_data_equal"
@@ -19294,8 +19381,8 @@ fn body_ckb_runtime_features(
                         func.as_str(),
                         "__ckb_cell_lock_args_empty"
                             | "__ckb_cell_type_args_empty"
-                            | "__ckb_cell_lock_args_hash"
-                            | "__ckb_cell_type_args_hash"
+                            | "__ckb_cell_lock_args32"
+                            | "__ckb_cell_type_args32"
                     ) {
                         features.insert("ckb-script-args-read".to_string());
                     }
@@ -19303,14 +19390,14 @@ fn body_ckb_runtime_features(
                         func.as_str(),
                         "__ckb_require_cell_lock_args_empty"
                             | "__ckb_require_cell_type_args_empty"
-                            | "__ckb_require_cell_lock_args_hash"
-                            | "__ckb_require_cell_type_args_hash"
+                            | "__ckb_require_cell_lock_args32"
+                            | "__ckb_require_cell_type_args32"
                             | "__ckb_require_cell_lock_args_exact"
                             | "__ckb_require_cell_type_args_exact"
-                            | "__ckb_require_cell_lock_args_prefix_hash"
-                            | "__ckb_require_cell_type_args_prefix_hash"
-                            | "__ckb_require_cell_lock_args_suffix_hash"
-                            | "__ckb_require_cell_type_args_suffix_hash"
+                            | "__ckb_require_cell_lock_args_prefix32"
+                            | "__ckb_require_cell_type_args_prefix32"
+                            | "__ckb_require_cell_lock_args_suffix32"
+                            | "__ckb_require_cell_type_args_suffix32"
                     ) {
                         features.insert("ckb-script-args-requirements".to_string());
                     }
@@ -19346,8 +19433,7 @@ fn body_ckb_runtime_features(
                     }
                     if matches!(
                         func.as_str(),
-                        "__ckb_cell_data_hash"
-                            | "__ckb_cell_data_bytes32"
+                        "__ckb_cell_data_bytes32"
                             | "__ckb_cell_data_equal"
                             | "__ckb_source_bytes_equal"
                             | "__ckb_source_bytes_equal_memory"
@@ -19691,10 +19777,6 @@ fn runtime_range_for_call(func: &str, args: &[ir::IrOperand]) -> CkbRuntimeRange
         | "__ckb_cell_lock_hash"
         | "__ckb_cell_type_hash"
         | "__ckb_input_out_point_tx_hash"
-        | "__ckb_witness_raw"
-        | "__ckb_witness_lock"
-        | "__ckb_witness_input_type"
-        | "__ckb_witness_output_type"
         | "__ckb_witness_lock_exact32"
         | "__ckb_witness_input_type_exact32"
         | "__ckb_witness_output_type_exact32" => Some(32),
@@ -19733,13 +19815,12 @@ fn runtime_range_for_call(func: &str, args: &[ir::IrOperand]) -> CkbRuntimeRange
         }
         "__ckb_cell_occupied_capacity"
         | "__ckb_cell_unoccupied_capacity"
-        | "__ckb_cell_data_hash"
         | "__ckb_cell_lock_code_hash"
         | "__ckb_cell_type_code_hash"
         | "__ckb_cell_lock_args_empty"
         | "__ckb_cell_type_args_empty"
-        | "__ckb_cell_lock_args_hash"
-        | "__ckb_cell_type_args_hash"
+        | "__ckb_cell_lock_args32"
+        | "__ckb_cell_type_args32"
         | "__ckb_cell_lock_size"
         | "__ckb_cell_type_size"
         | "__ckb_witness_size"
@@ -20464,11 +20545,11 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
         "__ckb_cell_type_args_empty" => {
             Some(("cell-type-script-args-empty-read", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::cell_type_args_empty"))
         }
-        "__ckb_cell_lock_args_hash" => {
-            Some(("cell-lock-script-args-hash-read", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::cell_lock_args_hash"))
+        "__ckb_cell_lock_args32" => {
+            Some(("cell-lock-script-args32-read", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::cell_lock_args32"))
         }
-        "__ckb_cell_type_args_hash" => {
-            Some(("cell-type-script-args-hash-read", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::cell_type_args_hash"))
+        "__ckb_cell_type_args32" => {
+            Some(("cell-type-script-args32-read", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::cell_type_args32"))
         }
         "__ckb_require_cell_lock_hash" => {
             Some(("cell-lock-hash-require", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::require_cell_lock_hash"))
@@ -20518,11 +20599,11 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
         "__ckb_require_cell_type_args_empty" => {
             Some(("cell-type-script-empty-args-require", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::require_cell_type_args_empty"))
         }
-        "__ckb_require_cell_lock_args_hash" => {
-            Some(("cell-lock-script-hash-args-require", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::require_cell_lock_args_hash"))
+        "__ckb_require_cell_lock_args32" => {
+            Some(("cell-lock-script-args32-require", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::require_cell_lock_args32"))
         }
-        "__ckb_require_cell_type_args_hash" => {
-            Some(("cell-type-script-hash-args-require", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::require_cell_type_args_hash"))
+        "__ckb_require_cell_type_args32" => {
+            Some(("cell-type-script-args32-require", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::require_cell_type_args32"))
         }
         "__ckb_require_cell_lock_args_exact" => {
             Some(("cell-lock-script-exact-args-require", "LOAD_CELL_BY_FIELD", "SourceView", "script::require_cell_lock_matches"))
@@ -20530,29 +20611,29 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
         "__ckb_require_cell_type_args_exact" => {
             Some(("cell-type-script-exact-args-require", "LOAD_CELL_BY_FIELD", "SourceView", "script::require_cell_type_matches"))
         }
-        "__ckb_require_cell_lock_args_prefix_hash" => Some((
-            "cell-lock-script-prefix-hash-args-require",
+        "__ckb_require_cell_lock_args_prefix32" => Some((
+            "cell-lock-script-prefix32-args-require",
             "LOAD_CELL_BY_FIELD",
             "SourceView",
-            "ckb::require_cell_lock_args_prefix_hash",
+            "ckb::require_cell_lock_args_prefix32",
         )),
-        "__ckb_require_cell_type_args_prefix_hash" => Some((
-            "cell-type-script-prefix-hash-args-require",
+        "__ckb_require_cell_type_args_prefix32" => Some((
+            "cell-type-script-prefix32-args-require",
             "LOAD_CELL_BY_FIELD",
             "SourceView",
-            "ckb::require_cell_type_args_prefix_hash",
+            "ckb::require_cell_type_args_prefix32",
         )),
-        "__ckb_require_cell_lock_args_suffix_hash" => Some((
-            "cell-lock-script-suffix-hash-args-require",
+        "__ckb_require_cell_lock_args_suffix32" => Some((
+            "cell-lock-script-suffix32-args-require",
             "LOAD_CELL_BY_FIELD",
             "SourceView",
-            "ckb::require_cell_lock_args_suffix_hash",
+            "ckb::require_cell_lock_args_suffix32",
         )),
-        "__ckb_require_cell_type_args_suffix_hash" => Some((
-            "cell-type-script-suffix-hash-args-require",
+        "__ckb_require_cell_type_args_suffix32" => Some((
+            "cell-type-script-suffix32-args-require",
             "LOAD_CELL_BY_FIELD",
             "SourceView",
-            "ckb::require_cell_type_args_suffix_hash",
+            "ckb::require_cell_type_args_suffix32",
         )),
         "__ckb_require_cell_lock_script_hash_type" => {
             Some(("cell-lock-script-identity-require", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::require_cell_lock_script_hash_type"))
@@ -20568,7 +20649,6 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
         )),
         "__ckb_current_script_hash" => Some(("current-script-hash", "LOAD_SCRIPT_HASH", "CurrentScript", "ckb::current_script_hash")),
         "__ckb_transaction_hash" => Some(("transaction-hash", "LOAD_TX_HASH", "Transaction", "ckb::transaction_hash")),
-        "__ckb_cell_data_hash" => Some(("cell-data-hash", "LOAD_CELL_DATA", "SourceView", "ckb::cell_data_hash")),
         "__ckb_cell_data_bytes32" => Some(("cell-data-bytes32", "LOAD_CELL_DATA", "SourceView", "ckb::cell_data_bytes32")),
         "__ckb_cell_data_blake2b_span" => {
             Some(("cell-data-blake2b-span", "LOAD_CELL_DATA", "SourceView", "ckb::cell_data_blake2b_span"))
@@ -20662,20 +20742,12 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
         "__xudt_require_group_amount_burned" => {
             Some(("xudt-group-amount-burned-delta", "LOAD_CELL_DATA", "GroupInput/GroupOutput", "xudt::require_group_amount_burned"))
         }
-        "__ckb_witness_raw" => Some(("witness-raw", "LOAD_WITNESS", "Witness", "witness::raw")),
-        "__ckb_witness_lock" => Some(("witness-lock", "LOAD_WITNESS_ARGS_LOCK", "GroupInput", "witness::lock")),
-        "__ckb_witness_lock_exact32" => Some(("witness-lock", "LOAD_WITNESS_ARGS_LOCK", "GroupInput", "witness::args.lock")),
-        "__ckb_witness_input_type" => {
-            Some(("witness-input-type", "LOAD_WITNESS_ARGS_INPUT_TYPE", "GroupInput", "witness::input_type"))
-        }
+        "__ckb_witness_lock_exact32" => Some(("witness-lock", "LOAD_WITNESS_ARGS_LOCK", "GroupInput", "witness::lock_exact32")),
         "__ckb_witness_input_type_exact32" => {
-            Some(("witness-input-type", "LOAD_WITNESS_ARGS_INPUT_TYPE", "GroupInput", "witness::args.input_type"))
-        }
-        "__ckb_witness_output_type" => {
-            Some(("witness-output-type", "LOAD_WITNESS_ARGS_OUTPUT_TYPE", "GroupOutput", "witness::output_type"))
+            Some(("witness-input-type", "LOAD_WITNESS_ARGS_INPUT_TYPE", "GroupInput", "witness::input_type_exact32"))
         }
         "__ckb_witness_output_type_exact32" => {
-            Some(("witness-output-type", "LOAD_WITNESS_ARGS_OUTPUT_TYPE", "GroupOutput", "witness::args.output_type"))
+            Some(("witness-output-type", "LOAD_WITNESS_ARGS_OUTPUT_TYPE", "GroupOutput", "witness::output_type_exact32"))
         }
         "__ckb_witness_bounded_size" => Some(("witness-bounded-size", "LOAD_WITNESS", "Witness", "witness::bounded.size")),
         "__ckb_witness_bounded_u8" => Some(("witness-bounded-u8", "LOAD_WITNESS", "Witness", "witness::byte")),
@@ -20838,6 +20910,7 @@ fn metadata_type_layouts(ir: &ir::IrModule) -> MetadataTypeLayouts {
             let ir::IrItem::PureFn(function) = item else { return None };
             let ty = function.return_type.as_ref()?;
             if matches!(ty, ir::IrType::Hash | ir::IrType::Address)
+                || matches!(ty, ir::IrType::Named(name) if ir::is_ckb_fixed_hash_domain_name(name))
                 || matches!(ty, ir::IrType::Array(inner, count) if **inner == ir::IrType::U8 && (1..=64).contains(count))
             {
                 return Some((function.name.clone(), ty.clone()));
@@ -26825,7 +26898,11 @@ action activate(ticket: Ticket) -> Ticket {
 
     #[test]
     fn compile_spills_parameters_and_returns_computed_value() {
-        let result = compile(SIMPLE_PROGRAM, CompileOptions::default()).unwrap();
+        let result = compile(
+            SIMPLE_PROGRAM,
+            CompileOptions { diagnostics: crate::CompilerDiagnostics::without_optimizations(), ..Default::default() },
+        )
+        .unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
         assert!(asm.contains("sd a0, 0(sp)"), "missing parameter spill for x:\n{}", asm);
@@ -26853,7 +26930,11 @@ action activate(ticket: Ticket) -> Ticket {
 
     #[test]
     fn compile_emits_direct_user_function_calls() {
-        let result = compile(CALL_PROGRAM, CompileOptions::default()).unwrap();
+        let result = compile(
+            CALL_PROGRAM,
+            CompileOptions { diagnostics: crate::CompilerDiagnostics::without_optimizations(), ..Default::default() },
+        )
+        .unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
         assert!(asm.contains(".global double"), "missing callee symbol:\n{}", asm);
@@ -26864,7 +26945,11 @@ action activate(ticket: Ticket) -> Ticket {
 
     #[test]
     fn compile_lowers_if_expression_with_join_move() {
-        let result = compile(IF_EXPR_PROGRAM, CompileOptions::default()).unwrap();
+        let result = compile(
+            IF_EXPR_PROGRAM,
+            CompileOptions { diagnostics: crate::CompilerDiagnostics::without_optimizations(), ..Default::default() },
+        )
+        .unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
         assert!(asm.contains("beqz t0, .Lchoose_block_2"), "missing conditional branch for if expression:\n{}", asm);
@@ -26912,7 +26997,11 @@ action activate(ticket: Ticket) -> Ticket {
 
     #[test]
     fn compile_lowers_for_range_into_counted_loop_cfg() {
-        let result = compile(FOR_RANGE_PROGRAM, CompileOptions::default()).unwrap();
+        let result = compile(
+            FOR_RANGE_PROGRAM,
+            CompileOptions { diagnostics: crate::CompilerDiagnostics::without_optimizations(), ..Default::default() },
+        )
+        .unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
         assert!(asm.contains(".Lvisit_block_1:"), "missing for-loop condition block:\n{}", asm);
@@ -26925,7 +27014,11 @@ action activate(ticket: Ticket) -> Ticket {
 
     #[test]
     fn compile_lowers_mutable_assignments_in_loop_bodies() {
-        let result = compile(ASSIGN_PROGRAM, CompileOptions::default()).unwrap();
+        let result = compile(
+            ASSIGN_PROGRAM,
+            CompileOptions { diagnostics: crate::CompilerDiagnostics::without_optimizations(), ..Default::default() },
+        )
+        .unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
         assert!(asm.contains("sub t0, t0, t1"), "missing subtraction for x = x - 1:\n{}", asm);
@@ -27553,7 +27646,11 @@ action bad(token: Token) {
 
     #[test]
     fn compile_lowers_assert_invariant_into_fail_closed_cfg() {
-        let result = compile(ASSERT_PROGRAM, CompileOptions::default()).unwrap();
+        let result = compile(
+            ASSERT_PROGRAM,
+            CompileOptions { diagnostics: crate::CompilerDiagnostics::without_optimizations(), ..Default::default() },
+        )
+        .unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
         assert!(asm.contains("beqz t0"), "assert condition did not branch on failure:\n{}", asm);
@@ -30776,7 +30873,7 @@ action batch(collection_before: Collection, recipients: Vec<Address>) -> collect
     fn compile_preserves_full_width_u128_decimal_literals() {
         let result = compile_with_executable_surface_policy(
             U128_LITERAL_PROGRAM,
-            CompileOptions::default(),
+            CompileOptions { diagnostics: crate::CompilerDiagnostics::without_optimizations(), ..Default::default() },
             ExecutableSurfacePolicy::DenyFailClosed,
         )
         .unwrap();
@@ -30830,9 +30927,9 @@ fn contextual_literals() -> u8 {
     return (1 << 7) | 3
 }
 "#;
-        for opt_level in [0, 1] {
+        for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
             let result =
-                compile(source, CompileOptions { target: Some("riscv64-elf".to_string()), opt_level, ..CompileOptions::default() })
+                compile(source, CompileOptions { target: Some("riscv64-elf".to_string()), diagnostics, ..CompileOptions::default() })
                     .unwrap();
             assert!(result.artifact_bytes.starts_with(b"\x7fELF"));
         }
@@ -30856,13 +30953,13 @@ action verify() -> u64 {
 "#;
 
         let mut trap_counts = Vec::new();
-        for opt_level in [0, 1, 2, 3] {
-            let result = compile(source, CompileOptions { opt_level, ..CompileOptions::default() }).unwrap();
+        for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
+            let result = compile(source, CompileOptions { diagnostics, ..CompileOptions::default() }).unwrap();
             let asm = String::from_utf8(result.artifact_bytes).unwrap();
             // Fatal handlers are shared now. Count the retained overflow paths,
             // not repeated copies of the same numeric-error constant.
             let trap_count = asm.matches("j .Lverify_fail_49").count();
-            assert!(trap_count >= 3, "-O{opt_level} must retain all three checked u128 overflow paths:\n{asm}");
+            assert!(trap_count >= 3, "-{diagnostics} must retain all three checked u128 overflow paths:\n{asm}");
             assert!(asm.contains("li a0, 49\n    j __cellscript_abort"));
             trap_counts.push(trap_count);
         }
@@ -31232,13 +31329,6 @@ action inspect() -> u64 {
     }
 
     #[test]
-    fn compile_rejects_unsupported_optimization_level() {
-        let err = compile(SIMPLE_PROGRAM, CompileOptions { opt_level: 4, ..CompileOptions::default() }).unwrap_err();
-
-        assert!(err.message.contains("optimization level must be between 0 and 3"), "unexpected error: {}", err.message);
-    }
-
-    #[test]
     fn compile_accepts_pure_ckb_target_profile() {
         let result =
             compile(SIMPLE_PROGRAM, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
@@ -31455,6 +31545,7 @@ action mint(amount: u64) -> Receipt {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "deploy_manifest"
 version = "0.1.0"
@@ -31526,6 +31617,7 @@ action add(a: u64, b: u64) -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "type_hash_deploy_manifest"
 version = "1.0.0"
@@ -31601,6 +31693,7 @@ action mint(amount: u64) -> Token {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "conflicting_cell_dep_location"
 version = "0.1.0"
@@ -31648,6 +31741,7 @@ action add(a: u64, b: u64) -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "incomplete_cell_dep_location"
 version = "0.1.0"
@@ -31693,6 +31787,7 @@ action add(a: u64, b: u64) -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "bad_deploy_manifest"
 version = "0.1.0"
@@ -31732,6 +31827,7 @@ action add(a: u64, b: u64) -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "bad_hash_type_manifest"
 version = "0.1.0"
@@ -31771,6 +31867,7 @@ action add(a: u64, b: u64) -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "vm1_deploy_manifest"
 version = "0.1.0"
@@ -31878,9 +31975,39 @@ action main() -> u64 {
     }
 
     #[test]
-    fn compile_uses_ast_optimizer_for_nonzero_optimization_levels() {
-        let baseline = compile(OPTIMIZER_PROGRAM, CompileOptions::default()).unwrap();
-        let optimized = compile(OPTIMIZER_PROGRAM, CompileOptions { opt_level: 1, ..CompileOptions::default() }).unwrap();
+    fn incremental_cache_separates_the_strategy_from_each_diagnostic_mask() {
+        let mut identities = std::collections::BTreeSet::new();
+        let passes = [
+            crate::OptimizationPass::ConstantFolding,
+            crate::OptimizationPass::Inlining,
+            crate::OptimizationPass::DeadCode,
+            crate::OptimizationPass::ExactCellEquality,
+            crate::OptimizationPass::SourceByteEquality,
+            crate::OptimizationPass::ExactReadHotCache,
+            crate::OptimizationPass::StackReloads,
+            crate::OptimizationPass::BranchFusion,
+        ];
+        for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()]
+            .into_iter()
+            .chain(passes.map(|pass| crate::CompilerDiagnostics::default().without(pass)))
+        {
+            let options = CompileOptions { diagnostics, ..Default::default() };
+            assert!(identities.insert(crate::incremental_cache_key(&[], &options)), "reused cache identity for {diagnostics}");
+        }
+    }
+
+    #[test]
+    fn compile_uses_unified_strategy_by_default() {
+        let baseline = compile(
+            OPTIMIZER_PROGRAM,
+            CompileOptions { diagnostics: crate::CompilerDiagnostics::without_optimizations(), ..Default::default() },
+        )
+        .unwrap();
+        let optimized = compile(
+            OPTIMIZER_PROGRAM,
+            CompileOptions { diagnostics: crate::CompilerDiagnostics::default(), ..CompileOptions::default() },
+        )
+        .unwrap();
 
         let baseline_asm = String::from_utf8(baseline.artifact_bytes).unwrap();
         let optimized_asm = String::from_utf8(optimized.artifact_bytes).unwrap();
@@ -32024,7 +32151,7 @@ action main() -> u64 {
     #[test]
     fn incremental_cache_key_partitions_primitive_and_debug_modes() {
         let release_elf = CompileOptions {
-            opt_level: 3,
+            diagnostics: crate::CompilerDiagnostics::default(),
             target: Some("riscv64-elf".to_string()),
             target_profile: Some("ckb".to_string()),
             ..CompileOptions::default()
@@ -32251,7 +32378,11 @@ resource Token has store {
 
     #[test]
     fn compile_infers_read_only_helper_function_effects() {
-        let result = compile(IMPURE_FN_PROGRAM, CompileOptions::default()).unwrap();
+        let result = compile(
+            IMPURE_FN_PROGRAM,
+            CompileOptions { diagnostics: crate::CompilerDiagnostics::without_optimizations(), ..Default::default() },
+        )
+        .unwrap();
         let function = result.metadata.functions.iter().find(|function| function.name == "helper").expect("helper metadata");
 
         assert_eq!(function.declared_effect_class, None);
@@ -32262,7 +32393,11 @@ resource Token has store {
 
     #[test]
     fn compile_infers_helper_function_effects_through_action_calls() {
-        let result = compile(INDIRECT_IMPURE_FN_PROGRAM, CompileOptions::default()).unwrap();
+        let result = compile(
+            INDIRECT_IMPURE_FN_PROGRAM,
+            CompileOptions { diagnostics: crate::CompilerDiagnostics::without_optimizations(), ..Default::default() },
+        )
+        .unwrap();
         let function = result.metadata.functions.iter().find(|function| function.name == "helper").expect("helper metadata");
 
         assert_eq!(function.inferred_effect_class, "Mutating");
@@ -32281,7 +32416,11 @@ resource Token has store {
 
     #[test]
     fn compile_infers_read_only_effect_for_env_runtime_builtins() {
-        let result = compile(FN_ENV_RUNTIME_PROGRAM, CompileOptions::default()).unwrap();
+        let result = compile(
+            FN_ENV_RUNTIME_PROGRAM,
+            CompileOptions { diagnostics: crate::CompilerDiagnostics::without_optimizations(), ..Default::default() },
+        )
+        .unwrap();
         let function = result.metadata.functions.iter().find(|function| function.name == "helper").expect("helper metadata");
 
         assert_eq!(function.declared_effect_class, None);
@@ -32292,7 +32431,11 @@ resource Token has store {
 
     #[test]
     fn compile_infers_read_only_effect_for_ckb_header_runtime_builtins() {
-        let result = compile(FN_CKB_HEADER_RUNTIME_PROGRAM, CompileOptions::default()).unwrap();
+        let result = compile(
+            FN_CKB_HEADER_RUNTIME_PROGRAM,
+            CompileOptions { diagnostics: crate::CompilerDiagnostics::without_optimizations(), ..Default::default() },
+        )
+        .unwrap();
         let function = result.metadata.functions.iter().find(|function| function.name == "helper").expect("helper metadata");
 
         assert_eq!(function.declared_effect_class, None);
@@ -32303,7 +32446,11 @@ resource Token has store {
 
     #[test]
     fn compile_infers_read_only_effect_for_type_hash_runtime_builtins() {
-        let result = compile(FN_TYPE_HASH_RUNTIME_PROGRAM, CompileOptions::default()).unwrap();
+        let result = compile(
+            FN_TYPE_HASH_RUNTIME_PROGRAM,
+            CompileOptions { diagnostics: crate::CompilerDiagnostics::without_optimizations(), ..Default::default() },
+        )
+        .unwrap();
         let function = result.metadata.functions.iter().find(|function| function.name == "helper").expect("helper metadata");
 
         assert_eq!(function.declared_effect_class, None);
@@ -32314,10 +32461,18 @@ resource Token has store {
 
     #[test]
     fn compile_allows_actions_and_locks_to_call_pure_functions() {
-        let action_result = compile(ACTION_CALLS_FN_PROGRAM, CompileOptions::default()).unwrap();
+        let action_result = compile(
+            ACTION_CALLS_FN_PROGRAM,
+            CompileOptions { diagnostics: crate::CompilerDiagnostics::without_optimizations(), ..Default::default() },
+        )
+        .unwrap();
         assert!(action_result.metadata.functions.iter().any(|function| function.name == "add_one"));
 
-        let lock_result = compile(LOCK_CALLS_FN_PROGRAM, CompileOptions::default()).unwrap();
+        let lock_result = compile(
+            LOCK_CALLS_FN_PROGRAM,
+            CompileOptions { diagnostics: crate::CompilerDiagnostics::without_optimizations(), ..Default::default() },
+        )
+        .unwrap();
         assert!(lock_result.metadata.functions.iter().any(|function| function.name == "yes"));
     }
 
@@ -33700,6 +33855,7 @@ flow Offer.state {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -36725,6 +36881,7 @@ action raw(data: Vec<u8>) -> u64 {
             dep_root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "dep_pkg"
 version = "0.1.0"
@@ -36747,6 +36904,7 @@ resource Token has store, replace, relock, consume, burn {
             app_root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app_pkg"
 version = "0.1.0"
@@ -36791,8 +36949,11 @@ action pass_through(token: Token) -> Token {
         let app_root = root.join("typed_app");
         std::fs::create_dir_all(dep_root.join("src")).unwrap();
         std::fs::create_dir_all(app_root.join("src")).unwrap();
-        std::fs::write(dep_root.join("Cell.toml"), "[package]\nedition = \"2026\"\nname = \"legacy_time\"\nversion = \"0.1.0\"\n")
-            .unwrap();
+        std::fs::write(
+            dep_root.join("Cell.toml"),
+            "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"legacy_time\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
         std::fs::write(
             dep_root.join("src").join("time.cell"),
             "module legacy::time\npublic fn legacy_epoch() -> u64 { return env::current_timepoint() }\n",
@@ -36801,6 +36962,7 @@ action pass_through(token: Token) -> Token {
         std::fs::write(
             app_root.join("Cell.toml"),
             r#"[package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2027"
 name = "typed_app"
 version = "0.1.0"
@@ -36857,6 +37019,7 @@ action inspect() -> u64 { return legacy_epoch() }
             dep_root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "generic_dep"
 version = "0.1.0"
@@ -36883,6 +37046,7 @@ public fn swap<T: fixed_value>(pair: Pair<T>) -> Pair<T> {
             app_root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "generic_app"
 version = "0.1.0"
@@ -37000,6 +37164,7 @@ fn hide(input: Token) -> Boxed<Token> {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "nested_layout"
 version = "0.1.0"
@@ -37056,6 +37221,7 @@ action inspect(witness signed: Signed) -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -37091,6 +37257,7 @@ action ping() -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -37125,6 +37292,7 @@ action ping() -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -37163,6 +37331,7 @@ action ping() -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -37201,6 +37370,7 @@ action ping() -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -37239,6 +37409,7 @@ action ping() -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -37278,6 +37449,7 @@ action ping() -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -37317,6 +37489,7 @@ action ping() -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -37354,6 +37527,7 @@ action ping() -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -37392,6 +37566,7 @@ action ping() -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -37427,6 +37602,7 @@ action ping() -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -37479,6 +37655,7 @@ action pass(token: Token) -> Token {
             dep_root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "dep_pkg"
 version = "0.1.0"
@@ -37505,6 +37682,7 @@ action dep_ping() -> u64 {
             app_root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app_pkg"
 version = "0.1.0"
@@ -37542,6 +37720,7 @@ action app_ping() -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -37591,6 +37770,7 @@ action pass(token: Token) -> Token {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "bad-import"
 version = "0.1.0"
@@ -37639,6 +37819,7 @@ action pass(token: Token) -> Token {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "unreferenced-bad"
 version = "0.1.0"
@@ -37687,6 +37868,7 @@ action broken() -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "cache-drift"
 version = "0.1.0"
@@ -37751,6 +37933,7 @@ resource Pair {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -37788,6 +37971,7 @@ action ping() -> u64 {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -38650,7 +38834,9 @@ action mint(amount: u64) -> Token {
         return create Token { amount: amount }
 }
 "#;
-        let result = compile(source, CompileOptions { opt_level: 2, ..CompileOptions::default() }).unwrap();
+        let result =
+            compile(source, CompileOptions { diagnostics: crate::CompilerDiagnostics::default(), ..CompileOptions::default() })
+                .unwrap();
         let token = result.metadata.types.iter().find(|ty| ty.name == "Token").expect("Token metadata");
         assert_eq!(token.validity_predicates[0].evidence_tier, crate::EvidenceTier::CheckedStatic);
         let helper = token

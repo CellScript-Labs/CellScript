@@ -6,10 +6,12 @@
 selection and build scheduling use two separate read-only schemas:
 
 - `cellscript-resolve-graph-v1` describes the selected package graph;
-- `cellscript-build-plan-v1` describes the compilation units derived from that
+- `cellscript-build-plan-v2` describes the compilation units derived from that
   graph.
 
-Both commands accept `--schema-version 1`. An unsupported version fails rather
+`resolve-graph` accepts `--schema-version 1`; `build-plan` accepts
+`--schema-version 2`. Build-plan v2 identifies the unified compilation strategy
+and rejects the retired optimization-level selection. An unsupported version fails rather
 than silently returning a different shape.
 
 ## Read-Only Resolution
@@ -54,7 +56,7 @@ cellc build-plan . --target riscv64-elf --target-profile ckb \
   --release --offline --json
 ```
 
-Each `cellscript-build-plan-v1` unit records the selected package root, entry,
+Each `cellscript-build-plan-v2` unit records the selected package root, entry,
 target and artifact format, target profile, VM and witness codec identities,
 complete compatibility profile, dependency scope, features, environment,
 direct workspace-unit dependencies, expected artifact/metadata/verified

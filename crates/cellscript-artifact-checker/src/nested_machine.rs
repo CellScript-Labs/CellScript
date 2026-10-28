@@ -26,10 +26,13 @@ mod outputs;
 mod parameters;
 mod scalar_status;
 mod script_hash_fields;
+mod streaming_hashes;
 mod uses;
 mod view_calls;
 mod view_values;
+mod witness_bytes;
 mod witness_exact_hash;
+mod witness_resolver;
 
 pub(crate) use cell_read_hashes::validate_all as validate_cell_data_reads;
 pub(crate) use hash_fields::validate as validate_hash_property_runtime;

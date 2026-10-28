@@ -2,6 +2,9 @@
 
 ## Status
 
+Budget revision — 2026-10-28: the maintainer raised the current gzip limit
+from 600 KiB to 1500 KiB (1,536,000 bytes). The metadata-only scope is unchanged.
+
 Implemented across the 0.20-0.23 line for the website playground, WASM
 metadata-only compile path, multi-file browser workspace, agent-facing
 documentation surface, and recoverable browser workbench. The 0.23 workbench
@@ -35,7 +38,7 @@ The governing constraints are:
 2. **Cool, ergonomic, legible, appropriately dense, layered.**
    Information density increases by layer; visual weight decreases by
    layer.
-3. **WASM bundle size budgeted.** Target `.wasm` gzipped <= 600KB.
+3. **WASM bundle size budgeted.** Target `.wasm` gzipped <= 1500 KiB.
 4. **Hero pseudo-console is an entry point, not a real IDE.** The
    real IDE lives on a separate `/playground` page. Clicking the hero
    console opens the playground with the current example preloaded.
@@ -569,7 +572,7 @@ targets, to be verified during implementation.
 
 ### 11.1 Budget
 
-- Target: `.wasm` gzipped <= 600KB for v1 (path A, metadata only).
+- Target: `.wasm` gzipped <= 1500 KiB for v1 (path A, metadata only).
 - Ceiling: 800KB gzipped. Beyond that the playground is not worth the
   cost; reconsider the editor or the compile path.
 
@@ -630,7 +633,7 @@ are the core technical debt; PR-4 is polish.
 
 ### Non-functional
 
-- WASM `.wasm` gzipped <= 600KB.
+- WASM `.wasm` gzipped <= 1500 KiB.
 - Landing Lighthouse Performance >= 90; playground >= 80 (WASM load
   accepted).
 - `prefers-reduced-motion`: overlay hidden, workflow bar static.
@@ -649,7 +652,7 @@ are the core technical debt; PR-4 is polish.
 
 | Risk                                              | Likelihood | Mitigation                                                                |
 |---------------------------------------------------|------------|---------------------------------------------------------------------------|
-| WASM size exceeds 600KB                           | Medium     | Path A only; `wasm-opt -Oz`; CI size guard                                 |
+| WASM size exceeds 1500 KiB                           | Medium     | Path A only; `wasm-opt -Oz`; CI size guard                                 |
 | Textarea overlay caret drift                      | Low        | Shared CSS class for identical metrics; mobile testing                     |
 | Transition overlay distracts readers              | Medium     | 2s display; reduced-motion hides it; bottom placement avoids content      |
 | Provenance rail consumes desktop width            | Low        | 240px fixed; main column recalculated; folds on mobile                     |

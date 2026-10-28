@@ -52,7 +52,13 @@ pub(super) fn package_sources(source: &str, shape: Shape) -> (String, String) {
     (application, library)
 }
 
-fn artifacts(root: &Path, shape: Shape, explicit: bool, opt_level: u8, cross_package: bool) -> (Vec<CompileResult>, Vec<Value>) {
+fn artifacts(
+    root: &Path,
+    shape: Shape,
+    explicit: bool,
+    diagnostics: cellscript::CompilerDiagnostics,
+    cross_package: bool,
+) -> (Vec<CompileResult>, Vec<Value>) {
     let mut source = match (shape, explicit) {
         (Shape::Bytes, false) => include_str!("../../examples/language/batches/nested_migration.cell"),
         (Shape::Bytes, true) => include_str!("fixtures/nested_migration_explicit.cell"),
@@ -69,9 +75,9 @@ fn artifacts(root: &Path, shape: Shape, explicit: bool, opt_level: u8, cross_pac
     let main = if cross_package {
         assert!(!explicit);
         let (application, library) = package_sources(&source, shape);
-        super::support::compile_package(root, &application, &library, opt_level).unwrap()
+        super::support::compile_package(root, &application, &library, diagnostics).unwrap()
     } else {
-        compile_at(&source, opt_level)
+        compile_at(&source, diagnostics)
     };
     let compiled = vec![
         main,
@@ -304,29 +310,29 @@ fn assert_business_rejection(input: &ProtocolBundleInput, root: &Path, compiled:
 
 #[test]
 fn nested_migration_bundle_uses_identical_sdk_codec_and_transaction_bytes() {
-    for opt_level in [0, 3] {
-        let named = run_pipeline(Shape::Bytes, false, opt_level, false);
-        let explicit = run_pipeline(Shape::Bytes, true, opt_level, false);
-        assert_eq!(named, explicit, "named/explicit complete byte-list transaction bytes O{opt_level}");
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let named = run_pipeline(Shape::Bytes, false, diagnostics, false);
+        let explicit = run_pipeline(Shape::Bytes, true, diagnostics, false);
+        assert_eq!(named, explicit, "named/explicit complete byte-list transaction bytes {diagnostics}");
     }
 }
 
 #[test]
 fn record_migration_bundle_preserves_identities_and_named_explicit_authoring() {
-    for opt_level in [0, 3] {
-        let named = run_pipeline(Shape::Records, false, opt_level, false);
-        let explicit = run_pipeline(Shape::Records, true, opt_level, false);
-        assert_eq!(named, explicit, "named/explicit complete transaction bytes O{opt_level}");
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let named = run_pipeline(Shape::Records, false, diagnostics, false);
+        let explicit = run_pipeline(Shape::Records, true, diagnostics, false);
+        assert_eq!(named, explicit, "named/explicit complete transaction bytes {diagnostics}");
     }
 }
 
 #[test]
 fn nested_migration_cross_package_helpers_preserve_codec_and_transaction_outcomes() {
     for shape in [Shape::Bytes, Shape::Records] {
-        for opt in [0, 3] {
+        for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let local = run_pipeline(shape, false, opt, false);
             let packaged = run_pipeline(shape, false, opt, true);
-            assert_eq!(packaged, local, "{shape:?} O{opt}: package extraction changed transaction bytes");
+            assert_eq!(packaged, local, "{shape:?} {opt}: package extraction changed transaction bytes");
         }
     }
 }
@@ -344,7 +350,8 @@ fn nested_migration_cross_package_rejects_bound_and_source_substitution() {
             application.replace("migrate_document(selected.documents.input(i)", "migrate_document(selected.documents.successor(i)"),
         ] {
             let temp = tempfile::tempdir().unwrap();
-            let error = super::support::compile_package(temp.path(), &invalid, &library, 3).unwrap_err();
+            let error = super::support::compile_package(temp.path(), &invalid, &library, cellscript::CompilerDiagnostics::default())
+                .unwrap_err();
             assert!(
                 std::iter::once(&error).chain(error.related.iter()).any(|diagnostic| diagnostic.message.contains("type mismatch")),
                 "{shape:?}: {error:?}"
@@ -353,10 +360,10 @@ fn nested_migration_cross_package_rejects_bound_and_source_substitution() {
     }
 }
 
-fn run_pipeline(shape: Shape, explicit: bool, opt_level: u8, cross_package: bool) -> Vec<Vec<u8>> {
+fn run_pipeline(shape: Shape, explicit: bool, diagnostics: cellscript::CompilerDiagnostics, cross_package: bool) -> Vec<Vec<u8>> {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
-    let (compiled, artifacts) = artifacts(root, shape, explicit, opt_level, cross_package);
+    let (compiled, artifacts) = artifacts(root, shape, explicit, diagnostics, cross_package);
     let frames = compiled[0]
         .verified_lowering_record
         .as_ref()
@@ -416,11 +423,11 @@ fn run_pipeline(shape: Shape, explicit: bool, opt_level: u8, cross_package: bool
         let vm_tx = packed::Transaction::from_slice(tx.data().as_slice()).unwrap().into_view();
         let fixture = context(input, &compiled, None);
         let cycles = fixture.verify_tx(&vm_tx, 10_000_000).unwrap();
-        if opt_level == 3 && !explicit {
+        if diagnostics.is_standard() && !explicit {
             let measure = if cross_package { super::resources::measure_package } else { super::resources::measure };
             measure(&format!("{shape:?}-{}-{}-valid", case.count, case.reverse), &fixture, input, &compiled, &vm_tx, &[0, 0, 0]);
         }
-        eprintln!("migration bundle: shape={shape:?} explicit={explicit} O{opt_level} documents={} reverse={} cycles={cycles} tx_bytes={} witness_bytes={} occupied_output={} protected_bytes={} elf_bytes={}",
+        eprintln!("migration bundle: shape={shape:?} explicit={explicit} {diagnostics} documents={} reverse={} cycles={cycles} tx_bytes={} witness_bytes={} occupied_output={} protected_bytes={} elf_bytes={}",
             case.count, case.reverse, tx.data().as_slice().len(), tx.witnesses().into_iter().map(|w|w.raw_data().len()).sum::<usize>(),
             evidence.occupied_output_capacity_shannons, evidence.exact_role_selections["migration"][0].aggregate_bytes, compiled[0].artifact_bytes.len());
         if case.count != 8 || case.reverse {
@@ -467,7 +474,7 @@ fn run_pipeline(shape: Shape, explicit: bool, opt_level: u8, cross_package: bool
         let bad_vm = packed::Transaction::from_slice(bad_tx.data().as_slice()).unwrap().into_view();
         let error = fixture.verify_tx(&bad_vm, 10_000_000).unwrap_err();
         assert!(format!("{error:?}").contains("error code 5"), "late note: {error:?}");
-        if opt_level == 3 && !explicit {
+        if diagnostics.is_standard() && !explicit {
             let measure = if cross_package { super::resources::measure_package } else { super::resources::measure };
             measure(&format!("{shape:?}-8-false-late-note"), &fixture, &bad, &compiled, &bad_vm, &[5, 0, 0]);
             if !cross_package {

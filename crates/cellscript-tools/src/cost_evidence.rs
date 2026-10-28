@@ -97,12 +97,16 @@ fn same_source(left: &Value, right: &Value) -> Result<()> {
     ] {
         ensure!(!left[field].is_null() && left[field] == right[field], "cost report source/configuration mismatch: {field}");
     }
-    // The matched corpus deliberately uses Edition 2027 / -O3, while the
+    // The matched corpus deliberately uses Edition 2027, while the
     // existing multi-Script anchor retains its default Edition 2026 profile.
     // Those profiles are explicit, rather than incorrectly equated here.
     for value in [left, right] {
+        ensure!(
+            value.get("opt_level").is_none() && value.get("optimization_level").is_none() && value.get("diagnostics").is_none(),
+            "retired cost-report optimization selector"
+        );
         ensure!(matches!(value["edition"].as_str(), Some("2026" | "2027")), "missing cost-report edition");
-        ensure!(value["opt_level"].as_u64().is_some_and(|level| level <= 3), "missing cost-report optimization profile");
+        ensure!(value["compilation_policy"] == "cellscript-unified-v1", "missing cost-report optimization profile");
         ensure!(value["target"] == "riscv64-elf" && value["target_profile"] == "ckb", "wrong cost-report target");
     }
     Ok(())
@@ -120,7 +124,7 @@ pub(crate) fn static_memory(value: &Value) -> Result<()> {
 
 pub fn check(root: &Path, path: &Path, multi_path: &Path) -> Result<()> {
     let report = read(path)?;
-    ensure!(report["schema"] == "cellscript-cost-corpus-v2" && report["status"] == "passed", "missing passing cost-report v2");
+    ensure!(report["schema"] == "cellscript-cost-corpus-v3" && report["status"] == "passed", "missing passing cost-report v3");
     ensure!(array(&report, "matched")?.len() == 3 && array(&report, "growth")?.len() == 18, "legacy corpus incomplete");
     let growth_budgets = read(&root.join("tests/fixtures/cost_corpus/growth_budgets.json"))?;
     let mut growth_names = BTreeSet::new();
@@ -174,7 +178,7 @@ pub fn check(root: &Path, path: &Path, multi_path: &Path) -> Result<()> {
         ensure!(transaction.is_some() == (code == 0), "transaction availability/oracle mismatch");
     }
     let multi = read(multi_path)?;
-    ensure!(multi["schema"] == "cellscript-multi-script-cost-v2" && multi["status"] == "passed", "missing multi-Script v2 evidence");
+    ensure!(multi["schema"] == "cellscript-multi-script-cost-v3" && multi["status"] == "passed", "missing multi-Script v3 evidence");
     same_source(&report["provenance"], &multi["provenance"])?;
     let rows = array(&multi, "rows")?;
     let budgets = read(&root.join("tests/fixtures/cost_corpus/multi_script_budgets.json"))?;
@@ -233,11 +237,17 @@ mod tests {
             "source_dirty":true, "tracked_diff_sha256":"tracked",
             "untracked_source_sha256":"untracked", "cargo_lock_sha256":"lock",
             "rust_toolchain":"rustc", "vm_configuration":{"limit":10_000_000}, "measurement_fixture_sha256":{"fixture":"hash"},
-            "edition":"2027", "opt_level":3, "target":"riscv64-elf", "target_profile":"ckb"
+            "edition":"2027", "compilation_policy":"cellscript-unified-v1", "target":"riscv64-elf", "target_profile":"ckb",
+            "rust_reference_profile":{"opt_level":"z"}
         });
+        for field in ["opt_level", "optimization_level", "diagnostics"] {
+            let mut legacy = source.clone();
+            legacy[field] = json!(3);
+            assert!(same_source(&source, &legacy).is_err(), "accepted retired field {field}");
+        }
         let mut companion = source.clone();
         companion["edition"] = json!("2026");
-        companion["opt_level"] = json!(0);
+        companion["compilation_policy"] = json!("cellscript-unified-v1");
         same_source(&source, &companion).unwrap();
         for field in [
             "compiler_version",
@@ -256,9 +266,12 @@ mod tests {
             changed.as_object_mut().unwrap().remove(field);
             assert!(same_source(&source, &changed).is_err(), "accepted missing {field}");
         }
-        for (field, invalid) in
-            [("edition", json!("2028")), ("opt_level", json!(4)), ("target", json!("assembly")), ("target_profile", json!("unknown"))]
-        {
+        for (field, invalid) in [
+            ("edition", json!("2028")),
+            ("compilation_policy", json!(4)),
+            ("target", json!("assembly")),
+            ("target_profile", json!("unknown")),
+        ] {
             let mut changed = companion.clone();
             changed[field] = invalid;
             assert!(same_source(&source, &changed).is_err(), "accepted invalid {field}");

@@ -86,7 +86,7 @@ where
 fn options() -> CompileOptions {
     CompileOptions {
         edition: CellScriptEdition::Edition2027,
-        opt_level: 3,
+        diagnostics: cellscript::CompilerDiagnostics::default(),
         target: Some("riscv64-elf".to_string()),
         target_profile: Some("ckb".to_string()),
         ..Default::default()
@@ -378,8 +378,8 @@ fn matched_cost_corpus_compiles_runs_and_stays_within_budget() {
     let scalar = cost_scalar::measure(&mut executions);
     assert_eq!(matched.len(), 3, "all matched samples executed");
     let report = serde_json::json!({
-        "schema": "cellscript-cost-corpus-v2", "status": "passed", "llvm_strip": strip,
-        "edition": "2027", "opt_level": 3, "matched": matched, "growth": growth,
+        "schema": "cellscript-cost-corpus-v3", "status": "passed", "llvm_strip": strip,
+        "edition": "2027", "compilation_policy":"cellscript-unified-v1", "matched": matched, "growth": growth,
         "provenance": cost_provenance::capture(&repo, &strip),
         "expanded": expanded, "executions": executions,
         "scalar": scalar,

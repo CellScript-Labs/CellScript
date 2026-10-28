@@ -19,7 +19,7 @@ use ckb_testtool::{
     },
     context::Context,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{path::Path, process::Command};
 
@@ -67,7 +67,7 @@ struct AnchorFixture {
     budgets: AnchorBudgets,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 struct AnchorArtifactIdentity {
     id: String,
     artifact_hash: String,
@@ -86,7 +86,7 @@ struct AdversarialCase {
     serialized_transaction_hash: String,
 }
 
-#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
 struct StatefulPolicyEvidence {
     partial_fill_raw_transaction_hash: String,
     partial_fill_serialized_transaction_hash: String,
@@ -136,6 +136,7 @@ struct AnchorResult {
     protocol_bundle: Option<AnchorProtocolBundleEvidence>,
 }
 
+#[derive(Serialize)]
 struct AnchorProtocolBundleEvidence {
     raw_transaction_hash: String,
     serialized_transaction_hash: String,
@@ -840,6 +841,22 @@ fn run_anchor_with_cost(mutation: Mutation, measure_cost: bool) -> AnchorResult 
         ];
         check_anchor_protocol_bundle(&context, &transaction, cycles, &specs, &order_plan, occupied_capacity_shannons)
     });
+    write_anchor_observation(
+        &format!("{mutation:?}"),
+        json!({
+            "artifact_identities": artifact_identities,
+            "verification_passed": verification.is_ok(),
+            "raw_transaction_hash": bytes_hex(transaction.hash().as_slice()),
+            "serialized_transaction_hash": hash_hex(transaction.data().as_slice()),
+            "protocol_bundle": protocol_bundle,
+            "measured": {
+                "cycles": verification.as_ref().ok(), "combined_elf_bytes": elf_bytes,
+                "max_stack_frame_bytes": max_stack_frame_bytes, "witness_bytes": witness_bytes,
+                "transaction_bytes": transaction.data().serialized_size_in_block(),
+                "occupied_capacity_shannons": occupied_capacity_shannons,
+            }
+        }),
+    );
     AnchorResult {
         cost,
         verification,
@@ -903,12 +920,12 @@ fn multi_script_cost_accounts_for_each_group_and_rejection() {
     provenance["target"] = json!(options.target);
     provenance["target_profile"] = json!(options.target_profile);
     provenance["edition"] = json!(options.edition.as_str());
-    provenance["opt_level"] = json!(options.opt_level);
+    provenance["compilation_policy"] = json!(cellscript::COMPILATION_POLICY);
     provenance["vm_configuration"] = cost_provenance::vm_configuration();
     std::fs::write(
         report,
         serde_json::to_vec_pretty(&json!({
-            "schema":"cellscript-multi-script-cost-v2", "status":"passed", "provenance":provenance, "rows":rows
+            "schema":"cellscript-multi-script-cost-v3", "status":"passed", "provenance":provenance, "rows":rows
         }))
         .unwrap(),
     )
@@ -1094,6 +1111,7 @@ fn persistent_order_policy_uses_prior_outputs_for_partial_fill_settle_and_cancel
         cancel_raw_transaction_hash: bytes_hex(cancel.hash().as_slice()),
         cancel_serialized_transaction_hash: hash_hex(cancel.data().as_slice()),
     };
+    write_anchor_observation("stateful-policy", serde_json::to_value(&actual).unwrap());
     assert_eq!(actual, fixture.stateful_policy, "recorded stateful policy transaction identities are stale");
     let scenario_evidence: Value = serde_json::from_str(SCENARIO_EVIDENCE).expect("business scenario evidence JSON");
     let artifact_hashes = vec![policy_identity.artifact_hash.clone()];
@@ -1160,6 +1178,7 @@ fn persistent_order_policy_uses_prior_outputs_for_partial_fill_settle_and_cancel
         .iter()
         .find(|profile| profile["id"] == "persistent-policy-group-input-view")
         .expect("persistent-policy resource profile");
+    write_anchor_observation("stateful-policy-resources", json!({"measured": resource_actual, "identities": resource_identities}));
     assert_eq!(resource_actual, profile["measured"], "recorded persistent-policy resource measurement is stale");
     assert_eq!(resource_identities, profile["identities"], "recorded persistent-policy identities are stale");
     for field in ["cycles", "elf_bytes", "max_stack_frame_bytes", "witness_bytes", "transaction_bytes", "dependency_bytes"] {
@@ -1197,4 +1216,12 @@ fn canonical_anchor_rejects_each_role_and_dependency_substitution() {
         }
     }
     assert!(stale_hashes.is_empty(), "recorded adversarial transaction identities are stale:\n{}", stale_hashes.join("\n"));
+}
+
+// Always retain observations before frozen identity assertions. Refreshing
+// tracked baselines is a separate maintainer action; tests never rewrite them.
+fn write_anchor_observation(name: &str, value: Value) {
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/anchor-observations");
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(directory.join(format!("{name}.json")), serde_json::to_vec_pretty(&value).unwrap()).unwrap();
 }

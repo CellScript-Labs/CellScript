@@ -25,7 +25,7 @@ private fn output_reserve(index: u64, amount: u64, pool: Hash, controller: Hash,
     ckb::require_cell_type_hash(reserve, asset)
     let expected = Custody { pool, controller, asset }
     let commitment = ckb::hash_data_packed(expected)
-    ckb::require_cell_lock_args_hash(reserve, commitment)
+    ckb::require_cell_lock_args32(reserve, commitment.0)
     if ckb::cell_data_blake2b_span(reserve, 8, 96) != commitment { return false }
     return ckb::cell_data_blake2b_span(reserve, 0, 8) == ckb::hash_data_packed(Amount { value: amount })
 }
@@ -38,7 +38,7 @@ private fn input_reserve(index: u64, amount: u64, pool: Hash, controller: Hash, 
     ckb::require_cell_type_hash(reserve, asset)
     let expected = Custody { pool, controller, asset }
     let commitment = ckb::hash_data_packed(expected)
-    ckb::require_cell_lock_args_hash(reserve, commitment)
+    ckb::require_cell_lock_args32(reserve, commitment.0)
     if ckb::cell_data_blake2b_span(reserve, 8, 96) != commitment { return false }
     return ckb::cell_data_blake2b_span(reserve, 0, 8) == ckb::hash_data_packed(Amount { value: amount })
 }
@@ -52,14 +52,14 @@ private fn check_pool(a: u64, b: u64, next_a: u64, next_b: u64, revision: u64, i
     let output = source::output(ob)
     if ckb::cell_data_size(current) != 200 || ckb::cell_data_size(output) != 200 { return false }
     let commitment = ckb::cell_data_blake2b_span(current, 0, 176)
-    ckb::require_cell_lock_args_hash(current, commitment)
+    ckb::require_cell_lock_args32(current, commitment.0)
     if ckb::cell_data_blake2b_span(output, 0, 176) != commitment { return false }
-    let pool = ckb::cell_data_hash_at(current, 0)
-    let asset_a = ckb::cell_data_hash_at(current, 32)
-    let asset_b = ckb::cell_data_hash_at(current, 64)
+    let pool = Hash::from_bytes(ckb::cell_data_bytes32(current, 0))
+    let asset_a = Hash::from_bytes(ckb::cell_data_bytes32(current, 32))
+    let asset_b = Hash::from_bytes(ckb::cell_data_bytes32(current, 64))
     if asset_a == asset_b { return false }
-    let owner = ckb::cell_data_hash_at(current, 96)
-    if ckb::cell_data_hash_at(current, 128) != Hash::from_bytes(b"@NETWORK_DOMAIN@") { return false }
+    let owner = Hash::from_bytes(ckb::cell_data_bytes32(current, 96))
+    if Hash::from_bytes(ckb::cell_data_bytes32(current, 128)) != Hash::from_bytes(b"@NETWORK_DOMAIN@") { return false }
     if ckb::cell_data_blake2b_span(current, 160, 8) != ckb::hash_data_packed(Amount { value: fee }) { return false }
     let controller = ckb::cell_lock_hash(current)
     ckb::require_cell_lock_hash(source::input(ib), controller)

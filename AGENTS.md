@@ -259,7 +259,7 @@ Existing command families to be aware of:
 
 - `build`, `check`, `fmt`, `doc`, `test` — package-level lifecycle.
 - `init`, `new`, `add`, `remove`, `clean` — workspace skeleton.
-- `metadata`, `constraints`, `abi`, `scheduler-plan`, `explain*`, `opt-report`,
+- `metadata`, `constraints`, `abi`, `scheduler-plan`, `explain*`,
   `proof-diff`, `profile`, `trace-tx`, `audit-bundle`, `validate-tx`,
   `solve-tx`, `verify-ckb-fixtures`, `deploy-plan`, `verify-deploy`,
   `diff-deploy`, `lock-deps`, `action-build`, `gen-builder`, `entry-witness`,
@@ -360,7 +360,7 @@ Existing command families to be aware of:
   gated behind `cli`/`lsp` (or moved behind the `wasm` exclusion) or the
   playground build breaks.
 - The website playground's `compile_metadata_json` only exposes the
-  metadata-only path — no ELF. The bundle size budget is 600 KB gzip;
+  metadata-only path — no ELF. The bundle size budget is 1500 KiB gzip;
   `website/scripts/build-wasm.sh` enforces it. Adding compiler surface area
   that wasm can't avoid will blow the budget; this is RFC path B / v2 per
   `crates/cellscript-wasm/src/lib.rs`.

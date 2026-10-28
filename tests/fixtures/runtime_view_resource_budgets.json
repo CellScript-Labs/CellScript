@@ -13,9 +13,9 @@
         "raw transaction hash"
       ],
       "measured": {
-        "cycles": 18313,
+        "cycles": 17982,
         "dependency_bytes": 28,
-        "elf_bytes": 9864,
+        "elf_bytes": 9400,
         "max_stack_frame_bytes": 5376,
         "transaction_bytes": 469,
         "witness_bytes": 60
@@ -41,17 +41,17 @@
         "one-past-last global and group output indexes"
       ],
       "identities": {
-        "artifact_hash": "0xd16795e2b9eff0d051bd93a0a1025880d03aa15c52ff49443b8f1fb7da52edc9",
-        "lowering_record_hash": "0x3e82663e85e862d832d68e1f2290f9ad580a6f32e3ac3d3f759ed203911ee837",
-        "raw_transaction_hash": "0x2b432d67015d21d52b6189039286f0867af2838c016a033ac967a81716b0f166",
-        "serialized_transaction_hash": "0x9c9755382df19ab0d9f4979d8f1554fbf6bce053a802785145b76f7dd8a92cc9",
-        "source_map_hash": "0x770ec8c4699a6e00aefaa164d0fefa204580eb47cd7158a549c8ffae1b2d87b9",
-        "verified_bundle_id": "0xb14bce10493b56b2ebe783ae0dff81184445622a59c57d8a1a627f8b2b0361df"
+        "artifact_hash": "0x2055c48a171c25e82aa69a79f88d04a16e0b669b9a1940bcd36eedb3d8b02c5a",
+        "lowering_record_hash": "0xf455495ba5a4834e395e7b9ad3a51d82b2c4c707d2af06615240cd9fb3e00e49",
+        "raw_transaction_hash": "0x0fad5475e0b2541ea15c288b0fd850518c6b3da21957fb33199a14bb043106e5",
+        "serialized_transaction_hash": "0xcd9225523346925192b518714e6a56724b4869639adfbb350cf8cb7489e74a85",
+        "source_map_hash": "0x64a0b1d4f041bbd05350945de2159a03a0c70f142730cf47b29e136e68f19116",
+        "verified_bundle_id": "0x2617b8cc4e0127e903481655cbe8ded649b33af93b5b1efd002623cab0969de2"
       },
       "measured": {
-        "cycles": 45452,
+        "cycles": 45412,
         "dependency_bytes": 0,
-        "elf_bytes": 9576,
+        "elf_bytes": 9536,
         "max_stack_frame_bytes": 11344,
         "transaction_bytes": 1743,
         "witness_bytes": 0
@@ -75,21 +75,21 @@
         "generated entry witness builders"
       ],
       "identities": {
-        "artifact_hash": "0x44fe77a2dd3bf35901985190d3232481507555e8c0ed0c70c66769848297af93",
-        "lowering_record_hash": "0xe1e8b3dec1c2f88ff0a8fec0e8dadc7d1ee21507d945395b9b20eb61aadafea4",
-        "source_map_hash": "0x84c526223967a2c947f28128732e43ab24161ba880f3049d77e453a5f1081602",
-        "verified_bundle_id": "0x1ec4b3ae3709c2a56597cb653a0dde8b1a481270a9a24197c56a67a8b4424dee",
-        "partial_fill_raw_transaction_hash": "0x19e07018f4fc958fdd7c226c439bba9e73155baa8ee567750c0ebefea9b30237",
-        "partial_fill_serialized_transaction_hash": "0xf2fb925144b892be243cf2a8a795e77d1ccb9f6b71db2e3b89cb05d5fc50ffb8",
-        "settle_raw_transaction_hash": "0xd6f76b9aadcf47a6e394495290fdcf2a9621a2eb3d6cdf88597ca31b6984efa7",
-        "settle_serialized_transaction_hash": "0x7791c3d85a43eee23b4cb8f96e226509aef300885db7ddba7dc0b411080e59b2",
-        "cancel_raw_transaction_hash": "0xbc6846a8730b13663dda0a78f93c556b9900f03ce514e1665f71899d979f1756",
-        "cancel_serialized_transaction_hash": "0x6c605a0a4d87505817bd4cc0e555fac4f2bb09bcf737a3310da4337b0f8219c6"
+        "artifact_hash": "0x009d26dc981c88c68131f789dcf172ef86103639d284e703a6619cf0d4455eb6",
+        "cancel_raw_transaction_hash": "0x88b165152c744696420e1c03b1e1e14886f25601029b25b23d5f4f6cf43a7567",
+        "cancel_serialized_transaction_hash": "0x7c1082076cbd50d52b4102952cd5356f35782f78101072247dbaeae3dfd4ba54",
+        "lowering_record_hash": "0x4cd201d76f2da5a4e44662fa830e3f48bce176c1f89cc3cc3712445fd38a4743",
+        "partial_fill_raw_transaction_hash": "0xa24bee218aa567aee9e9f1b089638ed6d923db089d3c08c9cd652ea2ea56ba80",
+        "partial_fill_serialized_transaction_hash": "0xb4080c2040a1629f53e3020fe2c2587e6fd5856c089438db95bf7ddb3ee66f45",
+        "settle_raw_transaction_hash": "0xd3988eb5850865882f0aa99ae742bc867c2ba3674ffb4ddc7efc4f21b88b8750",
+        "settle_serialized_transaction_hash": "0x95f4c873d641810af45a43c716d0c73cb08c9643a729c3bbd486e5e0dd1edbd3",
+        "source_map_hash": "0xdc40ce083152d69930fb169f1692420d8c5e1d15d743e759fdb3b5fd60822787",
+        "verified_bundle_id": "0x90f66478f793cbae3c26fb67a8b5d70d616d90155ebe98fde10edbf10b2a3166"
       },
       "measured": {
-        "cycles": 16937,
-        "dependency_bytes": 13136,
-        "elf_bytes": 5952,
+        "cycles": 16867,
+        "dependency_bytes": 12976,
+        "elf_bytes": 5792,
         "max_stack_frame_bytes": 4192,
         "transaction_bytes": 493,
         "witness_bytes": 145
@@ -115,17 +115,17 @@
         "WitnessArgs size and exact 32-byte lock, input_type, and output_type projections"
       ],
       "identities": {
-        "artifact_hash": "0x3c5853117c9dfd2593a54a64334bc2a41c365c9a46e9d85490452c9f1cd9e997",
-        "lowering_record_hash": "0xf69dd4163d86f0c4a6238349f4edb8dfa35cbe753019d7f3bc3caf7e26aae6cc",
-        "raw_transaction_hash": "0xb946fec9135bc9c9df785d3a7ccf1c1813e433625c664a92b31db2684e24ad3b",
-        "serialized_transaction_hash": "0x27cafddfd34dcf7e144265e429f6683137f399d4abac4f17f8d3de3da542899e",
-        "source_map_hash": "0xa3e0a76a62385110d3901fa428c047a39b3fac95c5825d71962295450380df5c",
-        "verified_bundle_id": "0xc8da3d620a7e04f5af9f2642f8be6191b287759f29bf4f3b856e17b3c3855e98"
+        "artifact_hash": "0x994c3ee8075124f84b857e74c46f09926e22805f8ef0666cce3a8cbffc346c38",
+        "lowering_record_hash": "0x201a3a29a44f64df911db4921436a52ccd3e786d833b327743d0308264451471",
+        "raw_transaction_hash": "0x378222dd01cd5f55b27daecf90d462c71e979417ee5aa4c8eafb1d049bed0a65",
+        "serialized_transaction_hash": "0x600eb6fb007e6ece706c3fb68571ec158abf72d0558989459a1051e7241acb05",
+        "source_map_hash": "0x6c54e3fb172012169ff60c725b11c9e3ef2c6a47f9e2c5c37744eafad95358d7",
+        "verified_bundle_id": "0xe5923334009ec1302acb28f72206f806d6fd8c54b004d034f953752ed44d2ae9"
       },
       "measured": {
-        "cycles": 92318,
+        "cycles": 92260,
         "dependency_bytes": 73,
-        "elf_bytes": 15056,
+        "elf_bytes": 14984,
         "max_stack_frame_bytes": 22880,
         "transaction_bytes": 597,
         "witness_bytes": 124
@@ -152,17 +152,17 @@
         "bounded policy entry witness and raw transaction hash"
       ],
       "identities": {
-        "artifact_hash": "0x8a6b199738e366e408c365b11d0a5fbe3806bdbbafa3497d5e3df4972992432f",
-        "lowering_record_hash": "0x2ea75f9efd66a78d748c7f3d12ebee9731ef0329e00b9cd720ca8991a96ab7ca",
-        "raw_transaction_hash": "0x49b979ccdb7785220414a5f4a1d9a5e6e1c1e0d0b3a78b68bd7cd65126206dc8",
-        "serialized_transaction_hash": "0x4a7f847c91459adbf8c8888360eb3593b42ffca73c15e18f3ad2183578d08a6e",
-        "source_map_hash": "0x7c46fae08cb40f439819f279984eeffee02e4fac81f12fe555865c1857ddba87",
-        "verified_bundle_id": "0xff5c2782aeb5b34e948943110a6aab55b13e0e93ea852b3dd4bc1bf8530815cc"
+        "artifact_hash": "0xf03b9007ac8200bc1e6147262efc7a399d580c8a1ca7e344eea85ecbd2a86807",
+        "lowering_record_hash": "0x9c11fc75b2237651116bcc33c68695aba44ab0b022535aec5f4960b48445d6af",
+        "raw_transaction_hash": "0xba3937e9170354d87c03b87ab56401fff7c1c0108b39f6c848c3c9a113a49bc7",
+        "serialized_transaction_hash": "0xd9d3966ac60fb433309ffbb98260e1ea926b12fbe585249ae8a02f745dea53fc",
+        "source_map_hash": "0x66984c818adbcd070d7503dd7a87f2feb2d9da8f3f6baae91c37383600a4ca59",
+        "verified_bundle_id": "0x3c5381438c49dfbdd1df952c5230638096a787b35020bbe298d74eeaf5b851ac"
       },
       "measured": {
-        "cycles": 94799,
+        "cycles": 94490,
         "dependency_bytes": 73,
-        "elf_bytes": 19328,
+        "elf_bytes": 18904,
         "max_stack_frame_bytes": 20000,
         "transaction_bytes": 594,
         "witness_bytes": 145

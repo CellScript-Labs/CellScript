@@ -1,4 +1,5 @@
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "audit_helpers"
 version = "0.4.2"

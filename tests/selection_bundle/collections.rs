@@ -240,7 +240,7 @@ fn allocated_multi_asset_transfer_matches_independent_model_and_all_group_execut
     ];
     let cases = cases();
     let mut observations = BTreeMap::new();
-    for opt in [0, 3] {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let mut canonical = BTreeMap::new();
         for (name, source) in programs {
             let ast = cellscript::frontend::parse(source, NEXT_EDITION).unwrap();
@@ -261,7 +261,7 @@ fn allocated_multi_asset_transfer_matches_independent_model_and_all_group_execut
                     &artifacts,
                     &case.before,
                     &case.after,
-                    (opt == 3 && case.resource).then_some(key.as_str()),
+                    (opt.is_standard() && case.resource).then_some(key.as_str()),
                 );
                 if name == "arena" {
                     canonical.insert(&case.name, bytes);
@@ -299,7 +299,7 @@ fn allocated_transfer_preallocation_policy_preserves_business_outcomes_and_measu
     let frozen: Value = serde_json::from_str(include_str!("../fixtures/collection_transfer_resources.json")).unwrap();
     let mut observations = BTreeMap::new();
     let mut ceiling_exceedances = BTreeMap::new();
-    for opt in [0, 3] {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let mut canonical = BTreeMap::new();
         for (policy, source) in [("actual-counts", actual_counts), ("declared-maxima", declared_maxima.as_str())] {
             let temp = tempfile::tempdir().unwrap();
@@ -314,7 +314,7 @@ fn allocated_transfer_preallocation_policy_preserves_business_outcomes_and_measu
                     &artifacts,
                     &case.before,
                     &case.after,
-                    (opt == 3 && case.resource).then_some(key.as_str()),
+                    (opt.is_standard() && case.resource).then_some(key.as_str()),
                 );
                 if policy == "actual-counts" {
                     canonical.insert(&case.name, bytes);
@@ -368,7 +368,7 @@ fn allocated_transfer_preallocation_policy_preserves_business_outcomes_and_measu
             "actual-counts":hex::encode(Sha256::digest(actual_counts)),
             "declared-maxima":hex::encode(Sha256::digest(&declared_maxima)),
         },
-        "cases_per_policy_per_optimization":44,"optimization_levels":[0,3],
+        "cases_per_policy_per_strategy":44,"strategies":["standard","diagnostic:ff"],
         "observations":observations,
         "candidate_ceiling_exceedances":ceiling_exceedances,
         "limitations":["no new source syntax or stable API decision", "finite business corpus, not a global worst-case proof"]
@@ -398,7 +398,7 @@ fn frozen_transfer_resources_bind_sources_and_complete_case_inventory() {
         assert_eq!(fixture["sources"][path], hex::encode(Sha256::digest(bytes)), "{path}");
         // Catch compiler code-size regressions before the full transaction
         // replay, which separately verifies cycles, memory and all groups.
-        let compiled = compile_at(std::str::from_utf8(bytes).unwrap(), 3);
+        let compiled = compile_at(std::str::from_utf8(bytes).unwrap(), cellscript::CompilerDiagnostics::default());
         let limit = fixture["ceilings"][profile]["groups"]["transfer"]["elf_bytes"].as_u64().unwrap();
         assert!(compiled.artifact_bytes.len() as u64 <= limit, "{profile}: ELF {} exceeds {limit}", compiled.artifact_bytes.len());
         assert_eq!(
@@ -455,7 +455,7 @@ action inspect() -> u64 {{
     return 0
 }}"#
         );
-        for opt in [0, 3] {
+        for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             for reject in [false, true] {
                 let temp = tempfile::tempdir().unwrap();
                 // Change only the assertion after the imported helper returns;

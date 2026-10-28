@@ -15,17 +15,17 @@ use ckb_script_runner::{build_simple_fixture, execute_cellscript_script, Fixture
 
 const EDITIONS: [CellScriptEdition; 2] = [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027];
 
-fn compile_source(source: &str, edition: CellScriptEdition, opt_level: u8) -> CompileResult {
+fn compile_source(source: &str, edition: CellScriptEdition, diagnostics: cellscript::CompilerDiagnostics) -> CompileResult {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("main.cell");
     std::fs::write(&path, source).unwrap();
     compile_path_with_executable_surface_policy(
         path.to_str().unwrap(),
-        CompileOptions { edition, opt_level, target: Some("riscv64-elf".to_string()), ..Default::default() },
+        CompileOptions { edition, diagnostics, target: Some("riscv64-elf".to_string()), ..Default::default() },
         Some(CompileEntryScope::Action("verify".to_string())),
         ExecutableSurfacePolicy::DenyFailClosed,
     )
-    .unwrap_or_else(|error| panic!("edition={edition:?}, opt={opt_level}: {error}\n{source}"))
+    .unwrap_or_else(|error| panic!("edition={edition:?}, opt={diagnostics}: {error}\n{source}"))
 }
 
 fn exit_code(compiled: &CompileResult, args: &[EntryWitnessArg]) -> i64 {
@@ -64,12 +64,12 @@ action inner(value: u64) {
 "#;
     let mut failures = Vec::new();
     for edition in EDITIONS {
-        for opt_level in 0..=3 {
-            let compiled = compile_source(source, edition, opt_level);
-            assert_eq!(exit_code(&compiled, &[EntryWitnessArg::U64(7)]), 0, "normal Unit return: {edition:?}, opt={opt_level}");
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+            let compiled = compile_source(source, edition, diagnostics);
+            assert_eq!(exit_code(&compiled, &[EntryWitnessArg::U64(7)]), 0, "normal Unit return: {edition:?}, opt={diagnostics}");
             let actual = exit_code(&compiled, &[EntryWitnessArg::U64(8)]);
             if actual != 5 {
-                failures.push(format!("{edition:?}, opt={opt_level}: expected assertion error 5, got {actual}"));
+                failures.push(format!("{edition:?}, opt={diagnostics}: expected assertion error 5, got {actual}"));
             }
         }
     }
@@ -89,12 +89,12 @@ action verify(witness value: u64) -> u64 {
 "#;
     let mut failures = Vec::new();
     for edition in EDITIONS {
-        for opt_level in 0..=3 {
-            let compiled = compile_source(source, edition, opt_level);
-            assert_eq!(exit_code(&compiled, &[EntryWitnessArg::U64(2)]), 0, "normal scalar return: {edition:?}, opt={opt_level}");
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+            let compiled = compile_source(source, edition, diagnostics);
+            assert_eq!(exit_code(&compiled, &[EntryWitnessArg::U64(2)]), 0, "normal scalar return: {edition:?}, opt={diagnostics}");
             let actual = exit_code(&compiled, &[EntryWitnessArg::U64(0)]);
             if actual != 20 {
-                failures.push(format!("{edition:?}, opt={opt_level}: expected numeric error 20, got {actual}"));
+                failures.push(format!("{edition:?}, opt={diagnostics}: expected numeric error 20, got {actual}"));
             }
         }
     }
@@ -145,13 +145,15 @@ fn arithmetic_failures_survive_transitive_calls_and_every_discard_shape() {
                  verification\n{use_call}\nreturn 0\n}}"
             );
             for edition in EDITIONS {
-                for opt_level in 0..=3 {
-                    let compiled = compile_source(&source, edition, opt_level);
+                for diagnostics in
+                    [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()]
+                {
+                    let compiled = compile_source(&source, edition, diagnostics);
                     let valid = exit_code(&compiled, std::slice::from_ref(&good));
                     let invalid = exit_code(&compiled, std::slice::from_ref(&bad));
                     if valid != 0 || invalid != expected {
                         failures.push(format!(
-                            "{name}/{result_use:?}, {edition:?}, opt={opt_level}: valid={valid}, invalid={invalid}, expected={expected}"
+                            "{name}/{result_use:?}, {edition:?}, opt={diagnostics}: valid={valid}, invalid={invalid}, expected={expected}"
                         ));
                     }
                 }
@@ -175,12 +177,12 @@ fn unit_failure_survives_scalar_wrappers_and_discarded_results() {
              action verify(witness value: u64) -> u64 {{ verification\n{use_call}\nreturn 0 }}"
         );
         for edition in EDITIONS {
-            for opt_level in 0..=3 {
-                let compiled = compile_source(&source, edition, opt_level);
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+                let compiled = compile_source(&source, edition, diagnostics);
                 let valid = exit_code(&compiled, &[EntryWitnessArg::U64(7)]);
                 let invalid = exit_code(&compiled, &[EntryWitnessArg::U64(8)]);
                 if valid != 0 || invalid != 5 {
-                    failures.push(format!("{result_use:?}, {edition:?}, opt={opt_level}: valid={valid}, invalid={invalid}"));
+                    failures.push(format!("{result_use:?}, {edition:?}, opt={diagnostics}: valid={valid}, invalid={invalid}"));
                 }
             }
         }
@@ -200,13 +202,13 @@ fn failed_helpers_cannot_supply_error_shaped_values_to_successful_predicates() {
              action verify(witness value: u64) -> u64 {{ verification\nrequire {predicate}\nreturn 0 }}"
         );
         for edition in EDITIONS {
-            for opt_level in 0..=3 {
-                let compiled = compile_source(&source, edition, opt_level);
-                assert_eq!(exit_code(&compiled, &[EntryWitnessArg::U64(good)]), 0, "valid predicate: {edition:?}, opt={opt_level}");
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+                let compiled = compile_source(&source, edition, diagnostics);
+                assert_eq!(exit_code(&compiled, &[EntryWitnessArg::U64(good)]), 0, "valid predicate: {edition:?}, opt={diagnostics}");
                 assert_eq!(
                     exit_code(&compiled, &[EntryWitnessArg::U64(bad)]),
                     expected,
-                    "fatal error must not become a matching scalar or true: {edition:?}, opt={opt_level}, predicate={predicate}"
+                    "fatal error must not become a matching scalar or true: {edition:?}, opt={diagnostics}, predicate={predicate}"
                 );
             }
         }
@@ -236,13 +238,13 @@ action verify(witness value: u64, witness large: u128) -> u64 {
 }
 "#;
     for edition in EDITIONS {
-        for opt_level in 0..=3 {
-            let compiled = compile_source(source, edition, opt_level);
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+            let compiled = compile_source(source, edition, diagnostics);
             for value in [5, 20, 49] {
                 assert_eq!(
                     exit_code(&compiled, &[EntryWitnessArg::U64(value), EntryWitnessArg::U128((1u128 << 96) + value as u128)]),
                     0,
-                    "ordinary value must not be treated as an error: {edition:?}, opt={opt_level}, value={value}"
+                    "ordinary value must not be treated as an error: {edition:?}, opt={diagnostics}, value={value}"
                 );
             }
         }
@@ -292,13 +294,13 @@ fn normal_enum_tuple_returns_and_reference_arguments_preserve_their_abi() {
              action verify(witness value: u64) -> u64 {{ verification\n{checks}\nreturn 0 }}"
         );
         for edition in EDITIONS {
-            for opt_level in 0..=3 {
-                let compiled = compile_source(&source, edition, opt_level);
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+                let compiled = compile_source(&source, edition, diagnostics);
                 for value in [5, 20, 49] {
                     let actual = exit_code(&compiled, &[EntryWitnessArg::U64(value)]);
                     if actual != 0 {
                         failures.push(format!(
-                            "{name}: {edition:?}, opt={opt_level}, value={value}: expected normal return, exit={actual}"
+                            "{name}: {edition:?}, opt={diagnostics}, value={value}: expected normal return, exit={actual}"
                         ));
                     }
                 }
@@ -324,24 +326,24 @@ action verify(read config: Config, witness expected: u64) -> u64 {
 }
 "#;
     for edition in EDITIONS {
-        for opt_level in 0..=3 {
-            let compiled = compile_source(source, edition, opt_level);
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+            let compiled = compile_source(source, edition, diagnostics);
             for expected in [5u64, 20, 49] {
                 assert_eq!(
                     exit_code_with_deps(&compiled, &[EntryWitnessArg::U64(expected)], &[expected.to_le_bytes().to_vec()]),
                     0,
-                    "valid external schema reference: {edition:?}, opt={opt_level}"
+                    "valid external schema reference: {edition:?}, opt={diagnostics}"
                 );
             }
             assert_eq!(
                 exit_code_with_deps(&compiled, &[EntryWitnessArg::U64(49)], &[vec![49, 0, 0]]),
                 4,
-                "external short data cannot receive a fabricated fixed width: {edition:?}, opt={opt_level}"
+                "external short data cannot receive a fabricated fixed width: {edition:?}, opt={diagnostics}"
             );
             assert_ne!(
                 exit_code_with_deps(&compiled, &[EntryWitnessArg::U64(49)], &[vec![49, 0, 0, 0, 0, 0, 0, 0, 0]]),
                 0,
-                "external trailing data remains invalid: {edition:?}, opt={opt_level}"
+                "external trailing data remains invalid: {edition:?}, opt={diagnostics}"
             );
         }
     }
@@ -361,13 +363,14 @@ fn discarded_schema_reads_cannot_hide_malformed_cell_data() {
              action verify() -> u64 {{ verification\n{use_call}\nreturn 0 }}"
         );
         for edition in EDITIONS {
-            for opt_level in 0..=3 {
-                let compiled = compile_source(&source, edition, opt_level);
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+                let compiled = compile_source(&source, edition, diagnostics);
                 let valid = exit_code_with_deps(&compiled, &[], &[49u64.to_le_bytes().to_vec()]);
                 let invalid = exit_code_with_deps(&compiled, &[], &[vec![49, 0, 0]]);
                 if valid != 0 || invalid != 4 {
-                    failures
-                        .push(format!("{result_use:?}, {edition:?}, opt={opt_level}: valid={valid}, malformed={invalid}, expected=4"));
+                    failures.push(format!(
+                        "{result_use:?}, {edition:?}, opt={diagnostics}: valid={valid}, malformed={invalid}, expected=4"
+                    ));
                 }
             }
         }
@@ -390,7 +393,7 @@ fn checked_value(value: u64) -> u64 { checked(value)
         std::fs::write(
             directory.path().join("Cell.toml"),
             format!(
-                "[package]\nname = \"verifier_failure\"\nversion = \"0.1.0\"\nedition = \"{}\"\n",
+                "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nname = \"verifier_failure\"\nversion = \"0.1.0\"\nedition = \"{}\"\n",
                 if edition == CellScriptEdition::Edition2026 { "2026" } else { "2027" }
             ),
         )
@@ -410,19 +413,21 @@ fn checked_value(value: u64) -> u64 { checked(value)
                      action verify(witness value: u64) -> u64 {{ verification\n{use_call}\nreturn 0 }}"
                 );
                 std::fs::write(&entry, &source).unwrap();
-                for opt_level in 0..=3 {
+                for diagnostics in
+                    [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()]
+                {
                     let compiled = compile_path_with_executable_surface_policy(
                         entry.to_str().unwrap(),
-                        CompileOptions { edition, opt_level, target: Some("riscv64-elf".to_string()), ..Default::default() },
+                        CompileOptions { edition, diagnostics, target: Some("riscv64-elf".to_string()), ..Default::default() },
                         Some(CompileEntryScope::Action("verify".to_string())),
                         ExecutableSurfacePolicy::DenyFailClosed,
                     )
-                    .unwrap_or_else(|error| panic!("{edition:?}, opt={opt_level}, {name}/{result_use:?}: {error}"));
+                    .unwrap_or_else(|error| panic!("{edition:?}, opt={diagnostics}, {name}/{result_use:?}: {error}"));
                     let valid = exit_code(&compiled, &[EntryWitnessArg::U64(good)]);
                     let invalid = exit_code(&compiled, &[EntryWitnessArg::U64(bad)]);
                     if valid != 0 || invalid != expected {
                         failures.push(format!(
-                            "{name}/{result_use:?}, {edition:?}, opt={opt_level}: valid={valid}, invalid={invalid}, expected={expected}"
+                            "{name}/{result_use:?}, {edition:?}, opt={diagnostics}: valid={valid}, invalid={invalid}, expected={expected}"
                         ));
                     }
                 }
@@ -446,9 +451,9 @@ action verify() -> u64 {
 }
 "#;
     for edition in EDITIONS {
-        for opt_level in 0..=3 {
-            let compiled = compile_source(source, edition, opt_level);
-            assert_eq!(exit_code(&compiled, &[]), 0, "declared status return: {edition:?}, opt={opt_level}");
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+            let compiled = compile_source(source, edition, diagnostics);
+            assert_eq!(exit_code(&compiled, &[]), 0, "declared status return: {edition:?}, opt={diagnostics}");
         }
     }
 }

@@ -68,10 +68,10 @@ public action verify(witness choice: Choice<Hash>, witness pair: Pair<u64>, witn
     require first<u64>(pair) == expected
 }
 "#;
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile_with_executable_surface_policy(
             source,
-            CompileOptions { source_contracts: true, target: Some("riscv64-elf".into()), opt_level, ..CompileOptions::default() },
+            CompileOptions { source_contracts: true, target: Some("riscv64-elf".into()), diagnostics, ..CompileOptions::default() },
             ExecutableSurfacePolicy::DenyFailClosed,
         )
         .unwrap();
@@ -82,7 +82,7 @@ public action verify(witness choice: Choice<Hash>, witness pair: Pair<u64>, witn
             &serde_json::to_vec(compiled.source_artifact_map.as_ref().unwrap()).unwrap(),
             &CheckerBudgets::default(),
         )
-        .unwrap_or_else(|error| panic!("opt={opt_level}: {error}"));
+        .unwrap_or_else(|error| panic!("opt={diagnostics}: {error}"));
         assert_eq!(inspected.declared(), &compiled.metadata.public_interface);
         inspected.validate_symbolic_declarations().unwrap();
         for template in ["Pair", "Envelope", "Choice", "Tagged", "UnitFields", "MixedFields", "WithUnits", "first"] {
@@ -103,10 +103,10 @@ public action verify(witness input: 箱<u64>, witness tag: αT) {
     require 取<u64>(input.value) == tag.value
 }
 "#;
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile_with_executable_surface_policy(
             source,
-            CompileOptions { source_contracts: true, target: Some("riscv64-elf".into()), opt_level, ..CompileOptions::default() },
+            CompileOptions { source_contracts: true, target: Some("riscv64-elf".into()), diagnostics, ..CompileOptions::default() },
             ExecutableSurfacePolicy::DenyFailClosed,
         )
         .unwrap();
@@ -285,13 +285,18 @@ public action verify(witness pair: Pair<u64>) {
 "#,
     ];
     for source in sources {
-        for opt_level in 0..=3 {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = compile_with_executable_surface_policy(
                 source,
-                CompileOptions { source_contracts: true, target: Some("riscv64-elf".into()), opt_level, ..CompileOptions::default() },
+                CompileOptions {
+                    source_contracts: true,
+                    target: Some("riscv64-elf".into()),
+                    diagnostics,
+                    ..CompileOptions::default()
+                },
                 ExecutableSurfacePolicy::DenyFailClosed,
             )
-            .unwrap_or_else(|error| panic!("opt={opt_level}: {error}\n{source}"));
+            .unwrap_or_else(|error| panic!("opt={diagnostics}: {error}\n{source}"));
             let inspected = inspect_bundle(
                 &compiled.artifact_bytes,
                 &serde_json::to_vec(&compiled.metadata).unwrap(),
@@ -299,7 +304,7 @@ public action verify(witness pair: Pair<u64>) {
                 &serde_json::to_vec(compiled.source_artifact_map.as_ref().unwrap()).unwrap(),
                 &CheckerBudgets::default(),
             )
-            .unwrap_or_else(|error| panic!("opt={opt_level}: {error}\n{source}"));
+            .unwrap_or_else(|error| panic!("opt={diagnostics}: {error}\n{source}"));
             assert_eq!(inspected.declared(), &compiled.metadata.public_interface);
         }
     }

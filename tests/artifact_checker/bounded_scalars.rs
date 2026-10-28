@@ -37,12 +37,12 @@ action inspect(witness messages: Messages) -> u64 {
     return 0
 }"#;
     for (source, nested) in [(cell, false), (nested, true)] {
-        for opt_level in [0, 3] {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let compiled = compile(
                 source,
-                CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             )
-            .unwrap_or_else(|error| panic!("nested={nested}/O{opt_level}: {error}"));
+            .unwrap_or_else(|error| panic!("nested={nested}/{diagnostics}: {error}"));
             let valid = Fixture::from_result(compiled.clone());
             assert!(!valid
                 .record
@@ -130,19 +130,19 @@ fn bounded_scalar_inventory_covers_named_catalogs_and_complete_programs() {
         include_str!("../../examples/language/batches/record_migration.cell"),
         NESTED_CELL_CODEC_SOURCE,
     ] {
-        for opt_level in [0, 3] {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
                 compile(
                     source,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap_or_else(|error| {
-                    panic!("O{opt_level} {}: {error}", source.lines().find(|line| line.starts_with("module ")).unwrap_or("fixture"))
+                    panic!("{diagnostics} {}: {error}", source.lines().find(|line| line.starts_with("module ")).unwrap_or("fixture"))
                 }),
             );
             assert!(
                 valid.record.blocks.iter().flat_map(|block| &block.allocated_lifecycle_labels).any(|label| label.starts_with(PREFIX)),
-                "{} O{opt_level}",
+                "{} {diagnostics}",
                 valid.record.module
             );
             let mut erased = valid.clone();

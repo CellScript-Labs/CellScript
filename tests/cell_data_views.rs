@@ -20,12 +20,12 @@ fn copied_cell_fields_snapshot_mutable_bindings_before_branch_assignment() {
                  action inspect() -> u64 {{ verification\n\
                  require same(ckb::input<Token>(0), ckb::output<Token>(0), true)\nreturn 0\n}}"
             );
-            for opt_level in 0..=3 {
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let compiled = compile(
                     &source,
                     CompileOptions {
                         edition: cellscript::NEXT_EDITION,
-                        opt_level,
+                        diagnostics,
                         target: Some("riscv64-elf".into()),
                         ..Default::default()
                     },
@@ -49,7 +49,7 @@ fn copied_cell_fields_snapshot_mutable_bindings_before_branch_assignment() {
                     assert_eq!(
                         execution.exit_code,
                         if equal { 0 } else { 5 },
-                        "{ty} O{opt_level} annotated={annotated} equal={equal}"
+                        "{ty} {diagnostics} annotated={annotated} equal={equal}"
                     );
                 }
             }
@@ -62,7 +62,7 @@ fn nested_data_views_keep_owned_buffers_across_reads_and_helpers() {
     use cellscript::nested_builder::{encode_nested_cell_data, NestedCellFieldInput as Field, NestedElementInput as Item};
     use std::collections::BTreeMap;
     let source = include_str!("syntax_combo/seeds/named-nested-data-views.cell");
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for group in [false, true] {
             let source = if group {
                 source
@@ -75,12 +75,12 @@ fn nested_data_views_keep_owned_buffers_across_reads_and_helpers() {
                 &source,
                 CompileOptions {
                     edition: cellscript::NEXT_EDITION,
-                    opt_level,
+                    diagnostics,
                     target: Some("riscv64-elf".into()),
                     ..Default::default()
                 },
             )
-            .unwrap_or_else(|error| panic!("nested data O{opt_level} group={group}: {error}"));
+            .unwrap_or_else(|error| panic!("nested data {diagnostics} group={group}: {error}"));
             for large in [false, true] {
                 let encode = |payload: &[u8]| {
                     let mut messages = vec![Item { fixed_fields: &[], payload }];
@@ -148,7 +148,7 @@ fn nested_data_views_keep_owned_buffers_across_reads_and_helpers() {
                     assert_eq!(
                         execution.exit_code,
                         [0, 5, 5, 5, 16, 2, 16][case],
-                        "O{opt_level} group={group} large={large} case={case}: {execution:?}"
+                        "{diagnostics} group={group} large={large} case={case}: {execution:?}"
                     );
                 }
             }
@@ -176,10 +176,10 @@ fn data_predicates_compose_through_typed_read_only_helpers() {
             } else {
                 source.clone()
             };
-            for opt_level in 0..=3 {
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let compiled =
-                    compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
-                        .unwrap_or_else(|error| panic!("O{opt_level} padding={padding} group={group}: {error}"));
+                    compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() })
+                        .unwrap_or_else(|error| panic!("{diagnostics} padding={padding} group={group}: {error}"));
                 assert!(!compiled.metadata.runtime.fail_closed_runtime_features.contains(&"cell-data-view-artifact-proof".into()));
                 let reads = compiled
                     .metadata
@@ -224,7 +224,7 @@ fn data_predicates_compose_through_typed_read_only_helpers() {
                     assert_eq!(
                         execution.exit_code,
                         [0, 5, 5, 16][case],
-                        "O{opt_level} padding={padding} group={group} case={case}: {execution:?}"
+                        "{diagnostics} padding={padding} group={group} case={case}: {execution:?}"
                     );
                 }
             }
@@ -280,9 +280,9 @@ return true",
 #[test]
 fn fixed_data_fields_lower_without_confusing_transaction_metadata_or_ownership() {
     cellscript::fmt::verify_idempotent(SOURCE, cellscript::fmt::FormatConfig::default()).unwrap();
-    for opt_level in 0..=3 {
-        let result = compile(SOURCE, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
-            .unwrap_or_else(|error| panic!("O{opt_level}: {error}"));
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let result = compile(SOURCE, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() })
+            .unwrap_or_else(|error| panic!("{diagnostics}: {error}"));
         assert!(!result.metadata.runtime.fail_closed_runtime_features.contains(&"cell-data-view-artifact-proof".into()));
         assert!(!result.metadata.runtime.fail_closed_runtime_features.contains(&"field-access".into()));
         let reads = result
@@ -303,7 +303,7 @@ fn fixed_data_fields_lower_without_confusing_transaction_metadata_or_ownership()
             .all(|view| view.ownership == "read-only-view" && !view.lifecycle_authority));
         cellscript::compile_with_executable_surface_policy(
             SOURCE,
-            CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+            CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
             cellscript::ExecutableSurfacePolicy::DenyFailClosed,
         )
         .unwrap();
@@ -353,9 +353,9 @@ action inspect() -> u64 {
     data.extend_from_slice(&0x89abcdefu32.to_le_bytes());
     data.extend_from_slice(&[0xbc; 32]);
     assert_eq!(data.len(), 512);
-    for opt_level in 0..=3 {
-        let compiled = compile(source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() })
-            .unwrap_or_else(|error| panic!("O{opt_level}: {error}"));
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let compiled = compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() })
+            .unwrap_or_else(|error| panic!("{diagnostics}: {error}"));
         for case in 0..8 {
             let mut input = data.clone();
             let mut output = data.clone();
@@ -389,7 +389,7 @@ action inspect() -> u64 {
             fixture.outputs[0].data = output.into();
             let execution =
                 ckb_script_runner::execute_cellscript_script(cellscript::strip_vm_abi_trailer(&compiled.artifact_bytes), &fixture);
-            assert_eq!(execution.exit_code, expected, "O{opt_level} case={case}: {execution:?}");
+            assert_eq!(execution.exit_code, expected, "{diagnostics} case={case}: {execution:?}");
         }
     }
 }
@@ -401,7 +401,7 @@ fn fixed_data_fields_execute_with_exact_lengths_full_widths_and_source_domains()
     data.extend_from_slice(&[0xab; 32]);
     data.extend_from_slice(&((1u128 << 100) | 19).to_le_bytes());
     data.extend_from_slice(&[3, 5, 7]);
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for group in [false, true] {
             let source = if group {
                 SOURCE.replace("ckb::input", "ckb::group_input").replace("ckb::output", "ckb::group_output")
@@ -409,7 +409,7 @@ fn fixed_data_fields_execute_with_exact_lengths_full_widths_and_source_domains()
                 SOURCE.into()
             };
             let result =
-                compile(&source, CompileOptions { opt_level, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap();
+                compile(&source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() }).unwrap();
             for case in 0..8 {
                 let mut input = data.clone();
                 let mut output = data.clone();
@@ -453,7 +453,7 @@ fn fixed_data_fields_execute_with_exact_lengths_full_widths_and_source_domains()
                 fixture.outputs[0].data = output.into();
                 let execution =
                     ckb_script_runner::execute_cellscript_script(cellscript::strip_vm_abi_trailer(&result.artifact_bytes), &fixture);
-                assert_eq!(execution.exit_code, expected, "O{opt_level} group={group} case={case}: {execution:?}");
+                assert_eq!(execution.exit_code, expected, "{diagnostics} group={group} case={case}: {execution:?}");
             }
         }
     }

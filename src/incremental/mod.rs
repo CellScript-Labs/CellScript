@@ -17,6 +17,8 @@ pub struct IncrementalCompiler {
 pub struct CompiledUnit {
     pub source_path: PathBuf,
     pub source_hash: u64,
+    pub compiler_version: String,
+    pub compilation_policy: String,
     pub output_path: PathBuf,
     pub output_hash: u64,
     pub dependencies: Vec<PathBuf>,
@@ -25,8 +27,8 @@ pub struct CompiledUnit {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct CompileOptions {
-    pub opt_level: u8,
     pub target: String,
     pub debug: bool,
 }
@@ -89,7 +91,10 @@ impl IncrementalCompiler {
             return true;
         };
 
-        if unit.compile_options != *options {
+        if unit.compiler_version != crate::VERSION
+            || unit.compilation_policy != crate::COMPILATION_POLICY
+            || unit.compile_options != *options
+        {
             return true;
         }
 
@@ -149,6 +154,8 @@ impl IncrementalCompiler {
         let output_hash = compute_file_hash(output).unwrap_or(0);
 
         let unit = CompiledUnit {
+            compiler_version: crate::VERSION.into(),
+            compilation_policy: crate::COMPILATION_POLICY.into(),
             source_path: source.to_path_buf(),
             source_hash,
             output_path: output.to_path_buf(),
@@ -441,7 +448,7 @@ mod tests {
         let source = temp.path().join("test.cell");
         fs::write(&source, "module test;").unwrap();
 
-        let options = CompileOptions { opt_level: 0, target: "riscv64".to_string(), debug: false };
+        let options = CompileOptions { target: "riscv64".to_string(), debug: false };
 
         assert!(compiler.needs_recompile(&source, &options));
 
@@ -450,6 +457,14 @@ mod tests {
         compiler.record_compilation(&source, &output, vec![], &options).unwrap();
 
         assert!(!compiler.needs_recompile(&source, &options));
+
+        let key = source.to_string_lossy().to_string();
+        compiler.unit_cache.get_mut(&key).unwrap().compilation_policy = "other-policy".into();
+        assert!(compiler.needs_recompile(&source, &options));
+        compiler.record_compilation(&source, &output, vec![], &options).unwrap();
+        compiler.unit_cache.get_mut(&key).unwrap().compiler_version = "other-compiler".into();
+        assert!(compiler.needs_recompile(&source, &options));
+        compiler.record_compilation(&source, &output, vec![], &options).unwrap();
 
         fs::write(&source, "module test2;").unwrap();
         assert!(compiler.needs_recompile(&source, &options));

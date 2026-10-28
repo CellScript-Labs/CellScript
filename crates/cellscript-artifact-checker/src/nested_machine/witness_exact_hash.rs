@@ -15,7 +15,7 @@ pub(super) fn field(owner: &str) -> Option<u32> {
 
 pub(super) fn validate(record: &VerifiedLoweringRecord, elf: &ParsedElf, owner: &str) -> Result<(), CheckerError> {
     use Label::*;
-    let field = field(owner).ok_or_else(|| invalid("unknown exact WitnessArgs hash helper"))?;
+    let field = field(owner).ok_or_else(|| invalid("unknown exact WitnessArgs byte helper"))?;
     let blocks = record.blocks.iter().filter(|block| block.owner_entry == owner).collect::<Vec<_>>();
     let start = blocks.iter().map(|block| block.range.start).min().ok_or_else(|| invalid("WitnessArgs helper has no body"))?;
     let end = blocks.iter().map(|block| block.range.end).max().unwrap();

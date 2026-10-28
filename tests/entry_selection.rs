@@ -270,17 +270,17 @@ action selected(witness choice: Outer) { verification require true }
     let directory = tempfile::tempdir().unwrap();
     let input = Utf8Path::from_path(directory.path()).unwrap().join("nested.cell");
     std::fs::write(&input, source).unwrap();
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let result = compile_file_with_entry_action(
             &input,
-            CompileOptions { source_contracts: true, opt_level, ..options("riscv64-elf") },
+            CompileOptions { source_contracts: true, diagnostics, ..options("riscv64-elf") },
             "selected",
         )
         .unwrap();
         assert_contract(&result, "action", "selected");
         let types = &result.verified_lowering_record.as_ref().unwrap().typed_semantics.types;
         for name in ["Inner", "Payload", "Outer"] {
-            assert!(types.iter().any(|ty| ty.name == name), "missing {name} at optimization level {opt_level}");
+            assert!(types.iter().any(|ty| ty.name == name), "missing {name} at strategy {diagnostics}");
         }
         assert!(!types.iter().any(|ty| ty.name == "Unrelated"));
         // Outer::Wrapped(Payload { inner: Inner::Value(42) }): two u8 tags
@@ -293,7 +293,7 @@ action selected(witness choice: Outer) { verification require true }
         fixture.witnesses = vec![packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(payload)).pack()).build().as_bytes()];
         let execution =
             ckb_script_runner::execute_cellscript_script(cellscript::strip_vm_abi_trailer(&result.artifact_bytes), &fixture);
-        assert_eq!(execution.exit_code, 0, "nested witness at optimization level {opt_level}: {:?}", execution.captured_debug);
+        assert_eq!(execution.exit_code, 0, "nested witness at strategy {diagnostics}: {:?}", execution.captured_debug);
     }
 }
 
@@ -316,16 +316,16 @@ public action selected(witness marker: Marker<(IdentityToken, IdentityToken)>, w
     let directory = tempfile::tempdir().unwrap();
     let input = Utf8Path::from_path(directory.path()).unwrap().join("generic.cell");
     std::fs::write(&input, source).unwrap();
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let result = compile_file_with_entry_action(
             &input,
-            CompileOptions { source_contracts: true, opt_level, ..options("riscv64-elf") },
+            CompileOptions { source_contracts: true, diagnostics, ..options("riscv64-elf") },
             "selected",
         )
         .unwrap();
         let typed = &result.verified_lowering_record.as_ref().unwrap().typed_semantics;
         for name in ["IdentityToken", "Number", "Choice"] {
-            assert!(typed.types.iter().any(|ty| ty.name == name), "missing identity-only {name} at O{opt_level}");
+            assert!(typed.types.iter().any(|ty| ty.name == name), "missing identity-only {name} at {diagnostics}");
         }
         assert!(typed.types.iter().any(|ty| ty.name.starts_with("Pair__mono__")));
         assert!(!typed.types.iter().any(|ty| ty.name == "Unrelated"));
@@ -344,7 +344,7 @@ public action selected(witness marker: Marker<(IdentityToken, IdentityToken)>, w
         fixture.witnesses = vec![packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(payload)).pack()).build().as_bytes()];
         let execution =
             ckb_script_runner::execute_cellscript_script(cellscript::strip_vm_abi_trailer(&result.artifact_bytes), &fixture);
-        assert_eq!(execution.exit_code, 0, "phantom layout at O{opt_level}: {:?}", execution.captured_debug);
+        assert_eq!(execution.exit_code, 0, "phantom layout at {diagnostics}: {:?}", execution.captured_debug);
     }
 }
 
@@ -395,10 +395,10 @@ public action selected(witness pair: Duo<u64>, witness other: Other<u64>) {
 "#,
     )
     .unwrap();
-    for opt_level in 0..=3 {
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let result = compile_file_with_entry_action(
             &input,
-            CompileOptions { source_contracts: true, opt_level, ..options("riscv64-elf") },
+            CompileOptions { source_contracts: true, diagnostics, ..options("riscv64-elf") },
             "selected",
         )
         .unwrap();
@@ -419,7 +419,7 @@ public action selected(witness pair: Duo<u64>, witness other: Other<u64>) {
         assert!(other.lowered_names.iter().any(|name| name.starts_with("Other__mono__")));
         assert_eq!(typed.types.iter().find(|ty| ty.name.starts_with("Duo__mono__")).unwrap().fields.len(), 2);
         assert_eq!(typed.types.iter().find(|ty| ty.name.starts_with("Other__mono__")).unwrap().fields.len(), 1);
-        if opt_level == 0 {
+        if !diagnostics.is_standard() {
             let first = typed.instantiations.iter().find(|instance| instance.template == "first").unwrap();
             assert_eq!(first.module, "imported_generic_owner");
             assert!(first.lowered_names.iter().any(|name| name.starts_with("pick__mono__")));
@@ -443,7 +443,7 @@ public action selected(witness pair: Duo<u64>, witness other: Other<u64>) {
         fixture.witnesses = vec![packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(payload)).pack()).build().as_bytes()];
         let execution =
             ckb_script_runner::execute_cellscript_script(cellscript::strip_vm_abi_trailer(&result.artifact_bytes), &fixture);
-        assert_eq!(execution.exit_code, 0, "imported generic aggregate at O{opt_level}: {:?}", execution.captured_debug);
+        assert_eq!(execution.exit_code, 0, "imported generic aggregate at {diagnostics}: {:?}", execution.captured_debug);
     }
 }
 

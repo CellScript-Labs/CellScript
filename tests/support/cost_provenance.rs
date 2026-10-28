@@ -90,7 +90,7 @@ pub fn capture(root: &Path, strip: &Path) -> Value {
         "target": "riscv64-elf",
         "target_profile": "ckb",
         "edition": "2027",
-        "opt_level": 3,
+        "compilation_policy": cellscript::COMPILATION_POLICY,
         "rust_reference_profile": {"opt_level":"z", "lto":"thin", "codegen_units":1, "panic":"abort", "target":"riscv64imac-unknown-none-elf"},
         "vm_configuration": vm_configuration(),
     });

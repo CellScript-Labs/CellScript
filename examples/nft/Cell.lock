@@ -6,23 +6,23 @@ resolver_model = "single-package-coordinate-v1"
 edition = "2026"
 name = "nft"
 version = "0.1.0"
-source_hash = "704ad1bc90ab5288acaae641a6b565ff1c9a8f6fa2889dff3591f722a12789ea"
-compiler_requirement = "*"
-resolver_compiler_version = "0.26.0"
+source_hash = "bf39ac7da6331e6b5148852783341806e5c284aa347e7d9f30a44309fc9a0515"
+compiler_requirement = ">=0.33.0-alpha.1"
+resolver_compiler_version = "0.33.0-alpha.1"
 
 [root]
-manifest_digest = "sha256:acfa416a9cd8c344337766afead9726f03093aa6000c7ae1b20c39c8b55fdbea"
+manifest_digest = "sha256:0a9656633c4dff9810af9c324ebc35377dd55cb1aaf34db11e09156be4f56b8a"
 
 [root.dependencies]
-token = "token@0.1.0|path:../token|compiler=2a|env=default|features=default"
+token = "token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default"
 
-[dependencies."token@0.1.0|path:../token|compiler=2a|env=default|features=default"]
+[dependencies."token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default"]
 name = "token"
 version = "0.1.0"
-source_hash = "d5ecb3241eeb97983005b9622cbe7a9540cbdec133ec22105c07955f99c7b889"
-manifest_digest = "sha256:3adaae2b8a70a8a49246c28c95a6bd3686fefaed383dfb598c7d35da2a2ad4f9"
-compiler_requirement = "*"
-resolver_compiler_version = "0.26.0"
+source_hash = "53c5e19396b91f310f5a286374861c98504730db154a8cc836c2c11079604cf0"
+manifest_digest = "sha256:8ffb252c81562ec747304ec3e34f4e2a58db2a713853074220a5763e4084dabd"
+compiler_requirement = ">=0.33.0-alpha.1"
+resolver_compiler_version = "0.33.0-alpha.1"
 
-[dependencies."token@0.1.0|path:../token|compiler=2a|env=default|features=default".source.Path]
+[dependencies."token@0.1.0|path:../token|compiler=3e3d302e33332e302d616c7068612e31|env=default|features=default".source.Path]
 path = "../token"

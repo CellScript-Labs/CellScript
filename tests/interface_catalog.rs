@@ -5,10 +5,10 @@ use cellscript_artifact_checker::{CheckerBudgets, CheckerRejectionCode};
 use serde_json::Value;
 
 const SOURCE: &str = "module catalog_coherence\npublic struct Value has copy, drop, store { amount: u64 }\naction verify(witness amount: u64) { verification require amount > 0 }\n";
-fn compile(source: &str, opt_level: u8) -> [Vec<u8>; 4] {
+fn compile(source: &str, diagnostics: cellscript::CompilerDiagnostics) -> [Vec<u8>; 4] {
     let compiled = compile_with_executable_surface_policy(
         source,
-        CompileOptions { source_contracts: true, opt_level, target: Some("riscv64-elf".into()), ..CompileOptions::default() },
+        CompileOptions { source_contracts: true, diagnostics, target: Some("riscv64-elf".into()), ..CompileOptions::default() },
         ExecutableSurfacePolicy::DenyFailClosed,
     )
     .unwrap();
@@ -25,8 +25,11 @@ fn borrow(bundle: &[Vec<u8>; 4]) -> ModuleBundle<'_> {
 
 #[test]
 fn every_actual_candidate_is_inspected_and_byte_frozen() {
-    let required = compile(SOURCE, 0);
-    let added = compile(&format!("{SOURCE}public struct Extra has copy, drop, store {{ flag: u8 }}\n"), 3);
+    let required = compile(SOURCE, cellscript::CompilerDiagnostics::without_optimizations());
+    let added = compile(
+        &format!("{SOURCE}public struct Extra has copy, drop, store {{ flag: u8 }}\n"),
+        cellscript::CompilerDiagnostics::default(),
+    );
     let candidates = [borrow(&required), borrow(&added)];
     let catalog = check_module_catalog(borrow(&required), &candidates, &CheckerBudgets::default()).unwrap();
     assert_eq!(catalog.candidates().len(), 2);
@@ -52,7 +55,7 @@ fn every_actual_candidate_is_inspected_and_byte_frozen() {
 
 #[test]
 fn an_invalid_unselected_candidate_never_receives_partial_coherence_evidence() {
-    let required = compile(SOURCE, 0);
+    let required = compile(SOURCE, cellscript::CompilerDiagnostics::without_optimizations());
     for field in 0..4 {
         let mut bad = required.clone();
         bad[field] = b"invalid input".to_vec();
@@ -60,7 +63,8 @@ fn an_invalid_unselected_candidate_never_receives_partial_coherence_evidence() {
             assert!(check_module_catalog(borrow(&required), &candidates, &CheckerBudgets::default()).is_err(), "field={field}");
         }
     }
-    let broken_layout = compile(&SOURCE.replace("amount: u64 }", "amount: u32 }"), 0);
+    let broken_layout =
+        compile(&SOURCE.replace("amount: u64 }", "amount: u32 }"), cellscript::CompilerDiagnostics::without_optimizations());
     assert!(check_module_catalog(borrow(&required), &[borrow(&required), borrow(&broken_layout)], &CheckerBudgets::default()).is_err());
     let missing_evidence =
         cellscript::compile(SOURCE, CompileOptions { target: Some("riscv64-elf".into()), ..CompileOptions::default() }).unwrap();
@@ -112,14 +116,14 @@ fn all_bundle_bytes_and_counts_are_bounded_before_any_parser_runs() {
         check_module_catalog(empty, &[[&oversized, &[], &[], &[]]], &CheckerBudgets::default()).unwrap_err().code,
         CheckerRejectionCode::V2400BudgetExceeded
     );
-    let valid = compile(SOURCE, 0);
+    let valid = compile(SOURCE, cellscript::CompilerDiagnostics::without_optimizations());
     assert!(check_module_catalog(borrow(&valid), &[borrow(&valid)], &CheckerBudgets { instructions: 1, ..CheckerBudgets::default() })
         .is_err());
 }
 
 #[test]
 fn all_bounded_cardinalities_allow_reused_code_without_claiming_duplicate_receipts() {
-    let bundle = compile(SOURCE, 0);
+    let bundle = compile(SOURCE, cellscript::CompilerDiagnostics::without_optimizations());
     for count in 1..=32 {
         // One checked code bundle may back distinct concrete Script args later.
         // This layer cannot classify duplicate/conflicting deployment receipts.

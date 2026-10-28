@@ -416,7 +416,7 @@ fn check_native(
 #[test]
 fn two_pools_issue_assets_authenticate_genesis_and_swap_independently_and_together() {
     let directory = tempfile::tempdir().unwrap();
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let asset = compile(directory.path(), "asset", ASSET, opt, true);
         let reserve = compile(directory.path(), "reserve", RESERVE, opt, false);
         let mut type_id = [0u8; 32];
@@ -450,7 +450,7 @@ fn two_pools_issue_assets_authenticate_genesis_and_swap_independently_and_togeth
         let observer = compile_module(
             Utf8Path::from_path(&consumer).unwrap(),
             "dev",
-            CompileOptions { opt_level: opt, ..Default::default() },
+            CompileOptions { diagnostics: opt, ..Default::default() },
             EntrySelection::Lock("verify".into()),
         )
         .unwrap();
@@ -594,11 +594,11 @@ fn two_pools_issue_assets_authenticate_genesis_and_swap_independently_and_togeth
         assert!(ledger.maximum_cycles < 7_000_000);
         assert!(concurrent.data().as_slice().len() < 9_000);
         eprintln!(
-            "two real pools O{opt}: max_cycles={} concurrent_bytes={}",
+            "two real pools {opt}: max_cycles={} concurrent_bytes={}",
             ledger.maximum_cycles,
             concurrent.data().as_slice().len()
         );
-        let evidence = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/instance-policy-evidence/pools").join(format!("O{opt}"));
+        let evidence = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/instance-policy-evidence/pools").join(format!("{opt}"));
         std::fs::create_dir_all(&evidence).unwrap();
         for (name, module, source) in [
             ("asset", &asset, ASSET),
@@ -621,7 +621,7 @@ fn two_pools_issue_assets_authenticate_genesis_and_swap_independently_and_togeth
         std::fs::write(evidence.join("implementation-creation.molecule"), provider.raw_transaction()).unwrap();
         std::fs::write(evidence.join("instance-policy.molecule"), policy.policy().encode().unwrap()).unwrap();
         let report = serde_json::json!({
-            "schema": "cellscript-instance-pool-evidence-v1", "scope": "local-all-group-ckb-vm", "opt_level": opt,
+            "schema": "cellscript-instance-pool-evidence-v1", "scope": "local-all-group-ckb-vm", "diagnostics": opt.to_string(),
             "compiler_version": env!("CARGO_PKG_VERSION"), "maximum_cycles": ledger.maximum_cycles,
             "source_policy": policy.implementation().identity(), "instance_policy": policy.identity(),
             "cases": ledger.records, "dependencies": dependencies, "native_group_records": native_records,
@@ -635,17 +635,17 @@ fn literal(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("\\x{byte:02x}")).collect()
 }
 
-fn compile(root: &Path, name: &str, source: &str, opt_level: u8, action: bool) -> FrozenPackageModule {
+fn compile(root: &Path, name: &str, source: &str, diagnostics: cellscript::CompilerDiagnostics, action: bool) -> FrozenPackageModule {
     let root = root.join(name);
     package(&root, name, source, "");
     lock(&root);
     compile_module(
         Utf8Path::from_path(&root).unwrap(),
         "dev",
-        CompileOptions { opt_level, ..Default::default() },
+        CompileOptions { diagnostics, ..Default::default() },
         if action { EntrySelection::Action("verify".into()) } else { EntrySelection::Lock("verify".into()) },
     )
-    .unwrap_or_else(|error| panic!("{name} O{opt_level}: {error:?}"))
+    .unwrap_or_else(|error| panic!("{name} {diagnostics}: {error:?}"))
 }
 
 // Reconstruct a fresh VM from the retained bytes alone. This checks that the

@@ -130,8 +130,8 @@ export function compareLifecycle(
       'reverse_dependents', 'policy', 'migration_artifacts_required', 'required_gates', 'diagnostics',
       'required_acknowledgements', 'acknowledgements', 'apply_status', 'mutates_deployed_manifest', 'performs_deployment']);
     object(p.selection, ['package', 'precise', 'scope', 'features', 'all_features', 'default_features', 'environment', 'offline']);
-    requireValue(p.schema === 'cellscript-upgrade-plan-v1' && p.schema_version === 1 && p.compiler_version === '0.31.0', 'package plan schema/compiler');
-    requireValue(p.resolve_graph_schema === 'cellscript-resolve-graph-v1' && p.build_plan_schema === 'cellscript-build-plan-v1', 'package graph schema');
+    requireValue(p.schema === 'cellscript-upgrade-plan-v1' && p.schema_version === 1 && p.compiler_version === '0.33.0-alpha.1', 'package plan schema/compiler');
+    requireValue(p.resolve_graph_schema === 'cellscript-resolve-graph-v1' && p.build_plan_schema === 'cellscript-build-plan-v2', 'package graph schema');
     requireValue(p.mutates_deployed_manifest === false && p.performs_deployment === false, 'package plan exceeds lock-only authority');
     const hash = `sha256:${lifecycleSha256(Buffer.from(canonical({ ...p, plan_hash: '' })))}`;
     requireValue(p.plan_hash === hash, 'package plan digest');

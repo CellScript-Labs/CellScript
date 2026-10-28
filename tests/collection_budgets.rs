@@ -69,8 +69,11 @@ fn collection_budget_reports_match_reference_and_vm_byte_event_thresholds() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
     std::fs::create_dir(root.join("src")).unwrap();
-    std::fs::write(root.join("Cell.toml"), "[package]\nname = \"budget_execution\"\nversion = \"0.1.0\"\nedition = \"2027\"\n")
-        .unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nname = \"budget_execution\"\nversion = \"0.1.0\"\nedition = \"2027\"\n",
+    )
+    .unwrap();
     let mut executions = 0;
     for (width, items) in [(1, 1), (1, 3), (17, 8), (17, 32), (64, 128), (17, 1024)] {
         std::fs::write(root.join("src/main.cell"), source(width, items, 65536, 256, false)).unwrap();
@@ -119,20 +122,27 @@ fn collection_budget_reports_match_reference_and_vm_byte_event_thresholds() {
                 vec![(65536, required_events, 21)]
             };
             for (bytes, events, expected) in cases {
-                for opt_level in [0, 3] {
+                for diagnostics in
+                    [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()]
+                {
                     eprintln!(
-                        "budget-boundary width={width} items={items} reserve={reserve} bytes={bytes} events={events} O{opt_level}"
+                        "budget-boundary width={width} items={items} reserve={reserve} bytes={bytes} events={events} {diagnostics}"
                     );
                     let program = source(width, items, bytes, events, reserve);
                     let compiled = cellscript::compile(
                         &program,
-                        CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                        CompileOptions {
+                            edition: NEXT_EDITION,
+                            diagnostics,
+                            target: Some("riscv64-elf".into()),
+                            ..Default::default()
+                        },
                     )
                     .unwrap();
                     assert_eq!(
                         execute(&compiled),
                         expected,
-                        "width={width}, items={items}, reserve={reserve}, bytes={bytes}, events={events}, O{opt_level}"
+                        "width={width}, items={items}, reserve={reserve}, bytes={bytes}, events={events}, {diagnostics}"
                     );
                     executions += 1;
                 }

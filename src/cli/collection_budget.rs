@@ -8,7 +8,11 @@ use std::collections::HashSet;
 pub(super) fn explain(input: &Utf8Path) -> Result<(serde_json::Value, Vec<String>)> {
     let path = crate::resolve_input_path(input)?;
     let project = crate::load_project_for_entry(&path, None)?;
-    let options = crate::CompileOptions { edition: project.entry().edition, opt_level: 0, ..Default::default() };
+    let options = crate::CompileOptions {
+        edition: project.entry().edition,
+        diagnostics: crate::CompilerDiagnostics::default(),
+        ..Default::default()
+    };
     let diagnostics = crate::project_frontend_diagnostics(&project, &options, true);
     if diagnostics.iter().any(|diagnostic| diagnostic.severity == crate::error::DiagnosticSeverity::Error) {
         return Err(crate::diagnostics_to_compile_error(diagnostics));

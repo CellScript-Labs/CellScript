@@ -1,0 +1,89 @@
+{
+  "schema": "cellscript-wide-argument-storage-comparison-v1",
+  "status": "focused-checks-passed-integration-pending",
+  "compiler": "0.33.0-alpha.1",
+  "source_hash": "953564ad0f1d27dd938d717a8d4cbf8f4b89980be02d2f1922acec9a9ba40709",
+  "source_fixture": "tests/value_return_abi.rs::u128_arguments_cross_register_stack_and_hidden_result_boundaries",
+  "before": [
+    {
+      "cases": [
+        {
+          "cycles": 7468,
+          "total": "0"
+        },
+        {
+          "cycles": 7468,
+          "total": "1268888540267514781771602329645"
+        },
+        {
+          "cycles": 7468,
+          "total": "340282366920938463463374607431768211455"
+        }
+      ],
+      "diagnostics": "standard",
+      "elf_bytes": 5032,
+      "helper_frame_bytes": 1632
+    },
+    {
+      "cases": [
+        {
+          "cycles": 7477,
+          "total": "0"
+        },
+        {
+          "cycles": 7477,
+          "total": "1268888540267514781771602329645"
+        },
+        {
+          "cycles": 7477,
+          "total": "340282366920938463463374607431768211455"
+        }
+      ],
+      "diagnostics": "diagnostic:ff",
+      "elf_bytes": 5040,
+      "helper_frame_bytes": 1632
+    }
+  ],
+  "after": [
+    {
+      "cases": [
+        {
+          "cycles": 7468,
+          "total": "0"
+        },
+        {
+          "cycles": 7468,
+          "total": "1268888540267514781771602329645"
+        },
+        {
+          "cycles": 7468,
+          "total": "340282366920938463463374607431768211455"
+        }
+      ],
+      "diagnostics": "standard",
+      "elf_bytes": 5032,
+      "helper_frame_bytes": 1456
+    },
+    {
+      "cases": [
+        {
+          "cycles": 7477,
+          "total": "0"
+        },
+        {
+          "cycles": 7477,
+          "total": "1268888540267514781771602329645"
+        },
+        {
+          "cycles": 7477,
+          "total": "340282366920938463463374607431768211455"
+        }
+      ],
+      "diagnostics": "diagnostic:ff",
+      "elf_bytes": 5040,
+      "helper_frame_bytes": 1456
+    }
+  ],
+  "scope": "helper owned frame only; not whole-program peak stack",
+  "uncommitted": true
+}

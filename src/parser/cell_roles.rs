@@ -337,17 +337,17 @@ mod tests {
     #[test]
     fn named_cell_roles_select_alias_and_read_without_repeating_schema_or_role() {
         let source = include_str!("../../tests/syntax_combo/seeds/named-role-selection.cell");
-        for opt_level in [0, 3] {
+        for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
             crate::compile(
                 source,
                 CompileOptions {
                     edition: CellScriptEdition::Edition2027,
-                    opt_level,
+                    diagnostics,
                     target: Some("riscv64-elf".into()),
                     ..Default::default()
                 },
             )
-            .unwrap_or_else(|error| panic!("O{opt_level}: {error}"));
+            .unwrap_or_else(|error| panic!("{diagnostics}: {error}"));
         }
         let formatted = crate::fmt::format_default(&parse(source).unwrap()).unwrap();
         assert_eq!(crate::fmt::format_default(&parse(&formatted).unwrap()).unwrap(), formatted);

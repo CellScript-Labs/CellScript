@@ -206,11 +206,11 @@ lock owner_boundary(
     claimed_owner: witness Address
 ) -> bool {
     let input = source::group_input(0)
-    let witness_lock = witness::lock(input)
+    let witness_lock = witness::lock_exact32(input)
     let digest = env::sighash_all(input)
     require wallet.owner == owner
     require claimed_owner == owner
-    require witness_lock == digest
+    require witness_lock == digest.0
 }
 ```
 

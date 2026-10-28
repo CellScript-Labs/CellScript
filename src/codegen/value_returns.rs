@@ -59,6 +59,7 @@ impl CodeGenerator {
     pub(super) fn fixed_struct_return_width(&self, ty: &IrType) -> Option<usize> {
         match ty {
             IrType::Hash | IrType::Address => return Some(32),
+            IrType::Named(name) if is_ckb_fixed_hash_domain_name(name) => return Some(32),
             IrType::Array(inner, count) if **inner == IrType::U8 && (9..=64).contains(count) => return Some(*count),
             _ => {}
         }
@@ -145,7 +146,9 @@ impl CodeGenerator {
                 // IR materializes returned byte constants as typed locals;
                 // LoadConst stores their rodata pointer in the ordinary slot.
                 ExpectedFixedByteSource::Const(_) => (value.id, 0),
-                ExpectedFixedByteSource::SchemaField(field) if self.type_fixed_sizes.contains_key(&field.type_name) => {
+                ExpectedFixedByteSource::SchemaField(field)
+                    if self.type_fixed_sizes.contains_key(&field.type_name) || field.type_name == CKB_SCRIPT_HASH_TYPE =>
+                {
                     (field.obj_var_id, field.layout.offset)
                 }
                 _ => return Err(CompileError::without_span("fixed struct return source needs fixed pointer storage")),

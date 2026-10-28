@@ -206,12 +206,12 @@ fn unchanged(bundle: Vec<u8>, _: &packed::Script, _: &packed::Script) -> Vec<u8>
 
 #[test]
 fn certified_fixed_cell_read_gates_check_real_group_bytes_and_lengths_in_vm() {
-    for opt_level in 0..=3 {
+    for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
         let mut selected = declaration();
         selected.actions.retain(|action| matches!(action.tag, MINT | BURN));
         let compiled = compile_artifact(
             SOURCE,
-            CompileOptions { source_contracts: true, opt_level, ..options() },
+            CompileOptions { source_contracts: true, diagnostics, ..options() },
             selected,
             ExecutableSurfacePolicy::DenyFailClosed,
         )
@@ -270,13 +270,13 @@ fn certified_fixed_cell_scalar_fields_have_real_unsigned_byte_oracles() {
         ),
     ] {
         let source = format!("module unsigned_cell_fields\nresource Token has store, consume {{ {members} }}\naction burn(input before: Token) {{ verification {predicate} consume before }}\n");
-        for opt_level in 0..=3 {
+        for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
             let mut selected = declaration();
             selected.actions.retain(|action| action.tag == BURN);
             selected.common_checks.clear();
             let compiled = compile_artifact(
                 &source,
-                CompileOptions { source_contracts: true, opt_level, ..options() },
+                CompileOptions { source_contracts: true, diagnostics, ..options() },
                 selected,
                 ExecutableSurfacePolicy::DenyFailClosed,
             )
@@ -353,13 +353,13 @@ fn certified_external_scalar_reception_has_real_vm_witness_oracles() {
             ),
         };
         let source = format!("module external_scalar_vm\nresource Token has store, consume {{ amount: u64 }}\naction burn(input before: Token, {parameters}) {{ verification require before.amount == 7 {predicate} consume before }}\n");
-        for opt_level in 0..=3 {
+        for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
             let mut selected = declaration();
             selected.actions.retain(|action| action.tag == BURN);
             selected.common_checks.clear();
             let compiled = compile_artifact(
                 &source,
-                CompileOptions { source_contracts: true, opt_level, ..options() },
+                CompileOptions { source_contracts: true, diagnostics, ..options() },
                 selected,
                 ExecutableSurfacePolicy::DenyFailClosed,
             )
@@ -389,7 +389,7 @@ fn certified_external_scalar_reception_has_real_vm_witness_oracles() {
                     execute(&compiled, case(), |_, script, _| encode_policy_witness_bundle(&[record(script, BURN, args)]).unwrap())
                 };
                 let cycles = run(args.clone()).unwrap();
-                resources.push(serde_json::json!({"type":ty,"opt_level":opt_level,"prepend_input":prepend,"cycles":cycles,"elf_bytes":compiled.artifact_bytes.len(),"inner_args_bytes":args.len(),"codec_identity":checked.identity()}));
+                resources.push(serde_json::json!({"type":ty,"diagnostics":diagnostics.to_string(),"prepend_input":prepend,"cycles":cycles,"elf_bytes":compiled.artifact_bytes.len(),"inner_args_bytes":args.len(),"codec_identity":checked.identity()}));
                 for extend in [false, true] {
                     let mut malformed = args.clone();
                     if extend {
@@ -418,10 +418,10 @@ fn certified_external_scalar_reception_has_real_vm_witness_oracles() {
 
 #[test]
 fn fixed_policy_parameter_decoder_certificate_has_real_vm_byte_oracles() {
-    for opt_level in 0..=3 {
+    for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile_artifact(
             SOURCE,
-            CompileOptions { source_contracts: true, opt_level, ..options() },
+            CompileOptions { source_contracts: true, diagnostics, ..options() },
             declaration(),
             ExecutableSurfacePolicy::DenyFailClosed,
         )
@@ -469,7 +469,7 @@ fn certified_shared_fixed_decoders_preserve_signed_bytes_in_vm() {
     for name in ["first", "second"] {
         source.push_str(&format!("action {name}(witness signed: i32, witness zero: i32, witness recipient: Address) {{\nverification\nrequire signed < zero\ncreate Token {{ amount: 7 }} with_lock(recipient)\n}}\n"));
     }
-    for opt_level in 0..=3 {
+    for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
         let declaration = ArtifactDeclaration {
             name: "SignedFixedDecoder".into(),
             context: ArtifactContext::TypeGroup { resource: "Token".into() },
@@ -479,7 +479,7 @@ fn certified_shared_fixed_decoders_preserve_signed_bytes_in_vm() {
         };
         let compiled = compile_artifact(
             &source,
-            CompileOptions { source_contracts: true, opt_level, ..options() },
+            CompileOptions { source_contracts: true, diagnostics, ..options() },
             declaration,
             ExecutableSurfacePolicy::DenyFailClosed,
         )
@@ -530,7 +530,7 @@ fn shared_policy_decoder_preserves_wide_and_outgoing_stack_arguments() {
         ));
     }
     for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
-        for opt_level in [0, 3] {
+        for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
             let declaration = ArtifactDeclaration {
                 name: "SharedStackPolicy".into(),
                 context: ArtifactContext::TypeGroup { resource: "Token".into() },
@@ -543,7 +543,7 @@ fn shared_policy_decoder_preserves_wide_and_outgoing_stack_arguments() {
             };
             let compiled = compile_artifact(
                 &source,
-                CompileOptions { edition, opt_level, ..options() },
+                CompileOptions { edition, diagnostics, ..options() },
                 declaration,
                 ExecutableSurfacePolicy::DenyFailClosed,
             )
@@ -594,10 +594,11 @@ fn same_policy_bytes_select_all_four_group_cardinalities_at_nonzero_indices() {
 
 #[test]
 fn optimized_policy_dispatch_keeps_variant_and_common_check_obligations() {
-    for opt_level in 1..=3 {
+    {
+        let diagnostics = crate::CompilerDiagnostics::default();
         let compiled = compile_artifact(
             SOURCE,
-            CompileOptions { opt_level, ..options() },
+            CompileOptions { diagnostics, ..options() },
             declaration(),
             ExecutableSurfacePolicy::DenyFailClosed,
         )
@@ -610,7 +611,7 @@ fn optimized_policy_dispatch_keeps_variant_and_common_check_obligations() {
         assert!(execute(&compiled, Case::new(TRANSFER, &[7], &[8]), unchanged).is_err());
         let failing = compile_artifact(
             &SOURCE.replace("require true", "require false"),
-            CompileOptions { opt_level, ..options() },
+            CompileOptions { diagnostics, ..options() },
             declaration(),
             ExecutableSurfacePolicy::DenyFailClosed,
         )
@@ -886,14 +887,14 @@ fn callable_policy_source(common_body: &str, mint_check: Option<&str>, definitio
         .join("\n")
 }
 
-fn compile_callable_policy(source: &str, edition: CellScriptEdition, opt_level: u8) -> CompileResult {
+fn compile_callable_policy(source: &str, edition: CellScriptEdition, diagnostics: crate::CompilerDiagnostics) -> CompileResult {
     let compiled = compile_artifact(
         source,
-        CompileOptions { edition, opt_level, ..options() },
+        CompileOptions { edition, diagnostics, ..options() },
         declaration(),
         ExecutableSurfacePolicy::DenyFailClosed,
     )
-    .unwrap_or_else(|error| panic!("callable policy: {edition:?}, opt={opt_level}: {error}\n{source}"));
+    .unwrap_or_else(|error| panic!("callable policy: {edition:?}, opt={diagnostics}: {error}\n{source}"));
     compiled.validate().expect("callable policy has consistent independent structural evidence");
     compiled
 }
@@ -933,11 +934,11 @@ fn policy_exported_callable_failures_remain_fatal_when_results_are_discarded() {
         for invocation in discarded_calls("outer(amount)") {
             let source = callable_policy_source("require true", Some(&invocation), definitions);
             for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
-                for opt_level in 0..=3 {
-                    let compiled = compile_callable_policy(&source, edition, opt_level);
+                for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
+                    let compiled = compile_callable_policy(&source, edition, diagnostics);
                     for case in valid_cases() {
                         execute(&compiled, case, unchanged)
-                            .unwrap_or_else(|error| panic!("valid {name}/{invocation}, {edition:?}, opt={opt_level}: {error}"));
+                            .unwrap_or_else(|error| panic!("valid {name}/{invocation}, {edition:?}, opt={diagnostics}: {error}"));
                     }
                     let error = execute(&compiled, Case::new(MINT, &[], &[bad_amount]), |bundle, _, recipient| {
                         let mut records = decode_policy_witness_bundle(&bundle).unwrap();
@@ -956,9 +957,9 @@ fn policy_exported_callable_failures_remain_fatal_when_results_are_discarded() {
                     })
                     .err()
                     .unwrap_or_else(|| {
-                        panic!("failed {name}/{invocation}, {edition:?}, opt={opt_level} accepted mint amount {bad_amount}")
+                        panic!("failed {name}/{invocation}, {edition:?}, opt={diagnostics} accepted mint amount {bad_amount}")
                     });
-                    assert_exit(format!("{name}/{invocation}, {edition:?}, opt={opt_level}: {error}"), expected);
+                    assert_exit(format!("{name}/{invocation}, {edition:?}, opt={diagnostics}: {error}"), expected);
                 }
             }
         }
@@ -975,21 +976,21 @@ fn policy_common_callable_failure_rejects_every_tag_in_the_same_elf() {
     ];
     for (name, definitions, good, bad, expected) in cases {
         for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
-            for opt_level in 0..=3 {
-                let successful = compile_callable_policy(&callable_policy_source(good, None, definitions), edition, opt_level);
-                let failing = compile_callable_policy(&callable_policy_source(bad, None, definitions), edition, opt_level);
+            for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
+                let successful = compile_callable_policy(&callable_policy_source(good, None, definitions), edition, diagnostics);
+                let failing = compile_callable_policy(&callable_policy_source(bad, None, definitions), edition, diagnostics);
                 for case in valid_cases() {
                     execute(&successful, case, unchanged)
-                        .unwrap_or_else(|error| panic!("successful common {name}, {edition:?}, opt={opt_level}: {error}"));
+                        .unwrap_or_else(|error| panic!("successful common {name}, {edition:?}, opt={diagnostics}: {error}"));
                 }
                 for case in valid_cases() {
                     let tag = case.tag;
-                    let error = execute(&failing, case, unchanged)
-                        .err()
-                        .unwrap_or_else(|| panic!("common {name}, tag={tag}, {edition:?}, opt={opt_level}: nested failure accepted"));
+                    let error = execute(&failing, case, unchanged).err().unwrap_or_else(|| {
+                        panic!("common {name}, tag={tag}, {edition:?}, opt={diagnostics}: nested failure accepted")
+                    });
                     // All tags are evaluated against this one failing artifact.
                     // Returning normally from a nested failed check is unsound.
-                    assert_exit(format!("common {name}, tag={tag}, {edition:?}, opt={opt_level}: {error}"), expected);
+                    assert_exit(format!("common {name}, tag={tag}, {edition:?}, opt={diagnostics}: {error}"), expected);
                 }
             }
         }
@@ -1008,11 +1009,11 @@ action status() -> u64 { return 49 }
     let mint = "require amount == 7\nrequire scalar(49) == 49\nrequire status() == 49\nunit()";
     let source = callable_policy_source(common, Some(mint), definitions);
     for edition in [CellScriptEdition::Edition2026, CellScriptEdition::Edition2027] {
-        for opt_level in 0..=3 {
-            let compiled = compile_callable_policy(&source, edition, opt_level);
+        for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
+            let compiled = compile_callable_policy(&source, edition, diagnostics);
             for case in valid_cases() {
                 execute(&compiled, case, unchanged)
-                    .unwrap_or_else(|error| panic!("normal callable values, {edition:?}, opt={opt_level}: {error}"));
+                    .unwrap_or_else(|error| panic!("normal callable values, {edition:?}, opt={diagnostics}: {error}"));
             }
         }
     }

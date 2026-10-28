@@ -2904,8 +2904,8 @@ mod tests {
             cost_model::estimate_cycles, machine::VERSION2, Bytes, DefaultCoreMachine, DefaultMachineBuilder, DefaultMachineRunner,
             SparseMemory, SupportMachine, TraceMachine, WXorXMemory, ISA_B, ISA_IMC, ISA_MOP,
         };
-        for opt_level in [0, 3] {
-            let mut g = CodeGenerator::new(CodegenOptions { opt_level, ..Default::default() });
+        for diagnostics in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
+            let mut g = CodeGenerator::new(CodegenOptions { diagnostics, ..Default::default() });
             g.emit(".section .text");
             g.emit(".global entry");
             g.emit_label("entry");
@@ -2938,7 +2938,7 @@ mod tests {
             g.emit("li a7, 93");
             g.emit("ecall");
             assert!(g.emission_error.is_none());
-            if opt_level > 0 {
+            if diagnostics.is_standard() {
                 eliminate_immediate_stack_reloads(&mut g.assembly);
             }
             let elf = assemble_elf_internal(&g.assembly).unwrap();
@@ -2947,7 +2947,7 @@ mod tests {
                 <<Machine as DefaultMachineRunner>::Inner as SupportMachine>::new(ISA_IMC | ISA_B | ISA_MOP, VERSION2, 1_000_000);
             let mut machine = Machine::new(DefaultMachineBuilder::new(core).instruction_cycle_func(Box::new(estimate_cycles)).build());
             machine.load_program(&Bytes::from(elf), std::iter::empty::<std::result::Result<Bytes, ckb_vm::Error>>()).unwrap();
-            assert_eq!(machine.run().unwrap(), 0, "O{opt_level}");
+            assert_eq!(machine.run().unwrap(), 0, "{diagnostics}");
         }
     }
 

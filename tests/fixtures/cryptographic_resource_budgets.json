@@ -20,7 +20,7 @@
         "tests/support/ckb_script_runner.rs"
       ],
       "measured": {
-        "cycles": 41639,
+        "cycles": 41637,
         "elf_bytes": 9696,
         "max_stack_frame_bytes": 5376,
         "witness_bytes": 60,
@@ -55,8 +55,8 @@
         "tests/support/ckb_script_runner.rs"
       ],
       "measured": {
-        "cycles": 1373919,
-        "elf_bytes": 10256,
+        "cycles": 1373883,
+        "elf_bytes": 10208,
         "max_stack_frame_bytes": 1344,
         "witness_bytes": 65556,
         "transaction_bytes": 65896,
@@ -91,7 +91,7 @@
         "tests/support/ckb_script_runner.rs"
       ],
       "measured": {
-        "cycles": 338366,
+        "cycles": 338359,
         "elf_bytes": 23064,
         "max_stack_frame_bytes": 5424,
         "witness_bytes": 732,
@@ -129,8 +129,8 @@
         "tests/support/ckb_script_runner.rs"
       ],
       "measured": {
-        "cycles": 1720319,
-        "elf_bytes": 11520,
+        "cycles": 1721134,
+        "elf_bytes": 11576,
         "max_stack_frame_bytes": 7440,
         "witness_bytes": 65588,
         "transaction_bytes": 79700,
@@ -164,8 +164,8 @@
         "tests/support/ckb_script_runner.rs"
       ],
       "measured": {
-        "cycles": 18679,
-        "elf_bytes": 9192,
+        "cycles": 18674,
+        "elf_bytes": 9184,
         "max_stack_frame_bytes": 5376,
         "witness_bytes": 230,
         "transaction_bytes": 607,

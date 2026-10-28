@@ -420,10 +420,10 @@ fn compatible_open_handle_spellings_stay_reserved() {
         ("instance-declaration", "module reserved\npublic struct InstanceScriptHandle { value: u64 }\npublic action verify() { verification require true }"),
     ];
     for (label, source) in cases {
-        for opt in 0..=3 {
+        for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let error = compile_with_executable_surface_policy(
                 source,
-                CompileOptions { opt_level: opt, ..CompileOptions::default() },
+                CompileOptions { diagnostics: opt, ..CompileOptions::default() },
                 ExecutableSurfacePolicy::DenyFailClosed,
             )
             .unwrap_err();
@@ -470,7 +470,7 @@ public action verify(witness handle: ScriptHandle<openiface::types>) -> u64 {{
     )
 }
 
-fn compile_open_handle(source: &str, opt: u8) -> cellscript::CompileResult {
+fn compile_open_handle(source: &str, opt: cellscript::CompilerDiagnostics) -> cellscript::CompileResult {
     let directory = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(directory.path().join("src")).unwrap();
     std::fs::write(directory.path().join("src/iface.cell"), OPEN_IFACE).unwrap();
@@ -478,7 +478,7 @@ fn compile_open_handle(source: &str, opt: u8) -> cellscript::CompileResult {
     cellscript::compile_path_with_executable_surface_policy(
         camino::Utf8PathBuf::from_path_buf(directory.path().join("src/main.cell")).expect("utf8 tempdir path"),
         CompileOptions {
-            opt_level: opt,
+            diagnostics: opt,
             target: Some("riscv64-elf".into()),
             target_profile: Some("ckb".into()),
             source_contracts: true,
@@ -555,7 +555,7 @@ fn open_handle_fixture(result: &cellscript::CompileResult, selection: Vec<u8>, d
 }
 
 /// The constant-root helper binds the selection and selected dependency at
-/// every optimization level, with independent substitution negatives.
+/// both standard and diagnostic builds, with independent substitution negatives.
 #[test]
 fn open_script_handle_requirement_executes_and_rejects_substitutions() {
     let dep_script = packed::Script::new_builder()
@@ -570,7 +570,7 @@ fn open_script_handle_requirement_executes_and_rejects_substitutions() {
     cellscript_artifact_checker::open_handle_policy::verify_selection(&root, &selection)
         .expect("the constructed selection verifies against its own root");
 
-    for opt in 0..=3u8 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let result = compile_open_handle(&open_handle_source(root, std::process::id() as u32), opt);
         let elf = strip_vm_abi_trailer(&result.artifact_bytes);
         let fixture = open_handle_fixture(&result, selection.to_vec(), &dep_script);
@@ -681,7 +681,7 @@ fn open_handle_from_args_binds_the_root_to_committed_script_args() {
     let (set, selection) = open_authorization_set(dep_type_hash);
     let root: [u8; 32] = set.root();
 
-    for opt in 0..=3u8 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let directory = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(directory.path().join("src")).unwrap();
         std::fs::write(directory.path().join("src/iface.cell"), OPEN_IFACE).unwrap();
@@ -689,7 +689,7 @@ fn open_handle_from_args_binds_the_root_to_committed_script_args() {
         let result = cellscript::compile_path_with_executable_surface_policy(
             camino::Utf8PathBuf::from_path_buf(directory.path().join("src/main.cell")).expect("utf8 path"),
             CompileOptions {
-                opt_level: opt,
+                diagnostics: opt,
                 target: Some("riscv64-elf".into()),
                 target_profile: Some("ckb".into()),
                 source_contracts: true,
@@ -755,7 +755,7 @@ fn open_verifier_handle_binds_artifact_data_for_constant_and_args_roots() {
     let root = set.root();
 
     for from_args in [false, true] {
-        for opt in 0..=3 {
+        for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let source = if from_args { open_handle_from_args_source(0) } else { open_handle_source(root, 0) }
                 .replace("ScriptHandle<", "VerifierHandle<")
                 .replace("open_script_handle", "open_verifier_handle");
@@ -797,7 +797,7 @@ fn open_code_selection_enforces_type_bytes_outpoints_modes_and_floors() {
     let code_type = packed::Script::new_builder().code_hash([9u8; 32].pack()).hash_type(1u8).build();
     let script_hash = code_type.calc_script_hash().unpack();
     let (baseline, _) = open_authorization_set(script_hash);
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for type_hash in [false, true] {
             for case in ["valid", "exact", "wrong-exact", "yanked", "floor", "outpoint", "index"] {
                 let mut header = baseline.header().clone();
@@ -875,7 +875,7 @@ fn open_code_dependency_budget_covers_every_direct_cell() {
     use ckb_script_runner::execute_cellscript_script_with_observer;
     let code_type = packed::Script::new_builder().code_hash([9u8; 32].pack()).hash_type(1u8).build();
     let (set, selection) = open_authorization_set(code_type.calc_script_hash().unpack());
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let result = compile_open_handle(&open_handle_from_args_source(0), opt);
         let elf = strip_vm_abi_trailer(&result.artifact_bytes);
         let mut fixture = open_handle_from_args_fixture(&result, set.root().to_vec(), selection.to_vec(), &code_type);
@@ -925,7 +925,7 @@ fn open_code_dependency_rejects_actual_dep_group_expansion() {
     point_seed.extend_from_slice(&0u64.to_le_bytes());
     let point = packed::OutPoint::new_builder().tx_hash(blake2b_256(&point_seed).pack()).index(0u32).build();
     let group: packed::OutPointVec = vec![point].pack();
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let result = compile_open_handle(&open_handle_from_args_source(0), opt);
         let elf = strip_vm_abi_trailer(&result.artifact_bytes);
         let mut fixture = open_handle_from_args_fixture(&result, set.root().to_vec(), selection.to_vec(), &code_type);
@@ -960,7 +960,7 @@ fn open_participant_observation_binds_role_source_and_complete_script_without_pe
     let set =
         cellscript_artifact_checker::open_handle_policy::AuthorizationSet::new(original.header().clone(), &[member.clone()]).unwrap();
     let selection = set.selection(&member.receipt).unwrap();
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         for subject in ["ckb::input<Token>(1)", "ckb::output<Token>(0)"] {
             let source = open_handle_from_args_source(0)
                 .replace("public action", "resource Token has store { amount: u64 }\npublic action")
@@ -978,7 +978,7 @@ fn open_participant_observation_binds_role_source_and_complete_script_without_pe
             fixture.outputs[0].type_script = Some(participant.clone());
             fixture.witnesses.push(Bytes::default());
             let execution = execute_cellscript_script(elf, &fixture);
-            assert_eq!(execution.exit_code, 0, "O{opt} {subject}: {:?}", execution.captured_debug);
+            assert_eq!(execution.exit_code, 0, "{opt} {subject}: {:?}", execution.captured_debug);
             assert!(execution.cycles < 3_000_000);
             let mut changed = fixture.clone();
             let replacement = participant.clone().as_builder().args(Bytes::from_static(b"substituted").pack()).build();
@@ -987,7 +987,7 @@ fn open_participant_observation_binds_role_source_and_complete_script_without_pe
             } else {
                 changed.outputs[0].type_script = Some(replacement);
             }
-            assert_eq!(execute_cellscript_script(elf, &changed).exit_code, 85, "complete Script args O{opt} {subject}");
+            assert_eq!(execute_cellscript_script(elf, &changed).exit_code, 85, "complete Script args {opt} {subject}");
             let wrong_source = source.replace(subject, "ckb::group_input<Token>(0)");
             let wrong_result = compile_open_handle(&wrong_source, opt);
             assert_eq!(
@@ -1041,7 +1041,7 @@ fn instance_participant_reads_actual_role_and_global_or_group_relative_views() {
             ConsumerArgs { policy_root: policy.root().unwrap(), subject: participant.calc_script_hash().unpack(), config: Vec::new() }
                 .encode()
                 .unwrap();
-        for opt in 0..=3 {
+        for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             for (view, is_input, is_group) in
                 [("input", true, false), ("output", false, false), ("group_input", true, true), ("group_output", false, true)]
             {
@@ -1107,14 +1107,14 @@ fn instance_participant_reads_actual_role_and_global_or_group_relative_views() {
                 // consumer itself, not the foreign participant at global 1.
                 let expected = if role == ScriptRole::Type && is_group { 85 } else { 0 };
                 let execution = run(&participant, &fixture, elf);
-                assert_eq!(execution.exit_code, expected, "O{opt} {role:?} {view}: {:?}", execution.captured_debug);
+                assert_eq!(execution.exit_code, expected, "{opt} {role:?} {view}: {:?}", execution.captured_debug);
                 let other = participant.clone().as_builder().args(Bytes::from_static(b"instance-B").pack()).build();
-                assert_eq!(run(&other, &fixture, elf).exit_code, 85, "O{opt} {role:?} {view}: substituted instance");
+                assert_eq!(run(&other, &fixture, elf).exit_code, 85, "{opt} {role:?} {view}: substituted instance");
                 let missing = compile_open_handle(&source.replace(&format!("<Document>({index})"), "<Document>(99)"), opt);
                 assert_eq!(
                     run(&participant, &fixture, strip_vm_abi_trailer(&missing.artifact_bytes)).exit_code,
                     85,
-                    "O{opt} {role:?} {view}: missing view"
+                    "{opt} {role:?} {view}: missing view"
                 );
             }
         }
@@ -1127,7 +1127,7 @@ fn instance_handle_authoring_preserves_format_and_rejects_cross_profile_types() 
     let tokens = cellscript::lexer::lex(&source).unwrap();
     let parsed = cellscript::parser::parse(&tokens).unwrap();
     let formatted = cellscript::fmt::format_default(&parsed).unwrap();
-    let result = compile_open_handle(&formatted, 0);
+    let result = compile_open_handle(&formatted, cellscript::CompilerDiagnostics::without_optimizations());
     assert_eq!(result.metadata.actions[0].params[0].ty, "InstanceScriptHandle<openiface::types>");
     let plan = result.metadata.actions[0].proof_plan.iter().find(|plan| plan.category == "script-instance-admission").unwrap();
     assert!(plan.on_chain_checked && plan.identity_lifecycle_policy.contains("application predicates"));
@@ -1138,7 +1138,7 @@ fn instance_handle_authoring_preserves_format_and_rejects_cross_profile_types() 
             "witness handle: InstanceScriptHandle<openiface::types>",
             "witness handle: InstanceScriptHandle<openiface::types>, witness extra: u64",
         ),
-        0,
+        cellscript::CompilerDiagnostics::without_optimizations(),
     );
     assert!(
         cellscript_artifact_checker::entry_codec::check_fixed_policy_parameter_decoders(
@@ -1218,7 +1218,7 @@ fn constrained_instance_reads_committed_configuration_and_actual_participant_arg
         ConsumerArgs { policy_root: policy.root().unwrap(), subject: participant.calc_script_hash().unpack(), config: vec![0x41; 32] }
             .encode()
             .unwrap();
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let source = instance_handle_source();
         let result = compile_open_handle(&source, opt);
         assert_eq!(result.metadata.actions[0].params[0].fixed_byte_len, Some(instance_policy::SELECTION_BYTES));
@@ -1248,7 +1248,7 @@ fn constrained_instance_reads_committed_configuration_and_actual_participant_arg
         };
         let fixture = fixture_for(committed.to_vec(), selection.to_vec(), participant.clone());
         let execution = execute_cellscript_script(elf, &fixture);
-        assert_eq!(execution.exit_code, 0, "O{opt}: {:?}", execution.captured_debug);
+        assert_eq!(execution.exit_code, 0, "{opt}: {:?}", execution.captured_debug);
         // B is also policy-valid, but changing only the observed Cell cannot
         // substitute it for the subject authorized by the consumer's args.
         let mut other_args = args.clone();
@@ -1276,7 +1276,7 @@ fn constrained_instance_reads_committed_configuration_and_actual_participant_arg
             assert_eq!(
                 execute_cellscript_script(elf, &fixture_for(consumer.to_vec(), wire.to_vec(), script)).exit_code,
                 expected,
-                "O{opt} field offset={offset} value={value}"
+                "{opt} field offset={offset} value={value}"
             );
         }
         // Reconstruct the advertised schema and policy roots even for malformed
@@ -1327,7 +1327,7 @@ fn constrained_instance_reads_committed_configuration_and_actual_participant_arg
             assert_eq!(
                 execute_cellscript_script(elf, &fixture_for(consumer.to_vec(), wire.to_vec(), participant.clone())).exit_code,
                 85,
-                "rebound O{opt} offset={offset}"
+                "rebound {opt} offset={offset}"
             );
         }
         for offset in [0, 8, 40, 72, 73, 74, 112, 207] {
@@ -1336,7 +1336,7 @@ fn constrained_instance_reads_committed_configuration_and_actual_participant_arg
             assert_eq!(
                 execute_cellscript_script(elf, &fixture_for(consumer.to_vec(), selection.to_vec(), participant.clone())).exit_code,
                 85,
-                "consumer O{opt} offset={offset}"
+                "consumer {opt} offset={offset}"
             );
         }
         for length in [0, 32, 207, 209] {
@@ -1344,7 +1344,7 @@ fn constrained_instance_reads_committed_configuration_and_actual_participant_arg
             consumer.resize(length, 0);
             assert_eq!(execute_cellscript_script(elf, &fixture_for(consumer, selection.to_vec(), participant.clone())).exit_code, 85);
         }
-        eprintln!("instance-smoke O{opt} ELF={} cycles={}", elf.len(), execution.cycles);
+        eprintln!("instance-smoke {opt} ELF={} cycles={}", elf.len(), execution.cycles);
     }
 }
 
@@ -1354,7 +1354,7 @@ fn instance_runtime_empty_maximum_scalar_widths_and_late_rejection_are_bounded()
     use cellscript_artifact_checker::open_handle_policy::{AuthorizationSet, SelectionMode};
     use ckb_testtool::ckb_script::ScriptGroupType;
     let mut resource_records = Vec::new();
-    for opt in 0..=3 {
+    for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile_open_handle(&instance_handle_source(), opt);
         let elf = strip_vm_abi_trailer(&compiled.artifact_bytes);
         let mut profiles = Vec::new();
@@ -1512,7 +1512,7 @@ fn instance_runtime_empty_maximum_scalar_widths_and_late_rejection_are_bounded()
                 assert_eq!(
                     execution.exit_code,
                     if late_invalid { 85 } else { 0 },
-                    "{name} O{opt} exact={exact_implementation}: {:?}",
+                    "{name} {opt} exact={exact_implementation}: {:?}",
                     execution.captured_debug
                 );
                 assert!(execution.cycles <= 1_000_000, "{name}: {}", execution.cycles);
@@ -1541,7 +1541,7 @@ fn instance_runtime_empty_maximum_scalar_widths_and_late_rejection_are_bounded()
                     assert!(transaction_bytes <= 4_800, "{name}: transaction-byte budget");
                     assert!(elf.len() <= 16_384, "instance helper ELF exceeded the frozen fixture budget");
                     eprintln!(
-                        "instance-bound O{opt} {name}: ELF={} witness={} group_cycles={group_cycles} observed_stack={stack}",
+                        "instance-bound {opt} {name}: ELF={} witness={} group_cycles={group_cycles} observed_stack={stack}",
                         elf.len(),
                         selection.len() + 8
                     );
@@ -1556,7 +1556,7 @@ fn instance_runtime_empty_maximum_scalar_widths_and_late_rejection_are_bounded()
                         })
                         .sum();
                     resource_records.push(serde_json::json!({
-                        "case": name, "optimization": opt, "exact_implementation": exact_implementation,
+                        "case": name, "diagnostics": opt.to_string(), "exact_implementation": exact_implementation,
                         "members": set.members().len(), "direct_dependencies": if full { 64 } else { 3 },
                         "args_bytes": args.len(), "config_bytes": config.len(), "constraints": constraints.len(),
                         "group_cycles": group_cycles, "observed_stack_bytes": stack, "elf_bytes": elf.len(),

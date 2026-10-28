@@ -190,7 +190,7 @@ helpers independently of the producer's enclosing hashes.
 and the complete transaction/snapshots. Its `open_bindings` field can retain
 ordinary open participants in the same transaction. The CLI uses the existing
 `cellc protocol bundle check ... --open-admission ...` command with the new
-request schema `cellscript-protocol-instance-admission-input-v1`. An instance
+request schema `cellscript-protocol-instance-admission-input-v2`. An instance
 binding adds `instance_policy` (canonical 848-byte lowercase `0x` hex) to the
 existing source-policy fields and carries a 1768-byte `selection`. The new
 request schema requires at least one such binding; the old schema rejects it.

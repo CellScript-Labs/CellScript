@@ -4,7 +4,7 @@ use super::*;
 const SOURCE: &str = include_str!("../../../../../examples/language/batches/mixed_settlement.cell");
 const PEER: &str = include_str!("../../../../../tests/fixtures/mixed_settlement_asset.cell");
 
-fn compile_settlement(opt_level: u8, named: bool) -> crate::CompileResult {
+fn compile_settlement(diagnostics: crate::CompilerDiagnostics, named: bool) -> crate::CompileResult {
     let mut source =
         if named { SOURCE } else { include_str!("../../../../../tests/selection_bundle/fixtures/mixed_settlement_positional.cell") }
             .to_string();
@@ -16,9 +16,9 @@ fn compile_settlement(opt_level: u8, named: bool) -> crate::CompileResult {
     assert_eq!(crate::fmt::format_default(&crate::frontend::parse(&formatted, crate::NEXT_EDITION).unwrap()).unwrap(), formatted);
     let compiled = crate::compile(
         &source,
-        crate::CompileOptions { edition: crate::NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+        crate::CompileOptions { edition: crate::NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
     )
-    .unwrap_or_else(|error| panic!("settlement O{opt_level}: {error}"));
+    .unwrap_or_else(|error| panic!("settlement {diagnostics}: {error}"));
     for blocker in ["cell-data-view-artifact-proof", "exact-role-selection-artifact-proof"] {
         assert!(!compiled.metadata.runtime.fail_closed_runtime_features.iter().any(|feature| feature == blocker));
     }
@@ -239,18 +239,18 @@ fn run_settlement(
 #[test]
 fn mixed_settlement_business_transaction_checks_each_asset_and_every_group() {
     let peer = crate::compile(PEER, crate::CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() }).unwrap();
-    for opt in [0, 3] {
+    for opt in [crate::CompilerDiagnostics::default(), crate::CompilerDiagnostics::without_optimizations()] {
         let compiled = compile_settlement(opt, true);
-        let positional = (opt == 3).then(|| compile_settlement(opt, false));
+        let positional = (opt.is_standard()).then(|| compile_settlement(opt, false));
         for count in [1, 3, 6] {
             let forward = run_settlement(&compiled, &peer, count, Mutation::None, false).unwrap();
             let reversed = run_settlement(&compiled, &peer, count, Mutation::None, true).unwrap();
             assert_eq!(forward.cycles, reversed.cycles);
-            eprintln!("[mixed settlement] O{opt} orders={count} {}", serde_json::to_string(&reversed).unwrap());
+            eprintln!("[mixed settlement] {opt} orders={count} {}", serde_json::to_string(&reversed).unwrap());
             if let Some(positional) = &positional {
                 let legacy = run_settlement(positional, &peer, count, Mutation::None, true).unwrap();
                 assert_eq!(legacy.transaction, reversed.transaction, "authoring form changed canonical transaction bytes");
-                eprintln!("[mixed settlement positional] O{opt} orders={count} {}", serde_json::to_string(&legacy).unwrap());
+                eprintln!("[mixed settlement positional] {opt} orders={count} {}", serde_json::to_string(&legacy).unwrap());
             }
         }
         let too_many = run_settlement(&compiled, &peer, 7, Mutation::None, true).unwrap_err();
@@ -287,7 +287,7 @@ fn mixed_settlement_business_transaction_checks_each_asset_and_every_group() {
                 Mutation::Schema => 4,
                 _ => 5,
             };
-            assert!(error.contains(&format!("error code {code} ")), "O{opt} {mutation:?}: {error}");
+            assert!(error.contains(&format!("error code {code} ")), "{opt} {mutation:?}: {error}");
             if let Some(positional) = &positional {
                 let legacy = run_settlement(positional, &peer, 6, mutation, true).unwrap_err();
                 assert!(legacy.contains(&format!("error code {code} ")), "positional {mutation:?}: {legacy}");

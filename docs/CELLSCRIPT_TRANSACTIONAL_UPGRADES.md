@@ -38,7 +38,7 @@ It cannot substitute an immutable path or Git dependency.
 
 The plan binds its entire canonical JSON body with `plan_hash`, records the
 active compiler version, and names the `cellscript-resolve-graph-v1` and
-`cellscript-build-plan-v1` contracts it composes. Every affected member has:
+`cellscript-build-plan-v2` contracts it composes. Every affected member has:
 
 - exact old and candidate lock text, parsed lock records, and SHA-256 hashes;
 - aggregate old and candidate graph hashes;

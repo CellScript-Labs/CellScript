@@ -12,11 +12,11 @@ fn scalar_only_signatures_still_require_binding_when_helpers_create_bounded_valu
              fn bump(value: u64) -> u64 {{ {body} }}\n\
              action inspect() -> u64 {{ verification\nrequire bump(4) == 7\nreturn 0 }}"
         );
-        for opt_level in [0, 3] {
+        for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
             let valid = Fixture::from_result(
                 compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
                 .unwrap(),
             );
@@ -85,12 +85,12 @@ action inspect(witness bytes: Hash, witness messages: Messages) -> u64 {{
     return 0
 }}"#
             );
-            for opt_level in [0, 3] {
+            for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
                 let compiled = compile(
                     &source,
-                    CompileOptions { edition: NEXT_EDITION, opt_level, target: Some("riscv64-elf".into()), ..Default::default() },
+                    CompileOptions { edition: NEXT_EDITION, diagnostics, target: Some("riscv64-elf".into()), ..Default::default() },
                 )
-                .unwrap_or_else(|error| panic!("{ty}/{padding}/O{opt_level}: {error}"));
+                .unwrap_or_else(|error| panic!("{ty}/{padding}/{diagnostics}: {error}"));
                 use cellscript::EntryWitnessArg as A;
                 use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
                 let messages = [15u32.to_le_bytes().as_slice(), &8u32.to_le_bytes(), &3u32.to_le_bytes(), &[1, 2, 3]].concat();

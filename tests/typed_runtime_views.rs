@@ -157,7 +157,7 @@ action inspect() -> u64 {
     if output.type_hash != output_type.hash || group_output.type_hash != group_type.hash || output_type.hash == group_type.hash {
         return 88
     }
-    if output_type.code_hash == group_type.code_hash || output_type.hash_type != group_type.hash_type || output_type.args_empty || group_type.args_empty || output_type.args_hash == Hash::zero() {
+    if output_type.code_hash == group_type.code_hash || output_type.hash_type != group_type.hash_type || output_type.args_empty || group_type.args_empty || output_type.args32 == Hash::zero().0 {
         return 89
     }
     return 0
@@ -197,7 +197,7 @@ action inspect() -> u64 {
     if input_lock.hash != group_lock.hash || input_lock.code_hash != group_lock.code_hash || input_lock.hash_type != group_lock.hash_type || !input_lock.args_empty || !group_lock.args_empty {
         return 84
     }
-    if input_type.hash != group_type.hash || input_type.code_hash != group_type.code_hash || input_type.hash_type != group_type.hash_type || input_type.args_empty || group_type.args_empty || input_type.args_hash != group_type.args_hash {
+    if input_type.hash != group_type.hash || input_type.code_hash != group_type.code_hash || input_type.hash_type != group_type.hash_type || input_type.args_empty || group_type.args_empty || input_type.args32 != group_type.args32 {
         return 85
     }
     if input_out_point.tx_hash != group_out_point.tx_hash || input_out_point.index != group_out_point.index || ckb::since_to_raw(input.since) != ckb::since_to_raw(group_input.since) {
@@ -212,13 +212,13 @@ action inspect() -> u64 {
     if dep_lock.code_hash != input_lock.code_hash || dep_lock.hash_type != input_lock.hash_type || !dep_lock.args_empty {
         return 89
     }
-    if dep_type.code_hash == input_type.code_hash || dep_type.hash_type != input_type.hash_type || dep_type.args_empty || dep_type.args_hash == input_type.args_hash {
+    if dep_type.code_hash == input_type.code_hash || dep_type.hash_type != input_type.hash_type || dep_type.args_empty || dep_type.args32 == input_type.args32 {
         return 90
     }
-    if witness_args.size == 0 || witness_args.lock == Hash::zero() || witness_args.input_type == Hash::zero() || witness_args.output_type == Hash::zero() {
+    if witness_args.size == 0 || witness::lock_exact32(witness_args) == Hash::zero().0 || witness::input_type_exact32(witness_args) == Hash::zero().0 || witness::output_type_exact32(witness_args) == Hash::zero().0 {
         return 91
     }
-    if witness_args.lock == witness_args.input_type || witness_args.input_type == witness_args.output_type {
+    if witness::lock_exact32(witness_args) == witness::input_type_exact32(witness_args) || witness::input_type_exact32(witness_args) == witness::output_type_exact32(witness_args) {
         return 92
     }
     return 0
@@ -269,7 +269,7 @@ action inspect(
     require input_type.hash_type == output_type.hash_type
     require !input_type.args_empty
     require !output_type.args_empty
-    require input_type.args_hash == output_type.args_hash
+    require input_type.args32 == output_type.args32
     require out_point.tx_hash != Hash::zero()
     require out_point.index == 0
     require ckb::since_to_raw(input.since) == 0
@@ -286,7 +286,7 @@ action inspect(
     require dep_type.code_hash != input_type.code_hash
     require dep_type.hash_type == input_type.hash_type
     require !dep_type.args_empty
-    require dep_type.args_hash != input_type.args_hash
+    require dep_type.args32 != input_type.args32
     require ckb::epoch_number_to_u64(header.epoch_number) == 42
     require ckb::block_number_to_u64(header.epoch_start_block_number) == 97
     require ckb::epoch_length_to_u64(header.epoch_length) == 10
@@ -563,6 +563,7 @@ fn fixed_transaction_header_temporal_view_resource_profile_is_exact_and_bounded(
     });
     let manifest: serde_json::Value = serde_json::from_str(include_str!("fixtures/runtime_view_resource_budgets.json")).unwrap();
     let profile = &manifest["profiles"][0];
+    record_runtime_profile(profile, &actual, None);
     assert_eq!(actual, profile["measured"], "recorded runtime-view resource measurement is stale: {actual}");
     for field in ["cycles", "elf_bytes", "max_stack_frame_bytes", "witness_bytes", "transaction_bytes", "dependency_bytes"] {
         assert!(actual[field].as_u64().unwrap() <= profile["budgets"][field].as_u64().unwrap(), "{field} exceeded budget");
@@ -682,6 +683,7 @@ fn output_group_output_and_maximum_script_view_resource_profile_is_exact_and_bou
         .iter()
         .find(|profile| profile["id"] == "output-group-output-maximum-script-view")
         .expect("output/Script resource profile");
+    record_runtime_profile(profile, &actual, Some(&identities));
     assert_eq!(actual, profile["measured"], "recorded runtime-view resource measurement is stale: {actual}");
     assert_eq!(identities, profile["identities"], "recorded runtime-view identities are stale: {identities}");
     for field in ["cycles", "elf_bytes", "max_stack_frame_bytes", "witness_bytes", "transaction_bytes", "dependency_bytes"] {
@@ -719,6 +721,7 @@ fn input_group_input_cell_dep_and_witness_view_resource_profile_is_exact_and_bou
         .iter()
         .find(|profile| profile["id"] == "input-group-input-cell-dep-witness-view")
         .expect("Input/GroupInput/CellDep/WitnessArgs resource profile");
+    record_runtime_profile(profile, &actual, Some(&identities));
     assert_eq!(actual, profile["measured"], "recorded runtime-view resource measurement is stale: {actual}");
     assert_eq!(identities, profile["identities"], "recorded runtime-view identities are stale: {identities}");
     for field in ["cycles", "elf_bytes", "max_stack_frame_bytes", "witness_bytes", "transaction_bytes", "dependency_bytes"] {
@@ -780,6 +783,7 @@ fn persistent_policy_and_generated_builder_cover_complete_runtime_view_profile()
         .iter()
         .find(|profile| profile["id"] == "persistent-policy-complete-runtime-view")
         .expect("persistent-policy complete runtime-view resource profile");
+    record_runtime_profile(profile, &actual, Some(&identities));
     assert_eq!(actual, profile["measured"], "recorded persistent runtime-view measurement is stale: {actual}");
     assert_eq!(identities, profile["identities"], "recorded persistent runtime-view identities are stale: {identities}");
     for field in ["cycles", "elf_bytes", "max_stack_frame_bytes", "witness_bytes", "transaction_bytes", "dependency_bytes"] {
@@ -1064,4 +1068,12 @@ action inspect() -> u64 {
 "#,
     );
     assert!(error.message.contains("bounded witness byte view"), "unexpected unbounded hash diagnostic: {error}");
+}
+
+fn record_runtime_profile(profile: &serde_json::Value, actual: &serde_json::Value, identities: Option<&serde_json::Value>) {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/runtime-view-measurements");
+    std::fs::create_dir_all(&path).unwrap();
+    let report = serde_json::json!({"id": profile["id"], "measured": actual, "identities": identities});
+    std::fs::write(path.join(format!("{}.json", profile["id"].as_str().unwrap())), serde_json::to_vec_pretty(&report).unwrap())
+        .unwrap();
 }

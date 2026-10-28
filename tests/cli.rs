@@ -300,6 +300,7 @@ fn cellscript_mcp_check_tool_preserves_structured_boundaries() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "mcp-demo"
 version = "0.1.0"
@@ -1091,6 +1092,7 @@ fn cellc_check_multiple_diagnostics_prints_each_source_context() {
     std::fs::write(
         temp.path().join("Cell.toml"),
         r#"[package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "bad"
 version = "0.1.0"
@@ -1168,6 +1170,7 @@ fn cellc_auth_capability_create_infers_only_the_exact_publish_scope() {
     std::fs::write(
         temp.path().join("Cell.toml"),
         r#"[package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "amm"
 version = "0.1.0"
@@ -1328,6 +1331,7 @@ fn write_publish_fixture_package(root: &std::path::Path) {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "1.2.3"
@@ -2182,7 +2186,7 @@ fn write_live_registry_fixture_with(root: &std::path::Path, data_hash: &str, cod
         namespace: Some("cellscript".to_string()),
         source_hash: Some("source_hash".to_string()),
         compiler_source_hash: None,
-        compiler_requirement: "*".to_string(),
+        compiler_requirement: format!(">={}", cellscript::VERSION),
         resolver_compiler_version: cellscript::VERSION.to_string(),
     };
     lockfile.package_build = Some(cellscript::package::LockedBuildInfo {
@@ -2989,6 +2993,7 @@ fn cellc_constraints_subcommand_surfaces_ckb_deployment_manifest() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -3494,6 +3499,7 @@ fn cellc_compiles_package_with_local_path_dependency() {
         dep_root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "dep_pkg"
 version = "0.1.0"
@@ -3516,6 +3522,7 @@ resource Token has store, replace, relock, consume, burn {
         app_root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app_pkg"
 version = "0.1.0"
@@ -3564,6 +3571,7 @@ fn cellc_rejects_registry_dependency_without_namespace() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -3606,6 +3614,7 @@ fn cellc_build_resolves_artifact_api_dependency_and_writes_lockfile() {
         dep_root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "token"
 version = "0.3.0"
@@ -3647,7 +3656,7 @@ resource Token has store, replace, relock, consume, burn {
             yanked_reason: None,
             replaced_by: None,
             audit: None,
-            compiler_requirement: "*".to_string(),
+            compiler_requirement: format!(">={}", cellscript::VERSION),
         }],
     };
 
@@ -3741,6 +3750,7 @@ resource Token has store, replace, relock, consume, burn {
         app_root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "0.1.0"
@@ -3836,7 +3846,7 @@ fn cellc_registry_edit_yanks_existing_version() {
             yanked_reason: None,
             replaced_by: None,
             audit: None,
-            compiler_requirement: "*".to_string(),
+            compiler_requirement: format!(">={}", cellscript::VERSION),
         },
     )
     .unwrap();
@@ -3895,7 +3905,7 @@ fn cellc_registry_verify_json_fails_closed_for_missing_deployment_ref() {
         namespace: Some("cellscript".to_string()),
         source_hash: Some("source_hash".to_string()),
         compiler_source_hash: None,
-        compiler_requirement: "*".to_string(),
+        compiler_requirement: format!(">={}", cellscript::VERSION),
         resolver_compiler_version: cellscript::VERSION.to_string(),
     };
     lockfile.package_build = Some(cellscript::package::LockedBuildInfo {
@@ -3987,7 +3997,7 @@ fn write_offline_fixture_with_lineage(root: &std::path::Path, lineage: Option<&s
         namespace: Some("cellscript".to_string()),
         source_hash: Some("source_hash".to_string()),
         compiler_source_hash: None,
-        compiler_requirement: "*".to_string(),
+        compiler_requirement: format!(">={}", cellscript::VERSION),
         resolver_compiler_version: cellscript::VERSION.to_string(),
     };
     lockfile.package_build = Some(cellscript::package::LockedBuildInfo {
@@ -4358,6 +4368,7 @@ fn cellc_rejects_underdeclared_effects_from_path_dependency_calls() {
         dep_root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "dep_pkg"
 version = "0.1.0"
@@ -4388,6 +4399,7 @@ action issue(amount: u64) -> Token {
         app_root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app_pkg"
 version = "0.1.0"
@@ -4458,6 +4470,7 @@ fn cellc_compiles_external_dependency_function_calls() {
         dep_root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "dep_pkg"
 version = "0.1.0"
@@ -4480,6 +4493,7 @@ fn add_one(x: u64) -> u64 {
         app_root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app_pkg"
 version = "0.1.0"
@@ -4525,6 +4539,7 @@ fn cellc_enforces_package_visibility_across_path_dependencies() {
         dep_root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "dep_pkg"
 version = "0.1.0"
@@ -4550,6 +4565,7 @@ public fn exported(x: u64) -> u64 {
         app_root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app_pkg"
 version = "0.1.0"
@@ -4642,6 +4658,7 @@ fn cellc_compiles_aliased_external_dependency_function_calls() {
         dep_root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "dep_pkg"
 version = "0.1.0"
@@ -4664,6 +4681,7 @@ fn add_one(x: u64) -> u64 {
         app_root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app_pkg"
 version = "0.1.0"
@@ -4721,6 +4739,7 @@ fn cellc_compiles_same_basename_external_dependency_function_calls_without_colli
             format!(
                 r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "{package}"
 version = "0.1.0"
@@ -4747,6 +4766,7 @@ fn add_one(x: u64) -> u64 {{
         app_root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app_pkg"
 version = "0.1.0"
@@ -4800,6 +4820,7 @@ fn cellc_compiles_transitive_external_dependency_function_calls() {
         dep_root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "dep_pkg"
 version = "0.1.0"
@@ -4826,6 +4847,7 @@ fn add_two(x: u64) -> u64 {
         app_root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app_pkg"
 version = "0.1.0"
@@ -4872,6 +4894,7 @@ fn cellc_uses_manifest_build_out_dir_for_package_input() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -4914,6 +4937,7 @@ fn cellc_cli_target_overrides_manifest_build_target() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -4957,6 +4981,7 @@ fn cellc_uses_manifest_build_target_by_default() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -5000,6 +5025,7 @@ fn cellc_build_and_check_subcommands_use_package_flow() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -5039,7 +5065,8 @@ action ping() -> u64 {
     let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(stdout["status"], "ok");
     assert_eq!(stdout["artifact_format"], "RISC-V assembly");
-    assert_eq!(stdout["opt_level"], 1);
+    assert_eq!(stdout["compilation_policy"], cellscript::COMPILATION_POLICY);
+    assert!(stdout.get("opt_level").is_none());
     assert_eq!(stdout["target_profile"], "ckb");
     assert_eq!(stdout["policy_verified"], false);
     assert_eq!(stdout["runtime_required_verifier_obligations"], 0);
@@ -5109,6 +5136,7 @@ cellscript_version = ">=999.0.0"
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "1.0.0"
@@ -5151,6 +5179,7 @@ fn cellc_json_reports_package_instance_conflicts_before_writing_a_lock() {
             package_root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "shared"
 version = "1.0.0"
@@ -5164,6 +5193,7 @@ namespace = "cellscript"
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "1.0.0"
@@ -5205,6 +5235,7 @@ fn cellc_check_all_targets_checks_asm_and_elf_without_writing_artifacts() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -5266,6 +5297,7 @@ fn cellc_check_json_reports_multiple_compile_diagnostics() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -5312,6 +5344,7 @@ fn cellc_check_json_reports_multiple_parse_diagnostics() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -5357,6 +5390,7 @@ fn cellc_check_json_reports_diagnostics_on_stdout() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -5426,6 +5460,7 @@ fn cellc_check_json_reports_multiple_ir_diagnostics() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -5489,6 +5524,7 @@ fn cellc_build_accepts_pure_ckb_target_profile_without_vm_abi_trailer() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -5561,6 +5597,7 @@ fn cellc_check_accepts_pure_ckb_target_profile() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -5609,6 +5646,7 @@ fn cellc_check_accepts_ckb_profile_timepoint() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -5645,6 +5683,7 @@ fn cellc_check_production_rejects_fail_closed_runtime_paths() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -5696,6 +5735,7 @@ fn cellc_production_rejects_bounded_collection_consensus_gaps_before_codegen() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "bounded-gap"
 version = "0.1.0"
@@ -5761,6 +5801,7 @@ fn cellc_errors_include_compiler_ecode_when_surface_is_rejected_before_codegen()
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -5803,6 +5844,7 @@ fn cellc_check_production_distinguishes_fixed_and_dynamic_helper_outputs() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -5868,6 +5910,7 @@ fn cellc_check_can_reject_runtime_required_obligations() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -5940,6 +5983,7 @@ fn cellc_check_reports_transaction_invariant_checked_subconditions() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -6098,6 +6142,7 @@ fn cellc_check_reports_resource_conservation_blocker_class() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -6169,6 +6214,7 @@ fn cellc_check_reports_explicit_output_binding_without_mutable_state_blockers() 
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -6227,6 +6273,7 @@ fn cellc_check_reports_dynamic_output_blocker_class() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -6299,6 +6346,7 @@ fn cellc_check_rejects_cell_backed_vec_with_source_aware_guidance() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -6357,6 +6405,7 @@ fn cellc_check_accepts_u128_mutable_state_transition_with_u64_delta() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -6410,6 +6459,7 @@ fn cellc_check_rejects_undeclared_flow_edge() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -6463,6 +6513,7 @@ fn cellc_check_accepts_declared_cyclic_flow_edge() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -6515,6 +6566,7 @@ fn cellc_check_accepts_declared_linear_flow_edge() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -6562,6 +6614,7 @@ fn cellc_check_rejects_flow_create_missing_state_field() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -6606,6 +6659,7 @@ fn cellc_check_rejects_initial_flow_create_non_static_state() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -6655,6 +6709,7 @@ fn cellc_check_rejects_flow_state_index_out_of_range() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -6701,6 +6756,7 @@ fn cellc_check_rejects_duplicate_flow_edge() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -6750,6 +6806,7 @@ fn cellc_check_rejects_transition_on_type_without_flow_block() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -6794,6 +6851,7 @@ fn cellc_check_rejects_aggregate_invariant_scope_mismatch() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -6852,6 +6910,7 @@ fn cellc_check_reports_claim_source_predicate_blocker_class() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -6932,6 +6991,7 @@ fn cellc_check_reports_pool_invariant_policy_families() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -7028,6 +7088,7 @@ fn cellc_check_reports_amm_pool_without_runtime_blockers() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -7086,6 +7147,7 @@ fn cellc_check_uses_manifest_policy_defaults() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -7139,6 +7201,7 @@ fn cellc_build_uses_manifest_policy_before_writing_artifacts() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -7194,6 +7257,7 @@ fn cellc_build_production_accepts_closed_u128_modulo_lowering() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -7238,6 +7302,7 @@ fn cellc_test_subcommand_compiles_test_sources() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -7303,6 +7368,7 @@ fn cellc_test_subcommand_supports_expected_compile_failures() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -7354,6 +7420,7 @@ fn cellc_test_subcommand_rejects_missing_expected_error_text() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -7404,6 +7471,7 @@ fn cellc_test_subcommand_supports_target_directive() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -7455,6 +7523,7 @@ fn cellc_test_subcommand_supports_policy_directives() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -7518,6 +7587,7 @@ fn cellc_test_subcommand_supports_runtime_metadata_directives() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -7585,6 +7655,7 @@ fn cellc_test_subcommand_rejects_missing_runtime_metadata() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -7635,6 +7706,7 @@ fn cellc_test_subcommand_supports_entrypoint_metadata_directives() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -7693,6 +7765,7 @@ fn cellc_test_subcommand_rejects_missing_entrypoint_metadata() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -7743,6 +7816,7 @@ fn cellc_test_subcommand_rejects_unknown_directives() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -7794,6 +7868,7 @@ fn cellc_test_subcommand_rejects_conflicting_expectations() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -7844,6 +7919,7 @@ fn cellc_doc_subcommand_generates_markdown_docs() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -7981,6 +8057,7 @@ fn cellc_schema_ack_creates_and_verifies_a_focused_receipt() {
             root.join("Cell.toml"),
             r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 name = "schema-ack-demo"
 version = "0.1.0"
 edition = "2027"
@@ -8433,6 +8510,7 @@ fn cellc_check_denies_metadata_only_declared_invariant() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -8482,6 +8560,7 @@ fn cellc_check_production_rejects_metadata_only_executable_claim() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -8549,6 +8628,7 @@ fn cellc_info_subcommand_supports_json_summary() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -8589,7 +8669,7 @@ fn cellc_add_and_remove_subcommands_honor_dev_path_and_json() {
     std::fs::write(root.join("src/main.cell"), "module demo;\n").unwrap();
     std::fs::write(
         root.join("math/Cell.toml"),
-        "[package]\nedition = \"2026\"\nname = \"math\"\nversion = \"0.1.0\"\nentry = \"src/lib.cell\"\n",
+        "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"math\"\nversion = \"0.1.0\"\nentry = \"src/lib.cell\"\n",
     )
     .unwrap();
     std::fs::write(root.join("math/src/lib.cell"), "module math;\n").unwrap();
@@ -8598,6 +8678,7 @@ fn cellc_add_and_remove_subcommands_honor_dev_path_and_json() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -8682,6 +8763,7 @@ fn cellc_install_path_updates_lockfile_and_remove_prunes_it() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -8692,6 +8774,7 @@ version = "0.1.0"
         dep_root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "math"
 version = "0.2.0"
@@ -8708,6 +8791,7 @@ path = "../util"
         util_root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "util"
 version = "0.1.0"
@@ -8781,6 +8865,7 @@ fn cellc_build_uses_authoritative_lock_and_frozen_is_offline_and_read_only() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -8807,6 +8892,7 @@ action ping(value: u64) -> u64 {
         root.join("math/Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "math"
 version = "1.2.3"
@@ -8870,7 +8956,7 @@ fn cellc_explicit_lock_migrates_v3_compiler_requirement_evidence() {
 edition = "2026"
 name = "legacy-lock"
 version = "1.0.0"
-cellscript_version = ">=0.20"
+cellscript_version = ">=0.20, >=0.33.0-alpha.1"
 "#,
     )
     .unwrap();
@@ -8883,6 +8969,7 @@ schema = "cellscript-lock-v0.24-graph-v1"
 resolver_model = "legacy"
 
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "legacy-lock"
 version = "1.0.0"
@@ -8904,7 +8991,7 @@ manifest_digest = "legacy"
     let lockfile: cellscript::package::Lockfile = toml::from_str(&std::fs::read_to_string(root.join("Cell.lock")).unwrap()).unwrap();
     assert_eq!(lockfile.version, cellscript::package::Lockfile::CURRENT_VERSION);
     assert_eq!(lockfile.schema, cellscript::package::Lockfile::CURRENT_SCHEMA);
-    assert_eq!(lockfile.package.compiler_requirement, ">=0.20");
+    assert_eq!(lockfile.package.compiler_requirement, ">=0.20, >=0.33.0-alpha.1");
     assert_eq!(lockfile.package.resolver_compiler_version, cellscript::VERSION);
 
     let frozen = cellc_command().current_dir(root).args(["check", "--frozen", "--offline"]).output().unwrap();
@@ -8923,7 +9010,7 @@ fn cellc_explicit_lock_migrates_v4_to_the_declared_resolver_model() {
 edition = "2026"
 name = "v4-lock"
 version = "1.0.0"
-cellscript_version = ">=0.20"
+cellscript_version = ">=0.20, >=0.33.0-alpha.1"
 "#,
     )
     .unwrap();
@@ -8935,10 +9022,11 @@ cellscript_version = ">=0.20"
 schema = "cellscript-lock-v0.30-compiler-requirement-v1"
 
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "v4-lock"
 version = "1.0.0"
-compiler_requirement = ">=0.20"
+compiler_requirement = ">=0.20, >=0.33.0-alpha.1"
 resolver_compiler_version = "{}"
 
 [root]
@@ -9058,13 +9146,13 @@ fn bundled_package_graph_exercises_alias_features_test_scope_and_ckb_environment
     let lock_text = String::from_utf8(lock_before.clone()).unwrap();
     for needle in [
         "schema = \"cellscript-lock-v0.30-single-package-coordinate-v1\"",
-        "compiler_requirement = \"*\"",
+        "compiler_requirement = \">=0.33.0-alpha.1\"",
         "[environments.mainnet.dependencies]",
         "[environments.mainnet.dev_dependencies]",
         "[environments.testnet.dependencies]",
         "[environments.testnet.dev_dependencies]",
-        "network_contracts@1.0.0|path:deps/contracts-mainnet|compiler=2a|env=environment-independent:root=6d61696e6e6574",
-        "network_contracts@2.0.0|path:deps/contracts-testnet|compiler=2a|env=environment-independent:root=746573746e6574",
+        "network_contracts@1.0.0|path:deps/contracts-mainnet|compiler=3e3d302e33332e302d616c7068612e31|env=environment-independent:root=6d61696e6e6574",
+        "network_contracts@2.0.0|path:deps/contracts-testnet|compiler=3e3d302e33332e302d616c7068612e31|env=environment-independent:root=746573746e6574",
         "chain=636b622d6d61696e6e6574:genesis=0x1111111111111111111111111111111111111111111111111111111111111111",
         "chain=636b622d746573746e6574:genesis=0x2222222222222222222222222222222222222222222222222222222222222222",
     ] {
@@ -9105,6 +9193,7 @@ fn cellc_metadata_subcommand_emits_lowering_runtime_json() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -9163,6 +9252,7 @@ fn cellc_metadata_reports_multiple_compile_diagnostics() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -9202,6 +9292,7 @@ fn cellc_expand_uses_the_manifest_edition_and_emits_the_semantic_foundation() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2027"
 name = "semantic-preview"
 version = "0.1.0"
@@ -9257,6 +9348,7 @@ fn cellc_expand_compiles_native_edition_2027_type_script_surface() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2027"
 name = "native-semantic-preview"
 version = "0.1.0"
@@ -9333,7 +9425,7 @@ fn cellc_expand_reports_native_pool_and_metadata_only_audit() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
     std::fs::create_dir_all(root.join("src")).unwrap();
-    std::fs::write(root.join("Cell.toml"), "[package]\nedition = \"2027\"\nname = \"native-pool-preview\"\nversion = \"0.1.0\"\n")
+    std::fs::write(root.join("Cell.toml"), "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"native-pool-preview\"\nversion = \"0.1.0\"\n")
         .unwrap();
     std::fs::write(
         root.join("src/main.cell"),
@@ -9391,6 +9483,7 @@ fn cellc_expand_compiles_native_edition_2027_lock_script_surface() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2027"
 name = "native-lock-preview"
 version = "0.1.0"
@@ -9455,6 +9548,7 @@ fn cellc_migrate_emits_only_a_differentially_verified_edition_2027_candidate() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "migration-preview"
 version = "0.1.0"
@@ -9517,7 +9611,11 @@ fn cellc_explain_collections_reports_preallocation_and_growth_without_writing_ar
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
     std::fs::create_dir(root.join("src")).unwrap();
-    std::fs::write(root.join("Cell.toml"), "[package]\nname = \"budgets\"\nversion = \"0.1.0\"\nedition = \"2027\"\n").unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nname = \"budgets\"\nversion = \"0.1.0\"\nedition = \"2027\"\n",
+    )
+    .unwrap();
     std::fs::write(root.join("src/main.cell"), include_str!("../examples/language/batches/multi_asset_transfer.cell")).unwrap();
     let output = cellc_command().current_dir(root).args(["explain", "collections", "--json"]).output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
@@ -9558,7 +9656,11 @@ fn cellc_explain_collections_resolves_unused_imported_records_and_shared_shortfa
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
     std::fs::create_dir(root.join("src")).unwrap();
-    std::fs::write(root.join("Cell.toml"), "[package]\nname = \"budgets\"\nversion = \"0.1.0\"\nedition = \"2027\"\n").unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nname = \"budgets\"\nversion = \"0.1.0\"\nedition = \"2027\"\n",
+    )
+    .unwrap();
     std::fs::write(root.join("src/values.cell"), "module values\npublic struct Pair<T: fixed_value> { left: T, right: T }").unwrap();
     let source = r#"module budgets
 use values::Pair
@@ -9609,6 +9711,7 @@ fn cellc_explain_generics_reports_checked_vec_instantiations() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -9724,6 +9827,7 @@ fn cellc_action_build_emits_builder_plan_json() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -9854,6 +9958,7 @@ fn cellc_action_build_emits_runtime_required_scan_selectors() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -9925,6 +10030,7 @@ fn cellc_action_build_emits_cellfabric_intent_envelope() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -10057,6 +10163,7 @@ fn write_xudt_package(root: &std::path::Path, source: &str) {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -10279,6 +10386,7 @@ fn cellc_atomic_swap_full_lifecycle_build_check_audit_receipt() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -10386,6 +10494,7 @@ fn cellc_multi_phase_dao_flow_lifecycle_build_check_audit_receipt() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -10532,6 +10641,7 @@ fn cellc_multi_phase_dao_rejects_undeclared_state_transition() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -10682,6 +10792,7 @@ fn cellc_gen_builder_typescript_emits_package_scaffold() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -10889,6 +11000,7 @@ fn cellc_gen_builder_preserves_typed_temporal_scalar_domains() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2027"
 name = "temporal-builder"
 version = "0.1.0"
@@ -10989,6 +11101,7 @@ fn cellc_gen_builder_preserves_dynamic_runtime_index_bounds() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2027"
 name = "dynamic-index-builder"
 version = "0.1.0"
@@ -11077,6 +11190,7 @@ fn cellc_gen_builder_emits_executable_bounded_output_plan_contract() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "bounded-output-builder"
 version = "0.1.0"
@@ -11143,6 +11257,7 @@ fn cellc_gen_builder_preserves_bounded_witness_owner_contract() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2027"
 name = "bounded-witness-builder"
 version = "0.1.0"
@@ -11238,6 +11353,7 @@ fn cellc_gen_builder_preserves_zero_lock_signing_message_domain() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2027"
 name = "sighash-zero-lock-builder"
 version = "0.1.0"
@@ -11255,8 +11371,8 @@ module sighash_zero_lock_builder::main
 action inspect() -> u64 {
     verification
         let digest = env::sighash_all_zero_lock(4, 8, 4, 4096)
-        let expected = witness::args(0).lock
-        require Hash::from_sighash_all(digest) == expected
+        let expected = witness::lock_exact32(source::input(0))
+        require Hash::from_sighash_all(digest).0 == expected
         return 0
 }
 "#,
@@ -11314,6 +11430,7 @@ fn cellc_gen_builder_typescript_declares_raw_cell_data_codec_manifest() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "raw-codec-demo"
 version = "0.1.0"
@@ -11398,6 +11515,7 @@ fn cellc_gen_builder_lockfile_identity_fails_closed() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -11451,7 +11569,7 @@ action mint(amount: u64, owner: Address) -> Token {
             namespace: None,
             source_hash: Some(package_source_hash.clone()),
             compiler_source_hash: metadata.source_hash.clone(),
-            compiler_requirement: "*".to_string(),
+            compiler_requirement: format!(">={}", cellscript::VERSION),
             resolver_compiler_version: cellscript::VERSION.to_string(),
         },
         root: Default::default(),
@@ -11720,6 +11838,7 @@ fn cellc_entry_witness_subcommand_emits_parameterized_witness_json() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -11893,6 +12012,7 @@ fn cellc_abi_subcommand_explains_entry_witness_layout() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -11948,6 +12068,7 @@ fn cellc_scheduler_plan_consumes_shared_touch_hints() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -12058,50 +12179,44 @@ fn cellc_ckb_std_compat_reports_runtime_boundary() {
 }
 
 #[test]
-fn cellc_opt_report_compares_all_optimization_levels() {
+fn cellc_rejects_removed_optimization_controls() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("strategy.cell");
+    std::fs::write(&source, "module strategy\naction inspect() -> u64 { verification return 20 }\n").unwrap();
+    for argument in ["-O0", "-O1", "-O2", "-O3", "--opt=3", "--opt-level=3", "--optimization-level=3", "opt-report"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(argument).arg(&source).output().unwrap();
+        assert!(!output.status.success(), "removed control accepted: {argument}");
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("--help").output().unwrap();
+    assert!(output.status.success());
+    let help = String::from_utf8(output.stdout).unwrap();
+    assert!(!help.contains("--opt"));
+    assert!(!help.contains("opt-report"));
+}
+
+#[test]
+fn cellc_release_and_normal_builds_use_the_same_compilation_strategy() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
-    let source = root.join("main.cell");
-    std::fs::write(
-        &source,
-        r#"
-module demo::main
-
-action main(value: u64) -> u64 {
-    verification
-        let doubled = value + value
-        return doubled
-}
-"#,
-    )
-    .unwrap();
-
-    let output =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).arg("opt-report").arg(&source).arg("--target").arg("riscv64-asm").output().unwrap();
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
-
-    let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(stdout["status"], "ok");
-    assert_eq!(stdout["policy"], "cellscript-opt-report-v1");
-    assert_eq!(stdout["baseline_opt_level"], 0);
-    let rows = stdout["rows"].as_array().expect("rows");
-    assert_eq!(rows.len(), 4);
-    for (index, row) in rows.iter().enumerate() {
-        assert_eq!(row["opt_level"], index as u64);
-        assert_eq!(row["artifact_format"], "RISC-V assembly");
-        assert_eq!(row["constraints_status"], "warn");
-        assert!(row["artifact_size_bytes"].as_u64().unwrap() > 0);
-        assert!(row["artifact_size_delta_from_o0"].is_i64());
-        assert!(row["estimated_cycles_total"].as_u64().unwrap() > 0);
-        assert!(row["estimated_cycles_total_delta_from_o0"].is_i64());
-        assert!(row["backend_shape"]["text_bytes"].as_u64().unwrap() > 0);
-        assert!(row["backend_shape"]["executable_text_op_count"].as_u64().unwrap() > 0);
-        assert!(row["backend_shape"]["covered_text_op_count"].as_u64().unwrap() > 0);
-        assert!(row["backend_shape"]["machine_block_count"].as_u64().unwrap() > 0);
-        assert!(row["backend_shape"]["layout_order_text_size"].as_u64().unwrap() > 0);
-        assert!(row["text_bytes_delta_from_o0"].is_i64());
-        assert!(row["executable_text_op_count_delta_from_o0"].is_i64());
+    cellscript::package::PackageManager::new(root).init("one-strategy").unwrap();
+    std::fs::write(root.join("src/main.cell"),
+        "module one_strategy\nfn add(value: u64) -> u64 { return value + 1 }\naction inspect(witness value: u64) -> u64 { verification require add(value) == 5 return 0 }\n").unwrap();
+    lock_package(root);
+    let mut artifacts = Vec::new();
+    for release in [false, true] {
+        let mut command = cellc_command();
+        command.current_dir(root).args(["build", "--target", "riscv64-elf", "--json"]);
+        if release {
+            command.arg("--release");
+        }
+        let output = command.output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["compilation_policy"], cellscript::COMPILATION_POLICY);
+        assert!(report.get("opt_level").is_none());
+        artifacts.push(std::fs::read(root.join(report["artifact"].as_str().unwrap())).unwrap());
     }
+    assert_eq!(artifacts[0], artifacts[1]);
 }
 
 #[test]
@@ -12114,6 +12229,7 @@ fn cellc_entry_witness_subcommand_encodes_schema_backed_params() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -12167,6 +12283,7 @@ fn cellc_entry_witness_subcommand_rejects_wrong_width_fixed_bytes() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -12214,6 +12331,7 @@ fn cellc_fmt_subcommand_formats_sources() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -12262,7 +12380,11 @@ fn cellc_run_simulate_json_reports_steps_and_null_cycles() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
     std::fs::create_dir_all(root.join("src")).unwrap();
-    std::fs::write(root.join("Cell.toml"), "[package]\nedition = \"2026\"\nname = \"demo\"\nversion = \"0.1.0\"\n").unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"demo\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
     std::fs::write(root.join("src/main.cell"), "module demo::main\naction main() -> u64 {\n    verification\n        0\n}\n").unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).args(["run", "--simulate", "--json"]).output().unwrap();
@@ -12291,6 +12413,7 @@ fn cellc_run_subcommand_executes_pure_elf_package() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -12336,6 +12459,7 @@ fn cellc_run_subcommand_rejects_parameterized_schema_elf() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -12378,6 +12502,7 @@ fn cellc_run_subcommand_rejects_ckb_runtime_elf() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -12415,7 +12540,8 @@ action main() -> u64 {
 fn write_workspace_member(root: &std::path::Path, directory: &str, name: &str, dependencies: &[(&str, &str)]) -> std::path::PathBuf {
     let member = root.join(directory);
     std::fs::create_dir_all(member.join("src")).unwrap();
-    let mut manifest = format!("[package]\nedition = \"2026\"\nname = \"{name}\"\nversion = \"1.0.0\"\n");
+    let mut manifest =
+        format!("[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"{name}\"\nversion = \"1.0.0\"\n");
     for (alias, path) in dependencies {
         manifest.push_str(&format!("\n[dependencies.{alias}]\npath = \"{path}\"\n"));
     }
@@ -12445,6 +12571,7 @@ members = ["pkg_a", "pkg_b"]
     std::fs::write(
         pkg_a.join("Cell.toml"),
         r#"[package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "pkg_a"
 version = "0.1.0"
@@ -12469,6 +12596,7 @@ action hello() -> u64 {
     std::fs::write(
         pkg_b.join("Cell.toml"),
         r#"[package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "pkg_b"
 version = "0.1.0"
@@ -12519,6 +12647,7 @@ members = ["alpha", "beta"]
     std::fs::write(
         alpha.join("Cell.toml"),
         r#"[package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "alpha"
 version = "0.1.0"
@@ -12539,6 +12668,7 @@ action run() -> u64 { verification let x: u64 = 1 return x }
     std::fs::write(
         beta.join("Cell.toml"),
         r#"[package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "beta"
 version = "0.1.0"
@@ -12586,6 +12716,7 @@ members = ["lib_a"]
     std::fs::write(
         lib_a.join("Cell.toml"),
         r#"[package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "lib_a"
 version = "0.1.0"
@@ -12633,6 +12764,7 @@ members = ["shared_types", "app"]
     std::fs::write(
         shared.join("Cell.toml"),
         r#"[package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "shared_types"
 version = "0.1.0"
@@ -12658,6 +12790,7 @@ resource Token has store, replace, relock, consume, burn {
     std::fs::write(
         app.join("Cell.toml"),
         r#"[package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "app"
 version = "0.1.0"
@@ -12843,14 +12976,16 @@ fn cellc_workspace_propagates_dependency_failure_without_building_dependents() {
 }
 
 #[test]
-fn inspection_v1_fixtures_remain_deserializable() {
+fn inspection_fixtures_use_the_current_schemas_and_reject_retired_build_selection() {
     let graph: cellscript::package::inspection::ResolveGraph =
         serde_json::from_str(include_str!("fixtures/resolve_graph_v1.json")).unwrap();
-    let plan: cellscript::package::inspection::BuildPlan = serde_json::from_str(include_str!("fixtures/build_plan_v1.json")).unwrap();
+    let plan: cellscript::package::inspection::BuildPlan = serde_json::from_str(include_str!("fixtures/build_plan_v2.json")).unwrap();
     let upgrade: cellscript::package::upgrade::UpgradePlan =
         serde_json::from_str(include_str!("fixtures/upgrade_plan_v1.json")).unwrap();
     assert_eq!(graph.schema, cellscript::package::inspection::RESOLVE_GRAPH_SCHEMA);
     assert_eq!(plan.schema, cellscript::package::inspection::BUILD_PLAN_SCHEMA);
+    assert_eq!(plan.schema_version, 2);
+    assert!(serde_json::from_str::<cellscript::package::inspection::BuildPlan>(include_str!("fixtures/build_plan_v1.json")).is_err());
     assert_eq!(upgrade.schema, cellscript::package::upgrade::UPGRADE_PLAN_SCHEMA);
 }
 
@@ -12893,7 +13028,7 @@ fn cellc_build_plan_and_build_share_the_same_unit_identity() {
     let build_output = cellc_command().current_dir(&package).args(["build", "--offline", "--json"]).output().unwrap();
     assert!(build_output.status.success(), "stdout: {}", String::from_utf8_lossy(&build_output.stdout));
     let build: serde_json::Value = serde_json::from_slice(&build_output.stdout).unwrap();
-    assert_eq!(build["build_plan_schema"], "cellscript-build-plan-v1");
+    assert_eq!(build["build_plan_schema"], "cellscript-build-plan-v2");
     assert_eq!(build["resolve_graph_digest"], plan["resolve_graph_digest"]);
     assert_eq!(build["build_unit_id"], plan["units"][0]["id"]);
 
@@ -12967,10 +13102,10 @@ fn cellc_inspection_rejects_unknown_schema_versions() {
     let dir = tempfile::tempdir().unwrap();
     let package = write_workspace_member(dir.path(), "app", "app", &[]);
     for command in ["resolve-graph", "build-plan"] {
-        let output = cellc_command().current_dir(&package).args([command, "--schema-version", "2", "--json"]).output().unwrap();
+        let output = cellc_command().current_dir(&package).args([command, "--schema-version", "3", "--json"]).output().unwrap();
         assert!(!output.status.success());
         let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert!(report["diagnostics"][0]["message"].as_str().unwrap().contains("unsupported inspection schema version 2"));
+        assert!(report["diagnostics"][0]["message"].as_str().unwrap().contains("schema version 3"));
     }
 }
 
@@ -13013,9 +13148,9 @@ fn cellc_update_plan_is_deterministic_read_only_and_applies_only_explicitly() {
     assert_eq!(plan["schema"], "cellscript-upgrade-plan-v1");
     assert_eq!(plan["schema_version"], 1);
     assert_eq!(plan["resolve_graph_schema"], "cellscript-resolve-graph-v1");
-    assert_eq!(plan["build_plan_schema"], "cellscript-build-plan-v1");
+    assert_eq!(plan["build_plan_schema"], "cellscript-build-plan-v2");
     assert_eq!(plan["apply_status"], "ready");
-    assert_eq!(plan["reverse_dependents"][0]["build_unit_schema"], "cellscript-build-plan-v1");
+    assert_eq!(plan["reverse_dependents"][0]["build_unit_schema"], "cellscript-build-plan-v2");
     assert!(plan["reverse_dependents"][0]["old_build_unit_id"].as_str().unwrap().starts_with("build-unit:"));
     assert!(plan["reverse_dependents"][0]["new_build_unit_id"].as_str().unwrap().starts_with("build-unit:"));
     assert_eq!(plan["reverse_dependents"][0]["old_build_unit"]["id"], plan["reverse_dependents"][0]["old_build_unit_id"]);
@@ -13150,7 +13285,7 @@ fn cellc_update_plan_includes_package_workspace_root_and_members() {
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::write(
         root.join("Cell.toml"),
-        "[package]\nedition = \"2026\"\nname = \"root_package\"\nversion = \"1.0.0\"\n\n[workspace]\nmembers = [\"member\"]\n",
+        "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"root_package\"\nversion = \"1.0.0\"\n\n[workspace]\nmembers = [\"member\"]\n",
     )
     .unwrap();
     std::fs::write(root.join("src/main.cell"), "module root_package\n\naction run() -> u64 {\n    verification\n        1\n}\n")
@@ -13204,7 +13339,7 @@ fn cellc_source_contract_builds_and_plans_keep_separate_cache_entries() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     std::fs::create_dir(root.join("src")).unwrap();
-    std::fs::write(root.join("Cell.toml"), "[package]\nedition = \"2027\"\nname = \"source_contract_cache\"\nversion = \"0.1.0\"\n")
+    std::fs::write(root.join("Cell.toml"), "[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2027\"\nname = \"source_contract_cache\"\nversion = \"0.1.0\"\n")
         .unwrap();
     std::fs::write(root.join("src/main.cell"), "module source_contract_cache\npublic struct Value has copy, drop, store, fixed, serializable, non_linear { amount: u64 }\npublic fn unused(value: u64) -> u64 { value }\npublic action verify(witness value: Value) { verification require value.amount == 1 }\n").unwrap();
     let mut elf = None;
@@ -13277,6 +13412,7 @@ fn cellc_incremental_cache_hit_on_second_build() {
     std::fs::write(
         root.join("Cell.toml"),
         r#"[package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "cache_test"
 version = "0.1.0"
@@ -13320,6 +13456,7 @@ fn cellc_incremental_cache_invalidated_on_source_change() {
     std::fs::write(
         root.join("Cell.toml"),
         r#"[package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "inval_test"
 version = "0.1.0"
@@ -13367,6 +13504,7 @@ fn cellc_clean_cache_flag_removes_incremental_cache() {
     std::fs::write(
         root.join("Cell.toml"),
         r#"[package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "clean_test"
 version = "0.1.0"
@@ -13442,6 +13580,7 @@ fn cellc_entry_action_bypasses_incremental_cache() {
     std::fs::write(
         root.join("Cell.toml"),
         r#"[package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "entry_bypass"
 version = "0.1.0"
@@ -13489,6 +13628,7 @@ fn cellc_install_rejects_self_path_dependency() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -13542,6 +13682,7 @@ fn cellc_install_rejects_self_name_dependency() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -13598,6 +13739,7 @@ fn cellc_add_rejects_self_name_dependency() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -13635,6 +13777,7 @@ fn cellc_build_writes_lockfile_deployment_ref_from_deployed_toml() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -13684,6 +13827,7 @@ action mint(amount: u64) -> Token {
 schema = "cellscript-deployed-v0.23-edition-2026"
 
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -13766,6 +13910,7 @@ fn cellc_build_omits_lockfile_deployment_when_artifact_hash_mismatches() {
         root.join("Cell.toml"),
         r#"
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"
@@ -13801,6 +13946,7 @@ action mint(amount: u64) -> Token {
 schema = "cellscript-deployed-v0.23-edition-2026"
 
 [package]
+cellscript_version = ">=0.33.0-alpha.1"
 edition = "2026"
 name = "demo"
 version = "0.1.0"

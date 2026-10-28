@@ -1,0 +1,491 @@
+{
+  "schema": "cellscript-byte-retirement-local-checks-v1",
+  "status": "buffer-retirement-implemented-and-verified-clean-source-backend-admission-deferred",
+  "compiler": "0.33.0-alpha.1",
+  "compilation_policy": "cellscript-unified-v1",
+  "cache_generation": "v134",
+  "source_snapshot": {
+    "base_commit": "6b38d68871a1a6f4864f80c735b090fe3f3a07e2",
+    "dirty": true,
+    "scope": "regular tracked and untracked files under src, crates, scripts, tests and examples plus Cargo manifests/lock, toolchain and repository instructions; excludes docs and submodule contents",
+    "format": "sorted repository-relative paths; for each path, u64 big-endian path-byte length, UTF-8 path, u64 big-endian content-byte length, file content",
+    "files": 1048,
+    "length_prefixed_sha256": "d5958ce2a9c500adbd3d9a60c2e8b6399972f45dbd5e0616c05446bb17f19b54",
+    "compiler_source_sha256": "653495b7d4b71f940b98890a54d2261f16f922122a1991919b21e3810d84dbaa",
+    "submodules": {
+      "tests/benchmarks": {
+        "head": "e20729761f1798a92f90ed8a43859b80fcadf51a",
+        "dirty": true,
+        "diff_sha256": "88ef837e25de540c4218f62418e6c3acd3e934e71e5a2905bb18e85f2d9b7897"
+      },
+      "website": {
+        "head": "5ca874f2c7c904c8a728335c7bae4d70d0a1b084",
+        "dirty": true,
+        "diff_sha256": "7af977c1e81358c3d9ee7610a40c0ad24ac417565b891440fe7fd353d7d42952",
+        "untracked_files": {
+          "scripts/test-playground-compiler.mjs": "e5901a390803c356cf5824665168ec4ed91ef165f1cf2d393ce67d18ba52e291"
+        }
+      }
+    },
+    "scope_note": "Compiler/checker source remains unchanged from the prior focused runs. Example compiler requirements and lockfiles were repinned afterwards; their complete 35-test examples suite passed. This is not an immutable complete backend receipt."
+  },
+  "test_results": {
+    "compiler_library": [
+      {
+        "status": "ok",
+        "passed": 1096,
+        "failed": 0,
+        "ignored": 0
+      }
+    ],
+    "cli": [
+      {
+        "status": "ok",
+        "passed": 254,
+        "failed": 0,
+        "ignored": 0
+      }
+    ],
+    "wide_bytes_crypto_and_sighash": [
+      {
+        "status": "ok",
+        "passed": 11,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "status": "ok",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "status": "ok",
+        "passed": 6,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "status": "ok",
+        "passed": 12,
+        "failed": 0,
+        "ignored": 0
+      }
+    ],
+    "bounded_mutations": [
+      {
+        "status": "ok",
+        "passed": 12,
+        "failed": 0,
+        "ignored": 0
+      }
+    ],
+    "nominal_result_mutations": [
+      {
+        "status": "ok",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0
+      }
+    ],
+    "computed_sighash_domain_mutations": [
+      {
+        "status": "ok",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0
+      }
+    ],
+    "explicit_constructor_mutations": [
+      {
+        "status": "ok",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0
+      }
+    ],
+    "corrected_unused_helper_mutation": [
+      {
+        "status": "ok",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0
+      }
+    ],
+    "wasm_metadata": [
+      {
+        "status": "ok",
+        "passed": 28,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "status": "ok",
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    ],
+    "ickb": [
+      {
+        "status": "ok",
+        "passed": 220,
+        "failed": 0,
+        "ignored": 0
+      }
+    ],
+    "frozen_interface": [
+      {
+        "status": "ok",
+        "passed": 47,
+        "failed": 0,
+        "ignored": 0
+      }
+    ],
+    "cost_corpus": [
+      {
+        "status": "ok",
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0
+      }
+    ],
+    "business_corpus": [
+      {
+        "status": "ok",
+        "passed": 7,
+        "failed": 0,
+        "ignored": 0
+      }
+    ],
+    "zk_lifecycle_native": [
+      {
+        "status": "ok",
+        "passed": 5,
+        "failed": 0,
+        "ignored": 0
+      }
+    ],
+    "standalone_checker": [
+      {
+        "status": "ok",
+        "passed": 59,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "status": "ok",
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "status": "ok",
+        "passed": 0,
+        "failed": 0,
+        "ignored": 1
+      },
+      {
+        "status": "ok",
+        "passed": 7,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "status": "ok",
+        "passed": 9,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "status": "ok",
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    ],
+    "complete_artifact_checker": [
+      {
+        "status": "ok",
+        "passed": 212,
+        "failed": 0,
+        "ignored": 0,
+        "filtered_out": 0,
+        "duration_seconds": 2689.21,
+        "scope": "before browser-summary boundary refinement; independent checker/on-chain lowering unchanged afterwards"
+      }
+    ],
+    "native_external_delegation": [
+      {
+        "status": "ok",
+        "passed": 8,
+        "failed": 0,
+        "ignored": 0
+      }
+    ],
+    "wasm_metadata_current": [
+      {
+        "status": "ok",
+        "passed": 30,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "status": "ok",
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    ]
+  },
+  "full_checker_attempt": {
+    "scope": "earlier mutable working-tree snapshot; not final source",
+    "passed": 207,
+    "failed": 1,
+    "failure": "unused reference helper eliminated by normal dead-code elimination",
+    "resolution": "fixture retains that helper under internal DeadCode diagnostics; focused rerun passes",
+    "complete_rerun_before_browser_packaging": {
+      "passed": 212,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "gates": {
+    "commit": "passed on final source",
+    "compiler_strict_clippy": "passed on current native and WASM core",
+    "checker_strict_clippy": "passed",
+    "tools_strict_clippy": "passed",
+    "syntax_combo_quick": {
+      "generated": 164,
+      "accepted": 92,
+      "expected_rejects": 72,
+      "failures": 0
+    },
+    "backend": "not run; clean committed source/stateful receipt pending",
+    "ci": "not run per maintainer",
+    "TAC": "not invoked per maintainer",
+    "release": "not run",
+    "scope": "Current commit/compiler checks are identified explicitly; unchanged checker/tooling checks retain their earlier source scope. Full backend/release admission is deferred."
+  },
+  "remaining": {
+    "clean_source_backend_acceptance": "deferred: requires clean committed source; current task prohibits commits",
+    "dev_and_release_gates": "not run; no integration or production-readiness claim",
+    "ci_and_TAC": "not run per maintainer"
+  },
+  "publication": {
+    "committed": false,
+    "pushed": false,
+    "issues_closed": false,
+    "published_alpha_tag_changed": false
+  },
+  "additional_checks": {
+    "native_release_build": {
+      "status": "passed",
+      "command": "cargo build --locked -p cellscript --release --bin cellc"
+    },
+    "wasm_target_check": {
+      "status": "passed",
+      "command": "cargo check --locked -p cellscript-wasm --target wasm32-unknown-unknown --features wasm"
+    },
+    "website_data_regeneration": {
+      "status": "passed",
+      "command": "npm run data:regen",
+      "compiler": "fresh native release build"
+    },
+    "distributed_browser_contracts": {
+      "status": "passed",
+      "passed": 63,
+      "failed": 0,
+      "skipped": 0,
+      "command": "npm run test:playground-compiler",
+      "bundle_version": "0.33.0-alpha.1"
+    },
+    "bundled_examples": {
+      "status": "passed",
+      "passed": 35,
+      "failed": 0,
+      "command": "cargo test --locked -p cellscript --test examples -- --test-threads=2"
+    },
+    "example_compiler_requirements": {
+      "manifests_updated": 17,
+      "lock_commands_succeeded": 16,
+      "policy": ">=0.33.0-alpha.1",
+      "excluded_workspace_member_not_locked": true
+    },
+    "strict_backend_quick_initial": {
+      "status": "failed",
+      "failed_command": "backend-shape-contracts",
+      "reason": "example package compiler * excludes prerelease; manifest/lock migration applied; examples suite and complete quick retry passed"
+    },
+    "strict_backend_quick": {
+      "status": "passed",
+      "commands_passed": 12,
+      "failed_commands": [],
+      "missing_feature_ids": [
+        "acceptance.ckb-stateful-scenarios",
+        "acceptance.syntax-combo"
+      ],
+      "report": "target/cellscript-strict-backend-audit/strict-backend-audit-quick-20261028-201506.json",
+      "report_sha256": "dfed3b8a598751f83d2edfec25bff34c9f7ce2a216777dd0f74eba41abbe1e23"
+    },
+    "canonical_wasm_build": {
+      "status": "passed",
+      "command": "CELLSCRIPT_WASM_DOCKER_NETWORK=host website/scripts/build-wasm.sh",
+      "raw_bytes": 1606472,
+      "gzip_bytes": 612606,
+      "budget_bytes": 614400,
+      "sha256": "d9847d38fab900ab6c827e88714ef310e2e8eb550fcd07834235158226f9345d",
+      "receipt": "browser-wasm-retirement.json"
+    },
+    "frozen_offline_workspace": {
+      "status": "passed",
+      "report_schema": null,
+      "report": "/tmp/cellscript-retirement-workspace-check.json"
+    },
+    "workspace_build_plan_v2": {
+      "status": "passed",
+      "report_schema": "cellscript-build-plan-v2",
+      "report": "/tmp/cellscript-retirement-workspace-plan.json"
+    },
+    "complete_checker_suite_before_browser_packaging": {
+      "status": "passed",
+      "command": "cargo test --locked -p cellscript --test artifact_checker -- --test-threads=2",
+      "tests": 212,
+      "log": "/tmp/cellscript-retirement-final-checker.log",
+      "results": {
+        "status": "ok",
+        "passed": 212,
+        "failed": 0,
+        "ignored": 0,
+        "filtered_out": 0,
+        "duration_seconds": 2689.21
+      },
+      "tested_binary_sha256": "310f69c72045dedfd88bce70aad6010d0b73e01f6be937c95ae644f0189274d5",
+      "log_sha256": "24ed6f79df28714319492bf53c82460f51cd30621ec4fe86fa5f93cffdc375c5",
+      "source_fingerprint_revalidated_after_run": true,
+      "scope_note": "212-test run preceded the browser-summary boundary refinement and shared trusted-call inventory extraction. Current native library/CLI/delegation and WASM tests separately cover that refinement; full clean-source backend acceptance is deferred."
+    },
+    "current_native_clippy": {
+      "status": "passed",
+      "command": "cargo clippy --locked -p cellscript --all-targets -- -D warnings"
+    },
+    "current_wasm_core_clippy": {
+      "status": "passed",
+      "command": "cargo clippy --locked -p cellscript --no-default-features --features wasm --lib -- -D warnings"
+    },
+    "final_commit_gate_before_browser_packaging": {
+      "status": "passed",
+      "command": "./scripts/cellscript_gate.sh commit",
+      "log_sha256": "71226efc30058da5cd7d9d3cb68fb8888270c2db975f621ec69e6d901e09a632",
+      "scope": "after example manifest/lock migration and completed checker receipt"
+    },
+    "final_commit_gate": {
+      "status": "passed",
+      "command": "./scripts/cellscript_gate.sh commit",
+      "log_sha256": "dae8c28bd7f4d4d99529386b617212b907c4f75d5d3b6e51dcb1f4c1fdbb3dc0",
+      "scope": "after final WASM summary boundary, wrapper formatting and browser receipts"
+    },
+    "current_wasm_wrapper_clippy": {
+      "status": "passed",
+      "command": "cargo clippy --locked -p cellscript-wasm --features wasm --all-targets -- -D warnings"
+    }
+  },
+  "earlier_source_snapshot": {
+    "base_commit": "6b38d68871a1a6f4864f80c735b090fe3f3a07e2",
+    "dirty": true,
+    "scope": "regular tracked and untracked files under src, crates, scripts, tests and examples plus Cargo manifests/lock, toolchain and repository instructions; excludes docs and submodule contents",
+    "files": 1046,
+    "length_prefixed_sha256": "bedd8dea4ed6da4af3357d78942bd3e7c5c0ff748054d9b33ed52f770153f7a6",
+    "submodules": {
+      "tests/benchmarks": {
+        "head": "e20729761f1798a92f90ed8a43859b80fcadf51a",
+        "dirty": true,
+        "diff_sha256": "88ef837e25de540c4218f62418e6c3acd3e934e71e5a2905bb18e85f2d9b7897"
+      },
+      "website": {
+        "head": "5ca874f2c7c904c8a728335c7bae4d70d0a1b084",
+        "dirty": true,
+        "diff_sha256": "7af977c1e81358c3d9ee7610a40c0ad24ac417565b891440fe7fd353d7d42952",
+        "untracked_files": {
+          "scripts/test-playground-compiler.mjs": "e5901a390803c356cf5824665168ec4ed91ef165f1cf2d393ce67d18ba52e291"
+        }
+      }
+    }
+  },
+  "prior_browser_bundle": {
+    "prebuilt_wasm_probe": {
+      "module": "browser_retirement_probe",
+      "action_count": 1,
+      "error": null,
+      "error_count": 0
+    },
+    "prebuilt_wasm_sha256": "2dfc01cf5203df1b74b8a753a1c4cb0a3e610bc401d0028b3ded6152cbe0f874"
+  },
+  "final_source_snapshot": {
+    "base_commit": "6b38d68871a1a6f4864f80c735b090fe3f3a07e2",
+    "dirty": true,
+    "files": 1048,
+    "format": "sorted repository-relative paths; for each path, u64 big-endian path-byte length, UTF-8 path, u64 big-endian content-byte length, file content",
+    "length_prefixed_sha256": "47d6c2b63acdd352ad9ad6123d17a712097e42074a97049787272c9bf741e3a8",
+    "scope": "regular tracked and untracked files under src, crates, scripts, tests and examples plus Cargo manifests/lock, toolchain and repository instructions; excludes docs and submodule contents",
+    "website_diff_sha256": "9e95207b8bb99418de38a34c2d70dae967cd3b6993232b8bfbc85d62de0ccf46",
+    "website_untracked": {
+      "scripts/test-playground-compiler.mjs": "939106832fc372fd22e32e4129c07ffff2c181c35588185bf4e5c4af7ad33f36"
+    }
+  },
+  "budget_policy_update": {
+    "date": "2026-10-28",
+    "authorization": "maintainer requested 1500k instead of 600k",
+    "gzip_budget_kib": 1500,
+    "gzip_budget_bytes": 1536000,
+    "previous_gzip_budget_bytes": 614400,
+    "script_sha256": "7f8c8af09e1fa89b8c94c2b0e07c2bdf25fe13aaf709aa8f80034e3cb64a908b",
+    "verification": "Executed the real build script size-check block, including its budget declarations, against the existing bundle and deterministic incompressible fixtures; no WASM rebuild or runtime behavior changes.",
+    "cases": [
+      {
+        "case": "current_bundle",
+        "raw_bytes": 1606472,
+        "gzip_bytes": 612606,
+        "exit_code": 0,
+        "expected_exit_code": 0,
+        "status": "passed"
+      },
+      {
+        "case": "above_old_limit",
+        "raw_bytes": 1000000,
+        "gzip_bytes": 1000197,
+        "exit_code": 0,
+        "expected_exit_code": 0,
+        "status": "passed"
+      },
+      {
+        "case": "just_under_new_limit",
+        "raw_bytes": 1535000,
+        "gzip_bytes": 1535277,
+        "exit_code": 0,
+        "expected_exit_code": 0,
+        "status": "passed"
+      },
+      {
+        "case": "above_new_limit",
+        "raw_bytes": 1537000,
+        "gzip_bytes": 1537277,
+        "exit_code": 1,
+        "expected_exit_code": 1,
+        "status": "passed"
+      }
+    ],
+    "commit_gate": {
+      "status": "passed",
+      "log_sha256": "0948f139d49ac0827d72920188ad59cba18cc6d0a2a299079a6d62d99d38bd7e"
+    },
+    "current_policy_source_sha256": {
+      "website/scripts/build-wasm.sh": "7f8c8af09e1fa89b8c94c2b0e07c2bdf25fe13aaf709aa8f80034e3cb64a908b",
+      "AGENTS.md": "05c1f9e05c74060dd49fa2f4931a0dae4d74eeecdcf1798eaddf2d0dc53d1792",
+      "crates/cellscript-wasm/Cargo.toml": "c88802b2ccd4c47220e9194bb5728061ca4b2eef28bda5a75735f644ffd66223",
+      "crates/cellscript-wasm/src/lib.rs": "9018af631ea52dbf15eb8d4ab9734d591c95615fcd27f3ffb19a46828df61afa"
+    },
+    "wasm_sha256_unchanged": "d9847d38fab900ab6c827e88714ef310e2e8eb550fcd07834235158226f9345d"
+  },
+  "publication_scope": "This receipt records the earlier working-tree build/test phase. Signed commits and pushes were subsequently authorized on 2026-10-28; they do not turn deferred gates into passes. Exact source/submodule pins are recorded separately."
+}
