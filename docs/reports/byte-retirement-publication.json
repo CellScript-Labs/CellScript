@@ -1,0 +1,47 @@
+{
+  "schema": "cellscript-byte-retirement-signed-publication-v1",
+  "status": "signed-source-and-submodules-verified-for-push",
+  "date": "2026-10-28",
+  "compiler_source_commit": "22e3247aa71112cdf340942d9e56b80d4f06abf1",
+  "website_commit": "12f349e0f7ec59f0a78446a9e0f104f460c61add",
+  "benchmark_commit": "f05add630ad047db09826a5240c5f459b2141cab",
+  "signatures": "verified good for source, website, benchmark specs and benchmark matrix commits",
+  "differential_verification": {
+    "command": "cargo test --locked -p cellscript --test ickb_diff -- --test-threads=1",
+    "refresh_disabled": true,
+    "passed": 220,
+    "failed": 0,
+    "ignored": 0,
+    "log_sha256": "9fc318ab51833127972fee1090e3d975a93310513c129b475bbb2944380f6cb6",
+    "matrix_sha256": "f0f5998b19072f2393b5af04ca3b3429fc9ab9cf8c140e69021068543304f21c",
+    "scenario_count": 187,
+    "scenario_set_and_expectations_preserved": true,
+    "original_binaries_preserved": true,
+    "scope": "existing selected executed fixtures; no broader production-readiness claim"
+  },
+  "browser_verification": {
+    "canonical_build": "passed from signed compiler source",
+    "gzip_bytes": 612606,
+    "gzip_budget_bytes": 1536000,
+    "sha256": "d9847d38fab900ab6c827e88714ef310e2e8eb550fcd07834235158226f9345d",
+    "identical_to_previously_tested_63_case_bundle": true,
+    "build_log_sha256": "c143e6a5ff771ec556ef802f3b72fd2301cd5eb7041159a0393e6d68a4c4eeed"
+  },
+  "push_plan": {
+    "parent_branch": "codex/bounded-runtime-foundations",
+    "submodule_branches": "codex/0.33-byte-retirement",
+    "order": [
+      "website",
+      "benchmarks",
+      "parent"
+    ],
+    "force_push": false,
+    "commit_messages_skip_ci": true
+  },
+  "scope_limits": [
+    "No release tag changes or issue closures.",
+    "No CI or TAC run; ordinary commit gate and focused regression results are not full backend/dev/release acceptance.",
+    "The integration commit following the signed source snapshot changes only evidence, documentation and the benchmark gitlink.",
+    "Existing untracked Talk draft is preserved outside these commits."
+  ]
+}

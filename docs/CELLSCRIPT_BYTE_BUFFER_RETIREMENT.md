@@ -106,10 +106,12 @@ or tag is authorized merely by this retirement work.
 
 The iCKB refresh preserves the 187-row scenario set, normalized fixtures,
 expected statuses, original binaries and numeric acceptance envelopes. Updated
-artifact identities/measurements are candidate baselines in an uncommitted
-benchmark submodule. The inherited matrix's historical source commit and
-production claim are not a new provenance receipt for this dirty source tree;
-publication must bind the final committed source separately.
+artifact identities/measurements were subsequently bound to signed compiler
+source `22e3247aa71112cdf340942d9e56b80d4f06abf1`. All 220 differential tests
+passed again with refresh disabled. The matrix pin identifies that compiler
+snapshot; the following integration commit updates evidence and the benchmark
+gitlink without changing compiler source. The existing equivalence claim covers
+the selected executed fixtures, not general production readiness.
 
 ## Remaining acceptance work
 
@@ -169,3 +171,6 @@ The existing Talk draft and published alpha tag are preserved.
 records the source fingerprint, test outcomes and unfinished boundaries.
 The [browser artifact receipt](reports/browser-wasm-retirement.json) binds the
 rebuilt bundle, its source files, size, interface checks and corpus comparison.
+The [signed publication receipt](reports/byte-retirement-publication.json)
+binds the compiler source and both submodule commits, the repeated 220-test
+result and the canonical WASM rebuilt from that signed source.
