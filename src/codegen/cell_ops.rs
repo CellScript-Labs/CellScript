@@ -955,6 +955,7 @@ impl CodeGenerator {
                 input_size_offset,
                 input_buffer_offset,
                 layout,
+                field_count,
                 width,
                 &format!("{} input.{}", type_name, field),
                 start_offset,
@@ -963,6 +964,7 @@ impl CodeGenerator {
                 output_size_offset,
                 output_buffer_offset,
                 layout,
+                field_count,
                 width,
                 &format!("{} output.{}", type_name, field),
                 output_start_offset,
@@ -1035,12 +1037,13 @@ impl CodeGenerator {
         size_offset: usize,
         buffer_offset: usize,
         layout: &SchemaFieldLayout,
+        field_count: usize,
         width: usize,
         context: &str,
         start_stack_offset: usize,
     ) {
         self.emit_sp_addi("t4", buffer_offset);
-        self.emit_molecule_table_field_bounds_to_t5("t4", size_offset, layout.index, width, context);
+        self.emit_molecule_table_field_bounds_to_t5("t4", size_offset, layout.index, field_count, width, context);
         self.emit_sp_addi("t4", buffer_offset);
         self.emit("add t5, t4, t5");
         self.emit_stack_store("t5", start_stack_offset);
@@ -1655,6 +1658,7 @@ impl CodeGenerator {
                 "t4",
                 input_size_offset,
                 layout.index,
+                field_count,
                 width,
                 &format!("{} input.{}", pattern.ty, transition.field),
             );
@@ -1679,6 +1683,7 @@ impl CodeGenerator {
                 "t4",
                 output_size_offset,
                 layout.index,
+                field_count,
                 width,
                 &format!("{} output.{}", pattern.ty, transition.field),
             );
@@ -1691,7 +1696,6 @@ impl CodeGenerator {
             self.emit_fail(CellScriptRuntimeError::MutateTransitionMismatch);
             self.emit_label(&ok_label);
         }
-        let _ = field_count;
         true
     }
 

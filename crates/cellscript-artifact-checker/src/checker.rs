@@ -297,6 +297,10 @@ pub fn check_bundle_values(
     let bodies = crate::nested_machine::validate(record, &elf, terminal_sink, &selections, &allocated)?;
     crate::scalar_machine::validate(record, &elf, terminal_sink, &selections, &bodies, &allocated)?;
     crate::code_origin::validate_open_verifier_claims(record, &elf)?;
+    // Slot pairing runs after the typed machine-binding layers: tampering
+    // with a save's base register is their provenance contract, and this
+    // check is the cross-machine backstop for everything else.
+    validate_ra_frame_slots(record, &elf)?;
     validate_source_map(source_map, record, artifact, &elf)?;
 
     Ok(CheckerReport {
@@ -4809,25 +4813,31 @@ fn validate_call_graph(
             graph.entry(from).or_default().insert(to);
         }
     }
+    let mut depth_memo = BTreeMap::new();
     for root in entries.keys() {
         let mut active = BTreeSet::new();
-        validate_call_depth(root, &graph, &mut active, 1, max_depth)?;
+        let depth = deepest_call_depth(root, &graph, &mut active, &mut depth_memo)?;
+        if depth.saturating_add(1) > max_depth {
+            return Err(CheckerError::new(
+                CheckerRejectionCode::V2400BudgetExceeded,
+                format!("static call depth exceeds checker budget {max_depth}"),
+            ));
+        }
     }
     Ok(())
 }
 
-fn validate_call_depth<'a>(
+/// Longest call-chain depth below `current`, memoised per entry. Path
+/// enumeration over compact DAGs is exponential; the memo keeps validation
+/// linear in edges while `active` still detects recursion cycles.
+fn deepest_call_depth<'a>(
     current: &'a str,
     graph: &BTreeMap<&'a str, BTreeSet<&'a str>>,
     active: &mut BTreeSet<&'a str>,
-    depth: u32,
-    max_depth: u32,
-) -> Result<(), CheckerError> {
-    if depth > max_depth {
-        return Err(CheckerError::new(
-            CheckerRejectionCode::V2400BudgetExceeded,
-            format!("static call depth exceeds checker budget {max_depth}"),
-        ));
+    depth_memo: &mut BTreeMap<&'a str, u32>,
+) -> Result<u32, CheckerError> {
+    if let Some(depth) = depth_memo.get(current) {
+        return Ok(*depth);
     }
     if !active.insert(current) {
         return Err(CheckerError::new(
@@ -4835,13 +4845,16 @@ fn validate_call_depth<'a>(
             format!("recursive call cycle reaches entry '{current}'"),
         ));
     }
+    let mut deepest = 0u32;
     if let Some(children) = graph.get(current) {
         for child in children {
-            validate_call_depth(child, graph, active, depth.saturating_add(1), max_depth)?;
+            let child_depth = deepest_call_depth(child, graph, active, depth_memo)?;
+            deepest = deepest.max(child_depth.saturating_add(1));
         }
     }
     active.remove(current);
-    Ok(())
+    depth_memo.insert(current, deepest);
+    Ok(deepest)
 }
 
 fn validate_elf_binding(artifact: &[u8], record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result<(), CheckerError> {
@@ -4853,6 +4866,65 @@ fn validate_elf_binding(artifact: &[u8], record: &VerifiedLoweringRecord, elf: &
             CheckerRejectionCode::V2409ArtifactIdentityMismatch,
             "record artifact size/text identity disagrees with ELF",
         ));
+    }
+    validate_startup(record, elf)?;
+    Ok(())
+}
+
+/// The producer excludes its five-word bootstrap from lowering blocks. Bind
+/// that entire prefix independently, including the VM's real entry and exit.
+fn validate_startup(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result<(), CheckerError> {
+    let invalid = || {
+        CheckerError::new(
+            CheckerRejectionCode::V2414ControlFlowInvalid,
+            "ELF startup does not enter the checked entry and exit profile",
+        )
+    };
+    if elf.entry != elf.text.address
+        || record.text_range.start != elf.entry.checked_add(20).ok_or_else(invalid)?
+        || record.text_range.end != elf.text.range().end
+    {
+        return Err(invalid());
+    }
+    let words = elf.instructions.get(..5).ok_or_else(invalid)?;
+    if words[2].word != 0x000008b7 || words[3].word != 0x05d88893 || words[4].word != 0x00000073 {
+        return Err(invalid());
+    }
+    // Explicit-parameter ABI fallback is a terminal rejection, never success.
+    if words[0].word == 0x00000537 && words[1].word == 0x01950513 {
+        return Ok(());
+    }
+    let contract = &record.typed_semantics.foundation.entry_contract;
+    let selected = record
+        .entries
+        .iter()
+        .find(|entry| entry.name == "_cellscript_entry")
+        .or_else(|| record.entries.iter().find(|entry| entry.id == contract.exact_entry));
+    if !is_auipc(words[0].word, 1) || !is_jalr_call(words[1].word) {
+        return Err(invalid());
+    }
+    match selected {
+        Some(selected) => {
+            let target = entry_start(record, &selected.id)?;
+            if !flow_targets(elf, elf.entry + 4, target) {
+                return Err(invalid());
+            }
+        }
+        None => {
+            // Helper-only modules have no action or lock entry, so the record
+            // declares exact_entry "none" and the trampoline calls the first
+            // emitted global function. That call must still land on a checked
+            // block boundary instead of unchecked bytes.
+            if contract.exact_entry != "none" {
+                return Err(invalid());
+            }
+            let Some(flow) = elf.control_flow.iter().find(|flow| flow.address == elf.entry + 4) else {
+                return Err(invalid());
+            };
+            if !record.blocks.iter().any(|block| block.range.start == flow.target) {
+                return Err(invalid());
+            }
+        }
     }
     Ok(())
 }
@@ -4871,9 +4943,100 @@ fn validate_block_digests(artifact: &[u8], record: &VerifiedLoweringRecord, elf:
     Ok(())
 }
 
+/// Frame-slot pairing for the return address, scoped to the entry (function)
+/// that owns each lowering block. Within one entry's blocks — laid out in
+/// address order — every `ld ra, off(sp)` must have an earlier `sd ra,
+/// off(sp)`, and the slot's last writer before the load must be that `sd ra`:
+/// any overlapping store poisons it unless it saves the full return address
+/// again. This includes narrow stores and stores starting before the slot.
+/// This check models offsets through the same sp/fp base, not arbitrary
+/// register aliases or complete control-flow dataflow. Cross-function leakage cannot
+/// pair: each entry's slot map starts empty, and layout-interleaved callee
+/// bodies belong to their own entries.
+fn validate_ra_frame_slots(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result<(), CheckerError> {
+    let reject = |message: String| CheckerError::new(CheckerRejectionCode::V2414ControlFlowInvalid, message);
+    // Group blocks by owning entry, keeping each function's address order.
+    let mut by_entry: BTreeMap<&str, Vec<&LoweringBlock>> = BTreeMap::new();
+    for block in &record.blocks {
+        by_entry.entry(block.owner_entry.as_str()).or_default().push(block);
+    }
+    let instruction_at = |address: u64| -> Option<&crate::elf::DecodedInstruction> {
+        elf.instructions.binary_search_by_key(&address, |instruction| instruction.address).ok().map(|index| &elf.instructions[index])
+    };
+    for (entry, blocks) in by_entry {
+        // Slot maps are keyed per base register: CellScript machines mix
+        // sp-relative saves with fp-relative restores inside one frame
+        // (`addi fp, sp, K`), and cross-base aliasing cannot pair statically
+        // anyway, so pairing requires the same base and the same offset.
+        let mut slots: BTreeMap<u32, BTreeMap<i64, bool>> = BTreeMap::new();
+        for block in blocks {
+            let mut address = block.range.start;
+            while address < block.range.end {
+                let Some(instruction) = instruction_at(address) else {
+                    break;
+                };
+                let word = instruction.word;
+                let opcode = word & 0x7f;
+                let funct3 = (word >> 12) & 0x7;
+                let rs1 = (word >> 15) & 0x1f;
+                let rs2 = (word >> 20) & 0x1f;
+                let rd = (word >> 7) & 0x1f;
+                // sb/sh/sw/sd can all overlap the saved eight-byte address.
+                if opcode == 0x23 && funct3 <= 3 && matches!(rs1, 2 | 8) {
+                    let offset = sign_extend_12((((word >> 25) & 0x7f) << 5) | ((word >> 7) & 0x1f));
+                    record_ra_frame_store(slots.entry(rs1).or_default(), offset, 1 << funct3, rs2 == 1);
+                }
+                // ld ra, off(base)
+                if opcode == 0x03 && funct3 == 3 && matches!(rs1, 2 | 8) && rd == 1 {
+                    let offset = sign_extend_12(word >> 20);
+                    match slots.get(&rs1).and_then(|base| base.get(&offset)) {
+                        Some(true) => {}
+                        Some(false) => {
+                            return Err(reject(format!(
+                                "ld ra at {address:#x} in '{entry}' restores frame slot {offset} overwritten without a full return-address save"
+                            )));
+                        }
+                        None => {
+                            return Err(reject(format!(
+                                "ld ra at {address:#x} in '{entry}' restores frame slot {offset} that the function never saved"
+                            )));
+                        }
+                    }
+                }
+                address += 4;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Offsets are decoded signed 12-bit immediates and widths are 1/2/4/8 bytes.
+fn record_ra_frame_store(slots: &mut BTreeMap<i64, bool>, offset: i64, width: i64, stores_ra: bool) {
+    // [saved, saved + 8) overlaps [offset, offset + width) exactly when
+    // offset - 7 <= saved < offset + width. Adjacent writes remain harmless.
+    for (_, valid) in slots.range_mut((offset - 7)..(offset + width)) {
+        *valid = false;
+    }
+    if width == 8 && stores_ra {
+        slots.insert(offset, true);
+    }
+}
+
+fn sign_extend_12(value: u32) -> i64 {
+    (i64::from(value) << 52) >> 52
+}
+
 fn validate_control_flow(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Result<(), CheckerError> {
     let blocks = record.blocks.iter().map(|block| (block.id.as_str(), block)).collect::<BTreeMap<_, _>>();
     let find_block = |address| record.blocks.iter().find(|block| block.range.contains(address));
+    for edge in record.edges.iter().filter(|edge| matches!(edge.kind, EdgeKind::Fallthrough | EdgeKind::ConditionalFallthrough)) {
+        if blocks[edge.from.as_str()].range.end != blocks[edge.to.as_str()].range.start {
+            return Err(CheckerError::new(
+                CheckerRejectionCode::V2414ControlFlowInvalid,
+                format!("declared fallthrough '{} -> {}' differs from physical instruction order", edge.from, edge.to),
+            ));
+        }
+    }
     for flow in elf.control_flow.iter().filter(|flow| record.text_range.contains(flow.address)) {
         let Some(from) = find_block(flow.address) else {
             return Err(CheckerError::new(
@@ -4887,6 +5050,10 @@ fn validate_control_flow(record: &VerifiedLoweringRecord, elf: &ParsedElf) -> Re
                 format!("target {:#x} is outside lowering blocks", flow.target),
             ));
         };
+        // Mid-block branch targets are deliberate machine-binding
+        // territory: the typed machine binding proofs (V2420) reject jumps
+        // into the middle of guarded sequences, so the CFG layer must not
+        // preempt that contract with a different rejection code.
         let allowed_kinds: &[EdgeKind] = match flow.kind {
             DecodedControlFlowKind::ConditionalBranch => {
                 &[EdgeKind::ConditionalTaken, EdgeKind::ConditionalFallthrough, EdgeKind::Fallthrough]
@@ -8639,6 +8806,33 @@ fn map_elf_error(error: ElfParseError) -> CheckerError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frame_store_overlap_covers_every_width_and_preserves_adjacent_slots() {
+        for saved in [-2048, -8, 0, 8, 2047] {
+            for width in [1, 2, 4, 8] {
+                for delta in -8..=8 {
+                    for stores_ra in [false, true] {
+                        let mut slots = BTreeMap::from([(saved, true)]);
+                        record_ra_frame_store(&mut slots, saved + delta, width, stores_ra);
+                        let overlaps = delta < 8 && delta + width > 0;
+                        let full_resave = delta == 0 && width == 8 && stores_ra;
+                        assert_eq!(slots[&saved], !overlaps || full_resave, "{saved}/{width}/{delta}/{stores_ra}");
+                    }
+                }
+            }
+            let mut slots = BTreeMap::new();
+            for width in [1, 2, 4] {
+                record_ra_frame_store(&mut slots, saved, width, true);
+                assert!(!slots.contains_key(&saved), "partial stores cannot establish a save");
+            }
+            record_ra_frame_store(&mut slots, saved, 8, true);
+            record_ra_frame_store(&mut slots, saved + 7, 1, false);
+            assert!(!slots[&saved]);
+            record_ra_frame_store(&mut slots, saved, 8, true);
+            assert!(slots[&saved]);
+        }
+    }
 
     #[test]
     fn empty_field_canonicalization_preserves_overlap_rejection_and_nonfixed_order() {

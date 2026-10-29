@@ -483,6 +483,7 @@ fn lookup_public_registry(
     let url = format!("{}/v1/artifacts/{}/{}", registry_url.trim_end_matches('/'), namespace, name);
     let response = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|error| CompileError::without_span(format!("failed to initialize public registry client: {error}")))?
         .get(&url)
@@ -496,8 +497,19 @@ fn lookup_public_registry(
     if !response.status().is_success() {
         return Err(CompileError::without_span(format!("public registry request '{}' returned HTTP {}", url, response.status())));
     }
-    let payload: PublicRegistryPackage = response
-        .json()
+    const MAX_REGISTRY_METADATA_BYTES: usize = 2 * 1024 * 1024;
+    if response.content_length().is_some_and(|length| length == 0 || length as usize > MAX_REGISTRY_METADATA_BYTES) {
+        return Err(CompileError::without_span("public registry response is empty or exceeds 2 MiB"));
+    }
+    let mut body = Vec::new();
+    response
+        .take(MAX_REGISTRY_METADATA_BYTES as u64 + 1)
+        .read_to_end(&mut body)
+        .map_err(|error| CompileError::without_span(format!("public registry response '{}' could not be read: {error}", url)))?;
+    if body.is_empty() || body.len() > MAX_REGISTRY_METADATA_BYTES {
+        return Err(CompileError::without_span("public registry response is empty or exceeds 2 MiB"));
+    }
+    let payload: PublicRegistryPackage = serde_json::from_slice(&body)
         .map_err(|error| CompileError::without_span(format!("public registry response '{}' is invalid: {error}", url)))?;
     payload.into_resolution(namespace, name)
 }
@@ -590,6 +602,11 @@ impl PublicRegistryPackage {
             matching.status =
                 public_registry_release_status(&public_version.verification_status, &public_version.availability_status)?;
             matching.yanked = public_version.availability_status == "yanked";
+            // Suppressed public releases are not resolution candidates, even
+            // for exact pins. Their presence must not hide active siblings.
+            if matches!(matching.status, RegistryEntryStatus::Yanked | RegistryEntryStatus::Deprecated) {
+                continue;
+            }
             if public_version.immutable_bundle.schema != "cellscript-registry-immutable-bundle"
                 || public_version.immutable_bundle.source_hash != matching.source_hash
             {
@@ -671,6 +688,24 @@ struct GeneratedSourceSnapshotFile {
     content_base64: String,
 }
 
+/// Publisher-controlled identifiers join cache directory paths. A component
+/// must be a single normal path segment before it ever reaches the
+/// filesystem, or a crafted Cell.lock entry could push materialization
+/// outside the `.cell/git-cache` root.
+pub fn validate_cache_path_component(value: &str, label: &str) -> Result<()> {
+    if value.is_empty()
+        || value == "."
+        || value == ".."
+        || value.contains('/')
+        || value.contains('\\')
+        || value.contains('\0')
+        || value.contains(':')
+    {
+        return Err(CompileError::without_span(format!("{label} '{value}' is not a single safe path component")));
+    }
+    Ok(())
+}
+
 /// Download, authenticate, and atomically materialize a public Registry source
 /// snapshot. The current source-package profile accepts only the generated JSON
 /// snapshot shape; opaque archives remain publish evidence but are not executed
@@ -684,6 +719,9 @@ pub fn materialize_public_source_snapshot(
     version: &str,
     expected_source_hash: &str,
 ) -> Result<PathBuf> {
+    validate_cache_path_component(namespace, "registry namespace")?;
+    validate_cache_path_component(name, "registry package name")?;
+    validate_cache_path_component(version, "registry package version")?;
     validate_public_source_snapshot_descriptor(snapshot, expected_source_hash)?;
     let bytes = download_public_source_snapshot(snapshot)?;
     std::fs::create_dir_all(cache_root).map_err(|error| {
@@ -724,6 +762,9 @@ pub fn materialize_locked_public_source_snapshot(
     version: &str,
     expected_source_hash: &str,
 ) -> Result<PathBuf> {
+    validate_cache_path_component(namespace, "registry namespace")?;
+    validate_cache_path_component(name, "registry package name")?;
+    validate_cache_path_component(version, "registry package version")?;
     let digest = snapshot_hash
         .strip_prefix("sha256:")
         .ok_or_else(|| CompileError::without_span("locked Registry snapshot hash must use sha256:<hex>"))?;
@@ -1134,6 +1175,18 @@ pub struct RegistryPublishPayload {
     pub cli_version: String,
     pub artifact: RegistryArtifactDescriptor,
     pub registry_entry: serde_json::Value,
+    /// SHA-256 of the exact Cell.lock the publish was built against, so the
+    /// signature binds the dependency selection and not just the source tree.
+    /// Optional for pre-lockfile publications and older protocol peers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lockfile_hash: Option<String>,
+}
+
+/// Hash the package's Cell.lock, if present, as `sha256:<hex>`.
+#[cfg(feature = "cli")]
+pub fn compute_lockfile_hash(package_root: &Path) -> Option<String> {
+    let bytes = std::fs::read(package_root.join("Cell.lock")).ok()?;
+    Some(format!("sha256:{}", hex::encode(Sha256::digest(&bytes))))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1562,8 +1615,12 @@ pub fn compute_source_hash(root: &Path) -> Result<String> {
     let mut files = collect_hash_source_files(root, &manifest)?;
     files.sort();
     files.dedup();
+    // The authoritative collector canonicalises every path; strip against a
+    // canonical root so the same tree hashes identically regardless of how
+    // the caller spelled the root (relative paths, symlinked temp roots).
+    let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     for file_path in &files {
-        let rel = file_path.strip_prefix(root).unwrap_or(file_path);
+        let rel = file_path.strip_prefix(&canonical_root).unwrap_or(file_path);
         let content = std::fs::read_to_string(file_path)
             .map_err(|e| CompileError::without_span(format!("failed to read '{}': {}", file_path.display(), e)))?;
         hasher.update(rel.to_string_lossy().replace('\\', "/").as_bytes());
@@ -1591,79 +1648,16 @@ struct SourceHashPackage {
 }
 
 fn collect_hash_source_files(root: &Path, manifest: &SourceHashManifest) -> Result<Vec<PathBuf>> {
-    let mut roots = Vec::new();
-    let mut seen_roots = std::collections::BTreeSet::new();
-
-    if let Some(package) = &manifest.package {
-        for source_root in &package.source_roots {
-            let source_root_path = root.join(source_root);
-            if !source_root_path.exists() {
-                return Err(CompileError::without_span(format!(
-                    "configured source root '{}' does not exist",
-                    source_root_path.display()
-                )));
-            }
-            if !source_root_path.is_dir() {
-                return Err(CompileError::without_span(format!(
-                    "configured source root '{}' is not a directory",
-                    source_root_path.display()
-                )));
-            }
-            if seen_roots.insert(source_root_path.clone()) {
-                roots.push(source_root_path);
-            }
-        }
-    }
-
-    if roots.is_empty() {
-        let src_dir = root.join("src");
-        if src_dir.exists() && src_dir.is_dir() && seen_roots.insert(src_dir.clone()) {
-            roots.push(src_dir);
-        }
-    }
-
-    let mut explicit_entry = None;
-    if let Some(entry) = manifest.package.as_ref().and_then(|package| package.entry.as_deref()) {
-        let entry_path = root.join(entry);
-        if !entry_path.exists() {
-            return Err(CompileError::without_span(format!("package entry '{}' does not exist", entry_path.display())));
-        }
-        if let Some(parent) = entry_path.parent() {
-            let parent = parent.to_path_buf();
-            if seen_roots.insert(parent.clone()) {
-                roots.push(parent);
-            }
-        }
-        explicit_entry = Some(entry_path);
-    }
-
-    let mut files = Vec::new();
-    for source_root in roots {
-        files.extend(collect_cell_files(&source_root)?);
-    }
-    if let Some(entry_path) = explicit_entry {
-        files.push(entry_path);
-    }
-    Ok(files)
-}
-
-fn collect_cell_files(dir: &Path) -> Result<Vec<PathBuf>> {
-    let mut files = Vec::new();
-    if !dir.exists() {
-        return Ok(files);
-    }
-    let entries = std::fs::read_dir(dir)
-        .map_err(|e| CompileError::without_span(format!("failed to read directory '{}': {}", dir.display(), e)))?;
-    for entry in entries {
-        let entry = entry.map_err(|e| CompileError::without_span(format!("failed to read directory entry: {}", e)))?;
-        let path = entry.path();
-        if path.is_dir() {
-            files.extend(collect_cell_files(&path)?);
-        } else if path.extension().is_some_and(|ext| ext == "cell") {
-            files.push(path);
-        }
-    }
-    Ok(files)
+    // The hashed file set must be the exact set compilation and publish
+    // snapshots use: a drift here would let one signed source_hash front a
+    // differently compiled package. `package_source_file_set` is the single
+    // authoritative implementation.
+    let utf8_root = camino::Utf8PathBuf::from_path_buf(root.to_path_buf())
+        .map_err(|path| CompileError::without_span(format!("package root '{}' is not valid UTF-8", path.display())))?;
+    let entry = manifest.package.as_ref().and_then(|package| package.entry.as_deref());
+    let source_roots = manifest.package.as_ref().map(|package| package.source_roots.clone()).unwrap_or_default();
+    let files = crate::package_source_file_set(&utf8_root, &source_roots, entry)?;
+    Ok(files.into_iter().map(|path| path.as_std_path().to_path_buf()).collect())
 }
 
 // ---------------------------------------------------------------------------
@@ -1821,6 +1815,57 @@ mod ckb_blake2b256_stream {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn write_binding_fixture(root: &Path) {
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            b"[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"demo\"\nnamespace = \"cellscript\"\nversion = \"1.2.3\"\nentry = \"src/main.cell\"\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("src/main.cell"), b"module demo\n").unwrap();
+        std::fs::write(root.join("src/helper.cell"), b"module demo::helper\n").unwrap();
+    }
+
+    #[test]
+    fn source_hash_covers_exactly_the_authoritative_compile_file_set() {
+        let root = tempfile::tempdir().unwrap();
+        write_binding_fixture(root.path());
+        // Root-level stray files participate in neither compilation nor the
+        // hash; the lockfile is signed separately through lockfile_hash.
+        std::fs::write(root.path().join("rogue.cell"), b"module rogue\n").unwrap();
+        std::fs::write(root.path().join("Cell.lock"), b"lock bytes\n").unwrap();
+
+        let utf8_root = camino::Utf8PathBuf::from_path_buf(root.path().to_path_buf()).unwrap();
+        let entry = crate::explicit_manifest_entry(&utf8_root).unwrap();
+        let authoritative = crate::package_source_file_set(&utf8_root, &[], entry.as_deref()).unwrap();
+        let names = authoritative.iter().map(|path| path.file_name().unwrap().to_string()).collect::<Vec<_>>();
+        assert!(names.iter().any(|name| name == "main.cell"), "entry is in the compile set");
+        assert!(names.iter().any(|name| name == "helper.cell"), "src sibling is in the compile set");
+        assert!(!names.iter().any(|name| name == "rogue.cell"), "stray root file is outside the compile set");
+
+        let base = compute_source_hash(root.path()).unwrap();
+        std::fs::write(root.path().join("rogue.cell"), b"module rogue changed\n").unwrap();
+        std::fs::write(root.path().join("Cell.lock"), b"lock bytes changed\n").unwrap();
+        assert_eq!(compute_source_hash(root.path()).unwrap(), base, "non-participating bytes must not move the signed source hash");
+        std::fs::write(root.path().join("src/helper.cell"), b"module demo::helper changed\n").unwrap();
+        assert_ne!(compute_source_hash(root.path()).unwrap(), base, "participating source bytes must move the signed source hash");
+    }
+
+    #[test]
+    fn distinct_compiled_packages_get_distinct_source_hashes() {
+        // #27: two packages whose compiled file sets differ must never share
+        // a source hash, or one signed hash could front both builds.
+        let hash_for = |with_extra_module: bool| {
+            let root = tempfile::tempdir().unwrap();
+            write_binding_fixture(root.path());
+            if with_extra_module {
+                std::fs::write(root.path().join("src/extra.cell"), b"module demo::extra\n").unwrap();
+            }
+            compute_source_hash(root.path()).unwrap()
+        };
+        assert_ne!(hash_for(false), hash_for(true));
+    }
 
     #[test]
     fn ls_idl_profile_binds_exact_bytes_to_lock_executable_suffix() {
@@ -1994,10 +2039,9 @@ left = "a"
         assert_eq!(compute_package_manifest_hash(&first).unwrap(), compute_package_manifest_hash(&second).unwrap());
     }
 
-    #[test]
     #[cfg(feature = "cli")]
-    fn public_registry_states_override_publisher_claim() {
-        let payload: PublicRegistryPackage = serde_json::from_value(serde_json::json!({
+    fn public_registry_test_payload() -> PublicRegistryPackage {
+        serde_json::from_value(serde_json::json!({
             "schema": "cellscript-registry-artifact",
             "namespace": "cellscript",
             "name": "demo",
@@ -2021,6 +2065,7 @@ left = "a"
                         "tag": "v1.2.3",
                         "source_hash": "source-hash",
                         "cellscript_version": "0.23.0",
+                        "compiler_requirement": format!(">={}", crate::VERSION),
                         "edition": "2026",
                         "compatibility_profile_hash": "profile-hash",
                         "dependencies": {},
@@ -2038,14 +2083,42 @@ left = "a"
                 }
             }]
         }))
-        .unwrap();
+        .unwrap()
+    }
 
-        let (entry, index, snapshots) = payload.into_resolution("cellscript", "demo").unwrap();
+    #[test]
+    #[cfg(feature = "cli")]
+    fn public_registry_states_override_publisher_claim() {
+        let (entry, index, snapshots) = public_registry_test_payload().into_resolution("cellscript", "demo").unwrap();
         assert_eq!(entry.source, "https://github.com/cellscript/demo");
         assert_eq!(index.versions.len(), 1);
         assert_eq!(index.versions[0].status, RegistryEntryStatus::VerifiedBuild);
         assert!(!index.versions[0].yanked);
         assert_eq!(snapshots["1.2.3"].source_hash, "source-hash");
+    }
+
+    #[test]
+    #[cfg(feature = "cli")]
+    fn public_registry_suppressed_release_does_not_hide_active_siblings() {
+        for status in ["yanked", "deprecated"] {
+            for suppressed_first in [false, true] {
+                let mut payload = public_registry_test_payload();
+                let mut suppressed = public_registry_test_payload().releases.remove(0);
+                suppressed.release = "1.2.2".to_string();
+                suppressed.registry_entry.versions[0].version = suppressed.release.clone();
+                suppressed.availability_status = status.to_string();
+                payload.releases.insert(usize::from(!suppressed_first), suppressed);
+                let (_, index, snapshots) = payload.into_resolution("cellscript", "demo").unwrap();
+                assert_eq!(index.find_matching_version("^1.2").unwrap().version, "1.2.3");
+                assert!(index.find_matching_version("=1.2.3").is_some());
+                assert!(index.find_matching_version_allowing_yanked_pin("=1.2.2").is_none());
+                assert_eq!(snapshots.len(), 1);
+                assert!(snapshots.contains_key("1.2.3"));
+            }
+            let mut payload = public_registry_test_payload();
+            payload.releases[0].availability_status = status.to_string();
+            assert!(payload.into_resolution("cellscript", "demo").unwrap_err().message.contains("no visible versions"));
+        }
     }
 
     #[cfg(feature = "cli")]

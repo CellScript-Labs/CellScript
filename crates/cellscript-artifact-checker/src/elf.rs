@@ -161,12 +161,15 @@ impl ParsedElf {
     }
 
     pub fn bytes_for_range<'a>(&self, artifact: &'a [u8], range: MachineRange) -> Result<&'a [u8], ElfParseError> {
-        let section = self.sections.iter().find(|section| section.range().contains_range(range)).ok_or_else(|| {
-            ElfParseError::new(
-                ElfErrorKind::InvalidSection,
-                format!("machine range {:#x}..{:#x} is outside all ELF sections", range.start, range.end),
-            )
-        })?;
+        let section =
+            self.sections.iter().find(|section| section.flags & SHF_ALLOC != 0 && section.range().contains_range(range)).ok_or_else(
+                || {
+                    ElfParseError::new(
+                        ElfErrorKind::InvalidSection,
+                        format!("machine range {:#x}..{:#x} is outside all ELF sections", range.start, range.end),
+                    )
+                },
+            )?;
         let relative = range
             .start
             .checked_sub(section.address)
@@ -247,6 +250,9 @@ pub fn parse_elf(bytes: &[u8], max_instructions: u64) -> Result<ParsedElf, ElfPa
         if segment.memory_size < segment.file_size {
             return Err(ElfParseError::new(ElfErrorKind::InvalidTable, "PT_LOAD memory size is smaller than file size"));
         }
+        if segment.virtual_address.checked_add(segment.memory_size).is_none() {
+            return Err(ElfParseError::new(ElfErrorKind::InvalidTable, "PT_LOAD virtual range overflows"));
+        }
         if segment.flags != PF_R | PF_X {
             return Err(ElfParseError::new(
                 ElfErrorKind::ProhibitedLinkState,
@@ -254,6 +260,11 @@ pub fn parse_elf(bytes: &[u8], max_instructions: u64) -> Result<ParsedElf, ElfPa
             ));
         }
         segments.push(segment);
+    }
+    // The emitted profile has one immutable image. Multiple segments could
+    // overwrite the bytes selected below (including through page rounding).
+    if segments.len() != 1 {
+        return Err(ElfParseError::new(ElfErrorKind::InvalidTable, "checker requires one PT_LOAD image"));
     }
     if segments.is_empty() || !segments.iter().any(|segment| segment.flags & PF_X != 0 && segment_contains(segment, entry)) {
         return Err(ElfParseError::new(ElfErrorKind::InvalidTable, "ELF entry is not contained in an executable PT_LOAD segment"));
@@ -280,6 +291,19 @@ pub fn parse_elf(bytes: &[u8], max_instructions: u64) -> Result<ParsedElf, ElfPa
         }
         let name_offset = usize::try_from(read_u32(header, 0)?)
             .map_err(|_| ElfParseError::new(ElfErrorKind::InvalidSection, "section name offset overflows usize"))?;
+        // Peek the raw table bytes before allocating a name: only the three
+        // canonical names can ever be admitted, so a header pointing at
+        // anything else (including a repeated megabyte-scale entry) is
+        // rejected without the copy.
+        if ![".text\0", ".rodata\0", ".shstrtab\0"]
+            .iter()
+            .any(|prefix| strings.get(name_offset..).is_some_and(|rest| rest.starts_with(prefix.as_bytes())))
+        {
+            return Err(ElfParseError::new(
+                ElfErrorKind::InvalidSection,
+                "section name is outside the admitted .text/.rodata/.shstrtab set",
+            ));
+        }
         let name = read_c_string(strings, name_offset)?;
         let section = ElfSection {
             name,
@@ -289,6 +313,9 @@ pub fn parse_elf(bytes: &[u8], max_instructions: u64) -> Result<ParsedElf, ElfPa
             offset: read_u64(header, 24)?,
             size: read_u64(header, 32)?,
         };
+        if section.address.checked_add(section.size).is_none() {
+            return Err(ElfParseError::new(ElfErrorKind::InvalidSection, "section virtual range overflows"));
+        }
         checked_file_range(bytes, section.offset, section.size, &section.name)?;
         if matches!(section.section_type, SHT_RELA | SHT_DYNAMIC | SHT_REL | SHT_DYNSYM)
             || matches!(section.name.as_str(), ".dynamic" | ".dynsym" | ".dynstr" | ".interp" | ".plt" | ".got" | ".got.plt")
@@ -323,7 +350,13 @@ pub fn parse_elf(bytes: &[u8], max_instructions: u64) -> Result<ParsedElf, ElfPa
         .find(|section| section.name == ".rodata")
         .cloned()
         .ok_or_else(|| ElfParseError::new(ElfErrorKind::InvalidSection, "ELF has no .rodata section"))?;
-    if text.section_type != SHT_PROGBITS || text.flags != SHF_ALLOC | SHF_EXECINSTR || text.size == 0 || text.size % 4 != 0 {
+    if text.section_type != SHT_PROGBITS
+        || text.flags != SHF_ALLOC | SHF_EXECINSTR
+        || text.size == 0
+        || text.size % 4 != 0
+        || text.address % 4 != 0
+        || entry % 4 != 0
+    {
         return Err(ElfParseError::new(ElfErrorKind::InvalidSection, ".text must be non-empty, executable, and four-byte aligned"));
     }
     if rodata.section_type != SHT_PROGBITS || rodata.flags != SHF_ALLOC {
@@ -333,12 +366,20 @@ pub fn parse_elf(bytes: &[u8], max_instructions: u64) -> Result<ParsedElf, ElfPa
         return Err(ElfParseError::new(ElfErrorKind::InvalidSection, "ELF entry is outside .text"));
     }
     for section in [&text, &rodata] {
-        if !segments.iter().any(|segment| segment_contains_range(segment, section.address, section.size)) {
+        let segment = &segments[0];
+        let relative = section.address.checked_sub(segment.virtual_address);
+        if !segment_contains_range(segment, section.address, section.size)
+            || relative.and_then(|value| value.checked_add(section.size)).is_none_or(|end| end > segment.file_size)
+            || relative.and_then(|value| segment.offset.checked_add(value)) != Some(section.offset)
+        {
             return Err(ElfParseError::new(
                 ElfErrorKind::InvalidSection,
-                format!("ELF section '{}' is outside PT_LOAD mappings", section.name),
+                format!("ELF section '{}' differs from its file-backed PT_LOAD mapping", section.name),
             ));
         }
+    }
+    if rodata.size != 0 && text.range().start < rodata.range().end && rodata.range().start < text.range().end {
+        return Err(ElfParseError::new(ElfErrorKind::InvalidSection, "allocated sections overlap"));
     }
 
     let instruction_count = text.size / 4;
@@ -350,6 +391,15 @@ pub fn parse_elf(bytes: &[u8], max_instructions: u64) -> Result<ParsedElf, ElfPa
     }
     let text_bytes = checked_file_range(bytes, text.offset, text.size, ".text")?;
     let decoded = validate_instructions(text_bytes, text.address, text.range())?;
+    for flow in &decoded.control_flow {
+        let target = &decoded.instructions[((flow.target - text.address) / 4) as usize];
+        if target.word & 0x7f == 0x67 && target.word != 0x00008067 {
+            return Err(ElfParseError::new(
+                ElfErrorKind::InvalidBranchTarget,
+                "control flow enters the second instruction of a PC-relative call",
+            ));
+        }
+    }
 
     Ok(ParsedElf {
         entry,
@@ -370,6 +420,16 @@ fn validate_instructions(bytes: &[u8], base: u64, text_range: MachineRange) -> R
     let mut stack_adjustments = Vec::new();
     let mut syscalls = Vec::new();
     let mut control_flow = Vec::new();
+    // Track `auipc ra` producers that no canonical jalr call has consumed:
+    // `ret` must never return to a PC-relative attacker-chosen address.
+    // `decode_call_target` already pins every non-ret jalr to an immediately
+    // preceding auipc-ra pair, and jal/jalr rd=1 only ever load ra with a
+    // pc+4 text address, so they clear the marker.
+    let mut unconsumed_auipc_ra = false;
+    // Frame-slot pairing for `ra` restores (`ld ra, off(sp)` needs a same-
+    // frame, same-offset `sd ra` that is the slot's last writer) is validated
+    // per function in `validate_ra_frame_slots`, where lowering blocks bind
+    // instructions to the entry that owns them.
     for (index, chunk) in bytes.chunks_exact(4).enumerate() {
         let word = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
         let address = base + (index as u64) * 4;
@@ -381,6 +441,19 @@ fn validate_instructions(bytes: &[u8], base: u64, text_range: MachineRange) -> R
             ));
         }
         validate_stack_pointer_write(bytes, index, word, address, &mut stack_adjustments)?;
+        let rd = (word >> 7) & 0x1f;
+        let rs1 = (word >> 15) & 0x1f;
+        if word == 0x0000_8067 && unconsumed_auipc_ra {
+            return Err(ElfParseError::new(
+                ElfErrorKind::InvalidInstruction,
+                format!("ret at {address:#x} returns to an unpaired auipc-defined ra"),
+            ));
+        }
+        if opcode == 0x17 && rd == 1 {
+            unconsumed_auipc_ra = true;
+        } else if (opcode == 0x67 && rs1 == 1) || rd == 1 {
+            unconsumed_auipc_ra = false;
+        }
         instructions.push(DecodedInstruction { address, word });
         if word == 0x0000_0073 {
             syscalls.push(address);
@@ -505,6 +578,12 @@ fn instruction_is_allowed(word: u32) -> bool {
     let funct3 = (word >> 12) & 0x7;
     let funct7 = (word >> 25) & 0x7f;
     let funct6 = (word >> 26) & 0x3f;
+    // `ret` targets whatever value `ra` holds, and the checker cannot trace
+    // full register dataflow. The runtime legitimately uses `ra` as a plain
+    // work register after saving the return address, so only the PC-relative
+    // injection shape is fenced here: `validate_instructions` rejects a
+    // `ret` that consumes an unpaired `auipc ra` value.
+    let _ = rd;
     match opcode {
         0x03 => matches!(funct3, 3 | 4),
         0x13 => match funct3 {

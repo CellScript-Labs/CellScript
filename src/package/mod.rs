@@ -280,6 +280,10 @@ const EXTERNAL_RESOLVER_REQUEST_SCHEMA: &str = "cellscript-dependency-resolver-r
 const EXTERNAL_RESOLVER_RESPONSE_SCHEMA: &str = "cellscript-dependency-resolver-response-v1";
 const EXTERNAL_RESOLVER_TIMEOUT: Duration = Duration::from_secs(10);
 const EXTERNAL_RESOLVER_MAX_OUTPUT_BYTES: u64 = 1024 * 1024;
+/// Publisher-supplied Cell.lock graphs are fully validated before dependency
+/// selection, so node admission stays bounded: the recursive cycle search
+/// and linear-membership graph operations must never see an unbounded map.
+const MAX_LOCKFILE_GRAPH_NODES: usize = 4096;
 
 fn is_false(value: &bool) -> bool {
     !*value
@@ -500,6 +504,28 @@ pub(crate) fn active_lockfile_override(root: &Path) -> Result<Option<Lockfile>> 
         .map_err(|error| CompileError::without_span(format!("failed to canonicalize package root '{}': {error}", root.display())))?;
     Ok(LOCKFILE_OVERRIDE_STACK
         .with(|stack| stack.borrow().iter().rev().find(|(candidate, _)| candidate == &root).map(|(_, lockfile)| lockfile.clone())))
+}
+
+/// Execute a compiler operation with dependency materialization disabled: a
+/// missing locked dependency is an error, never an outbound request.
+/// Verification subprocesses compile untrusted snapshots and must stay
+/// network-silent end to end.
+pub fn with_offline_dependencies<T>(operation: impl FnOnce() -> Result<T>) -> Result<T> {
+    RESOLUTION_OPTIONS_STACK.with(|stack| {
+        let mut options = stack.borrow().last().cloned().unwrap_or_default();
+        options.offline = true;
+        stack.borrow_mut().push(options);
+    });
+    struct PopResolutionOptions;
+    impl Drop for PopResolutionOptions {
+        fn drop(&mut self) {
+            RESOLUTION_OPTIONS_STACK.with(|stack| {
+                stack.borrow_mut().pop();
+            });
+        }
+    }
+    let _guard = PopResolutionOptions;
+    operation()
 }
 
 pub struct PackageManager {
@@ -834,6 +860,39 @@ pub fn compiler_requirement_matches(requirement: &str, compiler_version: &str) -
     Ok(requirement.matches(&compiler_version))
 }
 
+/// Manifest-selected path fields join the package root on every hashing,
+/// compilation, and publication surface. They must stay relative, inside the
+/// package, and free of parent traversal or platform-specific prefixes, or a
+/// crafted manifest could read sources or write build outputs outside the
+/// package directory.
+pub fn validate_package_path_selection(manifest: &PackageManifest) -> Result<()> {
+    let check = |value: &str, label: &str| -> Result<()> {
+        let path = std::path::Path::new(value);
+        if value.is_empty()
+            || value.contains('\0')
+            || path.is_absolute()
+            || path.components().any(|component| !matches!(component, std::path::Component::Normal(_)))
+        {
+            return Err(CompileError::without_span(format!(
+                "{label} '{value}' must be a relative path that stays inside the package root"
+            ))
+            .with_code("E2604"));
+        }
+        Ok(())
+    };
+    check(&manifest.package.entry, "package entry")?;
+    for root in &manifest.package.source_roots {
+        check(root, "package source root")?;
+    }
+    for pattern in manifest.package.include.iter().chain(manifest.package.exclude.iter()) {
+        check(pattern, "package include/exclude path")?;
+    }
+    if let Some(out_dir) = &manifest.build.out_dir {
+        check(out_dir, "build out_dir")?;
+    }
+    Ok(())
+}
+
 pub fn validate_package_compiler_requirement(package: &PackageInfo) -> Result<()> {
     if compiler_requirement_matches(&package.cellscript_version, crate::VERSION)? {
         return Ok(());
@@ -1162,6 +1221,7 @@ impl PackageManager {
         let manifest: PackageManifest = toml::from_str(&content)?;
         validate_declarations(&manifest.artifacts)?;
         validate_package_compiler_requirement(&manifest.package)?;
+        validate_package_path_selection(&manifest)?;
         Ok(manifest)
     }
 
@@ -1632,6 +1692,13 @@ dist/
                 Ok(path)
             }
             LockedSource::Git { url, revision } => {
+                registry::validate_cache_path_component(&locked.name, "locked dependency name")?;
+                if revision.len() != 40 || !revision.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                    return Err(CompileError::without_span(format!(
+                        "locked git revision '{revision}' for '{}' is not a 40-hex commit id",
+                        locked.name
+                    )));
+                }
                 let path = self.git_cache_dir().join(format!("{}-git-{}", locked.name, revision));
                 if !path.exists() {
                     if offline {
@@ -1656,7 +1723,14 @@ dist/
                 Ok(path)
             }
             LockedSource::Registry { url, revision, namespace, version, .. } => {
+                registry::validate_cache_path_component(&locked.name, "locked dependency name")?;
                 let suffix = revision.trim_start_matches("sha256:");
+                if suffix.len() != 64 || !suffix.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                    return Err(CompileError::without_span(format!(
+                        "locked Registry snapshot hash '{revision}' for '{}' is not sha256:<64 hex>",
+                        locked.name
+                    )));
+                }
                 let path = self.git_cache_dir().join(format!("{}-snapshot-{}", locked.name, suffix));
                 if !path.exists() {
                     if offline {
@@ -2096,6 +2170,15 @@ dist/
         if options.offline {
             return Err(CompileError::without_span(format!(
                 "offline mode cannot invoke external resolver for dependency '{}'",
+                alias
+            )));
+        }
+        // Executable resolvers are a root-authority boundary: a transitive
+        // package's manifest must never select a local executable to run.
+        let owner_is_root = std::fs::canonicalize(owner_root).ok() == std::fs::canonicalize(&self.root).ok();
+        if !owner_is_root {
+            return Err(CompileError::without_span(format!(
+                "dependency '{}' selects an external resolver from a non-root manifest; only the workspace root may declare executable resolvers",
                 alias
             )));
         }
@@ -3116,6 +3199,12 @@ impl Lockfile {
     }
 
     fn validate_graph(&self) -> Result<()> {
+        if self.dependencies.len() > MAX_LOCKFILE_GRAPH_NODES {
+            return Err(CompileError::without_span(format!(
+                "Cell.lock dependency graph exceeds the admission budget of {MAX_LOCKFILE_GRAPH_NODES} nodes"
+            ))
+            .with_code("E2600"));
+        }
         for (node_id, dependency) in &self.dependencies {
             if dependency.name.is_empty()
                 || dependency.manifest_digest.is_empty()
@@ -5501,7 +5590,9 @@ path = "deps/testnet"
             genesis_hash: format!("0x{}", "11".repeat(32)),
             policy: EnvironmentSelectionPolicy::InheritByChainIdentity,
         };
-        let resolved = PackageManager::new(temp.path())
+        // Executable resolvers are a root-manifest authority boundary: run the
+        // identity checks with the resolver owner as the package root.
+        let resolved = PackageManager::new(&owner)
             .resolve_external_dependency("math", "math", dependency, &owner, &ResolutionOptions::default(), Some(&environment))
             .unwrap();
         assert_eq!(resolved.version, "=1.2.3");

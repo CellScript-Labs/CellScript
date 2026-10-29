@@ -33,7 +33,8 @@ This is an intentional API and artifact change. There are no backward aliases.
 Previously built ELF files, code hashes, frozen modules, build plans and cache
 entries must not be treated as equivalent to rebuilt output. Rebuild and check
 actual artifacts, then explicitly update any package or deployment identities
-that should move. The cache generation changes to v134 and keys distinguish
+that should move. The cache generation changes to v135 to invalidate artifacts
+whose byte-loop optimization could discard trapping prefix operations. Keys distinguish
 strategy identity and every diagnostic pass mask.
 
 ## Compiler diagnosis

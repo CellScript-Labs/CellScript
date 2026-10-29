@@ -1,5 +1,34 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+
+const RECEIPT_SCHEMA: &str = "cellscript-fiber-execution-receipt-v1";
+const RECEIPT_TRUST_ROOT: [u8; 32] = [
+    0xe0, 0x18, 0xa9, 0x8f, 0x10, 0x94, 0xa7, 0x6e, 0xb8, 0xe1, 0x12, 0x9a, 0x0f, 0x96, 0x1a, 0xcb, 0xb7, 0x9e, 0x77, 0x2e, 0x88,
+    0x8b, 0x6f, 0x71, 0xa6, 0x53, 0xdf, 0x50, 0x7b, 0xb9, 0x7f, 0x99,
+];
+const FIXTURE_OPERATOR_PKCS8: &[u8] = &[
+    0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20, 0x23, 0x6d, 0xd9, 0x95, 0xea,
+    0x62, 0xdc, 0xc8, 0x76, 0x0c, 0x3b, 0x0f, 0x02, 0xb5, 0x07, 0x62, 0x34, 0xf1, 0xe0, 0x78, 0x56, 0x27, 0x74, 0x43, 0x0d, 0x8c,
+    0xce, 0x76, 0x98, 0x68, 0x49, 0x48,
+];
+const FIBER_SUITES: &[&str] = &[
+    "open-use-close-a-channel,",
+    "3-nodes-transfer,",
+    "router-pay,",
+    "invoice-ops,",
+    "shutdown-force,",
+    "reestablish,",
+    "external-funding-open,",
+    "funding-tx-verification,",
+    "udt,",
+    "udt-router-pay,",
+    "watchtower/force-close-after-open-channel,",
+    "watchtower/force-close-with-pending-tlcs,",
+    "watchtower/force-close-with-pending-tlcs-and-udt,",
+    "watchtower/force-close-preimage-multiple,",
+    "cross-chain-hub,",
+    "cross-chain-hub-separate,",
+];
 use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -124,10 +153,51 @@ fn write_operator_evidence(root: &Path) {
             "settle_fiber_candidate": {"commit": {"tx_hash": tx_hash}},
         }),
     );
+    // Sign genuine fixture receipts with the checked-in test-chain operator
+    // key; the profile's verification root rejects aggregate pass claims
+    // without them.
+    let pair = ring::signature::Ed25519KeyPair::from_pkcs8_maybe_unchecked(FIXTURE_OPERATOR_PKCS8).expect("fixture key");
+    let trust_root: [u8; 32] = RECEIPT_TRUST_ROOT;
+    let sign = |suite: &str, execution: &mut serde_json::Value| {
+        let mut unsigned = execution.clone();
+        unsigned.as_object_mut().unwrap().remove("receipt");
+        let message = format!("{RECEIPT_SCHEMA}:{suite}:{}", serde_json::to_string(&unsigned).expect("stable execution JSON"));
+        let signature = pair.sign(message.as_bytes());
+        execution["receipt"] = serde_json::json!({
+            "schema": RECEIPT_SCHEMA,
+            "signature": hex::encode(signature.as_ref()),
+        });
+    };
+    let fiber_workflows = FIBER_SUITES
+        .iter()
+        .map(|suite| {
+            let mut execution = serde_json::json!({
+                "status": "passed", "started_node": true,
+                "command": ["./tests/nodes/start.sh", format!("e2e/{suite}")],
+                "returncode": 0, "duration_seconds": 9.5,
+                "fiber_repo": {"path": "fiber", "origin": "origin", "branch": "develop", "commit": "abc", "dirty": false},
+            });
+            sign(suite, &mut execution);
+            serde_json::json!({"suite": suite, "present": true, "execution": execution})
+        })
+        .collect::<Vec<_>>();
+    // Sanity: every fixture receipt verifies against the trust root.
+    {
+        let verifier = ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, trust_root);
+        for row in &fiber_workflows {
+            let suite = row["suite"].as_str().unwrap();
+            let mut unsigned = row["execution"].clone();
+            unsigned.as_object_mut().unwrap().remove("receipt");
+            let message = format!("{RECEIPT_SCHEMA}:{suite}:{}", serde_json::to_string(&unsigned).expect("stable execution JSON"));
+            let signature = hex::decode(row["execution"]["receipt"]["signature"].as_str().unwrap()).unwrap();
+            verifier.verify(message.as_bytes(), &signature).expect("fixture receipt verifies");
+        }
+    }
     write_json(
         root,
         "target/novaseal-fiber-node-experiments.json",
         &serde_json::json!({
+            "workflows": fiber_workflows,
             "workflow_coverage": {"all_required_workflows_executed_passed": true},
         }),
     );

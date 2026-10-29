@@ -102,11 +102,16 @@ jobs:
 
       - name: Resolve release version
         id: version
+        env:
+          DISPATCH_VERSION: ${{ github.event.inputs.version }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ github.event.inputs.version }}"
+            VERSION="$DISPATCH_VERSION"
           fi
+          case "$VERSION" in
+            ''|*[!0-9A-Za-z._-]*) echo "invalid release version: $VERSION"; exit 1 ;;
+          esac
           printf 'version=%s\n' "$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Run authoritative release gate
@@ -206,11 +211,16 @@ jobs:
 
       - name: Package archive
         id: package
+        env:
+          DISPATCH_VERSION: ${{ github.event.inputs.version }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ github.event.inputs.version }}"
+            VERSION="$DISPATCH_VERSION"
           fi
+          case "$VERSION" in
+            ''|*[!0-9A-Za-z._-]*) echo "invalid release version: $VERSION"; exit 1 ;;
+          esac
           ARCHIVE="cellscript-${VERSION}-${{ matrix.target }}.tar.gz"
           cp "target/${{ matrix.target }}/release/cellc" cellc
           cp "target/${{ matrix.target }}/release/cellscript-artifact-checker" cellscript-artifact-checker
@@ -256,11 +266,16 @@ jobs:
 
       - name: Determine version
         id: version
+        env:
+          DISPATCH_VERSION: ${{ github.event.inputs.version }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ github.event.inputs.version }}"
+            VERSION="$DISPATCH_VERSION"
           fi
+          case "$VERSION" in
+            ''|*[!0-9A-Za-z._-]*) echo "invalid release version: $VERSION"; exit 1 ;;
+          esac
           printf 'version=%s\n' "$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release

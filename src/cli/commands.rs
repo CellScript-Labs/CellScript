@@ -7,12 +7,13 @@ use crate::runtime_errors::{runtime_error_info, runtime_error_info_by_code, Cell
 use crate::{
     compile_path, compile_path_metadata_with_diagnostics, compile_path_with_entry_action, compile_path_with_entry_lock,
     compile_path_with_executable_surface_policy, default_metadata_path_for_artifact, default_output_path_for_input,
-    load_modules_for_input, resolve_input_path, validate_artifact_metadata, validate_source_units_on_disk, ArtifactFormat,
-    CompileEntryScope, CompileMetadata, CompileOptions, EntryWitnessArg, ExecutableSurfacePolicy, ParamMetadata, ProofPlanMetadata,
-    TargetProfile, ENTRY_WITNESS_ABI, ENTRY_WITNESS_PLACEMENT_ABI, ENTRY_WITNESS_PLACEMENT_FIELD, ENTRY_WITNESS_PLACEMENT_SOURCE,
+    load_modules_for_input, load_own_package_modules_for_input, resolve_input_path, validate_artifact_metadata,
+    validate_source_units_on_disk, ArtifactFormat, CompileEntryScope, CompileMetadata, CompileOptions, EntryWitnessArg,
+    ExecutableSurfacePolicy, ParamMetadata, ProofPlanMetadata, TargetProfile, ENTRY_WITNESS_ABI, ENTRY_WITNESS_PLACEMENT_ABI,
+    ENTRY_WITNESS_PLACEMENT_FIELD, ENTRY_WITNESS_PLACEMENT_SOURCE,
 };
 use base64::Engine;
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 #[cfg(feature = "vm-runner")]
 use ckb_vm::{
     cost_model::estimate_cycles, machine::VERSION2, Bytes, DefaultCoreMachine, DefaultMachineBuilder, DefaultMachineRunner,
@@ -1753,14 +1754,14 @@ impl CommandExecutor {
 
     fn fmt(args: FmtArgs) -> Result<()> {
         let modules = if args.files.is_empty() {
-            load_modules_for_input(".")?
+            load_own_package_modules_for_input(".")?
         } else {
             let mut modules = Vec::new();
             for path in &args.files {
                 let utf8 = Utf8Path::from_path(path).ok_or_else(|| {
                     crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", path.display()))
                 })?;
-                modules.extend(load_modules_for_input(utf8)?);
+                modules.extend(load_own_package_modules_for_input(utf8)?);
             }
             modules
         };
@@ -4793,6 +4794,7 @@ impl CommandExecutor {
                     version: manifest.package.version.clone(),
                     source_hash: source_hash.clone(),
                     manifest_hash: crate::package::registry::compute_package_manifest_hash(&manifest)?,
+                    lockfile_hash: crate::package::registry::compute_lockfile_hash(std::path::Path::new(".")),
                     capability_key_id,
                     nonce,
                     issued_at,
@@ -6673,6 +6675,7 @@ fn publish_declared_artifact(args: PublishArgs, manifest_path: &Path) -> Result<
         version: manifest.release,
         source_hash: source_hash.clone(),
         manifest_hash,
+        lockfile_hash: crate::package::registry::compute_lockfile_hash(std::path::Path::new(".")),
         capability_key_id,
         nonce,
         issued_at,
@@ -7199,6 +7202,17 @@ fn source_snapshot_content_type(path: &Path) -> &'static str {
 
 fn build_generated_source_snapshot_bytes(root: &Path, manifest: &PackageManifest) -> Result<Vec<u8>> {
     let files = collect_publish_snapshot_files(root, manifest)?;
+    // The snapshot's source files must be exactly the set the compiler and
+    // the signed source_hash cover; a drift here could publish a differently
+    // compiled package behind an unchanged hash.
+    let authoritative = publish_authoritative_source_files(root, manifest)?;
+    let snapshot_cells =
+        files.iter().filter(|path| path.extension().is_some_and(|ext| ext == "cell")).cloned().collect::<BTreeSet<_>>();
+    if snapshot_cells != authoritative {
+        return Err(crate::error::CompileError::without_span(
+            "publish snapshot source files disagree with the authoritative compile file set",
+        ));
+    }
     let mut entries = Vec::new();
     for path in files {
         let bytes = std::fs::read(&path)
@@ -7223,6 +7237,16 @@ fn build_generated_source_snapshot_bytes(root: &Path, manifest: &PackageManifest
         .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize generated source snapshot: {}", error)))
 }
 
+/// The authoritative `.cell` file set for publication, straight from the
+/// single compiler-side implementation (explicit entry semantics included).
+fn publish_authoritative_source_files(root: &Path, manifest: &PackageManifest) -> Result<BTreeSet<std::path::PathBuf>> {
+    let utf8_root = Utf8PathBuf::from_path_buf(root.to_path_buf())
+        .map_err(|path| crate::error::CompileError::without_span(format!("package root '{}' is not valid UTF-8", path.display())))?;
+    let entry = crate::explicit_manifest_entry(&utf8_root)?;
+    let files = crate::package_source_file_set(&utf8_root, &manifest.package.source_roots, entry.as_deref())?;
+    Ok(files.into_iter().map(|path| path.as_std_path().to_path_buf()).collect())
+}
+
 fn collect_publish_snapshot_files(root: &Path, manifest: &PackageManifest) -> Result<Vec<PathBuf>> {
     let mut files = BTreeSet::new();
     let manifest_path = root.join("Cell.toml");
@@ -7234,50 +7258,12 @@ fn collect_publish_snapshot_files(root: &Path, manifest: &PackageManifest) -> Re
         files.insert(lockfile_path);
     }
 
-    if manifest.package.source_roots.is_empty() {
-        let src = root.join("src");
-        if src.is_dir() {
-            collect_publish_snapshot_cell_files(&src, &mut files)?;
-        }
-    } else {
-        for source_root in &manifest.package.source_roots {
-            let path = root.join(source_root);
-            if !path.exists() {
-                return Err(crate::error::CompileError::without_span(format!(
-                    "configured source root '{}' does not exist",
-                    path.display()
-                )));
-            }
-            if path.is_dir() {
-                collect_publish_snapshot_cell_files(&path, &mut files)?;
-            } else if path.extension().is_some_and(|ext| ext == "cell") {
-                files.insert(path);
-            }
-        }
-    }
-
-    let entry_path = root.join(&manifest.package.entry);
-    if entry_path.is_file() {
-        files.insert(entry_path);
+    // Source selection is the single authoritative compile set: no local
+    // walker, no single-file source roots, no drift from the hashed set.
+    for path in publish_authoritative_source_files(root, manifest)? {
+        files.insert(path);
     }
     Ok(files.into_iter().collect())
-}
-
-fn collect_publish_snapshot_cell_files(dir: &Path, files: &mut BTreeSet<PathBuf>) -> Result<()> {
-    let entries = std::fs::read_dir(dir).map_err(|error| {
-        crate::error::CompileError::without_span(format!("failed to read directory '{}': {}", dir.display(), error))
-    })?;
-    for entry in entries {
-        let entry =
-            entry.map_err(|error| crate::error::CompileError::without_span(format!("failed to read directory entry: {}", error)))?;
-        let path = entry.path();
-        if path.is_dir() {
-            collect_publish_snapshot_cell_files(&path, files)?;
-        } else if path.extension().is_some_and(|ext| ext == "cell") {
-            files.insert(path);
-        }
-    }
-    Ok(())
 }
 
 fn normalized_relative_path(root: &Path, path: &Path) -> String {
@@ -13498,15 +13484,21 @@ fn audit_bundle_json(metadata: &CompileMetadata) -> serde_json::Value {
 }
 
 fn audit_bundle_html(bundle: &serde_json::Value) -> String {
+    // The bundle interleaves publisher-controlled names and diagnostics; the
+    // report opens in a browser, so every interpolated text is escaped.
+    fn escape_html(value: &str) -> String {
+        value.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&#39;")
+    }
     let module = bundle.get("module").and_then(serde_json::Value::as_str).unwrap_or("unknown");
     let status = bundle.pointer("/proof_plan_soundness/status").and_then(serde_json::Value::as_str).unwrap_or("unknown");
+    let body = serde_json::to_string_pretty(bundle).unwrap_or_else(|_| "{}".to_string());
     format!(
         "<!doctype html><meta charset=\"utf-8\"><title>CellScript Audit Bundle</title>\
          <h1>CellScript Audit Bundle</h1><p>Module: {}</p><p>ProofPlan soundness: {}</p>\
          <pre>{}</pre>",
-        module,
-        status,
-        serde_json::to_string_pretty(bundle).unwrap_or_else(|_| "{}".to_string())
+        escape_html(module),
+        escape_html(status),
+        escape_html(&body)
     )
 }
 
@@ -19103,6 +19095,45 @@ fn resolve_primitive_compat(compat: Option<String>, strict: Option<String>) -> O
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn publish_snapshot_carries_exactly_the_authoritative_source_files() {
+        // #27: the publish snapshot's source files must be the exact set
+        // compilation and the signed source_hash cover — no stray root files,
+        // no drift between the three collectors.
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("src")).unwrap();
+        std::fs::write(
+            root.path().join("Cell.toml"),
+            b"[package]\ncellscript_version = \">=0.33.0-alpha.1\"\nedition = \"2026\"\nname = \"demo\"\nnamespace = \"cellscript\"\nversion = \"1.2.3\"\nentry = \"src/main.cell\"\n",
+        )
+        .unwrap();
+        std::fs::write(root.path().join("src/main.cell"), b"module demo\n").unwrap();
+        std::fs::write(root.path().join("src/helper.cell"), b"module demo::helper\n").unwrap();
+        std::fs::write(root.path().join("rogue.cell"), b"module rogue\n").unwrap();
+        std::fs::write(root.path().join("Cell.lock"), b"lock bytes\n").unwrap();
+        let manifest: PackageManifest = toml::from_str(&std::fs::read_to_string(root.path().join("Cell.toml")).unwrap()).unwrap();
+
+        let bytes = build_generated_source_snapshot_bytes(root.path(), &manifest).unwrap();
+        let snapshot: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let paths =
+            snapshot["files"].as_array().unwrap().iter().map(|entry| entry["path"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        assert!(paths.contains(&"Cell.toml".to_string()));
+        assert!(paths.contains(&"Cell.lock".to_string()));
+        assert!(paths.contains(&"src/main.cell".to_string()));
+        assert!(paths.contains(&"src/helper.cell".to_string()));
+        assert!(!paths.iter().any(|path| path == "rogue.cell"), "stray root source must not enter the snapshot");
+        for entry in snapshot["files"].as_array().unwrap() {
+            let path = root.path().join(entry["path"].as_str().unwrap());
+            let bytes = std::fs::read(&path).unwrap();
+            assert_eq!(
+                entry["blake2b256"].as_str().unwrap(),
+                &crate::hex_encode(&crate::ckb_blake2b256(&bytes)),
+                "snapshot entry hash must match disk bytes for {}",
+                entry["path"].as_str().unwrap()
+            );
+        }
+    }
 
     #[test]
     fn policy_artifact_selection_is_explicit_and_preserved_by_build_and_check() {

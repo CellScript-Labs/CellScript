@@ -147,16 +147,18 @@ fn check_tool(arguments: Value) -> anyhow::Result<Value> {
 }
 
 fn constraints_tool(arguments: Value) -> anyhow::Result<Value> {
-    let mut args = vec!["constraints".to_string(), input_arg(&arguments), "--json".to_string()];
+    let mut args = vec!["constraints".to_string(), "--json".to_string()];
     push_optional_flag(&mut args, &arguments, "target", "--target");
     push_optional_flag(&mut args, &arguments, "target_profile", "--target-profile");
+    push_positional_input(&mut args, &arguments);
     run_cellc_vec(args, cwd_from_arguments(&arguments)?, "compile-only")
 }
 
 fn metadata_tool(arguments: Value) -> anyhow::Result<Value> {
-    let mut args = vec!["metadata".to_string(), input_arg(&arguments)];
+    let mut args = vec!["metadata".to_string()];
     push_optional_flag(&mut args, &arguments, "target", "--target");
     push_optional_flag(&mut args, &arguments, "target_profile", "--target-profile");
+    push_positional_input(&mut args, &arguments);
     run_cellc_vec(args, cwd_from_arguments(&arguments)?, "compile-only")
 }
 
@@ -176,15 +178,20 @@ fn template_layouts_tool(arguments: Value) -> anyhow::Result<Value> {
 }
 
 fn protocol_graph_tool(arguments: Value) -> anyhow::Result<Value> {
-    let mut args = vec!["explain".to_string(), "graph".to_string(), input_arg(&arguments), "--json".to_string()];
+    let mut args = vec!["explain".to_string(), "graph".to_string(), "--json".to_string()];
     push_optional_flag(&mut args, &arguments, "target", "--target");
     push_optional_flag(&mut args, &arguments, "target_profile", "--target-profile");
+    push_positional_input(&mut args, &arguments);
     run_cellc_vec(args, cwd_from_arguments(&arguments)?, "compile-only")
 }
 
 fn explain_tool(arguments: Value) -> anyhow::Result<Value> {
     let code = required_string(&arguments, "code")?;
-    run_cellc_vec(vec!["explain".to_string(), code, "--json".to_string()], cwd_from_arguments(&arguments)?, "compile-only")
+    run_cellc_vec(
+        vec!["explain".to_string(), "--json".to_string(), "--".to_string(), code],
+        cwd_from_arguments(&arguments)?,
+        "compile-only",
+    )
 }
 
 fn gate_policy_tool(_arguments: Value) -> anyhow::Result<Value> {
@@ -397,6 +404,10 @@ fn string_schema(description: &str) -> Value {
 fn run_cellc_vec(args: Vec<String>, cwd: Option<PathBuf>, evidence_level: &str) -> anyhow::Result<Value> {
     let mut command = Command::new(cellc_path());
     command.args(&args);
+    // Advertised tools are read-only analysis: the child must not fetch
+    // dependencies over the network or mutate the persistent incremental
+    // cache while answering.
+    command.env("CELLSCRIPT_OFFLINE", "1");
     if let Some(cwd) = cwd {
         command.current_dir(cwd);
     }
@@ -434,6 +445,14 @@ fn cwd_from_arguments(arguments: &Value) -> anyhow::Result<Option<PathBuf>> {
 
 fn input_arg(arguments: &Value) -> String {
     optional_string(arguments, "input").unwrap_or(None).unwrap_or_else(|| ".".to_string())
+}
+
+/// Positional inputs cross from MCP JSON into the cellc argv. Terminating
+/// the option surface with `--` keeps an option-shaped `input`/`code` value
+/// from being reinterpreted as a flag (for example an output override).
+fn push_positional_input(args: &mut Vec<String>, arguments: &Value) {
+    args.push("--".to_string());
+    args.push(input_arg(arguments));
 }
 
 fn push_optional_flag(args: &mut Vec<String>, arguments: &Value, key: &str, flag: &str) {

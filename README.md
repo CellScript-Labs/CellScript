@@ -81,7 +81,21 @@ curl -fsSL https://github.com/CellScript-Labs/CellScript/releases/download/v0.31
 ```
 
 Follow the installer's PATH instructions. Release archives have accompanying
-`SHA256SUMS` on the release page.
+`SHA256SUMS` on the release page. Verification behavior depends on the downloaded
+installer version: the v0.31.0 installer above permits mirror-supplied checksums
+and can skip verification when checksums or hashing tools are unavailable.
+
+The [installer in this source checkout](scripts/install.sh) requires checksum
+verification using github.com's `SHA256SUMS` or a published digest you supply via
+`CELLSCRIPT_INSTALL_SHA256`. To use it with the pinned release, run from this
+checkout:
+
+```bash
+CELLSCRIPT_VERSION=0.31.0 sh scripts/install.sh
+```
+
+These guarantees apply to this checkout's installer; they do not update installer
+assets attached to earlier releases.
 
 Create and build a package without a source checkout:
 
@@ -203,7 +217,7 @@ build defaults. A minimal manifest is:
 [package]
 edition = "2026"
 name = "token"
-version = "0.1.0"
+version = "0.33.0-alpha.1"
 cellscript_version = ">=0.31.0"
 entry = "src/main.cell"
 source_roots = ["src"]

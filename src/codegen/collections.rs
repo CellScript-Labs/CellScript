@@ -169,6 +169,29 @@ impl CodeGenerator {
         true
     }
 
+    /// Copy `width` bytes addressed by `src_reg` into the destination's
+    /// dedicated fixed-byte local frame storage and leave that storage's
+    /// address in `t0`. Collection reads must never expose the collection's
+    /// own backing slots: a later push/set/remove would silently rewrite a
+    /// value the source program already bound.
+    fn emit_copy_fixed_bytes_to_local(&mut self, src_reg: &str, dest: &IrVar, width: usize) -> bool {
+        let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else {
+            return false;
+        };
+        for byte_index in 0..width {
+            if byte_index <= 2047 {
+                self.emit(format!("lbu t6, {}({})", byte_index, src_reg));
+            } else {
+                self.emit_large_addi("t2", src_reg, byte_index as i64);
+                self.emit("lbu t6, 0(t2)");
+            }
+            self.emit_sp_addi("t2", dest_offset + byte_index);
+            self.emit("sb t6, 0(t2)");
+        }
+        self.emit_sp_addi("t0", dest_offset);
+        true
+    }
+
     fn emit_stack_collection_index(&mut self, dest: &IrVar, arr: &IrOperand, idx: &IrOperand) -> bool {
         let IrOperand::Var(arr_var) = arr else {
             return false;
@@ -207,7 +230,10 @@ impl CodeGenerator {
                 self.emit_sign_extend_i32("t0");
             }
         } else {
-            self.emit("addi t0, t4, 0");
+            self.emit(format!("# cellscript abi: stack collection index snapshot fixed bytes size={}", element_width));
+            if !self.emit_copy_fixed_bytes_to_local("t4", dest, element_width) {
+                return false;
+            }
         }
         self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         true
@@ -1022,11 +1048,7 @@ impl CodeGenerator {
         if !dest_scalar && !dest_fixed_bytes {
             return false;
         }
-        let removed_value_slots = if dest_fixed_bytes { element_width.div_ceil(8) } else { 0 };
-        if dest_fixed_bytes && removed_value_slots + 1 > RUNTIME_EXPR_TEMP_SLOTS {
-            return false;
-        }
-        let Some(index_offset) = self.checked_runtime_expr_temp_offset(removed_value_slots) else {
+        let Some(index_offset) = self.checked_runtime_expr_temp_offset(0) else {
             return false;
         };
 
@@ -1048,20 +1070,11 @@ impl CodeGenerator {
             self.emit_unaligned_scalar_load("t5", "t6", "t2", 0, element_width);
             self.emit_stack_store("t6", self.scalar_slot_offset(dest.id));
         } else {
-            let removed_offset = self.runtime_expr_temp_offset(0);
             self.emit(format!("# cellscript abi: stack collection remove snapshot fixed bytes size={}", element_width));
-            for byte_index in 0..element_width {
-                if byte_index <= 2047 {
-                    self.emit(format!("lbu t6, {}(t5)", byte_index));
-                } else {
-                    self.emit_large_addi("t2", "t5", byte_index as i64);
-                    self.emit("lbu t6, 0(t2)");
-                }
-                self.emit_sp_addi("t2", removed_offset + byte_index);
-                self.emit("sb t6, 0(t2)");
+            if !self.emit_copy_fixed_bytes_to_local("t5", dest, element_width) {
+                return false;
             }
-            self.emit_sp_addi("t6", removed_offset);
-            self.emit_stack_store("t6", self.scalar_slot_offset(dest.id));
+            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         }
 
         self.emit_stack_store("t1", index_offset);
@@ -1147,8 +1160,11 @@ impl CodeGenerator {
             self.emit_unaligned_scalar_load("t5", "t6", "t2", 0, element_width);
             self.emit_stack_store("t6", self.scalar_slot_offset(dest.id));
         } else {
-            self.emit("# cellscript abi: stack collection pop fixed bytes");
-            self.emit_stack_store("t5", self.scalar_slot_offset(dest.id));
+            self.emit(format!("# cellscript abi: stack collection pop snapshot fixed bytes size={}", element_width));
+            if !self.emit_copy_fixed_bytes_to_local("t5", dest, element_width) {
+                return false;
+            }
+            self.emit_stack_store("t0", self.scalar_slot_offset(dest.id));
         }
         self.emit("sd t1, -8(t4)");
         true

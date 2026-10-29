@@ -108,6 +108,7 @@ export interface PackageVersionQuery {
   query?: string;
   namespace?: string;
   name?: string;
+  snapshot_hash?: string;
   artifact_kind?: ArtifactKind;
   verification_status?: VerificationStatus;
   verification_statuses?: VerificationStatus[];
@@ -122,6 +123,14 @@ export interface PackageVersionQuery {
 export interface ArtifactPackagePage {
   records: PackageVersionRecord[];
   has_more: boolean;
+}
+
+export const MAX_ARTIFACT_PAGE_RELEASES = 1000;
+
+export function assertArtifactPageSize(releaseCount: number): void {
+  if (releaseCount > MAX_ARTIFACT_PAGE_RELEASES) {
+    throw new ApiError(413, "artifact_page_too_large", `artifact page exceeds ${MAX_ARTIFACT_PAGE_RELEASES} releases; reduce limit or narrow the query filters`);
+  }
 }
 
 export type PackageEvidenceKind = "verified_build" | "reproduced_build" | "deployed" | "on_chain_committed";
@@ -374,6 +383,7 @@ export interface RegistryStore {
     principal_type: PrincipalType;
     principal_id: string;
     request_id: string;
+    claim_cooldown_seconds?: number;
   }): Promise<NamespaceClaimResult>;
   upsertReservedNamespace(input: ReservedNamespaceRecord & {
     request_id: string;
@@ -396,6 +406,7 @@ export interface RegistryStore {
   }): Promise<void>;
   recordSnapshot(input: SnapshotRecord): Promise<void>;
   getSnapshot(snapshotHash: string): Promise<SnapshotRecord | null>;
+  deleteSnapshot(snapshotHash: string): Promise<void>;
   getSnapshots(snapshotHashes: string[]): Promise<Map<string, SnapshotRecord>>;
   getPackageVersion(namespace: string, name: string, version: string): Promise<PackageVersionRecord | null>;
   listPackageVersions(input: PackageVersionQuery): Promise<PackageVersionRecord[]>;
@@ -443,11 +454,14 @@ export interface RegistryStore {
     audit_event_type?: string;
     capability_usage?: PublishAdmissionInput["capability_usage"];
     idempotency?: PublishAdmissionInput["idempotency"];
+    allow_quarantine_transition?: boolean;
   }): Promise<PackageVersionRecord>;
   appendAuditEvent(event: AuditEventInput): Promise<void>;
   listAuditEvents(input: ListAuditEventsInput): Promise<AuditEventRecord[]>;
   countRecentQuotaEvents(quotaKey: string, bucket: string, sinceIso: string): Promise<number>;
   recordQuotaEvent(quotaKey: string, bucket: string): Promise<void>;
+  /** Atomically count the window and record the event; false means the quota is exhausted. */
+  tryConsumeQuota(quotaKey: string, bucket: string, limit: number, windowSeconds: number): Promise<boolean>;
   consumeNonce(input: {
     nonce_key: string;
     protocol: string;
@@ -606,6 +620,13 @@ export class MemoryRegistryStore implements RegistryStore {
     const existing = this.capabilities.get(key_id);
     if (existing?.revoked_at) {
       throw new ApiError(409, "capability_key_revoked", "revoked capability keys cannot be reactivated");
+    }
+    // Mirror the SQL store: a reused delegated pubkey stays bound to its
+    // first principal, so another wallet cannot re-register it for itself.
+    if (existing
+      && (existing.principal_type !== input.payload.principal_type
+        || existing.principal_id !== input.payload.principal_id)) {
+      throw new ApiError(409, "capability_principal_mismatch", "publishing key is already bound to another principal");
     }
     const record: CapabilityRecord = {
       key_id,
@@ -937,11 +958,21 @@ export class MemoryRegistryStore implements RegistryStore {
   }
 
   async recordSnapshot(input: SnapshotRecord): Promise<void> {
+    // Mirror the SQL store: a hash already admitted under another namespace's
+    // object key is a cross-tenant conflict, not a dedup hit.
+    const existing = this.snapshots.get(input.snapshot_hash);
+    if (existing && existing.r2_key !== input.r2_key) {
+      throw new ApiError(409, "snapshot_namespace_conflict", "snapshot content is already admitted under a different namespace object key");
+    }
     this.snapshots.set(input.snapshot_hash, input);
   }
 
   async getSnapshot(snapshotHash: string): Promise<SnapshotRecord | null> {
     return this.snapshots.get(snapshotHash) ?? null;
+  }
+
+  async deleteSnapshot(snapshotHash: string): Promise<void> {
+    this.snapshots.delete(snapshotHash);
   }
 
   async getSnapshots(snapshotHashes: string[]): Promise<Map<string, SnapshotRecord>> {
@@ -964,6 +995,7 @@ export class MemoryRegistryStore implements RegistryStore {
       .filter(packageVersionIsPublic)
       .filter((record) => !input.namespace || record.namespace === input.namespace)
       .filter((record) => !input.name || record.name === input.name)
+      .filter((record) => !input.snapshot_hash || record.snapshot_hash === input.snapshot_hash)
       .filter((record) => !input.artifact_kind || record.artifact.kind === input.artifact_kind)
       .filter((record) => !input.verification_status || record.verification_status === input.verification_status)
       .filter((record) => !input.verification_statuses || input.verification_statuses.includes(record.verification_status))
@@ -986,8 +1018,10 @@ export class MemoryRegistryStore implements RegistryStore {
     const coordinates = [...new Set(all.map((record) => `${record.namespace}/${record.name}`))];
     const pageCoordinates = coordinates.slice(input.offset, input.offset + input.limit);
     const selected = new Set(pageCoordinates);
+    const records = all.filter((record) => selected.has(`${record.namespace}/${record.name}`));
+    assertArtifactPageSize(records.length);
     return {
-      records: all.filter((record) => selected.has(`${record.namespace}/${record.name}`)),
+      records,
       has_more: coordinates.length > input.offset + input.limit,
     };
   }
@@ -1260,6 +1294,7 @@ export class MemoryRegistryStore implements RegistryStore {
     audit_event_type?: string;
     capability_usage?: PublishAdmissionInput["capability_usage"];
     idempotency?: PublishAdmissionInput["idempotency"];
+    allow_quarantine_transition?: boolean;
   }): Promise<PackageVersionRecord> {
     const key = `${input.namespace}/${input.name}@${input.version}`;
     const existing = this.packageVersions.get(key);
@@ -1267,6 +1302,9 @@ export class MemoryRegistryStore implements RegistryStore {
       throw new ApiError(404, "artifact_release_not_found", "artifact release is not known to the registry");
     }
     this.assertProcessingIdempotency(input.idempotency);
+    if (existing.availability_status === "quarantined" && !input.allow_quarantine_transition) {
+      throw new ApiError(403, "quarantine_admin_required", "a quarantined release only accepts administrative transitions");
+    }
     const updated: PackageVersionRecord = {
       ...existing,
       availability_status: input.status,
@@ -1323,6 +1361,16 @@ export class MemoryRegistryStore implements RegistryStore {
 
   async recordQuotaEvent(quotaKey: string, bucket: string): Promise<void> {
     this.quotaEvents.push({ quotaKey, bucket, at: nowIso() });
+  }
+
+  async tryConsumeQuota(quotaKey: string, bucket: string, limit: number, windowSeconds: number): Promise<boolean> {
+    // Single-threaded in-memory store: the plain pair is already atomic here.
+    const since = new Date(Date.now() - windowSeconds * 1000).toISOString();
+    const allowed = (await this.countRecentQuotaEvents(quotaKey, bucket, since)) < limit;
+    if (allowed) {
+      await this.recordQuotaEvent(quotaKey, bucket);
+    }
+    return allowed;
   }
 
   async consumeNonce(input: {

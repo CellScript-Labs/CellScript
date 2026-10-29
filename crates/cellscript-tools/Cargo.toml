@@ -19,6 +19,7 @@ ckb-jsonrpc-types = "1.0.0"
 ckb-types = "1.0.0"
 clap = { version = "=4.5.49", features = ["derive"] }
 hex = "0.4"
+ring = "0.17"
 hex-literal = "0.4"
 k256 = { version = "0.13.4", default-features = false, features = ["schnorr"] }
 percent-encoding = "2"

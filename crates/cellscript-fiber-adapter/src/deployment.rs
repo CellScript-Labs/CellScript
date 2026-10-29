@@ -61,6 +61,12 @@ pub struct LiveCell {
 pub trait CkbEvidenceProvider {
     fn get_live_cell(&self, out_point: &OutPointRef) -> anyhow::Result<LiveCell>;
     fn resolve_type_id(&self, type_id: &ScriptIdentity) -> anyhow::Result<Vec<LiveCell>>;
+    /// The queried node's genesis block hash, when the provider can ask.
+    /// Deployment evidence must be bound to the same chain identity the
+    /// report claims.
+    fn genesis_hash(&self) -> anyhow::Result<Option<String>> {
+        Ok(None)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -107,6 +113,15 @@ fn validate_rpc_url(url: &str, label: &str) -> anyhow::Result<()> {
 }
 
 impl CkbEvidenceProvider for HttpCkbEvidenceProvider {
+    fn genesis_hash(&self) -> anyhow::Result<Option<String>> {
+        let result = self.rpc(&self.ckb_rpc_url, "get_block_hash", json!(["0x0"]))?;
+        let hash = result.as_str().ok_or_else(|| anyhow::anyhow!("CKB get_block_hash returned a non-string result"))?;
+        if !hash.starts_with("0x") || hash.len() != 66 || !hash[2..].chars().all(|character| character.is_ascii_hexdigit()) {
+            anyhow::bail!("CKB get_block_hash returned a malformed genesis hash");
+        }
+        Ok(Some(hash.to_ascii_lowercase()))
+    }
+
     fn get_live_cell(&self, out_point: &OutPointRef) -> anyhow::Result<LiveCell> {
         let result = self.rpc(
             &self.ckb_rpc_url,
@@ -202,7 +217,16 @@ pub fn verify_code_deployment(
     descriptor: &FiberAssetDescriptor,
     deployment_name: Option<&str>,
     dependency_mode: DependencyMode,
+    expected_genesis: Option<&str>,
 ) -> anyhow::Result<(CodeDeploymentIdentity, LiveCellDepEvidence)> {
+    // Live-cell evidence is only meaningful on the chain the report claims:
+    // query the node's own genesis and refuse cross-network observations.
+    if let Some(expected) = expected_genesis
+        && let Some(observed) = provider.genesis_hash()?
+        && !observed.eq_ignore_ascii_case(expected)
+    {
+        anyhow::bail!("CKB endpoint genesis {} does not match the recorded chain identity {expected}", observed.to_ascii_lowercase());
+    }
     let mut candidates = Vec::new();
     let mut failures = Vec::new();
     for deployment in manifest.deployments.iter().filter(|deployment| deployment_name.is_none_or(|name| deployment.name == name)) {
@@ -538,7 +562,8 @@ mod tests {
                 out_point: out_point.display(),
             }],
         };
-        let (deployment, evidence) = verify_code_deployment(&provider, &manifest, &descriptor, None, DependencyMode::Direct).unwrap();
+        let (deployment, evidence) =
+            verify_code_deployment(&provider, &manifest, &descriptor, None, DependencyMode::Direct, None).unwrap();
         assert_eq!(deployment.code_hash, descriptor.artifact_hash);
         assert!(evidence.live);
         assert!(evidence.dependency.cell_dep.is_some());
@@ -571,7 +596,7 @@ mod tests {
                 out_point: out_point.display(),
             }],
         };
-        let error = verify_code_deployment(&provider, &manifest, &descriptor, None, DependencyMode::Direct).unwrap_err();
+        let error = verify_code_deployment(&provider, &manifest, &descriptor, None, DependencyMode::Direct, None).unwrap_err();
         assert!(error.to_string().contains("no live deployment"));
     }
 
@@ -601,7 +626,7 @@ mod tests {
                 out_point: out_point.display(),
             }],
         };
-        let (_, evidence) = verify_code_deployment(&provider, &manifest, &descriptor, None, DependencyMode::TypeId).unwrap();
+        let (_, evidence) = verify_code_deployment(&provider, &manifest, &descriptor, None, DependencyMode::TypeId, None).unwrap();
         assert!(evidence.dependency.type_id.is_some());
         assert!(evidence.dependency.cell_dep.is_none());
         assert_eq!(evidence.resolved_out_point, out_point);

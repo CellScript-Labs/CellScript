@@ -381,7 +381,10 @@ impl CodeGenerator {
                         self.emit("ret");
                     }
                     "__ckb_spawn" => {
-                        self.emit("li a0, 0");
+                        // Bare spawn has no argv/fd plumbing: the helper is a
+                        // fail-closed stub, never a success-shaped no-op that
+                        // lets a contract proceed on an unspawned child.
+                        self.emit("li a0, 76");
                         self.emit("ret");
                     }
                     _ => {

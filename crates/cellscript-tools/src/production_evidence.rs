@@ -63,6 +63,9 @@ pub(crate) const EXPECTED_LANGUAGE_EXAMPLES: &[&str] = &[
     "ckb/witness_source.cell",
     "ckb/typed_temporal.cell",
     "ckb/sighash_all_zero_lock.cell",
+    "ckb/exact_role_verification.cell",
+    "ckb/typed_cell_data.cell",
+    "ckb/typed_cell_predicate.cell",
     "ownership/identity_lifecycle.cell",
     "ownership/semantic_foundation.cell",
     "ownership/borrow.cell",
@@ -75,6 +78,10 @@ pub(crate) const EXPECTED_LANGUAGE_EXAMPLES: &[&str] = &[
     "batches/atomic_order_settlement.cell",
     "batches/cell_merge.cell",
     "batches/bridge_rollup_batch.cell",
+    "batches/mixed_settlement.cell",
+    "batches/multi_asset_transfer.cell",
+    "batches/nested_migration.cell",
+    "batches/record_migration.cell",
 ];
 
 pub(crate) const EXPECTED_CRITICAL_ELF_ABI_EXAMPLES: &[&str] = &["launch.cell", "token.cell", "amm_pool.cell"];
@@ -559,13 +566,27 @@ fn validate_ckb_runtime_provenance(report: &Map<String, Value>, repo_root: &Path
     require(binary_path.is_file(), format!("{context}.binary_path does not exist: {}", binary_path.display()))?;
     let expected_binary = fs::canonicalize(report_dir.join("ckb-runtime/ckb")).unwrap_or_else(|_| report_dir.join("ckb-runtime/ckb"));
     require_field(provenance, "binary_path", json!(expected_binary.to_string_lossy()), context)?;
-    require_field(provenance, "binary_sha256", json!(format!("0x{}", file_sha256(&binary_path)?)), context)?;
-    let binary_version = Command::new(&binary_path)
-        .arg("--version")
-        .output()
-        .with_context(|| format!("failed to execute {} --version", binary_path.display()))?;
-    require(binary_version.status.success(), format!("{} --version failed", binary_path.display()))?;
-    require_field(provenance, "version_output", json!(String::from_utf8_lossy(&binary_version.stdout).trim()), context)?;
+    let binary_sha256 = format!("0x{}", file_sha256(&binary_path)?);
+    require_field(provenance, "binary_sha256", json!(binary_sha256.clone()), context)?;
+    // The archived runtime is publisher-supplied bytes: its self-reported
+    // digest is consistency evidence, not an authenticity anchor. Only a
+    // digest pinned in the tracked acceptance pin authenticates the binary,
+    // and only then may this validator execute it. Without a pinned digest
+    // the version binding above stays declarative and the binary is never
+    // run.
+    if let Some(pinned) = pin.get("binary_sha256") {
+        let pinned = pinned
+            .as_str()
+            .filter(|value| !value.is_empty())
+            .with_context(|| "ckb_acceptance_pin.binary_sha256 must be a non-empty string when present")?;
+        require(pinned == binary_sha256, "archived CKB runtime digest does not match ckb_acceptance_pin.binary_sha256")?;
+        let binary_version = Command::new(&binary_path)
+            .arg("--version")
+            .output()
+            .with_context(|| format!("failed to execute {} --version", binary_path.display()))?;
+        require(binary_version.status.success(), format!("{} --version failed", binary_path.display()))?;
+        require_field(provenance, "version_output", json!(String::from_utf8_lossy(&binary_version.stdout).trim()), context)?;
+    }
 
     let templates = array(pin.get("template_paths"), "ckb_acceptance_pin.template_paths")?;
     require(templates.len() >= 2, "ckb_acceptance_pin.template_paths must contain config and spec paths")?;

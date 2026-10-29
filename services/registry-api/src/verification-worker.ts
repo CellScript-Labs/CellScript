@@ -187,6 +187,28 @@ async function processJob(job: VerificationJobRecord): Promise<void> {
         error: safeErrorMessage(error),
         ...(failed.status === "retry_wait" ? { retry_after_seconds: retryAfterSeconds } : {}),
       });
+      if (failed.status === "dead_letter") {
+        // Rejected publications must not leave their bytes in production
+        // object storage: delete the snapshot when no surviving release
+        // still references it. Best effort — the dead-letter decision and
+        // its audit trail already stand.
+        try {
+          const snapshot = await store.getSnapshot(job.snapshot_hash);
+          if (snapshot) {
+            const orphans = await store.listPackageVersions({ snapshot_hash: job.snapshot_hash, limit: 1, offset: 0 });
+            if (orphans.length === 0) {
+              await objectStore.delete?.(snapshot.r2_key);
+              await store.deleteSnapshot(job.snapshot_hash);
+            }
+          }
+        } catch (cleanupError) {
+          log("verification.dead_letter_cleanup_failed", {
+            request_id: requestId,
+            job_id: job.id,
+            error: safeErrorMessage(cleanupError),
+          });
+        }
+      }
     } catch (leaseError) {
       log("verification.failure_not_recorded", {
         request_id: requestId,

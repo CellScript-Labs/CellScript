@@ -1,1 +1,0 @@
-/home/arthur/a19q3/CellScript/tests/fixtures/cost_corpus/target/riscv64imac-unknown-none-elf/release/nft-lock: /home/arthur/a19q3/CellScript/tests/fixtures/cost_corpus/src/common.rs /home/arthur/a19q3/CellScript/tests/fixtures/cost_corpus/src/nft_lock.rs

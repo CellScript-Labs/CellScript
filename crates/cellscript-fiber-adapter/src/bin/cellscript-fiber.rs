@@ -217,8 +217,14 @@ fn enable(args: EnableArgs, verify_fiber_when_requested: bool) -> anyhow::Result
     let manifest = cellscript_ckb_adapter::load_deployment_manifest(&manifest_path)
         .with_context(|| format!("load ordinary deployment manifest {}", manifest_path.display()))?;
     let provider = HttpCkbEvidenceProvider::new(&args.ckb_rpc, args.ckb_indexer_rpc.clone())?;
-    let (deployment, dependency) =
-        verify_code_deployment(&provider, &manifest, &checked.descriptor, args.deployment_name.as_deref(), args.dependency_mode)?;
+    let (deployment, dependency) = verify_code_deployment(
+        &provider,
+        &manifest,
+        &checked.descriptor,
+        args.deployment_name.as_deref(),
+        args.dependency_mode,
+        (args.ckb_revision != "operator-unbound").then_some(args.ckb_revision.as_str()),
+    )?;
     write_json_atomic(
         output_dir.join("deployment.json"),
         &json!({

@@ -256,7 +256,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
-const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v134-0.33-explicit-bytes-unified-wide-contracts";
+const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v135-0.33-preserve-trapping-loop-prefixes";
 pub const METADATA_SCHEMA_VERSION: u32 = 72;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 2;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -7081,6 +7081,33 @@ pub fn load_modules_for_input<P: AsRef<Utf8Path>>(input: P) -> Result<Vec<Loaded
     load_project_modules_for_entry(&resolved, None)
 }
 
+/// Formatting owns the selected package's sources only: unlike compilation
+/// it must never rewrite materialized dependency sources under
+/// `.cell/git-cache` or locked local dependency roots.
+pub fn load_own_package_modules_for_input<P: AsRef<Utf8Path>>(input: P) -> Result<Vec<LoadedModule>> {
+    let resolved = resolve_input_path(input.as_ref())?;
+    let entry_path = canonical_utf8_path(&resolved)?;
+    let mut source_paths = BTreeSet::new();
+    if let Some(package_root) = find_package_root(&entry_path)? {
+        for source_path in collect_package_cell_files(&package_root)? {
+            source_paths.insert(source_path);
+        }
+    } else if let Some(parent) = entry_path.parent() {
+        for source_path in collect_cell_files(parent)? {
+            source_paths.insert(source_path);
+        }
+    }
+    source_paths.insert(entry_path.clone());
+    source_paths
+        .into_iter()
+        .map(|path| {
+            let edition = source_edition(&path)?;
+            let source = read_module_source(&path)?;
+            parse_loaded_module(path, source, edition)
+        })
+        .collect()
+}
+
 fn load_project_for_entry(entry_path: &Utf8Path, entry_source_override: Option<&str>) -> Result<LoadedProject> {
     let entry_path = canonical_utf8_path(entry_path)?;
     let mut modules = load_project_modules_for_entry(&entry_path, entry_source_override)?;
@@ -8499,7 +8526,20 @@ pub(crate) fn without_incremental_cache<T>(operation: impl FnOnce() -> T) -> T {
 }
 
 fn incremental_cache_enabled() -> bool {
-    INCREMENTAL_CACHE_SUPPRESSION_DEPTH.with(|depth| depth.get() == 0)
+    INCREMENTAL_CACHE_SUPPRESSION_DEPTH.with(|depth| depth.get() == 0) && !offline_environment_active()
+}
+
+/// Hosts that embed read-only compiler tooling (the MCP server) set this so
+/// analysis subprocesses neither write persistent caches nor fetch missing
+/// dependencies over the network.
+#[cfg(not(feature = "wasm"))]
+fn offline_environment_active() -> bool {
+    std::env::var("CELLSCRIPT_OFFLINE").is_ok_and(|value| value == "1")
+}
+
+#[cfg(feature = "wasm")]
+fn offline_environment_active() -> bool {
+    false
 }
 
 fn resolve_named_artifact(path: &Utf8Path, name: &str) -> Result<artifact::ArtifactDeclaration> {
@@ -8516,6 +8556,20 @@ fn resolve_named_artifact(path: &Utf8Path, name: &str) -> Result<artifact::Artif
 }
 
 fn compile_file_with_entry_scope<P: AsRef<Utf8Path>>(
+    path: P,
+    options: CompileOptions,
+    entry_scope: Option<CompileEntryScope>,
+    executable_surface_policy: ExecutableSurfacePolicy,
+) -> Result<CompileResult> {
+    if offline_environment_active() {
+        return crate::package::with_offline_dependencies(|| {
+            compile_file_with_entry_scope_inner(path, options, entry_scope, executable_surface_policy)
+        });
+    }
+    compile_file_with_entry_scope_inner(path, options, entry_scope, executable_surface_policy)
+}
+
+fn compile_file_with_entry_scope_inner<P: AsRef<Utf8Path>>(
     path: P,
     mut options: CompileOptions,
     entry_scope: Option<CompileEntryScope>,
@@ -22697,28 +22751,31 @@ fn hex_bytes(bytes: &[u8]) -> String {
     out
 }
 
-fn collect_package_cell_files(package_root: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
-    let manifest = load_manifest(package_root)?;
+/// The single authoritative source-file set for a package: the exact files
+/// that participate in compilation, source hashing, and publish snapshots.
+/// Publish `source_hash` must never cover a different set than the bytes a
+/// consumer actually compiles, or one signed hash could front two different
+/// compiled packages.
+pub fn package_source_file_set(
+    package_root: &Utf8Path,
+    source_roots: &[String],
+    entry: Option<&str>,
+) -> Result<std::collections::BTreeSet<Utf8PathBuf>> {
     let mut roots = Vec::new();
     let mut seen_roots = HashSet::new();
 
-    if !manifest.package.source_roots.is_empty() {
-        for source_root in &manifest.package.source_roots {
-            let root = package_root.join(source_root);
-            if !root.exists() {
-                return Err(CompileError::new(format!("configured source root '{}' does not exist", root), error::Span::default()));
-            }
-            if !root.is_dir() {
-                return Err(CompileError::new(
-                    format!("configured source root '{}' is not a directory", root),
-                    error::Span::default(),
-                ));
-            }
+    for source_root in source_roots {
+        let root = package_root.join(source_root);
+        if !root.exists() {
+            return Err(CompileError::new(format!("configured source root '{}' does not exist", root), error::Span::default()));
+        }
+        if !root.is_dir() {
+            return Err(CompileError::new(format!("configured source root '{}' is not a directory", root), error::Span::default()));
+        }
 
-            let root = canonical_utf8_path(&root)?;
-            if seen_roots.insert(root.clone()) {
-                roots.push(root);
-            }
+        let root = canonical_utf8_path(&root)?;
+        if seen_roots.insert(root.clone()) {
+            roots.push(root);
         }
     }
 
@@ -22733,7 +22790,7 @@ fn collect_package_cell_files(package_root: &Utf8Path) -> Result<Vec<Utf8PathBuf
     }
 
     let mut explicit_entry = None;
-    if let Some(entry) = explicit_manifest_entry(package_root)? {
+    if let Some(entry) = entry {
         let entry_path = package_root.join(entry);
         if !entry_path.exists() {
             return Err(CompileError::new(format!("package entry '{}' does not exist", entry_path), error::Span::default()));
@@ -22748,34 +22805,44 @@ fn collect_package_cell_files(package_root: &Utf8Path) -> Result<Vec<Utf8PathBuf
         explicit_entry = Some(entry_path);
     }
 
-    let mut files = Vec::new();
-    let mut seen_files = HashSet::new();
+    let mut files = std::collections::BTreeSet::new();
     for root in roots {
         for file in collect_cell_files(&root)? {
-            if seen_files.insert(file.clone()) {
-                files.push(file);
-            }
+            files.insert(file);
         }
     }
 
-    if let Some(entry_path) = explicit_entry
-        && seen_files.insert(entry_path.clone())
-    {
-        files.push(entry_path);
+    if let Some(entry_path) = explicit_entry {
+        files.insert(entry_path);
     }
 
-    files.sort();
     Ok(files)
+}
+
+fn collect_package_cell_files(package_root: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
+    let manifest = load_manifest(package_root)?;
+    let entry = explicit_manifest_entry(package_root)?;
+    let files = package_source_file_set(package_root, &manifest.package.source_roots, entry.as_deref())?;
+    Ok(files.into_iter().collect())
 }
 
 fn collect_cell_files(root: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
     let mut files = Vec::new();
-    collect_cell_files_recursive(root, &mut files)?;
+    collect_cell_files_recursive(root, &mut files, 0)?;
     files.sort();
     Ok(files)
 }
 
-fn collect_cell_files_recursive(root: &Utf8Path, files: &mut Vec<Utf8PathBuf>) -> Result<()> {
+const MAX_CELL_SOURCE_DISCOVERY_DEPTH: usize = 64;
+const MAX_CELL_SOURCE_FILES: usize = 4096;
+
+fn collect_cell_files_recursive(root: &Utf8Path, files: &mut Vec<Utf8PathBuf>, depth: usize) -> Result<()> {
+    if depth > MAX_CELL_SOURCE_DISCOVERY_DEPTH {
+        return Err(CompileError::new(
+            format!("module directory nesting exceeds the discovery limit of {MAX_CELL_SOURCE_DISCOVERY_DEPTH}"),
+            error::Span::default(),
+        ));
+    }
     let entries = std::fs::read_dir(root).map_err(|e| {
         CompileError::new(format!("failed to read module directory '{}': {}", root, e), error::Span::default())
             .with_category(error::CompileErrorCategory::Io)
@@ -22790,20 +22857,39 @@ fn collect_cell_files_recursive(root: &Utf8Path, files: &mut Vec<Utf8PathBuf>) -
                 .with_file(root.to_owned())
                 .with_source(e)
         })?;
+        // Decide on the entry's own file type: directory symlinks are never
+        // followed (a cycle would otherwise recurse without a visited set)
+        // and `.cell` symlinks are not admitted either, so a source file is
+        // always a regular file the workspace actually owns.
+        let file_type = entry.file_type().map_err(|e| {
+            CompileError::new(format!("failed to classify directory entry in '{}': {}", root, e), error::Span::default())
+                .with_category(error::CompileErrorCategory::Io)
+                .with_file(root.to_owned())
+                .with_source(e)
+        })?;
+        if file_type.is_symlink() {
+            continue;
+        }
         let path = entry.path();
         let Ok(candidate) = Utf8PathBuf::from_path_buf(path) else {
             continue;
         };
 
-        if candidate.is_dir() {
+        if file_type.is_dir() {
             if should_skip_cell_dir(&candidate) {
                 continue;
             }
-            collect_cell_files_recursive(&candidate, files)?;
+            collect_cell_files_recursive(&candidate, files, depth + 1)?;
             continue;
         }
 
-        if candidate.extension() == Some("cell") {
+        if file_type.is_file() && candidate.extension() == Some("cell") {
+            if files.len() >= MAX_CELL_SOURCE_FILES {
+                return Err(CompileError::new(
+                    format!("workspace source discovery exceeds the admission budget of {MAX_CELL_SOURCE_FILES} files"),
+                    error::Span::default(),
+                ));
+            }
             files.push(canonical_utf8_path(&candidate)?);
         }
     }
@@ -22845,6 +22931,7 @@ fn load_manifest(package_root: &Utf8Path) -> Result<PackageManifest> {
     artifact::validate_declarations(&manifest.artifacts)?;
     crate::package::validate_package_compiler_requirement(&manifest.package)
         .map_err(|error| error.with_file(manifest_path.clone()))?;
+    crate::package::validate_package_path_selection(&manifest).map_err(|error| error.with_file(manifest_path.clone()))?;
     Ok(manifest)
 }
 
@@ -22856,7 +22943,10 @@ fn manifest_has_table(manifest_path: &Utf8Path, table: &str) -> Result<bool> {
     Ok(manifest.get(table).is_some())
 }
 
-fn explicit_manifest_entry(package_root: &Utf8Path) -> Result<Option<String>> {
+/// Whether Cell.toml declares an explicit `[package].entry`, and its value.
+/// Hashing, compilation, and publish snapshots must all apply the same
+/// explicit-entry semantics.
+pub fn explicit_manifest_entry(package_root: &Utf8Path) -> Result<Option<String>> {
     let manifest_path = package_root.join("Cell.toml");
     let manifest_source = std::fs::read_to_string(&manifest_path)
         .map_err(|e| CompileError::new(format!("failed to read manifest '{}': {}", manifest_path, e), error::Span::default()))?;
@@ -29974,8 +30064,8 @@ action bad() -> u64 {
             asm
         );
         assert!(
-            asm.contains("# cellscript abi: stack collection pop fixed bytes"),
-            "Vec<Address>.pop should return a fixed-byte pointer into the stack collection buffer:\n{}",
+            asm.contains("# cellscript abi: stack collection pop snapshot fixed bytes size=32"),
+            "Vec<Address>.pop must snapshot the popped element into owned storage:\n{}",
             asm
         );
         assert!(

@@ -1192,6 +1192,39 @@ fn u128_add_on_dynamic_schema_fields_executes_exactly_in_ckb_vm() {
 }
 
 #[test]
+fn dynamic_schema_fixed_field_rejects_span_borrowing_the_next_field() {
+    let elf = compile_cellscript_source_to_elf(U128_DYNAMIC_SCHEMA_ENTRY, "verify", None);
+
+    // Malformed left entry: the fixed `amount` field's offset equals the
+    // `note` field's offset, so amount's declared 16-byte span is empty and
+    // its reads would borrow the leading note bytes. The expected sum is
+    // consistent with those borrowed bytes, so only the exact-span check can
+    // reject this table.
+    let forged = 0x00ff_ffee_ddcc_bbaa_55aa_55aa_55aa_55aau128;
+    let note = forged.to_le_bytes();
+    let total = 4 + 4 * 2 + note.len();
+    let mut left_entry = Vec::with_capacity(total);
+    left_entry.extend_from_slice(&(total as u32).to_le_bytes());
+    left_entry.extend_from_slice(&12u32.to_le_bytes());
+    left_entry.extend_from_slice(&12u32.to_le_bytes());
+    left_entry.extend_from_slice(&note);
+
+    let right = 1u128;
+    let mut payload = b"CSARGv1\0".to_vec();
+    payload.extend_from_slice(&(left_entry.len() as u32).to_le_bytes());
+    payload.extend_from_slice(&left_entry);
+    let right_entry = molecule_dynamic_entry_bytes(right, b"audit", None);
+    payload.extend_from_slice(&(right_entry.len() as u32).to_le_bytes());
+    payload.extend_from_slice(&right_entry);
+    payload.extend_from_slice(&(forged + right).to_le_bytes());
+    let witness = canonical_multisig_v2_witness(Bytes::from(payload));
+    let mut fixture = build_simple_fixture(Bytes::default(), 1, 1);
+    fixture.witnesses = vec![witness.as_bytes()];
+    let result = execute_cellscript_script(&elf, &fixture);
+    assert_ne!(result.exit_code, 0, "a zero-span fixed field borrowing note bytes must be rejected: {:?}", result.captured_debug);
+}
+
+#[test]
 fn u128_u64_arithmetic_checks_carry_overflow_and_underflow_in_ckb_vm() {
     let add_elf = compile_cellscript_source_to_elf(U128_U64_ADD_ENTRY, "verify_add", None);
     let carried = execute_u128_u64_arithmetic(&add_elf, u64::MAX as u128, 1, 1u128 << 64);

@@ -59,6 +59,12 @@ mod cell_data_results;
 #[path = "artifact_checker/bounded_admission.rs"]
 mod bounded_admission;
 
+#[path = "artifact_checker/loaded_image.rs"]
+mod loaded_image;
+
+#[path = "artifact_checker/admission_hardening.rs"]
+mod admission_hardening;
+
 fn assert_bounded_admitted(fixture: &Fixture) {
     let features = fixture.metadata["runtime"]["fail_closed_runtime_features"].as_array().unwrap();
     for feature in [

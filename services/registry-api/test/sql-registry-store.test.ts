@@ -5,6 +5,12 @@ import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { SqlRegistryStore } from "../src/sql-store";
+import {
+  AUTH_ACTION,
+  AUTH_PROTOCOL,
+  DEFAULT_REGISTRY_ORIGIN,
+  type CapabilityAuthorisationPayload,
+} from "../src/domain";
 
 const databaseUrl = process.env.REGISTRY_TEST_DATABASE_URL;
 const describePostgres = databaseUrl ? describe : describe.skip;
@@ -187,6 +193,31 @@ describePostgres("SqlRegistryStore PostgreSQL contract", () => {
         offset: 0,
       })).records[0]?.current_commitment_evidence_hash).toBe(evidenceHash);
 
+      await client.query(`
+        insert into packages(namespace, name) values ('fixture', 'page-bulk'), ('fixture', 'page-tail');
+        insert into package_versions(
+          namespace, name, version, status, artifact, verification_status, deployment_status,
+          availability_status, source_hash, manifest_hash, edition, compatibility_profile_hash,
+          capability_key_id, principal_type, principal_id, registry_entry, snapshot_hash, direct_url, created_at
+        )
+        select namespace, case when n <= 1000 then 'page-bulk' else 'page-tail' end,
+          '1.0.' || n, 'verified_build', artifact, 'verified', 'undeployed', 'active',
+          source_hash, manifest_hash, edition, compatibility_profile_hash,
+          capability_key_id, principal_type, principal_id, registry_entry, snapshot_hash, direct_url,
+          case when n <= 1000 then '2026-10-29T00:00:00Z'::timestamptz else '2026-10-28T00:00:00Z'::timestamptz end
+        from package_versions cross join generate_series(1, 1001) n
+        where namespace = 'fixture' and name = 'contract' and version = '1.0.0'
+      `);
+      const pageQuery = { namespace: "fixture", query: "page-", limit: 2, offset: 0 };
+      await expect(store.listArtifactPackagePage(pageQuery)).rejects.toMatchObject({ code: "artifact_page_too_large" });
+      const firstPage = await store.listArtifactPackagePage({ ...pageQuery, limit: 1 });
+      expect(firstPage.records).toHaveLength(1000);
+      expect(new Set(firstPage.records.map((record) => record.name))).toEqual(new Set(["page-bulk"]));
+      expect(firstPage.has_more).toBe(true);
+      const lastPage = await store.listArtifactPackagePage({ ...pageQuery, limit: 1, offset: 1 });
+      expect(lastPage.records.map((record) => record.name)).toEqual(["page-tail"]);
+      expect(lastPage.has_more).toBe(false);
+
       const reconciled = await store.reconcilePackageVersionLifecycle({
         namespace: "fixture",
         name: "contract",
@@ -304,6 +335,69 @@ describePostgres("SqlRegistryStore PostgreSQL contract", () => {
       expect(await store.withMaintenanceLease("registry-maintenance", async () => "overlap")).toBeNull();
       releaseLease();
       expect(await firstLease).toBe("complete");
+    } finally {
+      await client.end();
+    }
+  }, 30_000);
+
+  it("keeps a delegated capability key bound to its first principal across direct registrations", async () => {
+    const client = new Client({ connectionString: scopedConnectionString });
+    await client.connect();
+    try {
+      const schemaReady = await client.query("select to_regclass('principals') is not null as present");
+      if (!schemaReady.rows[0]?.present) {
+        const files = (await readdir(migrationsDirectory))
+          .filter((file) => /^[0-9]{4}_.+[.]sql$/.test(file))
+          .sort();
+        for (const file of files) {
+          await client.query(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
+        }
+      }
+      const store = new SqlRegistryStore({ connectionString: scopedConnectionString });
+      const ownerPrincipal = "0x1111111111111111111111111111111111111111";
+      const payload = (principalId: string, scopes: string[]): CapabilityAuthorisationPayload => ({
+        protocol: AUTH_PROTOCOL,
+        action: AUTH_ACTION,
+        registry_origin: DEFAULT_REGISTRY_ORIGIN,
+        principal_type: "joyid_ckb",
+        principal_id: principalId,
+        capability_pubkey: "p256-spki:fixture-delegated-key",
+        requested_scopes: scopes,
+        capability_expires_at: "2027-01-01T00:00:00Z",
+        nonce: `0x${principalId.slice(2, 10)}`,
+        issued_at: "2026-06-23T12:00:00Z",
+        expires_at: "2026-06-23T12:10:00Z",
+        cli_version: "cellc 0.33.0",
+      });
+
+      const owner = await store.recordCapability({
+        payload: payload(ownerPrincipal, ["publish:fixture/contract"]),
+        principal_signature: { scheme: "test" },
+        request_id: "capability-owner",
+      });
+      expect(owner.key_id).toMatch(/^cap_[0-9a-f]{32}$/);
+
+      await expect(store.recordCapability({
+        payload: payload("0x4444444444444444444444444444444444444444", ["publish:*/*", "deployment:*/*"]),
+        principal_signature: { scheme: "test" },
+        request_id: "capability-hijack",
+      })).rejects.toMatchObject({ code: "capability_principal_mismatch" });
+
+      const renewedScopes = ["publish:fixture/contract", "deployment:fixture/contract"];
+      const renewed = await store.recordCapability({
+        payload: payload(ownerPrincipal, renewedScopes),
+        principal_signature: { scheme: "test" },
+        request_id: "capability-renewal",
+      });
+      expect(renewed.principal_id).toBe(ownerPrincipal);
+      expect(renewed.scopes).toEqual(renewedScopes);
+
+      const row = (await client.query(
+        "select principal_id, scopes from capabilities where key_id = $1",
+        [owner.key_id],
+      )).rows[0];
+      expect(row.principal_id).toBe(ownerPrincipal);
+      expect(row.scopes).toEqual(renewedScopes);
     } finally {
       await client.end();
     }

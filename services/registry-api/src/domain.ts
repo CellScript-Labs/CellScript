@@ -115,6 +115,7 @@ export interface PublishPayload {
   version: string;
   source_hash: string;
   manifest_hash: string;
+  lockfile_hash?: string;
   capability_key_id: string;
   nonce: string;
   issued_at: string;
@@ -770,6 +771,12 @@ export function validatePublishPayload(payload: unknown, registryOrigin: string,
   const cliVersion = requireString(obj, "cli_version");
   const artifact = validateArtifactDescriptor(obj["artifact"]);
   const registryEntry = validateRegistryEntry(obj["registry_entry"], { namespace, name, version, sourceHash, manifestHash, artifact });
+  // Optional: when present, the signed dependency-lockfile hash must be
+  // well-formed so the signature can bind the exact dependency selection.
+  const lockfileHash = obj["lockfile_hash"] === undefined ? undefined : requireString(obj, "lockfile_hash");
+  if (lockfileHash !== undefined && !/^sha256:[0-9a-f]{64}$/.test(lockfileHash)) {
+    throw new ApiError(400, "invalid_lockfile_hash", "lockfile_hash must be sha256:<64 lowercase hex digits>");
+  }
   parseTimestamp(issuedAt, "issued_at");
   if (parseTimestamp(expiresAt, "expires_at").getTime() <= now.getTime()) {
     throw new ApiError(401, "publish_payload_expired", "publish payload has expired");
@@ -787,6 +794,7 @@ export function validatePublishPayload(payload: unknown, registryOrigin: string,
     version,
     source_hash: sourceHash,
     manifest_hash: manifestHash,
+    ...(lockfileHash !== undefined ? { lockfile_hash: lockfileHash } : {}),
     capability_key_id: capabilityKeyId,
     nonce,
     issued_at: issuedAt,

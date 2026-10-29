@@ -950,10 +950,7 @@ fn fetch_commitment_proof(fetched: &FetchedArtifact) -> Result<Value> {
     if !response.status().is_success() {
         return Err(error(format!("Registry commitment request '{url}' returned HTTP {}", response.status())));
     }
-    let bytes = response.bytes().map_err(|err| error(format!("failed to read Registry commitment response: {err}")))?;
-    if bytes.is_empty() || bytes.len() > MAX_REGISTRY_RESPONSE_BYTES {
-        return Err(error("Registry commitment response is empty or exceeds 2 MiB"));
-    }
+    let bytes = bounded_response_bytes(response, MAX_REGISTRY_RESPONSE_BYTES, "Registry commitment response")?;
     serde_json::from_slice(&bytes).map_err(|err| error(format!("Registry commitment response is invalid JSON: {err}")))
 }
 
@@ -1251,7 +1248,8 @@ fn record_deployment(
         .send()
         .map_err(|err| error(format!("failed to submit deployment evidence to '{endpoint}': {err}")))?;
     let status = response.status();
-    let body = response.text().map_err(|err| error(format!("failed to read deployment response: {err}")))?;
+    let body =
+        String::from_utf8_lossy(&bounded_response_bytes(response, MAX_REGISTRY_RESPONSE_BYTES, "deployment response")?).into_owned();
     if !status.is_success() {
         return Err(error(format!("deployment evidence request failed with HTTP {status}: {}", body.trim())));
     }
@@ -1338,7 +1336,8 @@ fn set_availability(
         .send()
         .map_err(|err| error(format!("failed to submit availability update to '{endpoint}': {err}")))?;
     let http_status = response.status();
-    let body = response.text().map_err(|err| error(format!("failed to read availability response: {err}")))?;
+    let body =
+        String::from_utf8_lossy(&bounded_response_bytes(response, MAX_REGISTRY_RESPONSE_BYTES, "availability response")?).into_owned();
     if !http_status.is_success() {
         return Err(error(format!("availability update failed with HTTP {http_status}: {}", body.trim())));
     }
@@ -1364,10 +1363,7 @@ fn fetch(raw_coordinate: &str, api_url: Option<&str>) -> Result<FetchedArtifact>
     if !response.status().is_success() {
         return Err(error(format!("Registry request '{detail_url}' returned HTTP {}", response.status())));
     }
-    let detail_bytes = response.bytes().map_err(|err| error(format!("failed to read Registry response: {err}")))?;
-    if detail_bytes.is_empty() || detail_bytes.len() > MAX_REGISTRY_RESPONSE_BYTES {
-        return Err(error("Registry detail response is empty or exceeds 2 MiB"));
-    }
+    let detail_bytes = bounded_response_bytes(response, MAX_REGISTRY_RESPONSE_BYTES, "Registry detail response")?;
     let detail: Value =
         serde_json::from_slice(&detail_bytes).map_err(|err| error(format!("Registry detail response is invalid JSON: {err}")))?;
     let releases =
@@ -1388,7 +1384,7 @@ fn fetch(raw_coordinate: &str, api_url: Option<&str>) -> Result<FetchedArtifact>
     let artifact = detail.get("artifact").cloned().ok_or_else(|| error("Registry detail response has no artifact descriptor"))?;
     let immutable = object_field(&release, "immutable_bundle", "Registry release")?;
     let bundle_url = map_string_field(immutable, "url", "immutable_bundle")?.to_string();
-    validate_download_url(&bundle_url)?;
+    validate_download_url(&bundle_url, &registry_origin)?;
     let response = client
         .get(&bundle_url)
         .header(reqwest::header::ACCEPT, "application/octet-stream, application/json")
@@ -1398,28 +1394,68 @@ fn fetch(raw_coordinate: &str, api_url: Option<&str>) -> Result<FetchedArtifact>
     if !response.status().is_success() {
         return Err(error(format!("immutable bundle request returned HTTP {}", response.status())));
     }
-    let bundle = response.bytes().map_err(|err| error(format!("failed to read immutable bundle: {err}")))?.to_vec();
-    if bundle.is_empty() || bundle.len() > MAX_BUNDLE_BYTES {
-        return Err(error("immutable artifact bundle is empty or exceeds 5 MiB"));
-    }
+    let bundle = bounded_response_bytes(response, MAX_BUNDLE_BYTES, "immutable artifact bundle")?;
     let expected_snapshot = map_string_field(immutable, "snapshot_hash", "immutable_bundle")?;
     require_sha256(&bundle, expected_snapshot, "snapshot_hash")?;
     Ok(FetchedArtifact { coordinate, registry_origin, artifact, release, bundle_url, bundle })
 }
 
-fn validate_download_url(value: &str) -> Result<()> {
+fn url_host_is_private_or_local(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.parse::<std::net::IpAddr>().is_ok_and(|address| match address {
+        std::net::IpAddr::V4(address) => {
+            address.is_loopback()
+                || address.is_private()
+                || address.is_link_local()
+                || address.is_unspecified()
+                || address.is_broadcast()
+        }
+        std::net::IpAddr::V6(address) => address.is_loopback() || address.is_unspecified() || address.segments()[0] & 0xffc0 == 0xfe80,
+    })
+}
+
+/// Registry-supplied download URLs must never direct the client at loopback
+/// or private network space: the plaintext-HTTP development exemption only
+/// applies when the selected Registry itself runs on loopback.
+fn validate_download_url(value: &str, registry_origin: &str) -> Result<()> {
     let url = reqwest::Url::parse(value).map_err(|err| error(format!("immutable bundle URL is invalid: {err}")))?;
     let host = url.host_str().ok_or_else(|| error("immutable bundle URL has no host"))?;
     let host = host.trim_start_matches('[').trim_end_matches(']');
+    let registry_host = reqwest::Url::parse(registry_origin)
+        .ok()
+        .and_then(|origin| origin.host_str().map(|host| host.trim_start_matches('[').trim_end_matches(']').to_string()))
+        .unwrap_or_default();
+    let registry_is_local = url_host_is_private_or_local(&registry_host);
+    if url_host_is_private_or_local(host) && !registry_is_local {
+        return Err(error("immutable bundle URL must not target loopback or private network addresses"));
+    }
     let loopback =
         host.eq_ignore_ascii_case("localhost") || host.parse::<std::net::IpAddr>().is_ok_and(|address| address.is_loopback());
-    if url.scheme() != "https" && !(url.scheme() == "http" && loopback) {
+    if url.scheme() != "https" && !(url.scheme() == "http" && loopback && registry_is_local) {
         return Err(error("immutable bundle URL must use HTTPS; plaintext HTTP is allowed only for loopback development servers"));
     }
     if !url.username().is_empty() || url.password().is_some() || url.fragment().is_some() {
         return Err(error("immutable bundle URL must not contain credentials or a fragment"));
     }
     Ok(())
+}
+
+/// Buffer an HTTP response under a hard byte cap. The Content-Length header
+/// is checked first, but chunked or absent headers must not bypass the cap,
+/// so the body is streamed through `take` and rejected once it overflows.
+fn bounded_response_bytes(response: reqwest::blocking::Response, max_bytes: usize, label: &str) -> Result<Vec<u8>> {
+    if response.content_length().is_some_and(|length| length == 0 || length as usize > max_bytes) {
+        return Err(error(format!("{label} is empty or exceeds {} bytes", max_bytes)));
+    }
+    let mut reader = response.take(max_bytes as u64 + 1);
+    let mut buffer = Vec::new();
+    reader.read_to_end(&mut buffer).map_err(|err| error(format!("failed to read {label}: {err}")))?;
+    if buffer.is_empty() || buffer.len() > max_bytes {
+        return Err(error(format!("{label} is empty or exceeds {} bytes", max_bytes)));
+    }
+    Ok(buffer)
 }
 
 fn verify_fetched(fetched: &FetchedArtifact) -> Result<VerifiedBundle> {
@@ -1567,10 +1603,33 @@ fn materialize_template(source: &[u8], contract: &Value, destination: &Path) -> 
     if !paths.contains(&entrypoint_path) {
         return Err(error("template copy.entrypoint is not present in the authenticated file map"));
     }
+    // Pin the destination's real location and create every missing parent
+    // component one at a time, re-verifying the canonical path stays under
+    // the root: a symlinked intermediate directory must never move template
+    // files outside the destination.
+    std::fs::create_dir_all(destination)
+        .map_err(|err| error(format!("failed to create template destination '{}': {err}", destination.display())))?;
+    let root = destination
+        .canonicalize()
+        .map_err(|err| error(format!("failed to resolve template destination '{}': {err}", destination.display())))?;
     for (target, _) in &materialized {
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|err| error(format!("failed to create template directory '{}': {err}", parent.display())))?;
+        let Some(parent) = target.parent() else { continue };
+        let relative = parent
+            .strip_prefix(destination)
+            .map_err(|err| error(format!("template path '{}' escapes the destination: {err}", parent.display())))?;
+        let mut current = root.clone();
+        for component in relative.components() {
+            current = current.join(component);
+            if std::fs::symlink_metadata(&current).is_err() {
+                std::fs::create_dir(&current)
+                    .map_err(|err| error(format!("failed to create template directory '{}': {err}", current.display())))?;
+            }
+            let canonical = current
+                .canonicalize()
+                .map_err(|err| error(format!("failed to resolve template directory '{}': {err}", current.display())))?;
+            if !canonical.starts_with(&root) {
+                return Err(error(format!("template directory '{}' resolves outside the destination root", current.display())));
+            }
         }
     }
     for (target, bytes) in materialized {
@@ -1936,7 +1995,9 @@ fn write_json(path: &Path, value: &impl Serialize, force: bool) -> Result<()> {
 }
 
 fn write_bytes(path: &Path, bytes: &[u8], force: bool) -> Result<()> {
-    if path.exists() && !force {
+    // A dangling symlink must count as "exists": following it would create
+    // the target file through the link and silently overwrite elsewhere.
+    if std::fs::symlink_metadata(path).is_ok() && !force {
         return Err(error(format!("refusing to overwrite '{}'; pass --force explicitly", path.display())));
     }
     if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
@@ -2178,11 +2239,15 @@ mod tests {
 
     #[test]
     fn immutable_bundle_downloads_require_safe_transport() {
-        assert!(validate_download_url("https://registry.example/bundle?version=1").is_ok());
-        assert!(validate_download_url("http://127.0.0.1:8787/bundle").is_ok());
-        assert!(validate_download_url("http://registry.example/bundle").is_err());
-        assert!(validate_download_url("https://user:secret@registry.example/bundle").is_err());
-        assert!(validate_download_url("https://registry.example/bundle#fragment").is_err());
+        assert!(validate_download_url("https://registry.example/bundle?version=1", "https://api.registry.example").is_ok());
+        assert!(validate_download_url("http://127.0.0.1:8787/bundle", "http://127.0.0.1:8787").is_ok());
+        assert!(validate_download_url("http://registry.example/bundle", "https://api.registry.example").is_err());
+        assert!(validate_download_url("https://user:secret@registry.example/bundle", "https://api.registry.example").is_err());
+        assert!(validate_download_url("https://registry.example/bundle#fragment", "https://api.registry.example").is_err());
+        // A public registry must never direct a download at internal space.
+        assert!(validate_download_url("http://127.0.0.1:8787/bundle", "https://api.registry.example").is_err());
+        assert!(validate_download_url("https://10.1.2.3/bundle", "https://api.registry.example").is_err());
+        assert!(validate_download_url("https://[fe80::1]/bundle", "https://api.registry.example").is_err());
     }
 
     #[test]

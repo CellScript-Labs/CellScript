@@ -20,6 +20,48 @@ action inspect(witness value: u64) -> u64 {
 "#;
 
 #[test]
+fn source_byte_loop_preserves_shift_traps_and_zero_iteration_behavior() {
+    let source = r#"module byte_loop_traps
+#[effect(ReadOnly)]
+fn same(a: u64, b: u64, length: u64, amount: u64) -> bool {
+    let mut index: u64 = 0
+    while index < length {
+        let dead = 1 << amount
+        if ckb::cell_data_u8(a, index) != ckb::cell_data_u8(b, index) { return false }
+        index += 1
+    }
+    return true
+}
+action inspect(witness amount: u64, witness length: u64) -> u64 {
+    verification
+    require same(source::input(0), source::input(0), length, amount)
+    return 0
+}
+"#;
+    for diagnostics in [
+        CompilerDiagnostics::default(),
+        CompilerDiagnostics::default().without(OptimizationPass::SourceByteEquality),
+        CompilerDiagnostics::without_optimizations(),
+    ] {
+        let compiled =
+            cellscript::compile(source, CompileOptions { diagnostics, target: Some("riscv64-elf".into()), ..Default::default() })
+                .unwrap();
+        for (amount, length, expected_exit) in [(0, 1, 0), (63, 1, 0), (64, 1, 65), (u64::MAX, 1, 65), (64, 0, 0)] {
+            let payload = compiled.metadata.actions[0]
+                .entry_witness_args(&[EntryWitnessArg::U64(amount), EntryWitnessArg::U64(length)])
+                .unwrap();
+            let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
+            fixture.inputs[0].data = Bytes::from(vec![7]);
+            fixture.current_type_script_input_indices = vec![0];
+            fixture.witnesses =
+                vec![packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(payload)).pack()).build().as_bytes()];
+            let execution = ckb_script_runner::execute_cellscript_script(&compiled.artifact_bytes, &fixture);
+            assert_eq!(execution.exit_code, expected_exit, "{diagnostics}, shift={amount}, length={length}: {execution:?}");
+        }
+    }
+}
+
+#[test]
 fn unified_strategy_and_each_diagnostic_preserve_success_failure_and_overflow() {
     let mut configurations = vec![CompilerDiagnostics::default(), CompilerDiagnostics::without_optimizations()];
     configurations.extend(

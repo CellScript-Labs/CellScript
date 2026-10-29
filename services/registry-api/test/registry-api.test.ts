@@ -38,6 +38,7 @@ import {
   validateArtifactDescriptor,
   validateVersion,
   versionCompatibilityLine,
+  WebCryptoP256Verifier,
   type CapabilityAuthorisationPayload,
   type CapabilityRevocationPayload,
   type AvailabilityPayload,
@@ -1058,6 +1059,32 @@ describe("registry api", () => {
     expect(() => validatePublishPayload(malformedBuildCompiler, DEFAULT_REGISTRY_ORIGIN, now)).toThrow(/valid SemVer/);
   });
 
+  it("preserves the signed CLI lockfile hash through validation and real P256 verification", async () => {
+    const payload = await publishPayload("lockfile-binding-test");
+    const legacy = validatePublishPayload(payload, DEFAULT_REGISTRY_ORIGIN, now);
+    expect(Object.hasOwn(legacy, "lockfile_hash")).toBe(false);
+    expect(canonicalJson(legacy)).toBe(canonicalJson(payload));
+
+    payload.lockfile_hash = `sha256:${"ab".repeat(32)}`;
+    const key = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+    const signature = {
+      algorithm: "p256-sha256" as const,
+      signature: Buffer.from(await crypto.subtle.sign(
+        { name: "ECDSA", hash: "SHA-256" }, key.privateKey, new TextEncoder().encode(canonicalJson(payload)),
+      )).toString("base64url"),
+    };
+    const publicKey = `p256-spki:${Buffer.from(await crypto.subtle.exportKey("spki", key.publicKey)).toString("base64url")}`;
+    const validated = validatePublishPayload(payload, DEFAULT_REGISTRY_ORIGIN, now);
+    expect(canonicalJson(validated)).toBe(canonicalJson(payload));
+    const verifier = new WebCryptoP256Verifier();
+    expect(await verifier.verify(canonicalJson(validated), publicKey, signature)).toBe(true);
+    validated.lockfile_hash = `sha256:${"cd".repeat(32)}`;
+    expect(await verifier.verify(canonicalJson(validated), publicKey, signature)).toBe(false);
+    for (const invalid of ["", null, `sha256:${"ab".repeat(31)}`, `sha256:${"AB".repeat(32)}`, `0x${"ab".repeat(32)}`]) {
+      expect(() => validatePublishPayload({ ...payload, lockfile_hash: invalid }, DEFAULT_REGISTRY_ORIGIN, now)).toThrow();
+    }
+  });
+
   it("accepts the versioned typed temporal interface and rejects contract drift", async () => {
     const payload = await publishPayload("temporal-interface-test");
     const published = payload.registry_entry.versions[0];
@@ -1389,6 +1416,40 @@ describe("registry api", () => {
       principal_id: payload.principal_id,
       status: "active",
     });
+  });
+
+  it("rejects another wallet re-registering a delegated key that is already bound", async () => {
+    const { app, store } = testApp();
+    const victim = authPayload();
+    const created = await post(app, "/v1/capabilities", {
+      payload: victim,
+      joyid_signature: joyidSignature(victim),
+    });
+    expect(created.status).toBe(201);
+
+    const attackerPrincipal = "0x4444444444444444444444444444444444444444";
+    const attacker = {
+      ...authPayload(attackerPrincipal),
+      capability_pubkey: victim.capability_pubkey,
+      nonce: "0x5555555555555555",
+    };
+    const hijack = await post(app, "/v1/capabilities", {
+      payload: attacker,
+      joyid_signature: joyidSignature(attacker),
+    });
+    expect(hijack.status).toBe(409);
+    expect((await hijack.json() as any).error.code).toBe("capability_principal_mismatch");
+
+    const renewal = { ...authPayload(), nonce: "0x6666666666666666" };
+    const renewed = await post(app, "/v1/capabilities", {
+      payload: renewal,
+      joyid_signature: joyidSignature(renewal),
+    });
+    expect(renewed.status).toBe(201);
+
+    const bound = store.capabilities.get(await capabilityKeyId(victim.capability_pubkey));
+    expect(bound?.principal_id).toBe(victim.principal_id);
+    expect(bound?.revoked_at).toBeNull();
   });
 
   it("completes a short-lived CLI-to-browser authorisation session without exposing the poll result", async () => {
@@ -2807,6 +2868,17 @@ describe("registry api", () => {
     expect(second.next_offset).toBe(2);
     expect(third.artifacts[0].coordinate).toBe("cellscript/gamma");
     expect(third.next_offset).toBeUndefined();
+
+    for (let index = 0; index < 998; index++) {
+      const item = record("alpha", `3.0.${index}`, "2026-06-23T12:05:00Z");
+      store.packageVersions.set(`${item.namespace}/${item.name}@${item.version}`, item);
+    }
+    const overflow = await get(app, "/v1/artifacts?limit=2&offset=0");
+    expect(overflow.status).toBe(413);
+    expect(await overflow.json()).toMatchObject({ error: { code: "artifact_page_too_large" } });
+    const bounded = await (await get(app, "/v1/artifacts?limit=1&offset=0")).json() as any;
+    expect(bounded.artifacts[0].releases).toHaveLength(1000);
+    expect(bounded.next_offset).toBe(1);
   });
 
   it("records only capability-signed, chain-verified mainnet deployments for executable artifacts", async () => {

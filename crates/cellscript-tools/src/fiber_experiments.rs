@@ -8,16 +8,102 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context, Result};
 use regex::Regex;
+use ring::signature::{Ed25519KeyPair, UnparsedPublicKey, ED25519};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use wait_timeout::ChildExt;
 
 use crate::crypto::{ckb_blake2b256, hex0x};
-use crate::shared::stable_json_pretty;
+use crate::shared::{stable_json_compact, stable_json_pretty};
 
 const SCHEMA: &str = "novaseal-fiber-node-execution-v0.4";
 const PREVIOUS_SCHEMAS: &[&str] =
     &["novaseal-fiber-node-execution-v0.1", "novaseal-fiber-node-execution-v0.2", "novaseal-fiber-node-execution-v0.3", SCHEMA];
+
+pub const RECEIPT_SCHEMA: &str = "cellscript-fiber-execution-receipt-v1";
+
+/// Verification root for Fiber execution receipts: the operator's Ed25519
+/// public key. Aggregate `all workflows passed` claims in generated reports
+/// count only executions whose receipt verifies against this key, so a
+/// self-reported or forged execution record can no longer carry the claim.
+/// The checked-in value is a fixture pair for the test chain; operators
+/// replace it with their production key when taking ownership of the
+/// profile (and keep the matching private key off the repository).
+pub const RECEIPT_TRUST_ROOT: [u8; 32] = [
+    0xe0, 0x18, 0xa9, 0x8f, 0x10, 0x94, 0xa7, 0x6e, 0xb8, 0xe1, 0x12, 0x9a, 0x0f, 0x96, 0x1a, 0xcb, 0xb7, 0x9e, 0x77, 0x2e, 0x88,
+    0x8b, 0x6f, 0x71, 0xa6, 0x53, 0xdf, 0x50, 0x7b, 0xb9, 0x7f, 0x99,
+];
+
+/// Test-chain signing key matching [`RECEIPT_TRUST_ROOT`]; production
+/// operators sign with their own key and never commit it.
+#[cfg(test)]
+const FIXTURE_OPERATOR_PKCS8: &[u8] = &[
+    0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20, 0x23, 0x6d, 0xd9, 0x95, 0xea,
+    0x62, 0xdc, 0xc8, 0x76, 0x0c, 0x3b, 0x0f, 0x02, 0xb5, 0x07, 0x62, 0x34, 0xf1, 0xe0, 0x78, 0x56, 0x27, 0x74, 0x43, 0x0d, 0x8c,
+    0xce, 0x76, 0x98, 0x68, 0x49, 0x48,
+];
+
+/// The exact bytes a receipt signature commits to: the schema, the suite the
+/// execution belongs to (so receipts cannot be reused across suites), and the
+/// execution record itself with any prior receipt removed.
+fn receipt_message(suite: &str, execution: &Value) -> Result<Vec<u8>> {
+    let mut unsigned = execution.clone();
+    if let Some(object) = unsigned.as_object_mut() {
+        object.remove("receipt");
+    }
+    Ok(format!("{RECEIPT_SCHEMA}:{suite}:{}", stable_json_compact(&unsigned)?).into_bytes())
+}
+
+/// Attach a signed receipt to a freshly executed (or re-executed) workflow
+/// record. The signer is the operator key supplied to the run.
+pub fn sign_execution_receipt(suite: &str, execution: &mut Value, signer_pkcs8: &[u8]) -> Result<()> {
+    let pair = Ed25519KeyPair::from_pkcs8_maybe_unchecked(signer_pkcs8)
+        .map_err(|error| anyhow::anyhow!("the Fiber receipt signing key is not a valid Ed25519 PKCS#8 DER: {error:?}"))?;
+    let message = receipt_message(suite, execution)?;
+    let signature = pair.sign(&message);
+    execution["receipt"] = json!({
+        "schema": RECEIPT_SCHEMA,
+        "signature": hex::encode(signature.as_ref()),
+    });
+    Ok(())
+}
+
+/// Verify one execution's receipt against the operator trust root. `false`
+/// covers missing, malformed, foreign-key, cross-suite, and tampered-body
+/// receipts alike: none of them may back a pass claim.
+pub fn receipt_signature_valid(suite: &str, execution: &Value) -> bool {
+    if execution.pointer("/receipt/schema").and_then(Value::as_str) != Some(RECEIPT_SCHEMA) {
+        return false;
+    }
+    let Some(signature) = execution.pointer("/receipt/signature").and_then(Value::as_str).and_then(|text| hex::decode(text).ok())
+    else {
+        return false;
+    };
+    let Ok(message) = receipt_message(suite, execution) else {
+        return false;
+    };
+    UnparsedPublicKey::new(&ED25519, RECEIPT_TRUST_ROOT).verify(&message, &signature).is_ok()
+}
+
+/// Independent verification-root entry for report consumers (the operator
+/// profile fixture): every workflow that claims `status: passed` must carry
+/// a receipt that verifies against [`RECEIPT_TRUST_ROOT`]. Reports with
+/// unsigned or forged pass claims are rejected wholesale.
+pub fn verify_report_receipts(report: &Value) -> bool {
+    let Some(workflows) = report["workflows"].as_array() else {
+        return false;
+    };
+    workflows.iter().all(|row| {
+        let Some(suite) = row["suite"].as_str() else {
+            return false;
+        };
+        let execution = &row["execution"];
+        if !execution.is_object() || execution["status"] != json!("passed") {
+            return true;
+        }
+        receipt_signature_valid(suite, execution)
+    })
+}
 
 struct Workflow {
     suite: &'static str,
@@ -682,6 +768,7 @@ pub fn run(
     run_all: bool,
     assume: bool,
     timeout: u64,
+    receipt_key: Option<&[u8]>,
 ) -> Result<i32> {
     let repo_root = fs::canonicalize(repo_root)?;
     let fiber_repo = fiber_repo.map(Path::to_path_buf).unwrap_or_else(|| repo_root.parent().unwrap().join("fiber"));
@@ -728,24 +815,30 @@ pub fn run(
         "ckb_cli": version("ckb-cli"),
     });
     let mut executions = previous(&output, &info, &cellscript_info, &artifact, &execution_toolchain);
+    // Track which suites were only carried over from a prior report: an
+    // aggregate "all workflows passed" claim must never rest entirely on
+    // copied, self-reported entries.
+    let mut carried: BTreeSet<String> = executions.keys().cloned().collect();
     let mut contract_override =
         cellscript_fungible_artifact.map(|path| TemporaryContractOverride::install(&fiber_repo, path)).transpose()?;
     for workflow in WORKFLOWS.iter().filter(|workflow| selected.contains(workflow.suite)) {
-        executions.insert(
-            workflow.suite.into(),
-            execute_workflow(
-                &repo_root,
-                &fiber_repo,
-                &output,
-                workflow,
-                assume,
-                timeout,
-                &info,
-                artifact_hash,
-                bruno_cli,
-                bruno_sandbox,
-            )?,
-        );
+        carried.remove(workflow.suite);
+        let mut execution = execute_workflow(
+            &repo_root,
+            &fiber_repo,
+            &output,
+            workflow,
+            assume,
+            timeout,
+            &info,
+            artifact_hash,
+            bruno_cli,
+            bruno_sandbox,
+        )?;
+        if let Some(signer) = receipt_key {
+            sign_execution_receipt(workflow.suite, &mut execution, signer)?;
+        }
+        executions.insert(workflow.suite.into(), execution);
     }
     let mut restored_info = info.clone();
     if let Some(contract_override) = contract_override.as_mut() {
@@ -759,10 +852,26 @@ pub fn run(
         WORKFLOWS.iter().map(|workflow| workflow_report(&fiber_repo, workflow, executions.get(workflow.suite))).collect::<Vec<_>>();
     let present = workflows.iter().filter(|row| row["present"] == true).count();
     let executed = workflows.iter().filter(|row| row["execution"].is_object()).count();
-    let passed = workflows.iter().filter(|row| row["execution"]["status"] == "passed").count();
+    // Pass claims count only receipt-verified executions: self-reported or
+    // forged `passed` records never reach the aggregate.
+    let passed = workflows
+        .iter()
+        .filter(|row| {
+            row["execution"]["status"] == "passed"
+                && receipt_signature_valid(row["suite"].as_str().unwrap_or_default(), &row["execution"])
+        })
+        .count();
+    let unsigned_passed = workflows
+        .iter()
+        .filter(|row| {
+            row["execution"]["status"] == "passed"
+                && !receipt_signature_valid(row["suite"].as_str().unwrap_or_default(), &row["execution"])
+        })
+        .count();
     let all_present = present == WORKFLOWS.len();
     let all_executed = executed == WORKFLOWS.len();
-    let all_passed = all_executed && passed == WORKFLOWS.len();
+    let carried_only = !carried.is_empty() && carried.len() == executions.len();
+    let all_passed = !carried_only && all_executed && passed == WORKFLOWS.len();
     let partial = executed > 0 && executed < WORKFLOWS.len() && executed == passed;
     let runnable =
         ["tests/nodes/start.sh", "tests/nodes/wait.sh", "package.json", "tests/bruno/bruno.json", "docs/dev/README.md", "Cargo.lock"]
@@ -791,7 +900,8 @@ pub fn run(
         "devnet_contract": {"runnable_devnet_contract_present": runnable, "start_command": "./tests/nodes/start.sh e2e/<suite>",
             "wait_command": "./tests/nodes/wait.sh", "bruno_command": format!("cd tests/bruno && npm exec -- {bruno_cli} run e2e/<suite> -r --env test --sandbox {bruno_sandbox}"), "source_docs": "docs/dev/README.md"},
         "workflow_coverage": {"required_count": WORKFLOWS.len(), "present_count": present, "executed_count": executed,
-            "passed_execution_count": passed, "all_required_workflows_present": all_present, "all_required_workflows_executed": all_executed,
+            "passed_execution_count": passed, "unsigned_passed_execution_count": unsigned_passed,
+            "all_required_workflows_present": all_present, "all_required_workflows_executed": all_executed,
             "all_required_workflows_executed_passed": all_passed, "partial_execution_passed": partial},
         "profiles_covered": profiles, "workflows": workflows,
         "acceptance_boundary": {"discovery_ready_live_not_run": "the Fiber clone exposes the expected devnet/e2e workflow surface, but no live Fiber node execution is claimed",
@@ -816,6 +926,77 @@ mod tests {
 
     fn test_root(name: &str) -> PathBuf {
         env::temp_dir().join(format!("cellscript-fiber-experiments-{name}-{}", std::process::id()))
+    }
+
+    fn signed_execution(suite: &str) -> Value {
+        let mut execution = json!({
+            "status": "passed", "started_node": true,
+            "command": ["./tests/nodes/start.sh", format!("e2e/{suite}")],
+            "returncode": 0, "duration_seconds": 12.5,
+            "fiber_repo": {"path": "fiber", "origin": "origin", "branch": "develop", "commit": "abc", "dirty": false},
+        });
+        sign_execution_receipt(suite, &mut execution, FIXTURE_OPERATOR_PKCS8).unwrap();
+        execution
+    }
+
+    #[test]
+    fn genuine_receipt_verifies_but_tampering_and_reuse_do_not() {
+        let suite = "udt-router-pay";
+        let execution = signed_execution(suite);
+        assert!(receipt_signature_valid(suite, &execution), "genuine receipt must verify");
+
+        // Forged body: the claim changed after signing.
+        let mut tampered = execution.clone();
+        tampered["returncode"] = json!(1);
+        assert!(!receipt_signature_valid(suite, &tampered), "tampered execution must not verify");
+
+        // Forged signature bytes.
+        let mut forged = execution.clone();
+        forged["receipt"]["signature"] = json!(format!("{}00", forged["receipt"]["signature"].as_str().unwrap()));
+        assert!(!receipt_signature_valid(suite, &forged), "foreign signature must not verify");
+
+        // Reused receipt: a genuine receipt for one suite cannot back another.
+        assert!(!receipt_signature_valid("udt-mint", &execution), "cross-suite reuse must not verify");
+
+        // Unsigned self-report.
+        let mut unsigned = execution.clone();
+        unsigned.as_object_mut().unwrap().remove("receipt");
+        assert!(!receipt_signature_valid(suite, &unsigned), "unsigned execution must not verify");
+    }
+
+    #[test]
+    fn report_pass_claims_require_verified_receipts() {
+        let suites = WORKFLOWS.iter().map(|workflow| workflow.suite).collect::<Vec<_>>();
+        let build_report = |executions: Vec<Value>| {
+            json!({
+                "schema": SCHEMA,
+                "workflows": suites.iter().zip(executions).map(|(suite, execution)| {
+                    json!({"suite": suite, "present": true, "execution": execution})
+                }).collect::<Vec<_>>(),
+                "workflow_coverage": {"all_required_workflows_executed_passed": true},
+            })
+        };
+        // All suites executed+passed with genuine receipts: accepted.
+        let signed: Vec<Value> = suites.iter().map(|suite| signed_execution(suite)).collect();
+        assert!(verify_report_receipts(&build_report(signed)), "fully receipted report must verify");
+        // One suite reuses another suite's receipt: rejected.
+        let mut mixed: Vec<Value> = suites.iter().map(|suite| signed_execution(suite)).collect();
+        if mixed.len() >= 2 {
+            mixed[1] = mixed[0].clone();
+            assert!(!verify_report_receipts(&build_report(mixed)), "reused receipt must reject the report");
+        }
+        // One suite self-reports without a receipt: rejected.
+        let mut hole = suites.iter().map(|suite| signed_execution(suite)).collect::<Vec<_>>();
+        if !hole.is_empty() {
+            hole[0].as_object_mut().unwrap().remove("receipt");
+            assert!(!verify_report_receipts(&build_report(hole)), "unsigned pass claim must reject the report");
+        }
+        // A failed execution never needs a receipt and never blocks others.
+        let mut failing = suites.iter().map(|suite| signed_execution(suite)).collect::<Vec<_>>();
+        if !failing.is_empty() {
+            failing[0] = json!({"status": "failed", "returncode": 1});
+            assert!(verify_report_receipts(&build_report(failing)), "failed execution needs no receipt");
+        }
     }
 
     #[test]

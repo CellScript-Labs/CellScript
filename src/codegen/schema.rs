@@ -65,11 +65,11 @@ impl CodeGenerator {
         base_reg: &str,
         size_offset: usize,
         field_index: usize,
+        field_count: usize,
         field_width: usize,
         context: &str,
     ) {
         self.emit(format!("# cellscript abi: molecule table field {} index={} min_width={}", context, field_index, field_width));
-        let field_count = field_index + 1;
         let header_size = 4 + 4 * field_count;
         self.emit_loaded_schema_bounds_check(size_offset, header_size, context);
 
@@ -98,10 +98,26 @@ impl CodeGenerator {
             self.emit_fail(CellScriptRuntimeError::BoundsCheckFailed);
             self.emit_label(&overflow_ok);
             self.emit("sltu t2, a0, t3");
-            let end_ok = self.fresh_label("molecule_table_end_ok");
+            let end_ok = self.fresh_label("molecule_table_field_end_ok");
             self.emit(format!("beqz t2, {}", end_ok));
             self.emit_fail(CellScriptRuntimeError::BoundsCheckFailed);
             self.emit_label(&end_ok);
+            // The declared width must equal the bytes the table actually
+            // allocates to this field. Without this check a malformed table
+            // could zero-length a fixed field and let its reads borrow bytes
+            // from the following field's span.
+            if field_index + 1 < field_count {
+                self.emit_unaligned_scalar_load(base_reg, "t6", "t2", 4 + 4 * (field_index + 1), 4);
+            } else {
+                self.emit("add t6, a0, zero");
+            }
+            self.emit("sub t0, t6, t5");
+            self.emit(format!("li t1, {}", field_width));
+            self.emit("sub t0, t0, t1");
+            let span_ok = self.fresh_label("molecule_table_field_span_ok");
+            self.emit(format!("beqz t0, {}", span_ok));
+            self.emit_fail(CellScriptRuntimeError::BoundsCheckFailed);
+            self.emit_label(&span_ok);
         }
     }
 
@@ -981,7 +997,8 @@ impl CodeGenerator {
             self.emit_loaded_schema_bounds_check(size_offset, source.layout.offset + width, &context);
         } else {
             self.emit_stack_load("t4", self.scalar_slot_offset(source.obj_var_id));
-            self.emit_molecule_table_field_bounds_to_t5("t4", size_offset, source.layout.index, width, &context);
+            let field_count = self.type_layouts.get(&source.type_name).map_or(source.layout.index + 1, |layouts| layouts.len());
+            self.emit_molecule_table_field_bounds_to_t5("t4", size_offset, source.layout.index, field_count, width, &context);
         }
     }
 
@@ -1002,7 +1019,8 @@ impl CodeGenerator {
                 }
             } else {
                 self.emit_stack_load("t4", self.scalar_slot_offset(source.obj_var_id));
-                self.emit_molecule_table_field_bounds_to_t5("t4", size_offset, source.layout.index, width, &context);
+                let field_count = self.type_layouts.get(&source.type_name).map_or(source.layout.index + 1, |layouts| layouts.len());
+                self.emit_molecule_table_field_bounds_to_t5("t4", size_offset, source.layout.index, field_count, width, &context);
                 self.emit(format!("add {}, t4, t5", dest_reg));
             }
             true

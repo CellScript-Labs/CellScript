@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+Preserve trapping byte-loop prefixes and invalidate older compiled cache entries
+(v135). Keep parser expression budgets across nested operands and reject partial
+or overlapping writes to tracked saved return-address slots. Preserve signed
+Registry lockfile hashes, exclude withdrawn public releases without hiding active
+siblings, and reject oversized discovery pages explicitly instead of truncating
+their package/release contents. Focused regressions cover these boundaries;
+complete backend/CI acceptance remains separate.
+
 Unify normal compilation under one strategy and remove numeric optimization
 levels, old CLI controls and the four-level comparison command without
 compatibility aliases. Keep internal pass isolation for compiler diagnosis.

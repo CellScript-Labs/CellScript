@@ -263,6 +263,7 @@ mod tests {
     #[test]
     fn previous_release_acceptance_cannot_authorize_the_current_candidate() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let current_line = concat!(env!("CARGO_PKG_VERSION_MAJOR"), ".", env!("CARGO_PKG_VERSION_MINOR"));
         let mut previous = ledger();
         previous.release_line = "0.30".to_string();
         previous.status = "accepted".to_string();
@@ -270,6 +271,6 @@ mod tests {
             *status = "passed".to_string();
         }
         previous.release_requirements.insert("independent_review".to_string(), "waived".to_string());
-        assert!(validate(&root, &previous, true).unwrap_err().to_string().contains("must identify the 0.31 line"));
+        assert!(validate(&root, &previous, true).unwrap_err().to_string().contains(&format!("must identify the {current_line} line")));
     }
 }

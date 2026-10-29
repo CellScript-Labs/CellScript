@@ -259,6 +259,11 @@ enum Command {
         repo_root: Option<PathBuf>,
         #[arg(long)]
         fiber_repo: Option<PathBuf>,
+        /// Operator Ed25519 receipt signing key (PKCS#8 DER, hex) for
+        /// execution receipts. Without it, executions stay unsigned and can
+        /// never back an aggregate all-passed claim.
+        #[arg(long)]
+        receipt_key: Option<String>,
         /// Temporarily install this exact CellScript fungible ELF as Fiber's dev SimpleUDT contract.
         #[arg(long)]
         cellscript_fungible_artifact: Option<PathBuf>,
@@ -552,6 +557,7 @@ fn main() -> ExitCode {
         Command::FiberNodeExperiments {
             repo_root,
             fiber_repo,
+            receipt_key,
             cellscript_fungible_artifact,
             bruno_cli,
             bruno_sandbox,
@@ -573,6 +579,7 @@ fn main() -> ExitCode {
             run_all,
             assume_nodes_running,
             timeout_seconds,
+            receipt_key.as_deref().and_then(|text| hex::decode(text).ok()).as_deref(),
         ) {
             Ok(0) => ExitCode::SUCCESS,
             Ok(_) => ExitCode::FAILURE,

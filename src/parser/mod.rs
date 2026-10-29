@@ -7,6 +7,8 @@ mod collections;
 mod data_shape;
 
 const MAX_PARSE_RECURSION_DEPTH: usize = 32;
+const MAX_BINARY_CHAIN_LINKS: usize = 256;
+const MAX_PARAM_COUNT: usize = 1024;
 
 /// Entry-body grammar is selected by a frontend, not inferred from source
 /// keywords or mixed into the shared expression/type grammar.
@@ -27,6 +29,8 @@ pub struct Parser<'a> {
     unary_depth: usize,
     statement_depth: usize,
     if_depth: usize,
+    pattern_depth: usize,
+    binary_chain_links: usize,
     entry_body_grammar: EntryBodyGrammar,
 }
 
@@ -57,6 +61,8 @@ impl<'a> Parser<'a> {
             unary_depth: 0,
             statement_depth: 0,
             if_depth: 0,
+            pattern_depth: 0,
+            binary_chain_links: 0,
             entry_body_grammar: EntryBodyGrammar::VerificationSection,
         }
     }
@@ -72,6 +78,8 @@ impl<'a> Parser<'a> {
             unary_depth: 0,
             statement_depth: 0,
             if_depth: 0,
+            pattern_depth: 0,
+            binary_chain_links: 0,
             entry_body_grammar: EntryBodyGrammar::VerificationSection,
         }
     }
@@ -335,6 +343,19 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_binding_pattern(&mut self) -> Result<BindingPattern> {
+        if self.pattern_depth >= MAX_PARSE_RECURSION_DEPTH {
+            return Err(CompileError::new(
+                format!("pattern nesting exceeds the parser limit of {}", MAX_PARSE_RECURSION_DEPTH),
+                self.current().span,
+            ));
+        }
+        self.pattern_depth += 1;
+        let result = self.parse_binding_pattern_inner();
+        self.pattern_depth -= 1;
+        result
+    }
+
+    fn parse_binding_pattern_inner(&mut self) -> Result<BindingPattern> {
         self.skip_newlines();
         match &self.current().kind {
             TokenKind::Underscore => {
@@ -2214,6 +2235,12 @@ impl<'a> Parser<'a> {
             }
             let param = self.parse_param()?;
             params.push(param);
+            if params.len() > MAX_PARAM_COUNT {
+                return Err(CompileError::new(
+                    format!("parameter lists exceed the parser limit of {} entries", MAX_PARAM_COUNT),
+                    self.current().span,
+                ));
+            }
 
             if self.check(&TokenKind::Comma) {
                 self.advance();
@@ -2802,6 +2829,11 @@ impl<'a> Parser<'a> {
                 self.current().span,
             ));
         }
+        // Nested expressions share the outer expression's budget. Resetting
+        // on parentheses would let `(1) + (1) + ...` grow an unbounded AST.
+        if self.expression_depth == 0 {
+            self.binary_chain_links = 0;
+        }
         self.expression_depth += 1;
         let result = self.parse_expr_inner();
         self.expression_depth -= 1;
@@ -2869,6 +2901,13 @@ impl<'a> Parser<'a> {
             self.advance();
             self.skip_newlines();
             let right = self.parse_and()?;
+            self.binary_chain_links += 1;
+            if self.binary_chain_links > MAX_BINARY_CHAIN_LINKS {
+                return Err(CompileError::new(
+                    format!("binary operator chain exceeds the parser limit of {}", MAX_BINARY_CHAIN_LINKS),
+                    self.current().span,
+                ));
+            }
             left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
         }
 
@@ -2888,6 +2927,13 @@ impl<'a> Parser<'a> {
             self.advance();
             self.skip_newlines();
             let right = self.parse_bitwise_or()?;
+            self.binary_chain_links += 1;
+            if self.binary_chain_links > MAX_BINARY_CHAIN_LINKS {
+                return Err(CompileError::new(
+                    format!("binary operator chain exceeds the parser limit of {}", MAX_BINARY_CHAIN_LINKS),
+                    self.current().span,
+                ));
+            }
             left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
         }
 
@@ -2905,6 +2951,13 @@ impl<'a> Parser<'a> {
             self.advance();
             self.skip_newlines();
             let right = self.parse_bitwise_xor()?;
+            self.binary_chain_links += 1;
+            if self.binary_chain_links > MAX_BINARY_CHAIN_LINKS {
+                return Err(CompileError::new(
+                    format!("binary operator chain exceeds the parser limit of {}", MAX_BINARY_CHAIN_LINKS),
+                    self.current().span,
+                ));
+            }
             left = Expr::Binary(BinaryExpr { op: BinaryOp::BitOr, left: Box::new(left), right: Box::new(right), span: start_span });
         }
         Ok(left)
@@ -2921,6 +2974,13 @@ impl<'a> Parser<'a> {
             self.advance();
             self.skip_newlines();
             let right = self.parse_bitwise_and()?;
+            self.binary_chain_links += 1;
+            if self.binary_chain_links > MAX_BINARY_CHAIN_LINKS {
+                return Err(CompileError::new(
+                    format!("binary operator chain exceeds the parser limit of {}", MAX_BINARY_CHAIN_LINKS),
+                    self.current().span,
+                ));
+            }
             left = Expr::Binary(BinaryExpr { op: BinaryOp::BitXor, left: Box::new(left), right: Box::new(right), span: start_span });
         }
         Ok(left)
@@ -2937,6 +2997,13 @@ impl<'a> Parser<'a> {
             self.advance();
             self.skip_newlines();
             let right = self.parse_equality()?;
+            self.binary_chain_links += 1;
+            if self.binary_chain_links > MAX_BINARY_CHAIN_LINKS {
+                return Err(CompileError::new(
+                    format!("binary operator chain exceeds the parser limit of {}", MAX_BINARY_CHAIN_LINKS),
+                    self.current().span,
+                ));
+            }
             left = Expr::Binary(BinaryExpr { op: BinaryOp::BitAnd, left: Box::new(left), right: Box::new(right), span: start_span });
         }
         Ok(left)
@@ -2961,6 +3028,13 @@ impl<'a> Parser<'a> {
                 let start_span = self.current().span;
                 self.skip_newlines();
                 let right = self.parse_comparison()?;
+                self.binary_chain_links += 1;
+                if self.binary_chain_links > MAX_BINARY_CHAIN_LINKS {
+                    return Err(CompileError::new(
+                        format!("binary operator chain exceeds the parser limit of {}", MAX_BINARY_CHAIN_LINKS),
+                        self.current().span,
+                    ));
+                }
                 left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
             } else {
                 break;
@@ -2995,6 +3069,13 @@ impl<'a> Parser<'a> {
                 let start_span = self.current().span;
                 self.skip_newlines();
                 let right = self.parse_shift()?;
+                self.binary_chain_links += 1;
+                if self.binary_chain_links > MAX_BINARY_CHAIN_LINKS {
+                    return Err(CompileError::new(
+                        format!("binary operator chain exceeds the parser limit of {}", MAX_BINARY_CHAIN_LINKS),
+                        self.current().span,
+                    ));
+                }
                 left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
             } else {
                 break;
@@ -3026,6 +3107,13 @@ impl<'a> Parser<'a> {
             };
             self.skip_newlines();
             let right = self.parse_term()?;
+            self.binary_chain_links += 1;
+            if self.binary_chain_links > MAX_BINARY_CHAIN_LINKS {
+                return Err(CompileError::new(
+                    format!("binary operator chain exceeds the parser limit of {}", MAX_BINARY_CHAIN_LINKS),
+                    self.current().span,
+                ));
+            }
             left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
         }
         Ok(left)
@@ -3050,6 +3138,13 @@ impl<'a> Parser<'a> {
                 let start_span = self.current().span;
                 self.skip_newlines();
                 let right = self.parse_factor()?;
+                self.binary_chain_links += 1;
+                if self.binary_chain_links > MAX_BINARY_CHAIN_LINKS {
+                    return Err(CompileError::new(
+                        format!("binary operator chain exceeds the parser limit of {}", MAX_BINARY_CHAIN_LINKS),
+                        self.current().span,
+                    ));
+                }
                 left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
             } else {
                 break;
@@ -3081,6 +3176,13 @@ impl<'a> Parser<'a> {
                 let start_span = self.current().span;
                 self.skip_newlines();
                 let right = self.parse_cast()?;
+                self.binary_chain_links += 1;
+                if self.binary_chain_links > MAX_BINARY_CHAIN_LINKS {
+                    return Err(CompileError::new(
+                        format!("binary operator chain exceeds the parser limit of {}", MAX_BINARY_CHAIN_LINKS),
+                        self.current().span,
+                    ));
+                }
                 left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
             } else {
                 break;
@@ -4047,6 +4149,19 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_match_pattern_primary(&mut self) -> Result<MatchPattern> {
+        if self.pattern_depth >= MAX_PARSE_RECURSION_DEPTH {
+            return Err(CompileError::new(
+                format!("pattern nesting exceeds the parser limit of {}", MAX_PARSE_RECURSION_DEPTH),
+                self.current().span,
+            ));
+        }
+        self.pattern_depth += 1;
+        let result = self.parse_match_pattern_primary_inner();
+        self.pattern_depth -= 1;
+        result
+    }
+
+    fn parse_match_pattern_primary_inner(&mut self) -> Result<MatchPattern> {
         if self.check(&TokenKind::Underscore) || matches!(&self.current().kind, TokenKind::Identifier(name) if name == "_") {
             self.advance();
             return Ok(MatchPattern::Wildcard);

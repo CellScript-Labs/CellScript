@@ -76,6 +76,12 @@ impl FiberUdtArgInfo {
         if !self.script.args.starts_with('^') || !self.script.args.ends_with('$') {
             anyhow::bail!("Fiber Script args matcher must be explicitly anchored with ^ and $");
         }
+        // The matcher must be the literal asset args, not a broad pattern: a
+        // forged report must never widen the generated asset whitelist.
+        let inner = self.script.args.strip_prefix('^').and_then(|rest| rest.strip_suffix('$')).unwrap_or_default();
+        if regex::escape(inner) != inner || canonical_hex(inner, None, "script.args matcher").is_err() {
+            anyhow::bail!("Fiber Script args matcher must be the exact literal asset args in canonical hex");
+        }
         if self.cell_deps.is_empty() {
             anyhow::bail!("Fiber UDT configuration must contain at least one live-verified CellDep");
         }
@@ -102,10 +108,17 @@ pub struct ExactArgsMatcherEvidence {
 
 impl ExactArgsMatcherEvidence {
     pub fn validate(&self) -> anyhow::Result<()> {
+        // The boolean fields are report-supplied and a forger recomputes
+        // them freely: the matcher itself must be re-derived from the
+        // intended args and compare byte-for-byte.
+        let derived = format!("^{}$", regex::escape(&self.intended_args));
+        if self.matcher != derived {
+            anyhow::bail!("Fiber Script args matcher must be the exact escaped form of the intended asset args");
+        }
         if self.intended_match && self.empty_rejected && self.prefix_rejected && self.suffix_rejected && self.neighbour_rejected {
             Ok(())
         } else {
-            anyhow::bail!("anchored Fiber Script args matcher failed its closed positive/negative match set")
+            anyhow::bail!("anchored Fiber Script args matcher failed its closed positive/negative match set");
         }
     }
 }

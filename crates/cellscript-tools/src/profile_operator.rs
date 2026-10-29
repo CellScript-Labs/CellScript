@@ -318,9 +318,20 @@ fn build_case(root: &Path, evidence_root: &Path, profile: &ProfileCase, action_c
     let fixture_action = fixture.get("action").and_then(Value::as_str) == Some(action_case.action);
     let live_passed = live_report.as_ref().and_then(|report| report.get("status")).and_then(Value::as_str) == Some("passed")
         || profile.external_boundary == Some("package_fixture_only_external_btc_and_ckb_finality_required");
-    let fiber_passed = fiber_report.as_ref().is_none_or(|report| {
-        !json_truthy(report) || report.pointer("/workflow_coverage/all_required_workflows_executed_passed") == Some(&Value::Bool(true))
-    });
+    // A profile that declares a Fiber experiment report path must actually
+    // carry that report: absence is a failed check, not an implicit pass.
+    // This fixture check is also the receipt verification root: an aggregate
+    // pass claim is only honoured when every `passed` execution carries a
+    // receipt signed by the operator trust key.
+    let fiber_passed = match (&fiber_report, profile.fiber_report) {
+        (Some(report), _) => {
+            !json_truthy(report)
+                || (report.pointer("/workflow_coverage/all_required_workflows_executed_passed") == Some(&Value::Bool(true))
+                    && crate::fiber_experiments::verify_report_receipts(report))
+        }
+        (None, Some(_)) => false,
+        (None, None) => true,
+    };
     let anchor_present = !public_btc_required || json_truthy(&public_btc_anchor);
     let anchor_shape = !public_btc_required || public_btc_anchor_shape_matches_profile(profile.profile, Some(&public_btc_anchor));
     let checks = json!({

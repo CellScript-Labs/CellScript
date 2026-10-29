@@ -884,10 +884,12 @@ impl CodeGenerator {
                     self.emit(format!("addi t0, t4, {}", layout.offset));
                 }
             } else {
+                let field_count = self.type_layouts.get(type_name).map_or(layout.index + 1, |layouts| layouts.len());
                 self.emit_molecule_table_field_bounds_to_t5(
                     "t4",
                     size_offset,
                     layout.index,
+                    field_count,
                     width,
                     &format!("{}.{}", type_name, field),
                 );

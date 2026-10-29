@@ -330,6 +330,15 @@ fn match_source_zero_loop(function: &super::IrPureFn) -> Option<(BlockId, IrBloc
     None
 }
 
+fn non_trapping_scalar_operand(operand: &IrOperand) -> bool {
+    match operand {
+        IrOperand::Var(var) => matches!(var.ty, IrType::U8 | IrType::U16 | IrType::U32 | IrType::U64 | IrType::I32 | IrType::Bool),
+        IrOperand::Const(value) => {
+            matches!(value, IrConst::U8(_) | IrConst::U16(_) | IrConst::U32(_) | IrConst::U64(_) | IrConst::Bool(_))
+        }
+    }
+}
+
 fn match_source_byte_equality_loop(function: &super::IrPureFn) -> Option<(BlockId, IrBlock)> {
     if function.return_type != Some(IrType::Bool) {
         return None;
@@ -353,6 +362,24 @@ fn match_source_byte_equality_loop(function: &super::IrPureFn) -> Option<(BlockI
         }
         let split = compare.instructions.len() - 3;
         let prefix = &compare.instructions[..split];
+        // The rewrite prunes the compare block and bypasses the loop, so the
+        // whole prefix is discarded. Only provably side-effect-free,
+        // non-trapping instructions may be dropped: constants, moves, and
+        // scalar arithmetic/bitwise/relational binaries. Division, modulo,
+        // shifts, and wide arithmetic can trap. Unknown instruction or value
+        // shapes keep the loop intact.
+        if !prefix.iter().all(|instruction| match instruction {
+            IrInstruction::LoadConst { .. } | IrInstruction::Move { .. } => true,
+            IrInstruction::Binary { dest, op, left, right } => {
+                matches!(dest.ty, IrType::U8 | IrType::U16 | IrType::U32 | IrType::U64 | IrType::I32 | IrType::Bool)
+                    && non_trapping_scalar_operand(left)
+                    && non_trapping_scalar_operand(right)
+                    && !matches!(op, BinaryOp::Div | BinaryOp::Mod | BinaryOp::Shl | BinaryOp::Shr)
+            }
+            _ => false,
+        }) {
+            continue;
+        }
         let [IrInstruction::Call { dest: Some(left_byte), func: left_func, args: left_args }, IrInstruction::Call { dest: Some(right_byte), func: right_func, args: right_args }, IrInstruction::Binary { dest: differs, op: BinaryOp::Ne, left, right }] =
             &compare.instructions[split..]
         else {
@@ -809,6 +836,52 @@ mod tests {
             .iter()
             .flat_map(|block| &block.instructions)
             .any(|instruction| matches!(instruction, IrInstruction::Call { func, .. } if func == SOURCE_BYTES_EQUAL_HELPER)));
+    }
+
+    #[test]
+    fn leaves_trapping_prefix_byte_loop_unchanged() {
+        for (expression, expected_op) in [
+            ("start / amount", BinaryOp::Div),
+            ("start % amount", BinaryOp::Mod),
+            ("start << amount", BinaryOp::Shl),
+            ("start >> amount", BinaryOp::Shr),
+            ("wide + wide", BinaryOp::Add),
+            ("wide - wide", BinaryOp::Sub),
+            ("wide * wide", BinaryOp::Mul),
+        ] {
+            let mut module = lower(&format!(
+                r#"
+                module test
+                #[effect(ReadOnly)]
+                fn same(a: u64, start: u64, b: u64, length: u64, amount: u64, wide: u128) -> bool {{
+                    let mut index: u64 = 0
+                    while index < length {{
+                        let dead = {expression}
+                        if witness::byte(a, start + 4 + index) != ckb::cell_lock_u8(b, index) {{ return false }}
+                        index += 1
+                    }}
+                    return true
+                }}
+                "#,
+            ));
+            let before = format!("{module:?}");
+            optimize_source_byte_equality(&mut module);
+            assert_eq!(format!("{module:?}"), before, "{expression} must retain its trap");
+            let function = module
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    IrItem::PureFn(function) => Some(function),
+                    _ => None,
+                })
+                .unwrap();
+            assert!(function
+                .body
+                .blocks
+                .iter()
+                .flat_map(|block| &block.instructions)
+                .any(|instruction| matches!(instruction, IrInstruction::Binary { op, .. } if *op == expected_op)));
+        }
     }
 
     #[test]

@@ -1,5 +1,7 @@
 import { Client } from "pg";
 import {
+  assertArtifactPageSize,
+  MAX_ARTIFACT_PAGE_RELEASES,
   assertPromotionTransition,
   AUTHORISATION_SESSION_TERMINAL_RETENTION_HOURS,
   deriveRegistryEntryStatus,
@@ -106,7 +108,7 @@ export class SqlRegistryStore implements RegistryStore {
                          authorisation_payload = excluded.authorisation_payload,
                          joyid_signature = excluded.joyid_signature
            where capabilities.revoked_at is null
-           returning key_id`,
+           returning key_id, principal_type, principal_id`,
           [
             keyId,
             input.payload.principal_type,
@@ -121,8 +123,16 @@ export class SqlRegistryStore implements RegistryStore {
             JSON.stringify(input.principal_signature),
           ],
         );
-        if (capabilityInsert.rowCount !== 1) {
+        const capabilityRow = capabilityInsert.rows[0];
+        if (!capabilityRow) {
           throw new ApiError(409, "capability_key_revoked", "revoked capability keys cannot be reactivated");
+        }
+        // key_id derives from the delegated pubkey alone, so a different
+        // wallet reusing that pubkey must not widen or renew scopes while the
+        // original owner stays bound to the row.
+        if (capabilityRow.principal_type !== input.payload.principal_type
+          || capabilityRow.principal_id !== input.payload.principal_id) {
+          throw new ApiError(409, "capability_principal_mismatch", "publishing key is already bound to another principal");
         }
         await client.query(
           `insert into audit_events(
@@ -579,6 +589,7 @@ export class SqlRegistryStore implements RegistryStore {
     principal_type: PrincipalType;
     principal_id: string;
     request_id: string;
+    claim_cooldown_seconds?: number;
   }): Promise<NamespaceClaimResult> {
     const reserved = await this.withClient(async (client) => {
       const result = await client.query(
@@ -594,6 +605,22 @@ export class SqlRegistryStore implements RegistryStore {
     await this.withClient(async (client) => {
       await client.query("begin");
       try {
+        // Serialize parallel claims by the same principal and enforce the
+        // cooldown inside the transaction: an outside count-then-insert
+        // check races and lets bursts through.
+        if ((input.claim_cooldown_seconds ?? 0) > 0) {
+          const quotaKey = `principal:${input.principal_type}:${input.principal_id}`;
+          await client.query("select pg_advisory_xact_lock(hashtext($1))", [quotaKey]);
+          const recent = await client.query(
+            `select count(*)::int as count from quota_events
+             where quota_key = $1 and bucket = 'namespace_claim_cooldown' and created_at > now() - ($2 || ' seconds')::interval`,
+            [quotaKey, String(input.claim_cooldown_seconds)],
+          );
+          if ((recent.rows[0]?.count ?? 0) >= 1) {
+            throw new ApiError(429, "namespace_claim_cooldown", "namespace claim cooldown is active");
+          }
+          await client.query("insert into quota_events(quota_key, bucket) values ($1, 'namespace_claim_cooldown')", [quotaKey]);
+        }
         await client.query(
           `insert into principals(principal_type, principal_id)
            values ($1, $2)
@@ -765,6 +792,12 @@ export class SqlRegistryStore implements RegistryStore {
     return (await this.getSnapshots([snapshotHash])).get(snapshotHash) ?? null;
   }
 
+  async deleteSnapshot(snapshotHash: string): Promise<void> {
+    await this.withClient(async (client) => {
+      await client.query("delete from source_snapshots where snapshot_hash = $1", [snapshotHash]);
+    });
+  }
+
   async getSnapshots(snapshotHashes: string[]): Promise<Map<string, SnapshotRecord>> {
     const uniqueHashes = [...new Set(snapshotHashes)];
     if (uniqueHashes.length === 0) return new Map();
@@ -832,6 +865,7 @@ export class SqlRegistryStore implements RegistryStore {
            and ($12::text[] is null or pv.verification_status = any($12::text[]))
            and ($10::text is null or pv.deployment_status = $10)
            and ($11::text is null or pv.availability_status = $11)
+           and ($13::text is null or pv.snapshot_hash = $13)
            and (pv.expires_at is null or pv.expires_at > now())
            and (
              $4::text is null
@@ -856,6 +890,7 @@ export class SqlRegistryStore implements RegistryStore {
           input.deployment_status ?? null,
           input.availability_status ?? null,
           input.verification_statuses ?? null,
+          input.snapshot_hash ?? null,
         ],
       );
       return result.rows.map(packageVersionFromRow);
@@ -906,7 +941,10 @@ export class SqlRegistryStore implements RegistryStore {
          from matching m
          join package_page pp on pp.namespace = m.namespace and pp.name = m.name
          where pp.page_position <= $6 + $5
-         order by pp.package_updated_at desc, m.namespace, m.name, m.created_at desc, m.version desc`,
+         order by pp.package_updated_at desc, m.namespace, m.name, m.created_at desc, m.version desc
+         -- Fetch one overflow row to reject an oversized page explicitly;
+         -- never return partial packages with a misleading package cursor.
+         limit ${MAX_ARTIFACT_PAGE_RELEASES + 1}`,
         [
           input.namespace ?? null,
           input.name ?? null,
@@ -922,6 +960,7 @@ export class SqlRegistryStore implements RegistryStore {
           input.verification_statuses ?? null,
         ],
       );
+      assertArtifactPageSize(result.rows.length);
       return {
         records: result.rows.map(packageVersionFromRow),
         has_more: result.rows[0]?.has_more === true,
@@ -980,6 +1019,22 @@ export class SqlRegistryStore implements RegistryStore {
     await this.withClient(async (client) => {
       await client.query("begin");
       try {
+        // Re-validate authorization under row locks: a capability revocation
+        // or namespace suspension that lands between the route-level checks
+        // and this transaction must still abort the write.
+        const guard = await client.query(
+          `select
+             (select status from namespaces where namespace = $1 for update) as namespace_status,
+             (select revoked_at from capabilities where key_id = $2 for update) as capability_revoked_at`,
+          [input.version.namespace, input.version.capability_key_id],
+        );
+        const namespaceRow = guard.rows[0]?.namespace_status;
+        if (namespaceRow !== null && namespaceRow !== "active") {
+          throw new ApiError(403, "namespace_not_active", "namespace is not active; publication is rejected");
+        }
+        if (guard.rows[0]?.capability_revoked_at != null) {
+          throw new ApiError(403, "capability_revoked", "capability was revoked before the write committed");
+        }
         await client.query(
           `insert into packages(namespace, name, source_repo)
            values ($1, $2, $3)
@@ -1000,6 +1055,17 @@ export class SqlRegistryStore implements RegistryStore {
             input.snapshot.content_type,
           ],
         );
+        // Snapshots are content-addressed but their object keys are
+        // namespaced. A hash already admitted under a different namespace's
+        // key must not silently bind this release to another tenant's
+        // object lifecycle.
+        const admittedSnapshot = await client.query(
+          `select r2_key from source_snapshots where snapshot_hash = $1`,
+          [input.snapshot.snapshot_hash],
+        );
+        if (admittedSnapshot.rows[0]?.r2_key !== input.snapshot.r2_key) {
+          throw new ApiError(409, "snapshot_namespace_conflict", "snapshot content is already admitted under a different namespace object key");
+        }
         const insertedVersion = await client.query(
           `insert into package_versions(
              namespace, name, version, status, artifact, verification_status, deployment_status, availability_status,
@@ -1225,6 +1291,24 @@ export class SqlRegistryStore implements RegistryStore {
         }
         const current = packageVersionFromRow(currentRow);
         assertPromotionTransition(current, input.kind);
+        // A commitment promotion must not replace the currently accepted
+        // observation with a strictly older one.
+        if (
+          input.kind === "on_chain_committed"
+          && current.current_commitment_evidence_hash
+          && current.current_commitment_evidence_hash !== input.evidence_hash
+        ) {
+          const previous = await client.query(
+            `select evidence from package_version_evidence
+             where namespace = $1 and name = $2 and version = $3 and kind = 'on_chain_committed' and evidence_hash = $4`,
+            [input.namespace, input.name, input.version, current.current_commitment_evidence_hash],
+          );
+          const previousObserved = Date.parse(String(previous.rows[0]?.evidence?.observed_at ?? ""));
+          const incomingObserved = Date.parse(String((input.evidence as Record<string, unknown> | undefined)?.observed_at ?? ""));
+          if (!Number.isNaN(previousObserved) && !Number.isNaN(incomingObserved) && incomingObserved < previousObserved) {
+            throw new ApiError(409, "stale_commitment_evidence", "commitment evidence predates the currently accepted observation");
+          }
+        }
         await client.query(
           `insert into package_version_evidence(
              namespace, name, version, kind, evidence_hash, evidence,
@@ -1388,7 +1472,10 @@ export class SqlRegistryStore implements RegistryStore {
           `update package_versions
            set status = case when availability_status = 'active' then 'deployed' else status end,
                deployment_status = 'chain_verified',
-               current_commitment_evidence_hash = null,
+               current_commitment_evidence_hash = case
+                 when deployment_status = 'chain_verified' then current_commitment_evidence_hash
+                 else null
+               end,
                indexed_at = coalesce(indexed_at, now())
            where namespace = $1 and name = $2 and version = $3
            returning namespace, name, version, status, artifact, verification_status, deployment_status, availability_status,
@@ -1563,10 +1650,22 @@ export class SqlRegistryStore implements RegistryStore {
     audit_event_type?: string;
     capability_usage?: PublishAdmissionInput["capability_usage"];
     idempotency?: PublishAdmissionInput["idempotency"];
+    allow_quarantine_transition?: boolean;
   }): Promise<PackageVersionRecord> {
     const row = await this.withClient(async (client) => {
       await client.query("begin");
       try {
+        // Re-check under the row lock: a publisher availability write must
+        // never land on top of a concurrent administrative quarantine.
+        const guarded = await client.query(
+          `select availability_status from package_versions
+           where namespace = $1 and name = $2 and version = $3
+           for update`,
+          [input.namespace, input.name, input.version],
+        );
+        if (guarded.rows[0]?.availability_status === "quarantined" && !input.allow_quarantine_transition) {
+          throw new ApiError(403, "quarantine_admin_required", "a quarantined release only accepts administrative transitions");
+        }
         const updated = await client.query(
           `update package_versions
            set status = case
@@ -1711,6 +1810,33 @@ export class SqlRegistryStore implements RegistryStore {
         [quotaKey, bucket, sinceIso],
       );
       return Number(result.rows[0]?.count ?? 0);
+    });
+  }
+
+  async tryConsumeQuota(quotaKey: string, bucket: string, limit: number, windowSeconds: number): Promise<boolean> {
+    return this.withClient(async (client) => {
+      await client.query("begin");
+      try {
+        // Serialize quota consumption per key: a plain count-then-insert
+        // pair lets concurrent requests share a single slot.
+        await client.query("select pg_advisory_xact_lock(hashtext($1))", [quotaKey]);
+        const counted = await client.query(
+          `select count(*)::int as count
+           from quota_events
+           where quota_key = $1 and bucket = $2 and created_at > now() - ($3 || ' seconds')::interval`,
+          [quotaKey, bucket, String(windowSeconds)],
+        );
+        if (Number(counted.rows[0]?.count ?? 0) >= limit) {
+          await client.query("commit");
+          return false;
+        }
+        await client.query("insert into quota_events(quota_key, bucket) values ($1, $2)", [quotaKey, bucket]);
+        await client.query("commit");
+        return true;
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      }
     });
   }
 

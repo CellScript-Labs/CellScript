@@ -2164,9 +2164,20 @@ async function reconcileRegistryChainState(
 ): Promise<void> {
   const configuration = registryCommitmentConfiguration(env, true)!;
   const listCommitmentCells = deps.listRegistryCommitmentCells ?? deps.listMainnetCommitmentCells;
-  const cells = listCommitmentCells
-    ? await listCommitmentCells(configuration)
-    : await listRegistryCommitmentCells(env, configuration);
+  // A commitment scan that exceeds its budget must not abort deployment
+  // verification: run the deployment checks, skip commitment promotion, and
+  // never demote from an incomplete view of live cells.
+  let commitmentScanComplete = true;
+  let cells: RegistryCommitmentCell[] = [];
+  try {
+    cells = listCommitmentCells ? await listCommitmentCells(configuration) : await listRegistryCommitmentCells(env, configuration);
+  } catch (error) {
+    if (error instanceof ApiError && error.code === "registry_commitment_scan_limit") {
+      commitmentScanComplete = false;
+    } else {
+      throw error;
+    }
+  }
   const cellsByHash = new Map(cells.map((cell) => [cell.commitment_hash.toLowerCase(), cell]));
   const staticOrigin = env.STATIC_REGISTRY_ORIGIN ?? DEFAULT_STATIC_REGISTRY_ORIGIN;
   let checked = 0;
@@ -2174,7 +2185,11 @@ async function reconcileRegistryChainState(
   let demotedCommitments = 0;
   let staleDeployments = 0;
   const versionsToCheck: PackageVersionRecord[] = [];
-  for (let offset = 0; offset < 10_000; offset += 200) {
+  // Page until exhaustion: a fixed offset horizon would leave every older
+  // chain-verified release permanently unreconciled. The loop is safe
+  // because reconciliation only removes rows from this status, so the
+  // offset marches past a monotonically shrinking set.
+  for (let offset = 0; offset < 500_000; offset += 200) {
     const versions = await store.listPackageVersions({ deployment_status: "chain_verified", limit: 200, offset });
     versionsToCheck.push(...versions);
     if (versions.length < 200) break;
@@ -2229,6 +2244,7 @@ async function reconcileRegistryChainState(
         && item.evidence_hash === version.current_commitment_evidence_hash
         && item.evidence["deployed_evidence_hash"] === deployed.evidence_hash)
       : undefined;
+    if (!commitmentScanComplete) continue;
     if (!cell) {
       if (version.current_commitment_evidence_hash) {
         const reconciled = await store.reconcilePackageVersionLifecycle({
@@ -2444,7 +2460,25 @@ async function verifyRegistryCommitment(
   };
 }
 
+// Anonymous /ready calls repeat live CKB and SQL checks; coalesce
+// simultaneous probes into one shared computation so a burst cannot consume
+// worker slots and upstream RPC capacity. Results are never cached — each
+// quiet probe still observes current configuration.
+const readinessInFlight = new Map<string, Promise<{ status: number; payload: Record<string, unknown> }>>();
+
 async function handleReadiness(env: Env, deps: AppDeps, requestId: string, headers: Headers): Promise<Response> {
+  let computation = readinessInFlight.get("/ready");
+  if (!computation) {
+    computation = computeReadiness(env, deps).finally(() => {
+      readinessInFlight.delete("/ready");
+    });
+    readinessInFlight.set("/ready", computation);
+  }
+  const { status, payload } = await computation;
+  return json({ ...payload, request_id: requestId }, status, headers);
+}
+
+async function computeReadiness(env: Env, deps: AppDeps): Promise<{ status: number; payload: Record<string, unknown> }> {
   let runtime: RegistryRuntimeConfig | null = null;
   const storeConfigured = !!deps.store || !!env.HYPERDRIVE;
   const objectStoreConfigured =
@@ -2524,15 +2558,13 @@ async function handleReadiness(env: Env, deps: AppDeps, requestId: string, heade
     }
   }
   const ready = storeConfigured && objectStoreConfigured && adminConfigured && dependenciesHealthy;
-  return json(
-    {
+  return {
+    status: ready ? 200 : 503,
+    payload: {
       status: ready ? "ready" : "not_ready",
-      request_id: requestId,
       checks,
     },
-    ready ? 200 : 503,
-    headers,
-  );
+  };
 }
 
 async function handleAdminReservedNamespace(
@@ -2712,6 +2744,7 @@ async function handleAdminPackageVersionStatus(
     ...(reason ? { reason } : {}),
     request_id: requestId,
     admin_actor: adminActor,
+    allow_quarantine_transition: true,
   });
   if (!isSuppressivePackageVersionStatus(status)) {
     await tryWriteStaticRegistryVersionObject(
@@ -3259,6 +3292,7 @@ async function handleClaimNamespace(
     principal_type: payload.principal_type,
     principal_id: payload.principal_id,
     request_id: requestId,
+    claim_cooldown_seconds: namespaceClaimCooldownSeconds(env),
   });
   return json({ request_id: requestId, ...claim }, claim.status === "active" ? 201 : 202, headers);
 }
@@ -3819,12 +3853,18 @@ export async function syncStaticRegistryVersionObject(
   version: PackageVersionRecord,
   staticOrigin: string,
 ): Promise<void> {
-  const snapshot = await requireSnapshot(store, version);
-  const evidence = await store.listPackageEvidence(version.namespace, version.name, version.version);
+  // Re-read current state: a worker holding a stale in-memory record must
+  // not republish active metadata over an administrative quarantine.
+  const current = await store.getPackageVersion(version.namespace, version.name, version.version);
+  if (!current || current.availability_status === "quarantined") {
+    return;
+  }
+  const snapshot = await requireSnapshot(store, current);
+  const evidence = await store.listPackageEvidence(current.namespace, current.name, current.version);
   await writeStaticRegistryVersionObject(
     env,
     deps,
-    { ...version, direct_url: staticPackageVersionUrl(staticOrigin, version.namespace, version.name, version.version) },
+    { ...current, direct_url: staticPackageVersionUrl(staticOrigin, current.namespace, current.name, current.version) },
     snapshot,
     staticOrigin,
     evidence,
@@ -4042,9 +4082,10 @@ async function throttle(
   windowSeconds: number,
   now: Date,
 ): Promise<void> {
-  const since = new Date(now.getTime() - windowSeconds * 1000).toISOString();
-  const count = await store.countRecentQuotaEvents(quotaKey, bucket, since);
-  if (count >= limit) {
+  // The count and the record must be atomic per quota key: a bare
+  // count-then-insert pair lets concurrent requests share one slot.
+  const allowed = await store.tryConsumeQuota(quotaKey, bucket, limit, windowSeconds);
+  if (!allowed) {
     await store.appendAuditEvent({
       request_id: requestId,
       event_type: "rate_limit.blocked",
@@ -4052,7 +4093,6 @@ async function throttle(
     });
     throw new ApiError(429, "rate_limited", "rate limit exceeded");
   }
-  await store.recordQuotaEvent(quotaKey, bucket);
 }
 
 async function enforceNamespaceClaimCooldown(
@@ -4097,6 +4137,17 @@ async function appendFailureAuditEvent(
   if (!store) {
     return;
   }
+  // Unauthenticated callers can generate failures at network speed; one
+  // audit row per rejection is an unbounded storage write. Auth failures
+  // stay auditable but rate-bounded per source.
+  if (eventType === "auth.failure") {
+    const ipHash = await requestIpHash(request);
+    const quotaKey = ipHash ? `auth-failure-audit:${ipHash}` : "auth-failure-audit:unknown";
+    const allowed = await store.tryConsumeQuota(quotaKey, "auth_failure_audit", 20, 60 * 60);
+    if (!allowed) {
+      return;
+    }
+  }
   try {
     const url = new URL(request.url);
     const ipHash = await requestIpHash(request);
@@ -4137,15 +4188,36 @@ async function throttleRequestSource(
   }
 }
 
-async function readJson(request: Request, maxBytes: number): Promise<Record<string, unknown>> {
+/// Read a request body under a hard byte cap. The Content-Length header is a
+/// fast precheck only: chunked or absent headers must not bypass the cap, so
+/// the stream is aborted as soon as it overflows instead of buffering first.
+async function readBodyWithCap(request: Request, maxBytes: number): Promise<string> {
   const contentLength = Number(request.headers.get("content-length") ?? "0");
   if (contentLength > maxBytes) {
-    throw new ApiError(413, "body_too_large", `JSON body exceeds ${maxBytes} bytes`);
+    throw new ApiError(413, "body_too_large", `request body exceeds ${maxBytes} bytes`);
   }
-  const text = await request.text();
-  if (new TextEncoder().encode(text).byteLength > maxBytes) {
-    throw new ApiError(413, "body_too_large", `JSON body exceeds ${maxBytes} bytes`);
+  if (!request.body) {
+    return "";
   }
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let received = 0;
+  let text = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    received += value.byteLength;
+    if (received > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new ApiError(413, "body_too_large", `request body exceeds ${maxBytes} bytes`);
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  return text + decoder.decode();
+}
+
+async function readJson(request: Request, maxBytes: number): Promise<Record<string, unknown>> {
+  const text = await readBodyWithCap(request, maxBytes);
   try {
     const parsed = JSON.parse(text) as unknown;
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -4757,7 +4829,12 @@ function errorResponse(error: unknown, requestId: string): Response {
   const headers = corsHeaders(requestId);
   const status = error instanceof ApiError ? error.status : 500;
   const code = error instanceof ApiError ? error.code : "internal_error";
-  const message = error instanceof Error ? error.message : "internal error";
+  // Unexpected failures can embed host paths, SQL text, or stack context;
+  // disclose them only to the server log, never to API callers.
+  const message = error instanceof ApiError ? error.message : "internal error";
+  if (!(error instanceof ApiError) && error instanceof Error) {
+    console.error(`internal error ${requestId}:`, error.message);
+  }
   return json({ request_id: requestId, error: { code, message } }, status, headers);
 }
 

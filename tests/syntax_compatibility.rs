@@ -59,3 +59,48 @@ fn native_exact_hash_accepts_script_hash_and_keeps_legacy_preview_inputs() {
         assert!(compile_metadata(&invalid, NEXT_EDITION, None).is_err());
     }
 }
+
+#[test]
+fn parser_rejects_pathological_flat_binary_chains() {
+    // A flat left-associative chain builds one AST nesting level per
+    // operator without consuming the shared expression recursion budget, so
+    // it needs its own admission bound.
+    for term in ["1", "(1)", "((1))", "identity(1)", "[1][0]"] {
+        let chain = format!("module bounds\naction verify() -> u64 {{ verification return {} }}", vec![term; 600].join(" + "));
+        let error = cellscript::frontend::parse(&chain, CellScriptEdition::Edition2026).unwrap_err();
+        assert!(error.message.contains("binary operator chain exceeds the parser limit"), "{term}: {error}");
+    }
+
+    let sane = format!("module bounds\naction verify() -> u64 {{ verification return {} }}", vec!["1"; 32].join(" + "));
+    cellscript::frontend::parse(&sane, CellScriptEdition::Edition2026).unwrap();
+    // Separate statements receive fresh budgets, even after nested expressions.
+    let statements = (0..20).map(|index| format!("let value{index} = {}\n", vec!["(1)"; 32].join(" + "))).collect::<String>();
+    let independent = format!("module bounds\naction verify() -> u64 {{ verification {statements} return 0 }}");
+    cellscript::frontend::parse(&independent, CellScriptEdition::Edition2026).unwrap();
+}
+
+#[test]
+fn parser_rejects_deeply_nested_binding_and_match_patterns() {
+    let depth = 96;
+    let opens = "(".repeat(depth);
+    let closes = ")".repeat(depth);
+    let nested_let = format!("module bounds\naction verify() -> u64 {{ verification let {opens}_{closes} = ignored return 0 }}");
+    let error = cellscript::frontend::parse(&nested_let, CellScriptEdition::Edition2026).unwrap_err();
+    assert!(error.message.contains("pattern nesting exceeds the parser limit"), "{error}");
+
+    let nested_match = format!(
+        "module bounds\naction verify(value: u64) -> u64 {{ verification return match value {{ {opens}_{closes} => {{ 0 }} }} }}"
+    );
+    let error = cellscript::frontend::parse(&nested_match, CellScriptEdition::Edition2026).unwrap_err();
+    assert!(error.message.contains("pattern nesting exceeds the parser limit"), "{error}");
+}
+
+#[test]
+fn parser_rejects_parameter_lists_beyond_the_admission_budget() {
+    // Wide parameter lists drive the backend's pairwise scalar-slot
+    // interference graph quadratically; admission stays bounded at parse.
+    let params = (0..1200).map(|index| format!("value_{index}: u64")).collect::<Vec<_>>().join(", ");
+    let source = format!("module bounds\nfn wide({params}) -> u64 {{ return 0 }}");
+    let error = cellscript::frontend::parse(&source, CellScriptEdition::Edition2026).unwrap_err();
+    assert!(error.message.contains("parameter lists exceed the parser limit"), "{error}");
+}

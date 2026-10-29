@@ -134,6 +134,13 @@ refuses to overwrite an existing path.
 
 ## Endpoints
 
+`GET /v1/artifacts` paginates whole packages and includes all matching releases
+for each selected package. A page exceeding 1000 releases returns HTTP 413
+with `artifact_page_too_large`; it never returns a truncated success page.
+Reduce `limit` or narrow the query filters to fit the response budget.
+Publish payloads may include `lockfile_hash` as `sha256:<64 lowercase hex digits>`;
+when present, it is preserved verbatim in the capability-signed payload.
+
 ```text
 GET  /health
 GET  /ready

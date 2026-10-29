@@ -192,8 +192,13 @@ fn verify_cellscript_source(args: Args, snapshot: &[u8]) -> Result<VerificationO
 
     let compile_root = Utf8PathBuf::from_path_buf(work.clone())
         .map_err(|path| anyhow::anyhow!("verification work path is not valid UTF-8: {}", path.display()))?;
-    let result = cellscript::compile_path(&compile_root, cellscript::CompileOptions::default())
-        .context("CellScript package compilation failed")?;
+    // The verifier compiles publisher-supplied snapshots inside an isolated
+    // subprocess: a missing locked dependency must be an error here, never
+    // an outbound fetch toward an arbitrary locked URL.
+    let result = cellscript::package::with_offline_dependencies(|| {
+        cellscript::compile_path(&compile_root, cellscript::CompileOptions::default())
+    })
+    .context("CellScript package compilation failed")?;
     let compatibility_profile_bytes =
         serde_json::to_vec(&result.metadata.compatibility_profile).context("failed to serialize compatibility profile")?;
     let compatibility_profile_hash = hex::encode(cellscript::ckb_blake2b256(&compatibility_profile_bytes));

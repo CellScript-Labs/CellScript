@@ -17,6 +17,10 @@ INSTALL_DIR="${CELLSCRIPT_HOME:-$HOME/.cellscript}/bin"
 #   CELLSCRIPT_MIRROR=ghproxy  — use gh-proxy.com (China-friendly)
 #   CELLSCRIPT_MIRROR=ghfast   — use ghfast.top (China-friendly)
 #   CELLSCRIPT_MIRROR=direct   — force github.com only, no mirrors
+#
+# Mirrors may supply the release archive, never its checksum: SHA256SUMS is
+# fetched from github.com only (or pinned via CELLSCRIPT_INSTALL_SHA256) and
+# verification is mandatory.
 # ---------------------------------------------------------------------------
 
 # github.com release download rewrite for each mirror
@@ -182,25 +186,34 @@ download_and_install() {
     curl_any -fsSL --max-time 120 -o "$_TMPDIR/$_ARCHIVE" -- $_URLS \
         || die "download failed from all mirrors"
 
-    # Optional SHA256 verification — try same mirrors for SHA256SUMS
-    _SHA_URLS=""
-    for _mf in $MIRRORS; do
-        _SHA_URLS="$_SHA_URLS $($_mf "$REPO" "$VERSION" "SHA256SUMS")"
-    done
-    if curl_any -fsSL --max-time 15 -o "$_TMPDIR/SHA256SUMS" -- $_SHA_URLS 2>/dev/null; then
-        info "verifying SHA256 checksum ..."
-        cd "$_TMPDIR"
-        if command -v sha256sum >/dev/null 2>&1; then
-            printf '%s' "$(grep "$_ARCHIVE" SHA256SUMS)" | sha256sum -c - || die "SHA256 checksum mismatch"
-        elif command -v shasum >/dev/null 2>&1; then
-            printf '%s' "$(grep "$_ARCHIVE" SHA256SUMS)" | shasum -a 256 -c - || die "SHA256 checksum mismatch"
-        else
-            warn "sha256sum/shasum not found; skipping checksum verification"
+    # Mandatory SHA256 verification. The archive may come from any mirror,
+    # but its checksum must come from the release origin (github.com) or from
+    # the caller: a mirror that supplied the bytes must never also supply the
+    # checksum. Verification fails closed — set CELLSCRIPT_INSTALL_SHA256 to
+    # the digest published in the release notes when github.com is
+    # unreachable.
+    _EXPECTED_SHA="${CELLSCRIPT_INSTALL_SHA256:-}"
+    if [ -z "$_EXPECTED_SHA" ]; then
+        _SHA_URL="$(_github_url "$REPO" "$VERSION" "SHA256SUMS")"
+        if ! curl -fsSL --max-time 15 -o "$_TMPDIR/SHA256SUMS" "$_SHA_URL"; then
+            die "cannot fetch SHA256SUMS from github.com; set CELLSCRIPT_INSTALL_SHA256 to the published digest and retry"
         fi
-        cd -
-    else
-        warn "SHA256SUMS not found for v${VERSION}; skipping checksum verification"
+        _EXPECTED_SHA="$(grep "[[:space:]]${_ARCHIVE}\$" "$_TMPDIR/SHA256SUMS" | head -1 | awk '{print $1}' || true)"
+        if [ -z "$_EXPECTED_SHA" ]; then
+            die "SHA256SUMS from github.com has no entry for ${_ARCHIVE}"
+        fi
     fi
+    if command -v sha256sum >/dev/null 2>&1; then
+        _ACTUAL_SHA="$(sha256sum "$_TMPDIR/$_ARCHIVE" | awk '{print $1}')"
+    elif command -v shasum >/dev/null 2>&1; then
+        _ACTUAL_SHA="$(shasum -a 256 "$_TMPDIR/$_ARCHIVE" | awk '{print $1}')"
+    else
+        die "neither sha256sum nor shasum is available; refusing to install an unverified binary"
+    fi
+    if [ "$_ACTUAL_SHA" != "$_EXPECTED_SHA" ]; then
+        die "SHA256 checksum mismatch (expected ${_EXPECTED_SHA}, got ${_ACTUAL_SHA})"
+    fi
+    info "SHA256 checksum verified"
 
     info "installing to ${INSTALL_DIR} ..."
     mkdir -p "$INSTALL_DIR"
