@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+Reject deferred maturity/time/epoch constraints and occupied-capacity floors
+under production policy; development artifacts abort with runtime errors 86/87.
+IPC reads return a complete u64 or abort, and inherited-fd selection checks both
+the reported count and the 64-entry copied prefix. Advance artifact caches to
+v137. Namespace claims enforce cooldown once in the store, reject competing
+owners with HTTP 409, and consume no claim quota on failure or same-owner replay.
+Memory claims share session completion's rollback lock; SQL claims serialize
+with session completion through the principal row. Behavioral regressions cover
+real VM failures, controlled IPC boundaries, HTTP routes and concurrent claims.
+
 Preserve trapping byte-loop prefixes and invalidate older compiled cache entries
 (v135). Keep parser expression budgets across nested operands and reject partial
 or overlapping writes to tracked saved return-address slots. Preserve signed

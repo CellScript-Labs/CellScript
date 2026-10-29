@@ -404,17 +404,15 @@ impl CodeGenerator {
                         self.emit(format!("li a7, {}", syscall));
                         self.emit("ecall");
                         let failed = self.fresh_label("ckb_pipe_read_failed");
-                        let short_read = self.fresh_label("ckb_pipe_read_short");
                         let done = self.fresh_label("ckb_pipe_read_done");
                         self.emit(format!("bnez a0, {}", failed));
                         self.emit_stack_load("t0", 8);
                         self.emit("li t1, 8");
-                        self.emit(format!("bne t0, t1, {}", short_read));
+                        self.emit(format!("bne t0, t1, {}", failed));
                         self.emit_stack_load("a0", 16);
                         self.emit(format!("j {}", done));
-                        self.emit_label(&short_read);
                         self.emit_label(&failed);
-                        self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
+                        self.emit_process_failure(CellScriptRuntimeError::SyscallFailed);
                         self.emit_label(&done);
                         self.emit_stack_load("ra", 24);
                         self.emit_stack_adjustment(32);
@@ -423,14 +421,20 @@ impl CodeGenerator {
                     // INHERITED_FDS takes (buffer_addr, length_addr): the
                     // scheduler fills the inherited fd list into the buffer,
                     // the fd count through length_addr, and SUCCESS in a0.
-                    // The DSL builtin selects the fd at the caller's index.
+                    // The DSL builtin selects from a bounded prefix covering
+                    // all 64 distinct scheduler fd slots. Spawn can repeat an
+                    // fd in its list, so the reported count can exceed this
+                    // capacity: check both bounds before reading the buffer.
                     "__ckb_inherited_fd" => {
-                        self.emit_stack_adjustment(-96);
-                        self.emit_stack_store("ra", 88);
+                        const FD_CAPACITY: usize = 64;
+                        const FD_BUFFER: usize = 16;
+                        const FRAME_BYTES: usize = align_frame(FD_BUFFER + FD_CAPACITY * 8 + 8);
+                        self.emit_stack_adjustment(-(FRAME_BYTES as i64));
+                        self.emit_stack_store("ra", FRAME_BYTES - 8);
                         self.emit_stack_store("a0", 0);
-                        self.emit("li t0, 8");
+                        self.emit(format!("li t0, {FD_CAPACITY}"));
                         self.emit_stack_store("t0", 8);
-                        self.emit_sp_addi("a0", 16);
+                        self.emit_sp_addi("a0", FD_BUFFER);
                         self.emit_sp_addi("a1", 8);
                         self.emit(format!("li a7, {}", syscall));
                         self.emit("ecall");
@@ -440,17 +444,18 @@ impl CodeGenerator {
                         self.emit_stack_load("t0", 8);
                         self.emit_stack_load("t1", 0);
                         self.emit(format!("bgeu t1, t0, {}", failed));
-                        self.emit("li t2, 8");
-                        self.emit("mul t1, t1, t2");
-                        self.emit_sp_addi("t2", 16);
+                        self.emit(format!("li t2, {FD_CAPACITY}"));
+                        self.emit(format!("bgeu t1, t2, {}", failed));
+                        self.emit("slli t1, t1, 3");
+                        self.emit_sp_addi("t2", FD_BUFFER);
                         self.emit("add t2, t2, t1");
                         self.emit("ld a0, 0(t2)");
                         self.emit(format!("j {}", done));
                         self.emit_label(&failed);
-                        self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
+                        self.emit_process_failure(CellScriptRuntimeError::SyscallFailed);
                         self.emit_label(&done);
-                        self.emit_stack_load("ra", 88);
-                        self.emit_stack_adjustment(96);
+                        self.emit_stack_load("ra", FRAME_BYTES - 8);
+                        self.emit_stack_adjustment(FRAME_BYTES as i64);
                         self.emit("ret");
                     }
                     // PROCESS_ID falls through: it takes no arguments and

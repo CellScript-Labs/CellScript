@@ -722,36 +722,13 @@ export class MemoryRegistryStore implements RegistryStore {
         if (!await this.consumeNonce({ ...input.nonce, request_id: input.request_id })) {
           throw new ApiError(409, "nonce_replay", "signed nonce has already been used");
         }
-        const namespace = this.namespaces.get(existing.namespace);
-        if (namespace
-          && (namespace.owner_principal_type !== input.payload.principal_type
-            || namespace.owner_principal_id !== input.payload.principal_id)) {
-          throw new ApiError(409, "namespace_already_claimed", "namespace is already claimed by another principal");
-        }
-        const namespaceClaim = namespace
-          ? {
-              namespace: namespace.namespace,
-              status: namespace.status === "active" ? "active" as const : "review_pending" as const,
-              ...(namespace.review_reason ? { review_reason: namespace.review_reason } : {}),
-            }
-          : await (async () => {
-              if (input.namespace_claim_cooldown_seconds > 0) {
-                const quotaKey = `principal:${input.payload.principal_type}:${input.payload.principal_id}`;
-                const since = new Date(
-                  Date.parse(input.now_iso) - input.namespace_claim_cooldown_seconds * 1000,
-                ).toISOString();
-                if (await this.countRecentQuotaEvents(quotaKey, "namespace_claim_cooldown", since) >= 1) {
-                  throw new ApiError(429, "namespace_claim_cooldown", "namespace claim cooldown is active");
-                }
-                await this.recordQuotaEvent(quotaKey, "namespace_claim_cooldown");
-              }
-              return this.claimNamespace({
-                namespace: existing.namespace,
-                principal_type: input.payload.principal_type,
-                principal_id: input.payload.principal_id,
-                request_id: input.request_id,
-              });
-            })();
+        const namespaceClaim = this.claimNamespaceRecord({
+          namespace: existing.namespace,
+          principal_type: input.payload.principal_type,
+          principal_id: input.payload.principal_id,
+          request_id: input.request_id,
+          claim_cooldown_seconds: input.namespace_claim_cooldown_seconds,
+        }, input.now_iso);
         const capabilityKey = await capabilityKeyId(input.payload.capability_pubkey);
         const existingCapability = this.capabilities.get(capabilityKey);
         if (existingCapability
@@ -851,17 +828,12 @@ export class MemoryRegistryStore implements RegistryStore {
     request_id: string;
     claim_cooldown_seconds?: number;
   }): Promise<NamespaceClaimResult> {
-    // Mirror the SQL store: one atomic count-then-record enforces the
-    // per-principal claim cooldown. This single-threaded store is atomic by
-    // construction; recording here keeps the route-level precheck read-only.
-    if ((input.claim_cooldown_seconds ?? 0) > 0) {
-      const quotaKey = `principal:${input.principal_type}:${input.principal_id}`;
-      const since = new Date(Date.now() - input.claim_cooldown_seconds! * 1000).toISOString();
-      if ((await this.countRecentQuotaEvents(quotaKey, "namespace_claim_cooldown", since)) >= 1) {
-        throw new ApiError(429, "namespace_claim_cooldown", "namespace claim cooldown is active");
-      }
-      await this.recordQuotaEvent(quotaKey, "namespace_claim_cooldown");
-    }
+    // Session completion snapshots and rolls back this same state. Join its
+    // lock so an unrelated successful claim cannot be erased by that rollback.
+    return this.withAuthorisationSessionCompletionLock("authorisation-store", async () => this.claimNamespaceRecord(input));
+  }
+
+  private claimNamespaceRecord(input: Parameters<RegistryStore["claimNamespace"]>[0], at = nowIso()): NamespaceClaimResult {
     const existing = this.namespaces.get(input.namespace);
     if (existing) {
       // Mirror the SQL store: a namespace already owned by another principal
@@ -876,17 +848,24 @@ export class MemoryRegistryStore implements RegistryStore {
     }
     const reserved = this.reservedNamespaceFor(input.namespace);
     const review_reason = reserved?.reason ?? (input.namespace.length <= 3 ? "short_namespace_review" : undefined);
+    // No await may split ownership/cooldown admission from publication. Both
+    // concurrent claims and session completion use these same synchronous
+    // state updates; rejected and idempotent claims consume no quota.
+    const quotaKey = `principal:${input.principal_type}:${input.principal_id}`;
+    const cooldown = input.claim_cooldown_seconds ?? 0;
+    if (cooldown > 0) {
+      const since = Date.parse(at) - cooldown * 1000;
+      if (this.quotaEvents.some((event) => event.quotaKey === quotaKey
+        && event.bucket === "namespace_claim_cooldown" && Date.parse(event.at) > since)) {
+        throw new ApiError(429, "namespace_claim_cooldown", "namespace claim cooldown is active");
+      }
+    }
     const result: NamespaceClaimResult = {
       namespace: input.namespace,
       status: review_reason ? "review_pending" : "active",
       ...(review_reason ? { review_reason } : {}),
     };
-    this.namespaces.set(input.namespace, {
-      ...result,
-      owner_principal_type: input.principal_type,
-      owner_principal_id: input.principal_id,
-    });
-    await this.appendAuditEvent({
+    this.appendAuditEventRecord({
       request_id: input.request_id,
       event_type: "namespace.claimed",
       principal_type: input.principal_type,
@@ -894,6 +873,12 @@ export class MemoryRegistryStore implements RegistryStore {
       namespace: input.namespace,
       data: { status: result.status, review_reason },
     });
+    this.namespaces.set(input.namespace, {
+      ...result,
+      owner_principal_type: input.principal_type,
+      owner_principal_id: input.principal_id,
+    });
+    if (cooldown > 0) this.quotaEvents.push({ quotaKey, bucket: "namespace_claim_cooldown", at });
     return result;
   }
 
@@ -1349,6 +1334,10 @@ export class MemoryRegistryStore implements RegistryStore {
   }
 
   async appendAuditEvent(event: AuditEventInput): Promise<void> {
+    this.appendAuditEventRecord(event);
+  }
+
+  private appendAuditEventRecord(event: AuditEventInput): void {
     this.auditEvents.push({
       id: `memory-audit-${this.auditEvents.length + 1}`,
       created_at: nowIso(),

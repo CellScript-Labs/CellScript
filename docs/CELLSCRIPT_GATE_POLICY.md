@@ -1,5 +1,13 @@
 # CellScript Gate Policy
 
+`require_maturity`, `require_time`, `require_epoch_after` and
+`require_epoch_relative` remain deferred: production policy rejects them, and
+development artifacts abort with runtime error 86. The `occupied_capacity`
+floor is likewise deferred (error 87). These helpers do not establish CKB since
+constraints or capacity bounds. IPC `pipe_read` returns a complete eight-byte
+scalar or aborts with error 1; `inherited_fd` admits indices below both the
+reported count and its 64-entry copied prefix, otherwise aborting with error 1.
+
 The [unified compilation strategy](CELLSCRIPT_COMPILATION_POLICY.md) removes
 user-facing optimization levels. Current differential tests compare the normal
 strategy with internal diagnostic builds. Earlier O0/O3 descriptions below

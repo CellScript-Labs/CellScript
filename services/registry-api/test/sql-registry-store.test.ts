@@ -403,7 +403,7 @@ describePostgres("SqlRegistryStore PostgreSQL contract", () => {
     }
   }, 30_000);
 
-  it("claims exactly once per principal inside the cooldown and rejects concurrent cross-principal claim losers", async () => {
+  it("enforces sequential claim cooldown and rejects existing cross-principal owners", async () => {
     const client = new Client({ connectionString: scopedConnectionString });
     await client.connect();
     try {
@@ -419,9 +419,9 @@ describePostgres("SqlRegistryStore PostgreSQL contract", () => {
       const owner = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
       const rival = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
-      // H2: the first claim within a cooldown window must succeed — the
-      // cooldown is enforced once inside the store transaction, never
-      // double-counted by a route-level pre-write.
+      // The first store claim succeeds and the next new namespace is blocked.
+      // namespace-claims.test.ts separately covers the real HTTP route and
+      // forces concurrent inserts through the SQL conflict branch.
       const first = await store.claimNamespace({
         namespace: "h2claim",
         principal_type: "joyid_ckb",
@@ -440,8 +440,7 @@ describePostgres("SqlRegistryStore PostgreSQL contract", () => {
         claim_cooldown_seconds: 3600,
       })).rejects.toMatchObject({ code: "namespace_claim_cooldown" });
 
-      // M7: a different principal racing the same namespace gets a 409 with
-      // the winner still owning it, never a success for the loser.
+      // A different principal gets 409 for an already owned namespace.
       await expect(store.claimNamespace({
         namespace: "h2claim",
         principal_type: "joyid_ckb",

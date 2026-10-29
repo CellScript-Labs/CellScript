@@ -605,12 +605,36 @@ export class SqlRegistryStore implements RegistryStore {
     await this.withClient(async (client) => {
       await client.query("begin");
       try {
-        // Serialize parallel claims by the same principal and enforce the
-        // cooldown inside the transaction: an outside count-then-insert
-        // check races and lets bursts through.
+        // Match session completion's lock order. The principal row serializes
+        // direct claims with session claims before either checks the cooldown.
+        await client.query(
+          `insert into principals(principal_type, principal_id)
+           values ($1, $2)
+           on conflict (principal_type, principal_id)
+           do update set updated_at = now()`,
+          [input.principal_type, input.principal_id],
+        );
         if ((input.claim_cooldown_seconds ?? 0) > 0) {
           const quotaKey = `principal:${input.principal_type}:${input.principal_id}`;
           await client.query("select pg_advisory_xact_lock(hashtext($1))", [quotaKey]);
+        }
+        const existing = await client.query(
+          `select owner_principal_type, owner_principal_id
+           from namespaces where namespace = $1 for update`,
+          [input.namespace],
+        );
+        if (existing.rows[0]) {
+          const owner = existing.rows[0];
+          if (owner.owner_principal_type !== input.principal_type || owner.owner_principal_id !== input.principal_id) {
+            throw new ApiError(409, "namespace_already_claimed", "namespace is already claimed by another principal");
+          }
+          await client.query("commit");
+          return;
+        }
+        // Only new claims consume quota. Failed claims roll it back together
+        // with the namespace and audit writes.
+        if ((input.claim_cooldown_seconds ?? 0) > 0) {
+          const quotaKey = `principal:${input.principal_type}:${input.principal_id}`;
           const recent = await client.query(
             `select count(*)::int as count from quota_events
              where quota_key = $1 and bucket = 'namespace_claim_cooldown' and created_at > now() - ($2 || ' seconds')::interval`,
@@ -621,13 +645,6 @@ export class SqlRegistryStore implements RegistryStore {
           }
           await client.query("insert into quota_events(quota_key, bucket) values ($1, 'namespace_claim_cooldown')", [quotaKey]);
         }
-        await client.query(
-          `insert into principals(principal_type, principal_id)
-           values ($1, $2)
-           on conflict (principal_type, principal_id)
-           do update set updated_at = now()`,
-          [input.principal_type, input.principal_id],
-        );
         const claimInsert = await client.query(
           `insert into namespaces(
              namespace, owner_principal_type, owner_principal_id, status, review_reason, audit_request_id
@@ -658,15 +675,7 @@ export class SqlRegistryStore implements RegistryStore {
             throw new ApiError(409, "namespace_already_claimed", "namespace is already claimed by another principal");
           }
           await client.query("commit");
-          const existing = await this.getNamespace(input.namespace);
-          if (!existing) {
-            throw new Error("namespace claim did not return a readable record");
-          }
-          return {
-            namespace: existing.namespace,
-            status: existing.status === "active" ? "active" : "review_pending",
-            ...(existing.review_reason ? { review_reason: existing.review_reason } : {}),
-          };
+          return;
         }
         await client.query(
           `insert into audit_events(request_id, event_type, principal_type, principal_id, namespace, data)

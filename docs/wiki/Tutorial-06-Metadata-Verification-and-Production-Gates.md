@@ -1,5 +1,13 @@
 # Tutorial 06: Metadata Verification and Production Gates
 
+Check `fail_closed_runtime_features` before using time or capacity helpers.
+Maturity/time/epoch constraints and the `occupied_capacity` floor are deferred:
+production policy rejects them, while development artifacts abort with errors
+86 and 87 respectively. A successful metadata build does not establish their
+on-chain semantics. IPC reads abort on syscall failure or incomplete u64
+delivery; inherited-fd indices must fit both the reported count and the
+64-entry copied prefix. See the [runtime error catalog](../CELLSCRIPT_RUNTIME_ERROR_CODES.md).
+
 For bounded Edition 2027 named collections, run
 `cellc explain collections path/to/package` or add `--json` before tuning shared
 budgets. It shows each member's maximum payload, alignment/record overhead,

@@ -1661,6 +1661,39 @@ describe("registry api", () => {
     expect(store.auditEvents.some((event) => event.event_type === "namespace.claimed")).toBe(false);
   });
 
+  it("preserves a direct claim queued during a failed session completion", async () => {
+    const { app, store } = testApp();
+    const { created, browserToken } = await createBrowserAuthorisationSession(app, "rollback", "demo");
+    const challenge = await prepareBrowserAuthorisationChallenge(app, created.session_id, browserToken);
+    const appendAuditEvent = store.appendAuditEvent.bind(store);
+    let concurrentClaim: ReturnType<typeof store.claimNamespace> | undefined;
+    const owner = `0x${"55".repeat(20)}`;
+    vi.spyOn(store, "appendAuditEvent").mockImplementation(async (event) => {
+      if (event.event_type === "authorisation_session.completed") {
+        concurrentClaim = store.claimNamespace({
+          namespace: "survivor", principal_type: "joyid_ckb", principal_id: owner,
+          request_id: "surviving-claim", claim_cooldown_seconds: 3600,
+        });
+        throw new Error("injected completion failure");
+      }
+      await appendAuditEvent(event);
+    });
+
+    const response = await completeBrowserAuthorisationSession(app, created.session_id, browserToken, challenge);
+    expect(response.status).toBe(500);
+    expect(concurrentClaim).toBeDefined();
+    await expect(concurrentClaim!).resolves.toMatchObject({ namespace: "survivor", status: "active" });
+    expect([...store.namespaces.keys()]).toEqual(["survivor"]);
+    expect(store.namespaces.get("survivor")?.owner_principal_id).toBe(owner);
+    expect(store.auditEvents.filter((event) => event.event_type === "namespace.claimed")
+      .map((event) => event.namespace)).toEqual(["survivor"]);
+    expect(store.quotaEvents.filter((event) => event.bucket === "namespace_claim_cooldown")
+      .map((event) => event.quotaKey)).toEqual([`principal:joyid_ckb:${owner}`]);
+    expect(store.capabilities.size).toBe(0);
+    expect(store.usedNonces.size).toBe(0);
+    expect(store.authorisationSessions.get(created.session_id)?.status).toBe("pending");
+  });
+
   it("keeps a session pending when another identity owns its namespace", async () => {
     const { app, store } = testApp();
     const { created, browserToken } = await createBrowserAuthorisationSession(app, "occupied", "demo");

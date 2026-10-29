@@ -569,6 +569,26 @@
       "status": "reserved"
     },
     {
+      "conditions": "CKB since/epoch maturity constraints are deferred. Artifacts unconditionally exit with runtime error 86 when require_maturity, require_time, require_epoch_after, or require_epoch_relative runs, including discarded results and helper calls.",
+      "fail_closed_features": [
+        "ckb-since-constraints-deferred"
+      ],
+      "id": "artifact:ckb-since-constraints",
+      "layer": "artifact-policy",
+      "production_policy": "rejected by production policy",
+      "status": "reserved"
+    },
+    {
+      "conditions": "The compile-visible occupied-capacity floor is deferred. Artifacts unconditionally exit with runtime error 87 when occupied_capacity runs, including discarded results and helper calls.",
+      "fail_closed_features": [
+        "ckb-occupied-capacity-deferred"
+      ],
+      "id": "artifact:ckb-occupied-capacity-floor",
+      "layer": "artifact-policy",
+      "production_policy": "rejected by production policy",
+      "status": "reserved"
+    },
+    {
       "conditions": "Explicit Input or CellDep read-only Cell view.",
       "fail_closed_features": [],
       "id": "ir:read-ref",

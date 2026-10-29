@@ -4,6 +4,13 @@ Typed production API for the public CellScript artifact Registry. The same
 application runs as a Cloudflare Worker or through the bundled Node HTTP
 adapter.
 
+Namespace claim cooldown is enforced atomically by the store. Only a successful
+new claim consumes the principal's cooldown allowance; a same-owner replay
+returns the existing claim, and a competing owner receives HTTP 409
+`namespace_already_claimed`. A new claim during the cooldown receives HTTP 429
+`namespace_claim_cooldown`. Direct claims and browser authorisation completion
+serialize against the same principal's claims.
+
 - `https://api.registry.cellscript.dev` is the authenticated write and dynamic
   read boundary.
 - `https://registry.cellscript.dev` serves immutable bundles and static release
