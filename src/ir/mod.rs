@@ -709,12 +709,18 @@ fn direct_bounded_plan_field_expr<'a>(expr: &'a Expr, binding: &str) -> Option<&
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IrDeferredRuntimeFeature {
     CkbSighashAll,
+    CkbSinceConstraints,
+    CkbOccupiedCapacityFloor,
 }
 
 impl IrDeferredRuntimeFeature {
     pub fn from_helper(helper: &str) -> Option<Self> {
         match helper {
             "__ckb_sighash_all" => Some(Self::CkbSighashAll),
+            "__ckb_require_maturity" | "__ckb_require_time" | "__ckb_require_epoch_after" | "__ckb_require_epoch_relative" => {
+                Some(Self::CkbSinceConstraints)
+            }
+            "__ckb_occupied_capacity" => Some(Self::CkbOccupiedCapacityFloor),
             _ => None,
         }
     }
@@ -729,12 +735,16 @@ impl IrDeferredRuntimeFeature {
     pub const fn feature(self) -> &'static str {
         match self {
             Self::CkbSighashAll => "ckb-sighash-all-deferred",
+            Self::CkbSinceConstraints => "ckb-since-constraints-deferred",
+            Self::CkbOccupiedCapacityFloor => "ckb-occupied-capacity-deferred",
         }
     }
 
     pub const fn runtime_error(self) -> CellScriptRuntimeError {
         match self {
             Self::CkbSighashAll => CellScriptRuntimeError::SighashAllUnsupported,
+            Self::CkbSinceConstraints => CellScriptRuntimeError::SinceConstraintsUnsupported,
+            Self::CkbOccupiedCapacityFloor => CellScriptRuntimeError::OccupiedCapacityUnsupported,
         }
     }
 

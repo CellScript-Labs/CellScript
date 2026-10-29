@@ -402,4 +402,66 @@ describePostgres("SqlRegistryStore PostgreSQL contract", () => {
       await client.end();
     }
   }, 30_000);
+
+  it("claims exactly once per principal inside the cooldown and rejects concurrent cross-principal claim losers", async () => {
+    const client = new Client({ connectionString: scopedConnectionString });
+    await client.connect();
+    try {
+      if (!(await client.query("select to_regclass('principals') is not null as present")).rows[0]?.present) {
+        const files = (await readdir(migrationsDirectory))
+          .filter((file) => /^[0-9]{4}_.+[.]sql$/.test(file))
+          .sort();
+        for (const file of files) {
+          await client.query(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
+        }
+      }
+      const store = new SqlRegistryStore({ connectionString: scopedConnectionString });
+      const owner = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+      const rival = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+      // H2: the first claim within a cooldown window must succeed — the
+      // cooldown is enforced once inside the store transaction, never
+      // double-counted by a route-level pre-write.
+      const first = await store.claimNamespace({
+        namespace: "h2claim",
+        principal_type: "joyid_ckb",
+        principal_id: owner,
+        request_id: "h2-first-claim",
+        claim_cooldown_seconds: 3600,
+      });
+      expect(["active", "review_pending"]).toContain(first.status);
+
+      // The same principal is inside its own cooldown now.
+      await expect(store.claimNamespace({
+        namespace: "h2claim-next",
+        principal_type: "joyid_ckb",
+        principal_id: owner,
+        request_id: "h2-second-claim",
+        claim_cooldown_seconds: 3600,
+      })).rejects.toMatchObject({ code: "namespace_claim_cooldown" });
+
+      // M7: a different principal racing the same namespace gets a 409 with
+      // the winner still owning it, never a success for the loser.
+      await expect(store.claimNamespace({
+        namespace: "h2claim",
+        principal_type: "joyid_ckb",
+        principal_id: rival,
+        request_id: "h2-rival-claim",
+        claim_cooldown_seconds: 0,
+      })).rejects.toMatchObject({ code: "namespace_already_claimed" });
+
+      const ownerRow = (await client.query(
+        "select owner_principal_id from namespaces where namespace = 'h2claim'",
+      )).rows[0];
+      expect(ownerRow.owner_principal_id).toBe(owner);
+
+      const claimAudits = (await client.query(
+        "select principal_id from audit_events where event_type = 'namespace.claimed' and namespace = 'h2claim'",
+      )).rows;
+      expect(claimAudits).toHaveLength(1);
+      expect(claimAudits[0].principal_id).toBe(owner);
+    } finally {
+      await client.end();
+    }
+  }, 30_000);
 });

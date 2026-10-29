@@ -139,7 +139,7 @@ const ENTRY_ARTIFACT_SIZE_BUDGETS: [(&str, EntryArtifactSizeBudget); 4] = [
         "token.cell",
         EntryArtifactSizeBudget {
             max_elf_bytes: 12 * 1024,
-            max_compact_metadata_bytes: 84 * 1024,
+            max_compact_metadata_bytes: 85 * 1024,
             max_proof_plan_records: 10,
             max_compact_proof_plan_bytes: 9 * 1024,
             max_actions: 1,

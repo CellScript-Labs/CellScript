@@ -129,6 +129,8 @@ for the independent check's exact scope.
 | 79 | `zk-child-rejected` | The child rejected the proof or Wait failed. | Check the exact VK, proof, finalized transaction statement and child exit. |
 | 84 | `zk-cycle-bound-exceeded` | The exact verifier call exceeded its declared cycle budget. | Check the exact child artifact and the profile's 250,000,000-cycle ceiling. |
 | 85 | `open-handle-invalid` | A compatible-open handle selection failed its structural, membership or selected-dependency check. | Check the 656-byte selection witness, the expected authorization root and the selected CellDep. |
+| 86 | `since-constraints-unsupported` | CKB since/epoch maturity constraints are deferred; the helper aborts with this code instead of accepting. | Remove the `require_maturity`/`require_time`/`require_epoch_*` call until real CKB since verification ships. |
+| 87 | `occupied-capacity-unsupported` | The compile-visible occupied-capacity floor is deferred; the helper aborts with this code instead of returning zero. | Remove the `occupied_capacity` floor call until the deferred bound ships. |
 
 ## Stability
 

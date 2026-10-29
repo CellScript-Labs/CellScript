@@ -80,6 +80,8 @@ pub enum CellScriptRuntimeError {
     ZkChildRejected = 79,
     ZkCycleBoundExceeded = 84,
     OpenHandleInvalid = 85,
+    SinceConstraintsUnsupported = 86,
+    OccupiedCapacityUnsupported = 87,
 }
 
 impl CellScriptRuntimeError {
@@ -163,6 +165,8 @@ impl CellScriptRuntimeError {
             Self::ZkChildRejected => "zk-child-rejected",
             Self::ZkCycleBoundExceeded => "zk-cycle-bound-exceeded",
             Self::OpenHandleInvalid => "open-handle-invalid",
+            Self::SinceConstraintsUnsupported => "since-constraints-unsupported",
+            Self::OccupiedCapacityUnsupported => "occupied-capacity-unsupported",
         }
     }
 
@@ -176,6 +180,8 @@ impl CellScriptRuntimeError {
             Self::ZkChildRejected => "The verifier child rejected the proof or Wait failed.",
             Self::ZkCycleBoundExceeded => "The exact verifier call exceeded its declared cycle budget.",
             Self::OpenHandleInvalid => "An open or instance handle failed its encoding, authorization, dependency or concrete Script constraint check.",
+            Self::SinceConstraintsUnsupported => "CKB since/epoch maturity constraints are deferred and cannot verify a lock with an unconditional success stub.",
+            Self::OccupiedCapacityUnsupported => "The compile-visible occupied-capacity floor is deferred and cannot supply a trustworthy bound.",
             Self::SyscallFailed => "A target VM syscall returned a non-zero status while loading transaction context.",
             Self::BoundsCheckFailed => "Loaded bytes were smaller than the verifier-required minimum.",
             Self::CellLoadFailed => "Cell data or field loading failed or returned an unusable result.",
@@ -283,6 +289,8 @@ impl CellScriptRuntimeError {
             Self::ZkChildRejected => "Check the exact ZK profile, transaction-derived statement, verifier/VK CellDeps and bounded Spawn/IPC evidence.",
             Self::ZkCycleBoundExceeded => "Check the exact ZK profile, transaction-derived statement, verifier/VK CellDeps and bounded Spawn/IPC evidence.",
             Self::OpenHandleInvalid => "Check the declared profile: a 656-byte open selection with its 32-byte root, or a 1768-byte instance selection with its 208-byte committed configuration. Verify the selected CellDep, actual Script args and subject identity.",
+            Self::SinceConstraintsUnsupported => "Remove the require_maturity/require_time/require_epoch_* call until real CKB since verification ships; the helper aborts instead of accepting.",
+            Self::OccupiedCapacityUnsupported => "Remove the occupied_capacity floor call until the deferred bound ships; the helper aborts instead of returning zero.",
             Self::SyscallFailed => {
                 "Check transaction input/output/cell_dep indexes, source flags, and target-profile syscall compatibility."
             }
@@ -477,6 +485,8 @@ impl CellScriptRuntimeError {
             78 => Some(Self::ZkCloseFailed),
             79 => Some(Self::ZkChildRejected),
             84 => Some(Self::ZkCycleBoundExceeded),
+            86 => Some(Self::SinceConstraintsUnsupported),
+            87 => Some(Self::OccupiedCapacityUnsupported),
             _ => None,
         }
     }
@@ -564,6 +574,8 @@ pub const ALL_RUNTIME_ERRORS: &[CellScriptRuntimeError] = &[
     CellScriptRuntimeError::ZkCloseFailed,
     CellScriptRuntimeError::ZkChildRejected,
     CellScriptRuntimeError::ZkCycleBoundExceeded,
+    CellScriptRuntimeError::SinceConstraintsUnsupported,
+    CellScriptRuntimeError::OccupiedCapacityUnsupported,
 ];
 
 pub const RESERVED_RUNTIME_ERROR_CODES: &[u64] = &[6, 19, 27, 28, 29, 30, 31];

@@ -849,9 +849,26 @@ export class MemoryRegistryStore implements RegistryStore {
     principal_type: PrincipalType;
     principal_id: string;
     request_id: string;
+    claim_cooldown_seconds?: number;
   }): Promise<NamespaceClaimResult> {
+    // Mirror the SQL store: one atomic count-then-record enforces the
+    // per-principal claim cooldown. This single-threaded store is atomic by
+    // construction; recording here keeps the route-level precheck read-only.
+    if ((input.claim_cooldown_seconds ?? 0) > 0) {
+      const quotaKey = `principal:${input.principal_type}:${input.principal_id}`;
+      const since = new Date(Date.now() - input.claim_cooldown_seconds! * 1000).toISOString();
+      if ((await this.countRecentQuotaEvents(quotaKey, "namespace_claim_cooldown", since)) >= 1) {
+        throw new ApiError(429, "namespace_claim_cooldown", "namespace claim cooldown is active");
+      }
+      await this.recordQuotaEvent(quotaKey, "namespace_claim_cooldown");
+    }
     const existing = this.namespaces.get(input.namespace);
     if (existing) {
+      // Mirror the SQL store: a namespace already owned by another principal
+      // rejects instead of silently returning the winner's record.
+      if (existing.owner_principal_type !== input.principal_type || existing.owner_principal_id !== input.principal_id) {
+        throw new ApiError(409, "namespace_already_claimed", "namespace is already claimed by another principal");
+      }
       const status = existing.status === "active" ? "active" : "review_pending";
       return existing.review_reason
         ? { namespace: existing.namespace, status, review_reason: existing.review_reason }

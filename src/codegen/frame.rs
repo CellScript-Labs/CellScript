@@ -1824,7 +1824,10 @@ mod verifier_failure_tests {
 
     #[test]
     fn runtime_requirements_and_scalar_status_failures_exit_before_continuation() {
-        for name in ["__ckb_require_time", "__ckb_cell_capacity"] {
+        // __ckb_require_time is deferred-fail-closed now (emits its own
+        // static error 86); keep this caller-side check on a helper whose
+        // status is still produced dynamically.
+        for name in ["__ckb_require_witness_size_at_least", "__ckb_cell_capacity"] {
             let mut codegen = generator();
             codegen.current_function = Some("caller".to_string());
             codegen.emit_call(None, name, &[IrOperand::Const(IrConst::U64(99))]).unwrap();

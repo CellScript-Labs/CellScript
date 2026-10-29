@@ -3286,14 +3286,30 @@ async function handleClaimNamespace(
       headers,
     );
   }
-  await enforceNamespaceClaimCooldown(store, requestId, payload.principal_type, payload.principal_id, now, namespaceClaimCooldownSeconds(env));
-  const claim = await store.claimNamespace({
-    namespace,
-    principal_type: payload.principal_type,
-    principal_id: payload.principal_id,
-    request_id: requestId,
-    claim_cooldown_seconds: namespaceClaimCooldownSeconds(env),
-  });
+  // Cooldown enforcement lives inside store.claimNamespace (advisory-lock
+  // transaction on SQL, atomic count-then-record in memory). A recording
+  // route-level precheck here would double-count and 429 every first claim.
+  let claim;
+  try {
+    claim = await store.claimNamespace({
+      namespace,
+      principal_type: payload.principal_type,
+      principal_id: payload.principal_id,
+      request_id: requestId,
+      claim_cooldown_seconds: namespaceClaimCooldownSeconds(env),
+    });
+  } catch (error) {
+    if (error instanceof ApiError && error.code === "namespace_claim_cooldown") {
+      await store.appendAuditEvent({
+        request_id: requestId,
+        event_type: "namespace_claim.cooldown_blocked",
+        principal_type: payload.principal_type,
+        principal_id: payload.principal_id,
+        data: { cooldown_seconds: namespaceClaimCooldownSeconds(env) },
+      });
+    }
+    throw error;
+  }
   return json({ request_id: requestId, ...claim }, claim.status === "active" ? 201 : 202, headers);
 }
 
@@ -4095,33 +4111,6 @@ async function throttle(
   }
 }
 
-async function enforceNamespaceClaimCooldown(
-  store: RegistryStore,
-  requestId: string,
-  principalType: string,
-  principalId: string,
-  now: Date,
-  cooldownSeconds: number,
-): Promise<void> {
-  if (cooldownSeconds <= 0) {
-    return;
-  }
-  const quotaKey = `principal:${principalType}:${principalId}`;
-  const bucket = "namespace_claim_cooldown";
-  const since = new Date(now.getTime() - cooldownSeconds * 1000).toISOString();
-  const count = await store.countRecentQuotaEvents(quotaKey, bucket, since);
-  if (count >= 1) {
-    await store.appendAuditEvent({
-      request_id: requestId,
-      event_type: "namespace_claim.cooldown_blocked",
-      principal_type: principalType,
-      principal_id: principalId,
-      data: { cooldown_seconds: cooldownSeconds },
-    });
-    throw new ApiError(429, "namespace_claim_cooldown", "namespace claim cooldown is active");
-  }
-  await store.recordQuotaEvent(quotaKey, bucket);
-}
 
 async function appendFailureAuditEvent(
   request: Request,

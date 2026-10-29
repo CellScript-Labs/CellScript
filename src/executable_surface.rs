@@ -347,6 +347,22 @@ pub static EXECUTABLE_SURFACE: &[ExecutableSurfaceEntry] = &[
         "Canonical transaction sighash construction is deferred. Audit artifacts unconditionally exit with runtime error 66 when called, including discarded results and helper calls.",
         ["ckb-sighash-all-deferred"]
     ),
+    entry!(
+        "artifact:ckb-since-constraints",
+        "artifact-policy",
+        "reserved",
+        "rejected by production policy",
+        "CKB since/epoch maturity constraints are deferred. Artifacts unconditionally exit with runtime error 86 when require_maturity, require_time, require_epoch_after, or require_epoch_relative runs, including discarded results and helper calls.",
+        ["ckb-since-constraints-deferred"]
+    ),
+    entry!(
+        "artifact:ckb-occupied-capacity-floor",
+        "artifact-policy",
+        "reserved",
+        "rejected by production policy",
+        "The compile-visible occupied-capacity floor is deferred. Artifacts unconditionally exit with runtime error 87 when occupied_capacity runs, including discarded results and helper calls.",
+        ["ckb-occupied-capacity-deferred"]
+    ),
     entry!("ir:read-ref", "instruction", "bounded", ACCEPT, "Explicit Input or CellDep read-only Cell view."),
     entry!("ir:move", "instruction", "complete", ACCEPT, "Typed local move; ownership validity is checked before lowering."),
     entry!("ir:tuple", "instruction", "bounded", ACCEPT_WHEN_CLOSED, "Deterministic fixed aggregate construction."),

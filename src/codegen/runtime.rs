@@ -387,6 +387,74 @@ impl CodeGenerator {
                         self.emit("li a0, 76");
                         self.emit("ret");
                     }
+                    // READ takes (fd, buffer_addr, length_addr): the scheduler
+                    // writes the payload to the buffer and the delivered byte
+                    // count back through length_addr, with SUCCESS in a0. A
+                    // bare ecall would pass unprepared a1/a2 and return the
+                    // status word as if it were the payload.
+                    "__ckb_pipe_read" => {
+                        self.emit_stack_adjustment(-32);
+                        self.emit_stack_store("ra", 24);
+                        self.emit_stack_store("a0", 0);
+                        self.emit("li t0, 8");
+                        self.emit_stack_store("t0", 8);
+                        self.emit_stack_load("a0", 0);
+                        self.emit_sp_addi("a1", 16);
+                        self.emit_sp_addi("a2", 8);
+                        self.emit(format!("li a7, {}", syscall));
+                        self.emit("ecall");
+                        let failed = self.fresh_label("ckb_pipe_read_failed");
+                        let short_read = self.fresh_label("ckb_pipe_read_short");
+                        let done = self.fresh_label("ckb_pipe_read_done");
+                        self.emit(format!("bnez a0, {}", failed));
+                        self.emit_stack_load("t0", 8);
+                        self.emit("li t1, 8");
+                        self.emit(format!("bne t0, t1, {}", short_read));
+                        self.emit_stack_load("a0", 16);
+                        self.emit(format!("j {}", done));
+                        self.emit_label(&short_read);
+                        self.emit_label(&failed);
+                        self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
+                        self.emit_label(&done);
+                        self.emit_stack_load("ra", 24);
+                        self.emit_stack_adjustment(32);
+                        self.emit("ret");
+                    }
+                    // INHERITED_FDS takes (buffer_addr, length_addr): the
+                    // scheduler fills the inherited fd list into the buffer,
+                    // the fd count through length_addr, and SUCCESS in a0.
+                    // The DSL builtin selects the fd at the caller's index.
+                    "__ckb_inherited_fd" => {
+                        self.emit_stack_adjustment(-96);
+                        self.emit_stack_store("ra", 88);
+                        self.emit_stack_store("a0", 0);
+                        self.emit("li t0, 8");
+                        self.emit_stack_store("t0", 8);
+                        self.emit_sp_addi("a0", 16);
+                        self.emit_sp_addi("a1", 8);
+                        self.emit(format!("li a7, {}", syscall));
+                        self.emit("ecall");
+                        let failed = self.fresh_label("ckb_inherited_fd_failed");
+                        let done = self.fresh_label("ckb_inherited_fd_done");
+                        self.emit(format!("bnez a0, {}", failed));
+                        self.emit_stack_load("t0", 8);
+                        self.emit_stack_load("t1", 0);
+                        self.emit(format!("bgeu t1, t0, {}", failed));
+                        self.emit("li t2, 8");
+                        self.emit("mul t1, t1, t2");
+                        self.emit_sp_addi("t2", 16);
+                        self.emit("add t2, t2, t1");
+                        self.emit("ld a0, 0(t2)");
+                        self.emit(format!("j {}", done));
+                        self.emit_label(&failed);
+                        self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
+                        self.emit_label(&done);
+                        self.emit_stack_load("ra", 88);
+                        self.emit_stack_adjustment(96);
+                        self.emit("ret");
+                    }
+                    // PROCESS_ID falls through: it takes no arguments and
+                    // returns the pid in a0, so the direct syscall is exact.
                     _ => {
                         self.emit(format!("li a7, {}", syscall));
                         self.emit("ecall");

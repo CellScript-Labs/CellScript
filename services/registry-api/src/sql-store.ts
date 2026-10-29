@@ -628,12 +628,13 @@ export class SqlRegistryStore implements RegistryStore {
            do update set updated_at = now()`,
           [input.principal_type, input.principal_id],
         );
-        await client.query(
+        const claimInsert = await client.query(
           `insert into namespaces(
              namespace, owner_principal_type, owner_principal_id, status, review_reason, audit_request_id
            )
            values ($1, $2, $3, $4, $5, $6)
-           on conflict (namespace) do nothing`,
+           on conflict (namespace) do nothing
+           returning namespace`,
           [
             input.namespace,
             input.principal_type,
@@ -643,6 +644,30 @@ export class SqlRegistryStore implements RegistryStore {
             input.request_id,
           ],
         );
+        if (claimInsert.rowCount !== 1) {
+          // A concurrent claim won the row. Re-read it under the lock and
+          // only proceed for the idempotent same-principal case; a different
+          // owner must not receive a success response or a false audit row.
+          const winner = await client.query(
+            `select owner_principal_type, owner_principal_id
+             from namespaces where namespace = $1 for update`,
+            [input.namespace],
+          );
+          const owner = winner.rows[0];
+          if (owner?.owner_principal_type !== input.principal_type || owner?.owner_principal_id !== input.principal_id) {
+            throw new ApiError(409, "namespace_already_claimed", "namespace is already claimed by another principal");
+          }
+          await client.query("commit");
+          const existing = await this.getNamespace(input.namespace);
+          if (!existing) {
+            throw new Error("namespace claim did not return a readable record");
+          }
+          return {
+            namespace: existing.namespace,
+            status: existing.status === "active" ? "active" : "review_pending",
+            ...(existing.review_reason ? { review_reason: existing.review_reason } : {}),
+          };
+        }
         await client.query(
           `insert into audit_events(request_id, event_type, principal_type, principal_id, namespace, data)
            values ($1, 'namespace.claimed', $2, $3, $4, $5::jsonb)`,
