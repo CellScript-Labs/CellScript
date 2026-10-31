@@ -342,13 +342,12 @@ fn migrate_action(module: &Module, action: &ActionDef) -> Result<ActionDef> {
     if action.next_surface.is_some()
         || action.return_type.is_some()
         || !action.state_edges.is_empty()
-        || action.effect_declared
         || action.scheduler_hint.is_some()
         || action.doc_comment.is_some()
     {
         return migration_error(
             action.span,
-            "legacy action uses return, transition, effect, scheduler, documentation, or native-container syntax outside the bounded migration subset",
+            "legacy action uses return, transition, scheduler, documentation, or native-container syntax outside the bounded migration subset",
         );
     }
     if module.visibility_of(&action.name) != Visibility::LegacyPublic {

@@ -180,7 +180,7 @@ pub fn audit_module(ir: &IrModule) -> WasmCompileReport {
     for item in &ir.items {
         match item {
             IrItem::Action(action) => blockers.push(format!("action '{}' has no wasm lowering", action.name)),
-            IrItem::PureFn(function) => blockers.push(format!("fn '{}' has no wasm lowering", function.name)),
+            IrItem::Function(function) => blockers.push(format!("fn '{}' has no wasm lowering", function.name)),
             IrItem::Lock(lock) => blockers.push(format!("lock '{}' has no wasm lowering", lock.name)),
             IrItem::TypeDef(_) | IrItem::Invariant(_) => {}
         }
@@ -199,7 +199,9 @@ pub fn ir_type_to_wasm(ty: &IrType) -> WasmValType {
             WasmValType::I32
         }
         IrType::U64 | IrType::U128 => WasmValType::I64,
-        IrType::Array(_, _) | IrType::Tuple(_) | IrType::Named(_) | IrType::Ref(_) | IrType::MutRef(_) => WasmValType::I64,
+        IrType::Array(_, _) | IrType::Tuple(_) | IrType::Named(_) | IrType::Nested(_) | IrType::Ref(_) | IrType::MutRef(_) => {
+            WasmValType::I64
+        }
     }
 }
 
@@ -387,8 +389,9 @@ mod tests {
             name: "types_only".to_string(),
             generic_contracts: Default::default(),
             source_type_origins: Default::default(),
+            source_callable_targets: Default::default(),
             items: Vec::new(),
-            entry_selection: crate::ir::IrEntrySelection::Legacy,
+            entry_selection: crate::ir::IrEntrySelection::Implicit,
             external_type_defs: Vec::new(),
             external_callable_abis: Vec::new(),
             enum_fixed_sizes: Default::default(),
@@ -405,7 +408,8 @@ mod tests {
             name: "demo".to_string(),
             generic_contracts: Default::default(),
             source_type_origins: Default::default(),
-            entry_selection: crate::ir::IrEntrySelection::Legacy,
+            source_callable_targets: Default::default(),
+            entry_selection: crate::ir::IrEntrySelection::Implicit,
             external_type_defs: Vec::new(),
             external_callable_abis: Vec::new(),
             enum_fixed_sizes: Default::default(),
@@ -420,7 +424,7 @@ mod tests {
                 state_transition_edges: Vec::new(),
                 protocol_role_candidates: Vec::new(),
                 body: empty_body(),
-                effect_class: crate::ir::EffectClass::Pure,
+                effects: crate::ir::EffectFacts::empty(),
                 scheduler_hints: crate::ir::SchedulerHints::default(),
             })],
         };

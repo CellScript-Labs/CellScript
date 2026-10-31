@@ -7,13 +7,15 @@ The [0.30 release candidate notes](releases/CELLSCRIPT_0_30_RELEASE_NOTES.md)
 record the version, accepted compatibility axes, validation commands, and the
 separate no-TAC publication constraint.
 
-The active `0.30` implementation uses metadata schema 72; its runtime
+The current alpha.2 implementation work uses metadata schema 74; its runtime
 matrix is [`cellscript-ckb-runtime-view-v1`](CELLSCRIPT_0_30_CKB_RUNTIME_VIEW_MATRIX.md).
+The [native certification boundary](CELLSCRIPT_NATIVE_CERTIFICATION_BOUNDARY.md)
+records CLI, proposal-engine, packaging, dependency and validation ownership.
 The additive six-domain `Since`, typed HeaderDep, and checked `EpochDuration`
 subset of issue #12 is recorded in the
 [typed CKB temporal-domain contract](CELLSCRIPT_0_30_TEMPORAL_DOMAINS.md).
 The runtime-view matrix also records the bounded source-level
-`script::new`/`script::hash` contract and its lowering-record-v9 machine
+`script::new`/`script::hash` contract and its lowering-record-v10 machine
 evidence.
 The experimental `0.26b` baseline used schema 67. The existing unreleased 0.26
 implementation record below retains the historical schema 62 baseline; its
@@ -127,6 +129,9 @@ High-value active references include:
 - [CELLSCRIPT_AUTHORING_IMPLEMENTATION.md](CELLSCRIPT_AUTHORING_IMPLEMENTATION.md)
   for the complete implementation goal, 2026 parity requirements, current
   evidence, and remaining production acceptance work
+- [CELLSCRIPT_ALPHA_2_BOUNDARY_REVIEW.md](CELLSCRIPT_ALPHA_2_BOUNDARY_REVIEW.md)
+  for retained source/storage boundaries, removed effect protocols, emission
+  failure propagation and the scoped phase-invariant review
 - [CELLSCRIPT_PUBLIC_VALUE_GENERICS.md](CELLSCRIPT_PUBLIC_VALUE_GENERICS.md)
   for the accepted restricted public-generic decision, `fixed_value` profile,
   structural derivation, interface compatibility, and migration contract
@@ -160,7 +165,7 @@ High-value active references include:
 - `CELLSCRIPT_2027_PREVIEW_GRAMMAR.md` for the exact bounded native grammar,
   lowering, diagnostics, issue constraints, and deferred surface introduced by
   preview4, recorded under `cellscript-source-semantics-2027-authoring1`, and
-  retained by the current `cellscript-source-semantics-2027-0.30-v1` route
+  retained by the current `cellscript-source-semantics-2027-0.33-effect-facts-v1` route
 - `releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md` for the final 0.13 syntax
   governance summary
 - `CELLSCRIPT_GATE_POLICY.md`

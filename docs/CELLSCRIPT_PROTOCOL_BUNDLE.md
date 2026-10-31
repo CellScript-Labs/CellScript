@@ -87,7 +87,7 @@ artifact target profile.
 Every resolved artifact contains two additional issue #11 identities:
 
 - `exact_handle_receipt` uses
-  `cellscript-exact-script-handle-receipt-v1` to bind package coordinate,
+  `cellscript-exact-script-handle-receipt-v3` to bind package coordinate,
   exact `Cell.lock` node, selected entry, Script role, interface, typed
   semantics, ELF, target profile, the package/Registry ABI hash, verified
   bundle, deployment Script, code CellDep, and chain identity;

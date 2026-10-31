@@ -1,10 +1,20 @@
 # Tutorial 06: Metadata Verification and Production Gates
 
+Use `cellc interface-diff --checked --old old/main.elf --new new/main.elf --json`
+when comparing qualified nominal contracts across import-alias changes. Build
+both bundles with `--source-contracts` and retain their canonical metadata,
+lowering and source-map sidecars. Every bundle is independently verified before
+comparison; missing evidence and different nominal owners reject. Declaration
+JSON hashes retain their existing source-spelling contract. This offline result
+does not authorize signing, deployment or peer execution.
+
 Check `fail_closed_runtime_features` before using time or capacity helpers.
 Maturity/time/epoch constraints and the `occupied_capacity` floor are deferred:
 production policy rejects them, while development artifacts abort with errors
 86 and 87 respectively. A successful metadata build does not establish their
-on-chain semantics. IPC reads abort on syscall failure or incomplete u64
+on-chain semantics. Bare named `spawn` is rejected with source error E1021,
+including metadata-only analysis; use the separately checked CellDep transport
+APIs. Ordinary resolved user functions named `spawn` remain valid. IPC reads abort on syscall failure or incomplete u64
 delivery; inherited-fd indices must fit both the reported count and the
 64-entry copied prefix. See the [runtime error catalog](../CELLSCRIPT_RUNTIME_ERROR_CODES.md).
 
@@ -342,12 +352,12 @@ records the exact `identity(...)` condition declared by the same resource.
 No proof may source authority from a container or another Cell type.
 
 Top-level `enum_layouts` for concrete payload ADTs first appeared in schema 53
-and remain in current metadata schema 72 on the `0.30` development branch. Audit the
+and remain in current metadata schema 74 in the alpha.2 implementation work. Audit the
 `packed-tagged-union-v1` layout, one-byte tag, sequential variant tags, packed
 field offsets, encoded size, ownership, storage, and ABI together. A
 `linear-cell-handle` field is exactly eight bytes and forces
 `local-linear-handle-v1` storage; it is never a persistent serialization claim.
-Non-linear fixed payloads use `serializable-fixed-width`. Pure helpers may
+Non-linear fixed payloads use `serializable-fixed-width`. Functions may
 return layouts of at most 16 bytes through
 `fixed-bytes-pointer-v1+register-pair-return-v1`; larger layouts remain local or
 parameter values. Generic and variable-width payload enums are compile errors.
@@ -381,7 +391,7 @@ emit runtime error 24 in permissive artifacts and stop at E2105 under the
 production policy; a static `N` alone is never evidence that a scan ran.
 
 The validity record first appeared in schema 55 during the 0.22 line and is
-retained by current metadata schema 72 on the `0.30` development branch as
+retained by current metadata schema 74 in the alpha.2 implementation work as
 `types[].validity_predicates`. Review each predicate's
 `expression`, `dependencies`, `evidence_tier`,
 `runtime_checked_on_create`, `create_paths_selected`,
@@ -397,19 +407,20 @@ update path without concrete predicate lowering stays
 line. CKB-VM does not expose an ambient current-tip block-number syscall, so
 CellScript records `builder-evidence-required` with explicit header-dep builder
 evidence instead of emitting a fictional runtime call. Unknown `env::*` reads
-are compile errors. Pure imported helpers are retained transitively and receive
-module-qualified dependency names; lifecycle helpers and transaction-view
-reads are rejected in validity predicates.
+are compile errors. Imported helpers are retained transitively and receive
+module-qualified dependency names. Validity predicates require transitively
+empty external-operation facts; lifecycle, process and transaction-context
+operations are rejected there.
 
 Explicit borrow blocks first appeared in schema 55 and current metadata schema
-64 records them in
+74 records them in
 `runtime.borrow_regions`. Review
-`root`, `binding`, `view_type`, `storage`, `abi`, `allowed_effects`,
+`root`, `binding`, `view_type`, `storage`, `abi`,
 `evidence_tier`, and `source_span`. A canonical record has `View<T>`,
-`storage = none`, `abi = none`, `allowed_effects = [Pure, ReadOnly]`, and
+`storage = none`, `abi = none`, and
 `checked-static` evidence. Its matching `borrow-region` ProofPlan entry proves
 compiler rejection of escape, root lifecycle crossing, and incompatible
-callee effects; it does not describe a runtime allocation or persistent CKB
+callee facts must have empty lifecycle and process sets; the region does not describe a runtime allocation or persistent CKB
 Cell reference.
 
 ## Assurance Layer
@@ -443,7 +454,7 @@ selected Lock/Type Script or verifier CellDep data identity; decodes
 `WitnessArgs.input_type`; and binds the handle to its compiled `CSARGv1`
 parameter position. Exact-handle source items therefore need resolved Script,
 Script-hash, data, or data-hash fields in addition to their transaction index.
-For checked `create_each`, metadata schema 72 adds an explicit bounded output
+For checked `create_each`, metadata schema 74 adds an explicit bounded output
 plan contract. `tx validate` re-decodes the exact `CSBPLv1` parameter at its
 compiled `CSARGv1` position and requires
 `cellscript-bounded-output-plan-evidence-v1`: a witness index, current Script
@@ -552,53 +563,35 @@ For the review-finding closure matrix, see
 
 ## Effect And Terminal Evidence
 
-Introduced on the 0.22 line and retained by the current compiler, function
-helpers can publish the same stable effect contract as actions:
+Callable effects are inferred from bindings, operations, and transitive calls.
+Source code does not declare them:
 
 ```cellscript
-#[effect(ReadOnly)]
-fn read_threshold(config: &Config) -> u64 {
-    config.threshold
+fn read_capacity() -> u64 {
+    return ckb::cell_capacity(source::input(0))
 }
 ```
 
-Function metadata distinguishes `declared_effect_class`,
-`inferred_effect_class`, and the effective `effect_class`. The compiler walks
-the call graph transitively and recomputes imported helpers from loaded package
-source. An imported `#[effect(Pure)] fn` that wraps a creating or mutating
-action is rejected; the attribute is not treated as an unauthenticated promise.
-`effect_evidence_tier = checked-static` records that this contract is discharged
-by the compiler.
+This helper infers an input `capacity` observation in `effects.context_reads`.
+Its `lifecycle_ops` and `process_ops` are empty. Reading and then creating retains
+facts in both dimensions. Temporary collection mutation is local computation.
+Metadata stores the required structured facts, together with evidence status;
+there is no category field or default category. The compiler resolves imported
+and aliased calls from their definitions before inference. Manual effect
+attributes and the retired native wrapper are rejected.
 
-Canonical terminal flows use enum-backed states:
-
-```cellscript
-flow SwapLock.state {
-    initial Pending;
-    terminal Claimed, Refunded;
-
-    Pending -> Claimed;
-    Pending -> Refunded;
-}
-```
-
-Inspect these type metadata fields together:
-
-- `flow_initial_state` and `flow_terminal_states` describe the local state
-  contract;
-- `flow_terminal_discharge = terminal-by-output-state` identifies the only
-  implemented 0.22 discharge model;
-- `flow_terminal_evidence_tier = checked-runtime` records generated verifier
-  discharge;
-- `flow_state_model = enum-backed` distinguishes the canonical surface from
-  migration-only numeric flows;
-- `flow_audit_warnings` reports legacy declarations or an initial state with no
-  outgoing edge.
-
-An action edge that reaches a declared terminal emits a `flow-terminal` /
-`terminal-by-output-state` verifier obligation and matching ProofPlan record.
-That record proves the selected transaction's output-state check. It is not a
-global liveness, chain inclusion, capacity, or eventual-termination proof.
+The compiler first completes structural typing and binding, lowers unoptimized
+IR, infers facts and validates observation/invariant constraints. Optional
+optimization must preserve those facts. The independent checker reconstructs
+facts from its own bound typed operations and call evidence, then compares them
+exactly. Rebinding hashes cannot legitimize an omitted or broadened fact set.
+Concrete source-only declarations do not establish executable availability;
+uninstantiated templates carry explicit `effects: null`. Concrete instances
+have inferred facts, while absent executable projections lack verified evidence.
+An empty required fact contract rejects a candidate that starts reading context.
+Interface comparison uses a subset check in each of the three dimensions; all
+lifecycle, ownership and ABI obligations remain independently checked. See
+[the effect contract](../CELLSCRIPT_EFFECT_CONTRACTS.md) for the complete rules.
 
 ## Suggested Compiler CI Gate
 

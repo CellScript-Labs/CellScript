@@ -77,7 +77,7 @@ to its exact metadata, ELF, interface, builder manifest, selected entry, Script
 role, and deployment. Closed cross-Script roles use
 `cellscript-protocol-closed-role-v1`.
 Successful admission also returns
-`cellscript-exact-script-handle-receipt-v1` plus the fixed-width
+`cellscript-exact-script-handle-receipt-v3` plus the fixed-width
 `cellscript-exact-script-handle-value-v1` representation. The receipt explains
 which checked entry/interface/artifact/deployment the value identifies; the
 value itself grants no lifecycle or authorization capability.

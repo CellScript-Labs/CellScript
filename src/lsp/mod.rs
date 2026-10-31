@@ -4,18 +4,25 @@ use crate::lexer::token::{keyword_or_identifier, TokenKind};
 use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 mod cell_views;
 mod collection_budgets;
+mod view_index;
 
-#[cfg(not(feature = "wasm"))]
+#[cfg(all(feature = "lsp", not(feature = "wasm")))]
 pub mod server;
+#[cfg(all(feature = "lsp", not(feature = "wasm")))]
+mod session;
 
+#[derive(Clone)]
 pub struct LspServer {
-    documents: HashMap<String, String>,
-    ast_cache: HashMap<String, Module>,
-    diagnostics: HashMap<String, Vec<Diagnostic>>,
+    documents: HashMap<String, Arc<String>>,
+    ast_cache: HashMap<String, Arc<Module>>,
+    ast_editions: HashMap<String, crate::CellScriptEdition>,
+    diagnostics: HashMap<String, Arc<[Diagnostic]>>,
     edition_overrides: HashMap<String, crate::CellScriptEdition>,
+    view_cache: view_index::ViewCache,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -147,7 +154,14 @@ impl Default for LspServer {
 
 impl LspServer {
     pub fn new() -> Self {
-        Self { documents: HashMap::new(), ast_cache: HashMap::new(), diagnostics: HashMap::new(), edition_overrides: HashMap::new() }
+        Self {
+            documents: HashMap::new(),
+            ast_cache: HashMap::new(),
+            ast_editions: HashMap::new(),
+            diagnostics: HashMap::new(),
+            edition_overrides: HashMap::new(),
+            view_cache: Default::default(),
+        }
     }
 
     pub fn open_document(&mut self, uri: String, content: String) {
@@ -174,48 +188,93 @@ impl LspServer {
     /// If any change has `range == None`, the entire document is replaced with that change's text.
     /// Otherwise, each change's text is spliced into the current document at the given range.
     pub fn update_document_incremental(&mut self, uri: &str, changes: Vec<TextDocumentContentChangeEvent>) {
-        let Some(mut content) = self.documents.get(uri).cloned() else {
-            return;
-        };
+        self.apply_buffer_changes(uri, changes);
+        self.analyze_document(uri);
+    }
 
+    /// Transport mutation only: no parsing, manifest lookup or compilation.
+    pub(super) fn apply_buffer_changes(&mut self, uri: &str, changes: Vec<TextDocumentContentChangeEvent>) {
+        let Some(mut content) = self.documents.get(uri).map(|source| source.as_ref().clone()) else { return };
         for change in changes {
-            match change.range {
-                None => {
-                    // Full document replacement.
-                    content = change.text;
-                }
-                Some(range) => {
-                    content = apply_incremental_change(&content, range, &change.text);
-                }
-            }
+            content = match change.range {
+                None => change.text,
+                Some(range) => apply_incremental_change(&content, range, &change.text),
+            };
             if content.len() > crate::MAX_SOURCE_BYTES {
                 self.reject_oversized_document(uri);
                 return;
             }
         }
+        self.replace_buffer(uri.into(), content);
+    }
 
-        self.store_document(uri.to_string(), content);
+    pub(super) fn replace_buffer(&mut self, uri: String, content: String) {
+        if content.len() > crate::MAX_SOURCE_BYTES {
+            self.reject_oversized_document(&uri);
+            return;
+        }
+        self.ast_cache.remove(&uri);
+        self.diagnostics.remove(&uri);
+        self.documents.insert(uri, content.into());
+    }
+
+    fn analyze_document(&mut self, uri: &str) {
+        if let Some(content) = self.documents.get(uri).cloned() {
+            self.parse_document(uri, &content);
+        }
+    }
+
+    #[cfg(all(feature = "lsp", not(feature = "wasm")))]
+    pub(super) fn analyze_documents(&mut self) {
+        let mut uris = self.documents.keys().cloned().collect::<Vec<_>>();
+        uris.sort();
+        for uri in uris {
+            self.analyze_document(&uri);
+        }
+    }
+
+    /// Navigation parses its target; dependencies use the same workspace overlay
+    /// loader as compilation. Other projects' buffers do not delay the request.
+    #[cfg(any(test, all(feature = "lsp", not(feature = "wasm"))))]
+    pub(super) fn prepare_navigation_for(&mut self, uri: &str) {
+        let edition = self.document_edition(uri);
+        if self.ast_editions.get(uri) != Some(&edition) {
+            self.ast_cache.remove(uri);
+        }
+        if !self.ast_cache.contains_key(uri)
+            && let Some(source) = self.documents.get(uri)
+            && let Ok(module) = crate::frontend::parse_diagnostics(source, edition)
+        {
+            self.ast_cache.insert(uri.into(), module.into());
+            self.ast_editions.insert(uri.into(), edition);
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn prepare_navigation(&mut self) {
+        for uri in self.documents.keys().cloned().collect::<Vec<_>>() {
+            self.prepare_navigation_for(&uri);
+        }
     }
 
     pub fn close_document(&mut self, uri: &str) {
         self.documents.remove(uri);
         self.ast_cache.remove(uri);
+        self.ast_editions.remove(uri);
         self.diagnostics.remove(uri);
         self.edition_overrides.remove(uri);
+        self.view_cache.lock().unwrap().remove(uri);
     }
 
     fn store_document(&mut self, uri: String, content: String) {
-        if content.len() > crate::MAX_SOURCE_BYTES {
-            self.reject_oversized_document(&uri);
-            return;
-        }
-        self.parse_document(&uri, &content);
-        self.documents.insert(uri, content);
+        self.replace_buffer(uri.clone(), content);
+        self.analyze_document(&uri);
     }
 
     fn reject_oversized_document(&mut self, uri: &str) {
         self.documents.remove(uri);
         self.ast_cache.remove(uri);
+        self.ast_editions.remove(uri);
         self.diagnostics.insert(
             uri.to_string(),
             vec![Diagnostic {
@@ -225,26 +284,38 @@ impl LspServer {
                 code_description: None,
                 message: format!("source exceeds the {} byte compiler limit", crate::MAX_SOURCE_BYTES),
                 source: "cellscript".to_string(),
-            }],
+            }]
+            .into(),
         );
     }
 
     fn parse_document(&mut self, uri: &str, content: &str) {
         self.ast_cache.remove(uri);
+        self.ast_editions.remove(uri);
         let uri_path = file_uri_to_utf8_path(uri).filter(|path| path.exists());
         let edition = self.document_edition(uri);
         let ast = match crate::frontend::parse_diagnostics(content, edition) {
             Ok(ast) => ast,
             Err(errors) => {
-                self.diagnostics.insert(uri.to_string(), errors.iter().map(|error| diagnostic_from_error(content, error)).collect());
+                self.diagnostics.insert(
+                    uri.to_string(),
+                    errors.iter().map(|error| diagnostic_from_error(content, error)).collect::<Vec<_>>().into(),
+                );
                 return;
             }
         };
 
-        self.ast_cache.insert(uri.to_string(), ast.clone());
+        self.ast_cache.insert(uri.to_string(), ast.clone().into());
+        self.ast_editions.insert(uri.into(), edition);
         let report = uri_path
             .as_ref()
-            .map(|path| crate::compile_path_metadata_with_diagnostics_for_source(path, content, crate::CompileOptions::default()))
+            .map(|path| {
+                crate::compile_path_metadata_with_diagnostics_for_sources(
+                    path,
+                    &self.source_overlays(),
+                    crate::CompileOptions::default(),
+                )
+            })
             .unwrap_or_else(|| crate::compile_metadata_with_diagnostics(content, edition, None));
         let mut diagnostics = report
             .diagnostics
@@ -255,7 +326,7 @@ impl LspServer {
         if let Some(metadata) = report.metadata.as_ref() {
             diagnostics.extend(lowering_diagnostics(content, &ast, metadata));
         }
-        self.diagnostics.insert(uri.to_string(), diagnostics);
+        self.diagnostics.insert(uri.to_string(), diagnostics.into());
     }
 
     fn document_edition(&self, uri: &str) -> crate::CellScriptEdition {
@@ -265,7 +336,7 @@ impl LspServer {
     }
 
     pub fn get_diagnostics(&self, uri: &str) -> Vec<Diagnostic> {
-        self.diagnostics.get(uri).cloned().unwrap_or_default()
+        self.diagnostics.get(uri).map(|diagnostics| diagnostics.to_vec()).unwrap_or_default()
     }
 
     pub fn completion(&self, uri: &str, position: Position) -> Vec<CompletionItem> {
@@ -284,11 +355,14 @@ impl LspServer {
                 let mut temporary = Self {
                     documents: self.documents.clone(),
                     ast_cache: self.ast_cache.clone(),
+                    ast_editions: self.ast_editions.clone(),
                     diagnostics: HashMap::new(),
                     edition_overrides: self.edition_overrides.clone(),
+                    view_cache: Default::default(),
                 };
-                temporary.documents.insert(uri.into(), repaired);
-                temporary.ast_cache.insert(uri.into(), module);
+                temporary.documents.insert(uri.into(), repaired.into());
+                temporary.ast_cache.insert(uri.into(), module.into());
+                temporary.ast_editions.insert(uri.into(), self.document_edition(uri));
                 temporary.edition_overrides.insert(uri.into(), self.document_edition(uri));
                 return temporary.completion(uri, position);
             }
@@ -421,7 +495,7 @@ impl LspServer {
         if edition == crate::NEXT_EDITION {
             declarations.push((
                 "type_script",
-                "type_script ${1:Name} on type_group<${2:CellType}> {\n    entry ${3:verify}(\n        input ${4:before}: ${2:CellType} from group_input[0],\n        witness ${5:to}: Address from group_witness.input_type,\n        output ${6:after}: ${2:CellType} from group_output[0],\n    ) {\n        verify {\n            enforce ${4:before}.${7:amount} > 0\n        }\n\n        effects {\n            replace ${4:before} -> ${6:after} {\n                data {\n                    ${7:amount} = same\n                }\n                identity = same\n                type_script = same\n                lock_script = exact_hash(${5:to})\n                capacity = same\n                cardinality = one_to_one\n            }\n        }\n    }\n}",
+                "type_script ${1:Name} on type_group<${2:CellType}> {\n    entry ${3:verify}(\n        input ${4:before}: ${2:CellType} from group_input[0],\n        witness ${5:to}: Address from group_witness.input_type,\n        output ${6:after}: ${2:CellType} from group_output[0],\n    ) {\n        verify {\n            enforce ${4:before}.${7:amount} > 0\n        }\n\n        replace ${4:before} -> ${6:after} {\n            data {\n                ${7:amount} = same\n            }\n            identity = same\n            type_script = same\n            lock_script = exact_hash(${5:to})\n            capacity = same\n            cardinality = one_to_one\n        }\n    }\n}",
             ));
             declarations.push((
                 "lock_script",
@@ -1394,7 +1468,6 @@ impl LspServer {
                 ("entry", "entry ${1:name}($0)"),
                 ("verify", "verify {\n    enforce ${1:condition}\n}"),
                 ("enforce", "enforce ${1:condition}"),
-                ("effects", "effects {\n    $0\n}"),
                 ("replace", "replace ${1:input} -> ${2:output} {\n    $0\n}"),
                 ("pool", "pool ${1:name} {\n    inputs { ${2:input} }\n    outputs { ${3:output} }\n    data {\n        ${4:amount} = conserve\n    }\n    identity = pooled\n    type_script = same\n    lock_script { ${3:output} = exact_hash(${5:recipient}) }\n    capacity = builder_computed\n    cardinality = declared\n}"),
                 ("retire", "retire ${1:input} {\n    absence = ${2:field(identity)}\n    data = discarded\n    lock_script = none\n    type_script = absent\n    capacity = released\n    cardinality = one\n}"),
@@ -2114,7 +2187,7 @@ impl LspServer {
             .diagnostics
             .get(uri)
             .into_iter()
-            .flatten()
+            .flat_map(|diagnostics| diagnostics.iter())
             .any(|diagnostic| diagnostic.code.as_deref() == Some("W3012") && ranges_overlap(diagnostic.range, range));
         if has_temporal_migration_diagnostic
             && let Some(content) = self.documents.get(uri)
@@ -2143,7 +2216,7 @@ impl LspServer {
             .diagnostics
             .get(uri)
             .into_iter()
-            .flatten()
+            .flat_map(|diagnostics| diagnostics.iter())
             .any(|diagnostic| diagnostic.source == "cellscript-lowering" && ranges_overlap(diagnostic.range, range));
 
         if has_lowering_diagnostic {
@@ -2187,7 +2260,7 @@ impl LspServer {
         let Ok(formatted) = crate::fmt::format_default(ast) else {
             return Vec::new();
         };
-        if &formatted == content {
+        if formatted.as_str() == content.as_str() {
             return Vec::new();
         }
         vec![TextEdit { range: Range { start: Position { line: 0, character: 0 }, end: end_position(content) }, new_text: formatted }]
@@ -2502,43 +2575,31 @@ impl LspServer {
         None
     }
 
-    fn workspace_modules(&self, uri: &str) -> Vec<crate::LoadedModule> {
-        let Some(path) = file_uri_to_utf8_path(uri) else {
-            return Vec::new();
-        };
-
-        let mut modules = crate::load_modules_for_input(&path).unwrap_or_default();
-
-        // An imported schema may have unsaved changes in another open buffer.
-        // Keep its source and AST together so completion/navigation agree.
-        let opened = self
-            .ast_cache
+    fn source_overlays(&self) -> std::collections::BTreeMap<Utf8PathBuf, String> {
+        self.documents
             .iter()
-            .filter_map(|(open_uri, ast)| {
-                let path = file_uri_to_utf8_path(open_uri)?;
-                let content = self.documents.get(open_uri)?;
-                let canonical = std::fs::canonicalize(&path).unwrap_or_else(|_| path.as_std_path().to_path_buf());
-                Some((canonical, (content, ast)))
+            .filter_map(|(uri, source)| {
+                let path = file_uri_to_utf8_path(uri)?;
+                let path = crate::canonical_utf8_path(&path).ok()?;
+                Some((path, source.as_ref().clone()))
             })
-            .collect::<HashMap<_, _>>();
-        for module in &mut modules {
-            let path = std::fs::canonicalize(&module.path).unwrap_or_else(|_| module.path.as_std_path().to_path_buf());
-            if let Some((content, ast)) = opened.get(&path) {
-                module.source = (*content).clone();
-                module.ast = (*ast).clone();
-            }
-        }
+            .collect()
+    }
 
-        if let (Some(content), Some(ast)) = (self.documents.get(uri), self.ast_cache.get(uri)) {
-            if let Some(module) = modules.iter_mut().find(|module| same_workspace_path(&module.path, &path)) {
-                module.source = content.clone();
-                module.ast = ast.clone();
-            } else {
-                let edition = self.document_edition(uri);
-                modules.push(crate::LoadedModule { path, source: content.clone(), ast: ast.clone(), edition });
-            }
+    fn workspace_modules(&self, uri: &str) -> Vec<crate::LoadedModule> {
+        let Some(index) = self.view_index(uri) else { return Vec::new() };
+        let mut modules = index.modules.clone();
+        if let Some(path) = file_uri_to_utf8_path(uri)
+            && !modules.iter().any(|module| same_workspace_path(&module.path, &path))
+            && let (Some(content), Some(ast)) = (self.documents.get(uri), self.ast_cache.get(uri))
+        {
+            modules.push(crate::LoadedModule {
+                path,
+                source: content.as_ref().clone(),
+                ast: ast.as_ref().clone(),
+                edition: self.document_edition(uri),
+            });
         }
-
         modules
     }
 }
@@ -3176,7 +3237,7 @@ fn action_metadata_hover(name: &str, metadata: Option<&crate::CompileMetadata>) 
 
     format!(
         "\n\n**Lowering metadata**\n\nEffect: `{}`\n\nELF compatible: `{}`\n\nStandalone runner compatible: `{}`\n\nFail-closed runtime features: `{}`\n\nCKB runtime features: `{}`\n\nCKB runtime accesses: `{}`\n\nVerifier obligations: `{}`",
-        action.effect_class,
+        action.effects,
         action.elf_compatible,
         action.standalone_runner_compatible,
         fail_closed_features,
@@ -3186,25 +3247,11 @@ fn action_metadata_hover(name: &str, metadata: Option<&crate::CompileMetadata>) 
     )
 }
 
-fn function_metadata_hover(name: &str, function: &FnDef, metadata: Option<&crate::CompileMetadata>) -> String {
-    if let Some(metadata) = metadata
-        && let Some(function_metadata) = metadata.functions.iter().find(|candidate| candidate.name == name)
-    {
-        let declared = function_metadata.declared_effect_class.as_deref().unwrap_or("inferred");
-        return format!(
-            "\n\n**Effect metadata**\n\nDeclared: `{}`\n\nInferred: `{}`\n\nEffective: `{}`\n\nEvidence: `{}`",
-            declared,
-            function_metadata.inferred_effect_class,
-            function_metadata.effect_class,
-            function_metadata.effect_evidence_tier.as_str()
-        );
+fn function_metadata_hover(name: &str, _function: &FnDef, metadata: Option<&crate::CompileMetadata>) -> String {
+    if let Some(function) = metadata.and_then(|metadata| metadata.functions.iter().find(|function| function.name == name)) {
+        return format!("\n\n**Inferred effect**: `{}`\n\nEvidence: `{}`", function.effects, function.effect_evidence_tier.as_str());
     }
-
-    if function.effect_declared {
-        format!("\n\n**Declared effect**: `{}`", function.effect.as_str())
-    } else {
-        "\n\n**Effect**: inferred from the transitive call graph".to_string()
-    }
+    "\n\n**Effect**: inference evidence unavailable".to_string()
 }
 
 fn position_to_offset(source: &str, position: Position) -> Option<usize> {
@@ -3466,7 +3513,7 @@ mod tests {
         let offset = source.find("selected.quote.input_count").unwrap() + "selected.".len();
         let definition = server.goto_definition(uri, offset_to_position(source, offset + 1)).unwrap();
         assert_eq!(definition.range.start, offset_to_position(source, source.find("quote: Balance").unwrap()));
-        let declaration = &source[source.find("cell_roles Settlement").unwrap()..source.find("#[effect").unwrap()];
+        let declaration = &source[source.find("cell_roles Settlement").unwrap()..source.find("fn full_fill").unwrap()];
         let augmented =
             format!("{source}\n{}\nfn unrelated(quote: u64) -> u64 {{ return quote }}", declaration.replace("Settlement", "Other"));
         server.open_document_with_edition(uri.into(), augmented, crate::NEXT_EDITION);
@@ -3483,7 +3530,7 @@ mod tests {
     #[test]
     fn named_role_rename_preserves_catalog_identity_across_receiver_forms() {
         let original = include_str!("../../examples/language/batches/mixed_settlement.cell");
-        let declaration = &original[original.find("cell_roles Settlement").unwrap()..original.find("#[effect").unwrap()];
+        let declaration = &original[original.find("cell_roles Settlement").unwrap()..original.find("fn full_fill").unwrap()];
         for (receiver, separator) in [
             ("selected", " /* quote is a role */ "),
             ("selected", " /* quote remains\n in this catalog */ "),
@@ -4086,7 +4133,7 @@ mod tests {
             ("InputView<Token>", "view.", "out_point"),
             ("OutputView<Token>", "view.", "capacity"),
         ] {
-            let marked = format!("module helper_completion\nresource Token has store {{ id: u64, owner: Hash }}\n#[effect(ReadOnly)]\nfn inspect(view: {parameter}) -> u64 {{ return {expression}| }}");
+            let marked = format!("module helper_completion\nresource Token has store {{ id: u64, owner: Hash }}\nfn inspect(view: {parameter}) -> u64 {{ return {expression}| }}");
             let offset = marked.find('|').unwrap();
             let source = marked.replace('|', "");
             let position = offset_to_position(&source, offset);
@@ -4590,7 +4637,8 @@ action update(amount: u64) -> u64 {
                 code_description: None,
                 message: "action emits fail-closed runtime traps".to_string(),
                 source: "cellscript-lowering".to_string(),
-            }],
+            }]
+            .into(),
         );
 
         let actions = server.code_action(&uri, diagnostic_range);
@@ -4687,15 +4735,13 @@ type_script TokenTransfer on type_group<Token> {
         output next: Token from group_output[0],
     ) {
         verify { enforce token.amount > 0 }
-        effects {
-            replace token -> next {
-                data { owner = same; amount = same }
-                identity = same
-                type_script = same
-                lock_script = exact_hash(recipient)
-                capacity = same
-                cardinality = one_to_one
-            }
+        replace token -> next {
+            data { owner = same; amount = same }
+            identity = same
+            type_script = same
+            lock_script = exact_hash(recipient)
+            capacity = same
+            cardinality = one_to_one
         }
     }
 }
@@ -4703,7 +4749,7 @@ type_script TokenTransfer on type_group<Token> {
         std::fs::write(&source_path, native).unwrap();
         server.update_document(uri.clone(), native.to_string());
         assert!(server.get_diagnostics(&uri).is_empty());
-        for label in ["effects", "pool", "retire", "fresh", "audit"] {
+        for label in ["pool", "retire", "fresh", "audit"] {
             assert!(server.keyword_completions(&uri).iter().any(|item| item.label == label));
         }
         assert!(!server.keyword_completions(&uri).iter().any(|item| item.label == "consume" || item.label == "consume_each"));

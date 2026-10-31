@@ -60,6 +60,7 @@ pub(crate) fn nominal_catalog(
 ) -> Option<NominalDeclarationCatalog> {
     let mut catalog = NominalDeclarationCatalog { schema: NOMINAL_DECLARATION_CATALOG_SCHEMA.into(), ..Default::default() };
     for module in modules(root, resolver) {
+        let effects = crate::effects::infer_module(module, resolver).ok()?;
         let mut bindings = BTreeMap::new();
         for item in module.items.iter().chain(&module.interface_templates) {
             if let Some(name) = item.name() {
@@ -79,7 +80,13 @@ pub(crate) fn nominal_catalog(
                 if let Some(declaration) = nominal(module, item) {
                     catalog.declarations.push(declaration);
                 }
-                if let Some(callable) = callable(module, item) {
+                if let Some(mut callable) = callable(module, item, &effects) {
+                    if module.name == root.name
+                        && let Some(entry) = typed.entries.iter().find(|entry| entry.name == callable.name)
+                        && callable.type_parameters.is_empty()
+                    {
+                        callable.effects = Some(entry.effects.clone());
+                    }
                     catalog.callables.push(callable);
                 }
                 if let Item::Const(constant) = item {
@@ -249,7 +256,7 @@ fn structural(
     }
 }
 
-fn callable(module: &Module, item: &Item) -> Option<SourceCallableContract> {
+fn callable(module: &Module, item: &Item, effects: &crate::effects::InferredEffects) -> Option<SourceCallableContract> {
     let (name, kind, parameters, params, outputs, return_type, effect) = match item {
         Item::Action(def) => (
             &def.name,
@@ -267,7 +274,7 @@ fn callable(module: &Module, item: &Item) -> Option<SourceCallableContract> {
                 })
                 .collect(),
             def.return_type.as_ref().map(crate::generics::render_source_type),
-            def.effect.as_str(),
+            Some(effects.get(&def.name)?),
         ),
         Item::Function(def) => (
             &def.name,
@@ -283,7 +290,7 @@ fn callable(module: &Module, item: &Item) -> Option<SourceCallableContract> {
             params(&def.params),
             vec![],
             def.return_type.as_ref().map(crate::generics::render_source_type),
-            def.effect.as_str(),
+            if def.type_params.is_empty() { Some(effects.get(&def.name)?) } else { None },
         ),
         Item::Lock(def) => (
             &def.name,
@@ -292,7 +299,7 @@ fn callable(module: &Module, item: &Item) -> Option<SourceCallableContract> {
             params(&def.params),
             vec![],
             Some(crate::generics::render_source_type(&def.return_type)),
-            "ReadOnly",
+            Some(effects.get(&def.name)?),
         ),
         _ => return None,
     };
@@ -305,7 +312,7 @@ fn callable(module: &Module, item: &Item) -> Option<SourceCallableContract> {
         params,
         outputs,
         return_type,
-        declared_effect: effect.into(),
+        effects: effect,
     })
 }
 

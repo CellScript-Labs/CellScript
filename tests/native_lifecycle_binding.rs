@@ -16,15 +16,13 @@ type_script TokenPolicy on type_group<Token> {
         output after: Token from group_output[0],
     ) {
         verify { enforce true }
-        effects {
-            fresh after {
-                data { amount = 7 }
-                identity = none
-                type_script = declared
-                lock_script = exact_hash(recipient)
-                capacity = builder_computed
-                cardinality = one
-            }
+        fresh after {
+            data { amount = 7 }
+            identity = none
+            type_script = declared
+            lock_script = exact_hash(recipient)
+            capacity = builder_computed
+            cardinality = one
         }
     }
 }
@@ -36,15 +34,13 @@ resource Token has store, consume, burn { amount: u64 }
 type_script TokenPolicy on type_group<Token> {
     entry burn(input before: Token from group_input[0]) {
         verify { enforce before.amount == 7 }
-        effects {
-            retire before {
-                absence = singleton_type
-                data = discarded
-                lock_script = none
-                type_script = absent
-                capacity = released
-                cardinality = one
-            }
+        retire before {
+            absence = singleton_type
+            data = discarded
+            lock_script = none
+            type_script = absent
+            capacity = released
+            cardinality = one
         }
     }
 }

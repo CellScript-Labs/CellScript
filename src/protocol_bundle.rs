@@ -39,6 +39,12 @@ pub const PROTOCOL_BUNDLE_REPORT_SCHEMA: &str = "cellscript-protocol-bundle-repo
 pub const PROTOCOL_BUNDLE_EVIDENCE_SCHEMA: &str = "cellscript-protocol-bundle-evidence-v1";
 pub const PROTOCOL_BUNDLE_HASH_DOMAIN: &str = "cellscript-protocol-bundle-v1";
 pub const PROTOCOL_CLOSED_ROLE_SCHEMA: &str = "cellscript-protocol-closed-role-v1";
+pub(crate) const PROTOCOL_BUNDLE_ARTIFACT_BINDING_SCHEMA: &str = "cellscript-protocol-bundle-artifact-binding-v1";
+pub(crate) const PROTOCOL_BUNDLE_BOUNDED_OUTPUT_PLAN_EVIDENCE_SCHEMA: &str = "cellscript-bounded-output-plan-evidence-v1";
+pub(crate) const PROTOCOL_BUNDLE_BOUNDED_OUTPUT_PLAN_EVIDENCE_VERSION: u32 = 1;
+pub(crate) const PROTOCOL_OPEN_HANDLE_SCHEMA: &str = "cellscript-protocol-open-handle-v1";
+pub(crate) const PROTOCOL_INSTANCE_HANDLE_SCHEMA: &str = "cellscript-protocol-instance-handle-v1";
+pub(crate) const PROTOCOL_INSTANCE_ADMISSION_SCHEMA: &str = "cellscript-protocol-instance-admission-v1";
 
 const MAX_ARTIFACTS: usize = 64;
 const MAX_ROLE_BINDINGS: usize = 4_096;
@@ -883,7 +889,9 @@ fn validate_transaction(transaction: &ProtocolTransactionSkeleton) -> Result<()>
     bounded_count("bounded output plan evidence", transaction.bounded_output_plan_evidence.len(), MAX_WITNESS_CLAIMS)?;
     let mut bounded_plan_bindings = BTreeSet::new();
     for evidence in &transaction.bounded_output_plan_evidence {
-        if evidence.schema != "cellscript-bounded-output-plan-evidence-v1" || evidence.version != 1 {
+        if evidence.schema != PROTOCOL_BUNDLE_BOUNDED_OUTPUT_PLAN_EVIDENCE_SCHEMA
+            || evidence.version != PROTOCOL_BUNDLE_BOUNDED_OUTPUT_PLAN_EVIDENCE_VERSION
+        {
             return Err(CompileError::without_span(
                 "ProtocolBundle bounded output plan evidence has an unsupported schema or version",
             ));
@@ -1208,15 +1216,15 @@ fn validate_builder_manifest(input: &ProtocolArtifactInput, metadata: &CompileMe
             Ok(serde_json::json!({
                 "schema": if selection_profile { PROTOCOL_BUNDLE_SELECTION_SCHEMA } else { PROTOCOL_BUNDLE_SCHEMA },
                 "report_schema": if selection_profile { PROTOCOL_BUNDLE_SELECTION_REPORT_SCHEMA } else { PROTOCOL_BUNDLE_REPORT_SCHEMA },
-                "artifact_binding_schema": "cellscript-protocol-bundle-artifact-binding-v1",
-                "closed_role_schema": "cellscript-protocol-closed-role-v1",
-                "bounded_output_plan_evidence_schema": "cellscript-bounded-output-plan-evidence-v1",
-                "deployment_line_admission_evidence_schema": "cellscript-deployment-line-admission-evidence-v1",
-                "deployment_line_admission_transition_schema": "cellscript-deployment-line-admission-transition-v1",
+                "artifact_binding_schema": PROTOCOL_BUNDLE_ARTIFACT_BINDING_SCHEMA,
+                "closed_role_schema": PROTOCOL_CLOSED_ROLE_SCHEMA,
+                "bounded_output_plan_evidence_schema": PROTOCOL_BUNDLE_BOUNDED_OUTPUT_PLAN_EVIDENCE_SCHEMA,
+                "deployment_line_admission_evidence_schema": crate::deployment_line_handle::DEPLOYMENT_LINE_ADMISSION_EVIDENCE_SCHEMA,
+                "deployment_line_admission_transition_schema": crate::deployment_line_handle::DEPLOYMENT_LINE_ADMISSION_TRANSITION_SCHEMA,
                 "requires_deployment_line_admission": metadata.target_profile.name == "ckb-type-hash",
-                "exact_handle_receipt_schema": "cellscript-exact-script-handle-receipt-v1",
-                "exact_handle_value_schema": "cellscript-exact-script-handle-value-v1",
-                "exact_handle_encoding": "CSHDLv1-fixed-202",
+                "exact_handle_receipt_schema": crate::script_handle::EXACT_SCRIPT_HANDLE_RECEIPT_SCHEMA,
+                "exact_handle_value_schema": crate::script_handle::EXACT_SCRIPT_HANDLE_VALUE_SCHEMA,
+                "exact_handle_encoding": crate::script_handle::EXACT_SCRIPT_HANDLE_ENCODING,
                 "exact_handle_hash_algorithm": "ckb-blake2b-256",
                 "exact_handle_hash_personalization": "ckb-default-hash",
                 "runtime_adapter": "cellscript-ckb-adapter",
@@ -2263,8 +2271,8 @@ mod tests {
         transaction.witnesses[0].input_type = Some(format!("0x{}", hex_encode(&ckb_blake2b256(&[1_u8, 2]))));
         transaction.witnesses[0].input_type_bytes = Some("0x0102".to_string());
         transaction.bounded_output_plan_evidence.push(ProtocolBoundedOutputPlanEvidence {
-            schema: "cellscript-bounded-output-plan-evidence-v1".to_string(),
-            version: 1,
+            schema: PROTOCOL_BUNDLE_BOUNDED_OUTPUT_PLAN_EVIDENCE_SCHEMA.to_string(),
+            version: PROTOCOL_BUNDLE_BOUNDED_OUTPUT_PLAN_EVIDENCE_VERSION,
             action: "settle".to_string(),
             binding: "plans".to_string(),
             witness_index: 0,

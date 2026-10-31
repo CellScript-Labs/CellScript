@@ -23,7 +23,7 @@ action cast(
         require ckb::cell_data_u32_le(proposal, 72) > 0
         require ckb::cell_data_u64_le(proposal, 76) > 0
         require ckb::cell_data_u64_le(proposal, 84) > 0
-        ckb::require_cell_type_hash(proposal, ckb::cell_type_args32(ballot))
+        ckb::require_cell_type_hash(proposal, Hash::from_bytes(ckb::cell_type_args32(ballot)))
         require ckb::cell_type_hash_type(ballot) == 4
         require hash_blake2b(ckb::cell_type_code_hash(ballot)) == ckb::cell_data_blake2b_span(proposal, 40, 32)
         require hash_blake2b(ckb::cell_type_hash(dao)) == ckb::cell_data_blake2b_span(proposal, 156, 32)

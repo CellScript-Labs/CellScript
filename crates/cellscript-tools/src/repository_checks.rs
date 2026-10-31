@@ -87,6 +87,8 @@ fn untracked_cell_paths(root: &Path) -> Result<Vec<PathBuf>> {
 }
 
 pub fn check_source_policy(root: &Path) -> Result<()> {
+    check_nested_ir_boundary(root)?;
+    check_view_syntax_boundary(root)?;
     let retired_runtime_name = ["py", "thon"].concat();
     let version_token =
         Regex::new(r"(?i)(?:^|[._-])(?:v(?:ersion)?[._-]?)?\d+[._-]\d+(?:[._-]\d+)?(?:$|[._-])|(?:^|[._-])v\d+(?:$|[._-])")?;
@@ -140,6 +142,63 @@ pub fn check_source_policy(root: &Path) -> Result<()> {
     bail!("repository source-language policy failed")
 }
 
+fn copied_witness_view_parser(source: &str) -> Result<bool> {
+    Ok(Regex::new(r#"\.\s*strip_prefix\s*\(\s*"WitnessBytesView<""#)?.is_match(source))
+}
+
+/// The common parser owns syntax only. Source/checker admission remains local.
+fn check_view_syntax_boundary(root: &Path) -> Result<()> {
+    let owner = Path::new("crates/cellscript-artifact-checker/src/view_types.rs");
+    let mut pending = vec![root.join("src"), root.join("crates/cellscript-artifact-checker/src")];
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(&directory)? {
+            let path = entry?.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().is_some_and(|extension| extension == "rs")
+                && path.strip_prefix(root)? != owner
+                && copied_witness_view_parser(&fs::read_to_string(&path)?)?
+            {
+                bail!("{} reconstructs WitnessBytesView syntax outside the closed parser", path.display());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn nested_ir_text_round_trip(source: &str) -> Result<bool> {
+    let direct_parse = Regex::new(r"\bnested_values\s*::\s*(?:parsed|parse|bytes_view_type)\s*\(")?;
+    let rebuilt_name = Regex::new(r#"IrType\s*::\s*Named\s*\(\s*(?:format!\s*\(\s*)?"Nested(?:Values|BytesView|RecordView)<"#)?;
+    Ok(direct_parse.is_match(source) || rebuilt_name.is_match(source) || source.contains("values.item_type()"))
+}
+
+/// Check the migrated executable phases, including newly added Rust files.
+/// Source parsing, external metadata readers, diagnostics and source fixtures
+/// retain their separate text boundaries. This guard is not runtime evidence.
+fn check_nested_ir_boundary(root: &Path) -> Result<()> {
+    let mut pending = vec![root.join("src/ir"), root.join("src/codegen")];
+    while let Some(path) = pending.pop() {
+        for entry in fs::read_dir(&path).with_context(|| format!("failed to inspect {}", path.display()))? {
+            let path = entry?.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().and_then(|extension| extension.to_str()) == Some("rs") {
+                let relative = path.strip_prefix(root)?;
+                // The single source-to-IR boundary also owns malformed-name
+                // rejection tests; no other emitter/lowering file rebuilds it.
+                if relative == Path::new("src/ir/nested.rs") {
+                    continue;
+                }
+                let source = fs::read_to_string(&path)?;
+                if nested_ir_text_round_trip(&source)? {
+                    bail!("nested IR/codegen text round trip in {}; use the resolved nested description", relative.display());
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn normalized_head(path: &Path, lines: usize) -> Result<String> {
     let text = fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
     Ok(text.lines().take(lines).flat_map(str::split_whitespace).collect::<Vec<_>>().join(" "))
@@ -171,6 +230,29 @@ fn check_document_contract(
         }
     }
     Ok(())
+}
+
+pub(crate) fn current_metadata_schema(root: &Path) -> Result<u32> {
+    let compiler = fs::read_to_string(root.join("src/lib.rs"))?;
+    let checker = fs::read_to_string(root.join("crates/cellscript-artifact-checker/src/schema.rs"))?;
+    metadata_envelope_schema(&compiler, &checker)
+}
+
+fn metadata_envelope_schema(compiler: &str, checker: &str) -> Result<u32> {
+    let alias = Regex::new(
+        r"(?m)^pub const METADATA_SCHEMA_VERSION:\s*u32\s*=\s*cellscript_artifact_checker::COMPILE_METADATA_SCHEMA_VERSION\s*;",
+    )?;
+    if !alias.is_match(compiler) {
+        bail!("compiler METADATA_SCHEMA_VERSION must use the checker-owned envelope schema constant");
+    }
+    let declaration = Regex::new(r"(?m)^pub const COMPILE_METADATA_SCHEMA_VERSION:\s*u32\s*=\s*(\d+)\s*;")?;
+    declaration
+        .captures(checker)
+        .and_then(|captures| captures.get(1))
+        .context("checker source is missing COMPILE_METADATA_SCHEMA_VERSION")?
+        .as_str()
+        .parse()
+        .context("checker envelope schema is not a u32")
 }
 
 pub fn check_doc_status(root: &Path) -> Result<()> {
@@ -230,13 +312,7 @@ pub fn check_doc_status(root: &Path) -> Result<()> {
         }
     }
 
-    let lib_source = fs::read_to_string(root.join("src/lib.rs"))?;
-    let schema_re = Regex::new(r"METADATA_SCHEMA_VERSION:\s*u32\s*=\s*(\d+)")?;
-    let schema_version = schema_re
-        .captures(&lib_source)
-        .and_then(|captures| captures.get(1))
-        .map(|value| value.as_str().to_owned())
-        .context("src/lib.rs is missing METADATA_SCHEMA_VERSION")?;
+    let schema_version = current_metadata_schema(root)?;
     let current_schema = format!("current metadata schema {schema_version}");
     let schema_number = format!("metadata schema {schema_version}");
 
@@ -265,7 +341,7 @@ pub fn check_doc_status(root: &Path) -> Result<()> {
     check_document_contract(
         root,
         "docs/skills/cellscript-metadata-audit/SKILL.md",
-        &[schema_number.as_str(), "`0.30` development branch", "generic_instantiations"],
+        &[schema_number.as_str(), "current compiler development line", "generic_instantiations"],
         &["current 0.24 development line", "metadata schema 57"],
         &mut failures,
     )?;
@@ -466,12 +542,46 @@ mod tests {
     use super::*;
 
     #[test]
+    fn documentation_schema_uses_the_authoritative_envelope_not_component_versions() {
+        let compiler = "pub const METADATA_SCHEMA_VERSION: u32 = cellscript_artifact_checker::COMPILE_METADATA_SCHEMA_VERSION;\npub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 2;\npub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;";
+        let checker = "pub const COMPILE_METADATA_SCHEMA_VERSION: u32 = 73;";
+        assert_eq!(metadata_envelope_schema(compiler, checker).unwrap(), 73);
+        assert!(metadata_envelope_schema("pub const METADATA_SCHEMA_VERSION: u32 = 72;", checker).is_err());
+        assert!(metadata_envelope_schema(compiler, "pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 2;").is_err());
+    }
+
+    #[test]
     fn source_policy_recognizes_forbidden_artifact_paths() {
         assert!(forbidden_source_artifact(Path::new("scripts/legacy.py")));
         assert!(forbidden_source_artifact(Path::new("src/__pycache__/legacy.pyc")));
         assert!(forbidden_source_artifact(Path::new(".cap/logs/run.log")));
         assert!(forbidden_source_artifact(Path::new(".playwright-mcp/page.yml")));
         assert!(!forbidden_source_artifact(Path::new("src/main.rs")));
+    }
+
+    #[test]
+    fn view_syntax_policy_rejects_copied_parsing_but_allows_consumers() {
+        assert!(copied_witness_view_parser(r#"name.strip_prefix("WitnessBytesView<")"#).unwrap());
+        assert!(copied_witness_view_parser(r#"name . strip_prefix ( "WitnessBytesView<" )"#).unwrap());
+        assert!(!copied_witness_view_parser("parse_witness_bytes_view_type(name, WitnessViewSyntax::ExactArguments)").unwrap());
+        assert!(!copied_witness_view_parser(r#"format!("WitnessBytesView<{owner},{maximum}>")"#).unwrap());
+    }
+
+    #[test]
+    fn nested_ir_policy_rejects_reparsing_and_rebuilt_view_names() {
+        for source in [
+            "crate::nested_values::parsed(name)",
+            "nested_values :: parse (name)",
+            "nested_values::bytes_view_type(8)",
+            "IrType::Named(\"NestedBytesView<8>\".into())",
+            "IrType::Named(format!(\"NestedRecordView<{name}, 8>\"))",
+            "values.item_type()",
+        ] {
+            assert!(nested_ir_text_round_trip(source).unwrap(), "{source}");
+        }
+        for source in ["IrType::Nested(view)", "view.index_type()", "view.canonical_text()", "IrType::Named(\"Other\".into())"] {
+            assert!(!nested_ir_text_round_trip(source).unwrap(), "{source}");
+        }
     }
 
     #[test]

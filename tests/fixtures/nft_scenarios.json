@@ -1,98 +1,98 @@
 {
   "artifact_identities": {
     "capacity": {
-      "artifact_hash": "0x14b9d8950ec047836419e35094473b1fe7e3e110880a105e3aabe7b9f2544213",
-      "lowering_record_hash": "0x2bbe9a5033272c854fcc991d6e29e9ea33dbd20caf3dfee68fcb6e2c289af426",
-      "source_map_hash": "0x9295c34a225a45f51bb73dcd2f945f6337522227989273c5701a45b858c5dd56",
-      "verified_bundle_id": "0xd82f3ff6ce4978a42f5a01c6e9bb31c9ee839a7c156883e2daaaf37a5d36f723"
+      "artifact_hash": "0x7705e90d9c17fa72d6a9504dae5ddc4be86173e5f62ff605af1edd4bf10a506c",
+      "lowering_record_hash": "0xcb11e1b95dc53d4f97680547614090d57648e395905ea1e9f821d38d5cae0c73",
+      "source_map_hash": "0x1c0be1ce90cc3f0d587144fdf3beca59c66eb39cbfbe11b4a4239364ba760096",
+      "verified_bundle_id": "0xf16717c09a7fe73c909402a6392b445153fb51c139820ed308799f2cab8f6076"
     },
     "policy": {
-      "artifact_hash": "0xf2ebc7e2fdcdcc73d5b8361ad8ba32987e9438fef26960f3ddc7e1674105adf5",
-      "lowering_record_hash": "0xf5351b211958b7697482602e1ac06598bab3d6c5ab51929d1e9f070fac5d618f",
-      "source_map_hash": "0xf9d2080354be1903d62ddf826f716c8eb76254ff53e72edfcfe58ce43788cf97",
-      "verified_bundle_id": "0x8cfa3590b53c7c8fa66be04e2f7ba06b5c3bdd5870d7d4a7fee94825f267c34e"
+      "artifact_hash": "0x5d753ec6d29109d4027f3b6d5d72ce0889c78fa8c3c2fbb14d1c65e8e7d61dee",
+      "lowering_record_hash": "0xe8649a44252014ad100dc30728eeb9bbcf6dfb6f2149dc67057787c2513e50f7",
+      "source_map_hash": "0xae0190d05177cf53efb02db404b49731d65d463db3bbf58e98c77497f62a8520",
+      "verified_bundle_id": "0xfd3fa26e9bfb8fa16eeddd539f93a56fa4a1d4d0112bedbd0cbbf8ea20c82e5b"
     }
   },
   "cases": [
     {
       "expected_exit_code": 0,
       "outcome": "positive",
-      "raw_transaction_hash": "0x8ce3929f4f62a421cd2abaeb51549febce89beabc1dc0103b4ddf00dc1ae6960",
+      "raw_transaction_hash": "0x1cde018a0a3896b79409a40e994ce8bbdf2e3e090fbcd8355aa94f4d421ea91a",
       "rejection_stage": "ckb-vm",
       "scenario": "burn",
-      "serialized_transaction_hash": "0xbd3276ffce658a438ae592373c1d2baa43566d2dd85b4d7a8b3ecccc5b93ac5f"
+      "serialized_transaction_hash": "0x871d57993a52d1fca33102a664ad44957aa6ffc28aeb6956215cf1d7057b51c0"
     },
     {
       "expected_exit_code": 0,
       "outcome": "positive",
-      "raw_transaction_hash": "0x3b9777b04c162050494393c32c09d328221e3e276178b063da69634e08304e0f",
+      "raw_transaction_hash": "0x4c0283875563ea81792c0a0d25c9084218730ac6dd6b86ffdd7b1d8af0d8998a",
       "rejection_stage": "ckb-vm",
       "scenario": "capacity_adjustment",
-      "serialized_transaction_hash": "0x23e38f79b70fc43fc5f859f6a82f7428a161271703635701bc38e39507eb242f"
+      "serialized_transaction_hash": "0x331a3a142a7868eff9e244d78666fde2b923d8c37b42f121a0576bde73979632"
     },
     {
       "expected_exit_code": 21,
       "outcome": "adversarial",
-      "raw_transaction_hash": "0x1b46004db9826a3f080be25e9170ed3aec4363df12f6be294354fffd248d5b3b",
+      "raw_transaction_hash": "0x105094290f089ef563455725ab1cdd0a027f14f655dfe2a2c56d60c989cc7c94",
       "rejection_stage": "ckb-vm",
       "scenario": "duplicate_identity",
-      "serialized_transaction_hash": "0x641da2e5ea02a3fc8ec1fcb0490c6ed710d8ecd50d214becec62a64e7c4563cc"
+      "serialized_transaction_hash": "0xf6fd4aaa38c874934f894322459a4a82eb67c581f868cf18f2a0f3b789ab3272"
     },
     {
       "expected_exit_code": 0,
       "outcome": "positive",
-      "raw_transaction_hash": "0xa21024d59cf1253ccf520d8c179f3f1133e2dd898a430552fb537ea1c448845e",
+      "raw_transaction_hash": "0xcefdf3e0e6984295d71961d1e3a3deb6c9f1591621abbc0c53ea795423b6a047",
       "rejection_stage": "ckb-vm",
       "scenario": "metadata_update",
-      "serialized_transaction_hash": "0x12bc816d4d79ca20f5e309dd05da031b85d65f7e108f29142a15a130dd2685cf"
+      "serialized_transaction_hash": "0xe592a697530c65293a5b964a07798f597711c98a0969216572e7f3f0dbad6f13"
     },
     {
       "expected_exit_code": 0,
       "outcome": "positive",
-      "raw_transaction_hash": "0xb44563af9856ed314312183a7a8807f094c473696f559c69b5c2277fb41ccc2e",
+      "raw_transaction_hash": "0x694683e33ffc5aeaa022dace4744d2c023b311c439724f0008b052141dc7d4af",
       "rejection_stage": "ckb-vm",
       "scenario": "mint_unique",
-      "serialized_transaction_hash": "0x934b9427cce35a373150d88e67b8835fdd8b1a5d011ee210c62f7a8dd38a8f87"
+      "serialized_transaction_hash": "0xf7c1db8902f433a4ff4880d624ed1354671d9580d259ea405d113dbcb2bc038a"
     },
     {
       "expected_exit_code": 0,
       "outcome": "positive",
-      "raw_transaction_hash": "0x8e342c1a4fe93611510c26feb0a734a0bb8ebfae9fe220b85039bf1c272ddc4e",
+      "raw_transaction_hash": "0x0dcff2777668c97cf495c1bc56fab3d0c94d0a75bbda66d7f0c7fce874a1af72",
       "rejection_stage": "ckb-vm",
       "scenario": "ownership_transfer",
-      "serialized_transaction_hash": "0x7614e58fc3ec6554aa1ff6983a41cc1adbb87ae166b837366dbd7983fc57f849"
+      "serialized_transaction_hash": "0x7617f02a0ad1ea7c9fd4e83b79284bcfa10c0b6d38e07385e00fb027f4e20b14"
     },
     {
       "expected_exit_code": 3,
       "outcome": "adversarial",
-      "raw_transaction_hash": "0x638444f5744721c496998579e11ab5f330702b7767d961920a23ce022f366fea",
+      "raw_transaction_hash": "0x7a396b23b44692c8a8a155b933fa27ce78b62e61040ff2fbf9e41259da576158",
       "rejection_stage": "ckb-vm",
       "scenario": "stale_state",
-      "serialized_transaction_hash": "0x63221c9072696887c021487d80e326825b23917e57ceb47e3268c1165be9b148"
+      "serialized_transaction_hash": "0x8ce549cea4aa3ccc1f5e0cad896630d35e78f7215adc7f25e8380bdbb5044503"
     },
     {
       "expected_exit_code": -11,
       "outcome": "adversarial",
-      "raw_transaction_hash": "0xa21024d59cf1253ccf520d8c179f3f1133e2dd898a430552fb537ea1c448845e",
+      "raw_transaction_hash": "0xcefdf3e0e6984295d71961d1e3a3deb6c9f1591621abbc0c53ea795423b6a047",
       "rejection_stage": "ckb-vm",
       "scenario": "unauthorized_update",
-      "serialized_transaction_hash": "0x3ba1cdab0005aa0ee317688f2a7ce06e382ad8f05fd7dbff20c316d455f80eb9"
+      "serialized_transaction_hash": "0x8c28449dffec609e7b4a7d6d59bcbde6f8542e5f464221a791276941df669e3d"
     },
     {
       "expected_exit_code": 3,
       "outcome": "adversarial",
-      "raw_transaction_hash": "0x50371dcb2e6e3b0eb1e5c3eb3443a75000e9112502cae75d2719c98eb9da2d5c",
+      "raw_transaction_hash": "0xff5dd3585f2174372a0b12b69bdd8929f2fdeaea4a1530f624fcdc99688a41f9",
       "rejection_stage": "ckb-vm",
       "scenario": "wrong_lock",
-      "serialized_transaction_hash": "0xfb22fa24f27491f3ecd9b5e1b27b95bf511c51284dc804c872551943c7a3d9d8"
+      "serialized_transaction_hash": "0xe594dc142da499dd47a4879bb6c924ac2e320a7adf236f610f2dae035e5e689c"
     },
     {
       "expected_exit_code": 47,
       "outcome": "adversarial",
-      "raw_transaction_hash": "0x3752c5400510be8c1f13b675666842ab71a4b4ee069dc5ca50da6b7b58c0d99a",
+      "raw_transaction_hash": "0x89be769e8c238a00bcfad026b9bd6bdb3a258e01cb86c09c398dcce0938e46ab",
       "rejection_stage": "ckb-vm",
       "scenario": "wrong_type",
-      "serialized_transaction_hash": "0xf8d587e19fc60104bc35aebee57d510f74a74116c8dc149e7749e6e6745b6e9a"
+      "serialized_transaction_hash": "0xd4202864830de872402e3c8e0b4485181bbaf48de33418e9c0a12157cfd8f641"
     }
   ],
   "schema": "cellscript-nft-scenarios-v1",

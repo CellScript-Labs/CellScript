@@ -157,7 +157,8 @@ pub static EXECUTABLE_SURFACE: &[ExecutableSurfaceEntry] = &[
     entry!("ir-item:type-def", "ir-item", "bounded", ACCEPT_WHEN_CLOSED, "Concrete fixed-layout type definition."),
     entry!("ir-item:invariant", "ir-item", "compile-time-only", FRONTEND_ONLY, "Proof-planning invariant record."),
     entry!("ir-item:action", "ir-item", "bounded", ACCEPT_WHEN_CLOSED, "Executable transaction action entry."),
-    entry!("ir-item:pure-fn", "ir-item", "bounded", ACCEPT_WHEN_CLOSED, "Resolved helper callable."),
+    entry!("type:Nested", "type", "bounded", ACCEPT_WHEN_CLOSED, "Resolved immutable nested values and derived views with admitted record layouts; decoding and lifetime evidence remain mandatory."),
+    entry!("ir-item:function", "ir-item", "bounded", ACCEPT_WHEN_CLOSED, "Resolved helper callable."),
     entry!("ir-item:lock", "ir-item", "bounded", ACCEPT_WHEN_CLOSED, "Executable lock predicate entry."),
     entry!("ir-terminator:return", "terminator", "complete", ACCEPT, "Typed return with an optional value."),
     entry!("ir-terminator:jump", "terminator", "complete", ACCEPT, "Validated direct CFG edge."),
@@ -344,7 +345,7 @@ pub static EXECUTABLE_SURFACE: &[ExecutableSurfaceEntry] = &[
         "artifact-policy",
         "reserved",
         "rejected by production policy",
-        "Canonical transaction sighash construction is deferred. Audit artifacts unconditionally exit with runtime error 66 when called, including discarded results and helper calls.",
+        "The generic env::sighash_all contract is deferred and unconditionally aborts with runtime error 66. The separately bounded env::sighash_all_zero_lock signing-message domain remains executable.",
         ["ckb-sighash-all-deferred"]
     ),
     entry!(
@@ -352,7 +353,7 @@ pub static EXECUTABLE_SURFACE: &[ExecutableSurfaceEntry] = &[
         "artifact-policy",
         "reserved",
         "rejected by production policy",
-        "CKB since/epoch maturity constraints are deferred. Artifacts unconditionally exit with runtime error 86 when require_maturity, require_time, require_epoch_after, or require_epoch_relative runs, including discarded results and helper calls.",
+        "Legacy require_maturity, require_time, require_epoch_after and require_epoch_relative unconditionally abort with runtime error 86. Typed InputView.since reads, checked decoding and temporal comparisons remain executable.",
         ["ckb-since-constraints-deferred"]
     ),
     entry!(
@@ -360,8 +361,15 @@ pub static EXECUTABLE_SURFACE: &[ExecutableSurfaceEntry] = &[
         "artifact-policy",
         "reserved",
         "rejected by production policy",
-        "The compile-visible occupied-capacity floor is deferred. Artifacts unconditionally exit with runtime error 87 when occupied_capacity runs, including discarded results and helper calls.",
+        "The legacy compile-visible occupied_capacity floor unconditionally aborts with runtime error 87. The separate ckb::cell_occupied_capacity reads actual Cell occupied capacity; witnesses do not contribute to occupied capacity.",
         ["ckb-occupied-capacity-deferred"]
+    ),
+    entry!(
+        "source:bare-spawn",
+        "source",
+        "rejected",
+        "rejected by semantic checking (E1021)",
+        "Bare named spawn has no child binding or argument/descriptor transport. Use a manifest-bound CellDep spawn API with checked transport. Resolved user functions named spawn remain ordinary calls."
     ),
     entry!("ir:read-ref", "instruction", "bounded", ACCEPT, "Explicit Input or CellDep read-only Cell view."),
     entry!("ir:move", "instruction", "complete", ACCEPT, "Typed local move; ownership validity is checked before lowering."),
@@ -494,7 +502,7 @@ pub fn validate_ir_module(module: &IrModule) -> Result<()> {
                 validate_params_and_return(&action.params, action.return_type.as_ref())?;
                 validate_body(&action.body)?;
             }
-            IrItem::PureFn(function) => {
+            IrItem::Function(function) => {
                 validate_params_and_return(&function.params, function.return_type.as_ref())?;
                 validate_body(&function.body)?;
             }
@@ -546,8 +554,12 @@ fn validate_body(body: &IrBody) -> Result<()> {
 }
 
 fn validate_ir_type(ty: &IrType) -> Result<()> {
+    crate::ir::validate_fixed_layout(ty)?;
     require_registered(ir_type_surface_id(ty))?;
     match ty {
+        IrType::Named(name) if crate::nested_values::is_nested_name(name) => {
+            Err(CompileError::without_span("nested views require a resolved IR description").with_code("E2105"))
+        }
         IrType::Array(inner, _) | IrType::Ref(inner) | IrType::MutRef(inner) => validate_ir_type(inner),
         IrType::Tuple(items) => {
             for item in items {
@@ -565,7 +577,8 @@ fn validate_ir_type(ty: &IrType) -> Result<()> {
         | IrType::Unit
         | IrType::Address
         | IrType::Hash
-        | IrType::Named(_) => Ok(()),
+        | IrType::Named(_)
+        | IrType::Nested(_) => Ok(()),
     }
 }
 
@@ -582,7 +595,7 @@ fn ir_item_surface_id(item: &IrItem) -> &'static str {
         IrItem::TypeDef(_) => "ir-item:type-def",
         IrItem::Invariant(_) => "ir-item:invariant",
         IrItem::Action(_) => "ir-item:action",
-        IrItem::PureFn(_) => "ir-item:pure-fn",
+        IrItem::Function(_) => "ir-item:function",
         IrItem::Lock(_) => "ir-item:lock",
     }
 }
@@ -602,6 +615,7 @@ fn ir_type_surface_id(ty: &IrType) -> &'static str {
         IrType::Array(_, _) => "type:Array",
         IrType::Tuple(_) => "type:Tuple",
         IrType::Named(_) => "type:Named",
+        IrType::Nested(_) => "type:Nested",
         IrType::Ref(_) => "type:Ref",
         IrType::MutRef(_) => "type:MutRef",
     }

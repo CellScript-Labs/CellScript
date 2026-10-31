@@ -127,7 +127,7 @@ public action verify(witness input: 箱<u64>, witness tag: αT) {
 }
 
 #[test]
-fn interface_inspection_preserves_declared_and_inferred_effects_separately() {
+fn interface_inspection_binds_the_inferred_effect_to_machine_evidence() {
     let source =
         "module inspected\naction verify() {\nverification\nlet amount = ckb::cell_capacity(source::input(0))\nrequire amount > 0\n}";
     let compiled = compile_with_executable_surface_policy(
@@ -143,15 +143,27 @@ fn interface_inspection_preserves_declared_and_inferred_effects_separately() {
         |artifact: &[u8], metadata: &[u8]| inspect_bundle(artifact, metadata, &lowering, &source_map, &CheckerBudgets::default());
     let result = inspect(&compiled.artifact_bytes, &metadata).unwrap();
     assert_eq!(result.declared(), &compiled.metadata.public_interface);
-    assert_eq!(result.declared().callables[0].effect, "Pure");
-    assert_eq!(result.effective().entries[0].effect, "ReadOnly");
+    assert_eq!(
+        result.declared().callables[0].effects,
+        Some(cellscript_artifact_checker::effect_facts::EffectFacts::read(
+            cellscript_artifact_checker::effect_facts::ContextSource::Input,
+            cellscript_artifact_checker::effect_facts::ContextAccess::Capacity
+        ))
+    );
+    assert_eq!(
+        result.effective().entries[0].effects,
+        cellscript_artifact_checker::effect_facts::EffectFacts::read(
+            cellscript_artifact_checker::effect_facts::ContextSource::Input,
+            cellscript_artifact_checker::effect_facts::ContextAccess::Capacity
+        )
+    );
     assert_eq!(result.report().artifact_hash, compiled.metadata.artifact_hash.as_ref().unwrap().as_str());
 
     let mut substituted = compiled.artifact_bytes.clone();
     substituted[0] ^= 1;
     assert!(inspect(&substituted, &metadata).is_err());
     let mut changed = serde_json::to_value(&compiled.metadata).unwrap();
-    changed["public_interface"]["callables"][0]["effect"] = serde_json::json!("ReadOnly");
+    changed["public_interface"]["callables"][0]["effect"] = serde_json::json!("Pure");
     assert!(inspect(&compiled.artifact_bytes, &serde_json::to_vec(&changed).unwrap()).is_err());
 }
 

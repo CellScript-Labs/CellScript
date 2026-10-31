@@ -1970,7 +1970,7 @@ fn sha256_identity(bytes: &[u8]) -> String {
 }
 
 fn canonical_json(value: &Value) -> Result<String> {
-    serde_json::to_string(&crate::package::registry::canonical_json_value(value))
+    serde_json::to_string(&crate::canonical_json::canonical_json_value(value))
         .map_err(|err| error(format!("failed to serialize canonical JSON: {err}")))
 }
 

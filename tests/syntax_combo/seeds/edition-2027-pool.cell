@@ -23,29 +23,27 @@ type_script TokenPool on type_group<Token> {
             expected_evidence = external_policy(recipient)
         }
 
-        effects {
-            pool value_flow {
-                inputs {
-                    left
-                    right
-                }
-                outputs {
-                    merged
-                }
-                data {
-                    owner {
-                        merged = recipient
-                    }
-                    amount = conserve
-                }
-                identity = pooled
-                type_script = same
-                lock_script {
-                    merged = exact_hash(recipient)
-                }
-                capacity = builder_computed
-                cardinality = declared
+        pool value_flow {
+            inputs {
+                left
+                right
             }
+            outputs {
+                merged
+            }
+            data {
+                owner {
+                    merged = recipient
+                }
+                amount = conserve
+            }
+            identity = pooled
+            type_script = same
+            lock_script {
+                merged = exact_hash(recipient)
+            }
+            capacity = builder_computed
+            cardinality = declared
         }
     }
 }

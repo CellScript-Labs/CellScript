@@ -99,12 +99,12 @@ pub(super) fn bind_source_receipt(
 ) -> Result<CheckedSourceCodeReceipt> {
     let (package, version) = source_package_version(module)?;
     let record = Record {
-        schema: "cellscript-frozen-source-code-receipt-v1",
+        schema: "cellscript-frozen-source-code-receipt-v3",
         source_context: module.context_identity().into(),
         defining_module: module.context.entry_module.clone(),
         package,
         artifact_receipt: receipt.identity().into(),
     };
-    let identity = canonical_hash("cellscript-frozen-source-code-receipt-id-v1", &record).map_err(checker_error)?;
+    let identity = canonical_hash("cellscript-frozen-source-code-receipt-id-v3", &record).map_err(checker_error)?;
     Ok(CheckedSourceCodeReceipt { record, version, identity })
 }

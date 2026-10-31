@@ -4,7 +4,6 @@ resource BorrowedToken has store, consume, burn {
     amount: u64,
 }
 
-#[effect(Pure)]
 fn amount_is(token: &BorrowedToken, expected: u64) -> bool {
     return token.amount == expected
 }

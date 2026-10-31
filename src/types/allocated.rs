@@ -53,20 +53,23 @@ impl TypeChecker<'_> {
     /// A dedicated argument path keeps references out of ordinary value
     /// inference. Each evaluated reference stays borrowed until all arguments
     /// have been evaluated and the call has been checked, including on errors.
-    pub(super) fn infer_collection_helper_call(&mut self, env: &mut TypeEnv, call: &CallExpr) -> Result<Option<Type>> {
+    pub(super) fn infer_collection_helper_call(
+        &mut self,
+        env: &mut TypeEnv,
+        call: &CallExpr,
+        source_signature: Option<&FunctionSignature>,
+    ) -> Result<Option<Type>> {
         let Expr::Identifier(name) = call.func.as_ref() else { return Ok(None) };
-        let local_name =
-            self.current_module.as_deref().and_then(|module| name.strip_prefix(module)?.strip_prefix("::")).unwrap_or(name);
-        let Some(signature) = self.functions.get(local_name).cloned() else { return Ok(None) };
+        let Some(signature) = source_signature else { return Ok(None) };
         if !signature.params.iter().any(|ty| self.contains_collection_owner(ty)) {
             return Ok(None);
         }
         if signature.kind != CallableKind::Function
-            || !matches!(signature.effect, EffectClass::Pure | EffectClass::ReadOnly)
             || signature.params.iter().any(|ty| self.contains_collection_owner(ty) && self.collection_reference(ty).is_none())
         {
             return Err(CompileError::new("collection arguments require dedicated read-only &Owner helper parameters", call.span));
         }
+        self.require_effect(name, false, call.span, "collection helper must allow observation only");
         if signature.params.len() != call.args.len() {
             return Err(CompileError::new(format!("function '{name}' expects {} arguments", signature.params.len()), call.span));
         }
@@ -111,7 +114,7 @@ impl TypeChecker<'_> {
                     types.push(ty);
                 }
             }
-            self.infer_call_type(env, call, &types).map(Some)
+            self.infer_call_type(env, call, &types, Some(signature.clone())).map(Some)
         })();
         self.active_borrows.truncate(borrow_depth);
         result

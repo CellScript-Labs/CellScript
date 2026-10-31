@@ -7,6 +7,7 @@ import { AUTH_ACTION, AUTH_PROTOCOL, DEFAULT_REGISTRY_ORIGIN, canonicalJson, typ
 import { createApp } from "../src/index";
 import { MemoryRegistryStore, type RegistryStore } from "../src/store";
 import { SqlRegistryStore } from "../src/sql-store";
+import { preparePostgresExtensions } from "./postgres-fixture";
 
 const databaseUrl = process.env.REGISTRY_TEST_DATABASE_URL;
 const principal = () => `0x${randomUUID().replaceAll("-", "")}12345678`;
@@ -35,6 +36,7 @@ for (const backend of ["memory", "postgres"] as const) {
       }
       admin = new Client({ connectionString: databaseUrl! });
       await admin.connect();
+      await preparePostgresExtensions(admin);
       await admin.query(`create schema ${schema}`);
       const url = new URL(databaseUrl!);
       url.searchParams.set("options", `-csearch_path=${schema}`);

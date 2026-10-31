@@ -1,6 +1,25 @@
 use super::*;
 
 impl TypeChecker<'_> {
+    /// Source aliases are spellings of one defining Cell declaration, not new
+    /// schemas. Equality never follows field widths or structural similarity.
+    fn selected_cell_schema_identity(&self, name: &str) -> Option<(String, String)> {
+        if let Some((resolver, module)) = self.resolver.zip(self.current_module.as_deref())
+            && let Some((owner, declaration)) = resolver.resolve_type_with_module(module, name)
+        {
+            let declared_name = match declaration {
+                TypeDef::Resource(declaration) => declaration.name,
+                TypeDef::Shared(declaration) => declaration.name,
+                TypeDef::Receipt(declaration) => declaration.name,
+                TypeDef::Struct(_) | TypeDef::Enum(_) => return None,
+            };
+            return Some((owner, declared_name));
+        }
+        let module = self.current_module.as_deref()?;
+        let local_name = name.strip_prefix(module).and_then(|name| name.strip_prefix("::")).unwrap_or(name);
+        self.cell_type_kinds.contains_key(local_name).then(|| (module.to_string(), local_name.to_string()))
+    }
+
     pub(super) fn cell_data_view_field_type(&self, ty: &Type, field: &str, span: Span) -> Result<Option<Type>> {
         let Type::Named(name) = ty else { return Ok(None) };
         let projection = field == "data" && crate::cell_data_view::transaction_schema(name).is_some();
@@ -114,7 +133,14 @@ impl TypeChecker<'_> {
                 .ok()
                 .and_then(|role| roles.get(role))
                 .ok_or_else(|| CompileError::new("selected role ordinal is outside its catalog", call.span))?;
-            if call.type_args[0] != Type::Named(element.clone()) {
+            let same_schema = match &call.type_args[0] {
+                Type::Named(requested) => {
+                    let expected = self.selected_cell_schema_identity(element);
+                    expected.is_some() && expected == self.selected_cell_schema_identity(requested)
+                }
+                _ => false,
+            };
+            if !same_schema {
                 return Err(CompileError::new("selected role Cell type differs from its nominal catalog schema", call.span));
             }
             if read.indexed() && self.infer_expr(env, &call.args[2])? != Type::U64 {

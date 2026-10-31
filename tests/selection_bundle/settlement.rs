@@ -11,7 +11,7 @@ fn mixed_settlement_cross_package_helpers_preserve_transaction_and_authority() {
     let source = include_str!("../../examples/language/batches/mixed_settlement.cell");
     let schemas = source.find("resource Order").unwrap();
     let catalog = source.find("cell_roles Settlement").unwrap();
-    let helpers = source.find("#[effect(ReadOnly)]").unwrap();
+    let helpers = source.find("fn full_fill").unwrap();
     let action = source.find("action settle").unwrap();
     let library = format!(
         "module shared::rules\n{}\n{}",

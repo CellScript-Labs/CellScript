@@ -42,8 +42,8 @@ receipt. It has no public constructor, mutable fields or deserialization path.
 Coordinates are source facts, not authenticated publisher releases. Names and
 namespace/module identifiers are bounded to 512 bytes, version text to 128 bytes,
 before SemVer parsing, cloning or source-receipt hashing. The receipt schema/
-domain are `cellscript-frozen-source-code-receipt-v1` /
-`cellscript-frozen-source-code-receipt-id-v1`. See the separate
+domain are `cellscript-frozen-source-code-receipt-v3` /
+`cellscript-frozen-source-code-receipt-id-v3`. See the separate
 [source policy profile](FROZEN_CODE_POLICY.md) for selectable version checks.
 
 This closes a **host-only source/API/byte-origin prerequisite** for #28. It does

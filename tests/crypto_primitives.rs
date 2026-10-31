@@ -262,7 +262,6 @@ fn byte_loop_prefix_offset_preserves_success_and_last_byte_rejection_in_ckb_vm()
     let source = r#"
 module byte_loop_prefix_vm
 
-#[effect(ReadOnly)]
 fn same(start: u64, length: u64) -> bool {
     let input = source::input(0)
     let mut index: u64 = 0
@@ -314,4 +313,65 @@ action verify() -> u64 {
             "opt level {diagnostics}: final-byte mismatch must fail the source requirement"
         );
     }
+}
+
+#[test]
+fn zero_byte_loop_keeps_division_failure() {
+    let source = r#"module zero_prefix_audit
+fn zero(divisor: u64) -> bool {
+    let input = source::input(0)
+    let mut index: u64 = 0
+    while index < 1 {
+        let dead = 1 / divisor
+        if witness::byte(input, index) != 0 { return false }
+        index += 1
+    }
+    return true
+}
+action verify() -> u64 { verification require zero(0) return 0 }
+"#;
+    assert_byte_loop_trap_preserved(source);
+}
+
+#[test]
+fn memory_byte_loop_keeps_division_failure() {
+    let source = r#"module memory_prefix_audit
+fn same(divisor: u64, expected: [u8; 32]) -> bool {
+    let input = source::input(0)
+    let mut index: u64 = 0
+    while index < 1 {
+        let dead = 1 / divisor
+        if witness::byte(input, index) != expected[index] as u64 { return false }
+        index += 1
+    }
+    return true
+}
+action verify() -> u64 { verification require same(0, b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00") return 0 }
+"#;
+    assert_byte_loop_trap_preserved(source);
+}
+fn assert_byte_loop_trap_preserved(source: &str) {
+    use cellscript::{CompileOptions, CompilerDiagnostics};
+    let mut exits = Vec::new();
+    for diagnostics in [CompilerDiagnostics::without_optimizations(), CompilerDiagnostics::default()] {
+        let result = cellscript::compile(
+            source,
+            CompileOptions { diagnostics, target: Some("riscv64-elf".into()), source_contracts: true, ..Default::default() },
+        )
+        .unwrap();
+        cellscript_artifact_checker::check_bundle_values(
+            &result.artifact_bytes,
+            &serde_json::to_value(&result.metadata).unwrap(),
+            result.verified_lowering_record.as_ref().unwrap(),
+            result.source_artifact_map.as_ref().unwrap(),
+            &cellscript_artifact_checker::CheckerBudgets::default(),
+        )
+        .unwrap();
+        let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::new(), 1, 1);
+        fixture.witnesses = vec![vec![0; 32].into()];
+        let execution = ckb_script_runner::execute_cellscript_script(&result.artifact_bytes, &fixture);
+        exits.push(execution.exit_code);
+    }
+    assert_eq!(exits[0], 20, "division by zero must retain its stable runtime error");
+    assert_eq!(exits[0], exits[1], "standard optimization removed an observable failure");
 }

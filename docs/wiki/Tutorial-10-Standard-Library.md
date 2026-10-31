@@ -177,7 +177,7 @@ action settle_voucher(voucher: Voucher) -> coin: Coin {
 Use `settle` only when the protocol language really benefits from the word. It
 still lowers to explicit input consumption plus named output constraints.
 
-## Require Blocks Stay Pure
+## Require Blocks Contain Boolean Conditions
 
 Lifecycle stdlib patterns are Cell effects. Do not put them inside anonymous
 `require` blocks.
@@ -202,7 +202,7 @@ require {
 }
 ```
 
-A `require` block is pure boolean proof syntax. Lifecycle and Cell operation
+A `require` block combines boolean proof conditions. Lifecycle and Cell operation
 syntax must stay at the action proof level where the consumed inputs and created
 outputs remain visible.
 

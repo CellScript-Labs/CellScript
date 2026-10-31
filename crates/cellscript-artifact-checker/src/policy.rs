@@ -656,7 +656,6 @@ fn validate_common_calls<'a>(
             || call.contract != "typed-local"
             || call.params != callee.params.iter().map(|param| param.ty.clone()).collect::<Vec<_>>()
             || call.return_type != callee.return_type
-            || call.effect != callee.effect
             || callee.params.iter().any(|param| param.mutable || !bounded_call_type(&param.ty, typed))
             || !bounded_call_type(&callee.return_type, typed)
             || callee.return_type.starts_with('&')

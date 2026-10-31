@@ -186,6 +186,13 @@ fn named_data_shapes_preserve_witness_bytes_bounds_and_vm_results() {
         };
         let named = compile(named);
         let concrete = compile(&concrete);
+        assert_eq!(named.metadata.public_interface, concrete.metadata.public_interface);
+        assert_eq!(named.metadata.interface_hash, concrete.metadata.interface_hash);
+        assert_eq!(
+            named.metadata.actions[0].params.iter().map(|param| &param.ty).collect::<Vec<_>>(),
+            concrete.metadata.actions[0].params.iter().map(|param| &param.ty).collect::<Vec<_>>(),
+            "source shape aliases must expand before external parameter rendering"
+        );
         assert_eq!(
             cellscript::strip_vm_abi_trailer(&named.artifact_bytes),
             cellscript::strip_vm_abi_trailer(&concrete.artifact_bytes),
@@ -196,6 +203,127 @@ fn named_data_shapes_preserve_witness_bytes_bounds_and_vm_results() {
             assert_eq!(actual.0, *exit, "named shape {diagnostics}");
             assert_eq!(actual, execute_compiled_nested(&concrete, args), "wire, rejection and cycle parity {diagnostics}");
         }
+    }
+}
+
+#[test]
+fn generic_nested_shapes_keep_the_concrete_record_and_alias_projection() {
+    let direct = "module generic_nested\npublic struct Entry<T: fixed_value> { key: T, payload: Vec<u8> }\npublic action inspect(witness values: NestedValues<Entry<u64>, 2, 8, 128>) -> u64 { verification require values.len() == 1 require values[0].key == 7 require values[0].payload.len() == 2 return 0 }";
+    let alias = direct.replace("public action inspect", "data_shape Messages { element: Entry<u64>, limits { items: 2, payload_bytes: 8, encoded_bytes: 128 } }\npublic action inspect")
+        .replace("witness values: NestedValues<Entry<u64>, 2, 8, 128>", "witness values: Messages");
+    let wire = |key: u64| {
+        let values = molecule_fields(&[molecule_fields(&[key.to_le_bytes().to_vec(), vec![2, 0, 0, 0, 0xaa, 0xbb]])]);
+        let mut args = (values.len() as u32).to_le_bytes().to_vec();
+        args.extend_from_slice(&values);
+        args
+    };
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let compile = |source: &str| {
+            cellscript::compile_with_executable_surface_policy(
+                source,
+                cellscript::CompileOptions {
+                    edition: cellscript::NEXT_EDITION,
+                    source_contracts: true,
+                    target: Some("riscv64-elf".into()),
+                    diagnostics,
+                    ..Default::default()
+                },
+                cellscript::ExecutableSurfacePolicy::DenyFailClosed,
+            )
+            .unwrap()
+        };
+        let expanded = compile(direct);
+        let named = compile(&alias);
+        assert_eq!(expanded.metadata.actions[0].params[0].ty, "NestedValues<Entry__mono__753634, 2, 8, 128>");
+        assert_eq!(expanded.metadata.public_interface, named.metadata.public_interface);
+        assert_eq!(expanded.metadata.interface_hash, named.metadata.interface_hash);
+        assert_eq!(expanded.metadata.typed_semantics_hash, named.metadata.typed_semantics_hash);
+        assert_eq!(
+            cellscript::strip_vm_abi_trailer(&expanded.artifact_bytes),
+            cellscript::strip_vm_abi_trailer(&named.artifact_bytes)
+        );
+        for compiled in [&expanded, &named] {
+            let serialized = serde_json::to_value(&compiled.metadata).unwrap();
+            assert!(serialized["actions"][0]["params"][0]["ty"].is_string());
+            for definition in serialized["types"].as_array().unwrap() {
+                for field in definition["fields"].as_array().unwrap() {
+                    assert!(field["ty"].is_string());
+                }
+            }
+            assert_eq!(execute_compiled_nested(compiled, &wire(7)).0, 0);
+            assert_ne!(execute_compiled_nested(compiled, &wire(8)).0, 0);
+        }
+    }
+}
+
+#[test]
+fn cross_owner_nested_records_keep_distinct_aliases_and_machine_layouts() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("left.cell"), "module left\npublic struct Entry { revision: u64, payload: Vec<u8> }\n").unwrap();
+    std::fs::write(root.path().join("right.cell"), "module right\npublic struct Entry { serial: u8, payload: Vec<u8> }\n").unwrap();
+    let source = r#"
+module nested_owners
+use left::Entry as Left
+use right::Entry as Right
+public action inspect(witness lhs: NestedValues<Left, 2, 8, 128>, witness rhs: NestedValues<Right, 2, 8, 128>) -> u64 {
+    verification
+    require lhs[0].revision == (rhs[0].serial as u64) * 256 + 52
+    require lhs[0].payload.len() == 1
+    require rhs[0].payload.len() == 2
+    return 0
+}
+"#;
+    let path = root.path().join("main.cell");
+    std::fs::write(&path, source).unwrap();
+    let left = molecule_fields(&[molecule_fields(&[0x1234u64.to_le_bytes().to_vec(), vec![1, 0, 0, 0, 7]])]);
+    let right = molecule_fields(&[molecule_fields(&[vec![0x12], vec![2, 0, 0, 0, 8, 9]])]);
+    let arguments = |lhs: &[u8], rhs: &[u8]| {
+        let mut bytes = (lhs.len() as u32).to_le_bytes().to_vec();
+        bytes.extend_from_slice(lhs);
+        bytes.extend_from_slice(&(rhs.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(rhs);
+        bytes
+    };
+    for diagnostics in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
+        let compiled = cellscript::compile_path_with_executable_surface_policy(
+            path.to_str().unwrap(),
+            cellscript::CompileOptions {
+                source_contracts: true,
+                target: Some("riscv64-elf".into()),
+                diagnostics,
+                ..Default::default()
+            },
+            None,
+            cellscript::ExecutableSurfacePolicy::DenyFailClosed,
+        )
+        .unwrap();
+        for (name, field, ty) in [("Left", "revision", "u64"), ("Right", "serial", "u8")] {
+            let record = compiled.metadata.types.iter().find(|record| record.name == name).unwrap();
+            assert_eq!(record.fields.iter().find(|candidate| candidate.name == field).unwrap().ty, ty);
+        }
+        cellscript_artifact_checker::check_bundle_values(
+            &compiled.artifact_bytes,
+            &serde_json::to_value(&compiled.metadata).unwrap(),
+            compiled.verified_lowering_record.as_ref().unwrap(),
+            compiled.source_artifact_map.as_ref().unwrap(),
+            &Default::default(),
+        )
+        .unwrap();
+        let inspected = cellscript_artifact_checker::interface::inspect_bundle(
+            &compiled.artifact_bytes,
+            &serde_json::to_vec(&compiled.metadata).unwrap(),
+            &serde_json::to_vec(compiled.verified_lowering_record.as_ref().unwrap()).unwrap(),
+            &serde_json::to_vec(compiled.source_artifact_map.as_ref().unwrap()).unwrap(),
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(inspected.declared(), &compiled.metadata.public_interface);
+        assert_eq!(execute_compiled_nested(&compiled, &arguments(&left, &right)).0, 0);
+        assert_eq!(
+            execute_compiled_nested(&compiled, &arguments(&right, &left)).0,
+            16,
+            "different owners' record encodings must not substitute for each other"
+        );
     }
 }
 
@@ -1123,7 +1251,7 @@ fn borrowed_nested_cell_helpers_retain_checked_transport_without_a_blanket_block
         let arguments = "0, ".repeat(count);
         let forwarded = (0..count).map(|i| format!("p{i}, ")).collect::<String>();
         for caller in ["count", "wrap"] {
-            let source = format!("{}\n#[effect(ReadOnly)]\nfn count({params}document: &Document) -> u64 {{ return document.entries.len() }}\n#[effect(ReadOnly)]\nfn wrap({params}document: &Document) -> u64 {{ return count({forwarded}document) }}\n",
+            let source = format!("{}\nfn count({params}document: &Document) -> u64 {{ return document.entries.len() }}\nfn wrap({params}document: &Document) -> u64 {{ return count({forwarded}document) }}\n",
                 NESTED_CELL_SOURCE.replace("require original.len() == 1", &format!("require {caller}({arguments}&before) == 1")));
             let compiled =
                 cellscript::compile(&source, cellscript::CompileOptions { target: Some("riscv64-elf".into()), ..Default::default() })
@@ -1135,7 +1263,7 @@ fn borrowed_nested_cell_helpers_retain_checked_transport_without_a_blanket_block
             }
         }
     }
-    let mixed = format!("{}\n#[effect(ReadOnly)]\nfn count(values: NestedValues<Vec<u8>, 32, 256, 4096>, document: &Document) -> u64 {{ return values.len() + document.entries.len() }}\n",
+    let mixed = format!("{}\nfn count(values: NestedValues<Vec<u8>, 32, 256, 4096>, document: &Document) -> u64 {{ return values.len() + document.entries.len() }}\n",
         NESTED_CELL_SOURCE.replace("require original.len() == 1", "require count(original, &before) == 2"));
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
         assert_eq!(execute_nested_cell(&mixed, &cell, &cell, opt), 0);

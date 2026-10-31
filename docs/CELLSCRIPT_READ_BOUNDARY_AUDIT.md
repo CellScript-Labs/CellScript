@@ -4,8 +4,14 @@
 The [alpha receipt](CELLSCRIPT_BOUNDED_RUNTIME_ADMISSION.md#final-validation-receipt)
 records the maintainer's full-gate exception and the retained coverage limits.**
 
+This is a historical alpha.1/v129 report. Its aliases, numeric optimization
+profiles and helper-registry ownership describe that baseline. For the current
+interfaces, see the [byte-buffer retirement record](CELLSCRIPT_BYTE_BUFFER_RETIREMENT.md)
+and [compilation strategy](CELLSCRIPT_COMPILATION_POLICY.md). The historical
+compatibility aliases below must not be used as current compiler guidance.
+
 This follows the [stack-layout audit](CELLSCRIPT_STACK_LAYOUT_AUDIT.md) on base
-`f34c175756b4d310812dad3dfae9bc8ff60724d3`. Current artifact-cache generation is v129.
+`f34c175756b4d310812dad3dfae9bc8ff60724d3`. Artifact-cache generation at that baseline is v129.
 No release/version change, TAC or external security scan is included.
 
 ## Return conventions and compatibility (v129)

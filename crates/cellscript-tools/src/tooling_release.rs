@@ -357,7 +357,11 @@ pub fn run(root: &Path) -> Result<()> {
     require_contains(
         root,
         "src/main.rs",
-        &["Start the language server (JSON-RPC over stdio).", "cellscript::lsp::server::run_lsp_server_blocking();"],
+        &[
+            "Start the language server (JSON-RPC over stdio).",
+            "if let Err(error) = cellscript::lsp::server::run_lsp_server_blocking()",
+            "terminate_cli_error(&error, requested_message_format, None, None);",
+        ],
     )?;
     require_contains(
         root,

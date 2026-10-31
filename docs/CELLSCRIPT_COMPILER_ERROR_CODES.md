@@ -3,18 +3,34 @@
 Compiler diagnostics use stable numeric ranges. Runtime verifier exits remain
 in the low-numbered `E####` registry documented by
 `CELLSCRIPT_RUNTIME_ERROR_CODES.md`; backend/compiler failures use the
-non-overlapping `E2xxx` range.
+non-overlapping `E2xxx` range. Typed source-boundary diagnostics use `E1xxx`.
 
 | Code | Name | Meaning | Suggested action |
 | --- | --- | --- | --- |
+| `E1010` | `unterminated-string` | An ordinary string reaches EOF before its closing quote. | Close the string using its opening quote delimiter. |
+| `E1011` | `unterminated-escape` | A string escape reaches EOF without an escaped character. | Complete the escape and close the string. |
+| `E1012` | `unterminated-block-comment` | A block comment reaches EOF before all delimiters close. | Close every nested block comment. |
+| `E1013` | `incomplete-pool-assignments` | Pool field assignments do not exactly cover the ordered output roles. | Assign each declared pool output exactly once in declaration order. |
+| `E1014` | `empty-pool-roles` | A pool requires nonempty input and output role sets. | Declare at least one input and one output role. |
+| `E1015` | `effect-declaration-removed` | The source uses a removed manual effect declaration. | Remove the attribute and review the inferred public contract. |
+| `E1016` | `effect-evidence-unavailable` | A callable has no resolved effect evidence. | Resolve the named callable and its defining package. |
+| `E1017` | `effect-analysis-budget` | Effect inference exceeded its bounded call-graph or convergence budget. | Reduce the call graph or split the module surface. |
+| `E1018` | `native-effects-block-removed` | A native entry uses the removed effects wrapper. | Write lifecycle dispositions directly in the entry body. |
+| `E1019` | `byte-buffer-api-removed` | A removed digest-shaped byte-buffer API is called. | Use the explicit byte view, exact read, or digest named in the diagnostic. |
+| `E1020` | `fixed-layout-bounds` | An intrinsic fixed-value or entry-payload extent cannot be represented safely. | Reduce the declared array/tuple extent or split the entry payload. |
+| `E1021` | `bare-spawn-unsupported` | Bare named spawn has no child binding or argument/descriptor transport. | Use a manifest-bound CellDep spawn API with checked transport. Resolved user functions named spawn remain valid. |
+| `E1022` | `unterminated-byte-string` | A byte string reaches EOF without a closing quote. | Close the byte string. |
+| `E1023` | `unterminated-byte-string-escape` | A byte-string escape reaches EOF without an escaped byte. | Complete the escape and close the byte string. |
+| `E1024` | `unknown-scheduler-hint` | A scheduler_hint attribute contains an unrecognized key. | Use parallel, sequential or estimated_cycles with the documented literal value syntax. |
 | `E2000` | `backend-uncategorized` | Backend failure outside a classified boundary. | Preserve the full diagnostic and the source that reached code generation. |
 | `E2001` | `backend-empty-artifact` | Code generation produced no artifact bytes. | Check entrypoint selection and artifact target. |
 | `E2100` | `type-layout-lowering` | A type could not be lowered to its backend storage layout. | Check fixed widths, schema fields, and payload layouts. |
 | `E2101` | `entry-abi-lowering` | The selected entrypoint could not be lowered to the entry ABI. | Check entry parameters and witness ABI support. |
 | `E2102` | `action-lowering` | An action body could not be lowered. | Inspect the named action and operation in the diagnostic. |
 | `E2103` | `lock-lowering` | A lock body could not be lowered. | Inspect the named lock and target runtime requirements. |
-| `E2104` | `pure-function-lowering` | A pure function could not be lowered. | Check call ABI, return layout, and the reported expression. |
+| `E2104` | `function-lowering` | A function could not be lowered. | Check call ABI, return layout, and the reported expression. |
 | `E2105` | `executable-surface-incomplete` | Strict production compilation found semantics that cannot be executed by the selected backend. | Use metadata-only analysis for inspection, or remove the fail-closed feature before generating an artifact. |
+| `E2106` | `shift-amount-out-of-range` | A constant shift exceeds its left operand width. | Use an amount from zero to one less than the width. |
 | `E2110` | `generic-declaration-invalid` | A value-generic declaration violates the parameter, ability, phantom, or reserved-name contract. | Correct the declaration and keep Cell lifecycle authority outside ordinary generic values. |
 | `E2111` | `generic-instantiation-invalid` | A generic application has invalid arguments, constraints, layout, or identity. | Supply concrete fixed serializable value types satisfying every declared ability. |
 | `E2112` | `generic-instantiation-budget` | Deterministic monomorphization exceeded its nesting, count, or identity-size budget. | Reduce recursive/nested specializations or split the generic surface. |

@@ -151,8 +151,7 @@ pub(super) fn bind_deployment_lines(input: &mut ProtocolBundleInput, compiled: &
         .unwrap();
         let admission_type = type_id(0x41 + index as u8);
         let admission_hash = cellscript::script_handle::ckb_script_identity_hash(&admission_type).unwrap();
-        let interface = cellscript::interface::build(&result.ast, metadata);
-        let (receipt, handle) = begin_deployment_line(&exact, &interface, &admission_hash).unwrap();
+        let (receipt, handle) = begin_deployment_line(&exact, &metadata.public_interface, &admission_hash).unwrap();
         let data = deployment_line_commitment_data(&handle).unwrap();
         let admission_cell = DeploymentLineCellEvidence {
             out_point: ProtocolOutPoint { tx_hash: format!("0x{}", hex::encode([0xe1 + index as u8; 32])), index: 0 },

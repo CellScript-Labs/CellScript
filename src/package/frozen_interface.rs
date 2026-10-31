@@ -176,7 +176,9 @@ pub fn compile_module(
             scope.clone(),
             ExecutableSurfacePolicy::DenyFailClosed,
         )?;
-        if crate::interface::build(&project.entry().ast, &compiled.metadata) != compiled.metadata.public_interface {
+        if crate::interface::build_with_resolver(&project.entry().ast, &compiled.metadata, Some(&project.resolver))?
+            != compiled.metadata.public_interface
+        {
             return Err(invalid("checked public interface differs from the frozen package source"));
         }
         let (_, ir) = crate::prepare_compile_ir(

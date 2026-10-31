@@ -385,9 +385,6 @@ impl Formatter {
                 self.push_line(&format!("/// {}", line));
             }
         }
-        if action.effect != EffectClass::Pure {
-            self.push_line(&format!("#[effect({})]", format_effect(action.effect)));
-        }
         if let Some(hint) = &action.scheduler_hint {
             let mode = if hint.parallelizable { "parallel" } else { "sequential" };
             self.push_line(&format!("#[scheduler_hint({}, estimated_cycles = {})]", mode, hint.estimated_cycles));
@@ -471,8 +468,6 @@ impl Formatter {
             self.push_line("}");
         }
         self.push_line("");
-        self.push_line("effects {");
-        self.indent_level += 1;
         for disposition in &surface.dispositions {
             match disposition {
                 NextDisposition::Replace(replacement) => {
@@ -578,8 +573,6 @@ impl Formatter {
         self.push_line("}");
         self.indent_level -= 1;
         self.push_line("}");
-        self.indent_level -= 1;
-        self.push_line("}");
         Ok(())
     }
 
@@ -588,9 +581,6 @@ impl Formatter {
             for line in doc.lines() {
                 self.push_line(&format!("/// {}", line));
             }
-        }
-        if function.effect_declared {
-            self.push_line(&format!("#[effect({})]", function.effect.as_str()));
         }
 
         let params = function.params.iter().map(format_param).collect::<Vec<_>>().join(", ");
@@ -1088,16 +1078,6 @@ fn format_next_absence_policy(policy: &DestructionPolicy) -> String {
     }
 }
 
-fn format_effect(effect: EffectClass) -> &'static str {
-    match effect {
-        EffectClass::Pure => "pure",
-        EffectClass::ReadOnly => "readonly",
-        EffectClass::Mutating => "mutating",
-        EffectClass::Creating => "creating",
-        EffectClass::Destroying => "destroying",
-    }
-}
-
 fn bounded_each_call_parts(call: &CallExpr) -> Option<(&'static str, &str, &Expr, &[Stmt])> {
     let Expr::Identifier(func) = call.func.as_ref() else {
         return None;
@@ -1328,22 +1308,32 @@ pub(crate) fn format_expression(expr: &Expr) -> String {
     Formatter::new(FormatConfig::default()).format_expr(expr)
 }
 
-/// Verify that formatting is idempotent: re-formatting the output produces the same output.
-/// Returns `Ok(())` if idempotent, or an error message describing the diff.
-pub fn verify_idempotent(source: &str, config: FormatConfig) -> Result<()> {
-    let tokens = crate::lexer::lex(source)?;
-    let module = crate::parser::parse(&tokens)?;
+/// Format and verify source using the requested edition's complete frontend.
+/// Both the input and canonical output must parse under that same edition;
+/// formatting never guesses an edition from the source's spelling.
+pub fn format_source(source: &str, edition: crate::CellScriptEdition, config: FormatConfig) -> Result<String> {
+    let module = crate::frontend::parse(source, edition)?;
     let first_pass = Formatter::new(config.clone()).format_module(&module)?;
-    let tokens2 = crate::lexer::lex(&first_pass)?;
-    let module2 = crate::parser::parse(&tokens2)?;
+    let module2 = crate::frontend::parse(&first_pass, edition)?;
     let second_pass = Formatter::new(config).format_module(&module2)?;
     if first_pass == second_pass {
-        Ok(())
+        Ok(first_pass)
     } else {
         Err(crate::error::CompileError::without_span(
             "formatter is not idempotent: re-formatting the output produces a different result",
         ))
     }
+}
+
+/// Verify idempotence with an explicit source edition, including native syntax.
+pub fn verify_idempotent_for_edition(source: &str, edition: crate::CellScriptEdition, config: FormatConfig) -> Result<()> {
+    format_source(source, edition, config).map(|_| ())
+}
+
+/// Verify idempotence under the default Edition 2026 source contract.
+/// Use `verify_idempotent_for_edition` for Edition 2027 authoring/native syntax.
+pub fn verify_idempotent(source: &str, config: FormatConfig) -> Result<()> {
+    verify_idempotent_for_edition(source, crate::CURRENT_EDITION, config)
 }
 
 #[cfg(test)]

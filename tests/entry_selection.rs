@@ -251,7 +251,8 @@ action selected(witness expected: u64) -> u64 {{
         let result = compile_file_with_entry_action(&input, options("riscv64-elf"), "selected").unwrap();
         assert_contract(&result, "action", "selected");
         assert!(result.metadata.actions.iter().any(|action| action.name == dependency), "called action must remain available");
-        assert!(result.metadata.functions.iter().any(|function| function.name == "zero"), "transitive helper must remain available");
+        // The standard strategy may inline zero. The selected entry must still
+        // execute its transitive behavior and reject the wrong witness below.
         assert_execution(&result, "action", "selected", Some(42), 0);
         assert_execution(&result, "action", "selected", Some(13), 5);
     }
@@ -422,10 +423,12 @@ public action selected(witness pair: Duo<u64>, witness other: Other<u64>) {
         if !diagnostics.is_standard() {
             let first = typed.instantiations.iter().find(|instance| instance.template == "first").unwrap();
             assert_eq!(first.module, "imported_generic_owner");
-            assert!(first.lowered_names.iter().any(|name| name.starts_with("pick__mono__")));
+            assert!(first.lowered_names.iter().all(|name| typed.entries.iter().any(|entry| &entry.name == name)));
+            assert!(first.lowered_names.iter().any(|name| name.ends_with(".first__mono__753634")));
             let swap = typed.instantiations.iter().find(|instance| instance.template == "swap").unwrap();
             assert_eq!(swap.module, "imported_generic_owner");
-            assert!(swap.lowered_names.iter().any(|name| name.starts_with("flip__mono__")));
+            assert!(swap.lowered_names.iter().all(|name| typed.entries.iter().any(|entry| &entry.name == name)));
+            assert!(swap.lowered_names.iter().any(|name| name.ends_with(".swap__mono__753634")));
         }
         cellscript_artifact_checker::interface::inspect_bundle(
             &result.artifact_bytes,

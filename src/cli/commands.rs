@@ -1,7 +1,10 @@
 use super::artifact::{ArtifactArgs, ArtifactOperation};
+use super::certification::CertifyArgs;
+use super::output::{json_output, print_json, read_json_value, CliDiagnosticCode, CommandOutcome};
+use super::protocol_builder::typescript_protocol_bundle_api;
 use crate::docgen::{DocGenerator, OutputFormat};
 use crate::error::{CompileError, Result};
-use crate::fmt::format_default;
+use crate::fmt::format_source;
 use crate::package::{Dependency, DetailedDependency, Lockfile, PackageManager, PackageManifest, PolicyConfig};
 use crate::runtime_errors::{runtime_error_info, runtime_error_info_by_code, CellScriptRuntimeErrorInfo, ALL_RUNTIME_ERRORS};
 use crate::{
@@ -45,38 +48,6 @@ const ICKB_REQUIRED_PRODUCTION_EVIDENCE: [&str; 8] = [
 const ICKB_REQUIRED_HARDENING_EVIDENCE: [&str; 5] =
     ["mutation_coverage", "deterministic_fuzz_seed", "normalized_fixture_generator", "max_cellscript_cycles", "max_tx_size_bytes"];
 pub(super) const CELLSCRIPT_CKB_RPC_URL_ENV: &str = "CELLSCRIPT_CKB_RPC_URL";
-const NOVASEAL_CERTIFICATION_PLUGIN: &str = "novaseal-profile-v0";
-const NOVASEAL_CERTIFICATION_REPORT_SCHEMA: &str = "cellscript-certification-report-v0.1";
-const NOVASEAL_PLUGIN_REPORT_SCHEMA: &str = "novaseal-production-gates-v0.4";
-const NOVASEAL_PROFILE_CERTIFICATION_SCHEMA: &str = "novaseal-profile-certification-v0.1";
-const NOVASEAL_AGREEMENT_PROFILE: &str = "agreement-profile-v0";
-const NOVASEAL_CANONICAL_SCHEMA: &str = "NovaSealCanonicalV0";
-const NOVASEAL_PROFILE_CERTIFICATION_GATE: &str = "agreement_profile_public_ecosystem_certification_v0";
-const NOVASEAL_LOCAL_V1_DIMENSIONS: &[&str] = &[
-    "architecture_and_profile_conformance",
-    "planned_profiles_and_business_scenarios",
-    "security_audit_coverage",
-    "devnet_multi_profile_coverage",
-    "multi_business_scenario_coverage",
-    "full_stateful_acceptance",
-    "wallet_signing_vectors",
-    "profile_operator_fixtures",
-    "service_builder_fixtures",
-    "btc_spv_evidence_adapter",
-    "external_attestation_adapter",
-    "external_evidence_handoff",
-    "local_bip340_tcb_review",
-    "local_v1_gate",
-];
-const NOVASEAL_EXTERNAL_V1_DIMENSIONS: &[&str] = &[
-    "external_btc_fiber_endpoint_acceptance",
-    "all_profiles_production_completeness",
-    "public_shared_cell_dep_attestation",
-    "external_bip340_tcb_review_attestation",
-    "public_btc_spv_evidence",
-    "rwa_legal_registry_review_evidence",
-];
-
 #[derive(Debug)]
 pub enum Command {
     Build(BuildArgs),
@@ -406,6 +377,7 @@ pub struct InterfaceDiffArgs {
     pub new: PathBuf,
     pub output: Option<PathBuf>,
     pub json: bool,
+    pub checked: bool,
 }
 
 #[derive(Debug, Default)]
@@ -817,40 +789,7 @@ pub struct RegistryEditArgs {
     pub yanked_at: Option<String>,
 }
 
-#[derive(Debug, Default)]
-pub struct CertifyArgs {
-    pub plugin: String,
-    pub repo_root: Option<PathBuf>,
-    pub report: Option<PathBuf>,
-    pub output: Option<PathBuf>,
-    pub json: bool,
-    pub require_production: bool,
-}
-
 pub struct CommandExecutor;
-
-#[derive(Debug)]
-struct CommandOutcome {
-    machine: serde_json::Value,
-    human_lines: Vec<String>,
-}
-
-impl CommandOutcome {
-    fn emit(self, json: bool) -> Result<()> {
-        if json {
-            print_json(&self.machine)
-        } else {
-            for line in self.human_lines {
-                println!("{}", line);
-            }
-            Ok(())
-        }
-    }
-
-    fn failure(self, message: impl Into<String>) -> CompileError {
-        CompileError::without_span(message).with_details(self.machine)
-    }
-}
 
 #[derive(Debug, Clone, serde::Serialize)]
 struct RunEntryOutcome {
@@ -1077,7 +1016,7 @@ impl CommandExecutor {
             Command::PackageVerify(args) => Self::package_verify(args),
             Command::RegistryAdd(args) => Self::registry_add(args),
             Command::RegistryEdit(args) => Self::registry_edit(args),
-            Command::Certify(args) => Self::certify(args),
+            Command::Certify(args) => super::certification::run(args),
         }
     }
 
@@ -1768,7 +1707,7 @@ impl CommandExecutor {
 
         let mut changed = Vec::new();
         for module in modules {
-            let formatted = format_default(&module.ast)?;
+            let formatted = format_source(&module.source, module.edition, Default::default())?;
             if formatted != module.source {
                 changed.push(module.path.clone());
                 if !args.check {
@@ -2578,6 +2517,9 @@ impl CommandExecutor {
     }
 
     fn interface_diff(args: InterfaceDiffArgs) -> Result<()> {
+        if args.checked {
+            return super::interface_diff::run(args);
+        }
         let old = read_or_compile_interface(&args.old)?;
         let new = read_or_compile_interface(&args.new)?;
         let report = crate::interface::compare(&old, &new);
@@ -2588,6 +2530,13 @@ impl CommandExecutor {
                 std::fs::create_dir_all(parent)?;
             }
             std::fs::write(output_path, format!("{json}\n"))?;
+        }
+        if !report.compatible && args.json {
+            let details = serde_json::to_value(&report)
+                .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize interface report: {error}")))?;
+            return Err(crate::error::CompileError::without_span("public interface contains breaking changes")
+                .with_code("E2501")
+                .with_details(details));
         }
         if args.json || args.output.is_none() {
             println!("{json}");
@@ -2874,7 +2823,7 @@ impl CommandExecutor {
                 }
                 serde_json::json!({
                     "action": action.name,
-                    "effect_class": action.effect_class,
+                    "effects": action.effects,
                     "parallelizable": action.parallelizable,
                     "touches_shared": action.touches_shared,
                     "estimated_cycles": action.estimated_cycles,
@@ -5103,7 +5052,7 @@ impl CommandExecutor {
 
     fn lock(args: PackageLockArgs) -> Result<()> {
         refresh_lockfile_from_manifest(std::path::Path::new("."))?;
-        let lockfile = Lockfile::read_from_root(std::path::Path::new("."))?.expect("lockfile was just written");
+        let lockfile = read_generated_lockfile(std::path::Path::new("."))?;
         CommandOutcome {
             machine: serde_json::json!({
                 "status": "ok",
@@ -5848,75 +5797,6 @@ impl CommandExecutor {
         println!("    Open a PR with the advisory or replacement evidence");
 
         Ok(())
-    }
-
-    fn certify(args: CertifyArgs) -> Result<()> {
-        if args.plugin != NOVASEAL_CERTIFICATION_PLUGIN {
-            return Err(crate::error::CompileError::without_span(format!(
-                "unknown certification plugin '{}'; available plugins: {}",
-                args.plugin, NOVASEAL_CERTIFICATION_PLUGIN
-            )));
-        }
-
-        let repo_root = args.repo_root.unwrap_or(std::env::current_dir()?);
-        let report_provided = args.report.is_some();
-        let plugin_report_path = args.report.clone().unwrap_or_else(|| repo_root.join("target/novaseal-production-gates.json"));
-        let report_generated = !report_provided;
-
-        let plugin_report = if report_provided {
-            read_json_value(&plugin_report_path)?
-        } else {
-            let report = super::novaseal_certification::build_report(&repo_root)?;
-            if let Some(parent) = plugin_report_path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(
-                &plugin_report_path,
-                serde_json::to_string_pretty(&report).map_err(|error| {
-                    crate::error::CompileError::without_span(format!("failed to serialize NovaSeal production-gate report: {}", error))
-                })?,
-            )?;
-            report
-        };
-
-        let implementation_path = repo_root.join("src/cli/novaseal_certification.rs");
-        let summary = novaseal_certification_summary(
-            &plugin_report,
-            &repo_root,
-            &plugin_report_path,
-            &implementation_path,
-            report_generated,
-            args.require_production,
-        )?;
-        let output_path = args.output.unwrap_or_else(|| repo_root.join("target/cellscript-certification/novaseal-profile-v0.json"));
-        if let Some(parent) = output_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(
-            &output_path,
-            serde_json::to_string_pretty(&summary).map_err(|error| {
-                crate::error::CompileError::without_span(format!("failed to serialize certification report: {}", error))
-            })?,
-        )?;
-
-        let passed = summary["status"].as_str() == Some("passed");
-        let failure_message = (!passed).then(|| novaseal_certification_failure_message(&summary));
-        let outcome = CommandOutcome {
-            human_lines: vec![
-                "Certification report generated".to_string(),
-                format!("  Plugin: {}", args.plugin),
-                format!("  Status: {}", summary["status"].as_str().unwrap_or("unknown")),
-                format!("  Level: {}", summary["certification_level"].as_str().unwrap_or("unknown")),
-                format!("  Output: {}", output_path.display()),
-                format!("  Plugin report: {}", plugin_report_path.display()),
-            ],
-            machine: summary,
-        };
-        if passed {
-            outcome.emit(args.json)
-        } else {
-            Err(outcome.failure(failure_message.unwrap_or_else(|| "certification failed".to_string())))
-        }
     }
 }
 
@@ -7144,26 +7024,8 @@ fn registry_publish_canonical_payload(payload: &crate::package::registry::Regist
 }
 
 fn canonical_json_string(value: &serde_json::Value) -> Result<String> {
-    serde_json::to_string(&sort_json_for_canonical(value))
+    serde_json::to_string(&crate::canonical_json::canonical_json_value(value))
         .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize canonical JSON: {}", error)))
-}
-
-fn sort_json_for_canonical(value: &serde_json::Value) -> serde_json::Value {
-    match value {
-        serde_json::Value::Array(items) => serde_json::Value::Array(items.iter().map(sort_json_for_canonical).collect()),
-        serde_json::Value::Object(object) => {
-            let mut sorted = serde_json::Map::new();
-            let mut keys: Vec<_> = object.keys().collect();
-            keys.sort();
-            for key in keys {
-                if let Some(item) = object.get(key) {
-                    sorted.insert(key.clone(), sort_json_for_canonical(item));
-                }
-            }
-            serde_json::Value::Object(sorted)
-        }
-        other => other.clone(),
-    }
 }
 
 fn build_registry_source_snapshot(
@@ -7854,245 +7716,8 @@ fn render_interface_param(param: &crate::interface::InterfaceParam) -> String {
     rendered
 }
 
-fn read_json_value(path: &Path) -> Result<serde_json::Value> {
-    let bytes = std::fs::read(path).map_err(|error| {
-        crate::error::CompileError::without_span(format!("failed to read JSON '{}': {}", path.display(), error))
-            .with_category(crate::error::CompileErrorCategory::Io)
-            .with_source(error)
-    })?;
-    serde_json::from_slice(&bytes)
-        .map_err(|error| crate::error::CompileError::without_span(format!("failed to parse JSON '{}': {}", path.display(), error)))
-}
-
-fn print_json(value: &serde_json::Value) -> Result<()> {
-    let json = serde_json::to_string_pretty(value).map_err(|error| {
-        crate::error::CompileError::without_span(format!("failed to serialize JSON: {}", error))
-            .with_category(crate::error::CompileErrorCategory::Internal)
-            .with_source(error)
-    })?;
-    println!("{}", json);
-    Ok(())
-}
-
-fn ckb_blake2b_file_hash(path: &Path) -> Result<Option<String>> {
-    if !path.is_file() {
-        return Ok(None);
-    }
-    let bytes = std::fs::read(path)
-        .map_err(|error| crate::error::CompileError::without_span(format!("failed to read '{}': {}", path.display(), error)))?;
-    Ok(Some(crate::hex_encode(&crate::ckb_blake2b256(&bytes))))
-}
-
-fn json_pointer_str<'a>(value: &'a serde_json::Value, pointer: &str) -> Option<&'a str> {
-    value.pointer(pointer).and_then(serde_json::Value::as_str)
-}
-
-fn json_pointer_bool(value: &serde_json::Value, pointer: &str) -> bool {
-    value.pointer(pointer).and_then(serde_json::Value::as_bool).unwrap_or(false)
-}
-
-fn novaseal_gate_status<'a>(report: &'a serde_json::Value, gate_name: &str) -> Option<&'a str> {
-    report.get("gates")?.as_array()?.iter().find_map(|gate| {
-        let name = gate.get("name").and_then(serde_json::Value::as_str)?;
-        if name == gate_name {
-            gate.get("status").and_then(serde_json::Value::as_str)
-        } else {
-            None
-        }
-    })
-}
-
-fn novaseal_certification_failure_message(summary: &serde_json::Value) -> String {
-    let reason = summary.get("failure_reason").unwrap_or(&serde_json::Value::Null);
-    if let Some(message) = json_pointer_str(reason, "/message") {
-        return message.to_string();
-    }
-    if let Some(message) = reason.as_str() {
-        return message.to_string();
-    }
-    if !reason.is_null() {
-        return serde_json::to_string(reason).unwrap_or_else(|_| "certification failed".to_string());
-    }
-    "certification failed".to_string()
-}
-
-fn novaseal_failed_dimensions(plugin_report: &serde_json::Value, v1_readiness: &serde_json::Value) -> serde_json::Value {
-    let mut seen = BTreeSet::new();
-    let mut dimensions = Vec::new();
-    for source in [plugin_report.get("failed_dimensions"), v1_readiness.get("failed_dimensions")] {
-        let Some(items) = source.and_then(serde_json::Value::as_array) else {
-            continue;
-        };
-        for item in items {
-            let Some(name) = item.as_str() else {
-                continue;
-            };
-            if seen.insert(name.to_string()) {
-                dimensions.push(serde_json::Value::String(name.to_string()));
-            }
-        }
-    }
-    serde_json::Value::Array(dimensions)
-}
-
-fn novaseal_failed_dimension_matches(failed_dimensions: &serde_json::Value, expected: &[&str]) -> bool {
-    failed_dimensions.as_array().is_some_and(|dimensions| {
-        dimensions.iter().filter_map(serde_json::Value::as_str).any(|dimension| expected.contains(&dimension))
-    })
-}
-
-#[allow(clippy::too_many_arguments)]
-fn novaseal_certification_summary(
-    plugin_report: &serde_json::Value,
-    repo_root: &Path,
-    plugin_report_path: &Path,
-    implementation_path: &Path,
-    report_generated: bool,
-    require_production: bool,
-) -> Result<serde_json::Value> {
-    let plugin_report_hash = ckb_blake2b_file_hash(plugin_report_path)?.ok_or_else(|| {
-        crate::error::CompileError::without_span(format!(
-            "NovaSeal plugin report '{}' is not a regular file",
-            plugin_report_path.display()
-        ))
-    })?;
-    let implementation_hash = ckb_blake2b_file_hash(implementation_path)?;
-    let profile_certification = plugin_report.get("profile_certification").unwrap_or(&serde_json::Value::Null);
-    let v1_readiness = plugin_report.get("v1_readiness").unwrap_or(&serde_json::Value::Null);
-
-    let mut checks = vec![
-        ("plugin_report_schema", json_pointer_str(plugin_report, "/schema") == Some(NOVASEAL_PLUGIN_REPORT_SCHEMA)),
-        (
-            "profile_certification_schema",
-            json_pointer_str(profile_certification, "/schema") == Some(NOVASEAL_PROFILE_CERTIFICATION_SCHEMA),
-        ),
-        ("profile_id", json_pointer_str(profile_certification, "/profile") == Some(NOVASEAL_AGREEMENT_PROFILE)),
-        ("canonical_target", json_pointer_str(profile_certification, "/conforms_to") == Some(NOVASEAL_CANONICAL_SCHEMA)),
-        ("profile_certification_passed", json_pointer_str(profile_certification, "/status") == Some("passed")),
-        ("public_ecosystem_gate_passed", novaseal_gate_status(plugin_report, NOVASEAL_PROFILE_CERTIFICATION_GATE) == Some("passed")),
-        ("local_production_prep_ready", json_pointer_bool(plugin_report, "/local_production_prep_ready")),
-    ];
-    if !v1_readiness.is_null() {
-        checks.push(("v1_readiness_local_ready", json_pointer_bool(v1_readiness, "/local_v1_ready")));
-    }
-
-    let production_statement_eligible = plugin_report
-        .pointer("/production_statement_eligible")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or_else(|| json_pointer_bool(profile_certification, "/production_statement_eligible"));
-
-    if require_production {
-        checks.push(("production_ready", json_pointer_bool(plugin_report, "/production_ready")));
-        checks.push(("production_statement_eligible", production_statement_eligible));
-    }
-
-    let checks_json =
-        checks.iter().map(|(name, passed)| ((*name).to_string(), serde_json::Value::Bool(*passed))).collect::<serde_json::Map<_, _>>();
-    let failed_checks: Vec<serde_json::Value> =
-        checks.iter().filter(|(_, passed)| !*passed).map(|(name, _)| serde_json::Value::String((*name).to_string())).collect();
-    let passed = failed_checks.is_empty();
-    let external_blockers = plugin_report
-        .get("external_blockers")
-        .cloned()
-        .or_else(|| v1_readiness.get("external_blockers").cloned())
-        .or_else(|| profile_certification.get("production_statement_blockers").cloned())
-        .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
-    let failed_dimensions = novaseal_failed_dimensions(plugin_report, v1_readiness);
-    let planned_missing =
-        v1_readiness.pointer("/planned_profile_matrix/missing").cloned().unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
-    let planned_missing_non_empty = planned_missing.as_array().is_some_and(|items| !items.is_empty());
-    let external_blockers_non_empty = external_blockers.as_array().is_some_and(|items| !items.is_empty());
-    let failed_local_v1_dimension = novaseal_failed_dimension_matches(&failed_dimensions, NOVASEAL_LOCAL_V1_DIMENSIONS);
-    let failed_external_or_endpoint_dimension = novaseal_failed_dimension_matches(&failed_dimensions, NOVASEAL_EXTERNAL_V1_DIMENSIONS);
-    let certification_level = json_pointer_str(profile_certification, "/certification_level").unwrap_or("unknown");
-
-    let failure_reason = if passed {
-        serde_json::Value::Null
-    } else if !v1_readiness.is_null() && !json_pointer_bool(v1_readiness, "/local_v1_ready") && planned_missing_non_empty {
-        serde_json::json!({
-            "message": "NovaSeal V1 readiness requires remaining planned profiles and business scenarios",
-            "v1_status": json_pointer_str(v1_readiness, "/status"),
-            "missing": planned_missing,
-            "failed_dimensions": failed_dimensions.clone(),
-            "external_blockers": external_blockers.clone(),
-            "failed_checks": failed_checks,
-        })
-    } else if !v1_readiness.is_null() && !json_pointer_bool(v1_readiness, "/local_v1_ready") && failed_local_v1_dimension {
-        serde_json::json!({
-            "message": "NovaSeal V1 readiness requires fresh local evidence reports",
-            "remediation": [
-                "rerun live devnet reports for core, Agreement, and planned profiles after source or report changes",
-                "rerun NovaSeal wallet, operator fixture, service-builder, BTC SPV adapter, external attestation adapter, BIP340 TCB review, and handoff bundle generators"
-            ],
-            "v1_status": json_pointer_str(v1_readiness, "/status"),
-            "missing": planned_missing,
-            "failed_dimensions": failed_dimensions.clone(),
-            "external_blockers": external_blockers.clone(),
-            "failed_checks": failed_checks,
-        })
-    } else if !v1_readiness.is_null()
-        && !json_pointer_bool(v1_readiness, "/local_v1_ready")
-        && (external_blockers_non_empty || failed_external_or_endpoint_dimension)
-    {
-        serde_json::json!({
-            "message": "NovaSeal V1 readiness requires external production evidence and endpoint acceptance",
-            "v1_status": json_pointer_str(v1_readiness, "/status"),
-            "missing": planned_missing,
-            "failed_dimensions": failed_dimensions.clone(),
-            "external_blockers": external_blockers.clone(),
-            "failed_checks": failed_checks,
-        })
-    } else if require_production && json_pointer_bool(plugin_report, "/local_production_prep_ready") {
-        serde_json::json!({
-            "message": "NovaSeal production certification requires remaining external attestations",
-            "external_blockers": external_blockers.clone(),
-            "failed_dimensions": failed_dimensions.clone(),
-            "failed_checks": failed_checks,
-        })
-    } else {
-        serde_json::json!({
-            "message": "NovaSeal profile certification failed deterministic compiler checks",
-            "failed_dimensions": failed_dimensions.clone(),
-            "external_blockers": external_blockers.clone(),
-            "failed_checks": failed_checks,
-        })
-    };
-
-    Ok(serde_json::json!({
-        "schema": NOVASEAL_CERTIFICATION_REPORT_SCHEMA,
-        "status": if passed { "passed" } else { "failed" },
-        "plugin": {
-            "id": NOVASEAL_CERTIFICATION_PLUGIN,
-            "kind": "compiler-builtin-rust",
-            "implementation": super::novaseal_certification::IMPLEMENTATION_ID,
-            "implementation_path": implementation_path.display().to_string(),
-            "implementation_hash_algorithm": "ckb_blake2b_256",
-            "implementation_hash": implementation_hash,
-            "report_generated": report_generated,
-        },
-        "plugin_report": {
-            "path": plugin_report_path.display().to_string(),
-            "schema": json_pointer_str(plugin_report, "/schema"),
-            "hash_algorithm": "ckb_blake2b_256",
-            "hash": plugin_report_hash,
-            "status": json_pointer_str(plugin_report, "/status"),
-            "production_ready": json_pointer_bool(plugin_report, "/production_ready"),
-            "production_gates_passed": json_pointer_bool(plugin_report, "/production_gates_passed"),
-            "local_production_prep_ready": json_pointer_bool(plugin_report, "/local_production_prep_ready"),
-            "v1_status": json_pointer_str(v1_readiness, "/status"),
-            "local_v1_ready": json_pointer_bool(v1_readiness, "/local_v1_ready"),
-        },
-        "profile": NOVASEAL_AGREEMENT_PROFILE,
-        "conforms_to": NOVASEAL_CANONICAL_SCHEMA,
-        "certification_level": certification_level,
-        "production_statement_eligible": production_statement_eligible,
-        "failed_dimensions": failed_dimensions,
-        "external_blockers": external_blockers,
-        "require_production": require_production,
-        "repo_root": repo_root.display().to_string(),
-        "checks": checks_json,
-        "failure_reason": failure_reason,
-    }))
+fn read_generated_lockfile(root: &Path) -> Result<Lockfile> {
+    Lockfile::read_from_root(root)?.ok_or_else(|| CliDiagnosticCode::GeneratedLockfileMissing.error())
 }
 
 fn write_or_print_json(output: Option<&PathBuf>, value: &serde_json::Value, json_stdout: bool, label: &str) -> Result<()> {
@@ -8800,11 +8425,11 @@ fn write_typescript_builder_package(
         "lockfile_verified": locked_identity.is_some(),
         "deployment_verified": deployment_identity.is_some(),
         "protocol_bundle_api_schema": manifest["protocol_bundle_contract"]["schema"],
-        "protocol_bundle_artifact_binding_schema": "cellscript-protocol-bundle-artifact-binding-v1",
-        "protocol_bundle_closed_role_schema": "cellscript-protocol-closed-role-v1",
-        "exact_script_handle_receipt_schema": "cellscript-exact-script-handle-receipt-v1",
-        "exact_script_handle_value_schema": "cellscript-exact-script-handle-value-v1",
-        "exact_script_handle_encoding": "CSHDLv1-fixed-202",
+        "protocol_bundle_artifact_binding_schema": crate::protocol_bundle::PROTOCOL_BUNDLE_ARTIFACT_BINDING_SCHEMA,
+        "protocol_bundle_closed_role_schema": crate::protocol_bundle::PROTOCOL_CLOSED_ROLE_SCHEMA,
+        "exact_script_handle_receipt_schema": crate::script_handle::EXACT_SCRIPT_HANDLE_RECEIPT_SCHEMA,
+        "exact_script_handle_value_schema": crate::script_handle::EXACT_SCRIPT_HANDLE_VALUE_SCHEMA,
+        "exact_script_handle_encoding": crate::script_handle::EXACT_SCRIPT_HANDLE_ENCODING,
         "resumable_external_signing": true,
         "private_keys_in_generated_api": false,
         "lockfile": lockfile_path.map(|path| path.display().to_string()),
@@ -8942,11 +8567,11 @@ fn typescript_builder_manifest(
         "protocol_bundle_contract": {
             "schema": if selection_profile { crate::protocol_bundle::PROTOCOL_BUNDLE_SELECTION_SCHEMA } else { crate::protocol_bundle::PROTOCOL_BUNDLE_SCHEMA },
             "report_schema": if selection_profile { crate::protocol_bundle::PROTOCOL_BUNDLE_SELECTION_REPORT_SCHEMA } else { crate::protocol_bundle::PROTOCOL_BUNDLE_REPORT_SCHEMA },
-            "artifact_binding_schema": "cellscript-protocol-bundle-artifact-binding-v1",
-            "closed_role_schema": "cellscript-protocol-closed-role-v1",
-            "bounded_output_plan_evidence_schema": "cellscript-bounded-output-plan-evidence-v1",
-            "deployment_line_admission_evidence_schema": "cellscript-deployment-line-admission-evidence-v1",
-            "deployment_line_admission_transition_schema": "cellscript-deployment-line-admission-transition-v1",
+            "artifact_binding_schema": crate::protocol_bundle::PROTOCOL_BUNDLE_ARTIFACT_BINDING_SCHEMA,
+            "closed_role_schema": crate::protocol_bundle::PROTOCOL_CLOSED_ROLE_SCHEMA,
+            "bounded_output_plan_evidence_schema": crate::protocol_bundle::PROTOCOL_BUNDLE_BOUNDED_OUTPUT_PLAN_EVIDENCE_SCHEMA,
+            "deployment_line_admission_evidence_schema": crate::deployment_line_handle::DEPLOYMENT_LINE_ADMISSION_EVIDENCE_SCHEMA,
+            "deployment_line_admission_transition_schema": crate::deployment_line_handle::DEPLOYMENT_LINE_ADMISSION_TRANSITION_SCHEMA,
             "requires_deployment_line_admission": metadata.target_profile.name == "ckb-type-hash",
             "runtime_adapter": "cellscript-ckb-adapter",
             "states": [
@@ -8986,9 +8611,11 @@ fn typescript_builder_manifest(
     manifest["typed_semantics_hash"] = serde_json::json!(metadata.typed_semantics_hash);
     manifest["verified_bundle_id"] = serde_json::json!(metadata.verified_artifact.verified_bundle_id);
     manifest["protocol_bundle_contract"]["exact_handle_receipt_schema"] =
-        serde_json::json!("cellscript-exact-script-handle-receipt-v1");
-    manifest["protocol_bundle_contract"]["exact_handle_value_schema"] = serde_json::json!("cellscript-exact-script-handle-value-v1");
-    manifest["protocol_bundle_contract"]["exact_handle_encoding"] = serde_json::json!("CSHDLv1-fixed-202");
+        serde_json::json!(crate::script_handle::EXACT_SCRIPT_HANDLE_RECEIPT_SCHEMA);
+    manifest["protocol_bundle_contract"]["exact_handle_value_schema"] =
+        serde_json::json!(crate::script_handle::EXACT_SCRIPT_HANDLE_VALUE_SCHEMA);
+    manifest["protocol_bundle_contract"]["exact_handle_encoding"] =
+        serde_json::json!(crate::script_handle::EXACT_SCRIPT_HANDLE_ENCODING);
     manifest["protocol_bundle_contract"]["exact_handle_hash_algorithm"] = serde_json::json!("ckb-blake2b-256");
     manifest["protocol_bundle_contract"]["exact_handle_hash_personalization"] = serde_json::json!("ckb-default-hash");
     if let Some(policy) = &metadata.runtime.policy_artifact {
@@ -9057,771 +8684,6 @@ fn typescript_tsconfig_json() -> serde_json::Value {
         },
         "include": ["src/**/*.ts", "src/**/*.json"]
     })
-}
-
-fn typescript_protocol_bundle_api() -> &'static str {
-    r#"
-export const PROTOCOL_BUNDLE_SELECTION_SCHEMA = "cellscript-protocol-bundle-v2" as const;
-export const PROTOCOL_BUNDLE_SELECTION_REPORT_SCHEMA = "cellscript-protocol-bundle-report-v2" as const;
-export const PROTOCOL_BUNDLE_SCHEMA = "cellscript-protocol-bundle-v1" as const;
-export const PROTOCOL_BUNDLE_REPORT_SCHEMA = "cellscript-protocol-bundle-report-v1" as const;
-export const PROTOCOL_BUNDLE_ARTIFACT_BINDING_SCHEMA = "cellscript-protocol-bundle-artifact-binding-v1" as const;
-export const PROTOCOL_CLOSED_ROLE_SCHEMA = "cellscript-protocol-closed-role-v1" as const;
-export const PROTOCOL_BUNDLE_BOUNDED_OUTPUT_PLAN_EVIDENCE_SCHEMA = "cellscript-bounded-output-plan-evidence-v1" as const;
-export const EXACT_SCRIPT_HANDLE_RECEIPT_SCHEMA = "cellscript-exact-script-handle-receipt-v1" as const;
-export const EXACT_SCRIPT_HANDLE_VALUE_SCHEMA = "cellscript-exact-script-handle-value-v1" as const;
-export const EXACT_SCRIPT_HANDLE_ENCODING = "CSHDLv1-fixed-202" as const;
-export const DEPLOYMENT_LINE_RECEIPT_SCHEMA = "cellscript-deployment-line-receipt-v1" as const;
-export const DEPLOYMENT_LINE_VALUE_SCHEMA = "cellscript-deployment-line-handle-value-v1" as const;
-export const DEPLOYMENT_LINE_HANDLE_ENCODING = "CSLINv1-fixed-386" as const;
-export const DEPLOYMENT_LINE_ADMISSION_EVIDENCE_SCHEMA = "cellscript-deployment-line-admission-evidence-v1" as const;
-export const DEPLOYMENT_LINE_ADMISSION_TRANSITION_SCHEMA = "cellscript-deployment-line-admission-transition-v1" as const;
-
-export type ProtocolBundleScriptRole = "lock" | "type" | "spawned-verifier";
-
-export interface ProtocolBundleBoundedOutputPlanEvidence {
-  schema: typeof PROTOCOL_BUNDLE_BOUNDED_OUTPUT_PLAN_EVIDENCE_SCHEMA;
-  version: 1;
-  action: string;
-  binding: string;
-  witness_index: number;
-  witness_field: "input_type";
-  plan_payload: HexString;
-  current_script_hash: HexString;
-  group_output_indexes: readonly number[];
-}
-
-export interface ProtocolBundleDeploymentBinding {
-  network: { chainId: string; genesisHash: HexString };
-  artifactHash: string;
-  script: { codeHash: HexString; hashType: "data" | "data1" | "data2" | "type"; args: HexString };
-  codeCellDep: { outPoint: { txHash: HexString; index: number }; depType: "code" | "dep_group" };
-}
-
-export interface ExactScriptHandleReceipt {
-  schema: typeof EXACT_SCRIPT_HANDLE_RECEIPT_SCHEMA;
-  version: 1;
-  class: "script" | "verifier";
-  script_role: ProtocolBundleScriptRole;
-  package_coordinate: string;
-  lock_node_id: string;
-  entry: { kind: "action" | "lock" | "function"; name: string };
-  interface_hash: string;
-  typed_semantics_hash: string;
-  artifact_hash: string;
-  target_profile_hash: string;
-  runtime_abi_hash: string;
-  verified_bundle_id: string;
-  deployment: {
-    network: { chain_id: string; genesis_hash: HexString };
-    artifact_hash: string;
-    script: { code_hash: HexString; hash_type: "data" | "data1" | "data2" | "type"; args: HexString };
-    code_cell_dep: { out_point: { tx_hash: HexString; index: number }; dep_type: "code" | "dep_group" };
-  };
-  code_identity_policy: "data-hash-exact-artifact" | "type-hash-exact-code-cell";
-  upgrade_policy: "exact-artifact";
-}
-
-export interface ExactScriptHandleValue {
-  schema: typeof EXACT_SCRIPT_HANDLE_VALUE_SCHEMA;
-  version: 1;
-  encoding: typeof EXACT_SCRIPT_HANDLE_ENCODING;
-  encoded: HexString;
-}
-
-export interface DeploymentLineReceipt {
-  schema: typeof DEPLOYMENT_LINE_RECEIPT_SCHEMA;
-  version: 1;
-  line_id: string;
-  package_line: string;
-  sequence: number;
-  status: "active" | "yanked";
-  previous_receipt_hash?: string;
-  class: "script" | "verifier";
-  script_role: ProtocolBundleScriptRole;
-  entry: { kind: "action" | "lock" | "function"; name: string };
-  network: { chain_id: string; genesis_hash: HexString };
-  stable_script: { code_hash: HexString; hash_type: "type"; args: HexString };
-  baseline_interface_hash: string;
-  previous_interface_hash: string;
-  current_interface_hash: string;
-  predecessor_compatibility: unknown;
-  baseline_compatibility: unknown;
-  policy: unknown;
-  policy_hash: string;
-  admission_cell_type_hash: HexString;
-  current_exact_receipt: ExactScriptHandleReceipt;
-  current_exact_handle_hash: string;
-}
-
-export interface DeploymentLineHandleValue {
-  schema: typeof DEPLOYMENT_LINE_VALUE_SCHEMA;
-  version: 1;
-  encoding: typeof DEPLOYMENT_LINE_HANDLE_ENCODING;
-  encoded: HexString;
-}
-
-export interface DeploymentLineCellEvidence {
-  out_point: { tx_hash: HexString; index: number };
-  lock: { code_hash: HexString; hash_type: "data" | "data1" | "data2" | "type"; args: HexString };
-  type_script: { code_hash: HexString; hash_type: "type"; args: HexString };
-  data_hash: string;
-}
-
-export interface DeploymentLineAdmissionEvidence {
-  schema: typeof DEPLOYMENT_LINE_ADMISSION_EVIDENCE_SCHEMA;
-  version: 1;
-  artifact: string;
-  receipt: DeploymentLineReceipt;
-  handle: DeploymentLineHandleValue;
-  admission_cell: DeploymentLineCellEvidence;
-  admission_cell_data: HexString;
-  admission_cell_dep_index: number;
-  code_cell: DeploymentLineCellEvidence;
-  code_cell_dep_index: number;
-}
-
-export interface DeploymentLineAdmissionTransition {
-  schema: typeof DEPLOYMENT_LINE_ADMISSION_TRANSITION_SCHEMA;
-  version: 1;
-  previous_receipt?: DeploymentLineReceipt;
-  previous_handle?: DeploymentLineHandleValue;
-  admission_input_index?: number;
-  next_receipt: DeploymentLineReceipt;
-  next_handle: DeploymentLineHandleValue;
-  admission_output_index: number;
-}
-
-export interface ProtocolBundleArtifactBinding {
-  schema: typeof PROTOCOL_BUNDLE_ARTIFACT_BINDING_SCHEMA;
-  id: string;
-  packageName: string;
-  packageCoordinate: string;
-  lockNodeId: string;
-  metadataHash: string;
-  artifactHash: string;
-  interfaceHash: string;
-  typedSemanticsHash: string;
-  targetProfile: "ckb" | "ckb-type-hash";
-  targetProfileHash: string;
-  runtimeAbiHash: string;
-  verifiedBundleId: string | null;
-  schemaContracts: readonly ProtocolBundleRoleSchemaIdentity[];
-  exactRoleContracts?: unknown;
-  builderManifestSchema: typeof CELLSCRIPT_BUILDER_SCHEMA;
-  entry: { kind: "action" | "lock"; name: string };
-  scriptRole: ProtocolBundleScriptRole;
-  deployment: ProtocolBundleDeploymentBinding;
-}
-
-export interface ProtocolBundleRoleSchemaIdentity {
-  type_name: string;
-  schema_hash: string;
-}
-
-export const protocolBundleArtifactIdentity = Object.freeze({
-  packageName: builderManifest.package_name,
-  metadataHash: builderManifest.metadata_hash,
-  artifactHash: builderManifest.artifact_hash,
-  interfaceHash: metadata.interface_hash,
-  typedSemanticsHash: builderManifest.typed_semantics_hash,
-  targetProfile: builderManifest.target_profile,
-  targetProfileHash: builderManifest.target_profile_hash,
-  runtimeAbiHash: builderManifest.runtime_abi_hash,
-  verifiedBundleId: builderManifest.verified_bundle_id,
-  schemaContracts: Object.freeze(((builderManifest.molecule_schema_manifest as {
-    entries?: readonly ProtocolBundleRoleSchemaIdentity[];
-  }).entries ?? []).map((entry) => Object.freeze({
-    type_name: entry.type_name,
-    schema_hash: entry.schema_hash,
-  }))),
-  builderManifestSchema: CELLSCRIPT_BUILDER_SCHEMA,
-});
-
-export function bindProtocolBundleArtifact(options: {
-  id: string;
-  packageCoordinate: string;
-  lockNodeId: string;
-  entry: { kind: "action" | "lock"; name: string };
-  scriptRole: ProtocolBundleScriptRole;
-  deployment: ProtocolBundleDeploymentBinding;
-}): ProtocolBundleArtifactBinding {
-  if (!options.id || !options.packageCoordinate || !options.lockNodeId || !options.entry.name) {
-    throw new Error("ProtocolBundle artifact id, package coordinate, lock node, and entry name are required");
-  }
-  const artifactHash = protocolBundleArtifactIdentity.artifactHash;
-  if (typeof artifactHash !== "string") {
-    throw new Error("generated artifact has no deployable artifact hash");
-  }
-  if (options.deployment.artifactHash !== artifactHash) {
-    throw new Error("ProtocolBundle deployment artifact hash does not match generated builder identity");
-  }
-  if (!options.deployment.network.chainId || !/^0x[0-9a-f]{64}$/.test(options.deployment.network.genesisHash)) {
-    throw new Error("ProtocolBundle deployment network identity is invalid");
-  }
-  return Object.freeze({
-    schema: PROTOCOL_BUNDLE_ARTIFACT_BINDING_SCHEMA,
-    id: options.id,
-    packageName: protocolBundleArtifactIdentity.packageName,
-    packageCoordinate: options.packageCoordinate,
-    lockNodeId: options.lockNodeId,
-    metadataHash: protocolBundleArtifactIdentity.metadataHash,
-    artifactHash,
-    interfaceHash: protocolBundleArtifactIdentity.interfaceHash,
-    typedSemanticsHash: protocolBundleArtifactIdentity.typedSemanticsHash,
-    targetProfile: protocolBundleArtifactIdentity.targetProfile,
-    targetProfileHash: protocolBundleArtifactIdentity.targetProfileHash,
-    runtimeAbiHash: protocolBundleArtifactIdentity.runtimeAbiHash,
-    verifiedBundleId: protocolBundleArtifactIdentity.verifiedBundleId,
-    schemaContracts: protocolBundleArtifactIdentity.schemaContracts,
-    exactRoleContracts: (builderManifest as { exact_role_contracts?: Readonly<Record<string, unknown>> }).exact_role_contracts?.[`${options.entry.kind}:${options.entry.name}`],
-    builderManifestSchema: protocolBundleArtifactIdentity.builderManifestSchema,
-    entry: Object.freeze({ ...options.entry }),
-    scriptRole: options.scriptRole,
-    deployment: Object.freeze(options.deployment),
-  });
-}
-
-export interface BoundExactScriptHandle {
-  artifact: ProtocolBundleArtifactBinding;
-  receipt: ExactScriptHandleReceipt;
-  value: ExactScriptHandleValue;
-  handleHash: string;
-}
-
-export interface BoundOpenHandleWitness {
-  consumer: string;
-  parameter: string;
-  participant: string;
-  sourcePolicy: string;
-  selectedReceipt: string;
-  authorizationRoot: HexString;
-  selection: HexString;
-  witnessPayload: Uint8Array;
-}
-
-/** Encode the bounded one-handle CSARGv1 envelope. This performs serialization,
- * not receipt admission, membership verification or root authorization. */
-export function encodeOpenHandleWitness(selection: HexString | Uint8Array): Uint8Array {
-  if ((typeof selection === "string" && !/^0x[0-9a-f]{1312}$/.test(selection))
-    || (selection instanceof Uint8Array && selection.length !== 656)) {
-    throw new Error("open handle selection must be exactly 656 canonical bytes");
-  }
-  const bytes = boundedOutputBytes(selection, "open handle selection");
-  const magic = new TextEncoder().encode("CSOHWv1\0");
-  if (bytes.length !== 656 || magic.some((byte, index) => bytes[index] !== byte)) {
-    throw new Error("open handle selection has invalid CSOHWv1 magic");
-  }
-  const payload = new Uint8Array(664);
-  payload.set(new TextEncoder().encode("CSARGv1\0"));
-  payload.set(bytes, 8);
-  return payload;
-}
-
-/** Extract an already admitted witness from the native private-receipt path.
- * The runtime adapter must still recheck materialization and protect the final
- * witness through signing. This helper cannot construct a native receipt. */
-export function openHandleWitnessFromCheckedBundle(
-  checked: CheckedProtocolBundle,
-  consumer: ProtocolBundleArtifactBinding,
-  parameter: string,
-): BoundOpenHandleWitness {
-  if ((checked.schema !== PROTOCOL_BUNDLE_REPORT_SCHEMA && checked.schema !== PROTOCOL_BUNDLE_SELECTION_REPORT_SCHEMA) || checked.status !== "ok"
-    || !/^[0-9a-f]{64}$/.test(checked.bundle_hash)) {
-    throw new Error("open handle requires a successful native ProtocolBundle report");
-  }
-  const bundle = checked.bundle as {
-    artifacts?: readonly Record<string, unknown>[];
-    open_handles?: readonly Record<string, unknown>[];
-  };
-  exactScriptHandleFromCheckedBundle(checked, consumer);
-  const artifact = bundle.artifacts?.find((value) => value.id === consumer.id);
-  if (!artifact || artifact.artifact_hash !== consumer.artifactHash
-    || artifact.verified_bundle_id !== consumer.verifiedBundleId) {
-    throw new Error("open handle consumer differs from the generated checked artifact");
-  }
-  const bindings = bundle.open_handles?.filter((value) => value.consumer === consumer.id && value.parameter === parameter) ?? [];
-  if (bindings.length !== 1) throw new Error("missing or duplicate native open handle admission");
-  const binding = bindings[0];
-  const invocation = binding.verifier_invocation as Record<string, unknown> | undefined;
-  const hashes = [binding.source_policy, binding.selected_receipt, binding.checked_dependency,
-    invocation ? invocation.identity : binding.checked_type_group];
-  if (binding.schema !== "cellscript-protocol-open-handle-v1"
-    || hashes.some((value) => typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value))
-    || binding.authorization_root !== consumer.deployment.script.args
-    || binding.witness_field !== "input_type"
-    || typeof binding.selection !== "string"
-    || typeof binding.participant !== "string" || binding.participant === consumer.id
-    || !bundle.artifacts?.some((value) => value.id === binding.participant && value.artifact_hash === binding.selected_artifact_hash)) {
-    throw new Error("native open handle admission differs from the consumer root or selected participant");
-  }
-  const actions = (consumer.entry.kind === "lock" ? builderManifest.locks : builderManifest.actions) as readonly { name: string; params: readonly Record<string, unknown>[] }[];
-  const declared = actions.find((action) => action.name === consumer.entry.name)?.params.find((value) => value.name === parameter);
-  const handleClass = invocation ? "VerifierHandle" : "ScriptHandle";
-  if (!declared || declared.ty !== `${handleClass}<${binding.interface_module}>` || declared.fixed_byte_len !== 656) {
-    throw new Error("open handle parameter differs from the generated nominal interface");
-  }
-  const witnessPayload = encodeOpenHandleWitness(binding.selection as HexString);
-  return Object.freeze({
-    consumer: consumer.id, parameter, participant: binding.participant,
-    sourcePolicy: binding.source_policy as string, selectedReceipt: binding.selected_receipt as string,
-    authorizationRoot: binding.authorization_root as HexString,
-    selection: binding.selection as HexString, witnessPayload,
-  });
-}
-
-export interface BoundInstanceHandleWitness extends BoundOpenHandleWitness {
-  instancePolicyRoot: HexString;
-  instanceSourcePolicy: string;
-  instanceSelectionIdentity: string;
-}
-
-/** Serialize the separate instance profile; old CSOH selections are not accepted. */
-export function encodeInstanceHandleWitness(selection: HexString | Uint8Array): Uint8Array {
-  if ((typeof selection === "string" && !/^0x[0-9a-f]{3536}$/.test(selection))
-    || (selection instanceof Uint8Array && selection.length !== 1768)) {
-    throw new Error("instance handle selection must be exactly 1768 canonical bytes");
-  }
-  const bytes = boundedOutputBytes(selection, "instance handle selection");
-  const magic = new TextEncoder().encode("CSINWv1\0");
-  if (bytes.length !== 1768 || magic.some((byte, index) => bytes[index] !== byte)) {
-    throw new Error("instance handle selection has invalid CSINWv1 magic");
-  }
-  const payload = new Uint8Array(1776);
-  payload.set(new TextEncoder().encode("CSARGv1\0"));
-  payload.set(bytes, 8);
-  return payload;
-}
-
-/** Extract native instance admission evidence. This is not an independent
- * policy verifier; the adapter rechecks the policy and final transaction. */
-export function instanceHandleWitnessFromCheckedBundle(
-  checked: CheckedProtocolBundle,
-  consumer: ProtocolBundleArtifactBinding,
-  parameter: string,
-): BoundInstanceHandleWitness {
-  if ((checked.schema !== PROTOCOL_BUNDLE_REPORT_SCHEMA && checked.schema !== PROTOCOL_BUNDLE_SELECTION_REPORT_SCHEMA) || checked.status !== "ok"
-    || !/^[0-9a-f]{64}$/.test(checked.bundle_hash)) {
-    throw new Error("instance handle requires a successful native ProtocolBundle report");
-  }
-  exactScriptHandleFromCheckedBundle(checked, consumer);
-  const bundle = checked.bundle as {
-    artifacts?: readonly Record<string, unknown>[];
-    open_handles?: readonly Record<string, unknown>[];
-  };
-  const artifact = bundle.artifacts?.find((value) => value.id === consumer.id);
-  const bindings = bundle.open_handles?.filter((value) => value.consumer === consumer.id && value.parameter === parameter) ?? [];
-  if (!artifact || artifact.artifact_hash !== consumer.artifactHash
-    || artifact.verified_bundle_id !== consumer.verifiedBundleId || bindings.length !== 1) {
-    throw new Error("missing, duplicate or mismatched native instance admission");
-  }
-  const binding = bindings[0];
-  const instance = binding.instance as Record<string, unknown> | undefined;
-  const args = consumer.deployment.script.args;
-  if (!instance || instance.schema !== "cellscript-protocol-instance-admission-v1"
-    || binding.schema !== "cellscript-protocol-instance-handle-v1" || binding.verifier_invocation != null
-    || [binding.source_policy, binding.selected_receipt, binding.checked_dependency, binding.checked_type_group,
-      instance.source_policy, instance.selection_identity, instance.implementation_receipt, instance.args_schema]
-      .some((value) => typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value))
-    || !/^0x4353494e43763100[0-9a-f]{400}$/.test(args) || instance.consumer_args !== args
-    || instance.policy_root !== `0x${args.slice(18, 82)}`
-    || (instance.instance_mode !== "exact" && instance.instance_mode !== "constrained")
-    || binding.witness_field !== "input_type" || typeof binding.selection !== "string"
-    || typeof binding.authorization_root !== "string" || !/^0x[0-9a-f]{64}$/.test(binding.authorization_root)
-    || typeof binding.participant !== "string" || binding.participant === consumer.id
-    || !bundle.artifacts?.some((value) => value.id === binding.participant && value.artifact_hash === binding.selected_artifact_hash)) {
-    throw new Error("native instance admission differs from the consumer configuration or selected participant");
-  }
-  const actions = (consumer.entry.kind === "lock" ? builderManifest.locks : builderManifest.actions) as readonly { name: string; params: readonly Record<string, unknown>[] }[];
-  const declared = actions.find((action) => action.name === consumer.entry.name)?.params.find((value) => value.name === parameter);
-  if (!declared || declared.ty !== `InstanceScriptHandle<${binding.interface_module}>` || declared.fixed_byte_len !== 1768) {
-    throw new Error("instance handle parameter differs from the generated nominal interface");
-  }
-  const witnessPayload = encodeInstanceHandleWitness(binding.selection as HexString);
-  if (binding.authorization_root !== `0x${binding.selection.slice(50, 114)}`
-    || instance.args_schema !== binding.selection.slice(114, 178)
-    || binding.selection.slice(34, 36) !== (instance.instance_mode === "exact" ? "00" : "01")) {
-    throw new Error("instance witness differs from its admitted implementation, schema or mode");
-  }
-  return Object.freeze({
-    consumer: consumer.id, parameter, participant: binding.participant,
-    sourcePolicy: binding.source_policy as string, selectedReceipt: binding.selected_receipt as string,
-    authorizationRoot: binding.authorization_root as HexString, selection: binding.selection as HexString, witnessPayload,
-    instancePolicyRoot: instance.policy_root as HexString, instanceSourcePolicy: instance.source_policy as string,
-    instanceSelectionIdentity: instance.selection_identity as string,
-  });
-}
-
-function exactDeploymentMatches(artifact: ProtocolBundleArtifactBinding, receipt: ExactScriptHandleReceipt): boolean {
-  const left = artifact.deployment;
-  const right = receipt.deployment;
-  return left.network.chainId === right.network.chain_id
-    && left.network.genesisHash === right.network.genesis_hash
-    && left.artifactHash === right.artifact_hash
-    && left.script.codeHash === right.script.code_hash
-    && left.script.hashType === right.script.hash_type
-    && left.script.args === right.script.args
-    && left.codeCellDep.outPoint.txHash === right.code_cell_dep.out_point.tx_hash
-    && left.codeCellDep.outPoint.index === right.code_cell_dep.out_point.index
-    && left.codeCellDep.depType === right.code_cell_dep.dep_type;
-}
-
-/** Bind a receipt/value pair returned by the successful ProtocolBundle checker. */
-export function bindCheckedExactScriptHandle(
-  artifact: ProtocolBundleArtifactBinding,
-  checked: { exact_handle_receipt: ExactScriptHandleReceipt; exact_handle: ExactScriptHandleValue; exact_handle_hash: string },
-): BoundExactScriptHandle {
-  const receipt = checked.exact_handle_receipt;
-  const value = checked.exact_handle;
-  const handleHash = checked.exact_handle_hash;
-  if (typeof artifact.verifiedBundleId !== "string") {
-    throw new Error("generated artifact has no verified bundle identity for an exact Script handle");
-  }
-  const expectedClass = artifact.scriptRole === "spawned-verifier" ? "verifier" : "script";
-  const expectedPolicy = artifact.deployment.script.hashType === "type"
-    ? "type-hash-exact-code-cell"
-    : "data-hash-exact-artifact";
-  if (!receipt || receipt.schema !== EXACT_SCRIPT_HANDLE_RECEIPT_SCHEMA || receipt.version !== 1
-    || receipt.class !== expectedClass || receipt.script_role !== artifact.scriptRole
-    || receipt.package_coordinate !== artifact.packageCoordinate || receipt.lock_node_id !== artifact.lockNodeId
-    || receipt.entry.kind !== artifact.entry.kind || receipt.entry.name !== artifact.entry.name
-    || receipt.interface_hash !== artifact.interfaceHash
-    || receipt.typed_semantics_hash !== artifact.typedSemanticsHash
-    || receipt.artifact_hash !== artifact.artifactHash
-    || receipt.target_profile_hash !== artifact.targetProfileHash
-    || receipt.runtime_abi_hash !== artifact.runtimeAbiHash
-    || receipt.verified_bundle_id !== artifact.verifiedBundleId
-    || receipt.code_identity_policy !== expectedPolicy || receipt.upgrade_policy !== "exact-artifact"
-    || !exactDeploymentMatches(artifact, receipt)) {
-    throw new Error("checked exact Script handle receipt does not match generated artifact/deployment identity");
-  }
-  if (expectedPolicy === "data-hash-exact-artifact"
-    && artifact.deployment.script.codeHash !== `0x${artifact.artifactHash}`) {
-    throw new Error("exact data-hash Script handle does not identify the generated artifact bytes");
-  }
-  if (!value || value.schema !== EXACT_SCRIPT_HANDLE_VALUE_SCHEMA || value.version !== 1
-    || value.encoding !== EXACT_SCRIPT_HANDLE_ENCODING || !/^0x[0-9a-f]{404}$/.test(value.encoded)) {
-    throw new Error("checked exact Script handle value has an invalid schema or fixed-width encoding");
-  }
-  if (!/^[0-9a-f]{64}$/.test(handleHash)) {
-    throw new Error("checked exact Script handle has an invalid full-value CKB Blake2b-256 hash");
-  }
-  return Object.freeze({ artifact, receipt: Object.freeze(receipt), value: Object.freeze(value), handleHash });
-}
-
-export interface ProtocolBundleClosedRoleInput {
-  schema: typeof PROTOCOL_CLOSED_ROLE_SCHEMA;
-  role_id: string;
-  kind: "cell" | "witness";
-  schema_identity: ProtocolBundleRoleSchemaIdentity;
-  provider: { artifact: string; claim: string };
-  consumers: readonly { artifact: string; claim: string }[];
-  correspondence: "exact-physical-binding";
-}
-
-export function bindClosedProtocolRole(options: {
-  roleId: string;
-  kind: "cell" | "witness";
-  schemaIdentity: ProtocolBundleRoleSchemaIdentity;
-  provider: { artifact: ProtocolBundleArtifactBinding; claim: string };
-  consumers: readonly { artifact: ProtocolBundleArtifactBinding; claim: string }[];
-}): ProtocolBundleClosedRoleInput {
-  if (!options.roleId || !options.provider.claim || options.consumers.length < 1) {
-    throw new Error("closed ProtocolBundle role requires an id, provider claim, and at least one consumer");
-  }
-  if (!options.schemaIdentity.type_name || !/^[0-9a-f]{64}$/.test(options.schemaIdentity.schema_hash)) {
-    throw new Error("closed ProtocolBundle role schema identity is invalid");
-  }
-  const participants = [options.provider, ...options.consumers];
-  const participantIds = participants.map((participant) => participant.artifact.id);
-  if (new Set(participantIds).size !== participantIds.length || options.consumers.some((consumer) => !consumer.claim)) {
-    throw new Error("closed ProtocolBundle role participants and claims must be distinct and non-empty");
-  }
-  for (const participant of participants) {
-    if (participant.artifact.schema !== PROTOCOL_BUNDLE_ARTIFACT_BINDING_SCHEMA) {
-      throw new Error(`ProtocolBundle artifact '${participant.artifact.id}' has an invalid binding schema`);
-    }
-    const exposesSchema = participant.artifact.schemaContracts.some((candidate) =>
-      candidate.type_name === options.schemaIdentity.type_name
-      && candidate.schema_hash === options.schemaIdentity.schema_hash);
-    if (!exposesSchema) {
-      throw new Error(`ProtocolBundle artifact '${participant.artifact.id}' does not expose the closed-role schema identity`);
-    }
-  }
-  return Object.freeze({
-    schema: PROTOCOL_CLOSED_ROLE_SCHEMA,
-    role_id: options.roleId,
-    kind: options.kind,
-    schema_identity: Object.freeze({ ...options.schemaIdentity }),
-    provider: Object.freeze({ artifact: options.provider.artifact.id, claim: options.provider.claim }),
-    consumers: Object.freeze(options.consumers.map((consumer) =>
-      Object.freeze({ artifact: consumer.artifact.id, claim: consumer.claim }))),
-    correspondence: "exact-physical-binding" as const,
-  });
-}
-
-export interface CheckedProtocolBundle {
-  schema: typeof PROTOCOL_BUNDLE_REPORT_SCHEMA | typeof PROTOCOL_BUNDLE_SELECTION_REPORT_SCHEMA;
-  status: "ok";
-  bundle_hash: string;
-  bundle: unknown;
-  evidence: unknown;
-}
-
-/** Compare generated source contracts; actual Cell reconstruction remains the
- * native checker and materialization adapter's responsibility. */
-function assertExactRoleCatalog(checked: CheckedProtocolBundle, artifact: ProtocolBundleArtifactBinding): void {
-  if (artifact.exactRoleContracts === undefined) return;
-  const bundle = checked.bundle as { schema?: string; artifacts?: readonly Record<string, unknown>[] };
-  const evidence = checked.evidence as { exact_role_selections?: Readonly<Record<string, unknown>> };
-  const candidates = bundle.artifacts?.filter((item) => item.id === artifact.id) ?? [];
-  if (checked.schema !== PROTOCOL_BUNDLE_SELECTION_REPORT_SCHEMA || bundle.schema !== PROTOCOL_BUNDLE_SELECTION_SCHEMA
-    || candidates.length !== 1 || !sameRoleContract(candidates[0].exact_role_contracts, artifact.exactRoleContracts)
-    || !Array.isArray(evidence.exact_role_selections?.[artifact.id])) {
-    throw new Error("checked exact-role catalog differs from the generated builder or lacks v2 evidence");
-  }
-}
-
-function sameRoleContract(left: unknown, right: unknown): boolean {
-  if (left === right) return true;
-  if (left === null || right === null || typeof left !== "object" || typeof right !== "object") return false;
-  if (Array.isArray(left) || Array.isArray(right)) {
-    return Array.isArray(left) && Array.isArray(right) && left.length === right.length
-      && left.every((value, index) => sameRoleContract(value, right[index]));
-  }
-  const l = left as Record<string, unknown>;
-  const r = right as Record<string, unknown>;
-  const keys = Object.keys(l);
-  return keys.length === Object.keys(r).length
-    && keys.every((key) => Object.prototype.hasOwnProperty.call(r, key) && sameRoleContract(l[key], r[key]));
-}
-
-export function exactScriptHandleFromCheckedBundle(
-  checked: CheckedProtocolBundle,
-  artifact: ProtocolBundleArtifactBinding,
-): BoundExactScriptHandle {
-  assertExactRoleCatalog(checked, artifact);
-  const bundle = checked.bundle as { artifacts?: readonly Record<string, unknown>[] };
-  const candidate = bundle.artifacts?.find((item) => item.id === artifact.id);
-  if (!candidate) {
-    throw new Error(`successful ProtocolBundle report has no exact handle for artifact '${artifact.id}'`);
-  }
-  return bindCheckedExactScriptHandle(artifact, candidate as unknown as {
-    exact_handle_receipt: ExactScriptHandleReceipt;
-    exact_handle: ExactScriptHandleValue;
-    exact_handle_hash: string;
-  });
-}
-
-export interface BoundDeploymentLineHandle {
-  artifact: ProtocolBundleArtifactBinding;
-  admission: DeploymentLineAdmissionEvidence;
-  exact: BoundExactScriptHandle;
-  handleBytes: HexString;
-  admissionCellDepIndex: number;
-  codeCellDepIndex: number;
-}
-
-/** Extract the current checked CSLINv1 value and its exact CellDep positions. */
-export function deploymentLineHandleFromCheckedBundle(
-  checked: CheckedProtocolBundle,
-  artifact: ProtocolBundleArtifactBinding,
-): BoundDeploymentLineHandle {
-  if (artifact.targetProfile !== "ckb-type-hash" || artifact.deployment.script.hashType !== "type") {
-    throw new Error("deployment line handles require a checked ckb-type-hash artifact");
-  }
-  const bundle = checked.bundle as { deployment_lines?: readonly DeploymentLineAdmissionEvidence[] };
-  const admission = bundle.deployment_lines?.find((item) => item.artifact === artifact.id);
-  if (!admission || admission.schema !== DEPLOYMENT_LINE_ADMISSION_EVIDENCE_SCHEMA || admission.version !== 1
-    || admission.receipt.schema !== DEPLOYMENT_LINE_RECEIPT_SCHEMA || admission.receipt.version !== 1
-    || admission.receipt.status !== "active" || admission.receipt.script_role !== artifact.scriptRole
-    || admission.handle.schema !== DEPLOYMENT_LINE_VALUE_SCHEMA || admission.handle.version !== 1
-    || admission.handle.encoding !== DEPLOYMENT_LINE_HANDLE_ENCODING
-    || !/^0x[0-9a-f]{772}$/.test(admission.handle.encoded)
-    || !Number.isSafeInteger(admission.admission_cell_dep_index) || admission.admission_cell_dep_index < 0
-    || !Number.isSafeInteger(admission.code_cell_dep_index) || admission.code_cell_dep_index < 0
-    || admission.admission_cell_dep_index === admission.code_cell_dep_index) {
-    throw new Error(`successful ProtocolBundle report has no active canonical deployment line for artifact '${artifact.id}'`);
-  }
-  const exact = exactScriptHandleFromCheckedBundle(checked, artifact);
-  if (admission.receipt.current_exact_handle_hash !== exact.handleHash
-    || admission.receipt.current_exact_receipt.verified_bundle_id !== exact.receipt.verified_bundle_id
-    || !exactDeploymentMatches(artifact, admission.receipt.current_exact_receipt)) {
-    throw new Error(`deployment line for artifact '${artifact.id}' does not bind its checked exact version`);
-  }
-  return Object.freeze({
-    artifact,
-    admission: Object.freeze(admission),
-    exact,
-    handleBytes: admission.handle.encoded,
-    admissionCellDepIndex: admission.admission_cell_dep_index,
-    codeCellDepIndex: admission.code_cell_dep_index,
-  });
-}
-
-/** Build the exact evidence payload consumed by `cellc tx validate`. */
-export function deploymentLineHandleEvidence(
-  binding: BoundDeploymentLineHandle,
-  source: { location: "input" | "output" | "cell_dep"; index: number },
-  witness: { index: number; field: "input_type" },
-): {
-  handle: HexString;
-  source: { location: "input" | "output" | "cell_dep"; index: number };
-  admission: { index: number };
-  code: { index: number };
-  witness: { index: number; field: "input_type" };
-} {
-  if (!Number.isSafeInteger(source.index) || source.index < 0 || !Number.isSafeInteger(witness.index) || witness.index < 0) {
-    throw new Error("deployment line runtime source and witness indexes must be non-negative safe integers");
-  }
-  return Object.freeze({
-    handle: binding.handleBytes,
-    source: Object.freeze({ ...source }),
-    admission: Object.freeze({ index: binding.admissionCellDepIndex }),
-    code: Object.freeze({ index: binding.codeCellDepIndex }),
-    witness: Object.freeze({ ...witness }),
-  });
-}
-
-export interface ProtocolBundleStage<S extends string> {
-  state: S;
-  bundleHash: string;
-  rawTransactionHash: string;
-  transaction: unknown;
-  evidence: unknown;
-}
-
-export type MaterializedProtocolBundle = ProtocolBundleStage<"MaterializedProtocolBundleTx">;
-export type LiveResolvedProtocolBundle = ProtocolBundleStage<"LiveResolvedProtocolBundleTx">;
-export type DependencyResolvedProtocolBundle = ProtocolBundleStage<"LiveDependenciesResolvedProtocolBundleTx">;
-export type ReadyToSignProtocolBundle = ProtocolBundleStage<"ReadyToSignProtocolBundleTx">;
-export type SignedProtocolBundle = ProtocolBundleStage<"SignedProtocolBundleTx">;
-export type SignedDryRunProtocolBundle = ProtocolBundleStage<"SignedDryRunProtocolBundleTx">;
-export type TxPoolAcceptedProtocolBundle = ProtocolBundleStage<"TxPoolAcceptedProtocolBundleTx">;
-export type SubmittedProtocolBundle = ProtocolBundleStage<"SubmittedProtocolBundleTx">;
-export type ConfirmedProtocolBundle = ProtocolBundleStage<"ConfirmedProtocolBundleTx">;
-
-export interface ProtocolBundleConfirmationPolicy {
-  requiredConfirmations: number;
-  maxAttempts: number;
-  pollingIntervalMs: number;
-}
-
-export interface ProtocolBundleSigningRequest {
-  state: "ProtocolBundleSigningRequest";
-  bundleHash: string;
-  rawTransactionHash: string;
-  unsignedTransaction: unknown;
-  privateKeysIncluded: false;
-}
-
-export interface ProtocolBundleRuntime {
-  checkBundle(input: unknown, artifacts: readonly ProtocolBundleArtifactBinding[]): Promise<CheckedProtocolBundle>;
-  materializeBundle(checked: CheckedProtocolBundle): Promise<MaterializedProtocolBundle>;
-  resolveLiveInputs(materialized: MaterializedProtocolBundle): Promise<LiveResolvedProtocolBundle>;
-  resolveLiveDependencies(
-    materialized: MaterializedProtocolBundle,
-    live: LiveResolvedProtocolBundle,
-  ): Promise<DependencyResolvedProtocolBundle>;
-  readyToSign(
-    materialized: MaterializedProtocolBundle,
-    live: LiveResolvedProtocolBundle,
-    dependencies: DependencyResolvedProtocolBundle,
-  ): Promise<ReadyToSignProtocolBundle>;
-  bindSignedTransaction(
-    prepared: ReadyToSignProtocolBundle,
-    signedTransaction: unknown,
-  ): Promise<SignedProtocolBundle>;
-  dryRunSigned(signed: SignedProtocolBundle): Promise<SignedDryRunProtocolBundle>;
-  testTxPool(signed: SignedProtocolBundle, dryRun: SignedDryRunProtocolBundle): Promise<TxPoolAcceptedProtocolBundle>;
-  submit(signed: SignedProtocolBundle, accepted: TxPoolAcceptedProtocolBundle): Promise<SubmittedProtocolBundle>;
-  confirm(
-    submitted: SubmittedProtocolBundle,
-    policy: ProtocolBundleConfirmationPolicy,
-  ): Promise<ConfirmedProtocolBundle>;
-}
-
-function assertProtocolBundleStage<S extends string>(value: ProtocolBundleStage<S>, state: S, previous?: ProtocolBundleStage<string>): void {
-  if (!value || value.state !== state || !value.bundleHash || !value.rawTransactionHash) {
-    throw new Error(`ProtocolBundle runtime returned invalid ${state} evidence`);
-  }
-  if (previous && (value.bundleHash !== previous.bundleHash || value.rawTransactionHash !== previous.rawTransactionHash)) {
-    throw new Error(`ProtocolBundle runtime changed transaction identity at ${state}`);
-  }
-}
-
-export function createProtocolBundleClient(runtime: ProtocolBundleRuntime) {
-  return {
-    async prepare(input: unknown, artifacts: readonly ProtocolBundleArtifactBinding[]) {
-      if (artifacts.length < 2) throw new Error("ProtocolBundle requires at least two artifacts");
-      if (new Set(artifacts.map((artifact) => artifact.id)).size !== artifacts.length) {
-        throw new Error("ProtocolBundle artifact ids must be unique");
-      }
-      if (artifacts.some((artifact) => artifact.schema !== PROTOCOL_BUNDLE_ARTIFACT_BINDING_SCHEMA)) {
-        throw new Error("ProtocolBundle artifact binding schema mismatch");
-      }
-      const checked = await runtime.checkBundle(input, artifacts);
-      if (!checked || (checked.schema !== PROTOCOL_BUNDLE_REPORT_SCHEMA && checked.schema !== PROTOCOL_BUNDLE_SELECTION_REPORT_SCHEMA) || checked.status !== "ok" || !checked.bundle_hash) {
-        throw new Error("ProtocolBundle offline check did not return a successful canonical report");
-      }
-      for (const artifact of artifacts) assertExactRoleCatalog(checked, artifact);
-      const materialized = await runtime.materializeBundle(checked);
-      assertProtocolBundleStage(materialized, "MaterializedProtocolBundleTx");
-      if (materialized.bundleHash !== checked.bundle_hash) throw new Error("ProtocolBundle materialization changed bundle identity");
-      const live = await runtime.resolveLiveInputs(materialized);
-      assertProtocolBundleStage(live, "LiveResolvedProtocolBundleTx", materialized);
-      const dependencies = await runtime.resolveLiveDependencies(materialized, live);
-      assertProtocolBundleStage(dependencies, "LiveDependenciesResolvedProtocolBundleTx", live);
-      const prepared = await runtime.readyToSign(materialized, live, dependencies);
-      assertProtocolBundleStage(prepared, "ReadyToSignProtocolBundleTx", dependencies);
-      return { checked, materialized, live, dependencies, prepared } as const;
-    },
-    signingRequest(prepared: ReadyToSignProtocolBundle): ProtocolBundleSigningRequest {
-      assertProtocolBundleStage(prepared, "ReadyToSignProtocolBundleTx");
-      return Object.freeze({
-        state: "ProtocolBundleSigningRequest" as const,
-        bundleHash: prepared.bundleHash,
-        rawTransactionHash: prepared.rawTransactionHash,
-        unsignedTransaction: prepared.transaction,
-        privateKeysIncluded: false as const,
-      });
-    },
-    async resumeSigned(prepared: ReadyToSignProtocolBundle, signedTransaction: unknown) {
-      assertProtocolBundleStage(prepared, "ReadyToSignProtocolBundleTx");
-      const signed = await runtime.bindSignedTransaction(prepared, signedTransaction);
-      assertProtocolBundleStage(signed, "SignedProtocolBundleTx", prepared);
-      return signed;
-    },
-    async acceptSigned(signed: SignedProtocolBundle) {
-      assertProtocolBundleStage(signed, "SignedProtocolBundleTx");
-      const dryRun = await runtime.dryRunSigned(signed);
-      assertProtocolBundleStage(dryRun, "SignedDryRunProtocolBundleTx", signed);
-      const accepted = await runtime.testTxPool(signed, dryRun);
-      assertProtocolBundleStage(accepted, "TxPoolAcceptedProtocolBundleTx", dryRun);
-      return { dryRun, accepted } as const;
-    },
-    async submit(signed: SignedProtocolBundle, accepted: TxPoolAcceptedProtocolBundle) {
-      assertProtocolBundleStage(signed, "SignedProtocolBundleTx");
-      assertProtocolBundleStage(accepted, "TxPoolAcceptedProtocolBundleTx", signed);
-      const submitted = await runtime.submit(signed, accepted);
-      assertProtocolBundleStage(submitted, "SubmittedProtocolBundleTx", accepted);
-      return submitted;
-    },
-    async confirm(submitted: SubmittedProtocolBundle, policy: ProtocolBundleConfirmationPolicy) {
-      assertProtocolBundleStage(submitted, "SubmittedProtocolBundleTx");
-      if (!Number.isInteger(policy.requiredConfirmations) || policy.requiredConfirmations < 1
-        || !Number.isInteger(policy.maxAttempts) || policy.maxAttempts < 1
-        || !Number.isInteger(policy.pollingIntervalMs) || policy.pollingIntervalMs < 0) {
-        throw new Error("ProtocolBundle confirmation policy must use bounded non-negative integers and at least one confirmation/attempt");
-      }
-      const confirmed = await runtime.confirm(submitted, policy);
-      assertProtocolBundleStage(confirmed, "ConfirmedProtocolBundleTx", submitted);
-      return confirmed;
-    },
-  };
-}
-
-"#
 }
 
 fn typescript_builder_index(
@@ -9895,7 +8757,7 @@ fn typescript_builder_index(
     ts.push_str(&format!("export const actionSpecs = {action_specs_json} as const;\n\n"));
     ts.push_str(&format!("export const actionErrorContexts = {action_error_contexts_json} as const;\n"));
     ts.push_str(&format!("export const runtimeErrorCatalog = {runtime_error_catalog_json} as const;\n\n"));
-    ts.push_str(typescript_protocol_bundle_api());
+    ts.push_str(&typescript_protocol_bundle_api());
     ts.push_str(
         "export type HexString = `0x${string}`;\n\
          export type CellScriptScalarInput = bigint | number | string;\n\
@@ -11049,7 +9911,7 @@ fn typescript_builder_test(metadata: &CompileMetadata, actions: &[&crate::Action
            }\n\
            if (typeof first.verifiedBundleId === \"string\") {\n\
              const exactReceipt = {\n\
-               schema: builder.EXACT_SCRIPT_HANDLE_RECEIPT_SCHEMA, version: 1, class: \"script\", script_role: first.scriptRole,\n\
+               schema: builder.EXACT_SCRIPT_HANDLE_RECEIPT_SCHEMA, version: builder.EXACT_SCRIPT_HANDLE_RECEIPT_VERSION, class: \"script\", script_role: first.scriptRole,\n\
                package_coordinate: first.packageCoordinate, lock_node_id: first.lockNodeId, entry: first.entry,\n\
                interface_hash: first.interfaceHash, typed_semantics_hash: first.typedSemanticsHash,\n\
                artifact_hash: first.artifactHash, target_profile_hash: first.targetProfileHash,\n\
@@ -11069,6 +9931,9 @@ fn typescript_builder_test(metadata: &CompileMetadata, actions: &[&crate::Action
              const exactHandle = builder.bindCheckedExactScriptHandle(first, { exact_handle_receipt: exactReceipt, exact_handle: exactValue, exact_handle_hash: \"0\".repeat(64) });\n\
              assert.equal(exactHandle.value.encoding, \"CSHDLv1-fixed-202\");\n\
              assert.equal(exactHandle.handleHash, \"0\".repeat(64));\n\
+             assert.throws(() => builder.bindCheckedExactScriptHandle(first, {\n\
+               exact_handle_receipt: { ...exactReceipt, version: 2 }, exact_handle: exactValue, exact_handle_hash: \"0\".repeat(64),\n\
+             }), /does not match generated artifact/);\n\
              assert.throws(() => builder.bindCheckedExactScriptHandle(first, {\n\
                exact_handle_receipt: { ...exactReceipt, runtime_abi_hash: WRONG_HASH.slice(2) }, exact_handle: exactValue, exact_handle_hash: \"0\".repeat(64),\n\
              }), /does not match generated artifact/);\n\
@@ -13390,14 +12255,6 @@ fn audit_bundle_json(metadata: &CompileMetadata) -> serde_json::Value {
                 "scope": plan.scope,
                 "codegen_coverage_status": plan.codegen_coverage_status,
                 "on_chain_checked": plan.on_chain_checked,
-                "ir_effect_class": match plan.category.as_str() {
-                    "cell-access" => "cell-read-write",
-                    "transaction-invariant" => "transaction-scan",
-                    "declared-invariant" => "metadata-only-invariant",
-                    "aggregate-invariant" => "aggregate-check",
-                    "pool-primitive" => "pool-operation",
-                    _ => "unknown",
-                },
                 "reads": plan.reads,
                 "coverage": plan.coverage,
                 "builder_assumptions": plan.builder_assumptions,
@@ -14234,7 +13091,7 @@ fn compile_receipt_json(metadata: &CompileMetadata) -> Result<serde_json::Value>
         serde_json::Value::String(hash_json_value("template_layouts", &metadata.template_layouts)?)
     };
     Ok(serde_json::json!({
-        "schema": "cellscript-compile-receipt-v2",
+        "schema": "cellscript-compile-receipt-v4",
         "compiler_version": metadata.compiler_version,
         "edition": metadata.edition,
         "compatibility_profile": metadata.compatibility_profile,
@@ -14297,9 +13154,9 @@ fn verify_compile_receipt_against_metadata(
 
 fn validate_compile_receipt_schema(receipt: &serde_json::Value) -> Result<()> {
     match receipt.get("schema").and_then(serde_json::Value::as_str) {
-        Some("cellscript-compile-receipt-v2") => Ok(()),
+        Some("cellscript-compile-receipt-v4") => Ok(()),
         Some(schema) => Err(crate::error::CompileError::without_span(format!(
-            "unsupported compile receipt schema '{}'; expected cellscript-compile-receipt-v2",
+            "unsupported compile receipt schema '{}'; expected cellscript-compile-receipt-v4",
             schema
         ))),
         None => Err(crate::error::CompileError::without_span("compile receipt is missing schema")),
@@ -16233,10 +15090,6 @@ fn warn_legacy_alias(legacy: &str, canonical: &str, json: bool) {
     }
 }
 
-fn json_output(matches: &clap::ArgMatches) -> bool {
-    matches.get_flag("json") || matches.get_one::<String>("message-format").is_some_and(|format| format == "json")
-}
-
 fn update_clap_command(name: &'static str, about: &'static str, allow_apply: bool) -> clap::Command {
     use clap::{Arg, ArgAction, Command as ClapCommand};
 
@@ -16387,7 +15240,7 @@ impl CliParser {
             .map(String::as_str)
             .or_else(|| matches.subcommand().and_then(|(_, subcommand)| subcommand.get_one::<String>("color").map(String::as_str)));
         crate::cli::apply_color_policy(color);
-        Ok(Self::parse_matches(matches))
+        Self::parse_matches(matches)
     }
 
     pub fn command() -> clap::Command {
@@ -16806,6 +15659,7 @@ impl CliParser {
                 ClapCommand::new("interface-diff")
                     .display_order(32)
                     .about("Compare source API, layout, ABI, effects, builders, and deployment contracts")
+                    .arg(Arg::new("checked").long("checked").action(ArgAction::SetTrue).help("Compare independently checked nominal contracts; --old and --new must name ELF bundles with their sidecars"))
                     .arg(Arg::new("old").long("old").value_name("INPUT_OR_JSON").required(true).help("Previous source/package or interface JSON"))
                     .arg(Arg::new("new").long("new").value_name("INPUT_OR_JSON").required(true).help("Candidate source/package or interface JSON"))
                     .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write the compatibility report to a file")),
@@ -18131,44 +16985,11 @@ impl CliParser {
                             ),
                     ),
             )
-            .subcommand(
+            .subcommand(<CertifyArgs as clap::Args>::augment_args(
                 ClapCommand::new("certify")
                     .display_order(100)
-                    .about("Run a deterministic compiler-hosted certification plugin (currently: novaseal-profile-v0)")
-                    .arg(
-                        Arg::new("plugin")
-                            .long("plugin")
-                            .value_name("PLUGIN")
-                            .required(true)
-                            .help("Certification plugin id, e.g. novaseal-profile-v0"),
-                    )
-                    .arg(
-                        Arg::new("repo-root")
-                            .long("repo-root")
-                            .value_name("DIR")
-                            .help("Repository root for Rust certification evidence"),
-                    )
-                    .arg(
-                        Arg::new("report")
-                            .long("report")
-                            .value_name("JSON")
-                            .help("Verify an existing plugin report instead of regenerating it"),
-                    )
-                    .arg(
-                        Arg::new("output")
-                            .long("output")
-                            .short('o')
-                            .value_name("FILE")
-                            .help("Write compiler certification report JSON"),
-                    )
-                    .arg(
-                        Arg::new("require-production")
-                            .long("require-production")
-                            .action(ArgAction::SetTrue)
-                            .help("Require external production attestations, not only local profile certification"),
-                    )
-                    ,
-            )
+                    .about("Run a deterministic compiler-hosted certification plugin (currently: novaseal-profile-v0)"),
+            ))
             .subcommand(
                 ClapCommand::new("package")
                     .about("Package integrity commands")
@@ -18264,8 +17085,8 @@ impl CliParser {
             )
     }
 
-    fn parse_matches(matches: clap::ArgMatches) -> Command {
-        match matches.subcommand() {
+    fn parse_matches(matches: clap::ArgMatches) -> Result<Command> {
+        Ok(match matches.subcommand() {
             Some(("build", m)) => Command::Build(BuildArgs {
                 source_contracts: m.get_flag("source-contracts"),
                 release: m.get_flag("release"),
@@ -18461,6 +17282,7 @@ impl CliParser {
                 new: m.get_one::<String>("new").map(PathBuf::from).expect("required new interface"),
                 output: m.get_one::<String>("output").map(PathBuf::from),
                 json: json_output(m),
+                checked: m.get_flag("checked"),
             }),
             Some(("schema-ack", m)) => Command::SchemaAck(SchemaAckArgs {
                 old: m.get_one::<String>("old").map(PathBuf::from).expect("required old package"),
@@ -19013,14 +17835,7 @@ impl CliParser {
                 },
                 _ => unreachable!(),
             },
-            Some(("certify", m)) => Command::Certify(CertifyArgs {
-                plugin: m.get_one::<String>("plugin").cloned().unwrap_or_else(|| NOVASEAL_CERTIFICATION_PLUGIN.to_string()),
-                repo_root: m.get_one::<String>("repo-root").map(PathBuf::from),
-                report: m.get_one::<String>("report").map(PathBuf::from),
-                output: m.get_one::<String>("output").map(PathBuf::from),
-                json: json_output(m),
-                require_production: m.get_flag("require-production"),
-            }),
+            Some(("certify", m)) => Command::Certify(CertifyArgs::from_matches(m, json_output(m))?),
             Some(("package", m)) => match m.subcommand() {
                 Some(("lock", lock)) => Command::Lock(PackageLockArgs { json: json_output(lock) }),
                 Some(("update-plan", update)) => Command::UpdatePlan(update_plan_args_from_matches(update)),
@@ -19077,7 +17892,7 @@ impl CliParser {
                 })
             }
             _ => unreachable!(),
-        }
+        })
     }
 }
 
@@ -19095,6 +17910,44 @@ fn resolve_primitive_compat(compat: Option<String>, strict: Option<String>) -> O
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_disappeared_generated_lockfile_returns_a_typed_io_diagnostic() {
+        let root = tempfile::tempdir().unwrap();
+        let error = read_generated_lockfile(root.path()).unwrap_err();
+        assert_eq!(error.code.as_deref(), Some("CLI0003"));
+        assert_eq!(error.category, crate::error::CompileErrorCategory::Io);
+        assert_eq!(error.category.exit_code(), 74);
+    }
+
+    #[test]
+    fn certification_uses_its_typed_argument_declaration_and_global_output_policy() {
+        for output in [vec!["--json"], vec!["--message-format", "json"]] {
+            let mut arguments = vec!["cellc"];
+            arguments.extend(output);
+            arguments.extend([
+                "certify",
+                "--plugin",
+                "novaseal-profile-v0",
+                "--repo-root",
+                "evidence",
+                "--report",
+                "input.json",
+                "-o",
+                "result.json",
+                "--require-production",
+            ]);
+            let matches = CliParser::command().try_get_matches_from(arguments).unwrap();
+            let Command::Certify(args) = CliParser::parse_matches(matches).unwrap() else { panic!("expected certify command") };
+            assert_eq!(args.plugin, "novaseal-profile-v0");
+            assert_eq!(args.repo_root, Some(PathBuf::from("evidence")));
+            assert_eq!(args.report, Some(PathBuf::from("input.json")));
+            assert_eq!(args.output, Some(PathBuf::from("result.json")));
+            assert!(args.json && args.require_production);
+        }
+        let error = CliParser::command().try_get_matches_from(["cellc", "certify"]).unwrap_err();
+        assert_eq!(error.kind(), clap::error::ErrorKind::MissingRequiredArgument);
+    }
 
     #[test]
     fn publish_snapshot_carries_exactly_the_authoritative_source_files() {
@@ -19138,7 +17991,7 @@ mod tests {
     #[test]
     fn policy_artifact_selection_is_explicit_and_preserved_by_build_and_check() {
         let build = CliParser::command().try_get_matches_from(["cellc", "build", "--artifact", "token-policy"]).unwrap();
-        let Command::Build(build) = CliParser::parse_matches(build) else {
+        let Command::Build(build) = CliParser::parse_matches(build).unwrap() else {
             panic!("expected build command");
         };
         assert_eq!(build.artifact.as_deref(), Some("token-policy"));
@@ -19147,7 +18000,7 @@ mod tests {
 
         let check =
             CliParser::command().try_get_matches_from(["cellc", "check", "--artifact", "token-policy", "--all-targets"]).unwrap();
-        let Command::Check(check) = CliParser::parse_matches(check) else {
+        let Command::Check(check) = CliParser::parse_matches(check).unwrap() else {
             panic!("expected check command");
         };
         assert_eq!(check.artifact.as_deref(), Some("token-policy"));
@@ -19155,7 +18008,7 @@ mod tests {
 
         for command in ["build", "check"] {
             let matches = CliParser::command().try_get_matches_from(["cellc", command]).unwrap();
-            match CliParser::parse_matches(matches) {
+            match CliParser::parse_matches(matches).unwrap() {
                 Command::Build(args) => assert!(args.artifact.is_none()),
                 Command::Check(args) => assert!(args.artifact.is_none()),
                 _ => panic!("unexpected command"),
@@ -19184,7 +18037,7 @@ mod tests {
         let matches = CliParser::command()
             .try_get_matches_from(["cellc", "add", "peer", "--path", "deps/peer", "--use-environment", "production"])
             .unwrap();
-        let Command::Add(args) = CliParser::parse_matches(matches) else {
+        let Command::Add(args) = CliParser::parse_matches(matches).unwrap() else {
             panic!("expected add command");
         };
         assert_eq!(args.use_environment.as_deref(), Some("production"));
@@ -19195,7 +18048,7 @@ mod tests {
         assert_eq!(dependency.use_environment.as_deref(), Some("production"));
 
         let independent = CliParser::command().try_get_matches_from(["cellc", "add", "peer", "--environment-independent"]).unwrap();
-        let Command::Add(args) = CliParser::parse_matches(independent) else {
+        let Command::Add(args) = CliParser::parse_matches(independent).unwrap() else {
             panic!("expected add command");
         };
         assert!(args.environment_independent);
@@ -19321,7 +18174,7 @@ action selected(witness value: u64) -> u64 {
     #[test]
     fn publish_parses_continuous_browser_authorisation() {
         let matches = CliParser::command().try_get_matches_from(["cellc", "publish", "--authorise", "--no-open"]).unwrap();
-        let Command::Publish(args) = CliParser::parse_matches(matches) else {
+        let Command::Publish(args) = CliParser::parse_matches(matches).unwrap() else {
             panic!("expected publish command");
         };
         assert!(args.authorise);
@@ -19446,7 +18299,7 @@ action selected(witness value: u64) -> u64 {
             ])
             .unwrap();
         let Command::Artifact(ArtifactArgs { operation: ArtifactOperation::RecordDeployment { network, .. } }) =
-            CliParser::parse_matches(matches)
+            CliParser::parse_matches(matches).unwrap()
         else {
             panic!("expected artifact record-deployment command");
         };

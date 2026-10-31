@@ -180,7 +180,7 @@ impl CellScriptRuntimeError {
             Self::ZkChildRejected => "The verifier child rejected the proof or Wait failed.",
             Self::ZkCycleBoundExceeded => "The exact verifier call exceeded its declared cycle budget.",
             Self::OpenHandleInvalid => "An open or instance handle failed its encoding, authorization, dependency or concrete Script constraint check.",
-            Self::SinceConstraintsUnsupported => "CKB since/epoch maturity constraints are deferred and cannot verify a lock with an unconditional success stub.",
+            Self::SinceConstraintsUnsupported => "The legacy require_maturity/time/epoch helpers are deferred and cannot establish input since constraints.",
             Self::OccupiedCapacityUnsupported => "The compile-visible occupied-capacity floor is deferred and cannot supply a trustworthy bound.",
             Self::SyscallFailed => "A target VM syscall returned a non-zero status while loading transaction context.",
             Self::BoundsCheckFailed => "Loaded bytes were smaller than the verifier-required minimum.",
@@ -289,8 +289,8 @@ impl CellScriptRuntimeError {
             Self::ZkChildRejected => "Check the exact ZK profile, transaction-derived statement, verifier/VK CellDeps and bounded Spawn/IPC evidence.",
             Self::ZkCycleBoundExceeded => "Check the exact ZK profile, transaction-derived statement, verifier/VK CellDeps and bounded Spawn/IPC evidence.",
             Self::OpenHandleInvalid => "Check the declared profile: a 656-byte open selection with its 32-byte root, or a 1768-byte instance selection with its 208-byte committed configuration. Verify the selected CellDep, actual Script args and subject identity.",
-            Self::SinceConstraintsUnsupported => "Remove the require_maturity/require_time/require_epoch_* call until real CKB since verification ships; the helper aborts instead of accepting.",
-            Self::OccupiedCapacityUnsupported => "Remove the occupied_capacity floor call until the deferred bound ships; the helper aborts instead of returning zero.",
+            Self::SinceConstraintsUnsupported => "Use typed InputView.since reads and checked temporal comparisons bound to the selected input; the legacy helpers still abort.",
+            Self::OccupiedCapacityUnsupported => "Use ckb::cell_occupied_capacity for an actual Cell read; the legacy compile-visible floor helper still aborts.",
             Self::SyscallFailed => {
                 "Check transaction input/output/cell_dep indexes, source flags, and target-profile syscall compatibility."
             }

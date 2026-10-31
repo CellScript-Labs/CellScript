@@ -150,7 +150,7 @@ impl CodeGenerator {
         if payload.iter().any(|arg| arg.unsupported || arg.schema_dynamic) {
             return None;
         }
-        let width: usize = payload.iter().map(|arg| arg.width).sum();
+        let width = payload.iter().try_fold(0usize, |width, arg| width.checked_add(arg.width))?;
         let capacity = if width == 0 { 0 } else { ENTRY_WITNESS_HEADER_SIZE.checked_add(width)? };
         if capacity > ENTRY_WITNESS_BUFFER_SIZE {
             return None;
@@ -198,7 +198,9 @@ impl CodeGenerator {
         let outgoing_stack_arg_bytes = align_stack_arg_bytes(entry_abi_arg_count(params, callable_abi.as_ref()).saturating_sub(8) * 8);
         let payload =
             entry_witness_payload_layout(params, &runtime_bound_param_indices, &bounded_plan_param_indices, &self.enum_layouts);
-        let payload_len = payload.iter().map(|arg| arg.width).sum::<usize>();
+        let min_witness_len = payload
+            .iter()
+            .try_fold(ENTRY_WITNESS_HEADER_SIZE, |width, arg| crate::ir::checked_fixed_size(width.checked_add(arg.width)))?;
         let has_witness_payload = payload.iter().any(|arg| arg.width > 0 || arg.unsupported);
         let has_lock_args = params.iter().any(|param| param.source == ParamSource::LockArgs);
         let has_dynamic_payload = payload.iter().any(|arg| arg.schema_dynamic);
@@ -207,7 +209,6 @@ impl CodeGenerator {
                 && !runtime_bound_param_indices.contains(&index)
                 && !bounded_plan_param_indices.contains(&index)
         });
-        let min_witness_len = ENTRY_WITNESS_HEADER_SIZE + payload_len;
         // Only the private selected-record adapter can use the proven fixed
         // payload bound. The outer WitnessArgs loader still accepts 4096 bytes,
         // including optional fields and records belonging to other Scripts.

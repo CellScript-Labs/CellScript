@@ -260,12 +260,8 @@ pub fn run(root: &Path) -> anyhow::Result<i32> {
         validate_skill(skill_md, &fm, root, &command_names, &mut failures);
     }
 
-    let compiler_source = fs::read_to_string(root.join("src/lib.rs"))?;
-    let schema_re = Regex::new(r"METADATA_SCHEMA_VERSION:\s*u32\s*=\s*(\d+)")?;
-    let current_schema =
-        schema_re.captures(&compiler_source).and_then(|captures| captures.get(1)).map(|value| value.as_str().to_owned());
-    match current_schema {
-        Some(schema) => {
+    match crate::repository_checks::current_metadata_schema(root) {
+        Ok(schema) => {
             let metadata_skill = root.join("docs/skills/cellscript-metadata-audit/SKILL.md");
             let text = fs::read_to_string(&metadata_skill)?;
             let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -277,7 +273,7 @@ pub fn run(root: &Path) -> anyhow::Result<i32> {
                 }
             }
         }
-        None => failures.push("src/lib.rs: missing METADATA_SCHEMA_VERSION for skill-pack freshness".to_owned()),
+        Err(error) => failures.push(format!("metadata envelope schema for skill-pack freshness: {error:#}")),
     }
 
     let status = if failures.is_empty() { "passed" } else { "failed" };

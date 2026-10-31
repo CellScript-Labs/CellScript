@@ -3,14 +3,10 @@
 use super::*;
 
 fn runtime_inventory(diagnostics: crate::CompilerDiagnostics) -> (Vec<String>, MachineLayoutEvidence) {
-    // Discover literal helper names in the dispatch source so adding a helper
-    // cannot silently leave it out of this all-helpers generation test.
-    let mut names = include_str!("../runtime.rs")
-        .split('"')
-        .filter(|name| name.starts_with("__") && name.chars().all(|character| character.is_ascii_alphanumeric() || character == '_'))
-        .map(str::to_string)
+    let names = cellscript_artifact_checker::runtime_contract::RuntimeHelper::ALL
+        .iter()
+        .map(|helper| helper.symbol().to_string())
         .collect::<BTreeSet<_>>();
-    names.extend(runtime_contract::SURFACE.iter().map(|entry| entry.0.to_string()));
     let ir = IrModule {
         name: "stack_inventory".into(),
         items: vec![],
@@ -21,6 +17,7 @@ fn runtime_inventory(diagnostics: crate::CompilerDiagnostics) -> (Vec<String>, M
         enum_layouts: Default::default(),
         generic_contracts: Default::default(),
         source_type_origins: Default::default(),
+        source_callable_targets: Default::default(),
     };
     let mut generator = CodeGenerator::new(CodegenOptions { diagnostics, ..Default::default() });
     generator.emit_section(".text");
@@ -29,8 +26,13 @@ fn runtime_inventory(diagnostics: crate::CompilerDiagnostics) -> (Vec<String>, M
     generator.emit("ret");
     generator.generate_runtime_support(&ir);
     generator.emit_runtime_cell_membership();
-    generator.emit_runtime_ckb_v014_surface_helpers(&names);
-    for (name, field) in [("__env_current_timepoint", 1), ("__ckb_header_epoch_number", 1)] {
+    generator.emit_runtime_helpers(&names);
+    for (name, field) in [
+        ("__env_current_timepoint", 1),
+        ("__ckb_header_epoch_number", 1),
+        ("__ckb_header_epoch_start_block_number", 2),
+        ("__ckb_header_epoch_length", 3),
+    ] {
         generator.emit_runtime_header_field_u64(name, "epoch", field, true, "");
     }
     for (name, field) in
@@ -52,6 +54,11 @@ fn runtime_inventory(diagnostics: crate::CompilerDiagnostics) -> (Vec<String>, M
         .extend(crate::stdlib::collections::Collections::generate_assembly().replace("__", "__stdlib_").lines().map(str::to_string));
     assert!(generator.emission_error.is_none(), "{:?}", generator.emission_error);
     let evidence = assembler::machine_layout_evidence(&generator.assembly, &generator.entry_frame_sizes, &ir).unwrap();
+    let missing = cellscript_artifact_checker::runtime_contract::RuntimeHelper::ALL
+        .iter()
+        .filter(|helper| helper.has_standalone_symbol() && !evidence.symbols.contains_key(helper.symbol()))
+        .collect::<Vec<_>>();
+    assert!(missing.is_empty(), "registered runtime helpers have no emitted implementation: {missing:?}");
     (generator.assembly, evidence)
 }
 

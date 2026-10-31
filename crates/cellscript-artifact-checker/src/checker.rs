@@ -5,6 +5,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
+mod isa;
+use isa::{is_add, is_and, is_bgeu, is_bltu, is_lui, is_mul, is_sb, is_srli, is_sw};
+pub(crate) use isa::{
+    is_addi, is_auipc, is_beq, is_bne, is_jal_zero, is_jalr_call, is_lbu, is_ld, is_or, is_sd, is_slli, is_sltu, is_sub,
+};
+
+mod source_map;
+#[cfg(test)]
+use source_map::safe_source_path;
+use source_map::validate_source_map;
+
 mod zk;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -123,10 +134,6 @@ pub struct CheckerReport {
 }
 
 const CKB_RUNTIME_ACCESS_PROVENANCE_CONTRACT: &str = "cellscript-ckb-runtime-access-provenance-v1";
-const CKB_RUNTIME_ACCESS_PROVENANCE_METADATA_SCHEMA: u64 = 69;
-const BOUNDED_WITNESS_METADATA_SCHEMA: u64 = 70;
-const SIGHASH_ZERO_LOCK_METADATA_SCHEMA: u64 = 71;
-const BOUNDED_OUTPUT_PLAN_METADATA_SCHEMA: u64 = 72;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -275,6 +282,7 @@ pub fn check_bundle_values(
     crate::instance_machine::validate(record, &elf)?;
     crate::nested_machine::validate_cell_data_reads(record, &elf)?;
     crate::nested_machine::validate_scalar_status_calls(record, &elf, terminal_sink)?;
+    crate::pipe_machine::validate(record, &elf, terminal_sink)?;
     zk::validate(record, &elf)?;
     let zk_contracts = crate::zk_profile::contracts(&record.typed_semantics)
         .map_err(|message| CheckerError::new(CheckerRejectionCode::V2419TypedSemanticsInvalid, message))?;
@@ -353,6 +361,17 @@ fn validate_record_schema(record: &VerifiedLoweringRecord) -> Result<(), Checker
             "record compatibility profile disagrees with edition/target or accepts raw entry witnesses",
         ));
     }
+    let source_semantics = match record.edition.as_str() {
+        "2026" => Some(crate::SOURCE_SEMANTICS_2026),
+        "2027" => Some(crate::SOURCE_SEMANTICS_2027),
+        _ => None,
+    };
+    if source_semantics != Some(record.compatibility_profile.source_semantics.as_str()) {
+        return Err(CheckerError::new(
+            CheckerRejectionCode::V2403UnsupportedSchema,
+            "unsupported source-semantics generation; recompile and regenerate the complete artifact bundle",
+        ));
+    }
     let profile_hash = canonical_hash("cellscript-compatibility-profile-identity-v1", &record.compatibility_profile)?;
     if profile_hash != record.compatibility_profile_hash {
         return Err(CheckerError::new(
@@ -422,6 +441,45 @@ fn validate_metadata_binding(
     record: &VerifiedLoweringRecord,
     source_map: &SourceArtifactMap,
 ) -> Result<(), CheckerError> {
+    if json_u64(metadata, &["metadata_schema_version"]) != Some(u64::from(COMPILE_METADATA_SCHEMA_VERSION)) {
+        return Err(metadata_binding_error(
+            "unsupported effect metadata generation; recompile and regenerate the complete artifact bundle",
+        ));
+    }
+    for (collection, kind) in [("actions", "action"), ("functions", "helper"), ("locks", "lock")] {
+        for entry in metadata.get(collection).and_then(Value::as_array).into_iter().flatten() {
+            if ["effect", "effect_class", "declared_effect", "declared_effect_class", "effect_declared", "inferred_effect_class"]
+                .iter()
+                .any(|field| entry.get(field).is_some())
+            {
+                return Err(metadata_binding_error("retired effect declaration or duplicate inference field in current metadata"));
+            }
+            let name = entry
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or_else(|| metadata_binding_error("effect entry has no callable name"))?;
+            let checked = record
+                .typed_semantics
+                .entries
+                .iter()
+                .find(|candidate| candidate.name == name && candidate.kind == kind)
+                .ok_or_else(|| metadata_binding_error("effect metadata has no bound typed callable"))?;
+            let expected =
+                serde_json::to_value(&checked.effects).map_err(|_| metadata_binding_error("effect facts cannot be serialized"))?;
+            if entry.get("effects") != Some(&expected) {
+                return Err(metadata_binding_error("metadata effect facts differ from the bound typed callable"));
+            }
+        }
+    }
+    if metadata
+        .get("borrow_regions")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|region| region.get("allowed_effects").is_some())
+    {
+        return Err(metadata_binding_error("retired borrow-region effect category list"));
+    }
     crate::policy::validate_policy_metadata(metadata, &record.typed_semantics)?;
     crate::cell_selection::validate_types(&record.typed_semantics)?;
     crate::cell_data_view::validate_types(&record.typed_semantics)?;
@@ -664,11 +722,6 @@ pub(crate) fn ckb_deployment_hash_type(target_profile: &str) -> Option<&'static 
 }
 
 fn validate_runtime_access_provenance_metadata(metadata: &Value, typed_semantics: &TypedSemanticRecord) -> Result<(), CheckerError> {
-    let schema = json_u64(metadata, &["metadata_schema_version"])
-        .ok_or_else(|| metadata_binding_error("compile metadata has no numeric metadata_schema_version"))?;
-    if schema < CKB_RUNTIME_ACCESS_PROVENANCE_METADATA_SCHEMA {
-        return Ok(());
-    }
     if json_string(metadata, &["runtime", "ckb_runtime_access_provenance_contract"]) != Some(CKB_RUNTIME_ACCESS_PROVENANCE_CONTRACT) {
         return Err(metadata_binding_error("compile metadata does not bind the current CKB runtime access provenance contract"));
     }
@@ -716,36 +769,30 @@ fn validate_runtime_access_provenance_metadata(metadata: &Value, typed_semantics
             metadata_binding_error(format!("runtime.transaction_view_handles[{index}].provenance has an invalid shape: {error}"))
         })?;
         validate_runtime_access_provenance(&format!("runtime.transaction_view_handles[{index}]"), source, None, &provenance)?;
-        if schema >= BOUNDED_WITNESS_METADATA_SCHEMA {
-            let typed: RuntimeTransactionViewHandle = serde_json::from_value(handle.clone()).map_err(|error| {
-                metadata_binding_error(format!("runtime.transaction_view_handles[{index}] has an invalid schema-70 shape: {error}"))
-            })?;
-            validate_runtime_transaction_view_handle(&format!("runtime.transaction_view_handles[{index}]"), &typed)?;
-            typed_handles.push(typed);
+        let typed: RuntimeTransactionViewHandle = serde_json::from_value(handle.clone()).map_err(|error| {
+            metadata_binding_error(format!("runtime.transaction_view_handles[{index}] has an invalid current shape: {error}"))
+        })?;
+        validate_runtime_transaction_view_handle(&format!("runtime.transaction_view_handles[{index}]"), &typed)?;
+        typed_handles.push(typed);
+    }
+    for access in &module_accesses {
+        let Some((owner, maximum)) = validate_bounded_witness_runtime_access(access)? else {
+            continue;
+        };
+        if !typed_handles.iter().any(|handle| {
+            bounded_witness_view_parts(&handle.handle_type) == Some((owner.as_str(), maximum))
+                && handle.provenance.source.resolved_source == access.provenance.source.resolved_source
+                && handle.provenance.index == access.provenance.index
+        }) {
+            return Err(metadata_binding_error(format!(
+                "bounded witness runtime access '{}' has no matching transaction-view handle",
+                access.operation
+            )));
         }
     }
-    if schema >= BOUNDED_WITNESS_METADATA_SCHEMA {
-        for access in &module_accesses {
-            let Some((owner, maximum)) = validate_bounded_witness_runtime_access(access)? else {
-                continue;
-            };
-            if !typed_handles.iter().any(|handle| {
-                bounded_witness_view_parts(&handle.handle_type) == Some((owner.as_str(), maximum))
-                    && handle.provenance.source.resolved_source == access.provenance.source.resolved_source
-                    && handle.provenance.index == access.provenance.index
-            }) {
-                return Err(metadata_binding_error(format!(
-                    "bounded witness runtime access '{}' has no matching transaction-view handle",
-                    access.operation
-                )));
-            }
-        }
-        validate_header_dep_runtime_accesses(&module_accesses, &typed_handles, typed_semantics)?;
-        validate_script_hash_runtime_accesses(&module_accesses, typed_semantics)?;
-    }
-    if schema >= SIGHASH_ZERO_LOCK_METADATA_SCHEMA {
-        validate_sighash_zero_lock_domains(metadata, &module_accesses, typed_semantics)?;
-    }
+    validate_header_dep_runtime_accesses(&module_accesses, &typed_handles, typed_semantics)?;
+    validate_script_hash_runtime_accesses(&module_accesses, typed_semantics)?;
+    validate_sighash_zero_lock_domains(metadata, &module_accesses, typed_semantics)?;
     Ok(())
 }
 
@@ -858,14 +905,9 @@ fn validate_sighash_zero_lock_domains(
 }
 
 fn bounded_witness_view_parts(handle_type: &str) -> Option<(&str, u64)> {
-    let payload = handle_type.strip_prefix("WitnessBytesView<")?.strip_suffix('>')?;
-    let (owner, maximum) = payload.split_once(',')?;
-    let owner = owner.trim();
-    if !matches!(owner, "raw" | "lock" | "entry" | "output_type") {
-        return None;
-    }
-    let maximum = maximum.trim().parse::<u64>().ok()?;
-    (maximum <= 65_536).then_some((owner, maximum))
+    use crate::view_types::{parse_witness_bytes_view_type, WitnessViewSyntax};
+    let view = parse_witness_bytes_view_type(handle_type, WitnessViewSyntax::TrimArguments)?;
+    (view.maximum <= 65_536).then_some((view.owner.as_str(), view.maximum))
 }
 
 fn validate_runtime_transaction_view_handle(prefix: &str, handle: &RuntimeTransactionViewHandle) -> Result<(), CheckerError> {
@@ -1568,11 +1610,24 @@ fn validate_public_interface_metadata(metadata: &Value, module: &str, expected_h
         .get("public_interface")
         .and_then(Value::as_object)
         .ok_or_else(|| metadata_binding_error("compile metadata has no canonical public_interface object"))?;
-    if interface.get("schema").and_then(Value::as_str) != Some("cellscript-package-interface-v3")
-        || interface.get("version").and_then(Value::as_u64) != Some(3)
+    if interface.get("schema").and_then(Value::as_str) != Some(crate::interface::PACKAGE_INTERFACE_SCHEMA)
+        || interface.get("version").and_then(Value::as_u64) != Some(u64::from(crate::interface::PACKAGE_INTERFACE_VERSION))
         || interface.get("module").and_then(Value::as_str) != Some(module)
     {
         return Err(metadata_binding_error("compile metadata public interface has an invalid schema, version, or module identity"));
+    }
+    let current: crate::interface::PackageInterface = serde_json::from_value(Value::Object(interface.clone())).map_err(|_| {
+        metadata_binding_error("invalid current public interface; retired fields and category contracts are not accepted")
+    })?;
+    if current.callables.iter().any(|callable| callable.type_parameters.is_empty() != callable.effects.is_some()) {
+        return Err(metadata_binding_error(
+            "concrete callable effects are required; uninstantiated templates have no executable fact contract",
+        ));
+    }
+    if serde_json::to_value(current).map_err(|_| metadata_binding_error("public interface serialization failed"))?
+        != Value::Object(interface.clone())
+    {
+        return Err(metadata_binding_error("public interface has unknown or missing current-generation fields"));
     }
     let edition = interface.get("edition").and_then(Value::as_str);
     if !matches!(edition, Some("2026" | "2027")) || edition != metadata.get("edition").and_then(Value::as_str) {
@@ -1717,6 +1772,7 @@ fn validate_typed_semantics(record: &VerifiedLoweringRecord) -> Result<(), Check
     let typed_types = typed.types.iter().map(|ty| (ty.name.as_str(), ty)).collect::<BTreeMap<_, _>>();
     let typed_entries_by_name = typed.entries.iter().map(|entry| (entry.name.as_str(), entry)).collect::<BTreeMap<_, _>>();
     let allocated_owner_types = crate::allocated_values::owner_types(typed);
+    let inferred_effects = infer_typed_effects(typed)?;
     let called_targets = typed
         .entries
         .iter()
@@ -1767,7 +1823,6 @@ fn validate_typed_semantics(record: &VerifiedLoweringRecord) -> Result<(), Check
         if entry.name != lowering.name
             || entry.kind != lowering_entry_kind(lowering.kind)
             || canonical_abi_type(&entry.return_type) != canonical_abi_type(&lowering.return_type)
-            || normalize_effect(&entry.effect) != normalize_effect(&lowering.effect)
             || entry.params.len() != lowering.params.len()
         {
             return Err(CheckerError::new(
@@ -1865,7 +1920,12 @@ fn validate_typed_semantics(record: &VerifiedLoweringRecord) -> Result<(), Check
         }
         validate_typed_cfg_and_dataflow(entry, &locals)?;
         crate::allocated_values::validate_lifetimes(entry, &allocated_owner_types)?;
-        validate_typed_effect(entry)?;
+        if Some(&entry.effects) != inferred_effects.get(entry.name.as_str()) {
+            return typed_error(format!("typed entry '{}' differs from its independently reconstructed effect facts", entry.id));
+        }
+        if entry.kind == "lock" && !entry.effects.lifecycle_ops().is_empty() {
+            return typed_error("lock predicate has lifecycle effects");
+        }
         for borrow in &entry.borrows {
             let root_matches =
                 locals.values().any(|local| local.name == borrow.root && strip_reference(&local.ty) == borrow.root_type);
@@ -2797,9 +2857,9 @@ fn validate_typed_operation(
     let nested_helper_call = operation.opcode == "call"
         && operation.call.as_ref().is_some_and(|call| {
             call.contract == "typed-local"
-                && entries.get(call.target.as_str()).is_some_and(|callee| {
-                    callee.kind == "helper" && matches!(normalize_effect(&callee.effect).as_str(), "pure" | "readonly")
-                })
+                && entries
+                    .get(call.target.as_str())
+                    .is_some_and(|callee| callee.kind == "helper" && callee.effects.allows_observation())
         })
         && operation
             .operands
@@ -3248,7 +3308,6 @@ fn validate_typed_operation(
                     || !source_type_valid
                     || handle_operand != class
                     || call.contract != "versioned-runtime-helper"
-                    || call.effect != "runtime-contract"
                     || call.return_type != "unit"
                     || !operation.destinations.is_empty()
                 {
@@ -3262,7 +3321,6 @@ fn validate_typed_operation(
             if call.target == "__ckb_hash_blake2b_packed"
                 && let Some(inner) = committed_inner
                 && (call.contract != "versioned-runtime-helper"
-                    || call.effect != "runtime-contract"
                     || call.params != [inner]
                     || operation.operands.len() != 1
                     || operation.destinations.len() != 1
@@ -3282,7 +3340,6 @@ fn validate_typed_operation(
                 let opening_inner =
                     call.params.get(1).and_then(|value| value.strip_prefix("Opening<")).and_then(|value| value.strip_suffix('>'));
                 if call.contract != "versioned-runtime-helper"
-                    || call.effect != "runtime-contract"
                     || call.params.len() != 2
                     || operation.operands.len() != 2
                     || operation.destinations.len() != 1
@@ -3298,15 +3355,6 @@ fn validate_typed_operation(
                             .to_string(),
                     );
                 }
-            }
-            // This known helper has no executable digest contract in this
-            // schema. It must not be relabelled as an ordinary value-producing
-            // helper after rebinding the enclosing artifact hashes.
-            if call.target == "__ckb_sighash_all"
-                && (call.contract != "versioned-runtime-helper"
-                    || call.effect != "deferred-runtime-fail-closed:66:ckb-sighash-all-deferred")
-            {
-                return typed_error("deferred sighash call does not declare its canonical failure contract".to_string());
             }
             if call.target == "__ckb_sighash_all_zero_lock" {
                 let bounds = operation
@@ -3326,7 +3374,6 @@ fn validate_typed_operation(
                         && (1..=65_536).contains(&values[3])
                 });
                 if call.contract != "versioned-runtime-helper"
-                    || call.effect != "runtime-contract"
                     || call.params != ["u64", "u64", "u64", "u64"]
                     || call.return_type != "SighashAllDigest"
                     || !valid_bounds
@@ -3346,7 +3393,6 @@ fn validate_typed_operation(
                     Some(TypedSemanticConstant::Hash(_))
                 );
                 if call.contract != "versioned-runtime-helper"
-                    || call.effect != "runtime-contract"
                     || call.return_type != "unit"
                     || !operation.destinations.is_empty()
                     || operation.operands.len() != 3
@@ -3385,7 +3431,6 @@ fn validate_typed_operation(
                     Some(TypedSemanticConstant::Hash(_))
                 );
                 if call.contract != "versioned-runtime-helper"
-                    || call.effect != "runtime-contract"
                     || call.return_type != "unit"
                     || !operation.destinations.is_empty()
                     || operation.operands.len() != expected_len
@@ -3406,7 +3451,6 @@ fn validate_typed_operation(
                 let Some(callee) = entries.get(call.target.as_str()) else { return fail() };
                 if call.params != callee.params.iter().map(|param| param.ty.clone()).collect::<Vec<_>>()
                     || call.return_type != callee.return_type
-                    || normalize_effect(&call.effect) != normalize_effect(&callee.effect)
                 {
                     return fail();
                 }
@@ -3910,17 +3954,7 @@ fn typed_value_assignable(actual: &str, expected: &str) -> bool {
 }
 
 fn bounded_witness_view_retyping_move(actual: &str, expected: &str) -> bool {
-    if !matches!(actual, "u64" | "WitnessArgsView") {
-        return false;
-    }
-    let Some(payload) = expected.strip_prefix("WitnessBytesView<").and_then(|value| value.strip_suffix('>')) else {
-        return false;
-    };
-    let Some((owner, maximum)) = payload.split_once(',') else {
-        return false;
-    };
-    matches!(owner.trim(), "raw" | "lock" | "entry" | "output_type")
-        && maximum.trim().parse::<u64>().is_ok_and(|maximum| maximum <= 65_536)
+    matches!(actual, "u64" | "WitnessArgsView") && bounded_witness_view_parts(expected).is_some()
 }
 
 fn semantic_hash_domain_retyping_move(actual: &str, expected: &str) -> bool {
@@ -4244,66 +4278,8 @@ fn validate_typed_cfg_and_dataflow(
     Ok(())
 }
 
-fn validate_typed_effect(entry: &TypedSemanticEntry) -> Result<(), CheckerError> {
-    if entry.kind == "lock" {
-        return if entry.effect == "lock-predicate" {
-            Ok(())
-        } else {
-            typed_error(format!("typed lock '{}' has an invalid effect label", entry.id))
-        };
-    }
-    let mut has_read = entry.params.iter().any(|param| param.source == "read");
-    let mut has_consume = false;
-    let mut has_create = false;
-    for operation in entry.blocks.iter().flat_map(|block| &block.operations) {
-        match operation.opcode.as_str() {
-            "read-ref" | "type-hash" | "cell-metadata-equality" => has_read = true,
-            "consume" | "destroy" => has_consume = true,
-            "create" | "create-unique" => has_create = true,
-            "transfer" | "claim" | "settle" | "replace-unique" => {
-                has_consume = true;
-                has_create = true;
-            }
-            "call" => {
-                if let Some(call) = &operation.call {
-                    match normalize_effect(&call.effect).as_str() {
-                        "readonly" => has_read = true,
-                        "creating" => has_create = true,
-                        "destroying" => has_consume = true,
-                        "mutating" => {
-                            has_consume = true;
-                            has_create = true;
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    let inferred = match (has_consume, has_create, has_read) {
-        (true, true, _) => "mutating",
-        (true, false, _) => "destroying",
-        (false, true, _) => "creating",
-        (false, false, true) => "readonly",
-        (false, false, false) => "pure",
-    };
-    let declared = normalize_effect(&entry.effect);
-    let covers = matches!(
-        (declared.as_str(), inferred),
-        ("pure", "pure")
-            | ("readonly", "pure" | "readonly")
-            | ("creating", "pure" | "readonly" | "creating")
-            | ("destroying", "pure" | "readonly" | "destroying")
-            | ("mutating", _)
-    );
-    if !covers {
-        return typed_error(format!(
-            "typed entry '{}' effect '{}' does not cover inferred effect '{inferred}'",
-            entry.id, entry.effect
-        ));
-    }
-    Ok(())
+fn infer_typed_effects(typed: &TypedSemanticRecord) -> Result<BTreeMap<&str, crate::effect_facts::EffectFacts>, CheckerError> {
+    crate::effect_facts::check::infer(typed)
 }
 
 fn validate_ownership_bindings(entry: &TypedSemanticEntry, locals: &BTreeMap<u32, &TypedSemanticLocal>) -> Result<(), CheckerError> {
@@ -4372,10 +4348,6 @@ fn validate_ownership_bindings(entry: &TypedSemanticEntry, locals: &BTreeMap<u32
         }
     }
     Ok(())
-}
-
-pub(crate) fn normalize_effect(effect: &str) -> String {
-    effect.chars().filter(|character| character.is_ascii_alphanumeric()).flat_map(char::to_lowercase).collect()
 }
 
 pub(crate) fn canonical_abi_type(ty: &str) -> String {
@@ -4559,7 +4531,6 @@ fn validate_record_graph(record: &VerifiedLoweringRecord, budgets: &CheckerBudge
 fn validate_entry_abi(entry: &LoweringEntry, budgets: &CheckerBudgets) -> Result<(), CheckerError> {
     if entry.name.is_empty()
         || entry.return_type.is_empty()
-        || entry.effect.is_empty()
         || entry.frame_size_bytes > budgets.stack_frame_bytes
         || entry.outgoing_argument_bytes > entry.frame_size_bytes
     {
@@ -4678,7 +4649,6 @@ fn validate_block_abi(
     }
     if block.frame_size_bytes != entry.frame_size_bytes
         || block.outgoing_argument_bytes != entry.outgoing_argument_bytes
-        || block.effect != entry.effect
         || block.capabilities != entry.capabilities
         || block.frame_size_bytes > budgets.stack_frame_bytes
         || block.outgoing_argument_bytes > block.frame_size_bytes
@@ -6133,8 +6103,6 @@ fn validate_bounded_output_plan_machine_contract(
     record: &VerifiedLoweringRecord,
     elf: &ParsedElf,
 ) -> Result<(), CheckerError> {
-    let schema = json_u64(metadata, &["metadata_schema_version"])
-        .ok_or_else(|| bounded_output_machine_error("compile metadata has no numeric metadata schema"))?;
     let typed_load_count = record
         .typed_semantics
         .entries
@@ -6146,9 +6114,6 @@ fn validate_bounded_output_plan_machine_contract(
     let contracts = bounded_output_contracts_from_metadata(metadata, record)?;
     if contracts.is_empty() && typed_load_count == 0 {
         return Ok(());
-    }
-    if schema < BOUNDED_OUTPUT_PLAN_METADATA_SCHEMA {
-        return Err(bounded_output_machine_error("bounded output evidence is present before metadata schema 72"));
     }
     if contracts.len() != typed_load_count {
         return Err(bounded_output_machine_error(
@@ -8429,294 +8394,6 @@ fn owner_has_abort_error(record: &VerifiedLoweringRecord, elf: &ParsedElf, owner
     })
 }
 
-pub(crate) fn is_addi(word: u32, rd: u32, rs1: u32, immediate: i32) -> bool {
-    word & 0x7f == 0x13
-        && (word >> 12) & 0x7 == 0
-        && (word >> 7) & 0x1f == rd
-        && (word >> 15) & 0x1f == rs1
-        && (word as i32) >> 20 == immediate
-}
-
-fn is_lui(word: u32, rd: u32, immediate: u32) -> bool {
-    word & 0x7f == 0x37 && (word >> 7) & 0x1f == rd && word & 0xffff_f000 == immediate
-}
-
-pub(crate) fn is_ld(word: u32, rd: u32, rs1: u32, immediate: i32) -> bool {
-    word & 0x7f == 0x03
-        && (word >> 12) & 0x7 == 0x3
-        && (word >> 7) & 0x1f == rd
-        && (word >> 15) & 0x1f == rs1
-        && (word as i32) >> 20 == immediate
-}
-
-pub(crate) fn is_sd(word: u32, rs2: u32, rs1: u32, immediate: i32) -> bool {
-    let decoded = (((word >> 25) & 0x7f) << 5) | ((word >> 7) & 0x1f);
-    let decoded = ((decoded as i32) << 20) >> 20;
-    word & 0x7f == 0x23
-        && (word >> 12) & 0x7 == 0x3
-        && (word >> 20) & 0x1f == rs2
-        && (word >> 15) & 0x1f == rs1
-        && decoded == immediate
-}
-
-pub(crate) fn is_sub(word: u32, rd: u32, rs1: u32, rs2: u32) -> bool {
-    word & 0x7f == 0x33
-        && (word >> 25) & 0x7f == 0x20
-        && (word >> 12) & 0x7 == 0
-        && (word >> 7) & 0x1f == rd
-        && (word >> 15) & 0x1f == rs1
-        && (word >> 20) & 0x1f == rs2
-}
-
-fn is_add(word: u32, rd: u32, rs1: u32, rs2: u32) -> bool {
-    word & 0x7f == 0x33
-        && (word >> 25) & 0x7f == 0
-        && (word >> 12) & 0x7 == 0
-        && (word >> 7) & 0x1f == rd
-        && (word >> 15) & 0x1f == rs1
-        && (word >> 20) & 0x1f == rs2
-}
-
-fn is_mul(word: u32, rd: u32, rs1: u32, rs2: u32) -> bool {
-    word & 0x7f == 0x33
-        && (word >> 25) & 0x7f == 0x01
-        && (word >> 12) & 0x7 == 0
-        && (word >> 7) & 0x1f == rd
-        && (word >> 15) & 0x1f == rs1
-        && (word >> 20) & 0x1f == rs2
-}
-
-pub(crate) fn is_or(word: u32, rd: u32, rs1: u32, rs2: u32) -> bool {
-    word & 0x7f == 0x33
-        && (word >> 25) & 0x7f == 0
-        && (word >> 12) & 0x7 == 6
-        && (word >> 7) & 0x1f == rd
-        && (word >> 15) & 0x1f == rs1
-        && (word >> 20) & 0x1f == rs2
-}
-
-fn is_and(word: u32, rd: u32, rs1: u32, rs2: u32) -> bool {
-    word & 0x7f == 0x33
-        && (word >> 25) & 0x7f == 0
-        && (word >> 12) & 0x7 == 7
-        && (word >> 7) & 0x1f == rd
-        && (word >> 15) & 0x1f == rs1
-        && (word >> 20) & 0x1f == rs2
-}
-
-pub(crate) fn is_sltu(word: u32, rd: u32, rs1: u32, rs2: u32) -> bool {
-    word & 0x7f == 0x33
-        && (word >> 25) & 0x7f == 0
-        && (word >> 12) & 0x7 == 3
-        && (word >> 7) & 0x1f == rd
-        && (word >> 15) & 0x1f == rs1
-        && (word >> 20) & 0x1f == rs2
-}
-
-pub(crate) fn is_lbu(word: u32, rd: u32, rs1: u32, immediate: i32) -> bool {
-    word & 0x7f == 0x03
-        && (word >> 12) & 0x7 == 4
-        && (word >> 7) & 0x1f == rd
-        && (word >> 15) & 0x1f == rs1
-        && (word as i32) >> 20 == immediate
-}
-
-fn is_store(word: u32, function: u32, rs2: u32, rs1: u32, immediate: i32) -> bool {
-    let decoded = (((word >> 25) & 0x7f) << 5) | ((word >> 7) & 0x1f);
-    let decoded = ((decoded as i32) << 20) >> 20;
-    word & 0x7f == 0x23
-        && (word >> 12) & 0x7 == function
-        && (word >> 20) & 0x1f == rs2
-        && (word >> 15) & 0x1f == rs1
-        && decoded == immediate
-}
-
-fn is_sb(word: u32, rs2: u32, rs1: u32, immediate: i32) -> bool {
-    is_store(word, 0, rs2, rs1, immediate)
-}
-
-fn is_sw(word: u32, rs2: u32, rs1: u32, immediate: i32) -> bool {
-    is_store(word, 2, rs2, rs1, immediate)
-}
-
-fn is_srli(word: u32, rd: u32, rs1: u32, shift: u32) -> bool {
-    word & 0x7f == 0x13
-        && (word >> 12) & 0x7 == 5
-        && (word >> 26) & 0x3f == 0
-        && (word >> 7) & 0x1f == rd
-        && (word >> 15) & 0x1f == rs1
-        && (word >> 20) & 0x3f == shift
-}
-
-pub(crate) fn is_slli(word: u32, rd: u32, rs1: u32, shift: u32) -> bool {
-    word & 0x7f == 0x13
-        && (word >> 12) & 0x7 == 1
-        && (word >> 26) & 0x3f == 0
-        && (word >> 7) & 0x1f == rd
-        && (word >> 15) & 0x1f == rs1
-        && (word >> 20) & 0x3f == shift
-}
-
-pub(crate) fn is_auipc(word: u32, rd: u32) -> bool {
-    word & 0x7f == 0x17 && (word >> 7) & 0x1f == rd
-}
-
-pub(crate) fn is_jalr_call(word: u32) -> bool {
-    word & 0x7f == 0x67 && (word >> 7) & 0x1f == 1 && (word >> 12) & 0x7 == 0 && (word >> 15) & 0x1f == 1
-}
-
-pub(crate) fn is_beq(word: u32, rs1: u32, rs2: u32) -> bool {
-    is_branch(word, 0, rs1, rs2)
-}
-
-pub(crate) fn is_bne(word: u32, rs1: u32, rs2: u32) -> bool {
-    is_branch(word, 1, rs1, rs2)
-}
-
-fn is_bltu(word: u32, rs1: u32, rs2: u32) -> bool {
-    is_branch(word, 6, rs1, rs2)
-}
-
-fn is_bgeu(word: u32, rs1: u32, rs2: u32) -> bool {
-    is_branch(word, 7, rs1, rs2)
-}
-
-fn is_branch(word: u32, function: u32, rs1: u32, rs2: u32) -> bool {
-    word & 0x7f == 0x63 && (word >> 12) & 0x7 == function && (word >> 15) & 0x1f == rs1 && (word >> 20) & 0x1f == rs2
-}
-
-pub(crate) fn is_jal_zero(word: u32) -> bool {
-    word & 0x7f == 0x6f && (word >> 7) & 0x1f == 0
-}
-
-fn validate_source_map(
-    source_map: &SourceArtifactMap,
-    record: &VerifiedLoweringRecord,
-    artifact: &[u8],
-    elf: &ParsedElf,
-) -> Result<(), CheckerError> {
-    if source_map.schema != SOURCE_MAP_SCHEMA
-        || source_map.version != SOURCE_MAP_VERSION
-        || source_map.module != record.module
-        || source_map.text_range != record.text_range
-        || source_map.source_digest != record.source_content_hash
-        || source_map.coverage_claim.source_semantic_equivalence
-        || !source_map.coverage_claim.mapped_instruction_ranges_only
-    {
-        return Err(CheckerError::new(
-            CheckerRejectionCode::V2416SourceMapInvalid,
-            "source map schema, identity, or bounded claim is invalid",
-        ));
-    }
-    let blocks = record.blocks.iter().map(|block| (block.id.as_str(), block)).collect::<BTreeMap<_, _>>();
-    let entries = record.entries.iter().map(|entry| entry.id.as_str()).collect::<BTreeSet<_>>();
-    let mut previous_end = None;
-    let mut mapped_ranges = Vec::new();
-    for interval in &source_map.intervals {
-        if !safe_source_path(&interval.source_path)
-            || interval.source_start > interval.source_end
-            || interval.machine_range.is_empty()
-            || interval.machine_range.start % 4 != 0
-            || interval.machine_range.end % 4 != 0
-            || previous_end.is_some_and(|end| interval.machine_range.start < end)
-        {
-            return Err(CheckerError::new(
-                CheckerRejectionCode::V2416SourceMapInvalid,
-                format!("source-map interval for block '{}' overlaps, escapes, or is malformed", interval.block_id),
-            ));
-        }
-        let Some(block) = blocks.get(interval.block_id.as_str()) else {
-            return Err(CheckerError::new(
-                CheckerRejectionCode::V2416SourceMapInvalid,
-                format!("source-map interval references missing block '{}'", interval.block_id),
-            ));
-        };
-        if interval.entry_id != block.owner_entry
-            || !entries.contains(interval.entry_id.as_str())
-            || !block.range.contains_range(interval.machine_range)
-            || interval.lowering_block_id != block.lowering_block_id
-            || interval.proof_ids.iter().any(|proof| !block.proof_ids.contains(proof))
-        {
-            return Err(CheckerError::new(
-                CheckerRejectionCode::V2416SourceMapInvalid,
-                format!("source-map interval for '{}' disagrees with its lowering block", interval.block_id),
-            ));
-        }
-        elf.bytes_for_range(artifact, interval.machine_range).map_err(map_elf_error)?;
-        previous_end = Some(interval.machine_range.end);
-        mapped_ranges.push(interval.machine_range);
-    }
-    let foundation = &record.typed_semantics.foundation;
-    let mut semantic_ids = foundation.provenance.nodes.iter().map(|node| node.id.as_str()).collect::<BTreeSet<_>>();
-    semantic_ids.insert(foundation.entry_contract.semantic_node_id.as_str());
-    semantic_ids.extend(foundation.roles.iter().map(|role| role.semantic_node_id.as_str()));
-    semantic_ids.extend(foundation.dispositions.iter().map(|item| item.semantic_node_id.as_str()));
-    semantic_ids.extend(foundation.claims.iter().map(|claim| claim.semantic_node_id.as_str()));
-    semantic_ids.extend(foundation.legacy_nodes.iter().map(|legacy| legacy.semantic_node_id.as_str()));
-    if source_map.semantic_mappings.len() > 262_144
-        || source_map.semantic_mappings.windows(2).any(|pair| {
-            (&pair[0].semantic_node_id, &pair[0].source_path, pair[0].source_start, pair[0].source_end)
-                >= (&pair[1].semantic_node_id, &pair[1].source_path, pair[1].source_start, pair[1].source_end)
-        })
-    {
-        return Err(CheckerError::new(
-            CheckerRejectionCode::V2416SourceMapInvalid,
-            "semantic source mappings exceed their bound or are not canonical",
-        ));
-    }
-    let mut mapped_semantic_ids = BTreeSet::new();
-    for mapping in &source_map.semantic_mappings {
-        if !semantic_ids.contains(mapping.semantic_node_id.as_str())
-            || !safe_source_path(&mapping.source_path)
-            || mapping.source_start > mapping.source_end
-        {
-            return Err(CheckerError::new(
-                CheckerRejectionCode::V2416SourceMapInvalid,
-                format!("semantic source mapping '{}' is malformed or references an unknown node", mapping.semantic_node_id),
-            ));
-        }
-        mapped_semantic_ids.insert(mapping.semantic_node_id.as_str());
-    }
-    if mapped_semantic_ids != semantic_ids {
-        return Err(CheckerError::new(
-            CheckerRejectionCode::V2416SourceMapInvalid,
-            "semantic source mappings do not cover every semantic node",
-        ));
-    }
-    if source_map.coverage_claim.complete_text_coverage {
-        let mut expected = record.text_range.start;
-        for range in mapped_ranges {
-            if range.start != expected {
-                return Err(CheckerError::new(
-                    CheckerRejectionCode::V2416SourceMapInvalid,
-                    "source map claims complete text coverage but contains a gap",
-                ));
-            }
-            expected = range.end;
-        }
-        if expected != record.text_range.end {
-            return Err(CheckerError::new(
-                CheckerRejectionCode::V2416SourceMapInvalid,
-                "source map claims complete text coverage but does not reach text end",
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn safe_source_path(path: &str) -> bool {
-    if path == "<memory>" {
-        return true;
-    }
-    if path.is_empty() || path.starts_with('/') || path.starts_with('\\') || path.contains('\\') {
-        return false;
-    }
-    if path.len() >= 2 && path.as_bytes()[1] == b':' {
-        return false;
-    }
-    path.split('/').all(|component| !matches!(component, "" | "." | ".."))
-}
-
 fn ensure_canonical<T: Serialize>(label: &str, input: &[u8], value: &T) -> Result<(), CheckerError> {
     let canonical = canonical_bytes(value)?;
     if canonical != input {
@@ -8805,6 +8482,83 @@ fn map_elf_error(error: ElfParseError) -> CheckerError {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn witness_view_checker_admission_retains_trim_source_and_extent_rules() {
+        let vectors: serde_json::Value = serde_json::from_str(crate::view_types::WITNESS_BYTES_VIEW_CONFORMANCE_VECTORS).unwrap();
+        for vector in vectors["cases"].as_array().unwrap() {
+            let input = vector["input"].as_str().unwrap();
+            let expected = vector["trimmed"].as_bool().unwrap() && vector["maximum"].as_u64().is_some_and(|maximum| maximum <= 65_536);
+            assert_eq!(super::bounded_witness_view_parts(input).is_some(), expected, "{input:?}");
+            for source in ["u64", "WitnessArgsView"] {
+                assert_eq!(super::bounded_witness_view_retyping_move(source, input), expected, "{source}/{input:?}");
+            }
+            for source in ["Hash", "SourceView", "InputView<Token>", "WitnessBytesView<raw,64>", " u64"] {
+                assert!(!super::bounded_witness_view_retyping_move(source, input), "{source}/{input:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn witness_view_handle_validation_still_rejects_source_owner_and_range_substitution() {
+        use super::*;
+        let valid = RuntimeTransactionViewHandle {
+            scope_kind: "action".into(),
+            scope_name: "inspect".into(),
+            binding: "bytes".into(),
+            handle_type: "WitnessBytesView<lock,64>".into(),
+            source: "WitnessArgs/Input".into(),
+            provenance: RuntimeAccessProvenance {
+                contract: CKB_RUNTIME_ACCESS_PROVENANCE_CONTRACT.into(),
+                source: RuntimeSourceProvenance { resolved_source: "Input".into(), origin: "witness-args".into(), binding: None },
+                index: RuntimeScalarProvenance { kind: "static".into(), value: Some(0), binding: None, max_inclusive: Some(0) },
+                range: RuntimeRangeProvenance {
+                    kind: "bounded-range".into(),
+                    offset: RuntimeScalarProvenance { kind: "static".into(), value: Some(0), binding: None, max_inclusive: Some(64) },
+                    length: RuntimeScalarProvenance {
+                        kind: "dynamic".into(),
+                        value: None,
+                        binding: Some("bytes.size".into()),
+                        max_inclusive: Some(64),
+                    },
+                },
+            },
+            ownership: "read-only-view".into(),
+            witness_owner: Some("lock".into()),
+            max_bytes: Some(64),
+            lifecycle_authority: false,
+            typing_evidence_tier: "checked-static".into(),
+            read_evidence_tier: "checked-runtime".into(),
+        };
+        validate_runtime_transaction_view_handle("view", &valid).unwrap();
+        let mut wrong_source = valid.clone();
+        wrong_source.provenance.source.resolved_source = "Output".into();
+        assert!(validate_runtime_transaction_view_handle("view", &wrong_source).unwrap_err().message.contains("source"));
+        let mut wrong_range = valid.clone();
+        wrong_range.provenance.range.length.max_inclusive = Some(65);
+        assert!(validate_runtime_transaction_view_handle("view", &wrong_range).unwrap_err().message.contains("range"));
+        let mut wrong_owner = valid.clone();
+        wrong_owner.witness_owner = Some("raw".into());
+        assert!(validate_runtime_transaction_view_handle("view", &wrong_owner).unwrap_err().message.contains("owner"));
+        let mut oversized = valid;
+        oversized.handle_type = "WitnessBytesView<lock,65537>".into();
+        oversized.max_bytes = Some(65537);
+        oversized.provenance.range.offset.max_inclusive = Some(65537);
+        oversized.provenance.range.length.max_inclusive = Some(65537);
+        assert!(validate_runtime_transaction_view_handle("view", &oversized).unwrap_err().message.contains("maximum"));
+    }
+
+    #[test]
+    fn canonical_json_protocol_vectors() {
+        let vectors: serde_json::Value = serde_json::from_str(crate::CANONICAL_JSON_CONFORMANCE_VECTORS).unwrap();
+        for vector in vectors["valid"].as_array().unwrap() {
+            let input: serde_json::Value = serde_json::from_str(vector["input"].as_str().unwrap()).unwrap();
+            assert_eq!(serde_json::to_string(&super::canonical_json_value(&input)).unwrap(), vector["canonical"].as_str().unwrap());
+        }
+        for input in vectors["invalid"].as_array().unwrap() {
+            assert!(serde_json::from_str::<serde_json::Value>(input.as_str().unwrap()).is_err());
+        }
+    }
+
     use super::*;
 
     #[test]
@@ -8955,23 +8709,25 @@ mod tests {
 
     #[test]
     fn independent_checker_enforces_canonical_public_value_generics() {
-        let interface = serde_json::json!({
-            "schema": "cellscript-package-interface-v3",
-            "version": 3,
-            "module": "api",
-            "edition": "2027",
-            "types": [{
-                "identity": "api::Pair",
-                "type_parameters": [{
-                    "name": "T",
-                    "phantom": false,
-                    "constraints": ["copy", "drop", "store", "fixed", "serializable", "non_linear"]
-                }],
-                "value_abilities": ["copy", "drop", "store", "fixed", "serializable", "non_linear"]
+        use crate::interface::{InterfaceType, InterfaceTypeParameter, PackageInterface};
+        let abilities = ["copy", "drop", "store", "fixed", "serializable", "non_linear"].map(str::to_string).to_vec();
+        let interface = serde_json::to_value(PackageInterface {
+            schema: crate::interface::PACKAGE_INTERFACE_SCHEMA.into(),
+            version: crate::interface::PACKAGE_INTERFACE_VERSION,
+            module: "api".into(),
+            edition: "2027".into(),
+            types: vec![InterfaceType {
+                identity: "api::Pair".into(),
+                name: "Pair".into(),
+                kind: "struct".into(),
+                visibility: "public".into(),
+                type_parameters: vec![InterfaceTypeParameter { name: "T".into(), phantom: false, constraints: abilities.clone() }],
+                value_abilities: abilities,
+                ..Default::default()
             }],
-            "constants": [],
-            "callables": []
-        });
+            ..Default::default()
+        })
+        .unwrap();
         let hash = public_interface_hash(&interface);
         let metadata = serde_json::json!({ "edition": "2027", "public_interface": interface });
         validate_public_interface_metadata(&metadata, "api", &hash).unwrap();

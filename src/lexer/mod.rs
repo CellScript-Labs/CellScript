@@ -1,6 +1,6 @@
 pub mod token;
 
-use crate::error::{CompileError, Result, Span};
+use crate::error::{CompileError, Result, SourceDiagnosticCode, Span};
 use token::{keyword_or_identifier, Token, TokenKind};
 
 pub struct Lexer<'a> {
@@ -51,7 +51,8 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn skip_comment(&mut self) {
+    fn skip_comment(&mut self) -> Result<()> {
+        let opening = Span::new(self.position, self.position + 2, self.line, self.column);
         if self.peek() == Some('/') && self.peek_next() == Some('/') {
             while let Some(c) = self.peek() {
                 if c == '\n' {
@@ -78,10 +79,11 @@ impl<'a> Lexer<'a> {
                     (Some(_), _) => {
                         self.advance();
                     }
-                    (None, _) => break,
+                    (None, _) => return Err(SourceDiagnosticCode::UnterminatedComment.error("unterminated block comment", opening)),
                 }
             }
         }
+        Ok(())
     }
 
     fn read_identifier(&mut self) -> Token {
@@ -163,10 +165,16 @@ impl<'a> Lexer<'a> {
         while let Some(c) = self.peek() {
             if c == quote {
                 self.advance();
-                break;
+                let span = Span::new(start, self.position, start_line, start_col);
+                return Ok(Token::new(TokenKind::String(content), span, &self.input[start..self.position]));
             } else if c == '\\' {
+                let escape = Span::new(self.position, self.position + 1, self.line, self.column);
                 self.advance();
                 match self.peek() {
+                    Some(c) if c == quote => {
+                        content.push(c);
+                        self.advance();
+                    }
                     Some('n') => {
                         content.push('\n');
                         self.advance();
@@ -197,7 +205,7 @@ impl<'a> Lexer<'a> {
                             Span::new(self.position, self.position + c.len_utf8(), self.line, self.column),
                         ));
                     }
-                    None => break,
+                    None => return Err(SourceDiagnosticCode::UnterminatedEscape.error("unterminated string escape", escape)),
                 }
             } else {
                 content.push(c);
@@ -205,8 +213,8 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        let span = Span::new(start, self.position, start_line, start_col);
-        Ok(Token::new(TokenKind::String(content), span, &self.input[start..self.position]))
+        Err(SourceDiagnosticCode::UnterminatedString
+            .error("unterminated string literal", Span::new(start, start + 1, start_line, start_col)))
     }
 
     fn read_byte_string(&mut self) -> Result<Token> {
@@ -221,8 +229,10 @@ impl<'a> Lexer<'a> {
         while let Some(c) = self.peek() {
             if c == '"' {
                 self.advance();
-                break;
+                let span = Span::new(start, self.position, start_line, start_col);
+                return Ok(Token::new(TokenKind::ByteString(bytes), span, &self.input[start..self.position]));
             } else if c == '\\' {
+                let escape = Span::new(self.position, self.position + 1, self.line, self.column);
                 self.advance();
                 match self.peek() {
                     Some('n') => {
@@ -294,7 +304,11 @@ impl<'a> Lexer<'a> {
                             Span::new(self.position, self.position + 1, self.line, self.column),
                         ));
                     }
-                    None => break,
+                    None => {
+                        return Err(
+                            SourceDiagnosticCode::UnterminatedByteStringEscape.error("unterminated byte string escape", escape)
+                        );
+                    }
                 }
             } else if c.is_ascii() {
                 bytes.push(c as u8);
@@ -307,15 +321,15 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        let span = Span::new(start, self.position, start_line, start_col);
-        Ok(Token::new(TokenKind::ByteString(bytes), span, &self.input[start..self.position]))
+        Err(SourceDiagnosticCode::UnterminatedByteString
+            .error("unterminated byte string literal", Span::new(start, start + 2, start_line, start_col)))
     }
 
     pub fn next_token(&mut self) -> Result<Token> {
         loop {
             self.skip_whitespace();
             if self.peek() == Some('/') && (self.peek_next() == Some('/') || self.peek_next() == Some('*')) {
-                self.skip_comment();
+                self.skip_comment()?;
             } else {
                 break;
             }
@@ -580,6 +594,35 @@ mod tests {
         let input = r#"b"hello" b"\x00\xFF""#;
         let tokens = lex(input).unwrap();
         assert!(matches!(tokens[0].kind, TokenKind::ByteString(ref b) if b == b"hello"));
+    }
+
+    #[test]
+    fn closed_byte_strings_preserve_empty_values_quotes_and_escapes() {
+        for (input, expected) in [
+            (r#"b"""#, Vec::new()),
+            (r#"b"\x00\xFF""#, vec![0, 255]),
+            (r#"b"\n\t\r\\\"\0\x41""#, vec![b'\n', b'\t', b'\r', b'\\', b'"', 0, b'A']),
+        ] {
+            let tokens = lex(input).unwrap();
+            assert_eq!(tokens[0].kind, TokenKind::ByteString(expected));
+            assert_eq!(tokens[0].span, Span::new(0, input.len(), 1, 1));
+            assert_eq!(tokens[1].kind, TokenKind::Eof);
+        }
+    }
+
+    #[test]
+    fn malformed_byte_string_escapes_keep_their_specific_diagnostics() {
+        for (input, message) in [
+            (r#"b"\x"#, "incomplete hex escape in byte string"),
+            (r#"b"\x0"#, "incomplete hex escape in byte string"),
+            (r#"b"\xQ0""#, "invalid hex escape in byte string"),
+            (r#"b"\x0Q""#, "invalid hex escape in byte string"),
+            (r#"b"\q""#, "unknown escape sequence in byte string"),
+        ] {
+            let error = lex(input).unwrap_err();
+            assert!(error.code.is_none(), "{input:?}: {error}");
+            assert!(error.message.contains(message), "{input:?}: {error}");
+        }
     }
 
     #[test]

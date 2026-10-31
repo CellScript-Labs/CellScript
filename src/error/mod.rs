@@ -70,7 +70,73 @@ pub struct CompilerErrorInfo {
     pub hint: &'static str,
 }
 
+/// Stable source-boundary identities; presentation text is separate from codes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceDiagnosticCode {
+    UnterminatedString,
+    UnterminatedEscape,
+    UnterminatedComment,
+    PoolAssignments,
+    PoolRoles,
+    RemovedEffectDeclaration,
+    UnresolvedEffect,
+    EffectBudget,
+    RemovedNativeEffectsBlock,
+    RemovedByteBufferApi,
+    FixedLayoutBounds,
+    BareSpawnUnsupported,
+    UnterminatedByteString,
+    UnterminatedByteStringEscape,
+    UnknownSchedulerHint,
+}
+impl SourceDiagnosticCode {
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::UnterminatedString => "E1010",
+            Self::UnterminatedEscape => "E1011",
+            Self::UnterminatedComment => "E1012",
+            Self::PoolAssignments => "E1013",
+            Self::PoolRoles => "E1014",
+            Self::RemovedEffectDeclaration => "E1015",
+            Self::UnresolvedEffect => "E1016",
+            Self::EffectBudget => "E1017",
+            Self::RemovedNativeEffectsBlock => "E1018",
+            Self::RemovedByteBufferApi => "E1019",
+            Self::FixedLayoutBounds => "E1020",
+            Self::BareSpawnUnsupported => "E1021",
+            Self::UnterminatedByteString => "E1022",
+            Self::UnterminatedByteStringEscape => "E1023",
+            Self::UnknownSchedulerHint => "E1024",
+        }
+    }
+    pub fn error(self, message: impl Into<String>, span: Span) -> CompileError {
+        CompileError::new(message, span).with_code(self.code())
+    }
+}
+
+pub(crate) fn bare_spawn_error(span: Span) -> CompileError {
+    SourceDiagnosticCode::BareSpawnUnsupported.error(
+        "bare named spawn is unsupported: it has no child binding or argument/descriptor transport; use a manifest-bound CellDep spawn API with checked transport",
+        span,
+    )
+}
+
 pub const COMPILER_ERROR_INFOS: &[CompilerErrorInfo] = &[
+    CompilerErrorInfo { code: SourceDiagnosticCode::UnknownSchedulerHint.code(), name: "unknown-scheduler-hint", description: "A scheduler_hint attribute names an unsupported hint.", hint: "Use parallel, sequential, or estimated_cycles with a u64 integer literal." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::UnterminatedByteString.code(), name: "unterminated-byte-string", description: "A byte string reaches EOF before its closing quote.", hint: "Close the byte string with a double quote." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::UnterminatedByteStringEscape.code(), name: "unterminated-byte-string-escape", description: "A byte string escape reaches EOF without an escaped character.", hint: "Complete the escape and close the byte string." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::BareSpawnUnsupported.code(), name: "bare-spawn-unsupported", description: "Bare named spawn has no child binding or argument/descriptor transport.", hint: "Use a manifest-bound CellDep spawn API with checked transport." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::FixedLayoutBounds.code(), name: "fixed-layout-bounds", description: "An intrinsic fixed-value or entry-payload extent cannot be represented safely.", hint: "Reduce the declared array/tuple extent or split the entry payload; sizes must fit the target address and entry ABI." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::RemovedByteBufferApi.code(), name: "byte-buffer-api-removed", description: "The source uses a removed digest-shaped byte-buffer API.", hint: "Use the explicit bounded byte view, exact-width read, or digest named in the diagnostic." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::RemovedNativeEffectsBlock.code(), name: "native-effects-block-removed", description: "A native entry uses the removed effects wrapper.", hint: "Write replace, pool, retire, or fresh directly in the entry body." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::UnterminatedString.code(), name: "unterminated-string", description: "An ordinary string reaches EOF before its closing quote.", hint: "Close the string using its opening quote delimiter." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::UnterminatedEscape.code(), name: "unterminated-escape", description: "A string escape reaches EOF without an escaped character.", hint: "Complete the escape and close the string." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::UnterminatedComment.code(), name: "unterminated-block-comment", description: "A block comment reaches EOF before all delimiters close.", hint: "Close every nested block comment." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::PoolAssignments.code(), name: "incomplete-pool-assignments", description: "Pool field assignments do not exactly cover the ordered output roles.", hint: "Assign each declared pool output exactly once in declaration order." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::PoolRoles.code(), name: "empty-pool-roles", description: "A pool requires nonempty input and output role sets.", hint: "Declare at least one input and one output role." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::RemovedEffectDeclaration.code(), name: "effect-declaration-removed", description: "The source uses a removed manual effect declaration.", hint: "Remove the attribute and review the inferred public contract." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::UnresolvedEffect.code(), name: "effect-evidence-unavailable", description: "A callable has no resolved effect evidence.", hint: "Resolve the named callable and its defining package." },
+    CompilerErrorInfo { code: SourceDiagnosticCode::EffectBudget.code(), name: "effect-analysis-budget", description: "Effect inference exceeded its bounded call-graph or convergence budget.", hint: "Reduce the call graph or split the module surface." },
     CompilerErrorInfo {
         code: "E2000",
         name: "backend-uncategorized",
@@ -109,8 +175,8 @@ pub const COMPILER_ERROR_INFOS: &[CompilerErrorInfo] = &[
     },
     CompilerErrorInfo {
         code: "E2104",
-        name: "pure-function-lowering",
-        description: "A pure function could not be lowered to backend instructions.",
+        name: "function-lowering",
+        description: "A function could not be lowered to backend instructions.",
         hint: "Inspect the function call ABI, return layout, and unsupported expression in the diagnostic.",
     },
     CompilerErrorInfo {
@@ -647,7 +713,7 @@ mod tests {
         for info in COMPILER_ERROR_INFOS {
             assert!(codes.insert(info.code), "duplicate compiler error code {}", info.code);
             assert_eq!(compiler_error_info_by_code(info.code), Some(*info));
-            assert!(info.code.starts_with("E2") || info.code.starts_with("W3"));
+            assert!(info.code.starts_with("E1") || info.code.starts_with("E2") || info.code.starts_with("W3"));
             assert!(!info.description.is_empty());
             assert!(!info.hint.is_empty());
         }

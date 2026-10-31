@@ -176,22 +176,31 @@ fn cell_data_exact_reads_roundtrip_formatting_and_reject_invalid_sources() {
             let formatted = cellscript::fmt::Formatter::new(Default::default()).format_module(&first.ast).unwrap();
             assert_eq!(first.artifact_bytes, compile_read(&formatted, diagnostics).artifact_bytes);
         }
-        // Legacy raw u64 handles still pass type checking. Runtime must reject
-        // zero/unknown tags, HeaderDep and missing coordinates explicitly.
-        for view in [
-            "0",
-            "30064771072",
-            "17179869184",
-            "source::input(99)",
-            "source::output(99)",
-            "source::group_input(0)",
-            "source::group_output(99)",
-            "source::cell_dep(99)",
-        ] {
-            for (call, expected) in [
-                (format!("ckb::cell_data_hash_field({view})"), 44),
-                (format!("ckb::cell_data_bytes32({view}, 0)"), if view == "0" || view == "30064771072" { 44 } else { 1 }),
-            ] {
+        // Unresolved raw selectors cannot supply source evidence. Typed views
+        // still reach the VM, where missing coordinates fail explicitly.
+        for view in ["0", "30064771072", "17179869184"] {
+            for call in [format!("ckb::cell_data_hash_field({view})"), format!("ckb::cell_data_bytes32({view}, 0)")] {
+                let source =
+                    format!("module bad_source\naction inspect() -> u64 {{ let value = {call} require value == value return 0 }}");
+                let error = cellscript::compile(
+                    &source,
+                    CompileOptions {
+                        edition: CellScriptEdition::Edition2027,
+                        diagnostics,
+                        target: Some("riscv64-elf".into()),
+                        ..Default::default()
+                    },
+                )
+                .expect_err("unresolved raw sources must fail before emission");
+                assert_eq!(error.code.as_deref(), Some("E1016"), "{call}: {error}");
+            }
+        }
+        for view in
+            ["source::input(99)", "source::output(99)", "source::group_input(0)", "source::group_output(99)", "source::cell_dep(99)"]
+        {
+            for (call, expected) in
+                [(format!("ckb::cell_data_hash_field({view})"), 44), (format!("ckb::cell_data_bytes32({view}, 0)"), 1)]
+            {
                 let source =
                     format!("module bad_source\naction inspect() -> u64 {{ let value = {call} require value == value return 0 }}");
                 let result = compile_read(&source, diagnostics);

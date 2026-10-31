@@ -63,6 +63,7 @@ import {
 } from "../src/index";
 import type { PackageVersionRecord } from "../src/store";
 import { nodeCkbRpcEnv } from "../src/node-runtime-env";
+import { publicInterface, temporalInterface, callable } from "./interface-fixtures";
 
 const now = new Date("2026-06-23T12:00:00Z");
 const execFileAsync = promisify(execFile);
@@ -462,22 +463,8 @@ async function publishPayload(keyId: string): Promise<PublishPayload> {
         compiler_requirement: ">=0.23.0",
         edition: "2026",
         compatibility_profile_hash: "ef".repeat(32),
-        interface_hash: ckbBlake2bHex(canonicalJson({
-          schema: "cellscript-package-interface-v2",
-          version: 2,
-          module: "cellscript::demo",
-          types: [],
-          constants: [],
-          callables: [],
-        })),
-        interface: {
-          schema: "cellscript-package-interface-v2",
-          version: 2,
-          module: "cellscript::demo",
-          types: [],
-          constants: [],
-          callables: [],
-        },
+        interface_hash: ckbBlake2bHex(canonicalJson(publicInterface())),
+        interface: publicInterface(),
         dependencies: {},
         verification_status: "pending",
         deployment_status: "not_applicable",
@@ -533,9 +520,7 @@ async function ckbExecutablePublishPayload(keyId: string): Promise<PublishPayloa
 
 describe("CellScript public interface admission", () => {
   const baseInterface = {
-    schema: "cellscript-package-interface-v2",
-    version: 2,
-    module: "cellscript::demo",
+    ...publicInterface(),
     types: [{
       identity: "cellscript::demo::Value",
       kind: "struct",
@@ -547,23 +532,24 @@ describe("CellScript public interface admission", () => {
     }],
     constants: [],
     callables: [],
-    runtime_contract: { target_profile: "ckb", witness_abi: "v2" },
     deployment_contract_hash: "22".repeat(32),
   };
+
+  it("rejects retired source-interface generations before signed publication admission", async () => {
+    for (const version of [2, 3, 4]) {
+      const payload = await publishPayload("retired-interface");
+      const published = payload.registry_entry.versions[0];
+      published.interface = { ...publicInterface(), schema: `cellscript-package-interface-v${version}`, version };
+      published.interface_hash = ckbBlake2bHex(canonicalJson(published.interface));
+      expect(() => validatePublishPayload(payload, DEFAULT_REGISTRY_ORIGIN, now)).toThrow(/cellscript-package-interface-v5/);
+    }
+  });
 
   it("accepts additive exports and rejects layout changes before admission", () => {
     expect(() => validateInterfaceUpgrade(baseInterface, {
       ...baseInterface,
       callables: [{
-        identity: "cellscript::demo::read",
-        kind: "function",
-        type_parameters: [],
-        params: [],
-        return_type: "u64",
-        outputs: [],
-        effect: "Pure",
-        entry_witness_abi: null,
-        builder_contract_hash: "33".repeat(32),
+        ...callable(),
       }],
     })).not.toThrow();
     expect(() => validateInterfaceUpgrade(baseInterface, {
@@ -574,8 +560,9 @@ describe("CellScript public interface admission", () => {
 
   it("accepts pure generic-constraint relaxation and rejects tightening or shape drift", () => {
     const genericCallable = {
+      ...callable(),
       identity: "cellscript::demo::identity",
-      kind: "function",
+      name: "identity",
       type_parameters: [{
         name: "T",
         phantom: false,
@@ -584,7 +571,7 @@ describe("CellScript public interface admission", () => {
       params: [{ name: "value", type: "T", source: "default", mutable: false, reference: false }],
       return_type: "T",
       outputs: [],
-      effect: "Pure",
+      effects: null,
       entry_witness_abi: null,
       builder_contract_hash: "33".repeat(32),
     };
@@ -1088,40 +1075,11 @@ describe("registry api", () => {
   it("accepts the versioned typed temporal interface and rejects contract drift", async () => {
     const payload = await publishPayload("temporal-interface-test");
     const published = payload.registry_entry.versions[0];
-    const temporal = {
-      schema: "cellscript-ckb-temporal-interface-v1",
-      wire_representation: "fixed-u64-register-and-little-endian-wire",
-      since_abi: "ckb-since-rfc0017-typed-v1",
-      constructors: [
-        "ckb::since_absolute_block(u64)->AbsoluteBlockSince",
-        "ckb::since_absolute_epoch(u64,u64,u64)->AbsoluteEpochSince",
-        "ckb::since_absolute_timestamp(u64-seconds)->AbsoluteTimestampSince",
-        "ckb::since_relative_block(u64)->RelativeBlockSince",
-        "ckb::since_relative_epoch(u64,u64,u64)->RelativeEpochSince",
-        "ckb::since_relative_timestamp(u64-seconds)->RelativeTimestampSince",
-      ],
-      decoder: "ckb::since_decode(EncodedSince)->DecodedSince;ckb::since_from_raw_checked(u64)->DecodedSince",
-      domains: [
-        "EpochNumber",
-        "EpochDuration",
-        "BlockNumber",
-        "EpochLength",
-        "TimestampMillis",
-        "EncodedSince",
-        "DecodedSince",
-        "AbsoluteBlockSince",
-        "AbsoluteEpochSince",
-        "AbsoluteTimestampSince",
-        "RelativeBlockSince",
-        "RelativeEpochSince",
-        "RelativeTimestampSince",
-      ],
-      migration: "legacy-raw-ckb-temporal-to-explicit-typed-v1",
-    };
-    const interfaceV3 = {
+    const temporal = temporalInterface();
+    const currentInterface = {
       ...published.interface,
-      schema: "cellscript-package-interface-v3",
-      version: 3,
+      schema: "cellscript-package-interface-v5",
+      version: 5,
       types: [{
         identity: "cellscript::demo::Pair",
         type_parameters: [{
@@ -1134,10 +1092,10 @@ describe("registry api", () => {
       edition: "2026",
       runtime_contract: { temporal },
     };
-    published.interface = interfaceV3;
-    published.interface_hash = ckbBlake2bHex(canonicalJson(interfaceV3));
+    published.interface = currentInterface;
+    published.interface_hash = ckbBlake2bHex(canonicalJson(currentInterface));
     expect(validatePublishPayload(payload, DEFAULT_REGISTRY_ORIGIN, now).registry_entry.versions[0].interface)
-      .toEqual(interfaceV3);
+      .toEqual(currentInterface);
 
     const drifted = structuredClone(payload);
     const driftedInterface = drifted.registry_entry.versions[0].interface as Record<string, unknown>;

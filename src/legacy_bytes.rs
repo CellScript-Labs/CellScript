@@ -3,6 +3,13 @@
 //! These are migration diagnostics, not compatibility aliases. Keep the raw
 //! bytes, exact-width reads and actual digest operations distinguishable.
 
+pub(crate) fn removed_call_error(name: &str, span: crate::error::Span) -> Option<crate::error::CompileError> {
+    replacement(name).map(|replacement| {
+        crate::error::SourceDiagnosticCode::RemovedByteBufferApi
+            .error(format!("removed legacy byte-buffer API '{name}'; {replacement}"), span)
+    })
+}
+
 pub(crate) fn replacement(name: &str) -> Option<&'static str> {
     match name {
         "witness::raw" => Some(

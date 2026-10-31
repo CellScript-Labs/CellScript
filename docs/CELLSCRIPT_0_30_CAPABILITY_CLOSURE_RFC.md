@@ -52,7 +52,7 @@ The first #24 runtime-view tranche is specified by the
 The additive typed HeaderDep and six-domain `Since` subset is specified in the
 [0.30 temporal-domain contract](CELLSCRIPT_0_30_TEMPORAL_DOMAINS.md); it does
 not by itself close issue #12.
-Metadata schema 72 retains `cellscript-ckb-runtime-view-v1` together with the
+Metadata schema 74 retains `cellscript-ckb-runtime-view-v1` together with the
 structured `cellscript-ckb-runtime-access-provenance-v1` source/index/range
 contract and adds the explicit bounded output Plan mapping. Typed Cell views
 expose occupied/unoccupied capacity, consensus data hashes and input `since`.
@@ -100,7 +100,7 @@ replaces the complete first group `WitnessArgs.lock` payload with equal-length
 zero bytes, and commits to later group witnesses and transaction-level extra
 witnesses in canonical order. A real CKB-VM differential matches the pinned
 `ckb-sdk-rust` message generator. Its `SighashAllDigest` result, four literal
-bounds, exact transform, scope, and order are bound in metadata schema 72 and
+bounds, exact transform, scope, and order are bound in metadata schema 74 and
 the independent checker. This is the simple all-zero placeholder domain; it
 does not claim multisig layouts that preserve a nonzero configuration prefix,
 and the older generic `env::sighash_all(source)` spelling remains fail-closed.

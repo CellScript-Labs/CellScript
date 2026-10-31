@@ -80,7 +80,7 @@ struct LanguageServiceResult {
 /// Compile CellScript source to metadata JSON (path A, no ELF).
 ///
 /// Returns a JSON string. On success this is the serialized
-/// browser metadata summary (module, types, actions with effect_class /
+/// browser metadata summary (module, types, actions with effects /
 /// consume_set / create_set / estimated_cycles, plus module-wide fail-closed
 /// runtime features and their scoped reasons). On error it
 /// is `{"error": "<message>"}`.
@@ -242,7 +242,7 @@ fn browser_metadata_value(metadata: &cellscript::CompileMetadata) -> serde_json:
             serde_json::json!({
                 "name": action.name,
                 "params": params,
-                "effect_class": action.effect_class,
+                "effects": action.effects,
                 "estimated_cycles": action.estimated_cycles,
                 "consume_set": consume_set,
                 "read_refs": read_refs,
@@ -400,6 +400,7 @@ mod tests {
             );
             let result: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(&source, "2027", None)).unwrap();
             assert_eq!(result["error_count"], 1);
+            assert_eq!(result["diagnostics"][0]["code"], "E1019");
             assert!(result["diagnostics"][0]["message"].as_str().unwrap().contains("removed legacy byte-buffer API"));
         }
         let invalid =
@@ -648,6 +649,15 @@ action verify() -> u64 {
         let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
         assert!(result.get("error").is_none(), "{result}");
         assert_eq!(result["actions"][0]["params"][0]["ty"], "NestedValues<Vec<u8>, 3, 8, 128>");
+        // Resolved compiler references are internal. Browser type positions
+        // retain canonical wire text and cannot expose a descriptor object.
+        let metadata = cellscript::compile_metadata(source, cellscript::NEXT_EDITION, None).unwrap();
+        let serialized = serde_json::to_value(metadata).unwrap();
+        for definition in serialized["types"].as_array().unwrap() {
+            for field in definition["fields"].as_array().unwrap() {
+                assert!(field["ty"].is_string(), "{field}");
+            }
+        }
         assert!(!result["runtime"]["fail_closed_runtime_features"]
             .as_array()
             .unwrap()
@@ -825,7 +835,7 @@ action inspect() -> u64 {
 "#;
         let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, "2027", None)).unwrap();
         assert!(result.get("error").is_none(), "unexpected wasm compile error: {result}");
-        assert_eq!(result["metadata_schema_version"], 72);
+        assert_eq!(result["metadata_schema_version"], 74);
         assert_eq!(result["runtime"]["fail_closed_runtime_features"], serde_json::json!([]));
         let domain = &result["runtime"]["signing_message_domains"][0];
         assert_eq!(domain["contract"], "cellscript-ckb-sighash-all-zero-lock-v1");
@@ -850,15 +860,13 @@ type_script TokenTransfer on type_group<Token> {
         output next: Token from group_output[0],
     ) {
         verify { enforce token.amount > 0 }
-        effects {
-            replace token -> next {
-                data { owner = same; amount = same }
-                identity = same
-                type_script = same
-                lock_script = exact_hash(recipient)
-                capacity = same
-                cardinality = one_to_one
-            }
+        replace token -> next {
+            data { owner = same; amount = same }
+            identity = same
+            type_script = same
+            lock_script = exact_hash(recipient)
+            capacity = same
+            cardinality = one_to_one
         }
     }
 }
@@ -876,9 +884,9 @@ type_script TokenTransfer on type_group<Token> {
             assert_eq!(language["diagnostics"].as_array().map(Vec::len), Some(0));
             assert!(language["completions"].as_array().is_some_and(|items| items.iter().any(|item| item["label"] == "type_script")));
             assert!(!language["completions"].as_array().is_some_and(|items| items.iter().any(|item| item["label"] == "pool")));
-            // Effect keywords belong inside the entry body, not at the
+            // Disposition keywords belong inside the entry body, not at the
             // top-level declaration position used above.
-            let line = source.lines().position(|line| line.contains("effects {")).unwrap() as u32;
+            let line = source.lines().position(|line| line.trim_start().starts_with("replace ")).unwrap() as u32;
             let language: serde_json::Value =
                 serde_json::from_str(&language_service_json_for_edition(source, "2027", line, 15)).unwrap();
             assert_eq!(language["diagnostics"].as_array().map(Vec::len), Some(0));
@@ -901,17 +909,15 @@ type_script TokenPool on type_group<Token> {
     ) {
         verify { enforce left.amount > 0 }
         audit settlement_policy { expected_evidence = external_policy(recipient) }
-        effects {
-            pool value_flow {
-                inputs { left, right }
-                outputs { merged }
-                data { owner { merged = recipient } amount = conserve }
-                identity = pooled
-                type_script = same
-                lock_script { merged = exact_hash(recipient) }
-                capacity = builder_computed
-                cardinality = declared
-            }
+        pool value_flow {
+            inputs { left, right }
+            outputs { merged }
+            data { owner { merged = recipient } amount = conserve }
+            identity = pooled
+            type_script = same
+            lock_script { merged = exact_hash(recipient) }
+            capacity = builder_computed
+            cardinality = declared
         }
     }
 }
@@ -998,6 +1004,55 @@ action inspect() -> bool {
         assert!(result["diagnostics"][0]["message"]
             .as_str()
             .is_some_and(|message| message.contains("ckb::epoch_number_to_u64(ckb::header_dep(0).epoch_number)")));
+    }
+
+    #[test]
+    fn wasm_bare_spawn_rejects_but_resolved_user_spawn_compiles() {
+        let source = "module spawn_boundary\naction verify() -> u64 { verification return spawn(\"child\") }";
+        for edition in ["2026", "2027"] {
+            let result: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(source, edition, None)).unwrap();
+            assert!(result["metadata"].is_null());
+            assert_eq!(result["error_count"], 1);
+            assert_eq!(result["diagnostics"][0]["code"], "E1021");
+            let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(source, edition, None)).unwrap();
+            assert!(result["error"].as_str().is_some_and(|message| message.contains("manifest-bound CellDep spawn")));
+            let shadow = "module spawn_boundary\nfn spawn(value: u64) -> u64 { return value }\naction verify() -> u64 { verification return spawn(7) }";
+            let result: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(shadow, edition, None)).unwrap();
+            assert_eq!(result["error_count"], 0);
+            assert!(result["metadata"].is_object());
+        }
+    }
+
+    #[test]
+    fn wasm_byte_string_eof_diagnostics_preserve_codes_and_unicode_source_offsets() {
+        let prefix = "// π🙂\nmodule byte_boundary\naction inspect() -> u64 { verification /* π🙂 */ let payload = ";
+        for edition in ["2026", "2027"] {
+            for tail in ["b\"unfinished", "b\"unfinished\\"] {
+                let source = format!("{prefix}{tail}");
+                let expected = cellscript::lexer::lex(&source).unwrap_err();
+                let sources = serde_json::json!([{ "path": "main.cell", "source": source }]).to_string();
+                for encoded in [
+                    compile_metadata_json_diagnostics(&source, edition, None),
+                    compile_metadata_json_sources(&sources, "main.cell", edition, None),
+                ] {
+                    let result: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+                    assert!(result["metadata"].is_null(), "{result}");
+                    assert_eq!(result["error_count"], 1, "{result}");
+                    let diagnostic = &result["diagnostics"][0];
+                    assert_eq!(diagnostic["code"].as_str(), expected.code.as_deref());
+                    assert_eq!(diagnostic["range"]["start"]["offset"], expected.span.start);
+                    assert_eq!(diagnostic["range"]["end"]["offset"], expected.span.end);
+                    assert_eq!(diagnostic["range"]["start"]["line"], expected.span.line);
+                    assert_eq!(diagnostic["range"]["start"]["column"], expected.span.column);
+                }
+                let result: serde_json::Value = serde_json::from_str(&compile_metadata_json(&source, edition, None)).unwrap();
+                assert!(result["error"].as_str().is_some_and(|message| message.contains("unterminated byte string")), "{result}");
+            }
+            let valid = format!("{prefix}b\"\\x2A\" require payload[0] == 42 return 0 }}");
+            let result: serde_json::Value = serde_json::from_str(&compile_metadata_json_diagnostics(&valid, edition, None)).unwrap();
+            assert_eq!(result["error_count"], 0, "{result}");
+            assert!(result["metadata"].is_object(), "{result}");
+        }
     }
 
     #[test]

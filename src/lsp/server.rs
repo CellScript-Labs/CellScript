@@ -3,9 +3,13 @@
 //! This module wraps the in-process `LspServer` behind the `tower_lsp::LanguageServer`
 //! trait so that `cellc --lsp` can act as a full JSON-RPC language server.
 
+use super::session::{self, SharedSession};
 use crate::lsp;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionParams, CodeActionProviderCapability, CodeActionResponse,
@@ -24,26 +28,29 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 struct CellScriptBackend {
     client: Client,
-    state: Mutex<lsp::LspServer>,
+    state: SharedSession,
+    dynamic_watches: AtomicBool,
 }
 
 impl CellScriptBackend {
     fn new(client: Client) -> Self {
-        Self { client, state: Mutex::new(lsp::LspServer::new()) }
-    }
-
-    /// Publish diagnostics for a given URI.
-    async fn publish_diagnostics_for(&self, uri: &Url) {
-        let uri_str = uri.to_string();
-        let diagnostics = self.state.lock().unwrap().get_diagnostics(&uri_str);
-        let lsp_diagnostics: Vec<Diagnostic> = diagnostics.into_iter().map(convert_diagnostic).collect();
-        self.client.publish_diagnostics(uri.clone(), lsp_diagnostics, None).await;
+        Self { client, state: Arc::default(), dynamic_watches: AtomicBool::new(false) }
     }
 }
 
 #[tower_lsp::async_trait]
 impl LanguageServer for CellScriptBackend {
-    async fn initialize(&self, _: InitializeParams) -> LspResult<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> LspResult<InitializeResult> {
+        self.dynamic_watches.store(
+            params
+                .capabilities
+                .workspace
+                .as_ref()
+                .and_then(|workspace| workspace.did_change_watched_files.as_ref())
+                .and_then(|capability| capability.dynamic_registration)
+                == Some(true),
+            Ordering::Relaxed,
+        );
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Options(TextDocumentSyncOptions {
@@ -86,6 +93,18 @@ impl LanguageServer for CellScriptBackend {
 
     async fn initialized(&self, _: InitializedParams) {
         self.client.log_message(MessageType::INFO, "CellScript language server initialized").await;
+        if self.dynamic_watches.load(Ordering::Relaxed) {
+            let _ = self
+                .client
+                .register_capability(vec![tower_lsp::lsp_types::Registration {
+                    id: "cellscript-source-revisions".into(),
+                    method: "workspace/didChangeWatchedFiles".into(),
+                    register_options: Some(serde_json::json!({ "watchers": [
+                    { "globPattern": "**/*.cell" }, { "globPattern": "**/Cell.toml" }, { "globPattern": "**/Cell.lock" }
+                ] })),
+                }])
+                .await;
+        }
     }
 
     async fn shutdown(&self) -> LspResult<()> {
@@ -95,59 +114,39 @@ impl LanguageServer for CellScriptBackend {
     // ---- document sync ----
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        let uri = params.text_document.uri.clone();
-        let uri_str = uri.to_string();
-        self.state.lock().unwrap().open_document(uri_str, params.text_document.text);
-        self.publish_diagnostics_for(&uri).await;
+        let document = params.text_document;
+        self.state.lock().unwrap().open(document.uri.to_string(), document.version, document.text);
+        session::schedule(&self.state, &self.client);
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        let uri = params.text_document.uri.clone();
-        let uri_str = uri.to_string();
-        {
-            let mut state = self.state.lock().unwrap();
-            // Apply incremental changes. If the client sends a full update
-            // (single change with no range), treat it as a full replacement.
-            if params.content_changes.len() == 1 {
-                let change = &params.content_changes[0];
-                if change.range.is_none() {
-                    state.update_document(uri_str, change.text.clone());
-                } else {
-                    state.update_document_incremental(
-                        &uri_str,
-                        params
-                            .content_changes
-                            .iter()
-                            .map(|c| lsp::TextDocumentContentChangeEvent {
-                                range: c.range.map(convert_range_back),
-                                range_length: c.range_length,
-                                text: c.text.clone(),
-                            })
-                            .collect(),
-                    );
-                }
-            } else {
-                // For multiple incremental changes, apply them one by one.
-                state.update_document_incremental(
-                    &uri_str,
-                    params
-                        .content_changes
-                        .iter()
-                        .map(|c| lsp::TextDocumentContentChangeEvent {
-                            range: c.range.map(convert_range_back),
-                            range_length: c.range_length,
-                            text: c.text.clone(),
-                        })
-                        .collect(),
-                );
-            }
+        let changed = self.state.lock().unwrap().change(
+            params.text_document.uri.as_str(),
+            params.text_document.version,
+            params
+                .content_changes
+                .into_iter()
+                .map(|change| lsp::TextDocumentContentChangeEvent {
+                    range: change.range.map(convert_range_back),
+                    range_length: change.range_length,
+                    text: change.text,
+                })
+                .collect(),
+        );
+        if changed {
+            session::schedule(&self.state, &self.client);
         }
-        self.publish_diagnostics_for(&uri).await;
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        let uri_str = params.text_document.uri.to_string();
-        self.state.lock().unwrap().close_document(&uri_str);
+        self.state.lock().unwrap().close(params.text_document.uri.as_str());
+        self.client.publish_diagnostics(params.text_document.uri, Vec::new(), None).await;
+        session::schedule(&self.state, &self.client);
+    }
+
+    async fn did_change_watched_files(&self, _: tower_lsp::lsp_types::DidChangeWatchedFilesParams) {
+        self.state.lock().unwrap().dependencies_changed();
+        session::schedule(&self.state, &self.client);
     }
 
     // ---- language features ----
@@ -155,7 +154,7 @@ impl LanguageServer for CellScriptBackend {
     async fn completion(&self, params: CompletionParams) -> LspResult<Option<CompletionResponse>> {
         let uri_str = params.text_document_position.text_document.uri.to_string();
         let position = convert_position_back(params.text_document_position.position);
-        let items = self.state.lock().unwrap().completion(&uri_str, position);
+        let items = session::query(&self.state, uri_str.clone(), move |state| state.completion(&uri_str, position)).await?;
         if items.is_empty() {
             Ok(None)
         } else {
@@ -166,25 +165,25 @@ impl LanguageServer for CellScriptBackend {
     async fn goto_definition(&self, params: GotoDefinitionParams) -> LspResult<Option<GotoDefinitionResponse>> {
         let uri_str = params.text_document_position_params.text_document.uri.to_string();
         let position = convert_position_back(params.text_document_position_params.position);
-        let location = self.state.lock().unwrap().goto_definition(&uri_str, position);
-        Ok(location.map(|loc| GotoDefinitionResponse::Scalar(convert_location(loc))))
+        let location = session::query(&self.state, uri_str.clone(), move |state| state.goto_definition(&uri_str, position)).await?;
+        Ok(location.map(convert_location).transpose()?.map(GotoDefinitionResponse::Scalar))
     }
 
     async fn references(&self, params: ReferenceParams) -> LspResult<Option<Vec<Location>>> {
         let uri_str = params.text_document_position.text_document.uri.to_string();
         let position = convert_position_back(params.text_document_position.position);
-        let refs = self.state.lock().unwrap().find_references(&uri_str, position);
+        let refs = session::query(&self.state, uri_str.clone(), move |state| state.find_references(&uri_str, position)).await?;
         if refs.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(refs.into_iter().map(convert_location).collect()))
+            Ok(Some(refs.into_iter().map(convert_location).collect::<LspResult<Vec<_>>>()?))
         }
     }
 
     async fn hover(&self, params: HoverParams) -> LspResult<Option<Hover>> {
         let uri_str = params.text_document_position_params.text_document.uri.to_string();
         let position = convert_position_back(params.text_document_position_params.position);
-        let hover = self.state.lock().unwrap().hover(&uri_str, position);
+        let hover = session::query(&self.state, uri_str.clone(), move |state| state.hover(&uri_str, position)).await?;
         Ok(hover.map(|h| Hover {
             contents: HoverContents::Markup(MarkupContent { kind: MarkupKind::Markdown, value: h.contents }),
             range: h.range.map(convert_range),
@@ -193,24 +192,25 @@ impl LanguageServer for CellScriptBackend {
 
     async fn document_symbol(&self, params: DocumentSymbolParams) -> LspResult<Option<DocumentSymbolResponse>> {
         let uri_str = params.text_document.uri.to_string();
-        let symbols = self.state.lock().unwrap().document_symbols(&uri_str);
+        let symbols = session::query(&self.state, uri_str.clone(), move |state| state.document_symbols(&uri_str)).await?;
         if symbols.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(DocumentSymbolResponse::Flat(symbols.into_iter().map(convert_symbol_information).collect())))
+            Ok(Some(DocumentSymbolResponse::Flat(symbols.into_iter().map(convert_symbol_information).collect::<LspResult<Vec<_>>>()?)))
         }
     }
 
     async fn rename(&self, params: RenameParams) -> LspResult<Option<WorkspaceEdit>> {
         let uri_str = params.text_document_position.text_document.uri.to_string();
         let position = convert_position_back(params.text_document_position.position);
-        let changes = self.state.lock().unwrap().rename(&uri_str, position, params.new_name);
+        let changes =
+            session::query(&self.state, uri_str.clone(), move |state| state.rename(&uri_str, position, params.new_name)).await?;
         if changes.is_empty() {
             Ok(None)
         } else {
             let mut lsp_changes = HashMap::new();
             for (uri, edits) in changes {
-                let url = Url::parse(&uri).unwrap_or_else(|_| Url::from_file_path(&uri).unwrap());
+                let url = response_uri(&uri)?;
                 lsp_changes.insert(url, edits.into_iter().map(convert_text_edit).collect());
             }
             Ok(Some(WorkspaceEdit { changes: Some(lsp_changes), document_changes: None, change_annotations: None }))
@@ -220,45 +220,32 @@ impl LanguageServer for CellScriptBackend {
     async fn code_action(&self, params: CodeActionParams) -> LspResult<Option<CodeActionResponse>> {
         let uri_str = params.text_document.uri.to_string();
         let range = convert_range_back(params.range);
-        let actions = self.state.lock().unwrap().code_action(&uri_str, range);
+        let actions = session::query(&self.state, uri_str.clone(), move |state| state.code_action(&uri_str, range)).await?;
         if actions.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(
-                actions
-                    .into_iter()
-                    .map(|a| {
-                        CodeActionOrCommand::CodeAction(CodeAction {
-                            title: a.title,
-                            kind: Some(CodeActionKind::from(a.kind)),
-                            diagnostics: None,
-                            edit: a.edit.map(|we| WorkspaceEdit {
-                                changes: Some(
-                                    we.changes
-                                        .into_iter()
-                                        .map(|(uri, edits)| {
-                                            let url = Url::parse(&uri).unwrap_or_else(|_| Url::from_file_path(&uri).unwrap());
-                                            (url, edits.into_iter().map(convert_text_edit).collect())
-                                        })
-                                        .collect(),
-                                ),
-                                document_changes: None,
-                                change_annotations: None,
-                            }),
-                            command: None,
-                            is_preferred: None,
-                            disabled: None,
-                            data: None,
-                        })
-                    })
-                    .collect(),
-            ))
+            let converted = actions
+                .into_iter()
+                .map(|action| {
+                    Ok(CodeActionOrCommand::CodeAction(CodeAction {
+                        title: action.title,
+                        kind: Some(CodeActionKind::from(action.kind)),
+                        diagnostics: None,
+                        edit: action.edit.map(convert_workspace_edit).transpose()?,
+                        command: None,
+                        is_preferred: None,
+                        disabled: None,
+                        data: None,
+                    }))
+                })
+                .collect::<LspResult<Vec<_>>>()?;
+            Ok(Some(converted))
         }
     }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> LspResult<Option<Vec<TextEdit>>> {
         let uri_str = params.text_document.uri.to_string();
-        let edits = self.state.lock().unwrap().format_document(&uri_str);
+        let edits = session::query(&self.state, uri_str.clone(), move |state| state.format_document(&uri_str)).await?;
         if edits.is_empty() {
             Ok(None)
         } else {
@@ -269,14 +256,15 @@ impl LanguageServer for CellScriptBackend {
     async fn signature_help(&self, params: SignatureHelpParams) -> LspResult<Option<SignatureHelp>> {
         let uri_str = params.text_document_position_params.text_document.uri.to_string();
         let position = convert_position_back(params.text_document_position_params.position);
-        let help = self.state.lock().unwrap().signature_help(&uri_str, position);
+        let help = session::query(&self.state, uri_str.clone(), move |state| state.signature_help(&uri_str, position)).await?;
         Ok(help.map(convert_signature_help))
     }
 
     async fn document_highlight(&self, params: DocumentHighlightParams) -> LspResult<Option<Vec<DocumentHighlight>>> {
         let uri_str = params.text_document_position_params.text_document.uri.to_string();
         let position = convert_position_back(params.text_document_position_params.position);
-        let highlights = self.state.lock().unwrap().document_highlight(&uri_str, position);
+        let highlights =
+            session::query(&self.state, uri_str.clone(), move |state| state.document_highlight(&uri_str, position)).await?;
         if highlights.is_empty() {
             Ok(None)
         } else {
@@ -298,7 +286,7 @@ impl LanguageServer for CellScriptBackend {
 
     async fn folding_range(&self, params: FoldingRangeParams) -> LspResult<Option<Vec<FoldingRange>>> {
         let uri_str = params.text_document.uri.to_string();
-        let ranges = self.state.lock().unwrap().folding_range(&uri_str);
+        let ranges = session::query(&self.state, uri_str.clone(), move |state| state.folding_range(&uri_str)).await?;
         if ranges.is_empty() {
             Ok(None)
         } else {
@@ -325,13 +313,15 @@ impl LanguageServer for CellScriptBackend {
 
     async fn selection_range(&self, params: SelectionRangeParams) -> LspResult<Option<Vec<SelectionRange>>> {
         let uri_str = params.text_document.uri.to_string();
-        let mut results = Vec::new();
-        for pos in &params.positions {
-            let position = convert_position_back(*pos);
-            if let Some(range) = self.state.lock().unwrap().selection_range(&uri_str, position) {
-                results.push(convert_selection_range(range));
-            }
-        }
+        let results = session::query(&self.state, uri_str.clone(), move |state| {
+            params
+                .positions
+                .into_iter()
+                .filter_map(|position| state.selection_range(&uri_str, convert_position_back(position)))
+                .map(convert_selection_range)
+                .collect::<Vec<_>>()
+        })
+        .await?;
         if results.is_empty() {
             Ok(None)
         } else {
@@ -360,7 +350,7 @@ fn convert_range_back(r: Range) -> lsp::Range {
     lsp::Range { start: convert_position_back(r.start), end: convert_position_back(r.end) }
 }
 
-fn convert_diagnostic(d: lsp::Diagnostic) -> Diagnostic {
+pub(super) fn convert_diagnostic(d: lsp::Diagnostic) -> Diagnostic {
     Diagnostic {
         range: convert_range(d.range),
         severity: Some(match d.severity {
@@ -417,12 +407,27 @@ fn convert_completion_item(item: lsp::CompletionItem) -> CompletionItem {
     }
 }
 
-fn convert_location(loc: lsp::Location) -> Location {
-    let url = Url::parse(&loc.uri).unwrap_or_else(|_| Url::from_file_path(&loc.uri).unwrap());
-    Location { uri: url, range: convert_range(loc.range) }
+fn response_uri(uri: &str) -> LspResult<Url> {
+    Url::parse(uri).or_else(|_| {
+        Url::from_file_path(uri)
+            .map_err(|_| tower_lsp::jsonrpc::Error::invalid_params(format!("invalid document location URI: {uri:?}")))
+    })
 }
 
-fn convert_symbol_information(sym: lsp::SymbolInformation) -> SymbolInformation {
+fn convert_workspace_edit(edit: lsp::WorkspaceEdit) -> LspResult<WorkspaceEdit> {
+    let changes = edit
+        .changes
+        .into_iter()
+        .map(|(uri, edits)| Ok((response_uri(&uri)?, edits.into_iter().map(convert_text_edit).collect())))
+        .collect::<LspResult<HashMap<_, _>>>()?;
+    Ok(WorkspaceEdit { changes: Some(changes), document_changes: None, change_annotations: None })
+}
+
+fn convert_location(loc: lsp::Location) -> LspResult<Location> {
+    Ok(Location { uri: response_uri(&loc.uri)?, range: convert_range(loc.range) })
+}
+
+fn convert_symbol_information(sym: lsp::SymbolInformation) -> LspResult<SymbolInformation> {
     let kind = match sym.kind {
         lsp::SymbolKind::File => SymbolKind::FILE,
         lsp::SymbolKind::Module => SymbolKind::MODULE,
@@ -454,11 +459,11 @@ fn convert_symbol_information(sym: lsp::SymbolInformation) -> SymbolInformation 
     serde_json::from_value(serde_json::json!({
         "name": sym.name,
         "kind": kind,
-        "location": convert_location(sym.location),
+        "location": convert_location(sym.location)?,
         "containerName": sym.container_name,
         "tags": Option::<Vec<SymbolTag>>::None,
     }))
-    .expect("symbol information JSON should match lsp-types")
+    .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())
 }
 
 fn convert_text_edit(edit: lsp::TextEdit) -> TextEdit {
@@ -512,10 +517,72 @@ pub async fn run_lsp_server() {
 }
 
 /// Blocking entry point for use from synchronous `main`.
-pub fn run_lsp_server_blocking() {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("failed to build tokio runtime for LSP server")
-        .block_on(run_lsp_server());
+pub fn run_lsp_server_blocking() -> crate::error::Result<()> {
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to build Tokio runtime for LSP: {error}"))
+            .with_code("LSP0001")
+            .with_category(crate::error::CompileErrorCategory::Io)
+            .with_source(error)
+    })?;
+    runtime.block_on(run_lsp_server());
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn location(uri: &str) -> lsp::Location {
+        lsp::Location {
+            uri: uri.into(),
+            range: lsp::Range { start: lsp::Position { line: 1, character: 2 }, end: lsp::Position { line: 1, character: 5 } },
+        }
+    }
+
+    #[test]
+    fn response_locations_preserve_valid_uris_and_reject_relative_paths() {
+        for uri in ["file:///workspace/main.cell", "untitled:buffer", "/workspace/main.cell"] {
+            let converted = convert_location(location(uri)).unwrap();
+            assert_eq!(converted.range.start, Position::new(1, 2));
+            assert_eq!(converted.range.end, Position::new(1, 5));
+            assert_eq!(converted.uri, response_uri(uri).unwrap());
+        }
+        let error = convert_location(location("relative/main.cell")).unwrap_err();
+        assert_eq!(error.code, tower_lsp::jsonrpc::ErrorCode::InvalidParams);
+    }
+
+    #[test]
+    fn symbols_propagate_invalid_locations_without_unwinding() {
+        for uri in ["file:///workspace/main.cell", "relative/main.cell"] {
+            let converted = convert_symbol_information(lsp::SymbolInformation {
+                name: "inspect".into(),
+                kind: lsp::SymbolKind::Function,
+                location: location(uri),
+                container_name: Some("module".into()),
+            });
+            if uri.starts_with("file:") {
+                let converted = converted.unwrap();
+                assert_eq!(converted.name, "inspect");
+                assert_eq!(converted.kind, SymbolKind::FUNCTION);
+                assert_eq!(converted.container_name.as_deref(), Some("module"));
+            } else {
+                assert_eq!(converted.unwrap_err().code, tower_lsp::jsonrpc::ErrorCode::InvalidParams);
+            }
+        }
+    }
+
+    #[test]
+    fn workspace_edits_reject_invalid_locations_instead_of_returning_partial_edits() {
+        let edit = lsp::TextEdit { range: location("file:///workspace/main.cell").range, new_text: "renamed".into() };
+        let valid = lsp::WorkspaceEdit { changes: HashMap::from([("file:///workspace/main.cell".into(), vec![edit.clone()])]) };
+        let converted = convert_workspace_edit(valid).unwrap();
+        assert_eq!(converted.changes.unwrap()[&response_uri("file:///workspace/main.cell").unwrap()][0].new_text, "renamed");
+        let invalid = lsp::WorkspaceEdit {
+            changes: HashMap::from([
+                ("file:///workspace/main.cell".into(), vec![edit.clone()]),
+                ("relative/other.cell".into(), vec![edit]),
+            ]),
+        };
+        assert_eq!(convert_workspace_edit(invalid).unwrap_err().code, tower_lsp::jsonrpc::ErrorCode::InvalidParams);
+    }
 }

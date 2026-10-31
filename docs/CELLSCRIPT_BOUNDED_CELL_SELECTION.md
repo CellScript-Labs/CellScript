@@ -205,7 +205,7 @@ cannot choose a catalog, access class, merge target or weaker bound. Width and
 key offset come from the resolved Cell schema. The profile accepts unsigned
 scalars, Hash, Address and byte-array fields of 1–256 bytes, with the whole Cell
 and key bounds above. Nested fields, booleans, standalone role declarations and
-calls from pure functions reject. `local-type` additionally checks the actual
+calls from ordinary helper functions reject. `local-type` additionally checks the actual
 executing Type Script identity; it does not grant resource ownership.
 
 The source path now connects typing, structured IR, typed metadata, precise
@@ -305,7 +305,7 @@ arithmetic, equality on the view itself and unrelated calls reject. Field
 values can participate in ordinary supported value expressions.
 
 An immutable `InputView<T>` or `OutputView<T>` may now be passed directly to
-a `Pure`/`ReadOnly` helper, which can project `.data` locally. The
+a observation-only helper, which can project `.data` locally. The
 [typed predicate example](../examples/language/ckb/typed_cell_predicate.cell)
 extracts a two-field comparison and forwards both views through another helper.
 This passes a tagged transaction coordinate, not an owned Cell or a pointer to
@@ -422,7 +422,7 @@ of a producer invalidates its old derived-view facts before initializing the
 new result. This is read-only stack storage, not allocation-backed collections.
 
 Whole nested values and their admitted item/payload views compose with existing
-immutable `Pure`/`ReadOnly` helpers. A helper receiving `InputView<T>` or
+immutable observation-only helpers. A helper receiving `InputView<T>` or
 `OutputView<T>` may perform its own `.data` read. No view may escape its backing
 lifetime, mutate the Cell, or confer foreign lifecycle authority. `CellDataView`
 itself retains the restrictions listed above.

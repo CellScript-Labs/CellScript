@@ -6472,7 +6472,7 @@ fn novaseal_handoff_report_hash(label: &str, value: &Value) -> String {
     let mut state = blake2b_simd::Params::new().hash_length(32).personal(b"NovaExtHandoff").to_state();
     state.update(label.as_bytes());
     state.update(b"\x00");
-    state.update(canonical_json_for_report_hash(value).as_bytes());
+    state.update(crate::canonical_json::canonical_json_string(value).as_bytes());
     format!("0x{}", hex::encode(state.finalize().as_bytes()))
 }
 
@@ -6859,7 +6859,7 @@ fn btc_spv_proof_material_hash(case: &Value) -> Option<String> {
         "btc_block_header": json_pointer_str(case, "/btc_block_header")?,
         "btc_merkle_proof": case.get("btc_merkle_proof")?,
     });
-    Some(format!("0x{}", hex::encode(Sha256::digest(canonical_json_for_report_hash(&material).as_bytes()))))
+    Some(format!("0x{}", hex::encode(Sha256::digest(crate::canonical_json::canonical_json_string(&material).as_bytes()))))
 }
 
 fn bitcoin_merkle_root_display(txid_display: &str, branch_display: &[String], tx_index: i64) -> Option<String> {
@@ -6911,7 +6911,7 @@ fn novaseal_profile_operator_report_hash(label: &str, value: &Value) -> String {
     let mut state = blake2b_simd::Params::new().hash_length(32).personal(b"NovaProfileFxV0").to_state();
     state.update(label.as_bytes());
     state.update(b"\x00");
-    state.update(canonical_json_for_report_hash(value).as_bytes());
+    state.update(crate::canonical_json::canonical_json_string(value).as_bytes());
     format!("0x{}", hex::encode(state.finalize().as_bytes()))
 }
 
@@ -6919,7 +6919,7 @@ fn novaseal_service_builder_report_hash(label: &str, value: &Value) -> String {
     let mut state = blake2b_simd::Params::new().hash_length(32).personal(b"NovaSvcBuildV0").to_state();
     state.update(label.as_bytes());
     state.update(b"\x00");
-    state.update(canonical_json_for_report_hash(value).as_bytes());
+    state.update(crate::canonical_json::canonical_json_string(value).as_bytes());
     format!("0x{}", hex::encode(state.finalize().as_bytes()))
 }
 
@@ -6927,7 +6927,7 @@ fn novaseal_btc_spv_adapter_report_hash(label: &str, value: &Value) -> String {
     let mut state = blake2b_simd::Params::new().hash_length(32).personal(b"NovaBtcSpvReqV0").to_state();
     state.update(label.as_bytes());
     state.update(b"\x00");
-    state.update(canonical_json_for_report_hash(value).as_bytes());
+    state.update(crate::canonical_json::canonical_json_string(value).as_bytes());
     format!("0x{}", hex::encode(state.finalize().as_bytes()))
 }
 
@@ -6935,33 +6935,8 @@ fn novaseal_external_attestation_report_hash(label: &str, value: &Value) -> Stri
     let mut state = blake2b_simd::Params::new().hash_length(32).personal(b"NovaExtAttReqV0").to_state();
     state.update(label.as_bytes());
     state.update(b"\x00");
-    state.update(canonical_json_for_report_hash(value).as_bytes());
+    state.update(crate::canonical_json::canonical_json_string(value).as_bytes());
     format!("0x{}", hex::encode(state.finalize().as_bytes()))
-}
-
-fn canonical_json_for_report_hash(value: &Value) -> String {
-    match value {
-        Value::Null => "null".to_string(),
-        Value::Bool(value) => value.to_string(),
-        Value::Number(value) => value.to_string(),
-        Value::String(value) => serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string()),
-        Value::Array(values) => {
-            let items = values.iter().map(canonical_json_for_report_hash).collect::<Vec<_>>();
-            format!("[{}]", items.join(","))
-        }
-        Value::Object(object) => {
-            let mut entries = object.iter().collect::<Vec<_>>();
-            entries.sort_by_key(|(key, _)| *key);
-            let items = entries
-                .into_iter()
-                .map(|(key, value)| {
-                    let key = serde_json::to_string(key).unwrap_or_else(|_| "\"\"".to_string());
-                    format!("{}:{}", key, canonical_json_for_report_hash(value))
-                })
-                .collect::<Vec<_>>();
-            format!("{{{}}}", items.join(","))
-        }
-    }
 }
 
 #[cfg(test)]
@@ -8391,7 +8366,7 @@ mod tests {
             "a": ["b", true, null],
         });
 
-        assert_eq!(canonical_json_for_report_hash(&value), r#"{"a":["b",true,null],"z":1}"#);
+        assert_eq!(crate::canonical_json::canonical_json_string(&value), r#"{"a":["b",true,null],"z":1}"#);
         assert_eq!(
             novaseal_handoff_report_hash("test_label", &value),
             "0x91f5e5cc38c16e792d27a3738a7a7c77053fa15f902e2ccb4b210fd7239a476f"

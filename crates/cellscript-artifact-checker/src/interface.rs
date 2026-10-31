@@ -1,11 +1,14 @@
 //! Versioned public-interface wire models shared without compiler dependencies.
 //! Construction from source belongs to the compiler; checked projections belong
 //! to the independent artifact boundary. The field/serialization order is kept
-//! identical to the existing v3 package interface.
+//! defined by the structured effect-facts v5 package interface.
 
 use crate::generic_projection::checked_source_type;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+
+pub const PACKAGE_INTERFACE_SCHEMA: &str = "cellscript-package-interface-v5";
+pub const PACKAGE_INTERFACE_VERSION: u32 = 5;
 
 mod catalog;
 mod generics;
@@ -14,7 +17,7 @@ pub(crate) mod nominals;
 mod projection;
 mod source_types;
 pub use catalog::{check_module_catalog, CheckedModuleCatalog, ModuleBundle};
-pub use projection::{project_bundle, CheckedModuleProjection};
+pub use projection::{project_bundle, CheckedModuleProjection, MAX_PROJECTION_FILE_BYTES};
 mod universal;
 pub(crate) use source_types::SourceType;
 pub(crate) fn parse_source_type(value: &str) -> Result<SourceType, crate::CheckerError> {
@@ -34,16 +37,20 @@ pub struct InterfaceInspection {
     effective: TypedSemanticRecord,
     report: CheckerReport,
     bundle_bytes: [usize; 4],
+    lowered_entries: BTreeSet<String>,
 }
 
 impl InterfaceInspection {
+    fn checked_entry(&self, name: &str) -> Option<&crate::TypedSemanticEntry> {
+        self.lowered_entries.contains(name).then(|| self.effective.entries.iter().find(|entry| entry.name == name)).flatten()
+    }
     pub fn declared(&self) -> &PackageInterface {
         &self.declared
     }
 
     /// Includes inferred effects, concrete layouts, entry bindings and source
-    /// provenance checked against the lowering/machine boundary. In particular,
-    /// a source declaration's default effect need not equal its inferred effect.
+    /// provenance checked against the lowering/machine boundary. Retained
+    /// callable effects must equal their generated public contracts.
     pub fn effective(&self) -> &TypedSemanticRecord {
         &self.effective
     }
@@ -106,6 +113,9 @@ pub fn inspect_bundle(
     })?;
     let declared: PackageInterface = serde_json::from_value(raw.clone())
         .map_err(|_| CheckerError::new(CheckerRejectionCode::V2410MetadataBindingMismatch, "invalid public interface wire model"))?;
+    if declared.schema != PACKAGE_INTERFACE_SCHEMA || declared.version != PACKAGE_INTERFACE_VERSION {
+        return Err(mismatch("unsupported package interface generation; rebuild the complete bundle"));
+    }
     let modeled = serde_json::to_value(&declared)
         .map_err(|_| CheckerError::new(CheckerRejectionCode::V2401MalformedJson, "public interface serialization failed"))?;
     if modeled != *raw {
@@ -118,11 +128,14 @@ pub fn inspect_bundle(
     if item_count > budgets.entries as usize {
         return Err(CheckerError::new(CheckerRejectionCode::V2400BudgetExceeded, "public interface exceeds item count budget"));
     }
-    let effective = crate::parse_lowering_record(lowering_bytes, budgets)?.typed_semantics;
-    check_declaration_bindings(&declared, &metadata, &effective)?;
+    let record = crate::parse_lowering_record(lowering_bytes, budgets)?;
+    let lowered_entries = record.entries.iter().map(|entry| entry.name.clone()).collect();
+    let effective = record.typed_semantics;
+    check_declaration_bindings(&declared, &metadata, &effective, &lowered_entries)?;
     Ok(InterfaceInspection {
         declared,
         effective,
+        lowered_entries,
         report,
         bundle_bytes: [artifact.len(), metadata_bytes.len(), lowering_bytes.len(), source_map_bytes.len()],
     })
@@ -140,12 +153,13 @@ fn declaration_hash(value: &impl Serialize) -> Result<String, CheckerError> {
 }
 
 /// Bind every existing declaration digest to its constituent fields. These
-/// checks do not equate source-declared effects with inferred execution effects;
-/// the latter remain in the separately checked typed semantic record.
+/// checks bind generated callable effects to retained checked entries. Source-
+/// only declarations do not establish executable availability or effect proof.
 fn check_declaration_bindings(
     interface: &PackageInterface,
     metadata: &serde_json::Value,
     effective: &TypedSemanticRecord,
+    lowered_entries: &BTreeSet<String>,
 ) -> Result<(), CheckerError> {
     let instances = crate::generic_projection::type_instances(effective);
     let mut module = b"cellscript-module-identity-v1\0".to_vec();
@@ -219,7 +233,9 @@ fn check_declaration_bindings(
         if callable.identity != format!("{}::{}", interface.module, callable.name) {
             return Err(mismatch("interface callable identity differs from its declaration"));
         }
-        check_callable_binding(callable, effective, &instances)?;
+        if lowered_entries.contains(&callable.name) {
+            check_callable_binding(callable, effective, &instances)?;
+        }
         let family = match callable.kind.as_str() {
             "action" => "actions",
             "function" => "functions",
@@ -332,9 +348,17 @@ fn check_callable_entry(
     if !generics::matches_type(callable.return_type.as_deref().unwrap_or("unit"), &entry.return_type, instances, substitutions) {
         return Err(mismatch("interface callable return type differs from checked entry"));
     }
-    // Source effect annotations and the effective inference are distinct (a
-    // default Pure declaration can lower to ReadOnly). Preserve both rather
-    // than accepting the source label as the machine's effect guarantee.
+    // One instantiation cannot establish a universal executable contract for
+    // its source template. Its concrete entry facts were independently checked
+    // by the bundle checker; a template's required source slot remains null.
+    let effect_matches = if callable.type_parameters.is_empty() {
+        callable.effects.as_ref() == Some(&entry.effects)
+    } else {
+        callable.effects.is_none()
+    };
+    if !effect_matches {
+        return Err(mismatch("public callable effect differs from its independently checked inferred contract"));
+    }
     Ok(())
 }
 
@@ -399,6 +423,7 @@ pub struct InterfaceConstant {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct InterfaceCallable {
     pub identity: String,
     pub name: String,
@@ -408,7 +433,8 @@ pub struct InterfaceCallable {
     pub params: Vec<InterfaceParam>,
     pub return_type: Option<String>,
     pub outputs: Vec<InterfaceParam>,
-    pub effect: String,
+    #[serde(deserialize_with = "crate::schema::required_optional_effect_facts")]
+    pub effects: Option<crate::effect_facts::EffectFacts>,
     pub entry_witness_abi: Option<String>,
     pub builder_contract_hash: String,
 }
@@ -431,7 +457,6 @@ pub struct InterfaceRuntimeContract {
     pub source_encoding: String,
     pub spawn_ipc_abi: String,
     pub compatibility_profile_id: String,
-    #[serde(default)]
     pub temporal: InterfaceTemporalContract,
 }
 

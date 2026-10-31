@@ -20,9 +20,11 @@ use crate::{ckb_blake2b256, hex_encode};
 use cellscript_artifact_checker::canonical_hash;
 use serde::{Deserialize, Serialize};
 
-pub const EXACT_SCRIPT_HANDLE_RECEIPT_SCHEMA: &str = "cellscript-exact-script-handle-receipt-v1";
+pub const EXACT_SCRIPT_HANDLE_RECEIPT_SCHEMA: &str = "cellscript-exact-script-handle-receipt-v3";
+pub const EXACT_SCRIPT_HANDLE_RECEIPT_VERSION: u32 = 3;
 pub const EXACT_SCRIPT_HANDLE_VALUE_SCHEMA: &str = "cellscript-exact-script-handle-value-v1";
-pub const EXACT_SCRIPT_HANDLE_RECEIPT_HASH_DOMAIN: &str = "cellscript-exact-script-handle-receipt-v1";
+pub(crate) const EXACT_SCRIPT_HANDLE_VALUE_VERSION: u32 = 1;
+pub const EXACT_SCRIPT_HANDLE_RECEIPT_HASH_DOMAIN: &str = "cellscript-exact-script-handle-receipt-v3";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -130,7 +132,7 @@ pub fn build_exact_script_handle(
     };
     let receipt = ExactScriptHandleReceipt {
         schema: EXACT_SCRIPT_HANDLE_RECEIPT_SCHEMA.to_string(),
-        version: 1,
+        version: EXACT_SCRIPT_HANDLE_RECEIPT_VERSION,
         class,
         script_role: input.script_role,
         package_coordinate: input.package_coordinate.to_string(),
@@ -176,7 +178,10 @@ pub fn exact_script_handle_value_from_receipt(receipt: &ExactScriptHandleReceipt
 /// interface, artifact, target profile, runtime ABI, Script identity, class,
 /// role, or encoding fail as one closed runtime check.
 pub fn exact_script_handle_value_hash(value: &ExactScriptHandleValue) -> Result<String> {
-    if value.schema != EXACT_SCRIPT_HANDLE_VALUE_SCHEMA || value.version != 1 || value.encoding != EXACT_SCRIPT_HANDLE_ENCODING {
+    if value.schema != EXACT_SCRIPT_HANDLE_VALUE_SCHEMA
+        || value.version != EXACT_SCRIPT_HANDLE_VALUE_VERSION
+        || value.encoding != EXACT_SCRIPT_HANDLE_ENCODING
+    {
         return Err(CompileError::without_span("unsupported exact Script handle value schema/version/encoding"));
     }
     let bytes = canonical_hex_bytes(&value.encoded, "exact Script handle value")?;
@@ -248,7 +253,7 @@ fn encode_exact_script_handle(receipt: &ExactScriptHandleReceipt) -> Result<Exac
     }
     Ok(ExactScriptHandleValue {
         schema: EXACT_SCRIPT_HANDLE_VALUE_SCHEMA.to_string(),
-        version: 1,
+        version: EXACT_SCRIPT_HANDLE_VALUE_VERSION,
         encoding: EXACT_SCRIPT_HANDLE_ENCODING.to_string(),
         encoded: format!("0x{}", hex_encode(&bytes)),
     })
@@ -260,8 +265,10 @@ fn exact_script_handle_receipt_hash_unchecked(receipt: &ExactScriptHandleReceipt
 }
 
 fn validate_receipt_shape(receipt: &ExactScriptHandleReceipt) -> Result<()> {
-    if receipt.schema != EXACT_SCRIPT_HANDLE_RECEIPT_SCHEMA || receipt.version != 1 {
-        return Err(CompileError::without_span("unsupported exact Script handle receipt schema/version"));
+    if receipt.schema != EXACT_SCRIPT_HANDLE_RECEIPT_SCHEMA || receipt.version != EXACT_SCRIPT_HANDLE_RECEIPT_VERSION {
+        return Err(CompileError::without_span(
+            "unsupported exact Script handle receipt schema/version; recompile and regenerate the complete artifact/receipt bundle",
+        ));
     }
     let expected_class = match receipt.script_role {
         ProtocolScriptRole::Lock | ProtocolScriptRole::Type => ExactHandleClass::Script,

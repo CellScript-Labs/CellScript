@@ -261,15 +261,13 @@ type_script TokenTransfer on type_group<Token> {
         output next: Token from group_output[0],
     ) {
         verify { enforce token.amount > 0 }
-        effects {
-            replace token -> next {
-                data { owner = same; amount = same }
-                identity = same
-                type_script = same
-                lock_script = exact_hash(recipient)
-                capacity = same
-                cardinality = one_to_one
-            }
+        replace token -> next {
+            data { owner = same; amount = same }
+            identity = same
+            type_script = same
+            lock_script = exact_hash(recipient)
+            capacity = same
+            cardinality = one_to_one
         }
     }
 
@@ -370,15 +368,13 @@ type_script TokenMint on type_group<Token> {
         audit issuance_policy {
             expected_evidence = external_policy(recipient)
         }
-        effects {
-            fresh next {
-                data { amount = amount }
-                identity = ckb_type_id
-                type_script = declared
-                lock_script = exact_hash(recipient)
-                capacity = builder_computed
-                cardinality = one
-            }
+        fresh next {
+            data { amount = amount }
+            identity = ckb_type_id
+            type_script = declared
+            lock_script = exact_hash(recipient)
+            capacity = builder_computed
+            cardinality = one
         }
     }
 }
@@ -429,15 +425,13 @@ type_script NoteRetirement on type_group<Note> {
         input note: Note from group_input[0],
     ) {
         verify { enforce note.amount == 0 }
-        effects {
-            retire note {
-                absence = field(note_id)
-                data = discarded
-                lock_script = none
-                type_script = absent
-                capacity = released
-                cardinality = one
-            }
+        retire note {
+            absence = field(note_id)
+            data = discarded
+            lock_script = none
+            type_script = absent
+            capacity = released
+            cardinality = one
         }
     }
 }
@@ -467,20 +461,18 @@ type_script TokenPool on type_group<Token> {
         output merged: Token from group_output[0],
     ) {
         verify { enforce left.amount > 0 }
-        effects {
-            pool value_flow {
-                inputs { left, right }
-                outputs { merged }
-                data {
-                    owner { merged = recipient }
-                    amount = conserve
-                }
-                identity = pooled
-                type_script = same
-                lock_script { merged = exact_hash(recipient) }
-                capacity = builder_computed
-                cardinality = declared
+        pool value_flow {
+            inputs { left, right }
+            outputs { merged }
+            data {
+                owner { merged = recipient }
+                amount = conserve
             }
+            identity = pooled
+            type_script = same
+            lock_script { merged = exact_hash(recipient) }
+            capacity = builder_computed
+            cardinality = declared
         }
     }
 }

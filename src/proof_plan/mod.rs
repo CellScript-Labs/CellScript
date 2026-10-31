@@ -545,7 +545,7 @@ fn plan_for_borrow_region(scope_kind: &str, scope_name: &str, index: usize, regi
             format!("view:{}", region.binding),
             "storage:none".to_string(),
             "abi:none".to_string(),
-            "allowed-effects:Pure,ReadOnly".to_string(),
+            "effects:no-lifecycle-or-process-operations".to_string(),
             "lifecycle-crossing:rejected".to_string(),
             "escape:return,aggregate,assignment,generic-call-rejected".to_string(),
         ],

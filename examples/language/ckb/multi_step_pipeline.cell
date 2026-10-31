@@ -1,22 +1,19 @@
 module cellscript::language::ckb::multi_step_pipeline
 
-action pipe_to_delegate(value: u64) -> u64 {
+action pipe_cleanup() -> u64 {
     verification
-        // The pipe endpoints are ordinary CKB Spawn/IPC descriptors. The compiler
-        // requires every descriptor to be closed on all static exit paths.
+        // This example demonstrates endpoint ownership, not a child or a data
+        // roundtrip. CKB pipe writes block until another process reads them;
+        // writing then reading in this same process would deadlock.
+        // Real child transports: delegate_verify.cell and
+        // ../../bounded-byte-context/README.md.
         let fds = pipe()
         let read_fd = fds.0
         let write_fd = fds.1
 
-        pipe_write(write_fd, value)
-        let pid = spawn("hash_checker")
-        let status = wait()
-        let echoed = pipe_read(read_fd)
-
-        close(read_fd)
-        close(write_fd)
-
-        require pid >= 0, "child process id is visible"
-        require status == 0, "pipeline delegate failed"
-        return echoed
+        let read_close_status = close(read_fd)
+        let write_close_status = close(write_fd)
+        require read_close_status == 0, "read endpoint close failed"
+        require write_close_status == 0, "write endpoint close failed"
+        return 0
 }

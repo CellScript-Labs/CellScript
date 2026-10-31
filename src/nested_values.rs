@@ -6,6 +6,9 @@ use cellscript_artifact_checker::bounded_nested::{
     ElementShape, NestedValueContract, MAX_ITEMS, MAX_PAYLOAD_BYTES, MAX_TOTAL_BYTES, PROFILE,
 };
 
+mod descriptions;
+pub(crate) use descriptions::{Descriptions, Element, RecordRef};
+
 pub(crate) const VALUES: &str = "NestedValues";
 pub(crate) const BYTES_VIEW: &str = "NestedBytesView";
 pub(crate) const RECORD_VIEW: &str = "NestedRecordView";
@@ -29,19 +32,31 @@ pub(crate) fn declared_values(def: &crate::ast::DataShapeDef) -> Result<ValuesTy
     })
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ValuesType {
-    pub element: String,
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct ValuesType<E = String> {
+    pub element: E,
     pub max_items: u32,
     pub max_payload_bytes: u32,
     pub max_total_bytes: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum NestedType {
-    Values(ValuesType),
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum NestedType<E = String> {
+    Values(ValuesType<E>),
     BytesView { max_payload_bytes: u32 },
-    RecordView { element: String, max_payload_bytes: u32 },
+    RecordView { element: E, max_payload_bytes: u32 },
+}
+
+impl<E: std::fmt::Display> NestedType<E> {
+    pub(crate) fn canonical_text(&self) -> String {
+        match self {
+            Self::Values(values) => {
+                format!("{VALUES}<{}, {}, {}, {}>", values.element, values.max_items, values.max_payload_bytes, values.max_total_bytes)
+            }
+            Self::BytesView { max_payload_bytes } => format!("{BYTES_VIEW}<{max_payload_bytes}>"),
+            Self::RecordView { element, max_payload_bytes } => format!("{RECORD_VIEW}<{element}, {max_payload_bytes}>"),
+        }
+    }
 }
 
 pub(crate) fn is_nested_name(name: &str) -> bool {
@@ -93,20 +108,18 @@ pub(crate) fn parsed(name: &str) -> Option<NestedType> {
 /// Classify the already type-checked immutable view surface. This is metadata
 /// admission, not evidence of decoding, source identity or machine lifetime;
 /// those remain mandatory in the independent artifact checker.
-pub(crate) fn ir_type(ty: &crate::ir::IrType) -> Option<NestedType> {
+pub(crate) fn ir_type(ty: &crate::ir::IrType) -> Option<NestedType<Element>> {
     match ty {
-        crate::ir::IrType::Named(name) => parsed(name),
+        crate::ir::IrType::Nested(view) => Some(view.description().clone()),
+        crate::ir::IrType::Ref(inner) | crate::ir::IrType::MutRef(inner) => ir_type(inner),
         _ => None,
     }
 }
 
 pub(crate) fn ir_index_result(operand: &crate::ir::IrOperand) -> Option<crate::ir::IrType> {
     let crate::ir::IrOperand::Var(var) = operand else { return None };
-    match ir_type(&var.ty)? {
-        NestedType::Values(values) => Some(crate::ir::IrType::Named(values.item_type())),
-        NestedType::BytesView { .. } => Some(crate::ir::IrType::U8),
-        NestedType::RecordView { .. } => None,
-    }
+    let crate::ir::IrType::Nested(view) = &var.ty else { return None };
+    view.index_type()
 }
 
 pub(crate) fn ir_has_length(operand: &crate::ir::IrOperand) -> bool {
@@ -114,19 +127,10 @@ pub(crate) fn ir_has_length(operand: &crate::ir::IrOperand) -> bool {
         if matches!(ir_type(&var.ty), Some(NestedType::Values(_) | NestedType::BytesView { .. })))
 }
 
-pub(crate) fn ir_record_field(
-    operand: &crate::ir::IrOperand,
-    field: &str,
-    layouts: &crate::MetadataTypeLayouts,
-) -> Option<crate::ir::IrType> {
+pub(crate) fn ir_record_field(operand: &crate::ir::IrOperand, field: &str) -> Option<crate::ir::IrType> {
     let crate::ir::IrOperand::Var(var) = operand else { return None };
-    let NestedType::RecordView { element, max_payload_bytes } = ir_type(&var.ty)? else { return None };
-    let ty = &layouts.get(&element)?.get(field)?.ty;
-    if matches!(ty, crate::ir::IrType::Named(name) if is_bytes_element(name)) {
-        Some(crate::ir::IrType::Named(bytes_view_type(max_payload_bytes)))
-    } else {
-        Some(ty.clone())
-    }
+    let crate::ir::IrType::Nested(view) = &var.ty else { return None };
+    view.field_type(field)
 }
 
 pub(crate) fn is_bytes_element(element: &str) -> bool {
@@ -134,20 +138,23 @@ pub(crate) fn is_bytes_element(element: &str) -> bool {
 }
 
 pub(crate) fn bytes_view_type(max_payload_bytes: u32) -> String {
-    format!("{BYTES_VIEW}<{max_payload_bytes}>")
+    NestedType::<String>::BytesView { max_payload_bytes }.canonical_text()
 }
 
 impl ValuesType {
     pub(crate) fn source_type(&self) -> Type {
-        Type::Named(format!("{VALUES}<{}, {}, {}, {}>", self.element, self.max_items, self.max_payload_bytes, self.max_total_bytes))
+        Type::Named(NestedType::Values(self.clone()).canonical_text())
     }
     pub fn item_type(&self) -> String {
         if is_bytes_element(&self.element) {
             bytes_view_type(self.max_payload_bytes)
         } else {
-            format!("{RECORD_VIEW}<{}, {}>", self.element, self.max_payload_bytes)
+            NestedType::RecordView { element: &self.element, max_payload_bytes: self.max_payload_bytes }.canonical_text()
         }
     }
+}
+
+impl<E> ValuesType<E> {
     pub fn contract(&self, element: ElementShape) -> NestedValueContract {
         NestedValueContract {
             profile: PROFILE.into(),
@@ -163,32 +170,5 @@ impl ValuesType {
 /// values. Boolean/enum discriminants and nested fixed aggregates need their
 /// own validity evidence and are not inferred merely from equal byte widths.
 pub(crate) fn fixed_field_width(ty: &Type) -> Option<u16> {
-    match ty {
-        Type::U8 => Some(1),
-        Type::U16 => Some(2),
-        Type::U32 => Some(4),
-        Type::U64 => Some(8),
-        Type::U128 => Some(16),
-        Type::Hash | Type::Address => Some(32),
-        Type::Array(inner, length) if **inner == Type::U8 && (1..=256).contains(length) => Some(*length as u16),
-        _ => None,
-    }
-}
-
-pub(crate) fn record_shape(fields: &[(String, Type)]) -> Result<ElementShape> {
-    let invalid = || {
-        CompileError::new(
-        "a nested record requires 1..=8 fixed identity fields (unsigned integers, Hash, Address or byte arrays of 1..=256 bytes) followed by one Vec<u8> payload; recursive, optional and Cell fields are not admitted",
-        Span::default(),
-    )
-    };
-    if !(2..=9).contains(&fields.len()) {
-        return Err(invalid());
-    }
-    if !matches!(&fields.last().ok_or_else(invalid)?.1, Type::Named(name) if is_bytes_element(name)) {
-        return Err(invalid());
-    }
-    let fixed_field_widths =
-        fields[..fields.len() - 1].iter().map(|(_, ty)| fixed_field_width(ty).ok_or_else(invalid)).collect::<Result<Vec<_>>>()?;
-    Ok(ElementShape::Record { fixed_field_widths })
+    descriptions::FixedFieldType::from_source(ty).map(|ty| ty.width())
 }

@@ -103,8 +103,22 @@ fn main() {
 
     // Start the LSP server before any CLI parsing side effects.
     if std::env::args().any(|arg| arg == "--lsp") {
-        cellscript::lsp::server::run_lsp_server_blocking();
-        return;
+        #[cfg(feature = "lsp")]
+        {
+            if let Err(error) = cellscript::lsp::server::run_lsp_server_blocking() {
+                terminate_cli_error(&error, requested_message_format, None, None);
+            }
+            return;
+        }
+        #[cfg(not(feature = "lsp"))]
+        terminate_cli_error(
+            &CompileError::without_span("this cellc build does not include the lsp feature")
+                .with_code("CLI0002")
+                .with_category(CompileErrorCategory::Usage),
+            requested_message_format,
+            None,
+            None,
+        );
     }
 
     let raw_args = std::env::args().skip(1).collect::<Vec<_>>();

@@ -3128,7 +3128,7 @@ action swap(input: Pool) -> output: Pool {
         .unwrap();
     assert!(receipt_output.status.success(), "{}", String::from_utf8_lossy(&receipt_output.stderr));
     let receipt_json: serde_json::Value = serde_json::from_slice(&std::fs::read(&receipt).unwrap()).unwrap();
-    assert_eq!(receipt_json["schema"], "cellscript-compile-receipt-v2");
+    assert_eq!(receipt_json["schema"], "cellscript-compile-receipt-v4");
     assert_eq!(receipt_json["artifact_hash"], metadata["artifact_hash"]);
     assert!(receipt_json["template_layout_hash"].as_str().is_some_and(|hash| hash.len() == 64));
 
@@ -4355,7 +4355,7 @@ fn cellc_registry_verify_requires_trust_metadata_when_requested() {
 }
 
 #[test]
-fn cellc_rejects_underdeclared_effects_from_path_dependency_calls() {
+fn cellc_infers_creation_effects_from_path_dependency_calls() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
     let dep_root = root.join("dep_pkg");
@@ -4417,7 +4417,6 @@ module app::main
 use dep::token::Token
 use dep::token::issue
 
-#[effect(ReadOnly)]
 action wrapper(amount: u64) -> Token {
     verification
         return issue(amount)
@@ -4428,10 +4427,21 @@ action wrapper(amount: u64) -> Token {
 
     lock_package(&app_root);
     let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&app_root).output().unwrap();
-    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("declared effect ReadOnly is too weak"), "unexpected stderr: {}", stderr);
-    assert!(stderr.contains("inferred effect is Creating"), "unexpected stderr: {}", stderr);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let metadata_path = app_root.join("effects.json");
+    let metadata = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(&app_root)
+        .arg("metadata")
+        .arg("--output")
+        .arg(&metadata_path)
+        .output()
+        .unwrap();
+    assert!(metadata.status.success(), "{}", String::from_utf8_lossy(&metadata.stderr));
+    let metadata: serde_json::Value = serde_json::from_slice(&std::fs::read(&metadata_path).unwrap()).unwrap();
+    assert_eq!(
+        metadata["actions"].as_array().unwrap().iter().find(|action| action["name"] == "wrapper").unwrap()["effects"]["lifecycle_ops"],
+        serde_json::json!(["create"])
+    );
 
     std::fs::write(
         app_root.join("src").join("main.cell"),
@@ -4440,7 +4450,6 @@ module app::main
 
 use dep::token::Token
 
-#[effect(ReadOnly)]
 action wrapper(amount: u64) -> Token {
     verification
         return dep::token::issue(amount)
@@ -4450,10 +4459,21 @@ action wrapper(amount: u64) -> Token {
     .unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&app_root).output().unwrap();
-    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("declared effect ReadOnly is too weak"), "unexpected stderr: {}", stderr);
-    assert!(stderr.contains("inferred effect is Creating"), "unexpected stderr: {}", stderr);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let metadata_path = app_root.join("effects.json");
+    let metadata = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(&app_root)
+        .arg("metadata")
+        .arg("--output")
+        .arg(&metadata_path)
+        .output()
+        .unwrap();
+    assert!(metadata.status.success(), "{}", String::from_utf8_lossy(&metadata.stderr));
+    let metadata: serde_json::Value = serde_json::from_slice(&std::fs::read(&metadata_path).unwrap()).unwrap();
+    assert_eq!(
+        metadata["actions"].as_array().unwrap().iter().find(|action| action["name"] == "wrapper").unwrap()["effects"]["lifecycle_ops"],
+        serde_json::json!(["create"])
+    );
 }
 
 #[test]
@@ -4521,8 +4541,8 @@ action run(x: u64) -> u64 {
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let artifact = std::fs::read_to_string(app_root.join("build").join("main.s")).unwrap();
-    assert!(artifact.contains("call __cellscript_ext_dep__math__add_one"), "external call was not lowered:\n{}", artifact);
-    assert!(artifact.contains("__cellscript_ext_dep__math__add_one:"), "external helper body was not merged:\n{}", artifact);
+    assert!(artifact.contains("call __cellscript.ext.6465703a3a6d617468.add_one"), "external call was not lowered:\n{}", artifact);
+    assert!(artifact.contains("__cellscript.ext.6465703a3a6d617468.add_one:"), "external helper body was not merged:\n{}", artifact);
     assert!(!artifact.contains("call dep::math::add_one"), "qualified label leaked into assembly:\n{}", artifact);
 }
 
@@ -4712,8 +4732,17 @@ action run(x: u64) -> u64 {
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let artifact = std::fs::read_to_string(app_root.join("build").join("main.s")).unwrap();
-    assert!(artifact.contains("call plus_one"), "aliased external call was not lowered:\n{}", artifact);
-    assert!(artifact.contains("plus_one:"), "aliased external helper body was not merged:\n{}", artifact);
+    assert!(
+        artifact.contains("call __cellscript.ext.6465703a3a6d617468.add_one"),
+        "aliased external call was not lowered:\n{}",
+        artifact
+    );
+    assert_eq!(
+        artifact.matches("__cellscript.ext.6465703a3a6d617468.add_one:").count(),
+        1,
+        "aliases must share one defining helper body"
+    );
+    assert!(!artifact.contains("plus_one:"), "a source alias must not create a second physical helper:\n{}", artifact);
     assert!(!artifact.contains("call inc"), "duplicate alias did not reuse the canonical imported label:\n{}", artifact);
     assert!(!artifact.contains("inc:"), "duplicate alias emitted a second helper body:\n{}", artifact);
     assert!(!artifact.contains("call add_one"), "alias call fell back to the dependency basename:\n{}", artifact);
@@ -4795,10 +4824,11 @@ action run(x: u64) -> u64 {
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let artifact = std::fs::read_to_string(app_root.join("build").join("main.s")).unwrap();
-    assert!(artifact.contains("call __cellscript_ext_dep_a__math__add_one"), "dep_a call was not lowered:\n{}", artifact);
-    assert!(artifact.contains("call __cellscript_ext_dep_b__math__add_one"), "dep_b call was not lowered:\n{}", artifact);
+    assert!(artifact.contains("call __cellscript.ext.6465705f613a3a6d617468.add_one"), "dep_a call was not lowered:\n{}", artifact);
+    assert!(artifact.contains("call __cellscript.ext.6465705f623a3a6d617468.add_one"), "dep_b call was not lowered:\n{}", artifact);
     assert!(
-        artifact.contains("__cellscript_ext_dep_a__math__add_one:") && artifact.contains("__cellscript_ext_dep_b__math__add_one:"),
+        artifact.contains("__cellscript.ext.6465705f613a3a6d617468.add_one:")
+            && artifact.contains("__cellscript.ext.6465705f623a3a6d617468.add_one:"),
         "same-basename external helpers were not both merged:\n{}",
         artifact
     );
@@ -4875,10 +4905,15 @@ action run(x: u64) -> u64 {
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let artifact = std::fs::read_to_string(app_root.join("build").join("main.s")).unwrap();
-    assert!(artifact.contains("call __cellscript_ext_dep__math__add_two"), "outer helper call was not lowered:\n{}", artifact);
-    assert!(artifact.contains("call __cellscript_ext_dep__math__add_one"), "transitive helper call was not lowered:\n{}", artifact);
+    assert!(artifact.contains("call __cellscript.ext.6465703a3a6d617468.add_two"), "outer helper call was not lowered:\n{}", artifact);
     assert!(
-        artifact.contains("__cellscript_ext_dep__math__add_two:") && artifact.contains("__cellscript_ext_dep__math__add_one:"),
+        artifact.contains("call __cellscript.ext.6465703a3a6d617468.add_one"),
+        "transitive helper call was not lowered:\n{}",
+        artifact
+    );
+    assert!(
+        artifact.contains("__cellscript.ext.6465703a3a6d617468.add_two:")
+            && artifact.contains("__cellscript.ext.6465703a3a6d617468.add_one:"),
         "transitive external helpers were not merged:\n{}",
         artifact
     );
@@ -5461,7 +5496,7 @@ fn cellc_check_json_reports_multiple_ir_diagnostics() {
         r#"
 [package]
 cellscript_version = ">=0.33.0-alpha.1"
-edition = "2026"
+edition = "2027"
 name = "demo"
 version = "0.1.0"
 "#,
@@ -5472,26 +5507,18 @@ version = "0.1.0"
         r#"
 module demo::main
 
-resource Token {
-    amount: u64,
+resource Token has store { amount: u64 }
+
+action issue_one(witness handle: ExactScriptHandle, witness expected: Hash) -> u64 {
+    let input = ckb::input<Token>(0)
+    ckb::require_cell_lock_exact_handle(input, handle, expected)
+    return 0
 }
 
-#[effect(ReadOnly)]
-action issue_one(amount: u64) -> Token {
-    verification
-        let out = create Token {
-            amount: amount
-        }
-        return out
-}
-
-#[effect(ReadOnly)]
-action issue_two(amount: u64) -> Token {
-    verification
-        let out = create Token {
-            amount: amount
-        }
-        return out
+action issue_two(witness handle: ExactScriptHandle, witness expected: Hash) -> u64 {
+    let input = ckb::input<Token>(0)
+    ckb::require_cell_type_exact_handle(input, handle, expected)
+    return 0
 }
 "#,
     )
@@ -5506,12 +5533,11 @@ action issue_two(amount: u64) -> Token {
     assert_eq!(stdout["warning_count"], 0);
     let diagnostics = stdout["diagnostics"].as_array().unwrap();
     assert_eq!(diagnostics.len(), 2, "unexpected diagnostics: {stdout}");
-    assert!(diagnostics.iter().any(|diagnostic| diagnostic["message"].as_str().unwrap().contains("action 'issue_one'")));
-    assert!(diagnostics.iter().any(|diagnostic| diagnostic["message"].as_str().unwrap().contains("action 'issue_two'")));
     assert!(diagnostics.iter().all(|diagnostic| {
-        diagnostic["message"].as_str().unwrap().contains("declared effect ReadOnly is too weak")
+        diagnostic["message"].as_str().unwrap().contains("exact Script handle handle_hash must be a compile-time Hash literal")
             && diagnostic["range"]["start"]["line"].as_u64().unwrap_or_default() > 0
     }));
+    assert_ne!(diagnostics[0]["range"]["start"]["line"], diagnostics[1]["range"]["start"]["line"]);
 }
 
 #[test]
@@ -7390,7 +7416,7 @@ action ping() -> u64 {
     std::fs::write(
         root.join("tests").join("negative.cell"),
         r#"
-// cellscript-test: expect-error: declared effect Pure is too weak for function 'helper'
+// cellscript-test: expect-error: effect declarations have been removed
 module demo::tests::negative
 
 #[effect(Pure)]
@@ -9375,18 +9401,16 @@ type_script TokenTransfer on type_group<Token> {
             enforce token.amount > 0
         }
 
-        effects {
-            replace token -> next {
-                data {
-                    owner = same
-                    amount = same
-                }
-                identity = same
-                type_script = same
-                lock_script = exact_hash(recipient)
-                capacity = same
-                cardinality = one_to_one
+        replace token -> next {
+            data {
+                owner = same
+                amount = same
             }
+            identity = same
+            type_script = same
+            lock_script = exact_hash(recipient)
+            capacity = same
+            cardinality = one_to_one
         }
     }
 }
@@ -9441,17 +9465,15 @@ type_script TokenPool on type_group<Token> {
     ) {
         verify { enforce left.amount > 0 }
         audit settlement_policy { expected_evidence = external_policy(recipient) }
-        effects {
-            pool value_flow {
-                inputs { left, right }
-                outputs { merged }
-                data { owner { merged = recipient } amount = conserve }
-                identity = pooled
-                type_script = same
-                lock_script { merged = exact_hash(recipient) }
-                capacity = builder_computed
-                cardinality = declared
-            }
+        pool value_flow {
+            inputs { left, right }
+            outputs { merged }
+            data { owner { merged = recipient } amount = conserve }
+            identity = pooled
+            type_script = same
+            lock_script { merged = exact_hash(recipient) }
+            capacity = builder_computed
+            cardinality = declared
         }
     }
 }
@@ -10860,7 +10882,7 @@ action mint(amount: u64, owner: Address) -> Token {
     assert_eq!(summary["raw_cell_data_required"], false);
     assert_eq!(summary["protocol_bundle_api_schema"], "cellscript-protocol-bundle-v1");
     assert_eq!(summary["protocol_bundle_artifact_binding_schema"], "cellscript-protocol-bundle-artifact-binding-v1");
-    assert_eq!(summary["exact_script_handle_receipt_schema"], "cellscript-exact-script-handle-receipt-v1");
+    assert_eq!(summary["exact_script_handle_receipt_schema"], "cellscript-exact-script-handle-receipt-v3");
     assert_eq!(summary["exact_script_handle_value_schema"], "cellscript-exact-script-handle-value-v1");
     assert_eq!(summary["exact_script_handle_encoding"], "CSHDLv1-fixed-202");
     assert_eq!(summary["protocol_bundle_closed_role_schema"], "cellscript-protocol-closed-role-v1");
@@ -10897,7 +10919,7 @@ action mint(amount: u64, owner: Address) -> Token {
     assert_eq!(manifest["actions"][0]["action_scan_selectors"]["source"], "transaction_runtime_input_requirements");
     assert_eq!(manifest["protocol_bundle_contract"]["schema"], "cellscript-protocol-bundle-v1");
     assert_eq!(manifest["protocol_bundle_contract"]["closed_role_schema"], "cellscript-protocol-closed-role-v1");
-    assert_eq!(manifest["protocol_bundle_contract"]["exact_handle_receipt_schema"], "cellscript-exact-script-handle-receipt-v1");
+    assert_eq!(manifest["protocol_bundle_contract"]["exact_handle_receipt_schema"], "cellscript-exact-script-handle-receipt-v3");
     assert_eq!(manifest["protocol_bundle_contract"]["exact_handle_value_schema"], "cellscript-exact-script-handle-value-v1");
     assert_eq!(manifest["protocol_bundle_contract"]["exact_handle_encoding"], "CSHDLv1-fixed-202");
     assert_eq!(manifest["protocol_bundle_contract"]["exact_handle_hash_algorithm"], "ckb-blake2b-256");
@@ -11137,7 +11159,7 @@ action inspect(source_index: u64) -> u64 {
     assert!(metadata_output.status.success(), "stderr: {}", String::from_utf8_lossy(&metadata_output.stderr));
 
     let metadata: serde_json::Value = serde_json::from_slice(&std::fs::read(&metadata_path).unwrap()).unwrap();
-    assert_eq!(metadata["metadata_schema_version"], 72);
+    assert_eq!(metadata["metadata_schema_version"], 74);
     assert_eq!(metadata["runtime"]["ckb_runtime_access_provenance_contract"], "cellscript-ckb-runtime-access-provenance-v1");
     let dynamic_access = metadata["actions"][0]["ckb_runtime_accesses"]
         .as_array()
@@ -11294,7 +11316,7 @@ action inspect() -> u64 {
     assert!(metadata_output.status.success(), "stderr: {}", String::from_utf8_lossy(&metadata_output.stderr));
 
     let metadata: serde_json::Value = serde_json::from_slice(&std::fs::read(&metadata_path).unwrap()).unwrap();
-    assert_eq!(metadata["metadata_schema_version"], 72);
+    assert_eq!(metadata["metadata_schema_version"], 74);
     let handle = metadata["runtime"]["transaction_view_handles"]
         .as_array()
         .unwrap()

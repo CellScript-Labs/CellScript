@@ -194,7 +194,7 @@ fn item_key(item: &IrItem) -> (&'static str, String) {
     match item {
         IrItem::TypeDef(item) => ("type", item.name.clone()),
         IrItem::Action(item) => ("action", item.name.clone()),
-        IrItem::PureFn(item) => ("helper", item.name.clone()),
+        IrItem::Function(item) => ("helper", item.name.clone()),
         IrItem::Lock(item) => ("lock", item.name.clone()),
         IrItem::Invariant(item) => ("invariant", item.name.clone()),
     }

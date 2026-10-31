@@ -49,6 +49,12 @@ be marked executable. Concrete instances additionally require the checked
 substitution/layout/call ABI and their qualified declaration owner. Universal
 behavioral or source-to-machine equivalence is not inferred from either record.
 
+The native `interface-diff --checked` command exposes this qualified module
+comparison for two independently inspected ELF bundles. It preserves the
+existing declaration digest; a declaration-only JSON diff has no verified import
+scope from which to establish alias equivalence. See
+[public interface comparison](CELLSCRIPT_PUBLIC_INTERFACES.md#checked-nominal-compatibility-and-declaration-identity).
+
 ## Directional compatibility
 
 Compare a required baseline with a candidate, not two unordered hashes. All
@@ -212,13 +218,13 @@ from external dispatch.
 
 `check_required_contracts` compares every required projected key against a
 candidate and allows additional candidate keys, under the enumerated
-directional relation: inferred and declared effects may only become more
-restrictive (Pure admits only Pure; ReadOnly admits Pure or ReadOnly; each of
-Mutating/Creating/Destroying admits itself and the two smaller classes, since
-the three state-changing classes are pairwise incomparable), and binder
-constraints may only relax — a candidate may stop demanding an ability the
-baseline demanded, so baseline-admitted arguments still satisfy it, but may
-never demand a new ability. Binder names, phantom flags, declared template
+directional relation: candidate `context_reads`, `lifecycle_ops` and `process_ops`
+must each be a subset of the corresponding required fact set. No category
+comparison or replacement table participates. Missing verified facts cannot
+satisfy a required checked guarantee. Binder constraints may only relax: a
+candidate may stop demanding an ability the baseline demanded, so previously
+admitted arguments still satisfy it, but may never demand a new ability.
+Binder names, phantom flags, declared template
 abilities, codecs and every other contract field stay exact. Optimizer levels
 can retain different helper/layout evidence, so equality of projection
 identities across optimizer levels is not promised. Body predicates are

@@ -1,6 +1,6 @@
 # CellScript Scheduler Hints
 
-**Status**: production metadata contract for the current CellScript CKB profile.
+**Status**: alpha.2 structured-fact cutover; full acceptance is pending.
 
 CellScript emits scheduler-facing metadata for CKB. These hints are not hidden
 comments; they are part of action metadata and the Molecule scheduler witness.
@@ -9,7 +9,7 @@ comments; they are part of action metadata and the Molecule scheduler witness.
 
 Each action can expose:
 
-- effect class
+- structured `effects`: `context_reads`, `lifecycle_ops` and `process_ops`
 - `parallelizable`
 - `touches_shared`
 - estimated cycles
@@ -52,3 +52,12 @@ The report consumes action scheduler hints and emits:
 
 This command is a policy consumer for tooling and CI. It does not claim
 consensus-level scheduling enforcement by itself.
+
+## Current witness generation
+
+The scheduler ABI is `cellscript-scheduler-facts-molecule-v2`. Its Molecule table
+has version byte 2 and a byte vector containing the canonical structured effect
+facts. There is no category ID. `scheduler_witness_hex` is the only metadata byte
+field; no alias or older wire reader is admitted. The metadata accessor validates
+the current table, fact encoding and equality with the action's fact contract.
+The fact contract does not by itself prove the scheduler's conflict policy.

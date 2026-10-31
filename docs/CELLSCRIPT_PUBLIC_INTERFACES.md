@@ -1,10 +1,8 @@
 # CellScript Public Interfaces And Compatibility
 
-**Status**: v2 implemented on `nightly-0.26`; v3 implemented on the `0.30`
-development branch
+**Status**: current inferred-facts implementation; final alpha.2 acceptance is pending
 
-**Schemas**: `cellscript-package-interface-v3` (current),
-`cellscript-package-interface-v2` (read compatibility), and
+**Schemas**: `cellscript-package-interface-v5` (current only), and
 `cellscript-interface-compatibility-v1`
 
 ## What The Interface Represents
@@ -101,6 +99,39 @@ constraints expanded. The hash is computed over canonical JSON; reordering
 source declarations or replacing the expanded profile with its compact source
 spelling does not change the identity after normalization.
 
+## Checked nominal compatibility and declaration identity
+
+The declaration interface and its existing digest retain source type spellings.
+Renaming a private import alias used by a public field can change the declaration
+layout/interface digest and the conservative declaration-only comparison. A bare
+interface JSON document does not establish that two spellings name one owner.
+Do not infer nominal compatibility from equal offsets, sizes or ELF bytes.
+
+For alias-independent nominal compatibility, compile both candidates with
+`--source-contracts` and retain their complete ELF, metadata, lowering record and
+source map. Then use:
+
+```bash
+cellc interface-diff --checked --old old/main.elf --new new/main.elf --json
+```
+
+This mode independently verifies each four-file bundle under bounded reads, then
+compares the existing qualified checked module projection directionally. The
+report schema is `cellscript-checked-interface-compatibility-v1`; it names both
+contract digests and artifact hashes. Same-owner aliases can agree, while a
+same-width declaration from a different owner rejects. Missing, malformed,
+modified or oversized sidecars reject before a compatibility result. Sidecars
+use the same canonical neighboring paths as `verify-artifact`.
+
+In JSON mode, a breaking comparison exits with E2501 and emits one diagnostic
+envelope containing the complete comparison fields. It does not print a report
+followed by a second JSON document. An explicitly requested output file retains
+the comparison report. This applies to both declared and checked comparisons.
+
+The result covers the checked projected contracts. It does not establish source
+behavioral equivalence, deployment, peer execution or authorization. It does not
+replace package/Registry admission or change exact-hash receipt commitments.
+
 ## Compare Two Releases
 
 ```bash
@@ -117,7 +148,7 @@ The report classifies changes across six independent dimensions:
 | `source_api` | removing an export; changing a type parameter, parameter, return type, or output; tightening a generic constraint |
 | `serialized_layout` | changing fields, variants, offsets, fixed sizes, or type identity |
 | `runtime_abi` | changing an entry ABI, witness placement, target, or versioned VM contract |
-| `effects_capabilities` | changing callable effects, value abilities, or Cell lifecycle capabilities |
+| `effects_capabilities` | increasing inferred facts in any dimension, changing value abilities or Cell lifecycle capabilities |
 | `builder` | changing the generated transaction-builder contract |
 | `deployment` | changing the deployment/runtime identity contract |
 
@@ -129,12 +160,17 @@ layout, runtime ABI, effects/capabilities, builder, and deployment dimensions
 remain independently compatible. Changing parameter count, name, order, or
 phantom status and tightening any constraint are breaking.
 
-The v3 reader accepts a v2 JSON interface with an empty default temporal
-contract so `interface-diff` can compare an older release. Moving from that
-empty contract to the v3 typed contract is a `runtime_abi` and deployment
-break. Changing an exported callable from raw `u64` to a temporal domain is
-also a `source_api` and call-ABI break. Registry publication validates the
-canonical v3 temporal fields instead of trusting an arbitrary interface hash.
+Readers require the complete current v5 interface. Old or mixed generations
+reject and must be rebuilt; there is no default temporal/effect contract or
+older-interface comparison reader. Callable `effects` is mandatory: concrete
+declarations carry canonical `context_reads`, `lifecycle_ops` and `process_ops`;
+uninstantiated generic templates carry explicit null evidence. Missing evidence
+is never converted into an empty fact set. Candidate facts must be a subset of
+required facts independently in every dimension. See
+[the effect contract](CELLSCRIPT_EFFECT_CONTRACTS.md) for evidence and lifecycle
+boundaries. Changing an exported callable from raw `u64` to a temporal domain
+remains a source/call-ABI break. Registry publication validates current temporal
+and fact fields instead of trusting an arbitrary interface hash.
 It also requires the closed value-ability vocabulary in canonical order and the
 fixed, serializable, non-linear public generic layout boundary.
 
@@ -158,7 +194,7 @@ deployment evidence, and chain commitment remain separate states.
 ## Typed Semantics Relationship
 
 The public interface answers “what can a dependency rely on?” The
-`cellscript-typed-semantics-v9` record answers “what typed operations and
+`cellscript-typed-semantics-v11` record answers “what typed operations and
 control-flow facts were lowered?” Its embedded
 `cellscript-semantic-foundation-v3` additionally answers where values came
 from, which transaction roles they bind, how Cells are disposed, where claims

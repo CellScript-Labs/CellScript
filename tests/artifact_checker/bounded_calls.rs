@@ -70,9 +70,7 @@ fn bounded_scalar_calls_bind_forwarded_sources_and_preserve_prepared_arguments()
 resource Token has store {{ amount: u64 }}
 data_shape Messages {{ element: Vec<u8>, limits {{ items: 2, payload_bytes: 8, encoded_bytes: 32 }} }}
 fn identity(value: u64) -> u64 {{ return value }}
-#[effect(ReadOnly)]
 fn read({params}a: u64, view: {ty}, bytes: Hash, b: u64) -> u64 {{ return a + b + {read} }}
-#[effect(ReadOnly)]
 fn forward({params}a: u64, view: {ty}, bytes: Hash, b: u64) -> u64 {{
     return read({forwarded}identity(a), view, bytes, b)
 }}

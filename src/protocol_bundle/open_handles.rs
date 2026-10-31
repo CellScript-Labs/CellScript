@@ -464,8 +464,7 @@ fn admit_bindings(
             })
             .transpose()?;
         result.push(ResolvedOpenHandle {
-            schema: if instance.is_some() { "cellscript-protocol-instance-handle-v1" } else { "cellscript-protocol-open-handle-v1" }
-                .into(),
+            schema: if instance.is_some() { PROTOCOL_INSTANCE_HANDLE_SCHEMA } else { PROTOCOL_OPEN_HANDLE_SCHEMA }.into(),
             consumer: binding.consumer.into(),
             parameter: binding.parameter.into(),
             participant: binding.participant.into(),

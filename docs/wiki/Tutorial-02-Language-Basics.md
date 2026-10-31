@@ -244,7 +244,7 @@ The shorthand is exactly `field: field`; it does not infer or rename fields.
 ## Value Generics And Abilities
 
 The 0.25 value kernel supports type parameters on ordinary structs, enums, and
-pure functions. It specializes every used template before type checking and IR
+ordinary functions. It specializes every used template before type checking and IR
 lowering, so the backend sees only deterministic concrete types.
 
 ```cellscript
@@ -432,7 +432,7 @@ resource TimeLock has store, create, consume {
 }
 ```
 
-The fields are in scope, and a predicate may call only transitively Pure
+The fields are in scope, and a predicate may call only transitively external-effect-free
 helpers. Field-level `where` syntax, lifecycle operations, transaction-view
 reads, and unknown `env::*` functions are rejected. Concrete create and local
 constructor paths emit fail-closed field checks. A signature-only output or
@@ -451,7 +451,6 @@ Use a lexical borrow block when several checks need to inspect one linear Cell
 before its lifecycle operation:
 
 ```cellscript
-#[effect(Pure)]
 fn amount_is(token: &Token, expected: u64) -> bool {
     return token.amount == expected
 }
@@ -470,7 +469,7 @@ action inspect(token: Token, expected: u64) -> u64 {
 `view` is a compiler-only `View<Token>` marker. It cannot be returned,
 assigned, stored in an aggregate or collection, passed through an
 untyped/generic slot, or used across `consume`, `destroy`, transfer, claim, or
-settle of `token`. Calls that receive it must be `Pure` or `ReadOnly` functions
+settle of `token`. Calls that receive it must be observation-only functions
 with an explicit `&Token` parameter. The block does not replace the
 transaction's explicit consume/create lifecycle.
 
@@ -488,7 +487,7 @@ The metadata records the canonical root (`token`), the field path
 (`amount`), and `View<u64>` for both regions. Dereferencing is allowed only
 for non-Cell values; a Cell-backed value cannot be copied out through a view.
 Destroying, consuming, or replacing `token` anywhere inside either region is
-rejected. Generic Pure/ReadOnly helpers may receive a view only through an
+rejected. Generic observation-only helpers may receive a view only through an
 explicit matching `&T` parameter and do not inherit Cell lifecycle authority.
 
 Persistent declarations can also declare the default CKB script hash type used

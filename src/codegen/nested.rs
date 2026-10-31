@@ -413,46 +413,19 @@ impl CodeGenerator {
 mod tests;
 
 impl CodeGenerator {
-    pub(super) fn nested_type(ty: &IrType) -> Option<crate::nested_values::NestedType> {
-        named_type_name(ty).and_then(crate::nested_values::parsed)
+    pub(super) fn nested_type(ty: &IrType) -> Option<crate::nested_values::NestedType<crate::nested_values::Element>> {
+        crate::nested_values::ir_type(ty)
     }
 
     pub(super) fn nested_size_offset(&self, var: &IrVar) -> Option<usize> {
         self.dynamic_value_size_offsets.get(&var.id).or_else(|| self.schema_pointer_size_offsets.get(&var.id)).copied()
     }
 
-    fn nested_record_layout(&self, name: &str) -> Result<Vec<(String, SchemaFieldLayout)>> {
-        let invalid = || CompileError::without_span(format!("nested record '{name}' has no admitted ordered field layout"));
-        let mut fields = self
-            .type_layouts
-            .get(name)
-            .ok_or_else(invalid)?
-            .iter()
-            .map(|(name, layout)| (name.clone(), layout.clone()))
-            .collect::<Vec<_>>();
-        fields.sort_by_key(|(_, layout)| layout.index);
-        if !(2..=9).contains(&fields.len())
-            || !matches!(&fields.last().ok_or_else(invalid)?.1.ty, IrType::Named(name) if crate::nested_values::is_bytes_element(name))
-            || fields[..fields.len() - 1].iter().any(|(_, layout)| nested_fixed_width(&layout.ty).is_none())
-        {
-            return Err(invalid());
-        }
-        Ok(fields)
-    }
-
-    fn nested_contract(&self, values: &crate::nested_values::ValuesType) -> Result<NestedValueContract> {
-        let element = if crate::nested_values::is_bytes_element(&values.element) {
-            ElementShape::Bytes {}
-        } else {
-            let fields = self.nested_record_layout(&values.element)?;
-            ElementShape::Record {
-                fixed_field_widths: fields[..fields.len() - 1]
-                    .iter()
-                    .map(|(_, layout)| nested_fixed_width(&layout.ty).expect("checked nested fixed field"))
-                    .collect(),
-            }
-        };
-        let contract = values.contract(element);
+    fn nested_contract(
+        &self,
+        values: &crate::nested_values::ValuesType<crate::nested_values::Element>,
+    ) -> Result<NestedValueContract> {
+        let contract = values.contract(values.element.shape());
         contract.validate().map_err(|error| CompileError::without_span(error.to_string()))?;
         Ok(contract)
     }
@@ -493,12 +466,16 @@ impl CodeGenerator {
         self.emit(format!("bne t1, t2, {invalid}"));
     }
 
-    fn emit_nested_view_validation(&mut self, kind: &crate::nested_values::NestedType, invalid: &str) -> Result<()> {
-        use crate::nested_values::{NestedType, ValuesType};
+    fn emit_nested_view_validation(
+        &mut self,
+        kind: &crate::nested_values::NestedType<crate::nested_values::Element>,
+        invalid: &str,
+    ) -> Result<()> {
+        use crate::nested_values::{Element, NestedType, ValuesType};
         let (element, payload) = match kind {
-            NestedType::BytesView { max_payload_bytes } => ("Vec<u8>".to_string(), *max_payload_bytes),
+            NestedType::BytesView { max_payload_bytes } => (Element::Bytes, *max_payload_bytes),
             NestedType::RecordView { element, max_payload_bytes } => (element.clone(), *max_payload_bytes),
-            NestedType::Values(_) => unreachable!(),
+            NestedType::Values(_) => return Err(CompileError::without_span("nested element validation requires a derived view")),
         };
         let contract =
             self.nested_contract(&ValuesType { element, max_items: 1, max_payload_bytes: payload, max_total_bytes: 4096 })?;
@@ -655,28 +632,32 @@ impl CodeGenerator {
         let IrOperand::Var(var) = obj else {
             return Ok(false);
         };
-        let Some(crate::nested_values::NestedType::RecordView { element, .. }) = Self::nested_type(&var.ty) else {
+        let Some(crate::nested_values::NestedType::RecordView { element: crate::nested_values::Element::Record(record), .. }) =
+            Self::nested_type(&var.ty)
+        else {
             return Ok(false);
         };
-        let fields = self.nested_record_layout(&element)?;
-        let index = fields
-            .iter()
-            .position(|(name, _)| name == field)
-            .ok_or_else(|| CompileError::without_span(format!("unknown nested record field {element}.{field}")))?;
+        let layout = record.layout();
+        let index = if field == layout.payload_field {
+            layout.fixed_fields.len()
+        } else {
+            layout
+                .fixed_fields
+                .iter()
+                .position(|(name, _)| name == field)
+                .ok_or_else(|| CompileError::without_span(format!("unknown nested record field {}.{field}", record.spelling())))?
+        };
         let Some(size) = self.nested_size_offset(var) else {
             self.emit_fail(CellScriptRuntimeError::CollectionRuntimeUnsupported);
             return Ok(true);
         };
-        let offset = (fields.len() + 1) * 4
-            + fields[..index]
-                .iter()
-                .map(|(_, layout)| usize::from(nested_fixed_width(&layout.ty).expect("checked fixed prefix")))
-                .sum::<usize>();
+        let offset = (layout.fixed_fields.len() + 2) * 4
+            + layout.fixed_fields[..index].iter().map(|(_, ty)| usize::from(ty.width())).sum::<usize>();
         let done = self.emit_nested_use_marker("field", dest);
         self.emit_stack_load("a0", self.scalar_slot_offset(var.id));
         self.emit(format!("li t1, {offset}"));
         self.emit("add t0, a0, t1");
-        if index + 1 == fields.len() {
+        if index == layout.fixed_fields.len() {
             let dest_size =
                 self.nested_size_offset(dest).ok_or_else(|| CompileError::without_span("nested payload view has no length slot"))?;
             self.emit_stack_load("a1", size);

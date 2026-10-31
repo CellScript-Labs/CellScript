@@ -7,8 +7,18 @@ mod allocated_values;
 pub mod artifact;
 pub mod assumptions;
 pub mod ast;
+pub mod canonical_json;
 pub mod ckb_abi;
 mod commitment_contract;
+mod compile_cache;
+mod compile_pipeline;
+mod metadata_build;
+use compile_cache::*;
+use compile_pipeline::*;
+use metadata_build::compile_metadata_from_ir;
+#[cfg(test)]
+#[path = "compile_pipeline/diagnostic_tests.rs"]
+mod compile_diagnostic_tests;
 mod legacy_bytes;
 mod metadata_abi;
 mod optimization_policy;
@@ -31,6 +41,7 @@ pub mod debug;
 pub mod deployment_line_handle;
 pub mod docgen;
 pub mod edition;
+pub mod effects;
 pub mod error;
 pub mod executable_surface;
 pub mod fixed_cell_builder;
@@ -256,8 +267,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
-const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v137-0.33-checked-ipc-scalars";
-pub const METADATA_SCHEMA_VERSION: u32 = 72;
+pub const METADATA_SCHEMA_VERSION: u32 = cellscript_artifact_checker::COMPILE_METADATA_SCHEMA_VERSION;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 2;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const CONSTRAINTS_METADATA_SCHEMA_VERSION: u32 = 4;
@@ -1117,7 +1127,6 @@ pub struct BorrowRegionMetadata {
     pub view_type: String,
     pub storage: String,
     pub abi: String,
-    pub allowed_effects: Vec<String>,
     pub evidence_tier: EvidenceTier,
     pub source_span: crate::proof_plan::ProofPlanSourceSpanMetadata,
 }
@@ -2048,9 +2057,7 @@ fn validate_borrow_region_metadata(metadata: &CompileMetadata) -> Result<()> {
         if region.storage != "none" || region.abi != "none" {
             return Err(CompileError::without_span(format!("{} must declare storage=none and abi=none", prefix)));
         }
-        if region.allowed_effects != ["Pure", "ReadOnly"] {
-            return Err(CompileError::without_span(format!("{} must allow exactly Pure and ReadOnly callees", prefix)));
-        }
+
         if region.evidence_tier != EvidenceTier::CheckedStatic {
             return Err(CompileError::without_span(format!("{}.evidence_tier must be checked-static", prefix)));
         }
@@ -3199,7 +3206,7 @@ fn trusted_external_invocations(ir: &ir::IrModule) -> Result<Vec<TrustedExternal
     for item in &ir.items {
         let (scope, body) = match item {
             ir::IrItem::Action(item) => (format!("action:{}", item.name), &item.body),
-            ir::IrItem::PureFn(item) => (format!("helper:{}", item.name), &item.body),
+            ir::IrItem::Function(item) => (format!("helper:{}", item.name), &item.body),
             ir::IrItem::Lock(item) => (format!("lock:{}", item.name), &item.body),
             ir::IrItem::TypeDef(_) | ir::IrItem::Invariant(_) => continue,
         };
@@ -6122,21 +6129,19 @@ pub struct FieldMetadata {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ActionMetadata {
     pub name: String,
     pub params: Vec<ParamMetadata>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub return_type: Option<String>,
-    pub effect_class: String,
+    pub effects: ir::EffectFacts,
     pub parallelizable: bool,
     pub touches_shared: Vec<String>,
     pub estimated_cycles: u64,
-    #[serde(default = "default_scheduler_witness_abi")]
     pub scheduler_witness_abi: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub scheduler_witness_hex: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    scheduler_witness_molecule_hex: String,
     pub consume_set: Vec<CellPatternMetadata>,
     pub read_refs: Vec<CellPatternMetadata>,
     pub create_set: Vec<CreatePatternMetadata>,
@@ -6176,26 +6181,15 @@ impl ActionMetadata {
     /// access summary as the trusted scheduler policy input. Public scheduler
     /// witness bytes are Molecule-only.
     pub fn scheduler_witness_bytes(&self) -> Result<Vec<u8>> {
-        let scheduler_witness_hex = non_empty_metadata_field(&self.scheduler_witness_hex);
-        let scheduler_witness_molecule_hex = non_empty_metadata_field(&self.scheduler_witness_molecule_hex);
-        if let (Some(primary), Some(alias)) = (scheduler_witness_hex, scheduler_witness_molecule_hex)
-            && primary != alias
-        {
-            return Err(CompileError::without_span("conflicting scheduler_witness_hex and scheduler_witness_molecule_hex metadata"));
+        if self.scheduler_witness_abi != SCHEDULER_WITNESS_ABI_MOLECULE {
+            return Err(CompileError::without_span(format!("unsupported scheduler witness ABI '{}'", self.scheduler_witness_abi)));
         }
-        if let Some(scheduler_witness_hex) = scheduler_witness_hex {
-            if self.scheduler_witness_abi != SCHEDULER_WITNESS_ABI_MOLECULE {
-                return Err(CompileError::without_span(format!(
-                    "unsupported public scheduler_witness_abi '{}'; supported value: molecule",
-                    self.scheduler_witness_abi
-                )));
-            }
-            return decode_scheduler_witness_hex(scheduler_witness_hex);
+        if self.scheduler_witness_hex.is_empty() {
+            return Err(CompileError::without_span("scheduler witness metadata is missing"));
         }
-        if let Some(scheduler_witness_molecule_hex) = scheduler_witness_molecule_hex {
-            return decode_scheduler_witness_hex(scheduler_witness_molecule_hex);
-        }
-        Err(CompileError::without_span("scheduler witness metadata is missing"))
+        let bytes = decode_scheduler_witness_hex(&self.scheduler_witness_hex)?;
+        crate::stdlib::SchedulerMetadata::validate_current(&bytes, &self.effects)?;
+        Ok(bytes)
     }
 
     /// Encode positional entry witness bytes for the generated `_cellscript_entry` wrapper.
@@ -6208,11 +6202,7 @@ impl ActionMetadata {
     }
 }
 
-const SCHEDULER_WITNESS_ABI_MOLECULE: &str = "molecule";
-
-fn non_empty_metadata_field(field: &str) -> Option<&str> {
-    (!field.is_empty()).then_some(field)
-}
+const SCHEDULER_WITNESS_ABI_MOLECULE: &str = "cellscript-scheduler-facts-molecule-v2";
 
 impl LockMetadata {
     /// Output indexes where a CKB builder should install the built-in TYPE_ID
@@ -6263,18 +6253,6 @@ fn protocol_role_candidate_metadata(candidate: &ir::IrProtocolRoleCandidate) -> 
         evidence_tier: EvidenceTier::MetadataOnly,
         authorization_proven: false,
     }
-}
-
-fn default_scheduler_witness_abi() -> String {
-    SCHEDULER_WITNESS_ABI_MOLECULE.to_string()
-}
-
-fn default_pure_effect_class() -> String {
-    "Pure".to_string()
-}
-
-fn default_checked_static_evidence_tier() -> EvidenceTier {
-    EvidenceTier::CheckedStatic
 }
 
 fn default_metadata_only_evidence_tier() -> EvidenceTier {
@@ -6675,17 +6653,12 @@ fn split_top_level_commas(input: &str) -> Vec<&str> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FunctionMetadata {
     pub name: String,
     pub params: Vec<ParamMetadata>,
     pub return_type: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub declared_effect_class: Option<String>,
-    #[serde(default = "default_pure_effect_class")]
-    pub inferred_effect_class: String,
-    #[serde(default = "default_pure_effect_class")]
-    pub effect_class: String,
-    #[serde(default = "default_checked_static_evidence_tier")]
+    pub effects: ir::EffectFacts,
     pub effect_evidence_tier: EvidenceTier,
     pub mutate_set: Vec<MutatePatternMetadata>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -6703,8 +6676,10 @@ pub struct FunctionMetadata {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LockMetadata {
     pub name: String,
+    pub effects: ir::EffectFacts,
     pub params: Vec<ParamMetadata>,
     pub consume_set: Vec<CellPatternMetadata>,
     pub read_refs: Vec<CellPatternMetadata>,
@@ -7125,10 +7100,10 @@ fn load_project_for_entry(entry_path: &Utf8Path, entry_source_override: Option<&
 
 fn load_project_for_entry_diagnostics(
     entry_path: &Utf8Path,
-    entry_source_override: Option<&str>,
+    source_overrides: &BTreeMap<Utf8PathBuf, String>,
 ) -> std::result::Result<LoadedProject, Vec<CompileError>> {
     let entry_path = canonical_utf8_path(entry_path).map_err(|error| vec![error])?;
-    let mut modules = load_project_modules_for_entry_diagnostics(&entry_path, entry_source_override)?;
+    let mut modules = load_project_modules_for_entry_diagnostics(&entry_path, source_overrides)?;
     let Some(entry_index) = modules.iter().position(|module| module.path == entry_path) else {
         return Err(vec![CompileError::new(
             format!("entry source '{}' was not loaded into the project graph", entry_path),
@@ -7207,9 +7182,9 @@ fn load_project_modules_for_entry(entry_path: &Utf8Path, entry_source_override: 
         .collect()
 }
 
-fn load_project_modules_for_entry_diagnostics(
+pub(crate) fn load_project_modules_for_entry_diagnostics(
     entry_path: &Utf8Path,
-    entry_source_override: Option<&str>,
+    source_overrides: &BTreeMap<Utf8PathBuf, String>,
 ) -> std::result::Result<Vec<LoadedModule>, Vec<CompileError>> {
     let entry_path = canonical_utf8_path(entry_path).map_err(|error| vec![error])?;
     let source_paths = collect_source_paths_for_compile_file(&entry_path).map_err(|error| vec![error])?;
@@ -7223,18 +7198,8 @@ fn load_project_modules_for_entry_diagnostics(
                 continue;
             }
         };
-        let source = if path == entry_path {
-            if let Some(source) = entry_source_override {
-                source.to_string()
-            } else {
-                match read_module_source(&path) {
-                    Ok(source) => source,
-                    Err(error) => {
-                        diagnostics.push(error);
-                        continue;
-                    }
-                }
-            }
+        let source = if let Some(source) = source_overrides.get(&path) {
+            source.clone()
         } else {
             match read_module_source(&path) {
                 Ok(source) => source,
@@ -7594,7 +7559,7 @@ pub fn compile_metadata(source: &str, edition: CellScriptEdition, target: Option
     let ir = ir::generate(&ast)?;
     executable_surface::validate_ir_module(&ir)?;
     let mut metadata = compile_metadata_from_ir(&ir, artifact_format, target_profile, edition, None);
-    bind_public_interface(&mut metadata, &ast);
+    bind_public_interface(&mut metadata, &ast, None)?;
     apply_trusted_external_verifiers(&mut metadata, &ir, &[])?;
     bind_typed_semantics(&mut metadata, &ir, &ast, None, false);
     bind_source_metadata(&mut metadata, vec![source_unit_from_bytes("<memory>", "memory", source.as_bytes())]);
@@ -7669,7 +7634,10 @@ pub fn compile_metadata_with_diagnostics(
         return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
     }
     let mut metadata = compile_metadata_from_ir(&ir, artifact_format, target_profile, edition, None);
-    bind_public_interface(&mut metadata, &ast);
+    if let Err(error) = bind_public_interface(&mut metadata, &ast, None) {
+        diagnostics.push(error);
+        return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
+    }
     if let Err(error) = apply_trusted_external_verifiers(&mut metadata, &ir, &[]) {
         diagnostics.push(error);
         return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
@@ -7719,7 +7687,10 @@ pub fn compile_sources_metadata_with_diagnostics(
         return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
     }
     let mut metadata = compile_metadata_from_ir(&ir, artifact_format, target_profile, edition, None);
-    bind_public_interface(&mut metadata, &entry.ast);
+    if let Err(error) = bind_public_interface(&mut metadata, &entry.ast, Some(&project.resolver)) {
+        diagnostics.push(error);
+        return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
+    }
     if let Err(error) = apply_trusted_external_verifiers(&mut metadata, &ir, &[]) {
         diagnostics.push(error);
         return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
@@ -7759,25 +7730,27 @@ pub fn compile_path_metadata_with_diagnostics<P: AsRef<Utf8Path>>(
         Ok(path) => path,
         Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error] },
     };
-    compile_file_metadata_with_diagnostics(&resolved, options, None)
+    compile_file_metadata_with_diagnostics(&resolved, options, &BTreeMap::new())
 }
 
-pub fn compile_path_metadata_with_diagnostics_for_source<P: AsRef<Utf8Path>>(
+/// Analyze a file with unsaved sources overlaid before parsing and resolution.
+/// Keys are canonical source paths in the same locked project graph.
+pub fn compile_path_metadata_with_diagnostics_for_sources<P: AsRef<Utf8Path>>(
     path: P,
-    source: &str,
+    sources: &BTreeMap<Utf8PathBuf, String>,
     options: CompileOptions,
 ) -> CompileMetadataDiagnosticReport {
     let resolved = match resolve_input_path(path.as_ref()) {
         Ok(path) => path,
         Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error] },
     };
-    compile_file_metadata_with_diagnostics(&resolved, options, Some(source))
+    compile_file_metadata_with_diagnostics(&resolved, options, sources)
 }
 
 fn compile_file_metadata_with_diagnostics(
     path: &Utf8Path,
     mut options: CompileOptions,
-    entry_source_override: Option<&str>,
+    source_overrides: &BTreeMap<Utf8PathBuf, String>,
 ) -> CompileMetadataDiagnosticReport {
     let manifest = match find_package_root(path).and_then(|root| root.map(|root| load_manifest(&root)).transpose()) {
         Ok(manifest) => manifest,
@@ -7786,7 +7759,7 @@ fn compile_file_metadata_with_diagnostics(
     if let Some(manifest) = manifest.as_ref() {
         options.edition = manifest.package.edition;
     }
-    let project = match load_project_for_entry_diagnostics(path, entry_source_override) {
+    let project = match load_project_for_entry_diagnostics(path, source_overrides) {
         Ok(project) => project,
         Err(diagnostics) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics },
     };
@@ -7828,7 +7801,10 @@ fn compile_file_metadata_with_diagnostics(
     }
     let mut metadata =
         compile_metadata_from_ir(&ir, artifact_format, target_profile, options.edition, options.primitive_compat.as_deref());
-    bind_public_interface(&mut metadata, &entry.ast);
+    if let Err(error) = bind_public_interface(&mut metadata, &entry.ast, Some(&project.resolver)) {
+        diagnostics.push(error);
+        return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
+    }
     let trusted_external_verifiers = manifest
         .as_ref()
         .and_then(|manifest| manifest.deploy.ckb.as_ref())
@@ -7916,180 +7892,6 @@ fn diagnostics_to_compile_error(mut diagnostics: Vec<CompileError>) -> CompileEr
         0 => CompileError::without_span("compilation failed"),
         1 => diagnostics.remove(0),
         len => CompileError::without_span(format!("aborting due to {} diagnostics", len)).with_related(diagnostics),
-    }
-}
-
-#[cfg(test)]
-mod compile_diagnostic_tests {
-    use super::*;
-
-    #[test]
-    fn mixed_explicit_and_legacy_visibility_emits_one_migration_warning() {
-        let report = compile_metadata_with_diagnostics(
-            "module visibility\npublic fn explicit() -> u64 { return 1 }\nfn implicit() -> u64 { return 2 }\n",
-            CURRENT_EDITION,
-            None,
-        );
-        assert!(report.metadata.is_some());
-        let warnings = report.diagnostics.iter().filter(|diagnostic| diagnostic.code.as_deref() == Some("W2500")).collect::<Vec<_>>();
-        assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].severity, DiagnosticSeverity::Warning);
-        assert!(warnings[0].message.contains("implicit"));
-        assert!(report.metadata.unwrap().constraints.warnings.iter().any(|warning| warning.contains("legacy-public")));
-    }
-
-    #[test]
-    fn compile_metadata_diagnostics_collects_multiple_type_errors() {
-        let source = r#"
-module multi_errors
-
-action bad_one() -> u64 {
-    verification
-        return true
-}
-
-action bad_two() -> bool {
-    verification
-        return 1
-}
-"#;
-        let report = compile_metadata_with_diagnostics(source, CURRENT_EDITION, None);
-        assert!(report.metadata.is_none());
-        assert_eq!(report.diagnostics.len(), 2);
-        assert!(report.diagnostics.iter().any(|error| error.message.contains("expected U64, found Bool")));
-        assert!(report.diagnostics.iter().any(|error| error.message.contains("expected Bool, found U64")));
-    }
-
-    #[test]
-    fn compile_metadata_diagnostics_collects_multiple_parse_errors() {
-        let source = r#"
-module multi_parse_errors
-
-action bad() -> bool {
-    verification
-        let first: u64 true
-        let second: bool 1
-        return true
-}
-"#;
-        let report = compile_metadata_with_diagnostics(source, CURRENT_EDITION, None);
-        assert!(report.metadata.is_none());
-        assert_eq!(report.diagnostics.len(), 2);
-        assert!(report.diagnostics.iter().any(|error| error.message.contains("expected '=', found 'true'")));
-        assert!(report.diagnostics.iter().any(|error| error.message.contains("expected '=', found integer 1")));
-    }
-
-    #[test]
-    fn compile_sources_metadata_diagnostics_collects_parse_errors_across_files() {
-        let sources = vec![
-            InMemorySource {
-                path: "src/main.cell".to_string(),
-                role: Some("entry".to_string()),
-                source: r#"
-module demo::main
-
-action bad() -> bool {
-    verification
-        let first: u64 true
-        return true
-}
-"#
-                .to_string(),
-            },
-            InMemorySource {
-                path: "src/helper.cell".to_string(),
-                role: None,
-                source: r#"
-module demo::helper
-
-action also_bad() -> bool {
-    verification
-        let second: bool 1
-        return true
-}
-"#
-                .to_string(),
-            },
-        ];
-        let report = compile_sources_metadata_with_diagnostics(&sources, "src/main.cell", CURRENT_EDITION, None);
-        assert!(report.metadata.is_none());
-        assert_eq!(report.diagnostics.len(), 2);
-        assert!(report.diagnostics.iter().any(|error| error.file.as_ref().is_some_and(|file| file.as_str() == "src/main.cell")));
-        assert!(report.diagnostics.iter().any(|error| error.file.as_ref().is_some_and(|file| file.as_str() == "src/helper.cell")));
-    }
-
-    #[test]
-    fn compile_metadata_diagnostics_collects_multiple_statement_errors() {
-        let source = r#"
-module multi_errors
-
-action bad() -> bool {
-    verification
-        let first: u64 = true
-        let second: bool = 1
-        return true
-}
-"#;
-        let report = compile_metadata_with_diagnostics(source, CURRENT_EDITION, None);
-        assert!(report.metadata.is_none());
-        assert_eq!(report.diagnostics.len(), 2);
-        assert!(report.diagnostics.iter().any(|error| error.message.contains("expected U64, found Bool")));
-        assert!(report.diagnostics.iter().any(|error| error.message.contains("expected Bool, found U64")));
-    }
-
-    #[test]
-    fn compile_metadata_diagnostics_span_primitive_return_errors() {
-        let source = r#"
-module return_span
-
-action bad() -> bool {
-    verification
-        return 1
-}
-"#;
-        let report = compile_metadata_with_diagnostics(source, CURRENT_EDITION, None);
-        assert!(report.metadata.is_none());
-        assert_eq!(report.diagnostics.len(), 1);
-        let diagnostic = &report.diagnostics[0];
-        assert!(diagnostic.message.contains("expected Bool, found U64"));
-        assert_eq!(diagnostic.span.line, 6);
-        assert_eq!(diagnostic.span.column, 9);
-        assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "return 1");
-    }
-
-    #[test]
-    fn compile_metadata_diagnostics_collects_multiple_ir_errors() {
-        let source = r#"
-module multi_ir_errors
-
-resource Token {
-    amount: u64,
-}
-
-#[effect(ReadOnly)]
-action issue_one(amount: u64) -> Token {
-    verification
-        let out = create Token {
-            amount: amount
-        }
-        return out
-}
-
-#[effect(ReadOnly)]
-action issue_two(amount: u64) -> Token {
-    verification
-        let out = create Token {
-            amount: amount
-        }
-        return out
-}
-"#;
-        let report = compile_metadata_with_diagnostics(source, CURRENT_EDITION, None);
-        assert!(report.metadata.is_none());
-        assert_eq!(report.diagnostics.len(), 2);
-        assert!(report.diagnostics.iter().any(|error| error.message.contains("action 'issue_one'")));
-        assert!(report.diagnostics.iter().any(|error| error.message.contains("action 'issue_two'")));
-        assert!(report.diagnostics.iter().all(|error| error.message.contains("declared effect ReadOnly is too weak")));
     }
 }
 
@@ -8221,171 +8023,6 @@ pub(crate) fn proof_plan_has_blocking_consensus_gap(plan: &ProofPlanMetadata) ->
     true
 }
 
-fn prepare_compile_ir(
-    ast: &ast::Module,
-    options: &CompileOptions,
-    resolver: Option<(&ModuleResolver, &str)>,
-    entry_scope: Option<&CompileEntryScope>,
-) -> Result<(Option<ast::Module>, ir::IrModule)> {
-    // 2.5. Primitive compat/strict mode: reject v0.14 protocol verbs in strict mode
-    if options.is_primitive_strict_015() {
-        check_primitive_strict_015(ast)?;
-    };
-
-    // 3. Type check
-    if let Some((resolver, module_name)) = resolver {
-        types::check_with_resolver(ast, resolver, module_name)?;
-    } else {
-        types::check(ast)?;
-    }
-    flow::check(ast)?;
-
-    // Validate source lowering before optional rewrites can erase declarations.
-    // Effect annotations and invalid helper bodies must not become acceptable
-    // merely because inlining or dead-code elimination removes their evidence.
-    let generate_ir = |module: &ast::Module| match resolver {
-        Some((resolver, module_name)) => ir::generate_with_resolver(module, resolver, module_name),
-        None => ir::generate(module),
-    };
-    let source_ir = generate_ir(ast)?;
-
-    let optimized_ast = if options.diagnostics.enabled(OptimizationPass::ConstantFolding)
-        || options.diagnostics.enabled(OptimizationPass::Inlining)
-        || options.diagnostics.enabled(OptimizationPass::DeadCode)
-    {
-        let mut optimized = ast.clone();
-        optimize::optimize_module(&mut optimized, options.diagnostics)?;
-        if let Some((resolver, module_name)) = resolver {
-            types::check_with_resolver(&optimized, resolver, module_name)?;
-        } else {
-            types::check(&optimized)?;
-        }
-        flow::check(&optimized)?;
-        Some(optimized)
-    } else {
-        None
-    };
-    let lowering_ast = optimized_ast.as_ref().unwrap_or(ast);
-
-    // 4. Generate IR
-    let ir = if optimized_ast.is_some() { generate_ir(lowering_ast)? } else { source_ir };
-    let mut ir = match entry_scope {
-        Some(scope) => scope_ir_to_entry(&ir, scope)?,
-        None => ir,
-    };
-    if options.diagnostics.enabled(OptimizationPass::ExactCellEquality) {
-        ir::optimize_exact_cell_data_equality(&mut ir);
-    }
-    if options.diagnostics.enabled(OptimizationPass::SourceByteEquality) {
-        ir::optimize_source_byte_equality(&mut ir);
-    }
-    executable_surface::validate_ir_module(&ir)?;
-    Ok((optimized_ast, ir))
-}
-
-fn compile_ast_with_build(
-    ast: &ast::Module,
-    options: &CompileOptions,
-    resolver: Option<(&ModuleResolver, &str)>,
-    build: Option<&BuildConfig>,
-    ckb_deploy: Option<&package::CkbDeployConfig>,
-    entry_scope: Option<&CompileEntryScope>,
-    executable_surface_policy: ExecutableSurfacePolicy,
-) -> Result<CompileResult> {
-    validate_compile_options(options)?;
-    let target_profile = TargetProfile::from_options(options, build)?;
-    target_profile.ensure_compile_supported()?;
-    let artifact_format = ArtifactFormat::from_target(resolve_target(options, build))?;
-    let (optimized_ast, ir) = prepare_compile_ir(ast, options, resolver, entry_scope)?;
-    let lowering_ast = optimized_ast.as_ref().unwrap_or(ast);
-    let ir = &ir;
-
-    let mut metadata =
-        compile_metadata_from_ir(ir, artifact_format, target_profile, options.edition, options.primitive_compat.as_deref());
-    bind_public_interface(&mut metadata, ast);
-    apply_trusted_external_verifiers(&mut metadata, ir, ckb_deploy.map_or(&[], |ckb| ckb.trusted_external_verifiers.as_slice()))?;
-    if let Some(ckb) = ckb_deploy {
-        zk_package::validate(ir, ckb)?;
-    }
-    bind_typed_semantics(&mut metadata, ir, ast, resolver.map(|(resolver, _)| resolver), options.source_contracts);
-    let target_policy_violations = target_profile_artifact_policy_violations(&metadata, target_profile);
-    if !target_policy_violations.is_empty() {
-        return Err(CompileError::without_span(format!(
-            "target profile policy failed for '{}':\n  - {}",
-            target_profile.name(),
-            target_policy_violations.join("\n  - ")
-        )));
-    }
-    validate_executable_surface(&metadata, executable_surface_policy)?;
-
-    // 5. Code generation
-    let codegen_options = codegen::CodegenOptions { diagnostics: options.diagnostics, debug: options.debug, target_profile };
-    let generated = codegen::generate_with_evidence(ir, &codegen_options, artifact_format).map_err(|error| {
-        if error.code.is_some() {
-            error
-        } else {
-            error.with_code("E2000")
-        }
-    })?;
-    let mut artifact_bytes = generated.bytes;
-    if artifact_bytes.is_empty() {
-        return Err(CompileError::new("backend produced an empty artifact", error::Span::default()).with_code("E2001"));
-    }
-
-    // 5b. Debug info generation (embed DWARF section when debug option enabled and artifact is ELF).
-    // Gated out of the wasm build: the debug module pulls native tooling
-    // and DWARF embedding is not needed in the browser playground.
-    #[cfg(not(feature = "wasm"))]
-    if options.debug && artifact_format == ArtifactFormat::RiscvElf {
-        let mut debug_gen =
-            debug::DebugInfoGenerator::new(lowering_ast.name.clone(), std::path::PathBuf::from(lowering_ast.name.clone()));
-        for item in &lowering_ast.items {
-            if let ast::Item::Action(action) = item {
-                for stmt in &action.body {
-                    debug_gen.add_line_info(0, stmt_span(stmt));
-                }
-            }
-        }
-        let dwarf = debug_gen.generate_dwarf();
-        let mut debug_sections = Vec::new();
-        let mut elf_with_debug = artifact_bytes.clone();
-        dwarf.write_to_elf(&mut elf_with_debug, &mut debug_sections);
-        if !elf_with_debug.is_empty() {
-            artifact_bytes = elf_with_debug;
-        }
-        metadata.debug_info_sections = debug_sections.iter().map(|s| s.name.clone()).collect();
-    }
-
-    if metadata.runtime.vm_abi.embedded_in_artifact {
-        artifact_bytes = append_vm_abi_trailer(artifact_bytes, metadata.runtime.vm_abi.version);
-    }
-    let artifact_hash = ckb_blake2b256(&artifact_bytes);
-    bind_artifact_metadata(&mut metadata, &artifact_bytes, &artifact_hash);
-    bind_constraints_metadata(&mut metadata, &artifact_bytes, artifact_format, target_profile, ir, &codegen_options)?;
-    metadata.runtime.builder_assumptions = crate::assumptions::builder_assumptions_from_metadata(&metadata);
-    metadata.runtime.proof_plan_soundness = crate::proof_plan::soundness::check_metadata(&metadata, options.is_assurance_strict_016());
-    if options.is_assurance_strict_016() {
-        crate::proof_plan::soundness::validate_metadata(&metadata, true)?;
-    }
-    if options.is_ckb_source_strict_017() {
-        validate_primitive_strict_017_metadata(&metadata)?;
-    }
-
-    let verified_artifact_draft =
-        generated.machine_layout.map(|layout| verified_artifact::VerifiedArtifactDraft::new(layout, lowering_ast, ir));
-    Ok(CompileResult {
-        artifact_bytes,
-        artifact_format,
-        artifact_hash,
-        metadata,
-        ast: ast.clone(),
-        verified_lowering_record: None,
-        source_artifact_map: None,
-        verified_artifact_draft,
-        cache_hit: false,
-    })
-}
-
 /// Compile from file, package directory, or Cell.toml
 pub fn compile_path<P: AsRef<Utf8Path>>(path: P, options: CompileOptions) -> Result<CompileResult> {
     let resolved = resolve_input_path(path)?;
@@ -8507,28 +8144,6 @@ pub fn compile_path_with_artifact_name<P: AsRef<Utf8Path>>(
     compile_file_with_entry_scope(&resolved, options, Some(CompileEntryScope::Artifact(declaration)), policy)
 }
 
-thread_local! {
-    static INCREMENTAL_CACHE_SUPPRESSION_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
-}
-
-/// Run an in-memory analysis compile without reading, writing, touching, or
-/// pruning the persistent incremental cache.
-pub(crate) fn without_incremental_cache<T>(operation: impl FnOnce() -> T) -> T {
-    INCREMENTAL_CACHE_SUPPRESSION_DEPTH.with(|depth| depth.set(depth.get().saturating_add(1)));
-    struct RestoreIncrementalCache;
-    impl Drop for RestoreIncrementalCache {
-        fn drop(&mut self) {
-            INCREMENTAL_CACHE_SUPPRESSION_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
-        }
-    }
-    let _restore = RestoreIncrementalCache;
-    operation()
-}
-
-fn incremental_cache_enabled() -> bool {
-    INCREMENTAL_CACHE_SUPPRESSION_DEPTH.with(|depth| depth.get() == 0) && !offline_environment_active()
-}
-
 /// Hosts that embed read-only compiler tooling (the MCP server) set this so
 /// analysis subprocesses neither write persistent caches nor fetch missing
 /// dependencies over the network.
@@ -8626,360 +8241,6 @@ fn compile_file_with_entry_scope_inner<P: AsRef<Utf8Path>>(
     }
 
     Ok(result)
-}
-
-#[cfg(feature = "cli")]
-pub(crate) fn refresh_incremental_cache_for_input<P: AsRef<Utf8Path>>(
-    input: P,
-    options: &CompileOptions,
-    result: &CompileResult,
-) -> Result<()> {
-    let resolved = resolve_input_path(input.as_ref())?;
-    let source_units = collect_source_units_for_compile_file(&resolved)?;
-    let cache_units = collect_cache_units_for_compile_file(&resolved, &source_units)?;
-    // A package's mandatory edition overrides the caller's standalone default.
-    // Rebuilding Cell.lock must refresh the same cache key that compilation and
-    // build-plan use, including the source-evidence mode.
-    let mut resolved_options = options.clone();
-    resolved_options.edition = result.metadata.edition;
-    incremental_cache_store(&resolved, &cache_units, &resolved_options, result);
-    Ok(())
-}
-
-/// Check incremental compilation cache for a previous compile result.
-/// Returns `Some(result)` if the cache is valid and the source has not changed.
-fn incremental_cache_hit(path: &Utf8Path, cache_units: &[SourceUnitMetadata], options: &CompileOptions) -> Option<CompileResult> {
-    incremental_cache_result(path, cache_units, options, true)
-}
-
-fn incremental_cache_result(
-    path: &Utf8Path,
-    cache_units: &[SourceUnitMetadata],
-    options: &CompileOptions,
-    refresh_recency: bool,
-) -> Option<CompileResult> {
-    let max_entries = incremental_cache_max_entries();
-    if max_entries == 0 {
-        return None;
-    }
-    let cache_dir = incremental_cache_dir(path)?;
-    let cache_key = incremental_cache_key(cache_units, options);
-    let entry_dir = cache_dir.join(&cache_key);
-
-    let entry_metadata = std::fs::symlink_metadata(&entry_dir).ok()?;
-    if entry_metadata.file_type().is_symlink() || !entry_metadata.is_dir() {
-        return None;
-    }
-
-    let artifact_path = entry_dir.join("artifact");
-    let metadata_path = entry_dir.join("metadata.json");
-    let lowering_record_path = entry_dir.join("lowering.json");
-    let source_map_path = entry_dir.join("sourcemap.json");
-    let source_hash_file = entry_dir.join("source_hash");
-
-    if ![&artifact_path, &metadata_path, &source_hash_file].into_iter().all(|path| incremental_cache_file_is_regular(path)) {
-        return None;
-    }
-
-    // Verify the source content hash still matches.
-    let cached_source_hash = std::fs::read_to_string(&source_hash_file).ok()?;
-    let current_source_hash = source_set_hash(cache_units);
-    if cached_source_hash != current_source_hash {
-        return None;
-    }
-
-    // Load cached artifact and metadata.
-    let artifact_bytes = std::fs::read(&artifact_path).ok()?;
-    let metadata_json = std::fs::read_to_string(&metadata_path).ok()?;
-    let metadata: CompileMetadata = serde_json::from_str(&metadata_json).ok()?;
-    let (verified_lowering_record, source_artifact_map) = if metadata.artifact_format == "RISC-V ELF" {
-        if !incremental_cache_file_is_regular(&lowering_record_path) || !incremental_cache_file_is_regular(&source_map_path) {
-            return None;
-        }
-        let lowering_bytes = std::fs::read(&lowering_record_path).ok()?;
-        let source_map_bytes = std::fs::read(&source_map_path).ok()?;
-        (
-            Some(cellscript_artifact_checker::parse_lowering_record(&lowering_bytes, &CheckerBudgets::default()).ok()?),
-            Some(cellscript_artifact_checker::parse_source_map(&source_map_bytes, &CheckerBudgets::default()).ok()?),
-        )
-    } else {
-        (None, None)
-    };
-
-    let artifact_hash: [u8; 32] = {
-        let hash_hex = metadata.artifact_hash.as_deref().unwrap_or("");
-        hex_decode(hash_hex).unwrap_or([0u8; 32])
-    };
-
-    let result = CompileResult {
-        artifact_bytes,
-        artifact_format: match metadata.artifact_format.as_str() {
-            "RISC-V ELF" => ArtifactFormat::RiscvElf,
-            _ => ArtifactFormat::RiscvAssembly,
-        },
-        artifact_hash,
-        metadata,
-        ast: ast::Module {
-            name: String::new(),
-            items: Vec::new(),
-            interface_templates: Vec::new(),
-            visibilities: BTreeMap::new(),
-            span: crate::error::Span { start: 0, end: 0, line: 0, column: 0 },
-        },
-        verified_lowering_record,
-        source_artifact_map,
-        verified_artifact_draft: None,
-        cache_hit: true,
-    };
-    result.validate().ok()?;
-    if refresh_recency {
-        refresh_incremental_cache_recency(&entry_dir);
-        prune_incremental_cache_entries(&cache_dir, &cache_key, max_entries);
-    }
-    Some(result)
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct IncrementalCacheInspection {
-    pub cache_key: String,
-    pub source_set_hash: String,
-    pub status: String,
-    pub rebuild_reason: String,
-}
-
-pub(crate) fn inspect_incremental_cache<P: AsRef<Utf8Path>>(input: P, options: &CompileOptions) -> Result<IncrementalCacheInspection> {
-    let resolved = resolve_input_path(input.as_ref())?;
-    let source_units = collect_source_units_for_compile_file(&resolved)?;
-    let cache_units = collect_cache_units_for_compile_file(&resolved, &source_units)?;
-    let cache_key = incremental_cache_key(&cache_units, options);
-    let source_set_hash = source_set_hash(&cache_units);
-    let cache_entry_exists =
-        incremental_cache_dir(&resolved).map(|directory| directory.join(&cache_key)).is_some_and(|entry| entry.exists());
-    let up_to_date = incremental_cache_result(&resolved, &cache_units, options, false).is_some();
-    let (status, rebuild_reason) = if up_to_date {
-        ("up-to-date", "cache-entry-valid")
-    } else if cache_entry_exists {
-        ("stale", "cache-entry-invalid")
-    } else {
-        ("missing", "cache-entry-missing")
-    };
-    Ok(IncrementalCacheInspection {
-        cache_key,
-        source_set_hash,
-        status: status.to_string(),
-        rebuild_reason: rebuild_reason.to_string(),
-    })
-}
-
-/// Store compile result to incremental cache after a successful compile.
-fn incremental_cache_store(path: &Utf8Path, cache_units: &[SourceUnitMetadata], options: &CompileOptions, result: &CompileResult) {
-    let max_entries = incremental_cache_max_entries();
-    if max_entries == 0 {
-        return;
-    }
-    let Some(cache_dir) = incremental_cache_dir(path) else { return };
-    let cache_key = incremental_cache_key(cache_units, options);
-    let entry_dir = cache_dir.join(&cache_key);
-
-    let mut files = vec![
-        ("artifact", result.artifact_bytes.clone()),
-        (
-            "metadata.json",
-            match serde_json::to_vec_pretty(&result.metadata) {
-                Ok(bytes) => bytes,
-                Err(_) => return,
-            },
-        ),
-        ("source_hash", source_set_hash(cache_units).into_bytes()),
-        (".last_used", Vec::new()),
-    ];
-    if let Some(record) = &result.verified_lowering_record {
-        let Ok(bytes) = cellscript_artifact_checker::canonical_bytes(record) else { return };
-        files.push(("lowering.json", bytes));
-    }
-    if let Some(source_map) = &result.source_artifact_map {
-        let Ok(bytes) = cellscript_artifact_checker::canonical_bytes(source_map) else { return };
-        files.push(("sourcemap.json", bytes));
-    }
-    if let Ok(bytes) = serde_json::to_vec_pretty(cache_units) {
-        files.push(("source_units.json", bytes));
-    }
-
-    if !create_incremental_cache_components(&cache_dir) || std::fs::create_dir(&entry_dir).is_err() {
-        return;
-    }
-    if !files.into_iter().all(|(name, bytes)| write_new_incremental_cache_file(&entry_dir.join(name), &bytes)) {
-        if std::fs::symlink_metadata(&entry_dir).is_ok_and(|metadata| !metadata.file_type().is_symlink() && metadata.is_dir()) {
-            let _ = std::fs::remove_dir_all(&entry_dir);
-        }
-        return;
-    }
-    prune_incremental_cache_entries(&cache_dir, &cache_key, max_entries);
-}
-
-fn incremental_cache_file_is_regular(path: &Utf8Path) -> bool {
-    std::fs::symlink_metadata(path).is_ok_and(|metadata| !metadata.file_type().is_symlink() && metadata.is_file())
-}
-
-fn write_new_incremental_cache_file(path: &Utf8Path, bytes: &[u8]) -> bool {
-    use std::io::Write;
-
-    let Ok(mut file) = std::fs::OpenOptions::new().write(true).create_new(true).open(path) else { return false };
-    file.write_all(bytes).is_ok()
-}
-
-fn refresh_incremental_cache_recency(entry_dir: &Utf8Path) {
-    let nonce =
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|duration| duration.as_nanos()).unwrap_or_default();
-    let temporary = entry_dir.join(format!(".cellscript-cache-touch-{}-{nonce}.tmp", std::process::id()));
-    if !write_new_incremental_cache_file(&temporary, &[]) {
-        return;
-    }
-    if std::fs::rename(&temporary, entry_dir.join(".last_used")).is_err() {
-        let _ = std::fs::remove_file(temporary);
-    }
-}
-
-const DEFAULT_INCREMENTAL_CACHE_MAX_ENTRIES: usize = 32;
-const MAX_INCREMENTAL_CACHE_MAX_ENTRIES: usize = 4_096;
-
-fn incremental_cache_max_entries() -> usize {
-    std::env::var("CELLSCRIPT_INCREMENTAL_CACHE_MAX_ENTRIES")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .filter(|value| *value <= MAX_INCREMENTAL_CACHE_MAX_ENTRIES)
-        .unwrap_or(DEFAULT_INCREMENTAL_CACHE_MAX_ENTRIES)
-}
-
-fn cache_entry_recency(path: &std::path::Path) -> std::time::SystemTime {
-    std::fs::symlink_metadata(path.join(".last_used"))
-        .and_then(|metadata| {
-            if metadata.file_type().is_symlink() || !metadata.is_file() {
-                Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "unsafe incremental-cache recency marker"))
-            } else {
-                metadata.modified()
-            }
-        })
-        .or_else(|_| std::fs::symlink_metadata(path).and_then(|metadata| metadata.modified()))
-        .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
-}
-
-fn prune_incremental_cache_entries(cache_dir: &Utf8Path, current_key: &str, max_entries: usize) {
-    if max_entries == 0 || !cache_dir.is_dir() || !incremental_cache_components_are_safe(cache_dir) {
-        return;
-    }
-    let Ok(entries) = std::fs::read_dir(cache_dir) else { return };
-    let mut entries = entries
-        .filter_map(std::result::Result::ok)
-        .filter_map(|entry| {
-            let name = entry.file_name().to_str()?.to_owned();
-            if name.len() != 64 || !name.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-                return None;
-            }
-            let metadata = std::fs::symlink_metadata(entry.path()).ok()?;
-            if metadata.file_type().is_symlink() || !metadata.is_dir() {
-                return None;
-            }
-            let recency = cache_entry_recency(&entry.path());
-            Some((name, recency, entry.path()))
-        })
-        .collect::<Vec<_>>();
-    entries.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| right.0.cmp(&left.0)));
-
-    let mut retained = 0_usize;
-    for (name, _, path) in entries {
-        if name == current_key || retained < max_entries.saturating_sub(1) {
-            retained += usize::from(name != current_key);
-            continue;
-        }
-        let _ = std::fs::remove_dir_all(path);
-    }
-}
-
-fn incremental_cache_dir(path: &Utf8Path) -> Option<Utf8PathBuf> {
-    // Prefer the package root (where Cell.toml lives) so the cache sits at
-    //   <pkg-root>/.cell/build/cache
-    // rather than next to the source file (e.g. src/.cell/build/cache).
-    // Falls back to the source file's parent when not inside a package.
-    let cache_dir = if let Ok(Some(pkg_root)) = find_package_root(path) {
-        pkg_root.join(".cell/build/cache")
-    } else {
-        path.parent()?.join(".cell/build/cache")
-    };
-    incremental_cache_components_are_safe(&cache_dir).then_some(cache_dir)
-}
-
-fn incremental_cache_components_are_safe(cache_dir: &Utf8Path) -> bool {
-    let Some(build_dir) = cache_dir.parent() else { return false };
-    let Some(cell_dir) = build_dir.parent() else { return false };
-    if cache_dir.file_name() != Some("cache") || build_dir.file_name() != Some("build") || cell_dir.file_name() != Some(".cell") {
-        return false;
-    }
-    [cell_dir, build_dir, cache_dir].into_iter().all(|path| match std::fs::symlink_metadata(path) {
-        Ok(metadata) => !metadata.file_type().is_symlink() && metadata.is_dir(),
-        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
-    })
-}
-
-fn create_incremental_cache_components(cache_dir: &Utf8Path) -> bool {
-    let Some(build_dir) = cache_dir.parent() else { return false };
-    let Some(cell_dir) = build_dir.parent() else { return false };
-    if cache_dir.file_name() != Some("cache") || build_dir.file_name() != Some("build") || cell_dir.file_name() != Some(".cell") {
-        return false;
-    }
-    for path in [cell_dir, build_dir, cache_dir] {
-        match std::fs::create_dir(path) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                let Ok(metadata) = std::fs::symlink_metadata(path) else { return false };
-                if metadata.file_type().is_symlink() || !metadata.is_dir() {
-                    return false;
-                }
-            }
-            Err(_) => return false,
-        }
-    }
-    incremental_cache_components_are_safe(cache_dir)
-}
-
-fn incremental_cache_key(cache_units: &[SourceUnitMetadata], options: &CompileOptions) -> String {
-    let mut key_input = String::new();
-    key_input.push_str("cellscript-incremental-cache-v2");
-    key_input.push_str(&format!("-compiler-{}", VERSION));
-    key_input.push_str(&format!("-metadata-{}", METADATA_SCHEMA_VERSION));
-    key_input.push_str(&format!(
-        "-metadata-components-{}-{}-{}",
-        SOURCE_METADATA_SCHEMA_VERSION, ARTIFACT_METADATA_SCHEMA_VERSION, CONSTRAINTS_METADATA_SCHEMA_VERSION
-    ));
-    key_input.push_str(&format!("-artifact-cache-{}", ARTIFACT_CACHE_VERSION));
-    key_input.push_str(&source_set_hash(cache_units));
-    key_input.push_str(COMPILATION_POLICY);
-    key_input.push_str(&format!("-diagnostic-{}", options.diagnostics.cache_bits()));
-    key_input.push_str(&format!("-{}", options.target.as_deref().unwrap_or("default")));
-    key_input.push_str(&format!("-{}", options.target_profile.as_deref().unwrap_or("default")));
-    key_input.push_str(&format!("-edition-{}", options.edition));
-    let target_profile = options.target_profile.as_deref().unwrap_or(DEFAULT_TARGET_PROFILE);
-    let compatibility_profile = resolve_compatibility_profile(options.edition, target_profile, options.primitive_compat.as_deref());
-    key_input.push_str(&format!("-compatibility-profile-{}", compatibility_profile.id));
-    key_input.push_str(&format!("-debug{}", options.debug));
-    key_input.push_str(&format!("-source-contracts{}", options.source_contracts));
-    key_input.push_str(&format!("-primitive-{}", options.primitive_compat.as_deref().unwrap_or("default")));
-    hex_encode(&ckb_blake2b256(key_input.as_bytes()))
-}
-
-fn source_set_hash(cache_units: &[SourceUnitMetadata]) -> String {
-    let mut key_input = String::new();
-    for unit in cache_units {
-        key_input.push_str(&unit.role);
-        key_input.push('\0');
-        key_input.push_str(&unit.path);
-        key_input.push('\0');
-        key_input.push_str(&unit.hash);
-        key_input.push('\0');
-        key_input.push_str(&unit.size_bytes.to_string());
-        key_input.push('\n');
-    }
-    hex_encode(&ckb_blake2b256(key_input.as_bytes()))
 }
 
 fn hex_decode(hex: &str) -> Option<[u8; 32]> {
@@ -9302,7 +8563,7 @@ fn generic_instantiation_metadata(ir: &ir::IrModule) -> Vec<GenericInstantiation
     for item in &ir.items {
         match item {
             ir::IrItem::TypeDef(definition) => insert("struct", &definition.name, true),
-            ir::IrItem::PureFn(function) => insert("function", &function.name, false),
+            ir::IrItem::Function(function) => insert("function", &function.name, false),
             _ => {}
         }
     }
@@ -9316,23 +8577,26 @@ fn generic_instantiation_metadata(ir: &ir::IrModule) -> Vec<GenericInstantiation
 }
 
 #[cfg(not(feature = "wasm"))]
-fn bind_public_interface(metadata: &mut CompileMetadata, ast: &ast::Module) {
+fn bind_public_interface(metadata: &mut CompileMetadata, ast: &ast::Module, resolver: Option<&ModuleResolver>) -> Result<()> {
     for warning in visibility_migration_diagnostics(ast) {
         if !metadata.constraints.warnings.contains(&warning.message) {
             metadata.constraints.warnings.push(warning.message.clone());
         }
     }
-    metadata.public_interface = interface::build(ast, metadata);
+    metadata.public_interface = interface::build_with_resolver(ast, metadata, resolver)?;
     metadata.interface_hash = interface::hash(&metadata.public_interface);
+    Ok(())
 }
 
 #[cfg(feature = "wasm")]
-fn bind_public_interface(metadata: &mut CompileMetadata, ast: &ast::Module) {
+fn bind_public_interface(metadata: &mut CompileMetadata, ast: &ast::Module, resolver: Option<&ModuleResolver>) -> Result<()> {
+    effects::infer_module(ast, resolver)?;
     for warning in visibility_migration_diagnostics(ast) {
         if !metadata.constraints.warnings.contains(&warning.message) {
             metadata.constraints.warnings.push(warning.message.clone());
         }
     }
+    Ok(())
 }
 
 pub fn visibility_migration_diagnostics(module: &ast::Module) -> Vec<CompileError> {
@@ -9424,768 +8688,6 @@ fn bind_typed_semantics(
     _source_contracts: bool,
 ) {
     metadata.runtime.zk_verifiers = zk_contract::browser_contracts(ir);
-}
-
-#[cfg(feature = "wasm")]
-fn browser_type_metadata(type_def: &ir::IrTypeDef, type_defs: &BTreeMap<String, &ir::IrTypeDef>) -> TypeMetadata {
-    TypeMetadata {
-        name: type_def.name.clone(),
-        type_id: None,
-        default_hash_type: None,
-        hash_type_source: if type_def.default_hash_type.is_some() {
-            "dsl-with_default_hash_type".to_string()
-        } else {
-            "target-default".to_string()
-        },
-        capacity_floor_shannons: None,
-        capacity_floor_source: None,
-        type_id_hash: None,
-        ckb_type_id: None,
-        kind: format!("{:?}", type_def.kind),
-        capability_set_version: ast::Capability::REGISTRY_VERSION,
-        capabilities: ast::Capability::ALL
-            .into_iter()
-            .filter(|capability| type_def.capabilities.contains(capability))
-            .map(|capability| metadata_capability_name(&capability))
-            .collect(),
-        claim_output: None,
-        flow_states: Vec::new(),
-        flow_state_field: None,
-        flow_transitions: Vec::new(),
-        flow_initial_state: None,
-        flow_terminal_states: Vec::new(),
-        flow_terminal_discharge: None,
-        flow_terminal_evidence_tier: None,
-        flow_state_model: None,
-        flow_audit_warnings: Vec::new(),
-        validity_predicates: Vec::new(),
-        encoded_size: type_encoded_size(type_def, type_defs),
-        fields: Vec::new(),
-        molecule_schema: None,
-        identity_policy: None,
-    }
-}
-
-#[cfg(feature = "wasm")]
-fn browser_param_metadata(param: &ir::IrParam) -> ParamMetadata {
-    ParamMetadata {
-        name: param.name.clone(),
-        ty: ir_type_to_string(&param.ty),
-        is_mut: false,
-        is_ref: false,
-        source: "default".to_string(),
-        protected_spend_surface: false,
-        witness_data_source: false,
-        lock_args_data_source: false,
-        cell_bound_abi: false,
-        schema_pointer_abi: false,
-        schema_length_abi: false,
-        fixed_byte_pointer_abi: false,
-        fixed_byte_length_abi: false,
-        fixed_byte_len: None,
-        type_hash_pointer_abi: false,
-        type_hash_length_abi: false,
-        type_hash_len: None,
-        bounded_runtime_contract: None,
-    }
-}
-
-#[cfg(feature = "wasm")]
-fn browser_fail_closed_metadata(
-    ir: &ir::IrModule,
-    type_layouts: &MetadataTypeLayouts,
-    cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-    pure_const_returns: &HashMap<String, ir::IrConst>,
-) -> (Vec<String>, Vec<VerifierObligationMetadata>) {
-    let mut module_features = BTreeSet::new();
-    let mut obligations = Vec::new();
-    for item in &ir.items {
-        let (scope, body, params, return_type) = match item {
-            ir::IrItem::Action(action) => {
-                (format!("action:{}", action.name), &action.body, action.params.as_slice(), action.return_type.as_ref())
-            }
-            ir::IrItem::PureFn(function) => {
-                (format!("fn:{}", function.name), &function.body, function.params.as_slice(), function.return_type.as_ref())
-            }
-            ir::IrItem::Lock(lock) => (format!("lock:{}", lock.name), &lock.body, lock.params.as_slice(), None),
-            ir::IrItem::TypeDef(_) | ir::IrItem::Invariant(_) => continue,
-        };
-        let param_schema_vars = schema_pointer_var_ids(body, params);
-        let features = body_fail_closed_runtime_features(
-            body,
-            &param_schema_vars,
-            type_layouts,
-            params,
-            cell_type_kinds,
-            return_type,
-            pure_const_returns,
-        );
-        for feature in features {
-            module_features.insert(feature.clone());
-            obligations.push(VerifierObligationMetadata {
-                scope: scope.clone(),
-                category: "runtime".to_string(),
-                feature: feature.clone(),
-                status: "fail-closed".to_string(),
-                detail: executable_surface::experimental_artifact_admission_detail(&feature).map_or_else(
-                    || format!("the browser compiler reports '{feature}' as an explicit fail-closed runtime path"),
-                    str::to_owned,
-                ),
-            });
-        }
-    }
-    (module_features.into_iter().collect(), obligations)
-}
-
-#[cfg(feature = "wasm")]
-fn browser_action_metadata(
-    ir: &ir::IrModule,
-    action: &ir::IrAction,
-    type_layouts: &MetadataTypeLayouts,
-    cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-    pure_const_returns: &HashMap<String, ir::IrConst>,
-) -> ActionMetadata {
-    let param_schema_vars = schema_pointer_var_ids(&action.body, &action.params);
-    let fail_closed_runtime_features = body_fail_closed_runtime_features(
-        &action.body,
-        &param_schema_vars,
-        type_layouts,
-        &action.params,
-        cell_type_kinds,
-        action.return_type.as_ref(),
-        pure_const_returns,
-    );
-    let mut ckb_runtime_features = auto_lowered_aggregate_runtime_features_for_action(ir, action);
-    ckb_runtime_features.extend(merge_ckb_runtime_features(
-        body_ckb_runtime_features(&action.name, &action.body, cell_type_kinds, type_layouts),
-        &action.params,
-    ));
-    let ckb_runtime_features = ckb_runtime_features.into_iter().collect::<Vec<_>>();
-    ActionMetadata {
-        name: action.name.clone(),
-        params: action.params.iter().map(browser_param_metadata).collect(),
-        return_type: None,
-        effect_class: format!("{:?}", action.effect_class),
-        parallelizable: false,
-        touches_shared: Vec::new(),
-        estimated_cycles: action.scheduler_hints.estimated_cycles,
-        scheduler_witness_abi: String::new(),
-        scheduler_witness_hex: String::new(),
-        scheduler_witness_molecule_hex: String::new(),
-        consume_set: action.body.consume_set.iter().map(cell_pattern_metadata).collect(),
-        read_refs: action.body.read_refs.iter().map(cell_pattern_metadata).collect(),
-        create_set: action
-            .body
-            .create_set
-            .iter()
-            .map(|pattern| CreatePatternMetadata {
-                operation: String::new(),
-                ty: pattern.ty.clone(),
-                binding: pattern.binding.clone(),
-                fields: Vec::new(),
-                has_lock: false,
-                identity_policy: None,
-                ckb_output_data: None,
-                ckb_type_id: None,
-            })
-            .collect(),
-        mutate_set: action
-            .body
-            .mutate_set
-            .iter()
-            .map(|pattern| MutatePatternMetadata {
-                operation: String::new(),
-                ty: pattern.ty.clone(),
-                binding: pattern.binding.clone(),
-                fields: Vec::new(),
-                preserved_fields: Vec::new(),
-                input_source: String::new(),
-                input_index: 0,
-                output_source: String::new(),
-                output_index: 0,
-                preserve_type_hash: false,
-                preserve_lock_hash: false,
-                type_hash_preservation_status: String::new(),
-                lock_hash_preservation_status: String::new(),
-                field_equality_status: String::new(),
-                field_transition_status: String::new(),
-            })
-            .collect(),
-        state_transition_edges: Vec::new(),
-        protocol_role_candidates: Vec::new(),
-        pool_primitives: Vec::new(),
-        ckb_runtime_accesses: Vec::new(),
-        ckb_script_group: None,
-        standalone_runner_compatible: ckb_runtime_features.is_empty() && action.params.is_empty(),
-        ckb_runtime_features,
-        fail_closed_runtime_features,
-        verifier_obligations: Vec::new(),
-        proof_plan: Vec::new(),
-        transaction_runtime_input_requirements: Vec::new(),
-        elf_compatible: true,
-        block_count: action.body.blocks.len(),
-    }
-}
-
-#[cfg(feature = "wasm")]
-fn compile_metadata_from_ir(
-    ir: &ir::IrModule,
-    artifact_format: ArtifactFormat,
-    target_profile: TargetProfile,
-    edition: CellScriptEdition,
-    primitive_assurance: Option<&str>,
-) -> CompileMetadata {
-    let type_layouts = metadata_type_layouts(ir);
-    let type_defs = metadata_type_defs_by_name(ir);
-    let cell_type_kinds = metadata_cell_type_kinds(ir);
-    let pure_const_returns = metadata_pure_const_returns(ir);
-    let (fail_closed_runtime_features, verifier_obligations) =
-        browser_fail_closed_metadata(ir, &type_layouts, &cell_type_kinds, &pure_const_returns);
-    let mut types = ir.external_type_defs.iter().map(|type_def| browser_type_metadata(type_def, &type_defs)).collect::<Vec<_>>();
-    types.extend(ir.items.iter().filter_map(|item| match item {
-        ir::IrItem::TypeDef(type_def) => Some(browser_type_metadata(type_def, &type_defs)),
-        _ => None,
-    }));
-    let actions = ir
-        .items
-        .iter()
-        .filter_map(|item| match item {
-            ir::IrItem::Action(action) => {
-                Some(browser_action_metadata(ir, action, &type_layouts, &cell_type_kinds, &pure_const_returns))
-            }
-            _ => None,
-        })
-        .collect();
-    CompileMetadata {
-        metadata_schema_version: METADATA_SCHEMA_VERSION,
-        source_metadata_schema_version: SOURCE_METADATA_SCHEMA_VERSION,
-        artifact_metadata_schema_version: ARTIFACT_METADATA_SCHEMA_VERSION,
-        constraints_metadata_schema_version: CONSTRAINTS_METADATA_SCHEMA_VERSION,
-        compiler_version: VERSION.to_string(),
-        edition,
-        compatibility_profile: resolve_compatibility_profile(edition, target_profile.name(), primitive_assurance),
-        module: ir.name.clone(),
-        public_interface: interface::PackageInterface::default(),
-        interface_hash: String::new(),
-        typed_semantics: cellscript_artifact_checker::TypedSemanticRecord::default(),
-        typed_semantics_hash: String::new(),
-        artifact_format: artifact_format.display_name().to_string(),
-        target_profile: target_profile.metadata(artifact_format),
-        artifact_hash: None,
-        artifact_size_bytes: None,
-        source_hash: None,
-        source_content_hash: None,
-        source_units: Vec::new(),
-        verified_artifact: VerifiedArtifactMetadata::default(),
-        lowering: LoweringMetadata {
-            protocol_semantics: String::new(),
-            assembly_path: String::new(),
-            elf_path: String::new(),
-            semantics_preserving_claim: String::new(),
-        },
-        capability_registry: CapabilityRegistryMetadata::default(),
-        enum_layouts: Vec::new(),
-        generic_instantiations: Vec::new(),
-        runtime: RuntimeMetadata {
-            vm_target: String::new(),
-            vm_version: String::new(),
-            syscall_abi: String::new(),
-            ckb_runtime_view_contract: CKB_RUNTIME_VIEW_CONTRACT.to_string(),
-            ckb_runtime_access_provenance_contract: CKB_RUNTIME_ACCESS_PROVENANCE_CONTRACT.to_string(),
-            vm_abi: VmAbiMetadata {
-                format: String::new(),
-                version: 0,
-                default: false,
-                embedded_in_artifact: false,
-                scope: String::new(),
-                selection: String::new(),
-            },
-            pure_elf_runner: String::new(),
-            ckb_runtime_required: false,
-            ckb_runtime_features: Vec::new(),
-            standalone_runner_compatible: false,
-            fail_closed_runtime_features,
-            ckb_runtime_accesses: Vec::new(),
-            signing_message_domains: ckb_signing_message_domains(ir),
-            zk_verifiers: Vec::new(),
-            trusted_external_verifiers: Vec::new(),
-            transaction_view_handles: Vec::new(),
-            borrow_regions: Vec::new(),
-            capability_proofs: Vec::new(),
-            verifier_obligations,
-            proof_plan: Vec::new(),
-            proof_plan_soundness: ProofPlanSoundnessReport::default(),
-            builder_assumptions: Vec::new(),
-            collection_instantiations: Vec::new(),
-            transaction_runtime_input_requirements: Vec::new(),
-            pool_primitives: Vec::new(),
-            fungible_type_group_entry: None,
-            policy_artifact: None,
-        },
-        constraints: ConstraintsMetadata::default(),
-        molecule_schema_manifest: MoleculeSchemaManifestMetadata::default(),
-        cell_data_codec_manifest: CellDataCodecManifestMetadata::default(),
-        template_layouts: Vec::new(),
-        types,
-        actions,
-        functions: Vec::new(),
-        locks: Vec::new(),
-        debug_info_sections: Vec::new(),
-    }
-}
-
-#[cfg(not(feature = "wasm"))]
-fn compile_metadata_from_ir(
-    ir: &ir::IrModule,
-    artifact_format: ArtifactFormat,
-    target_profile: TargetProfile,
-    edition: CellScriptEdition,
-    primitive_assurance: Option<&str>,
-) -> CompileMetadata {
-    let type_layouts = metadata_type_layouts(ir);
-    let type_defs = metadata_type_defs_by_name(ir);
-    let flow_states = metadata_flow_states(ir);
-    let flow_state_fields = metadata_flow_state_fields(ir);
-    let cell_type_kinds = metadata_cell_type_kinds(ir);
-    let pure_const_returns = metadata_pure_const_returns(ir);
-    let fail_closed_runtime_features = module_fail_closed_runtime_features(ir, &type_layouts, &cell_type_kinds, &pure_const_returns);
-    let ckb_runtime_features = module_ckb_runtime_features(ir, &cell_type_kinds, &type_layouts);
-    let ckb_runtime_accesses = module_ckb_runtime_accesses(ir, &cell_type_kinds, &type_layouts);
-    let verifier_obligations =
-        module_verifier_obligations(ir, &type_layouts, &flow_states, &flow_state_fields, &cell_type_kinds, &pure_const_returns);
-    let proof_plan = module_proof_plan_metadata(
-        ir,
-        &type_layouts,
-        &flow_states,
-        &flow_state_fields,
-        &cell_type_kinds,
-        &pure_const_returns,
-        &ckb_runtime_accesses,
-    );
-    let collection_instantiations = module_collection_instantiation_metadata(ir, &type_layouts, &pure_const_returns);
-    let transaction_runtime_input_requirements = transaction_runtime_input_requirements_from_obligations(&verifier_obligations);
-    let pool_primitives = module_pool_primitive_metadata(ir, &type_layouts, &cell_type_kinds, &pure_const_returns);
-    let has_entry_params = module_has_entry_params(ir);
-    let ckb_runtime_required = !ckb_runtime_features.is_empty();
-    let standalone_runner_compatible = !ckb_runtime_required && !has_entry_params;
-    let embeds_vm_abi_trailer = target_profile.embeds_vm_abi_trailer(artifact_format);
-    let validity_paths = module_validity_path_coverage(ir);
-    let mut types = ir
-        .external_type_defs
-        .iter()
-        .map(|type_def| {
-            type_metadata(
-                type_def,
-                &type_defs,
-                target_profile,
-                validity_paths.selected_create_count(&type_def.name),
-                validity_paths.checked_create_count(&type_def.name),
-                validity_paths.update_count(&type_def.name),
-            )
-        })
-        .collect::<Vec<_>>();
-    types.extend(ir.items.iter().filter_map(|item| match item {
-        ir::IrItem::TypeDef(type_def) => Some(type_metadata(
-            type_def,
-            &type_defs,
-            target_profile,
-            validity_paths.selected_create_count(&type_def.name),
-            validity_paths.checked_create_count(&type_def.name),
-            validity_paths.update_count(&type_def.name),
-        )),
-        _ => None,
-    }));
-    let molecule_schema_manifest = molecule_schema_manifest_metadata(&types, target_profile);
-    let cell_data_codec_manifest = cell_data_codec_manifest_metadata(&ckb_runtime_accesses, &molecule_schema_manifest, target_profile);
-    let transaction_view_handles = transaction_view_handle_metadata(ir);
-    let borrow_regions = borrow_region_metadata(ir);
-    let capability_proofs = capability_proof_metadata(ir);
-    let compatibility_profile = resolve_compatibility_profile(edition, target_profile.name(), primitive_assurance);
-    #[cfg(not(feature = "wasm"))]
-    let generic_instantiations = generic_instantiation_metadata(ir);
-    #[cfg(feature = "wasm")]
-    let generic_instantiations = Vec::new();
-    let mut metadata = CompileMetadata {
-        metadata_schema_version: METADATA_SCHEMA_VERSION,
-        source_metadata_schema_version: SOURCE_METADATA_SCHEMA_VERSION,
-        artifact_metadata_schema_version: ARTIFACT_METADATA_SCHEMA_VERSION,
-        constraints_metadata_schema_version: CONSTRAINTS_METADATA_SCHEMA_VERSION,
-        compiler_version: VERSION.to_string(),
-        edition,
-        compatibility_profile,
-        module: ir.name.clone(),
-        public_interface: interface::PackageInterface::default(),
-        interface_hash: String::new(),
-        typed_semantics: cellscript_artifact_checker::TypedSemanticRecord::default(),
-        typed_semantics_hash: String::new(),
-        artifact_format: artifact_format.display_name().to_string(),
-        target_profile: target_profile.metadata(artifact_format),
-        artifact_hash: None,
-        artifact_size_bytes: None,
-        source_hash: None,
-        source_content_hash: None,
-        source_units: Vec::new(),
-        verified_artifact: VerifiedArtifactMetadata::default(),
-        lowering: LoweringMetadata {
-            protocol_semantics: "CellScript IR records consume/read_ref/create summaries before RISC-V codegen".to_string(),
-            assembly_path: "riscv64-asm emits executable CKB-style syscall paths plus metadata for verifier obligations".to_string(),
-            elf_path: "riscv64-elf is always enabled; all operations have real RISC-V lowerings or fail-closed traps with specific error codes".to_string(),
-            semantics_preserving_claim:
-                "Pure computation lowering is executable; stateful protocol lowering is represented in metadata and asm but is not yet a proved schema decoder/verifier"
-                    .to_string(),
-        },
-        capability_registry: capability_registry_metadata(),
-        enum_layouts: payload_enum_layout_metadata(ir),
-        generic_instantiations,
-        runtime: RuntimeMetadata {
-            vm_target: "CKB-VM compatible RISC-V 64 IMC+B+MOP".to_string(),
-            vm_version: "VERSION2".to_string(),
-            syscall_abi: "CKB store_data ABI: A0=buffer, A1=size pointer, A2=offset, A3=index, A4=source".to_string(),
-            ckb_runtime_view_contract: CKB_RUNTIME_VIEW_CONTRACT.to_string(),
-            ckb_runtime_access_provenance_contract: CKB_RUNTIME_ACCESS_PROVENANCE_CONTRACT.to_string(),
-            vm_abi: VmAbiMetadata {
-                format: "molecule".to_string(),
-                version: MOLECULE_VM_ABI_VERSION,
-                default: true,
-                embedded_in_artifact: embeds_vm_abi_trailer,
-                scope: "CKB-style full object load syscalls: LOAD_SCRIPT, LOAD_INPUT, LOAD_CELL, LOAD_HEADER".to_string(),
-                selection: if embeds_vm_abi_trailer {
-                    "RISC-V ELF artifacts embed a fixed VM ABI trailer; verifier callers strip the trailer and select the declared ABI"
-                        .to_string()
-                } else if target_profile.is_ckb() && artifact_format == ArtifactFormat::RiscvElf {
-                    "CKB-target ELF artifacts do not embed VM ABI trailer bytes; the profile selects CKB Molecule ABI out of band"
-                        .to_string()
-                } else {
-                    "Compiler artifact metadata declares the required VM object ABI; verifier callers must pass this ABI to the runtime"
-                        .to_string()
-                },
-            },
-            pure_elf_runner: "cellc run --features vm-runner executes no-argument pure ELF with ckb-vm 0.24".to_string(),
-            ckb_runtime_required,
-            ckb_runtime_features,
-            standalone_runner_compatible,
-            fail_closed_runtime_features,
-            ckb_runtime_accesses,
-            signing_message_domains: ckb_signing_message_domains(ir),
-            zk_verifiers: Vec::new(),
-            trusted_external_verifiers: Vec::new(),
-            transaction_view_handles,
-            borrow_regions,
-            capability_proofs,
-            verifier_obligations,
-            proof_plan,
-            proof_plan_soundness: ProofPlanSoundnessReport::default(),
-            builder_assumptions: Vec::new(),
-            collection_instantiations,
-            transaction_runtime_input_requirements,
-            pool_primitives,
-            fungible_type_group_entry: fungible_type_group_entry_metadata(ir),
-            policy_artifact: None,
-        },
-        constraints: ConstraintsMetadata::default(),
-        molecule_schema_manifest,
-        cell_data_codec_manifest,
-        template_layouts: template_layout_metadata(&types),
-        types,
-        actions: ir
-            .items
-            .iter()
-            .filter_map(|item| match item {
-                ir::IrItem::Action(action) => {
-                    let param_schema_vars = schema_pointer_var_ids(&action.body, &action.params);
-                    let fail_closed_runtime_features = body_fail_closed_runtime_features(
-                        &action.body,
-                        &param_schema_vars,
-                        &type_layouts,
-                        &action.params,
-                        &cell_type_kinds,
-                        action.return_type.as_ref(),
-                        &pure_const_returns,
-                    );
-                    let mut ckb_runtime_features = auto_lowered_aggregate_runtime_features_for_action(ir, action);
-                    ckb_runtime_features.extend(merge_ckb_runtime_features(
-                        body_ckb_runtime_features(&action.name, &action.body, &cell_type_kinds, &type_layouts),
-                        &action.params,
-                    ));
-                    let ckb_runtime_features = ckb_runtime_features.into_iter().collect::<Vec<_>>();
-                    let mut ckb_runtime_accesses = auto_lowered_aggregate_runtime_accesses_for_action(ir, action);
-                    ckb_runtime_accesses.extend(merge_ckb_runtime_accesses(
-                        body_ckb_runtime_accesses(&action.name, &action.body, &cell_type_kinds, &type_layouts),
-                        &action.params,
-                    ));
-                    let mut verifier_obligations = body_verifier_obligations(
-                        "action",
-                        &action.name,
-                        &action.body,
-                        &fail_closed_runtime_features,
-                        &ckb_runtime_features,
-                        &ckb_runtime_accesses,
-                        &type_layouts,
-                        &action.params,
-                        &flow_states,
-                        &flow_state_fields,
-                        &cell_type_kinds,
-                        action.return_type.as_ref(),
-                        &pure_const_returns,
-                    );
-                    verifier_obligations.extend(action_terminal_flow_obligations(ir, action));
-                    let pool_primitives = body_pool_primitive_metadata(
-                        "action",
-                        &action.name,
-                        &action.body,
-                        &action.params,
-                        &type_layouts,
-                        &cell_type_kinds,
-                        &pure_const_returns,
-                    );
-                    let transaction_runtime_input_requirements =
-                        transaction_runtime_input_requirements_from_obligations(&verifier_obligations);
-                    let proof_plan = crate::proof_plan::build_for_body(
-                        "action",
-                        &action.name,
-                        &action.body,
-                        &action.params,
-                        &verifier_obligations,
-                        &ckb_runtime_accesses,
-                        &pool_primitives,
-                    );
-                    let standalone_runner_compatible = ckb_runtime_features.is_empty() && action.params.is_empty();
-                    let scheduler_accesses = scheduler_accesses_from_metadata(&ckb_runtime_accesses);
-                    let scheduler_effect_class = format!("{:?}", action.effect_class);
-                    let scheduler_witness_molecule = crate::stdlib::SchedulerMetadata::generate(
-                        &scheduler_effect_class,
-                        action.scheduler_hints.parallelizable,
-                        action.scheduler_hints.touches_shared.clone(),
-                        action.scheduler_hints.estimated_cycles,
-                        scheduler_accesses,
-                    );
-                    let scheduler_witness_molecule_hex = hex_bytes(&scheduler_witness_molecule);
-                    Some(ActionMetadata {
-                        name: action.name.clone(),
-                        params: param_metadata_for_body(
-                            &action.params,
-                            &action.body,
-                            &cell_type_kinds,
-                            &ir.enum_layouts,
-                        ),
-                        return_type: action.return_type.as_ref().map(ir_type_to_string),
-                        effect_class: scheduler_effect_class,
-                        parallelizable: action.scheduler_hints.parallelizable,
-                        touches_shared: action.scheduler_hints.touches_shared.iter().map(hex_hash).collect(),
-                        estimated_cycles: action.scheduler_hints.estimated_cycles,
-                        scheduler_witness_abi: SCHEDULER_WITNESS_ABI_MOLECULE.to_string(),
-                        scheduler_witness_hex: scheduler_witness_molecule_hex.clone(),
-                        scheduler_witness_molecule_hex: String::new(),
-                        consume_set: action.body.consume_set.iter().map(cell_pattern_metadata).collect(),
-                        read_refs: action.body.read_refs.iter().map(cell_pattern_metadata).collect(),
-                        create_set: action
-                            .body
-                            .create_set
-                            .iter()
-                            .enumerate()
-                            .map(|(index, pattern)| create_pattern_metadata(pattern, index, &type_defs, target_profile))
-                            .collect(),
-                        mutate_set: action.body.mutate_set.iter().map(|pattern| mutate_pattern_metadata(pattern, &type_layouts)).collect(),
-                        state_transition_edges: action
-                            .state_transition_edges
-                            .iter()
-                            .map(state_transition_edge_metadata)
-                            .collect(),
-                        protocol_role_candidates: action
-                            .protocol_role_candidates
-                            .iter()
-                            .map(protocol_role_candidate_metadata)
-                            .collect(),
-                        pool_primitives,
-                        ckb_script_group: ckb_script_group_metadata("action", &ckb_runtime_accesses, target_profile),
-                        ckb_runtime_accesses,
-                        ckb_runtime_features,
-                        elf_compatible: true,
-                        standalone_runner_compatible,
-                        fail_closed_runtime_features,
-                        verifier_obligations,
-                        proof_plan,
-                        transaction_runtime_input_requirements,
-                        block_count: action.body.blocks.len(),
-                    })
-                }
-                _ => None,
-            })
-            .collect(),
-        functions: ir
-            .items
-            .iter()
-            .filter_map(|item| match item {
-                ir::IrItem::PureFn(function) => {
-                    let param_schema_vars = schema_pointer_var_ids(&function.body, &function.params);
-                    let fail_closed_runtime_features = body_fail_closed_runtime_features(
-                        &function.body,
-                        &param_schema_vars,
-                        &type_layouts,
-                        &function.params,
-                        &cell_type_kinds,
-                        function.return_type.as_ref(),
-                        &pure_const_returns,
-                    );
-                    let ckb_runtime_features = merge_ckb_runtime_features(
-                        body_ckb_runtime_features(&function.name, &function.body, &cell_type_kinds, &type_layouts),
-                        &function.params,
-                    );
-                    let ckb_runtime_accesses = merge_ckb_runtime_accesses(
-                        body_ckb_runtime_accesses(&function.name, &function.body, &cell_type_kinds, &type_layouts),
-                        &function.params,
-                    );
-                    let verifier_obligations = body_verifier_obligations(
-                        "fn",
-                        &function.name,
-                        &function.body,
-                        &fail_closed_runtime_features,
-                        &ckb_runtime_features,
-                        &ckb_runtime_accesses,
-                        &type_layouts,
-                        &function.params,
-                        &flow_states,
-                        &flow_state_fields,
-                        &cell_type_kinds,
-                        function.return_type.as_ref(),
-                        &pure_const_returns,
-                    );
-                    let pool_primitives = body_pool_primitive_metadata(
-                        "fn",
-                        &function.name,
-                        &function.body,
-                        &function.params,
-                        &type_layouts,
-                        &cell_type_kinds,
-                        &pure_const_returns,
-                    );
-                    let transaction_runtime_input_requirements =
-                        transaction_runtime_input_requirements_from_obligations(&verifier_obligations);
-                    let proof_plan = crate::proof_plan::build_for_body(
-                        "fn",
-                        &function.name,
-                        &function.body,
-                        &function.params,
-                        &verifier_obligations,
-                        &ckb_runtime_accesses,
-                        &pool_primitives,
-                    );
-                    Some(FunctionMetadata {
-                        name: function.name.clone(),
-                        params: param_metadata_for_body(
-                            &function.params,
-                            &function.body,
-                            &cell_type_kinds,
-                            &ir.enum_layouts,
-                        ),
-                        return_type: function.return_type.as_ref().map(ir_type_to_string),
-                        declared_effect_class: function.declared_effect_class.map(|effect| format!("{:?}", effect)),
-                        inferred_effect_class: format!("{:?}", function.inferred_effect_class),
-                        effect_class: format!("{:?}", function.effect_class),
-                        effect_evidence_tier: EvidenceTier::CheckedStatic,
-                        mutate_set: function.body.mutate_set.iter().map(|pattern| mutate_pattern_metadata(pattern, &type_layouts)).collect(),
-                        pool_primitives,
-                        ckb_runtime_accesses,
-                        ckb_runtime_features,
-                        elf_compatible: true,
-                        fail_closed_runtime_features,
-                        verifier_obligations,
-                        proof_plan,
-                        transaction_runtime_input_requirements,
-                        block_count: function.body.blocks.len(),
-                    })
-                }
-                _ => None,
-            })
-            .collect(),
-        locks: ir
-            .items
-            .iter()
-            .filter_map(|item| match item {
-                ir::IrItem::Lock(lock) => {
-                    let param_schema_vars = schema_pointer_var_ids(&lock.body, &lock.params);
-                    let fail_closed_runtime_features = body_fail_closed_runtime_features(
-                        &lock.body,
-                        &param_schema_vars,
-                        &type_layouts,
-                        &lock.params,
-                        &cell_type_kinds,
-                        None,
-                        &pure_const_returns,
-                    );
-                    let ckb_runtime_features =
-                        merge_ckb_runtime_features(body_ckb_runtime_features(&lock.name, &lock.body, &cell_type_kinds, &type_layouts), &lock.params);
-                    let ckb_runtime_accesses =
-                        merge_ckb_runtime_accesses(body_ckb_runtime_accesses(&lock.name, &lock.body, &cell_type_kinds, &type_layouts), &lock.params);
-                    let verifier_obligations = body_verifier_obligations(
-                        "lock",
-                        &lock.name,
-                        &lock.body,
-                        &fail_closed_runtime_features,
-                        &ckb_runtime_features,
-                        &ckb_runtime_accesses,
-                        &type_layouts,
-                        &lock.params,
-                        &flow_states,
-                        &flow_state_fields,
-                        &cell_type_kinds,
-                        None,
-                        &pure_const_returns,
-                    );
-                    let pool_primitives =
-                        body_pool_primitive_metadata("lock", &lock.name, &lock.body, &lock.params, &type_layouts, &cell_type_kinds, &pure_const_returns);
-                    let transaction_runtime_input_requirements =
-                        transaction_runtime_input_requirements_from_obligations(&verifier_obligations);
-                    let proof_plan = crate::proof_plan::build_for_body(
-                        "lock",
-                        &lock.name,
-                        &lock.body,
-                        &lock.params,
-                        &verifier_obligations,
-                        &ckb_runtime_accesses,
-                        &pool_primitives,
-                    );
-                    let standalone_runner_compatible = ckb_runtime_features.is_empty() && lock.params.is_empty();
-                    Some(LockMetadata {
-                        name: lock.name.clone(),
-                        params: param_metadata_for_body(
-                            &lock.params,
-                            &lock.body,
-                            &cell_type_kinds,
-                            &ir.enum_layouts,
-                        ),
-                        consume_set: lock.body.consume_set.iter().map(cell_pattern_metadata).collect(),
-                        read_refs: lock.body.read_refs.iter().map(cell_pattern_metadata).collect(),
-                        create_set: lock
-                            .body
-                            .create_set
-                            .iter()
-                            .enumerate()
-                            .map(|(index, pattern)| create_pattern_metadata(pattern, index, &type_defs, target_profile))
-                            .collect(),
-                        mutate_set: lock.body.mutate_set.iter().map(|pattern| mutate_pattern_metadata(pattern, &type_layouts)).collect(),
-                        pool_primitives,
-                        ckb_script_group: ckb_script_group_metadata("lock", &ckb_runtime_accesses, target_profile),
-                        ckb_runtime_accesses,
-                        ckb_runtime_features,
-                        elf_compatible: true,
-                        standalone_runner_compatible,
-                        fail_closed_runtime_features,
-                        verifier_obligations,
-                        proof_plan,
-                        transaction_runtime_input_requirements,
-                        block_count: lock.body.blocks.len(),
-                    })
-                }
-                _ => None,
-            })
-            .collect(),
-        debug_info_sections: Vec::new(),
-    };
-    artifact::bind_policy_metadata(&mut metadata, ir).expect("validated IR entry has canonical policy metadata");
-    metadata.runtime.builder_assumptions = crate::assumptions::builder_assumptions_from_metadata(&metadata);
-    metadata.runtime.proof_plan_soundness = crate::proof_plan::soundness::check_metadata(&metadata, false);
-    metadata
 }
 
 const FUNGIBLE_TYPE_GROUP_V1_CONTRACT: &str = "fungible-type-group-v1";
@@ -10388,7 +8890,7 @@ fn scope_ir_to_fungible_type_group_v1(ir: &ir::IrModule, selected_type: Option<&
                 runtime_error: None,
             }],
         },
-        effect_class: ir::EffectClass::ReadOnly,
+        effects: ir::EffectFacts::empty(),
         scheduler_hints: ir::SchedulerHints { parallelizable: false, touches_shared: Vec::new(), estimated_cycles: 0 },
     });
 
@@ -10405,6 +8907,7 @@ fn scope_ir_to_fungible_type_group_v1(ir: &ir::IrModule, selected_type: Option<&
         entry_selection: ir::IrEntrySelection::Action(FUNGIBLE_TYPE_GROUP_V1_ENTRY_ACTION.to_string()),
         generic_contracts: ir.generic_contracts.clone(),
         source_type_origins: ir.source_type_origins.clone(),
+        source_callable_targets: ir.source_callable_targets.clone(),
         external_type_defs: ir.external_type_defs.iter().filter(|type_def| type_def.name == candidate.type_name).cloned().collect(),
         external_callable_abis: Vec::new(),
         enum_fixed_sizes: HashMap::new(),
@@ -10456,7 +8959,7 @@ fn scope_ir_to_entry(ir: &ir::IrModule, scope: &CompileEntryScope) -> Result<ir:
         .items
         .iter()
         .filter_map(|item| match item {
-            ir::IrItem::PureFn(function) => Some((function.name.as_str(), function)),
+            ir::IrItem::Function(function) => Some((function.name.as_str(), function)),
             _ => None,
         })
         .collect::<HashMap<_, _>>();
@@ -10567,7 +9070,7 @@ fn scope_ir_to_entry(ir: &ir::IrModule, scope: &CompileEntryScope) -> Result<ir:
         _ => None,
     }));
     items.extend(ir.items.iter().filter_map(|item| match item {
-        ir::IrItem::PureFn(function) if used_functions.contains(&function.name) => Some(item.clone()),
+        ir::IrItem::Function(function) if used_functions.contains(&function.name) => Some(item.clone()),
         _ => None,
     }));
 
@@ -10584,6 +9087,7 @@ fn scope_ir_to_entry(ir: &ir::IrModule, scope: &CompileEntryScope) -> Result<ir:
         },
         generic_contracts: ir.generic_contracts.clone(),
         source_type_origins: ir.source_type_origins.clone(),
+        source_callable_targets: ir.source_callable_targets.clone(),
         external_type_defs: ir.external_type_defs.iter().filter(|type_def| used_types.contains(&type_def.name)).cloned().collect(),
         external_callable_abis: ir
             .external_callable_abis
@@ -10619,7 +9123,7 @@ fn collect_entry_item_scope(item: &ir::IrItem, used_types: &mut BTreeSet<String>
             collect_params_named_types(&lock.params, used_types);
             collect_body_scope(&lock.body, used_types, pending_functions);
         }
-        ir::IrItem::TypeDef(_) | ir::IrItem::Invariant(_) | ir::IrItem::PureFn(_) => {}
+        ir::IrItem::TypeDef(_) | ir::IrItem::Invariant(_) | ir::IrItem::Function(_) => {}
     }
 }
 
@@ -10885,6 +9389,17 @@ fn collect_ir_type_named_types(ty: &ir::IrType, used_types: &mut BTreeSet<String
             used_types.insert(name.clone());
             collect_inline_named_type_dependencies(name, used_types);
         }
+        ir::IrType::Nested(view) => {
+            used_types.insert(view.canonical_text());
+            if let nested_values::NestedType::Values(nested_values::ValuesType {
+                element: nested_values::Element::Record(record),
+                ..
+            })
+            | nested_values::NestedType::RecordView { element: nested_values::Element::Record(record), .. } = view.description()
+            {
+                used_types.insert(record.spelling().to_string());
+            }
+        }
         ir::IrType::Array(inner, _) | ir::IrType::Ref(inner) | ir::IrType::MutRef(inner) => {
             collect_ir_type_named_types(inner, used_types)
         }
@@ -10944,7 +9459,7 @@ fn module_fail_closed_runtime_features(
                     pure_const_returns,
                 ));
             }
-            ir::IrItem::PureFn(function) => {
+            ir::IrItem::Function(function) => {
                 let param_schema_vars = schema_pointer_var_ids(&function.body, &function.params);
                 features.extend(body_fail_closed_runtime_features(
                     &function.body,
@@ -10989,7 +9504,7 @@ fn module_ckb_runtime_accesses(
                     &action.params,
                 ));
             }
-            ir::IrItem::PureFn(function) => accesses.extend(merge_ckb_runtime_accesses(
+            ir::IrItem::Function(function) => accesses.extend(merge_ckb_runtime_accesses(
                 body_ckb_runtime_accesses(&function.name, &function.body, cell_type_kinds, type_layouts),
                 &function.params,
             )),
@@ -11008,7 +9523,7 @@ fn ckb_signing_message_domains(ir: &ir::IrModule) -> Vec<CkbSigningMessageDomain
     for item in &ir.items {
         let (scope_kind, scope_name, body) = match item {
             ir::IrItem::Action(action) => ("action", action.name.as_str(), &action.body),
-            ir::IrItem::PureFn(function) => ("function", function.name.as_str(), &function.body),
+            ir::IrItem::Function(function) => ("function", function.name.as_str(), &function.body),
             ir::IrItem::Lock(lock) => ("lock", lock.name.as_str(), &lock.body),
             ir::IrItem::TypeDef(_) | ir::IrItem::Invariant(_) => continue,
         };
@@ -11064,7 +9579,7 @@ fn transaction_view_handle_metadata(ir: &ir::IrModule) -> Vec<TransactionViewHan
             ir::IrItem::Action(action) => {
                 handles.extend(body_transaction_view_handles("action", &action.name, &action.body));
             }
-            ir::IrItem::PureFn(function) => {
+            ir::IrItem::Function(function) => {
                 handles.extend(body_transaction_view_handles("function", &function.name, &function.body));
             }
             ir::IrItem::Lock(lock) => {
@@ -11092,7 +9607,7 @@ fn borrow_region_metadata(ir: &ir::IrModule) -> Vec<BorrowRegionMetadata> {
     for item in &ir.items {
         let (scope_kind, scope_name, body) = match item {
             ir::IrItem::Action(action) => ("action", action.name.as_str(), &action.body),
-            ir::IrItem::PureFn(function) => ("function", function.name.as_str(), &function.body),
+            ir::IrItem::Function(function) => ("function", function.name.as_str(), &function.body),
             ir::IrItem::Lock(lock) => ("lock", lock.name.as_str(), &lock.body),
             ir::IrItem::TypeDef(_) | ir::IrItem::Invariant(_) => continue,
         };
@@ -11105,7 +9620,6 @@ fn borrow_region_metadata(ir: &ir::IrModule) -> Vec<BorrowRegionMetadata> {
             view_type: format!("View<{}>", region.view_type),
             storage: "none".to_string(),
             abi: "none".to_string(),
-            allowed_effects: vec!["Pure".to_string(), "ReadOnly".to_string()],
             evidence_tier: EvidenceTier::CheckedStatic,
             source_span: crate::proof_plan::ProofPlanSourceSpanMetadata {
                 start: region.span.start,
@@ -11211,6 +9725,7 @@ fn payload_ir_type_name(ty: &ir::IrType) -> String {
             format!("({})", items.iter().map(payload_ir_type_name).collect::<Vec<_>>().join(", "))
         }
         ir::IrType::Named(name) => name.clone(),
+        ir::IrType::Nested(view) => view.canonical_text(),
         ir::IrType::Ref(inner) => format!("&{}", payload_ir_type_name(inner)),
         ir::IrType::MutRef(inner) => format!("&mut {}", payload_ir_type_name(inner)),
     }
@@ -11231,7 +9746,7 @@ fn capability_proof_metadata(ir: &ir::IrModule) -> Vec<CapabilityProofMetadata> 
     for item in &ir.items {
         let (scope_kind, scope_name, body) = match item {
             ir::IrItem::Action(action) => ("action", action.name.as_str(), &action.body),
-            ir::IrItem::PureFn(function) => ("function", function.name.as_str(), &function.body),
+            ir::IrItem::Function(function) => ("function", function.name.as_str(), &function.body),
             ir::IrItem::Lock(lock) => ("lock", lock.name.as_str(), &lock.body),
             ir::IrItem::TypeDef(_) | ir::IrItem::Invariant(_) => continue,
         };
@@ -11535,7 +10050,7 @@ fn module_ckb_runtime_features(
                     &action.params,
                 ));
             }
-            ir::IrItem::PureFn(function) => features.extend(merge_ckb_runtime_features(
+            ir::IrItem::Function(function) => features.extend(merge_ckb_runtime_features(
                 body_ckb_runtime_features(&function.name, &function.body, cell_type_kinds, type_layouts),
                 &function.params,
             )),
@@ -11689,7 +10204,7 @@ fn module_verifier_obligations(
                 action_obligations.extend(action_terminal_flow_obligations(ir, action));
                 obligations.extend(action_obligations);
             }
-            ir::IrItem::PureFn(function) => {
+            ir::IrItem::Function(function) => {
                 let param_schema_vars = schema_pointer_var_ids(&function.body, &function.params);
                 let fail_closed_runtime_features = body_fail_closed_runtime_features(
                     &function.body,
@@ -11843,7 +10358,7 @@ fn module_proof_plan_metadata(
                     &pool_primitives,
                 ));
             }
-            ir::IrItem::PureFn(function) => {
+            ir::IrItem::Function(function) => {
                 let param_schema_vars = schema_pointer_var_ids(&function.body, &function.params);
                 let fail_closed_runtime_features = body_fail_closed_runtime_features(
                     &function.body,
@@ -11985,7 +10500,7 @@ fn module_pool_primitive_metadata(
                     pure_const_returns,
                 ));
             }
-            ir::IrItem::PureFn(function) => {
+            ir::IrItem::Function(function) => {
                 pool_primitives.extend(body_pool_primitive_metadata(
                     "fn",
                     &function.name,
@@ -12064,7 +10579,7 @@ fn module_collection_instantiation_metadata(
                 type_layouts,
                 pure_const_returns,
             )),
-            ir::IrItem::PureFn(function) => instantiations.extend(body_collection_instantiation_metadata(
+            ir::IrItem::Function(function) => instantiations.extend(body_collection_instantiation_metadata(
                 "function",
                 &function.name,
                 &function.body,
@@ -12137,8 +10652,11 @@ fn body_collection_instantiation_metadata(
             }
         })
         .collect::<Vec<_>>();
-    let param_schema_vars =
-        params.iter().filter(|param| named_type_name(&param.ty).is_some()).map(|param| param.binding.id).collect::<BTreeSet<_>>();
+    let param_schema_vars = params
+        .iter()
+        .filter(|param| named_type_name(&param.ty).is_some() || nested_values::ir_type(&param.ty).is_some())
+        .map(|param| param.binding.id)
+        .collect::<BTreeSet<_>>();
     let availability = metadata_prelude_availability(body, &param_schema_vars, type_layouts, params, pure_const_returns);
     let constructor_helpers = collection_constructor_helpers(body);
     let mut builders = BTreeMap::<String, CollectionInstantiationBuilder>::new();
@@ -17232,7 +15750,7 @@ fn module_has_entry_params(ir: &ir::IrModule) -> bool {
     ir.items.iter().any(|item| match item {
         ir::IrItem::Action(action) => !action.params.is_empty(),
         ir::IrItem::Lock(lock) => !lock.params.is_empty(),
-        ir::IrItem::PureFn(_) => false,
+        ir::IrItem::Function(_) => false,
         ir::IrItem::TypeDef(_) | ir::IrItem::Invariant(_) => false,
     })
 }
@@ -17388,7 +15906,7 @@ fn body_fail_closed_runtime_features(
                     if !is_executable_schema_field_access(obj, field, param_schema_vars, type_layouts)
                         && !is_executable_aggregate_field_access(obj, field, &prelude_availability, type_layouts)
                         && !is_executable_tuple_call_return_field_access(obj, field, &prelude_availability)
-                        && nested_values::ir_record_field(obj, field, type_layouts).as_ref() != Some(&dest.ty)
+                        && nested_values::ir_record_field(obj, field).as_ref() != Some(&dest.ty)
                     {
                         features.insert("field-access".to_string());
                     }
@@ -17702,7 +16220,7 @@ fn metadata_pure_const_returns(ir: &ir::IrModule) -> HashMap<String, ir::IrConst
     ir.items
         .iter()
         .filter_map(|item| {
-            let ir::IrItem::PureFn(function) = item else {
+            let ir::IrItem::Function(function) = item else {
                 return None;
             };
             metadata_pure_const_return(&function.body).map(|value| (function.name.clone(), value))
@@ -17733,8 +16251,11 @@ fn metadata_prelude_availability(
     pure_const_returns: &HashMap<String, ir::IrConst>,
 ) -> MetadataPreludeAvailability {
     let mut availability = MetadataPreludeAvailability::default();
-    let schema_param_ids =
-        params.iter().filter(|param| named_type_name(&param.ty).is_some()).map(|param| param.binding.id).collect::<HashSet<_>>();
+    let schema_param_ids = params
+        .iter()
+        .filter(|param| named_type_name(&param.ty).is_some() || nested_values::ir_type(&param.ty).is_some())
+        .map(|param| param.binding.id)
+        .collect::<HashSet<_>>();
     availability.schema_pointer_vars.extend(schema_param_ids.iter().copied());
 
     for param in params {
@@ -19770,8 +18291,11 @@ fn is_executable_destroy(operand: &ir::IrOperand) -> bool {
 }
 
 fn schema_pointer_var_ids(body: &ir::IrBody, params: &[ir::IrParam]) -> BTreeSet<usize> {
-    let mut vars =
-        params.iter().filter(|param| named_type_name(&param.ty).is_some()).map(|param| param.binding.id).collect::<BTreeSet<_>>();
+    let mut vars = params
+        .iter()
+        .filter(|param| named_type_name(&param.ty).is_some() || nested_values::ir_type(&param.ty).is_some())
+        .map(|param| param.binding.id)
+        .collect::<BTreeSet<_>>();
 
     for block in &body.blocks {
         for instruction in &block.instructions {
@@ -20033,7 +18557,7 @@ fn runtime_access_for_call(
             runtime_range_fixed(32),
         ));
     }
-    if matches!(func, "__ckb_exec_cell_dep_u8_args" | "__ckb_exec_cell_dep_hex4" | "__ckb_spawn_wait_cell_dep_hex4" | "__ckb_spawn") {
+    if matches!(func, "__ckb_exec_cell_dep_u8_args" | "__ckb_exec_cell_dep_hex4" | "__ckb_spawn_wait_cell_dep_hex4") {
         return Some(runtime_access_metadata(
             operation,
             syscall,
@@ -20432,7 +18956,6 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
         "__ckb_exec_cell_dep_u8_args" => Some(("exec-process-replacement", "EXEC", "CellDep", "ckb::exec_cell_dep_u8_args")),
         "__ckb_exec_cell_dep_hex4" => Some(("exec-process-replacement", "EXEC", "CellDep", "ckb::exec_cell_dep_hex4")),
         "__ckb_spawn_wait_cell_dep_hex4" => Some(("spawn-wait-checked", "SPAWN", "CellDep", "ckb::spawn_wait_cell_dep_hex4")),
-        "__ckb_spawn" => Some(("spawn", "SPAWN", "CellDep", "spawn")),
         "__ckb_wait" => Some(("wait", "WAIT", "Process", "wait")),
         "__ckb_process_id" => Some(("process-id", "PROCESS_ID", "Process", "process_id")),
         "__ckb_pipe" => Some(("pipe", "PIPE", "Process", "pipe")),
@@ -20961,7 +19484,7 @@ fn metadata_type_layouts(ir: &ir::IrModule) -> MetadataTypeLayouts {
         .items
         .iter()
         .filter_map(|item| {
-            let ir::IrItem::PureFn(function) = item else { return None };
+            let ir::IrItem::Function(function) = item else { return None };
             let ty = function.return_type.as_ref()?;
             if matches!(ty, ir::IrType::Hash | ir::IrType::Address)
                 || matches!(ty, ir::IrType::Named(name) if ir::is_ckb_fixed_hash_domain_name(name))
@@ -21103,7 +19626,7 @@ fn module_validity_path_coverage(ir: &ir::IrModule) -> ValidityPathCoverage {
     for item in &ir.items {
         let (body, params) = match item {
             ir::IrItem::Action(action) => (&action.body, action.params.as_slice()),
-            ir::IrItem::PureFn(function) => (&function.body, function.params.as_slice()),
+            ir::IrItem::Function(function) => (&function.body, function.params.as_slice()),
             ir::IrItem::Lock(lock) => (&lock.body, lock.params.as_slice()),
             ir::IrItem::TypeDef(_) | ir::IrItem::Invariant(_) => continue,
         };
@@ -21773,11 +20296,14 @@ fn molecule_type_for_ir_type(
         ir::IrType::Hash => Some(molecule_fixed_array_alias(aliases, "CellScriptHash", "byte", 32)),
         ir::IrType::Named(name) if name == "String" => Some(molecule_bytes_alias(aliases, "CellScriptString")),
         ir::IrType::Named(name) if name == "Vec" => Some(molecule_dynvec_alias(aliases, "CellScriptUnknownVec", "byte")),
-        ir::IrType::Named(name) if matches!(nested_values::parsed(name), Some(nested_values::NestedType::Values(_))) => {
-            let nested_values::NestedType::Values(values) = nested_values::parsed(name)? else { return None };
+        ir::IrType::Nested(view) if matches!(view.description(), nested_values::NestedType::Values(_)) => {
+            let nested_values::NestedType::Values(values) = view.description() else { return None };
             let item_field = format!("{field}NestedItem");
-            let item =
-                molecule_type_for_named_type(&values.element, owner, &item_field, type_defs, aliases, structs, emitted, visiting)?;
+            let element = match &values.element {
+                nested_values::Element::Bytes => "Vec<u8>",
+                nested_values::Element::Record(record) => record.spelling(),
+            };
+            let item = molecule_type_for_named_type(element, owner, &item_field, type_defs, aliases, structs, emitted, visiting)?;
             // Bounds are part of the schema identity even though Molecule's
             // vector declaration itself does not express count/byte limits.
             let alias = format!(
@@ -21813,7 +20339,7 @@ fn molecule_type_for_ir_type(
                 molecule_table_for_type(type_def, type_defs, aliases, structs, emitted, visiting)
             }
         }
-        ir::IrType::Unit | ir::IrType::Ref(_) | ir::IrType::MutRef(_) => None,
+        ir::IrType::Unit | ir::IrType::Nested(_) | ir::IrType::Ref(_) | ir::IrType::MutRef(_) => None,
     }
 }
 
@@ -22052,7 +20578,7 @@ fn ir_type_encoded_size(
             visiting.remove(name);
             size
         }
-        ir::IrType::Ref(_) | ir::IrType::MutRef(_) => None,
+        ir::IrType::Nested(_) | ir::IrType::Ref(_) | ir::IrType::MutRef(_) => None,
     }
 }
 
@@ -22074,6 +20600,7 @@ fn ir_type_to_string(ty: &ir::IrType) -> String {
             format!("({})", fields)
         }
         ir::IrType::Named(name) => name.clone(),
+        ir::IrType::Nested(view) => view.canonical_text(),
         ir::IrType::Ref(inner) => format!("&{}", ir_type_to_string(inner)),
         ir::IrType::MutRef(inner) => format!("&mut {}", ir_type_to_string(inner)),
     }
@@ -22298,43 +20825,7 @@ fn operand_fixed_byte_width(operand: &ir::IrOperand) -> Option<usize> {
 }
 
 fn type_static_length(ty: &ir::IrType) -> Option<usize> {
-    match ty {
-        ir::IrType::Named(name) if name.starts_with("InstanceScriptHandle<") => {
-            Some(script_handle_contract::INSTANCE_SCRIPT_HANDLE_BYTES)
-        }
-        ir::IrType::Bool | ir::IrType::U8 => Some(1),
-        ir::IrType::U16 => Some(2),
-        ir::IrType::U32 => Some(4),
-        ir::IrType::I32 => Some(4),
-        ir::IrType::U64 => Some(8),
-        ir::IrType::U128 => Some(16),
-        ir::IrType::Address | ir::IrType::Hash => Some(32),
-        ir::IrType::Array(inner, size) => type_static_length(inner).and_then(|inner_size| inner_size.checked_mul(*size)),
-        ir::IrType::Tuple(items) => {
-            items.iter().try_fold(0usize, |acc, item| type_static_length(item).and_then(|size| acc.checked_add(size)))
-        }
-        ir::IrType::Unit => Some(0),
-        ir::IrType::Ref(inner) | ir::IrType::MutRef(inner) => type_static_length(inner),
-        ir::IrType::Named(name) if ir::is_ckb_temporal_scalar_name(name) => Some(8),
-        ir::IrType::Named(name) if ir::is_ckb_fixed_hash_domain_name(name) => Some(32),
-        ir::IrType::Named(name) if commitment_contract::commitment_inner_type(name).is_some() => Some(32),
-        ir::IrType::Named(name) if zk_contract::fixed_width(name).is_some() => zk_contract::fixed_width(name),
-        ir::IrType::Named(name) if name == script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE => {
-            Some(script_handle_contract::EXACT_SCRIPT_HANDLE_BYTES)
-        }
-        ir::IrType::Named(name) if name == script_handle_contract::DEPLOYMENT_LINE_HANDLE_TYPE => {
-            Some(script_handle_contract::DEPLOYMENT_LINE_HANDLE_BYTES)
-        }
-        ir::IrType::Named(name)
-            if matches!(
-                name.split('<').next().unwrap_or(name),
-                script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE | script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
-            ) =>
-        {
-            Some(656)
-        }
-        ir::IrType::Named(_) => None,
-    }
+    crate::ir::fixed_layout_width(ty)
 }
 
 fn param_metadata_for_body(
@@ -22385,19 +20876,20 @@ fn param_metadata(
     let named_type = named_type_name(&param.ty);
     let enum_fixed_len =
         named_type.and_then(|name| enum_layouts.get(name)).filter(|layout| layout.has_payload()).map(|layout| layout.encoded_size);
-    let schema_pointer_abi = named_type.is_some_and(|name| {
-        !ir::is_ckb_temporal_scalar_name(name)
-            && !ir::is_ckb_fixed_hash_domain_name(name)
-            && commitment_contract::commitment_inner_type(name).is_none()
-            && zk_contract::fixed_width(name).is_none()
-            && name != script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE
-            && name != script_handle_contract::DEPLOYMENT_LINE_HANDLE_TYPE
-            && !name.starts_with("InstanceScriptHandle<")
-            && !matches!(
-                name.split('<').next().unwrap_or(name),
-                script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE | script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
-            )
-    }) && enum_fixed_len.is_none();
+    let schema_pointer_abi = nested_values::ir_type(&param.ty).is_some()
+        || (named_type.is_some_and(|name| {
+            !ir::is_ckb_temporal_scalar_name(name)
+                && !ir::is_ckb_fixed_hash_domain_name(name)
+                && commitment_contract::commitment_inner_type(name).is_none()
+                && zk_contract::fixed_width(name).is_none()
+                && name != script_handle_contract::EXACT_SCRIPT_HANDLE_TYPE
+                && name != script_handle_contract::DEPLOYMENT_LINE_HANDLE_TYPE
+                && !name.starts_with("InstanceScriptHandle<")
+                && !matches!(
+                    name.split('<').next().unwrap_or(name),
+                    script_handle_contract::OPEN_SCRIPT_HANDLE_TYPE | script_handle_contract::OPEN_VERIFIER_HANDLE_TYPE
+                )
+        }) && enum_fixed_len.is_none());
     let fixed_byte_len = enum_fixed_len.or_else(|| {
         metadata_fixed_byte_width(&param.ty, type_static_length(&param.ty))
             .filter(|width| *width > 8)
@@ -22975,7 +21467,7 @@ pub const NAME: &str = "cellc";
 mod tests {
     use super::{
         compile, compile_file, compile_file_with_entry_action, compile_file_with_entry_lock, compile_fungible_type_group_entry,
-        compile_path, compile_path_metadata_with_diagnostics, compile_path_metadata_with_diagnostics_for_source,
+        compile_path, compile_path_metadata_with_diagnostics, compile_path_metadata_with_diagnostics_for_sources,
         compile_with_executable_surface_policy, decode_scheduler_witness_hex, default_output_path_for_input,
         encode_bounded_output_plan_v1, encode_entry_witness_args_for_params, incremental_cache_key, load_modules_for_input,
         prune_incremental_cache_entries, resolve_input_path, source_unit_from_bytes, validate_primitive_strict_017_metadata,
@@ -23028,7 +21520,7 @@ mod tests {
         let ir = ir::generate(&ast).unwrap();
         let mut metadata =
             crate::compile_metadata_from_ir(&ir, ArtifactFormat::RiscvAssembly, target_profile, crate::CURRENT_EDITION, None);
-        crate::bind_public_interface(&mut metadata, &ast);
+        crate::bind_public_interface(&mut metadata, &ast, None).unwrap();
         crate::bind_typed_semantics(&mut metadata, &ir, &ast, None, false);
         crate::validate_compile_metadata(&metadata, ArtifactFormat::RiscvAssembly).unwrap();
         metadata
@@ -23056,7 +21548,7 @@ action add(x: u64, y: u64) -> u64 {
     struct SchedulerWitness {
         magic: u16,
         version: u8,
-        effect_class: u8,
+        effects: ir::EffectFacts,
         parallelizable: bool,
         touches_shared_count: u32,
         touches_shared: Vec<[u8; 32]>,
@@ -23071,7 +21563,11 @@ action add(x: u64, y: u64) -> u64 {
         SchedulerWitness {
             magic: read_u16(fields[0], "magic"),
             version: read_u8(fields[1], "version"),
-            effect_class: read_u8(fields[2], "effect_class"),
+            effects: {
+                let length = read_u32(&fields[2][..4], "effect bytes length") as usize;
+                assert_eq!(length, fields[2].len() - 4);
+                serde_json::from_slice(&fields[2][4..]).expect("current structured effect facts")
+            },
             parallelizable: read_bool(fields[3], "parallelizable"),
             touches_shared_count: read_u32(fields[4], "touches_shared_count"),
             touches_shared: read_fixvec_byte32(fields[5]),
@@ -24528,7 +23024,6 @@ shared Config {
     threshold: u64,
 }
 
-#[effect(ReadOnly)]
 action inspect() -> u64 {
     verification
         let cfg = read_ref<Config>()
@@ -24536,14 +23031,13 @@ action inspect() -> u64 {
 }
 "#;
 
-    const UNDERDECLARED_EFFECT_PROGRAM: &str = r#"
+    const CREATION_EFFECT_PROGRAM: &str = r#"
 module test
 
 resource Token {
     amount: u64,
 }
 
-#[effect(ReadOnly)]
 action issue(amount: u64) -> Token {
     verification
         let out = create Token {
@@ -25304,7 +23798,7 @@ fn bad() -> bool {
 }
 "#;
 
-    const INDIRECT_UNDERDECLARED_EFFECT_PROGRAM: &str = r#"
+    const INDIRECT_CREATION_EFFECT_PROGRAM: &str = r#"
 module test
 
 resource Token {
@@ -25319,14 +23813,13 @@ action issue(amount: u64) -> Token {
         return out
 
 }
-#[effect(ReadOnly)]
 action wrapper(amount: u64) -> Token {
     verification
         return issue(amount)
 }
 "#;
 
-    const QUALIFIED_UNDERDECLARED_EFFECT_PROGRAM: &str = r#"
+    const QUALIFIED_CREATION_EFFECT_PROGRAM: &str = r#"
 module test
 
 resource Token {
@@ -25341,7 +23834,6 @@ action issue(amount: u64) -> Token {
         return out
 
 }
-#[effect(ReadOnly)]
 action wrapper(amount: u64) -> Token {
     verification
         return test::issue(amount)
@@ -27316,12 +25808,10 @@ resource Token has destroy {
     amount: u64,
 }
 
-#[effect(Pure)]
 fn amount_is(token: &Token, expected: u64) -> bool {
     return token.amount == expected
 }
 
-#[effect(ReadOnly)]
 fn positive(token: &Token) -> bool {
     return token.amount > 0
 }
@@ -27410,7 +25900,6 @@ module test
 
 resource Token has destroy { amount: u64 }
 
-#[effect(Pure)]
 fn visible<T: cell>(value: &T) -> bool {
     return true
 }
@@ -27515,10 +26004,11 @@ action bad(token: Token) -> u64 {
     fn compile_checks_callee_effects_for_borrowed_views() {
         let source = r#"
 module test
-resource Token has destroy { amount: u64 }
+resource Token has create, destroy { amount: u64 }
+action change() { verification let value = create Token { amount: 1 } destroy value }
 
-#[effect(Mutating)]
 fn incompatible(token: &Token) -> bool {
+    change()
     return token.amount > 0
 }
 
@@ -27532,7 +26022,9 @@ action bad(token: Token) {
 "#;
         let error = compile(source, CompileOptions::default()).unwrap_err();
         assert!(
-            error.message.contains("function 'incompatible' has Mutating effect and cannot receive borrowed linear view 'view'"),
+            error.message.contains("cannot receive borrowed linear view unless it is observation-only")
+                && error.message.contains("incompatible")
+                && error.message.contains("lifecycle="),
             "unexpected error: {}",
             error.message
         );
@@ -32453,17 +30945,25 @@ resource Token has store {
         let result = compile(READ_ONLY_EFFECT_PROGRAM, CompileOptions::default()).unwrap();
         let action = result.metadata.actions.iter().find(|action| action.name == "inspect").expect("inspect metadata");
 
-        assert_eq!(action.effect_class, "ReadOnly");
+        assert_eq!(
+            action.effects,
+            ir::EffectFacts::read(
+                cellscript_artifact_checker::effect_facts::ContextSource::CellDep,
+                cellscript_artifact_checker::effect_facts::ContextAccess::CellData
+            )
+        );
         assert!(action.ckb_runtime_features.contains(&"read-cell-dep".to_string()));
         assert!(action.fail_closed_runtime_features.is_empty());
     }
 
     #[test]
-    fn compile_rejects_underdeclared_effect_annotations() {
-        let err = compile(UNDERDECLARED_EFFECT_PROGRAM, CompileOptions::default()).unwrap_err();
-
-        assert!(err.message.contains("declared effect ReadOnly is too weak"), "unexpected error: {}", err.message);
-        assert!(err.message.contains("inferred effect is Creating"), "unexpected error: {}", err.message);
+    fn compile_infers_creation_without_an_effect_annotation() {
+        let result = compile(CREATION_EFFECT_PROGRAM, CompileOptions::default()).unwrap();
+        let entry = result.metadata.actions.iter().find(|action| action.name == "issue").unwrap();
+        assert_eq!(
+            entry.effects.lifecycle_ops(),
+            ir::EffectFacts::lifecycle(cellscript_artifact_checker::effect_facts::LifecycleOperation::Create).lifecycle_ops()
+        );
     }
 
     #[test]
@@ -32474,10 +30974,8 @@ resource Token has store {
         )
         .unwrap();
         let function = result.metadata.functions.iter().find(|function| function.name == "helper").expect("helper metadata");
-
-        assert_eq!(function.declared_effect_class, None);
-        assert_eq!(function.inferred_effect_class, "ReadOnly");
-        assert_eq!(function.effect_class, "ReadOnly");
+        assert!(!function.effects.context_reads().is_empty());
+        assert!(function.effects.allows_observation());
         assert_eq!(function.effect_evidence_tier, crate::EvidenceTier::CheckedStatic);
     }
 
@@ -32490,18 +30988,23 @@ resource Token has store {
         .unwrap();
         let function = result.metadata.functions.iter().find(|function| function.name == "helper").expect("helper metadata");
 
-        assert_eq!(function.inferred_effect_class, "Mutating");
-        assert_eq!(function.effect_class, "Mutating");
+        assert_eq!(
+            function.effects.lifecycle_ops().iter().copied().collect::<std::collections::BTreeSet<_>>(),
+            std::collections::BTreeSet::from([
+                cellscript_artifact_checker::effect_facts::LifecycleOperation::Create,
+                cellscript_artifact_checker::effect_facts::LifecycleOperation::Consume,
+                cellscript_artifact_checker::effect_facts::LifecycleOperation::Destroy
+            ])
+        );
         assert_eq!(function.effect_evidence_tier, crate::EvidenceTier::CheckedStatic);
     }
 
     #[test]
-    fn compile_rejects_underdeclared_helper_function_effects() {
+    fn compile_rejects_retired_effect_declarations_on_lifecycle_helpers() {
         let source = INDIRECT_IMPURE_FN_PROGRAM.replace("fn helper", "#[effect(Pure)]\nfn helper");
         let err = compile(&source, CompileOptions::default()).unwrap_err();
 
-        assert!(err.message.contains("declared effect Pure is too weak for function 'helper'"), "unexpected error: {}", err.message);
-        assert!(err.message.contains("inferred effect is Mutating"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("effect declarations have been removed"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -32512,10 +31015,8 @@ resource Token has store {
         )
         .unwrap();
         let function = result.metadata.functions.iter().find(|function| function.name == "helper").expect("helper metadata");
-
-        assert_eq!(function.declared_effect_class, None);
-        assert_eq!(function.inferred_effect_class, "ReadOnly");
-        assert_eq!(function.effect_class, "ReadOnly");
+        assert!(!function.effects.context_reads().is_empty());
+        assert!(function.effects.allows_observation());
         assert_eq!(function.effect_evidence_tier, crate::EvidenceTier::CheckedStatic);
     }
 
@@ -32527,10 +31028,8 @@ resource Token has store {
         )
         .unwrap();
         let function = result.metadata.functions.iter().find(|function| function.name == "helper").expect("helper metadata");
-
-        assert_eq!(function.declared_effect_class, None);
-        assert_eq!(function.inferred_effect_class, "ReadOnly");
-        assert_eq!(function.effect_class, "ReadOnly");
+        assert!(!function.effects.context_reads().is_empty());
+        assert!(function.effects.allows_observation());
         assert_eq!(function.effect_evidence_tier, crate::EvidenceTier::CheckedStatic);
     }
 
@@ -32542,10 +31041,7 @@ resource Token has store {
         )
         .unwrap();
         let function = result.metadata.functions.iter().find(|function| function.name == "helper").expect("helper metadata");
-
-        assert_eq!(function.declared_effect_class, None);
-        assert_eq!(function.inferred_effect_class, "ReadOnly");
-        assert_eq!(function.effect_class, "ReadOnly");
+        assert!(function.effects.is_empty(), "a static local type identity does not observe transaction context");
         assert_eq!(function.effect_evidence_tier, crate::EvidenceTier::CheckedStatic);
     }
 
@@ -32699,7 +31195,11 @@ resource Token has store {
         let module = parser::parse(&tokens).unwrap();
         let err = ir::generate(&module).unwrap_err();
 
-        assert!(err.message.contains("call 'missing' has no known return type"), "unexpected error: {}", err.message);
+        assert!(
+            err.message.contains("call 'missing' has no known return type during IR lowering"),
+            "unexpected error: {}",
+            err.message
+        );
     }
 
     #[test]
@@ -32946,21 +31446,23 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
     }
 
     #[test]
-    fn compile_rejects_underdeclared_effects_through_calls() {
-        let err = compile(INDIRECT_UNDERDECLARED_EFFECT_PROGRAM, CompileOptions::default()).unwrap_err();
-
-        assert!(err.message.contains("declared effect ReadOnly is too weak"), "unexpected error: {}", err.message);
-        assert!(err.message.contains("action 'wrapper'"), "unexpected error: {}", err.message);
-        assert!(err.message.contains("inferred effect is Creating"), "unexpected error: {}", err.message);
+    fn compile_infers_creation_effects_through_calls() {
+        let result = compile(INDIRECT_CREATION_EFFECT_PROGRAM, CompileOptions::default()).unwrap();
+        let entry = result.metadata.actions.iter().find(|action| action.name == "wrapper").unwrap();
+        assert_eq!(
+            entry.effects.lifecycle_ops(),
+            ir::EffectFacts::lifecycle(cellscript_artifact_checker::effect_facts::LifecycleOperation::Create).lifecycle_ops()
+        );
     }
 
     #[test]
-    fn compile_rejects_underdeclared_effects_through_qualified_calls() {
-        let err = compile(QUALIFIED_UNDERDECLARED_EFFECT_PROGRAM, CompileOptions::default()).unwrap_err();
-
-        assert!(err.message.contains("declared effect ReadOnly is too weak"), "unexpected error: {}", err.message);
-        assert!(err.message.contains("action 'wrapper'"), "unexpected error: {}", err.message);
-        assert!(err.message.contains("inferred effect is Creating"), "unexpected error: {}", err.message);
+    fn compile_infers_creation_effects_through_qualified_calls() {
+        let result = compile(QUALIFIED_CREATION_EFFECT_PROGRAM, CompileOptions::default()).unwrap();
+        let entry = result.metadata.actions.iter().find(|action| action.name == "wrapper").unwrap();
+        assert_eq!(
+            entry.effects.lifecycle_ops(),
+            ir::EffectFacts::lifecycle(cellscript_artifact_checker::effect_facts::LifecycleOperation::Create).lifecycle_ops()
+        );
     }
 
     #[test]
@@ -35126,10 +33628,9 @@ action transfer_token(token: Token, to: Address) -> next_token: Token {
         assert!(action.fail_closed_runtime_features.is_empty());
         assert!(!action.touches_shared.is_empty());
         assert!(action.estimated_cycles > 32);
-        assert_eq!(action.scheduler_witness_abi, "molecule");
+        assert_eq!(action.scheduler_witness_abi, SCHEDULER_WITNESS_ABI_MOLECULE);
         assert!(!action.scheduler_witness_hex.is_empty());
         assert!(!action.scheduler_witness_hex.starts_with("11ce"));
-        assert!(action.scheduler_witness_molecule_hex.is_empty());
         assert_eq!(
             action.scheduler_witness_bytes().expect("scheduler witness hex should decode"),
             decode_scheduler_witness_hex(&action.scheduler_witness_hex).expect("scheduler witness hex should decode")
@@ -35137,8 +33638,8 @@ action transfer_token(token: Token, to: Address) -> next_token: Token {
 
         let witness = decode_molecule_scheduler_witness_hex(&action.scheduler_witness_hex);
         assert_eq!(witness.magic, 0xCE11);
-        assert_eq!(witness.version, 1);
-        assert_eq!(witness.effect_class, 2);
+        assert_eq!(witness.version, 2);
+        assert_eq!(witness.effects, action.effects);
         assert!(!witness.parallelizable);
         assert_eq!(witness.touches_shared_count as usize, witness.touches_shared.len());
         assert_eq!(witness.estimated_cycles, action.estimated_cycles);
@@ -35164,18 +33665,17 @@ action transfer_token(token: Token, to: Address) -> next_token: Token {
         assert!(invalid.message.contains("invalid scheduler witness hex byte"));
     }
 
-    fn action_metadata_with_scheduler_fields(scheduler_witness_hex: &str, scheduler_witness_molecule_hex: &str) -> ActionMetadata {
+    fn action_metadata_with_scheduler_fields(scheduler_witness_hex: &str) -> ActionMetadata {
         ActionMetadata {
             name: "scheduler".to_string(),
             params: vec![],
             return_type: Some("unit".to_string()),
-            effect_class: "Pure".to_string(),
+            effects: ir::EffectFacts::empty(),
             parallelizable: false,
             touches_shared: vec![],
             estimated_cycles: 0,
             scheduler_witness_abi: SCHEDULER_WITNESS_ABI_MOLECULE.to_string(),
             scheduler_witness_hex: scheduler_witness_hex.to_string(),
-            scheduler_witness_molecule_hex: scheduler_witness_molecule_hex.to_string(),
             consume_set: vec![],
             read_refs: vec![],
             create_set: vec![],
@@ -35197,12 +33697,12 @@ action transfer_token(token: Token, to: Address) -> next_token: Token {
     }
 
     #[test]
-    fn action_scheduler_witness_bytes_rejects_conflicting_molecule_alias() {
-        let action = action_metadata_with_scheduler_fields("11ce01", "11ce02");
-
-        let public_error = action.scheduler_witness_bytes().unwrap_err();
-
-        assert!(public_error.message.contains("conflicting scheduler_witness_hex"), "unexpected error: {public_error}");
+    fn action_scheduler_witness_bytes_rejects_old_wire_and_retired_alias() {
+        let action = action_metadata_with_scheduler_fields("11ce01");
+        assert!(action.scheduler_witness_bytes().is_err());
+        let mut value = serde_json::to_value(action).unwrap();
+        value["scheduler_witness_molecule_hex"] = "11ce01".into();
+        assert!(serde_json::from_value::<ActionMetadata>(value).is_err());
     }
 
     #[test]
@@ -35225,7 +33725,16 @@ action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger {
         let result = compile(source, CompileOptions::default()).unwrap();
         let action = result.metadata.actions.iter().find(|action| action.name == "credit").expect("credit metadata");
 
-        assert_eq!(action.effect_class, "Mutating");
+        assert!(action
+            .effects
+            .lifecycle_ops()
+            .iter()
+            .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Consume));
+        assert!(action
+            .effects
+            .lifecycle_ops()
+            .iter()
+            .any(|operation| *operation == cellscript_artifact_checker::effect_facts::LifecycleOperation::Create));
         assert!(!action.parallelizable, "generic shared mutation must not default to parallel execution");
         assert!(!action.touches_shared.is_empty(), "generic shared mutation must expose scheduler-visible shared type hash");
         assert!(action.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == "ledger_before"));
@@ -37081,9 +35590,13 @@ action inspect() -> u64 { return legacy_epoch() }
                 && diagnostic.file.as_ref().is_some_and(|path| path.ends_with("legacy_time/src/time.cell"))
         }));
 
-        let report = compile_path_metadata_with_diagnostics_for_source(
+        let report = compile_path_metadata_with_diagnostics_for_sources(
             &entry,
-            "module typed::app\nuse legacy::time::legacy_epoch\naction inspect() -> EpochNumber { return legacy_epoch() }\n",
+            &std::collections::BTreeMap::from([(
+                entry.clone(),
+                "module typed::app\nuse legacy::time::legacy_epoch\naction inspect() -> EpochNumber { return legacy_epoch() }\n"
+                    .into(),
+            )]),
             CompileOptions::default(),
         );
         assert!(report.has_errors(), "the old-edition u64 signature must not be retyped at the import boundary");
@@ -39134,8 +37647,7 @@ struct Value {
                 r#"
 module bad
 resource Token has store, create { amount: u64 }
-#[effect(Creating)]
-fn impure(amount: u64) -> bool { return true }
+fn impure(amount: u64) -> bool { return amount > ckb::cell_capacity(source::input(0)) }
 struct Value {
     amount: u64
     validity

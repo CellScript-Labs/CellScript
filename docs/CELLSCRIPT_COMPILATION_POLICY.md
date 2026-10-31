@@ -2,17 +2,32 @@
 
 Status: candidate implementation; backend integration acceptance is pending.
 
-Normal compilation uses `cellscript-unified-v1`. Standalone files, packages,
-release builds, metadata inspection and the browser metadata path use the same
-optional transformation set. `--release` does not select another optimization
-strategy. Output directories, debug information and target selection retain
-independent purposes.
+Normal artifact compilation uses `cellscript-unified-v1`. Standalone files,
+packages and release builds use the same optional transformation set.
+`--release` does not select another optimization strategy. Output directories,
+debug information and target selection retain independent purposes.
 
 The strategy includes syntax-local constant folding and propagation, bounded
 inlining, unused function and binding elimination, exact Cell-data and source
 byte equality lowering, repeated exact-read hot-cache selection, immediate stack
 reload elimination and scalar branch fusion. Required validation, overflow
 checks, failure propagation and memory boundaries remain mandatory.
+
+## Metadata inspection paths
+
+Metadata built by the artifact pipeline describes its optimized IR. The Rust
+`compile_metadata` API instead performs parsing, monomorphization, type/flow and
+IR validation, then constructs metadata without the eight optional pass groups
+or assembly/ELF emission. Optional-transformation parity with the artifact
+pipeline is not implemented in this path. Inlining and unused-function
+elimination currently leave different helper/function entries in the two
+results; whole-metadata equality has not been established. Shared interface
+and effect-fact claims require their own scoped cross-path checks.
+
+The browser uses the metadata-only path and its bounded WASM summaries. That
+output does not establish native ELF admission, runtime execution or complete
+source equivalence. Inspect actual native artifacts separately when those
+properties are required.
 
 ## Removed controls
 
@@ -33,8 +48,10 @@ This is an intentional API and artifact change. There are no backward aliases.
 Previously built ELF files, code hashes, frozen modules, build plans and cache
 entries must not be treated as equivalent to rebuilt output. Rebuild and check
 actual artifacts, then explicitly update any package or deployment identities
-that should move. The cache generation changes to v135 to invalidate artifacts
-whose byte-loop optimization could discard trapping prefix operations. Keys distinguish
+that should move. Cache generation v149 invalidates artifacts whose
+source-to-memory or zero-scan byte-loop optimization could discard trapping
+prefix operations; the earlier v135 correction covered source-to-source loops.
+All three matchers now share non-trapping prefix admission. Keys distinguish
 strategy identity and every diagnostic pass mask.
 
 ## Compiler diagnosis
@@ -78,8 +95,9 @@ cases, four cost-corpus tests and seven multi-contract composition tests passed;
 resource ceilings were not widened. See the
 [retirement work record](CELLSCRIPT_BYTE_BUFFER_RETIREMENT.md) and
 [wide-value measurement](CELLSCRIPT_WIDE_VALUE_ARGUMENTS.md) for scoped evidence.
-CI and TAC are not run under the maintainer's current instruction. No partial
-result constitutes backend integration or release acceptance.
+Those historical runs did not include complete CI or TAC. Current alpha.2
+acceptance is recorded in the [alpha.2 backlog](releases/CELLSCRIPT_0_33_ALPHA_2_TODO.md).
+No partial result constitutes backend integration or release acceptance.
 
 The 212-test run preceded the final browser-summary boundary refinement and
 shared trusted-call inventory extraction. After that refinement, the current

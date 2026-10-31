@@ -1,3 +1,8 @@
+mod calls;
+mod lineage;
+pub(crate) use calls::{collect_call_names_from_expr, collect_call_names_from_stmts, replace_relation_inner_exprs};
+pub(crate) use lineage::action_core_input_binding_names;
+
 use crate::error::Span;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -688,8 +693,6 @@ pub struct ActionDef {
     pub outputs: Vec<ActionOutput>,
     pub state_edges: Vec<ActionStateEdge>,
     pub body: Vec<Stmt>,
-    pub effect: EffectClass,
-    pub effect_declared: bool,
     pub scheduler_hint: Option<SchedulerHint>,
     /// Edition 2027 structure retained for canonical formatting and explicit
     /// semantic intent. The generated body remains executable authority, while
@@ -752,6 +755,7 @@ pub struct NextPool {
 
 #[derive(Debug, Clone)]
 pub struct NextPoolField {
+    pub span: Span,
     pub field: String,
     pub treatment: NextPoolFieldTreatment,
 }
@@ -805,8 +809,6 @@ pub struct FnDef {
     pub params: Vec<Param>,
     pub return_type: Option<Type>,
     pub body: Vec<Stmt>,
-    pub effect: EffectClass,
-    pub effect_declared: bool,
     pub doc_comment: Option<String>,
     pub span: Span,
 }
@@ -1451,26 +1453,7 @@ impl fmt::Display for MatchPattern {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EffectClass {
-    Pure,
-    ReadOnly,
-    Mutating,
-    Creating,
-    Destroying,
-}
-
-impl EffectClass {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Pure => "Pure",
-            Self::ReadOnly => "ReadOnly",
-            Self::Mutating => "Mutating",
-            Self::Creating => "Creating",
-            Self::Destroying => "Destroying",
-        }
-    }
-}
+pub use cellscript_artifact_checker::effect_facts::EffectFacts;
 
 /// Stdlib call expression: `std::namespace::name(args)` or `std::namespace::name(args) { field1, field2 }`
 ///

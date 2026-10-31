@@ -433,7 +433,7 @@ impl CodeGenerator {
             {
                 self.fixed_byte_param_size_offsets.insert(param.binding.id, next_cell_slot);
                 next_cell_slot += 8;
-            } else if named_type_name(&param.ty).is_some() {
+            } else if uses_schema_span_abi(&param.ty) {
                 self.schema_pointer_size_offsets.insert(param.binding.id, next_cell_slot);
                 next_cell_slot += 8;
             }
@@ -589,7 +589,7 @@ impl CodeGenerator {
         for instruction in body.blocks.iter().flat_map(|block| &block.instructions) {
             if let IrInstruction::Index { dest, .. } | IrInstruction::FieldAccess { dest, .. } = instruction
                 && matches!(
-                    named_type_name(&dest.ty).and_then(crate::nested_values::parsed),
+                    Self::nested_type(&dest.ty),
                     Some(
                         crate::nested_values::NestedType::Values(_)
                             | crate::nested_values::NestedType::BytesView { .. }
@@ -844,7 +844,8 @@ impl CodeGenerator {
             self.exact_selection_offset = Some(next_cell_slot);
             next_cell_slot += shared_selection_bytes;
         }
-        self.frame_size = align_frame(next_cell_slot + RUNTIME_EXPR_TEMP_SIZE + RUNTIME_SCRATCH_SIZE + 16);
+        let unaligned = crate::ir::checked_fixed_size(next_cell_slot.checked_add(RUNTIME_EXPR_TEMP_SIZE + RUNTIME_SCRATCH_SIZE + 16))?;
+        self.frame_size = crate::ir::checked_fixed_size(unaligned.checked_add(15).map(|size| size & !15))?;
         Ok(())
     }
 
@@ -1083,7 +1084,7 @@ impl CodeGenerator {
                     self.emit_spill_abi_arg(abi_index + 1, size_offset);
                 }
                 abi_index += 2;
-            } else if named_type_name(&param.ty).is_some() {
+            } else if uses_schema_span_abi(&param.ty) {
                 self.emit(format!(
                     "# cellscript abi: schema param {} pointer={} length={}",
                     param.name,

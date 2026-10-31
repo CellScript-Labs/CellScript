@@ -10,9 +10,10 @@ only a Token example or acceptance of old source text.
 The bounded 0.30 release scope is recorded in the capability ledger and
 [release notes](releases/CELLSCRIPT_0_30_RELEASE_NOTES.md). This wider authoring
 plan is not a claim that all proposed 1.0 features are complete. The source
-contract advances from the recorded `authoring1` and `0.30-dev1` development
-identities to `cellscript-source-semantics-2027-0.30-v1`; the compiler version is
-0.30.0 while existing single-entry payload/placement ABIs are unchanged. Explicit persistent
+contract now records `cellscript-source-semantics-2027-0.33-effect-facts-v1`.
+Alpha.2 replaces source effect declarations with inference, with a coordinated
+artifact schema break; see [the effect contract](CELLSCRIPT_EFFECT_CONTRACTS.md).
+The existing single-entry payload/placement ABIs are unchanged. Explicit persistent
 Type policies have a separate, opt-in `cellscript-policy-witness-v1` envelope.
 The implementation may become the next stable release without publishing a
 stable 0.26 line. The 0.30 scope and its broader Rust-comparable business
@@ -21,7 +22,7 @@ acceptance portfolio are tracked in the
 the release name nor this development evidence changes a compatibility identity.
 
 Issue #23 selects the public-generics Proposal A for 0.30. Public value
-templates and pure functions remain importable across packages, `fixed_value`
+templates and ordinary functions remain importable across packages, `fixed_value`
 normalizes the common six-ability contract, omitted aggregate abilities are
 derived from fields, and the compiler, Registry, artifact checker, CLI, LSP,
 editor, and browser metadata path share one canonical interface model. This
@@ -182,7 +183,7 @@ now addresses these rather than copying inaccurate records as reference semantic
   part of production acceptance.
 
 The mandatory fixed-Cell table introduced in typed semantics v5 is retained in
-`cellscript-typed-semantics-v9`. The
+`cellscript-typed-semantics-v11`. The
 independent checker cross-checks typed locals, roles and provenance, including
 hash-rebound source/ordinal/identity and missing-record mutations. This does
 not establish general syscall dataflow equivalence. The source-set artifact
@@ -252,7 +253,7 @@ max_extra_witnesses, max_witness_bytes) -> SighashAllDigest`. It streams the
 current input Script-group signing message, replaces the complete first
 `WitnessArgs.lock` payload with equal-length zero bytes, and commits to later
 group witnesses and transaction-level extra witnesses. All four bounds are
-integer literals and are enforced at runtime. Metadata schema 72 and the
+integer literals and are enforced at runtime. Metadata schema 74 and the
 standalone checker bind the scope, transform, order, type, and limits to typed
 semantics and runtime provenance. Differential CKB-VM evidence matches the
 pinned `ckb-sdk-rust` generator for this all-zero placeholder domain.
@@ -327,7 +328,7 @@ whole WitnessArgs limit is 4,096 bytes with at most eight records. Host and CKB
 adapter codecs are independently implemented; placement preserves other fields,
 rejects occupied `input_type`, and must occur before signing.
 
-Metadata schema 72, `cellscript-typed-semantics-v9` and
+Metadata schema 74, `cellscript-typed-semantics-v11` and
 `cellscript-semantic-foundation-v3` bind the declared policy, selector provenance,
 resource layout, variant payload schemas, fixed counts and ordered common
 checks. Runtime metadata also binds `cellscript-ckb-runtime-view-v1`, the

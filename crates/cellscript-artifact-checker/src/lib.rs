@@ -6,6 +6,7 @@ pub mod cell_selection;
 mod checker;
 pub mod code_origin;
 pub mod constant_values;
+pub mod effect_facts;
 mod elf;
 pub mod entry_codec;
 pub mod external_codec;
@@ -21,11 +22,14 @@ pub mod instance_policy;
 pub mod interface;
 mod nested_machine;
 pub mod open_handle_policy;
+mod pipe_machine;
 mod policy;
 mod policy_machine;
+pub mod runtime_contract;
 mod scalar_machine;
 mod schema;
 mod value_abilities;
+pub mod view_types;
 pub mod zk;
 pub mod zk_profile;
 
@@ -58,3 +62,6 @@ pub fn hex_encode(bytes: &[u8]) -> String {
     }
     output
 }
+
+/// Canonical byte vectors shared with independent producers and verifiers.
+pub const CANONICAL_JSON_CONFORMANCE_VECTORS: &str = include_str!("canonical_json_vectors.json");

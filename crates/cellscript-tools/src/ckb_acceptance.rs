@@ -472,7 +472,10 @@ fn compile_matrix(root: &Path, cellc: &Path, run_dir: &Path) -> Result<Vec<Artif
     fs::copy(root.join("tests/fixtures/bounded_group_input.cell"), bounded_group_package.join("src/main.cell"))?;
     fs::write(
         bounded_group_package.join("Cell.toml"),
-        "[package]\nedition = \"2026\"\nname = \"bounded_group_input_acceptance\"\nversion = \"0.1.0\"\n",
+        format!(
+            "[package]\nedition = \"2026\"\nname = \"bounded_group_input_acceptance\"\nversion = \"0.1.0\"\ncellscript_version = \">={}\"\n",
+            cellscript::VERSION
+        ),
     )?;
     artifacts.push(compile_artifact(
         cellc,
@@ -489,7 +492,10 @@ fn compile_matrix(root: &Path, cellc: &Path, run_dir: &Path) -> Result<Vec<Artif
     fs::copy(root.join("tests/fixtures/bounded_output_plan.cell"), bounded_output_package.join("src/main.cell"))?;
     fs::write(
         bounded_output_package.join("Cell.toml"),
-        "[package]\nedition = \"2026\"\nname = \"bounded_output_plan_acceptance\"\nversion = \"0.1.0\"\n",
+        format!(
+            "[package]\nedition = \"2026\"\nname = \"bounded_output_plan_acceptance\"\nversion = \"0.1.0\"\ncellscript_version = \">={}\"\n",
+            cellscript::VERSION
+        ),
     )?;
     artifacts.push(compile_artifact(
         cellc,
@@ -762,9 +768,9 @@ mod tests {
             .collect::<BTreeSet<_>>();
         assert_eq!(assert_generated_scripts_use_data2(&fixture, &generated_hashes), 253);
         for (name, expected_hash) in [
-            ("timelock.cell:create_absolute_lock", "0xd6bc48f45473bd51f9a8362bcdcb6b2e5f266931240c9c60de9dc54a090a4596"),
-            ("timelock.cell:extend_lock", "0xc4cb3f6fee53c2f47d1db078a8cb2e2ba778df151a10d9ef1a0e500d21520eb4"),
-            ("timelock.cell:batch_create_locks", "0x4c9522b688565df05ec61128385ea7620d6ab4db9a98751f2f85c5321b397827"),
+            ("timelock.cell:create_absolute_lock", "0x716f6082d69e3480ffd761c7203ed2e72aa64505ac6992c6435afdbfdf613a74"),
+            ("timelock.cell:extend_lock", "0xc44202d61b5fdee6d71cb8666d5e11dc298a7f8c07a1c6f371f076bde1d1d1f1"),
+            ("timelock.cell:batch_create_locks", "0x2cd8636db91ea2fdbeff54c3b28fe93b30cbcaa9f9902a5b63f4823df68a9fc5"),
         ] {
             let case = action_cases.iter().find(|case| case["name"] == name).unwrap();
             assert_eq!(case["artifact_data_hash"], expected_hash, "stale audited artifact identity for {name}");

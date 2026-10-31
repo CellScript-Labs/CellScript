@@ -1,10 +1,20 @@
 # CellScript Gate Policy
 
+`interface-diff --checked --old old.elf --new new.elf` compares only independently
+verified complete bundle projections. It requires source-contract evidence and
+canonical neighboring sidecars; declaration-only JSON is insufficient. Qualified
+nominal owners resolve aliases, while distinct same-width owners remain distinct.
+This is an offline contract check, not deployment or source-equivalence evidence.
+
 `require_maturity`, `require_time`, `require_epoch_after` and
 `require_epoch_relative` remain deferred: production policy rejects them, and
 development artifacts abort with runtime error 86. The `occupied_capacity`
 floor is likewise deferred (error 87). These helpers do not establish CKB since
-constraints or capacity bounds. IPC `pipe_read` returns a complete eight-byte
+constraints or capacity bounds. Bare named `spawn` is rejected with source error
+E1021 in development, production and metadata-only analysis. It has no runtime
+helper or deferred feature. Resolved user functions named `spawn` and
+manifest-bound CellDep spawn APIs retain
+their separate transport contracts. IPC `pipe_read` returns a complete eight-byte
 scalar or aborts with error 1; `inherited_fd` admits indices below both the
 reported count and its 64-entry copied prefix, otherwise aborting with error 1.
 
@@ -760,7 +770,7 @@ CKB-VM execution, deployment, and chain evidence.
 
 ### 0.30 typed CKB runtime-view evidence
 
-The `0.30` development branch uses compile metadata schema 72 and binds
+The `0.30` development branch uses compile metadata schema 74 and binds
 `runtime.ckb_runtime_view_contract = cellscript-ckb-runtime-view-v1` plus
 `runtime.ckb_runtime_access_provenance_contract =
 cellscript-ckb-runtime-access-provenance-v1`. The first
@@ -821,7 +831,7 @@ matrix spans both editions and optimization
 levels 0-3; mutations alter each stage, rebind block and bundle identities, and
 must still reject with `V2420`.
 
-Metadata schema 72 additionally binds the existing
+Metadata schema 74 additionally binds the existing
 `cellscript-ckb-sighash-all-zero-lock-v1`. Reviewers must check the current
 input Script-group scope, complete first-lock zero transform, witness order,
 `SighashAllDigest` type, and all four literal bounds together. The standalone
@@ -856,7 +866,7 @@ liveness. See
 [the bounded output plan contract](CELLSCRIPT_BOUNDED_OUTPUT_PLAN_CONTRACT.md).
 
 The deployment-line path adds the canonical
-`cellscript-deployment-line-receipt-v1` chain and `CSLINv1-fixed-386` value.
+`cellscript-deployment-line-receipt-v3` chain and `CSLINv1-fixed-386` value.
 `dev` and `ci` execute its initial, additive-upgrade, breaking-change,
 same-version replay, stable-Script, stale-predecessor, yank, and data-hash
 rejection cases. The same gates compile the distinct `ckb-type-hash` profile
@@ -914,7 +924,7 @@ a hash boundary. Source paths and spans live only in source-map v2, while
 source bytes have a separate `SourceDigest`.
 
 The gate treats Edition 2027 as experimental, not a release claim. The current
-`cellscript-source-semantics-2027-0.30-v1` frontend inherits the `authoring1`
+`cellscript-source-semantics-2027-0.33-effect-facts-v1` frontend inherits the `authoring1`
 2026 value/declaration/statement kernel while retaining an independently
 selected entry-body grammar. Ordinary modules retain legacy default provenance
 and lifecycle meanings and may contain multiple actions/locks; those source
@@ -1117,8 +1127,7 @@ negative seed through `SCA-BUG-0.22-VALIDITY-EVIDENCE-MISSING` and
 
 Explicit borrow blocks are a checked-static compiler contract. Each
 `runtime.borrow_regions` record must use canonical `View<T>`, declare
-`storage = none` and `abi = none`, and allow only `Pure` and `ReadOnly`
-callees with a dedicated `&T` parameter. The matching `borrow-region`
+`storage = none` and `abi = none`, and require callee lifecycle and process fact sets to be empty with a dedicated `&T` parameter. The matching `borrow-region`
 ProofPlan entry records escape and root-lifecycle rejection. Quick syntax
 coverage pins effect compatibility, escape rejection, and crossing
 `consume`/`destroy` through the three `SCA-BUG-0.22-BORROW-*` classes.

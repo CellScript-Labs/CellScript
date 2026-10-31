@@ -7,7 +7,7 @@
 ## Decision
 
 CellScript selects issue #23 **Proposal A: restricted public generics**.
-Public generic value structs, fixed-width payload enums, and pure functions may
+Public generic value structs, fixed-width payload enums, and ordinary functions may
 be imported across package boundaries. The compiler specializes every concrete
 use in the template's owning module before IR, so CKB-VM artifacts contain only
 bounded concrete code and layouts.

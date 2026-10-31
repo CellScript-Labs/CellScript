@@ -697,6 +697,16 @@ impl CodeGenerator {
             self.emit_label(&ok_label);
         }
 
+        if runtime_contract::return_abi(func) == Some(runtime_contract::RuntimeReturnAbi::StatusA0ValuesA1A2) {
+            let ok_label = self.fresh_label("runtime_pair_ok");
+            self.emit("# cellscript abi: consume status a0, then receive pair from a1/a2");
+            self.emit(format!("beqz a0, {}", ok_label));
+            self.emit_process_failure_status();
+            self.emit_label(&ok_label);
+            self.emit("mv a0, a1");
+            self.emit("mv a1, a2");
+        }
+
         if let Some(d) = dest {
             if let Some(offset) = return_buffer_offset {
                 let marker = result_marker.as_ref().expect("fixed result call has a machine marker");
@@ -1964,7 +1974,7 @@ impl CodeGenerator {
             }
             return true;
         }
-        if named_type_name(&param.ty).is_some() {
+        if uses_schema_span_abi(&param.ty) {
             self.emit(format!(
                 "# cellscript abi: call {} schema param {} pointer={} length={}",
                 func,

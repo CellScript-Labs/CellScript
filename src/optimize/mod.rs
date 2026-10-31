@@ -23,6 +23,67 @@ pub fn optimize_module(module: &mut Module, diagnostics: CompilerDiagnostics) ->
     Optimizer::new(diagnostics).optimize_module(module)
 }
 
+/// Retain the operations establishing each retained callable's source contract.
+/// A rewrite may reduce work, but cannot change that contract. Restoring a body
+/// also restores any local dependencies eliminated by inlining or dead code.
+/// The resulting IR still carries the real operations: no effect override or
+/// unaudited producer summary is introduced at the artifact boundary.
+pub(crate) fn preserve_effect_contracts(
+    source: &Module,
+    optimized: &mut Module,
+    resolver: Option<&crate::resolve::ModuleResolver>,
+) -> Result<()> {
+    let original = crate::effects::infer_module(source, resolver)?;
+    let rewritten = crate::effects::infer_module(optimized, resolver)?;
+    let mut restored = HashSet::new();
+    for item in &mut optimized.items {
+        let Some(name) = item.name() else { continue };
+        if callable_body(item).is_some() && original.get(name) != rewritten.get(name) {
+            let definition =
+                source.items.iter().find(|definition| definition.name() == Some(name)).expect("optimizer retained a source callable");
+            restored.insert(name.to_string());
+            *item = definition.clone();
+        }
+    }
+    let mut pending = HashSet::new();
+    for item in &optimized.items {
+        if item.name().is_some_and(|name| restored.contains(name)) {
+            crate::ast::collect_call_names_from_stmts(callable_body(item).expect("restored callable"), &mut pending);
+        }
+    }
+    let prefix = format!("{}::", source.name);
+    while let Some(name) = pending.iter().min().cloned() {
+        pending.remove(&name);
+        let name = name.strip_prefix(&prefix).unwrap_or(&name);
+        if optimized.items.iter().any(|item| item.name() == Some(name)) {
+            continue;
+        }
+        let Some(item) = source.items.iter().find(|item| item.name() == Some(name)) else { continue };
+        if let Some(body) = callable_body(item) {
+            crate::ast::collect_call_names_from_stmts(body, &mut pending);
+            optimized.items.push(item.clone());
+        }
+    }
+    let checked = crate::effects::infer_module(optimized, resolver)?;
+    for item in &optimized.items {
+        if let Some(name) = item.name().filter(|_| callable_body(item).is_some())
+            && original.get(name) != checked.get(name)
+        {
+            return Err(crate::error::CompileError::without_span(format!("optimization changed the inferred effect of '{name}'")));
+        }
+    }
+    Ok(())
+}
+
+fn callable_body(item: &Item) -> Option<&[Stmt]> {
+    match item {
+        Item::Action(action) => Some(&action.body),
+        Item::Function(function) => Some(&function.body),
+        Item::Lock(lock) => Some(&lock.body),
+        _ => None,
+    }
+}
+
 /// Syntax-local optimizer.
 pub struct Optimizer {
     diagnostics: CompilerDiagnostics,
@@ -1327,8 +1388,6 @@ mod tests {
                     else_branch: Some(vec![Stmt::Expr(Expr::Integer(1))]),
                     span: Span::default(),
                 })],
-                effect: EffectClass::Pure,
-                effect_declared: false,
                 scheduler_hint: None,
                 next_surface: None,
                 doc_comment: None,
@@ -1376,8 +1435,6 @@ mod tests {
                         })),
                         span: Span::default(),
                     })],
-                    effect: EffectClass::Pure,
-                    effect_declared: false,
                     doc_comment: None,
                     span: Span::default(),
                 }),
@@ -1387,8 +1444,6 @@ mod tests {
                     params: Vec::new(),
                     return_type: Some(Type::U64),
                     body: vec![Stmt::Return(ReturnStmt { value: Some(Expr::Integer(99)), span: Span::default() })],
-                    effect: EffectClass::Pure,
-                    effect_declared: false,
                     doc_comment: None,
                     span: Span::default(),
                 }),
@@ -1416,8 +1471,6 @@ mod tests {
                             span: Span::default(),
                         }),
                     ],
-                    effect: EffectClass::Pure,
-                    effect_declared: false,
                     scheduler_hint: None,
                     next_surface: None,
                     doc_comment: None,

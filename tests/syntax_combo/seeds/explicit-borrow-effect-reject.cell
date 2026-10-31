@@ -1,13 +1,15 @@
 // audit: phase=reject_compile
-// audit: contains=has Mutating effect and cannot receive borrowed linear view 'view'
+// audit: contains=function cannot receive borrowed linear view unless it is observation-only 'incompatible'
 module cellscript::audit::seed_explicit_borrow_effect_reject
 
-resource Token has consume {
+resource Token has create, destroy, consume {
     amount: u64,
 }
 
-#[effect(Mutating)]
+action change() { verification let token = create Token { amount: 1 } destroy token }
+
 fn incompatible(token: &Token) -> bool {
+    change()
     return token.amount > 0
 }
 

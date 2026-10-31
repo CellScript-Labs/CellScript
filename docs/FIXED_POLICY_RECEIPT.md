@@ -40,8 +40,8 @@ strings, bytes, wider widths) all fail closed. Uninstantiated generic
 declarations remain declaration-only; they cannot claim an executable external
 codec. Broader bundle inspection remains unchanged.
 
-The record schema is `cellscript-fixed-policy-interface-receipt-v1`; its identity
-uses domain `cellscript-fixed-policy-interface-receipt-id-v1` over canonical
+The record schema is `cellscript-fixed-policy-interface-receipt-v3`; its identity
+uses domain `cellscript-fixed-policy-interface-receipt-id-v3` over canonical
 record bytes. It contains the actual checked declared interface, entry contract,
 module API/codec identities, exact code-origin/target identities, hashes and
 lengths of every original bundle file, and the independent artifact report.

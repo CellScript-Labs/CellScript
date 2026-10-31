@@ -104,7 +104,7 @@ ring = { version = "0.17", optional = true }
 camino = "1.1"
 ckb-vm = { version = "0.24", features = ["asm", "detect-asm"], optional = true }
 
-# NovaSeal certifier uses sha2 in src/cli/novaseal_certification.rs
+# SHA-256 underpins package/Registry/upgrade integrity and native artifact/certification paths.
 sha2 = "0.10"
 
 # LSP

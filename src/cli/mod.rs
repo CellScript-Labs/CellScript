@@ -2,9 +2,13 @@
 //! Command-line interface and subcommand implementation
 
 mod artifact;
+mod certification;
 mod collection_budget;
 pub mod commands;
+mod interface_diff;
 mod novaseal_certification;
+mod output;
+mod protocol_builder;
 mod test_runner;
 
 use crate::error::Result;

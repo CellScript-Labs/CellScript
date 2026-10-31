@@ -101,7 +101,7 @@ fn assert_imported_contract(metadata: &CompileMetadata) {
     let helper = typed
         .entries
         .iter()
-        .find(|entry| entry.name == "is_positive")
+        .find(|entry| entry.name == "__cellscript.ext.706f6c6963795f696d706f7274733a3a68656c70657273.positive")
         .expect("imported scalar helper must remain in the checked dependency closure");
     assert_eq!(helper.kind, "helper");
     assert!(helper.cell_bindings.is_empty(), "scalar helper must not acquire entry Cell bindings");
@@ -113,7 +113,7 @@ fn assert_imported_contract(metadata: &CompileMetadata) {
                 .blocks
                 .iter()
                 .flat_map(|block| &block.operations)
-                .any(|operation| operation.call.as_ref().is_some_and(|call| call.target == "is_positive")),
+                .any(|operation| operation.call.as_ref().is_some_and(|call| call.target == helper.name)),
             "{name} must call the retained imported helper"
         );
         assert!(entry.cell_bindings.iter().all(|binding| {
@@ -195,7 +195,12 @@ fn imported_scalar_arithmetic_and_cast_guards_are_retained_across_compile_modes(
                 full.validate().unwrap();
                 assert_same_contract(&full.metadata, &metadata);
                 assert_imported_contract(&metadata);
-                let helper = metadata.typed_semantics.entries.iter().find(|entry| entry.name == "is_positive").unwrap();
+                let helper = metadata
+                    .typed_semantics
+                    .entries
+                    .iter()
+                    .find(|entry| entry.name == "__cellscript.ext.706f6c6963795f696d706f7274733a3a68656c70657273.positive")
+                    .unwrap();
                 assert!(helper.blocks.iter().flat_map(|block| &block.operations).any(|operation| {
                     matches!(&operation.detail, TypedSemanticOperationDetail::BinaryOperator { operator: actual } if actual == operator)
                 }), "{edition:?} opt{diagnostics} must retain {operator} in the imported helper");

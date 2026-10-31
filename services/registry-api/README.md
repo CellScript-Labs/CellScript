@@ -457,6 +457,16 @@ codes include `invalid_arguments`, `snapshot_unavailable`, `snapshot_invalid`,
 the job record; transport, timeout, malformed-output, and store failures remain
 retryable infrastructure errors.
 
+Permanent verifier rejection purges an unshared source object under job,
+snapshot and release locks. Snapshot/release rows remain as audit tombstones;
+public snapshot reads hide purged data, and administrative retry returns
+`verification_snapshot_purged`. A corrected upload needs a new release.
+Other retained release references, including expired releases awaiting their
+retention cleanup, prevent deletion. Exhausted infrastructure failures retain
+their source and remain eligible for administrative retry. Object-store deletion
+failure leaves the dead-letter job and readable snapshot metadata available for
+investigation; it does not turn rejection into accepted evidence.
+
 For CellScript source, the verifier compiles the authenticated snapshot using
 the current real compiler. Source publication requires both
 `compiler_requirement`, copied from `[package].cellscript_version`, and the

@@ -187,20 +187,17 @@ async function processJob(job: VerificationJobRecord): Promise<void> {
         error: safeErrorMessage(error),
         ...(failed.status === "retry_wait" ? { retry_after_seconds: retryAfterSeconds } : {}),
       });
-      if (failed.status === "dead_letter") {
-        // Rejected publications must not leave their bytes in production
-        // object storage: delete the snapshot when no surviving release
-        // still references it. Best effort — the dead-letter decision and
-        // its audit trail already stand.
+      if (failed.status === "dead_letter" && !retryable) {
+        // Permanent rejection may purge source bytes. Exhausted infrastructure
+        // failures retain their source so an administrator can retry them.
         try {
-          const snapshot = await store.getSnapshot(job.snapshot_hash);
-          if (snapshot) {
-            const orphans = await store.listPackageVersions({ snapshot_hash: job.snapshot_hash, limit: 1, offset: 0 });
-            if (orphans.length === 0) {
-              await objectStore.delete?.(snapshot.r2_key);
-              await store.deleteSnapshot(job.snapshot_hash);
-            }
-          }
+          await store.purgeRejectedSnapshot({
+            job_id: failed.id,
+            attempt_count: failed.attempt_count,
+            error_code: errorCode,
+            retryable,
+            delete_object: (key) => objectStore.delete(key),
+          });
         } catch (cleanupError) {
           log("verification.dead_letter_cleanup_failed", {
             request_id: requestId,

@@ -6,7 +6,7 @@ fn copied_cell_data_results_reject_intervening_body_writes() {
         let tail = if nested { ", messages: NestedValues<Vec<u8>, 2, 8, 32>" } else { "" };
         let source = format!(
             "module copied_data_writes\nresource Token has store {{ value: Hash{tail} }}\n\
-             #[effect(ReadOnly)]\nfn same(before: InputView<Token>, after: OutputView<Token>, delta: u64) -> bool {{\n\
+             fn same(before: InputView<Token>, after: OutputView<Token>, delta: u64) -> bool {{\n\
              let mut current = before.data.value\nlet original = current\ncurrent = after.data.value\n\
              let adjusted = delta + 1\nif adjusted <= delta {{ return false }}\nreturn original == current\n}}\n\
              action inspect() -> u64 {{ verification\n\

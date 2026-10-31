@@ -23,7 +23,7 @@ pub(crate) fn validate(module: &crate::ir::IrModule) -> crate::error::Result<()>
         let (body, action) = match item {
             IrItem::Action(entry) => (&entry.body, true),
             IrItem::Lock(entry) => (&entry.body, false),
-            IrItem::PureFn(entry) => (&entry.body, false),
+            IrItem::Function(entry) => (&entry.body, false),
             _ => continue,
         };
         let calls: Vec<_> = body

@@ -683,7 +683,7 @@ fn ir_runtime_error_labels(ir: &IrModule) -> BTreeMap<String, Vec<u64>> {
         let (name, body) = match item {
             IrItem::Action(action) => (action.name.as_str(), &action.body),
             IrItem::Lock(lock) => (lock.name.as_str(), &lock.body),
-            IrItem::PureFn(function) => (function.name.as_str(), &function.body),
+            IrItem::Function(function) => (function.name.as_str(), &function.body),
             IrItem::TypeDef(_) | IrItem::Invariant(_) => continue,
         };
         for block in &body.blocks {
@@ -2676,27 +2676,65 @@ mod tests {
 
     #[test]
     fn stack_pointer_offsets_are_emitted_through_helpers() {
-        let implementation = include_str!("mod.rs")
-            .split("\n    fn emit_runtime_ckb_v014_surface_helpers")
-            .next()
-            .expect("source should contain runtime helper boundary");
-        let offenders = implementation
-            .lines()
-            .enumerate()
-            .filter_map(|(index, line)| {
-                let emits_stack_memory =
-                    (line.contains("self.emit(format!(") || line.contains("self.emit(\"")) && line.contains("(sp)");
-                let emits_stack_addi =
-                    (line.contains("self.emit(\"addi ") || line.contains("self.emit(format!(\"addi ")) && line.contains(", sp,");
-                let allowed_stack_memory = line.contains("self.emit(format!(\"{} {}, {}(sp)\", opcode, register, offset))");
-                let allowed_outgoing_stack_memory = line.contains("self.emit(format!(\"sd {}, {}(sp)\", register, offset))");
-                let allowed_stack_addi = line.contains("self.emit(format!(\"addi {}, sp, {}\", rd, offset))");
-                ((emits_stack_memory && !allowed_stack_memory && !allowed_outgoing_stack_memory)
-                    || (emits_stack_addi && !allowed_stack_addi))
-                    .then(|| format!("{}: {}", index + 1, line.trim()))
-            })
-            .collect::<Vec<_>>();
-
+        // Ordinary emitters own caller frames. Runtime helpers own separate
+        // fixed frames, and assembler sources contain assembly test fixtures.
+        // Walk the module tree so extracting another emitter cannot silently
+        // remove it from this guard's coverage.
+        fn sources(root: &std::path::Path, directory: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(directory).expect("codegen source directory must exist") {
+                let path = entry.expect("codegen source entry must be readable").path();
+                if ["runtime", "assembler", "runtime.rs", "assembler.rs"].iter().any(|boundary| path == root.join(boundary)) {
+                    continue;
+                }
+                if path.is_dir() {
+                    sources(root, &path, found);
+                } else if path.extension().is_some_and(|extension| extension == "rs") {
+                    found.push(path);
+                }
+            }
+        }
+        fn stack_emission(statement: &str) -> bool {
+            statement.contains("(sp)") || (statement.contains("addi ") && statement.contains(", sp,"))
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/codegen");
+        let orchestration = std::fs::read_to_string(root.join("mod.rs")).unwrap();
+        for module in ["frame", "calls", "runtime", "assembler"] {
+            assert!(orchestration.lines().any(|line| line == format!("mod {module};")), "missing {module} ownership boundary");
+            assert!(root.join(format!("{module}.rs")).is_file(), "missing {module} module source");
+        }
+        let runtime = std::fs::read_to_string(root.join("runtime.rs")).unwrap();
+        assert!(runtime.lines().any(|line| line == "mod dispatch;"), "missing raw runtime dispatch module");
+        let dispatch = std::fs::read_to_string(root.join("runtime/dispatch.rs")).expect("missing raw runtime dispatch source");
+        assert!(dispatch.contains("pub(super) fn emit_runtime_helpers("), "runtime dispatch ownership changed");
+        let primitives = [
+            ("frame.rs", "self.emit(format!(\"{} {}, {}(sp)\", opcode, register, offset))"),
+            ("frame.rs", "self.emit(format!(\"addi {}, sp, {}\", rd, offset))"),
+            ("calls.rs", "self.emit(format!(\"sd {}, {}(sp)\", register, offset))"),
+        ];
+        for (owner, statement) in primitives {
+            let source = std::fs::read_to_string(root.join(owner)).unwrap();
+            assert_eq!(source.matches(statement).count(), 1, "stack primitive moved or changed in {owner}");
+        }
+        let mut files = Vec::new();
+        sources(&root, &root, &mut files);
+        files.sort();
+        assert!(files.contains(&root.join("frame.rs")) && files.contains(&root.join("calls.rs")));
+        let mut offenders = Vec::new();
+        for path in files {
+            let source = std::fs::read_to_string(&path).unwrap();
+            for (offset, _) in source.match_indices("self.emit(") {
+                let statement = source[offset..].split(';').next().unwrap();
+                if stack_emission(statement)
+                    && !primitives.iter().any(|(owner, allowed)| path == root.join(owner) && statement == *allowed)
+                {
+                    let line = source[..offset].bytes().filter(|byte| *byte == b'\n').count() + 1;
+                    offenders.push(format!("{}:{line}: {}", path.strip_prefix(&root).unwrap().display(), statement.trim()));
+                }
+            }
+        }
+        assert!(stack_emission("self.emit(\"ld t0, 8(sp)\")"));
+        assert!(stack_emission("self.emit(format!(\n    \"addi t0, sp, {}\", offset))"));
+        assert!(!stack_emission("self.emit(\"ld t0, 8(t1)\")"));
         assert!(offenders.is_empty(), "stack pointer accesses must go through stack helpers:\n{}", offenders.join("\n"));
     }
 
@@ -2893,9 +2931,44 @@ mod tests {
             enum_layouts: Default::default(),
             generic_contracts: Default::default(),
             source_type_origins: Default::default(),
+            source_callable_targets: Default::default(),
         };
-        let error = generator.generate(&ir, ArtifactFormat::RiscvAssembly).unwrap_err();
-        assert!(error.message.contains("no scratch register available"));
+        for format in [ArtifactFormat::RiscvAssembly, ArtifactFormat::RiscvElf] {
+            for evidence in [false, true] {
+                let mut generator = CodeGenerator::new(CodegenOptions::default());
+                // Register aliases must be compared by physical identity. Later
+                // successful emissions cannot reset this first failure.
+                generator.emit_stack_store_with_avoid("a0", 4096, &["x31", "t5", "x28", "t2", "x6", "t0"]);
+                generator.emit("addi a0, zero, 0");
+                let error = if evidence {
+                    generator.generate_with_evidence(&ir, format).unwrap_err()
+                } else {
+                    generator.generate(&ir, format).unwrap_err()
+                };
+                assert!(error.message.contains("no scratch register available"), "{format:?}/{evidence}: {error}");
+            }
+        }
+    }
+
+    #[test]
+    fn rejected_textual_scratch_contract_cannot_return_any_artifact() {
+        let ast = crate::frontend::parse("module emission\naction main() { verification }", crate::CURRENT_EDITION).unwrap();
+        let ir = crate::ir::generate(&ast).unwrap();
+        for format in [ArtifactFormat::RiscvAssembly, ArtifactFormat::RiscvElf] {
+            for evidence in [false, true] {
+                let mut generator = CodeGenerator::new(CodegenOptions::default());
+                generator.emit("sd a0, 4096(sp)");
+                // A second failure and ordinary code must not overwrite the
+                // diagnostic or make a failed emitter usable again.
+                generator.emit_stack_store_with_avoid("a0", 4096, &["t6", "t5", "t3", "t2", "t1", "t0"]);
+                let error = if evidence {
+                    generator.generate_with_evidence(&ir, format).unwrap_err()
+                } else {
+                    generator.generate(&ir, format).unwrap_err()
+                };
+                assert!(error.message.contains("explicit live-register contract"), "{format:?}/{evidence}: {error}");
+            }
+        }
     }
 
     #[test]
@@ -3297,7 +3370,8 @@ mod tests {
             name: "shape_test".to_string(),
             generic_contracts: Default::default(),
             source_type_origins: Default::default(),
-            entry_selection: crate::ir::IrEntrySelection::Legacy,
+            source_callable_targets: Default::default(),
+            entry_selection: crate::ir::IrEntrySelection::Implicit,
             items: vec![IrItem::Action(IrAction {
                 name: "shape".to_string(),
                 entry_trigger: None,
@@ -3307,7 +3381,7 @@ mod tests {
                 return_type: Some(IrType::U64),
                 state_transition_edges: vec![],
                 protocol_role_candidates: vec![],
-                effect_class: EffectClass::Pure,
+                effects: EffectFacts::empty(),
                 scheduler_hints: SchedulerHints::default(),
                 body: IrBody {
                     cell_bindings: Vec::new(),

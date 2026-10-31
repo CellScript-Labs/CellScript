@@ -1,21 +1,20 @@
 # CellScript Verified Artifact Boundary
 
-**Status**: semantic-foundation and bounded machine contracts implemented on
-the `0.32` development branch
+**Status**: alpha.2 effect-facts cutover in progress; full acceptance is pending.
 
-**Schemas**: `cellscript-verified-lowering-record-v9`,
-`cellscript-typed-semantics-v9`,
+**Schemas**: `cellscript-verified-lowering-record-v11`,
+`cellscript-typed-semantics-v11`,
 `cellscript-semantic-foundation-v3`,
 `cellscript-value-provenance-dag-v1`,
-`cellscript-source-artifact-map-v2`, and
-`cellscript-verified-artifact-boundary-v2`, plus
+`cellscript-source-artifact-map-v4`, and
+`cellscript-verified-artifact-boundary-v4`, plus
 `cellscript-artifact-checker-policy-v1`
 
-**Metadata schema**: 72
+**Metadata schema**: 74
 
 ## Purpose
 
-Typed semantics v9 requires an explicit `value_abilities` array for every type,
+Typed semantics v11 requires an explicit `value_abilities` array for every type,
 including an empty declaration. The independent checker validates the declared
 abilities against field and enum payload types, preserves declared restrictions,
 and does not infer `non_linear` from missing nominal evidence. Cell lifecycle
@@ -29,7 +28,7 @@ Entry selection retains nominal type evidence referenced only by specialization
 identities, without granting runtime Cell roles to phantom parameters.
 Private template layout/phantom-use projection, universal template admission
 and full compatible-open receipts remain pending. The nested schema advances independently
-of metadata schema 72 and lowering record v9; v8 records are not silently upgraded.
+of metadata schema 74 and lowering record v11; v8 records are not silently upgraded.
 
 Every CKB RISC-V ELF build now emits two canonical sidecars in addition to the
 artifact and compile metadata:
@@ -293,6 +292,21 @@ on any path cannot receive this summary. This preserves standalone nested Cell
 creation followed by an explicit scalar return without trusting syscall numbers
 from sidecar metadata or permitting an early successful EXIT to omit work.
 
+### Pipe result admission
+
+The checker independently decodes the complete PIPE helper and corresponds its
+actual machine callers to typed operations. Ordinary source calls must consume
+the status in `a0` before mapping the read/write descriptors from `a1`/`a2` into
+the two-value tuple. Both branch destinations and the tuple's caller-owned
+storage are checked. Internal BIP340 and ZK transports retain their separate
+raw register and fixed-error contracts.
+
+The current storage proof reconstructs scalar and closed fixed-byte/tuple
+prefixes from typed locals. An unknown prefix layout rejects with V2420.
+Rebound machine mutations cover status bypass, endpoint swaps, helper slot
+substitution and overlap with a live wide value. These checks establish this
+bounded calling contract; source equivalence remains a separate claim.
+
 ### Fatal verifier failures
 
 Typed semantics v8 declares `failure_semantics = current-vm-process-exit-v1`.
@@ -428,14 +442,17 @@ declared entry.
 On the 0.32 work branch, `cellscript_artifact_checker::interface::inspect_bundle`
 accepts actual ELF, metadata, lowering-record and source-map bytes. It requires
 all four checker evidence fields to be verified before returning an immutable
-inspection. The existing v3 public-interface wire models are shared from the
-standalone crate without importing the compiler front end or changing their
-serialized field order.
+inspection. The current v5 public-interface wire models are shared from the
+standalone crate without importing the compiler front end. Old interface
+generations reject; there is no translator or alternate reader.
 
 Inspection retains source declarations and effective typed contracts separately.
-A declaration's default `Pure` effect can correspond to an inferred `ReadOnly`
-entry; equating the two would hide a real compatibility dimension. Uninstantiated
-public generic templates remain declarations without invented runtime entries.
+Generated callable contracts carry automatically inferred structured facts.
+Retained executable entries must match independently reconstructed facts exactly.
+Uninstantiated public generic templates remain declarations without invented
+runtime entries or verified empty facts. Source declarations cannot override
+executable facts. The three dimensions and evidence rules are defined in
+[the effect contract](CELLSCRIPT_EFFECT_CONTRACTS.md).
 
 Additional checks reject unknown or synthesized interface fields, recompute
 module/type/builder/deployment digests, bind witness/runtime/temporal profiles,

@@ -12,20 +12,7 @@ impl LspServer {
     /// Follow the same nominal imports and package visibility as compilation.
     /// Searching every workspace declaration by spelling can select a decoy.
     pub(super) fn completion_type_definition(&self, uri: &str, name: &str) -> Option<crate::resolve::TypeDef> {
-        use crate::resolve::TypeDef;
-        let module = self.ast_cache.get(uri)?;
-        if let Some(definition) = module.items.iter().find_map(|item| match item {
-            Item::Resource(def) if def.name == name => Some(TypeDef::Resource(def.clone())),
-            Item::Shared(def) if def.name == name => Some(TypeDef::Shared(def.clone())),
-            Item::Receipt(def) if def.name == name => Some(TypeDef::Receipt(def.clone())),
-            Item::Struct(def) if def.name == name => Some(TypeDef::Struct(def.clone())),
-            _ => None,
-        }) {
-            return Some(definition);
-        }
-        let modules = self.workspace_modules(uri);
-        let resolver = crate::build_module_resolver_from_loaded_modules(&modules).ok()?;
-        resolver.resolve_type(&module.name, name)
+        self.view_index(uri)?.resolve_type(name)
     }
 
     pub(super) fn completion_record_fields(&self, uri: &str, name: &str) -> Option<Vec<Field>> {
@@ -63,8 +50,8 @@ impl LspServer {
     /// Role navigation is nominal and lexical: an alias keeps its catalog,
     /// while the same spelling in another catalog or local binding is distinct.
     pub(super) fn named_role_definition(&self, uri: &str, position: Position, symbol: &str) -> Option<Location> {
-        let tokens = crate::lexer::lex(self.documents.get(uri)?).ok()?;
-        self.named_role_definition_from_tokens(uri, position, symbol, &tokens)
+        let index = self.view_index(uri)?;
+        self.named_role_definition_from_tokens(uri, position, symbol, &index)
     }
 
     fn named_role_definition_from_tokens(
@@ -72,8 +59,9 @@ impl LspServer {
         uri: &str,
         position: Position,
         symbol: &str,
-        tokens: &[crate::lexer::token::Token],
+        index: &super::view_index::ViewIndex,
     ) -> Option<Location> {
+        let tokens = &index.tokens;
         let source = self.documents.get(uri)?;
         let module = self.ast_cache.get(uri)?;
         for item in &module.items {
@@ -104,7 +92,7 @@ impl LspServer {
         }
         let start = receiver_start(tokens, dot.checked_sub(1)?)?;
         let receiver = crate::parser::parse_expression_fragment(&tokens[start..dot]).ok()?;
-        let ty = self.cell_view_expression_type(uri, position, &receiver)?;
+        let ty = index.expression_at(offset, &receiver)?;
         let selection = crate::cell_selection::parse_selection_type(&ty)?;
         if selection.selected.is_some() {
             return None;
@@ -125,15 +113,16 @@ impl LspServer {
 
     pub(super) fn named_role_references(&self, uri: &str, position: Position, symbol: &str) -> Option<Vec<Location>> {
         let source = self.documents.get(uri)?;
-        let tokens = crate::lexer::lex(source).ok()?;
-        let definition = self.named_role_definition_from_tokens(uri, position, symbol, &tokens)?;
+        let index = self.view_index(uri)?;
+        let tokens = &index.tokens;
+        let definition = self.named_role_definition_from_tokens(uri, position, symbol, &index)?;
         Some(
             tokens
                 .iter()
                 .filter(|token| matches!(&token.kind, TokenKind::Identifier(name) if name == symbol))
                 .filter_map(|token| {
                     let at = offset_to_position(source, token.span.start);
-                    (self.named_role_definition_from_tokens(uri, at, symbol, &tokens).as_ref().map(|location| location.range)
+                    (self.named_role_definition_from_tokens(uri, at, symbol, &index).as_ref().map(|location| location.range)
                         == Some(definition.range))
                     .then(|| Location { uri: uri.into(), range: Range { start: at, end: offset_to_position(source, token.span.end) } })
                 })
@@ -150,37 +139,13 @@ impl LspServer {
 
     fn cell_view_expression_type(&self, uri: &str, position: Position, receiver: &Expr) -> Option<String> {
         let source = self.documents.get(uri)?;
-        let module = self.ast_cache.get(uri)?;
-        let catalogs = module
-            .items
-            .iter()
-            .filter_map(|item| match item {
-                Item::CellRoles(def) => Some((def.name.clone(), def.clone())),
-                _ => None,
-            })
-            .collect();
-        let record_fields = |name: &str| self.completion_record_fields(uri, name);
-        for item in &module.items {
-            if !position_in_range(position, span_to_range(source, item_span(item))) {
-                continue;
-            }
-            let (params, body) = match item {
-                Item::Action(item) => (&item.params, &item.body),
-                Item::Lock(item) => (&item.params, &item.body),
-                Item::Function(item) => (&item.params, &item.body),
-                _ => continue,
-            };
-            let mut bindings =
-                params.iter().map(|param| (param.name.clone(), shape_type(&type_to_string(&param.ty), module))).collect();
-            visible_bindings(source, body, position, &mut bindings, &catalogs, module, &record_fields);
-            let ty = expression_type(receiver, &bindings, &catalogs, &record_fields)?;
-            return (crate::cell_data_view::transaction_schema(&ty).is_some()
-                || crate::cell_data_view::schema(&ty).is_some()
-                || crate::cell_selection::parse_selection_type(&ty).is_some()
-                || crate::nested_values::parsed(&ty).is_some())
-            .then_some(ty);
-        }
-        None
+        let offset = position_to_offset(source, position)?;
+        let ty = self.view_index(uri)?.expression_at(offset, receiver)?;
+        (crate::cell_data_view::transaction_schema(&ty).is_some()
+            || crate::cell_data_view::schema(&ty).is_some()
+            || crate::cell_selection::parse_selection_type(&ty).is_some()
+            || crate::nested_values::parsed(&ty).is_some())
+        .then_some(ty)
     }
 }
 
@@ -210,75 +175,7 @@ fn receiver_start(tokens: &[crate::lexer::token::Token], mut cursor: usize) -> O
     }
 }
 
-fn visible_bindings(
-    source: &str,
-    body: &[Stmt],
-    position: Position,
-    bindings: &mut HashMap<String, String>,
-    catalogs: &HashMap<String, crate::ast::CellRolesDef>,
-    module: &Module,
-    record_fields: &dyn Fn(&str) -> Option<Vec<Field>>,
-) {
-    for stmt in body {
-        let range = span_to_range(source, stmt_span(stmt));
-        if position_le(position, range.start) {
-            break;
-        }
-        match stmt {
-            Stmt::Let(binding) if position_le(range.end, position) => {
-                if let BindingPattern::Name(name) = &binding.pattern {
-                    let ty = binding
-                        .ty
-                        .as_ref()
-                        .map(|ty| shape_type(&type_to_string(ty), module))
-                        .or_else(|| expression_type(&binding.value, bindings, catalogs, record_fields));
-                    bindings.remove(name);
-                    if let Some(ty) = ty {
-                        bindings.insert(name.clone(), ty);
-                    }
-                } else {
-                    remove_pattern(&binding.pattern, bindings);
-                }
-            }
-            Stmt::If(branch) if position_in_range(position, range) => {
-                for body in std::iter::once(&branch.then_branch).chain(branch.else_branch.iter()) {
-                    if body.iter().any(|stmt| position_in_range(position, span_to_range(source, stmt_span(stmt)))) {
-                        visible_bindings(source, body, position, bindings, catalogs, module, record_fields);
-                        break;
-                    }
-                }
-            }
-            Stmt::While(loop_) if position_in_range(position, range) => {
-                visible_bindings(source, &loop_.body, position, bindings, catalogs, module, record_fields)
-            }
-            Stmt::For(loop_) if position_in_range(position, range) => {
-                let element = expression_type(&loop_.iterable, bindings, catalogs, record_fields).and_then(|ty| nested_element(&ty));
-                remove_pattern(&loop_.pattern, bindings);
-                if let (BindingPattern::Name(name), Some(element)) = (&loop_.pattern, element) {
-                    bindings.insert(name.clone(), element);
-                }
-                visible_bindings(source, &loop_.body, position, bindings, catalogs, module, record_fields);
-            }
-            Stmt::Borrow(borrow) if position_in_range(position, range) => {
-                bindings.remove(&borrow.binding);
-                visible_bindings(source, &borrow.body, position, bindings, catalogs, module, record_fields);
-            }
-            _ => {}
-        }
-    }
-}
-
-fn remove_pattern(pattern: &BindingPattern, bindings: &mut HashMap<String, String>) {
-    match pattern {
-        BindingPattern::Name(name) => {
-            bindings.remove(name);
-        }
-        BindingPattern::Tuple(parts) => parts.iter().for_each(|part| remove_pattern(part, bindings)),
-        BindingPattern::Wildcard => {}
-    }
-}
-
-fn shape_type(ty: &str, module: &Module) -> String {
+pub(super) fn shape_type(ty: &str, module: &Module) -> String {
     let (shape, member) = ty.rsplit_once("::").map_or((ty, None), |(shape, member)| (shape, Some(member)));
     module
         .items
@@ -297,7 +194,7 @@ fn shape_type(ty: &str, module: &Module) -> String {
         .unwrap_or_else(|| ty.into())
 }
 
-fn nested_element(ty: &str) -> Option<String> {
+pub(super) fn nested_element(ty: &str) -> Option<String> {
     match crate::nested_values::parsed(ty)? {
         crate::nested_values::NestedType::Values(values) => Some(values.item_type()),
         crate::nested_values::NestedType::BytesView { .. } => Some("u8".into()),
@@ -321,14 +218,14 @@ fn project(ty: &str, field: &str, record_fields: &dyn Fn(&str) -> Option<Vec<Fie
     (field == "data").then(|| crate::cell_data_view::transaction_schema(ty)).flatten().map(|schema| format!("CellDataView<{schema}>"))
 }
 
-fn expression_type(
+pub(super) fn expression_type(
     expr: &Expr,
-    bindings: &HashMap<String, String>,
+    bindings: &dyn Fn(&str) -> Option<String>,
     catalogs: &HashMap<String, crate::ast::CellRolesDef>,
     record_fields: &dyn Fn(&str) -> Option<Vec<Field>>,
 ) -> Option<String> {
     match expr {
-        Expr::Identifier(name) => bindings.get(name).cloned(),
+        Expr::Identifier(name) => bindings(name),
         Expr::Index(index) => nested_element(&expression_type(&index.expr, bindings, catalogs, record_fields)?),
         Expr::FieldAccess(field) => {
             project(&expression_type(&field.expr, bindings, catalogs, record_fields)?, &field.field, record_fields)

@@ -246,6 +246,20 @@ export interface VerificationQueueMetrics {
   oldest_dead_letter_at?: string | null;
 }
 
+export interface RejectedSnapshotPurge {
+  job_id: string;
+  attempt_count: number;
+  error_code: string;
+  retryable: boolean;
+  // Cleanup may be retried after an acknowledgement is lost. Missing objects
+  // must count as successful deletion; a thrown error never revives admission.
+  delete_object: (key: string) => Promise<void>;
+}
+
+export function rejectedSnapshotPurgeReason(input: RejectedSnapshotPurge): string {
+  return `verification_rejected_pending_delete:${JSON.stringify([input.job_id, input.attempt_count, input.error_code])}`;
+}
+
 export type IdempotencyReservation =
   | { state: "reserved"; record: IdempotencyRecord }
   | { state: "in_progress"; record: IdempotencyRecord }
@@ -406,7 +420,7 @@ export interface RegistryStore {
   }): Promise<void>;
   recordSnapshot(input: SnapshotRecord): Promise<void>;
   getSnapshot(snapshotHash: string): Promise<SnapshotRecord | null>;
-  deleteSnapshot(snapshotHash: string): Promise<void>;
+  purgeRejectedSnapshot(input: RejectedSnapshotPurge): Promise<boolean>;
   getSnapshots(snapshotHashes: string[]): Promise<Map<string, SnapshotRecord>>;
   getPackageVersion(namespace: string, name: string, version: string): Promise<PackageVersionRecord | null>;
   listPackageVersions(input: PackageVersionQuery): Promise<PackageVersionRecord[]>;
@@ -598,6 +612,8 @@ export class MemoryRegistryStore implements RegistryStore {
   verificationJobs = new Map<string, VerificationJobRecord>();
   maintenanceLeases = new Set<string>();
   private authorisationSessionCompletionLocks = new Map<string, Promise<void>>();
+  private purgedSnapshots = new Set<string>();
+  private pendingRejectedSnapshotPurges = new Map<string, string>();
 
   async healthCheck(): Promise<void> {}
 
@@ -960,6 +976,9 @@ export class MemoryRegistryStore implements RegistryStore {
   }
 
   async recordSnapshot(input: SnapshotRecord): Promise<void> {
+    if (this.purgedSnapshots.has(input.snapshot_hash)) {
+      throw new ApiError(409, "verification_snapshot_purged", "rejected source snapshot has been purged");
+    }
     // Mirror the SQL store: a hash already admitted under another namespace's
     // object key is a cross-tenant conflict, not a dedup hit.
     const existing = this.snapshots.get(input.snapshot_hash);
@@ -970,18 +989,52 @@ export class MemoryRegistryStore implements RegistryStore {
   }
 
   async getSnapshot(snapshotHash: string): Promise<SnapshotRecord | null> {
-    return this.snapshots.get(snapshotHash) ?? null;
+    return this.purgedSnapshots.has(snapshotHash) ? null : this.snapshots.get(snapshotHash) ?? null;
   }
 
-  async deleteSnapshot(snapshotHash: string): Promise<void> {
-    this.snapshots.delete(snapshotHash);
+  async purgeRejectedSnapshot(input: RejectedSnapshotPurge): Promise<boolean> {
+    if (input.retryable) return false;
+    return this.withAuthorisationSessionCompletionLock("verification-snapshots", async () => {
+      const job = this.verificationJobs.get(input.job_id);
+      if (!job || job.status !== "dead_letter" || job.evidence_hash
+        || job.attempt_count !== input.attempt_count || job.last_error_code !== input.error_code) return false;
+      const key = `${job.namespace}/${job.name}@${job.version}`;
+      const version = this.packageVersions.get(key);
+      const snapshot = this.snapshots.get(job.snapshot_hash);
+      const pendingReason = rejectedSnapshotPurgeReason(input);
+      if (!version || !snapshot || version.snapshot_hash !== job.snapshot_hash
+        || (this.purgedSnapshots.has(job.snapshot_hash) && this.pendingRejectedSnapshotPurges.get(job.snapshot_hash) !== pendingReason)
+        || !["pending", "rejected"].includes(version.verification_status)) return false;
+      const protectedReference = [...this.packageVersions.entries()].some(([otherKey, other]) =>
+        otherKey !== key && other.snapshot_hash === job.snapshot_hash && (other.verification_status !== "rejected"
+          || [...this.verificationJobs.values()].some((otherJob) => otherJob.namespace === other.namespace
+            && otherJob.name === other.name && otherJob.version === other.version
+            && (otherJob.status !== "dead_letter" || !!otherJob.evidence_hash))));
+      if (protectedReference) {
+        this.packageVersions.set(key, { ...version, verification_status: "rejected" });
+        return false;
+      }
+      // Logical removal is irreversible even if object deletion fails or its
+      // acknowledgement is lost. Only the same rejection can resume cleanup.
+      this.purgedSnapshots.add(job.snapshot_hash);
+      this.pendingRejectedSnapshotPurges.set(job.snapshot_hash, pendingReason);
+      const at = nowIso();
+      for (const [otherKey, other] of this.packageVersions) {
+        if (other.snapshot_hash === job.snapshot_hash) {
+          this.packageVersions.set(otherKey, { ...other, verification_status: "rejected", source_purged_at: other.source_purged_at ?? at });
+        }
+      }
+      await input.delete_object(snapshot.r2_key);
+      this.pendingRejectedSnapshotPurges.delete(job.snapshot_hash);
+      return true;
+    });
   }
 
   async getSnapshots(snapshotHashes: string[]): Promise<Map<string, SnapshotRecord>> {
     const records = new Map<string, SnapshotRecord>();
     for (const hash of new Set(snapshotHashes)) {
       const snapshot = this.snapshots.get(hash);
-      if (snapshot) records.set(hash, snapshot);
+      if (snapshot && !this.purgedSnapshots.has(hash)) records.set(hash, snapshot);
     }
     return records;
   }
@@ -1029,6 +1082,9 @@ export class MemoryRegistryStore implements RegistryStore {
   }
 
   async recordPackageVersion(input: PackageVersionRecord): Promise<PackageVersionRecord> {
+    if (this.purgedSnapshots.has(input.snapshot_hash)) {
+      throw new ApiError(409, "verification_snapshot_purged", "rejected source snapshot has been purged");
+    }
     const key = `${input.namespace}/${input.name}@${input.version}`;
     const existing = this.packageVersions.get(key);
     if (existing) {
@@ -1110,6 +1166,9 @@ export class MemoryRegistryStore implements RegistryStore {
     const existing = this.packageVersions.get(versionKey);
     if (!existing) {
       throw new ApiError(404, "artifact_release_not_found", "artifact release is not known to the registry");
+    }
+    if (this.purgedSnapshots.has(existing.snapshot_hash)) {
+      throw new ApiError(409, "verification_snapshot_purged", "purged source cannot receive verification evidence");
     }
     assertPromotionTransition(existing, input.kind);
     this.assertProcessingIdempotency(input.idempotency);
@@ -1370,13 +1429,18 @@ export class MemoryRegistryStore implements RegistryStore {
   }
 
   async tryConsumeQuota(quotaKey: string, bucket: string, limit: number, windowSeconds: number): Promise<boolean> {
-    // Single-threaded in-memory store: the plain pair is already atomic here.
-    const since = new Date(Date.now() - windowSeconds * 1000).toISOString();
-    const allowed = (await this.countRecentQuotaEvents(quotaKey, bucket, since)) < limit;
-    if (allowed) {
-      await this.recordQuotaEvent(quotaKey, bucket);
-    }
-    return allowed;
+    // Session completion can roll back quota events. Join its lock, then keep
+    // count and publication synchronous within the admitted operation.
+    return this.withAuthorisationSessionCompletionLock("authorisation-store", async () => {
+      const at = nowIso();
+      const since = Date.parse(at) - windowSeconds * 1000;
+      const allowed = this.quotaEvents.filter((event) => event.quotaKey === quotaKey
+        && event.bucket === bucket && Date.parse(event.at) >= since).length < limit;
+      if (allowed) {
+        this.quotaEvents.push({ quotaKey, bucket, at });
+      }
+      return allowed;
+    });
   }
 
   async consumeNonce(input: {
@@ -1723,10 +1787,17 @@ export class MemoryRegistryStore implements RegistryStore {
     request_id: string;
     admin_actor: string;
   }): Promise<VerificationJobRecord> {
+    return this.withAuthorisationSessionCompletionLock("verification-snapshots", () => this.retryVerificationJobRecord(input));
+  }
+
+  private async retryVerificationJobRecord(input: Parameters<RegistryStore["retryVerificationJob"]>[0]): Promise<VerificationJobRecord> {
     const job = this.verificationJobs.get(input.job_id);
     if (!job) throw new ApiError(404, "verification_job_not_found", "verification job was not found");
     if (job.status !== "dead_letter") {
       throw new ApiError(409, "verification_job_not_dead_letter", "only dead-letter verification jobs can be retried manually");
+    }
+    if (this.purgedSnapshots.has(job.snapshot_hash)) {
+      throw new ApiError(409, "verification_snapshot_purged", "purged rejected uploads cannot be retried; publish a corrected release");
     }
     const now = nowIso();
     const retried: VerificationJobRecord = {
@@ -1846,6 +1917,9 @@ export class MemoryRegistryStore implements RegistryStore {
 }
 
 export function assertPromotionTransition(current: PackageVersionRecord, next: PackageEvidenceKind): void {
+  if (current.source_purged_at) {
+    throw new ApiError(409, "verification_snapshot_purged", "purged source cannot receive verification evidence");
+  }
   let allowed = false;
   if (next === "verified_build") {
     allowed = true;

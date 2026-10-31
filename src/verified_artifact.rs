@@ -40,7 +40,7 @@ impl VerifiedArtifactDraft {
             .filter_map(|item| match item {
                 crate::ir::IrItem::Action(entry) => Some((format!("action:{}", entry.name), &entry.body)),
                 crate::ir::IrItem::Lock(entry) => Some((format!("lock:{}", entry.name), &entry.body)),
-                crate::ir::IrItem::PureFn(entry) => Some((format!("helper:{}", entry.name), &entry.body)),
+                crate::ir::IrItem::Function(entry) => Some((format!("helper:{}", entry.name), &entry.body)),
                 crate::ir::IrItem::TypeDef(_) | crate::ir::IrItem::Invariant(_) => None,
             })
             .flat_map(|(entry_id, body)| {
@@ -54,7 +54,7 @@ impl VerifiedArtifactDraft {
             let (entry_id, audits) = match item {
                 crate::ir::IrItem::Action(entry) => (format!("action:{}", entry.name), entry.audit_claims.as_slice()),
                 crate::ir::IrItem::Lock(entry) => (format!("lock:{}", entry.name), entry.audit_claims.as_slice()),
-                crate::ir::IrItem::TypeDef(_) | crate::ir::IrItem::Invariant(_) | crate::ir::IrItem::PureFn(_) => continue,
+                crate::ir::IrItem::TypeDef(_) | crate::ir::IrItem::Invariant(_) | crate::ir::IrItem::Function(_) => continue,
             };
             for audit in audits {
                 claim_spans.insert(format!("claim:{entry_id}:audit:{}", audit.name), audit.span);
@@ -122,11 +122,6 @@ pub(crate) fn build_verified_artifact_boundary(
         let machine_bytes = elf.bytes_for_range(artifact, range).map_err(|error| boundary_error(error.to_string()))?;
         let frame_size_bytes = frame_sizes.get(owner_name).copied().unwrap_or(0);
         let proof_ids = proof_ids_by_entry.get(&owner_entry).cloned().unwrap_or_default();
-        let entry_effect = entries
-            .iter()
-            .find(|entry| entry.id == owner_entry)
-            .map(|entry| entry.effect.clone())
-            .unwrap_or_else(|| "runtime".to_string());
         // Several source/verification boundaries may name the same byte. A
         // nested-read completion must not hide the following typed CFG label.
         // An empty fallthrough block can share that address too; the last typed
@@ -253,7 +248,6 @@ pub(crate) fn build_verified_artifact_boundary(
                 .unwrap_or(0),
             stack_slots: Vec::new(),
             scratch_register_avoid: Vec::new(),
-            effect: entry_effect,
             capabilities: Vec::new(),
             proof_ids,
         });
@@ -533,26 +527,16 @@ fn build_entries(metadata: &CompileMetadata, frame_sizes: &BTreeMap<String, u32>
     });
     let mut entries = Vec::new();
     for owner in first_block_by_owner.keys() {
-        let (kind, params, return_type, effect) = if let Some(action) = metadata.actions.iter().find(|entry| entry.name == *owner) {
-            (
-                EntryKind::Action,
-                action.params.as_slice(),
-                action.return_type.clone().unwrap_or_else(|| "unit".to_string()),
-                action.effect_class.clone(),
-            )
+        let (kind, params, return_type) = if let Some(action) = metadata.actions.iter().find(|entry| entry.name == *owner) {
+            (EntryKind::Action, action.params.as_slice(), action.return_type.clone().unwrap_or_else(|| "unit".to_string()))
         } else if let Some(lock) = metadata.locks.iter().find(|entry| entry.name == *owner) {
-            (EntryKind::Lock, lock.params.as_slice(), "bool".to_string(), "lock-predicate".to_string())
+            (EntryKind::Lock, lock.params.as_slice(), "bool".to_string())
         } else if let Some(function) = metadata.functions.iter().find(|entry| entry.name == *owner) {
-            (
-                EntryKind::Helper,
-                function.params.as_slice(),
-                function.return_type.clone().unwrap_or_else(|| "unit".to_string()),
-                function.effect_class.clone(),
-            )
+            (EntryKind::Helper, function.params.as_slice(), function.return_type.clone().unwrap_or_else(|| "unit".to_string()))
         } else if owner == "_cellscript_entry" {
-            (EntryKind::Wrapper, &[][..], "i32".to_string(), "entry-wrapper".to_string())
+            (EntryKind::Wrapper, &[][..], "i32".to_string())
         } else {
-            (EntryKind::Runtime, &[][..], "i32".to_string(), "runtime-helper".to_string())
+            (EntryKind::Runtime, &[][..], "i32".to_string())
         };
         let id = entry_id(kind, owner);
         let frame_size_bytes = frame_sizes.get(owner).copied().unwrap_or(0);
@@ -565,9 +549,8 @@ fn build_entries(metadata: &CompileMetadata, frame_sizes: &BTreeMap<String, u32>
             kind,
             name: owner.clone(),
             entry_block: machine_block_id(first_block_by_owner[owner]),
-            params: params.iter().enumerate().map(|(index, param)| typed_parameter(index, param)).collect(),
+            params: params.iter().enumerate().map(|(index, param)| typed_parameter(index, param)).collect::<Result<_>>()?,
             return_type,
-            effect,
             capabilities: Vec::new(),
             proof_ids: Vec::new(),
             frame_size_bytes,
@@ -760,28 +743,29 @@ fn compatibility_profile_identity(metadata: &CompileMetadata) -> CompatibilityPr
     }
 }
 
-fn typed_parameter(index: usize, param: &ParamMetadata) -> TypedParameter {
-    let (storage, width_bytes, alignment_bytes) = parameter_storage(param);
-    TypedParameter {
-        index: u32::try_from(index).unwrap_or(u32::MAX),
+fn typed_parameter(index: usize, param: &ParamMetadata) -> Result<TypedParameter> {
+    let (storage, width_bytes, alignment_bytes) = parameter_storage(param)?;
+    Ok(TypedParameter {
+        index: u32::try_from(index).map_err(|_| boundary_error("parameter index exceeds the typed artifact extent"))?,
         name: param.name.clone(),
         ty: param.ty.clone(),
         storage,
         width_bytes,
         alignment_bytes,
-    }
+    })
 }
 
-fn parameter_storage(param: &ParamMetadata) -> (StorageClass, u32, u32) {
+fn parameter_storage(param: &ParamMetadata) -> Result<(StorageClass, u32, u32)> {
     if param.schema_pointer_abi {
-        return (StorageClass::SchemaPointer, 8, 8);
+        return Ok((StorageClass::SchemaPointer, 8, 8));
     }
     if param.is_ref {
-        return (StorageClass::Reference, 8, 8);
+        return Ok((StorageClass::Reference, 8, 8));
     }
     if param.fixed_byte_pointer_abi {
-        let width = u32::try_from(param.fixed_byte_len.unwrap_or(8)).unwrap_or(u32::MAX);
-        return (StorageClass::FixedBytes, width.max(1), width.next_power_of_two().min(16));
+        let width = param.fixed_byte_len.ok_or_else(|| boundary_error("fixed-byte parameter has no admitted width"))?;
+        let width = u32::try_from(width).map_err(|_| boundary_error("fixed-byte parameter exceeds the typed artifact extent"))?;
+        return Ok((StorageClass::FixedBytes, width.max(1), width.min(16).next_power_of_two()));
     }
     let width = match param.ty.as_str() {
         "u8" | "bool" => 1,
@@ -792,7 +776,7 @@ fn parameter_storage(param: &ParamMetadata) -> (StorageClass, u32, u32) {
         _ => 8,
     };
     let storage = if width > 8 { StorageClass::FixedBytes } else { StorageClass::Scalar };
-    (storage, width, width.next_power_of_two().min(16))
+    Ok((storage, width, width.next_power_of_two().min(16)))
 }
 
 fn entry_id(kind: EntryKind, name: &str) -> String {
@@ -833,4 +817,34 @@ fn stable_entry_source_path(metadata: &CompileMetadata) -> String {
 
 fn boundary_error(message: impl Into<String>) -> CompileError {
     CompileError::without_span(format!("verified artifact boundary: {}", message.into())).with_code("E2400")
+}
+
+#[cfg(test)]
+mod parameter_extent_tests {
+    use super::*;
+
+    #[test]
+    fn fixed_parameter_alignment_does_not_round_unbounded_widths_up() {
+        let metadata = crate::compile_metadata(
+            "module extent\naction inspect(witness value: [u8; 32]) { verification require value[0] == 7 }",
+            crate::CellScriptEdition::Edition2026,
+            None,
+        )
+        .unwrap();
+        let mut param = metadata.actions[0].params[0].clone();
+        assert!(param.fixed_byte_pointer_abi);
+        for (width, alignment) in [(1, 1), (9, 16), (17, 16), (u32::MAX as usize, 16)] {
+            param.fixed_byte_len = Some(width);
+            let (storage, recorded_width, recorded_alignment) = parameter_storage(&param).unwrap();
+            assert_eq!(storage, StorageClass::FixedBytes);
+            assert_eq!(recorded_width as usize, width);
+            assert_eq!(recorded_alignment, alignment);
+        }
+        param.fixed_byte_len = None;
+        assert!(parameter_storage(&param).is_err());
+        if usize::BITS > 32 {
+            param.fixed_byte_len = Some(u32::MAX as usize + 1);
+            assert!(parameter_storage(&param).is_err());
+        }
+    }
 }

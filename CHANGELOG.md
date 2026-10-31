@@ -2,6 +2,103 @@
 
 ## Unreleased
 
+Commit rejected-upload tombstones before deleting external objects. Keep a
+pending deletion owned by the rejecting job, attempt and error when deletion or
+its acknowledgement fails; retrying that identity completes cleanup without
+reviving a missing source. Memory and real PostgreSQL regressions cover commit
+failure, lost acknowledgements and snapshot identity changes.
+
+Consume the pipe helper's status before receiving its two descriptor values.
+Keep the helper's internal status/a1/a2 ABI and map successful source tuples from
+the descriptor registers; a failed pipe creation cannot yield apparent fd values.
+Replace the obsolete bare-spawn playground example with checked pipe endpoint
+cleanup. Real VM and independent checker regressions own this boundary. Cache
+v152 excludes prior pipe call results.
+
+Reject unterminated byte strings and trailing byte-string escapes with E1022 and
+E1023, preserving ordinary string diagnostics and valid byte escapes. Reject
+unknown scheduler hint keys with E1024 instead of silently ignoring them. Resolve
+selection read type arguments by defining nominal owner, then keep executable
+view types bound to the admitted catalog schema. Equal-layout declarations from
+different owners remain distinct. Cache v151 excludes earlier results.
+
+Add `interface-diff --checked` for bounded, complete ELF bundles: independent
+verification and qualified nominal projection precede directional compatibility.
+Both interface comparison modes emit one JSON failure envelope containing the
+report and E2501 diagnostic. The existing declaration wire/hash remains unchanged and may reflect import
+spellings; checked compatibility does not infer identity from equal byte widths.
+Generate protocol-builder schemas, versions and fixed encodings from native
+constants while preserving generated TypeScript bytes. Share the closed
+WitnessBytesView syntax and conformance vectors while retaining independent
+source, range and machine admission. Route formatter idempotence through the
+explicit source edition. Extract checker ISA predicates and relocate mixed u128
+arithmetic without changing the corresponding machine algorithms.
+
+Reject bare named `spawn` with source diagnostic E1021 in both editions and all
+artifact/metadata policies. Remove its runtime helper, deferred feature and
+error-88 emitter; ordinary resolved user functions and manifest-bound CellDep
+spawn/exec retain their separate contracts. Cache v150 excludes earlier
+successful or abort-only artifacts. The remaining three deferred families are
+legacy helper contracts, not blanket gaps in typed Since, Cell occupied-capacity
+reads or bounded zero-lock sighash support.
+
+Preserve trapping prefixes in all three source-byte loop matchers, including
+source-to-memory and zero scans. Advance artifact caches to v149 so earlier
+miscompiled results cannot be reused. Real CKB-VM regressions retain division
+error 20 under standard and diagnostic compilation. Align entry-selection tests
+with inlining and defining-owner-qualified generic labels while keeping runtime
+selection and independent bundle checks.
+
+Preserve independent IR lowering diagnostics during effect inference instead of
+reporting only the first failure. Replace the retired effect-category CLI fixture
+with two dynamic exact-handle commitments that must still fail lowering, and
+retain both source ranges through the diagnostic API and JSON CLI output.
+
+Refresh current-strategy scenario identities against unchanged VM verdicts and
+fixed resource ceilings. Construct Hash explicitly from raw issuer args in
+fungible/NFT fixtures. Record the new committed-state resource measurements
+without increasing their budgets.
+
+Read skill-pack metadata freshness from the checker-owned envelope constant,
+sharing the documentation validator instead of accidentally matching the source
+component's schema version. Require the fallible LSP entry point to route errors
+through native CLI diagnostics in the tooling boundary check.
+
+Require numeric deployment-line receipt version 3 in the CKB adapter, matching
+the current v3 schema and native producer. Preserve rejection of other versions
+when ProtocolBundle hashes are rebound; valid current bundles can materialize.
+
+Make in-memory quota admission atomic and serialize it with session rollback.
+Keep best-effort audit storage failures from replacing authentication responses.
+Purge permanently rejected uploads through locked snapshot/reference admission,
+retain relational tombstones and audit identity, and reject requeue or admission
+of purged sources. Retryable infrastructure failures and other retained release
+references keep their source bytes. Memory and PostgreSQL regressions cover
+deletion failure, stale workers, concurrent retry and quota admission.
+
+Infer three structured effect-fact sets for context reads, Cell lifecycle
+operations and process operations. Remove the five-category model, handwritten
+declarations, the native `effects` wrapper and earlier readers/translation paths.
+The compiler and standalone checker reconstruct facts independently; interface
+replacement checks inclusion in each dimension alongside the existing lifecycle
+and binding obligations. Current-only metadata/interface/receipt consumers,
+Registry admission, generated SDKs and browser/editor presentation use this
+contract. Old or mixed generations require complete regeneration. See the
+[effect contract](docs/CELLSCRIPT_EFFECT_CONTRACTS.md) and
+[alpha.2 acceptance backlog](docs/releases/CELLSCRIPT_0_33_ALPHA_2_TODO.md).
+
+Retain resolved nested-view owners, layouts and bounds through structured IR;
+remove executable string reparsing and duplicate record reconstruction. Make
+runtime helper availability and dispatch exhaustive. Reject bare named spawn
+before metadata or artifact generation. Reject
+unrepresentable fixed layouts with E1020, incomplete pool assignments and
+unfinished string/comment tokens with source diagnostics. LSP analysis uses
+revision-bound snapshots and shared view indexes outside its session lock;
+invalid response locations fail without partial edits. Extract cohesive
+compiler/native certification modules and select test binaries deterministically.
+Cache v148 excludes intermediate artifacts. Focused checks and the canonical
+browser build pass; final-source backend/dev/CI acceptance remains in progress.
+
 Reject deferred maturity/time/epoch constraints and occupied-capacity floors
 under production policy; development artifacts abort with runtime errors 86/87.
 IPC reads return a complete u64 or abort, and inherited-fd selection checks both

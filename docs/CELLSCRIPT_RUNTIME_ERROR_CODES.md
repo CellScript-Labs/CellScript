@@ -14,7 +14,7 @@ Use the error name first when debugging. Numeric codes are retained for VM,
 wallet, explorer, and acceptance-script compatibility.
 
 The table was introduced in compile metadata schema 30 and is emitted by the
-current metadata schema 72 on the `0.30` development branch under
+current metadata schema 74 in the alpha.2 implementation work under
 `constraints.runtime_errors`, so `cellc constraints`, `cellc check --json`, and
 sidecar metadata all expose the same machine-readable registry.
 The experimental ZK codes 74–79 and 84 are included in artifact metadata and
@@ -42,6 +42,14 @@ CKB-VM as a VM-level failure, not as the verifier's normal `a0` return value.
 
 Use the table below only for normal CellScript verifier exit codes. Do not
 interpret raw syscall status registers or VM trap diagnostics with this table.
+
+`pipe()` exposes a pair of descriptors only after successful creation. Its
+internal helper ABI is three words: status in `a0`, read descriptor in `a1`, and
+write descriptor in `a2`. Ordinary source calls check the status before receiving
+the two values; failure aborts with `1` (`syscall-failed`), including when the
+result is discarded. Internal verifier transports consume the same helper ABI
+through their own checked calling contracts. `close(fd)` remains an explicit
+status-returning API: callers must check its result when closure is required.
 
 On `0.26b`, the versioned `current-vm-process-exit-v1` contract makes generated
 fatal verification failures terminate the current VM process, including failures
@@ -129,8 +137,12 @@ for the independent check's exact scope.
 | 79 | `zk-child-rejected` | The child rejected the proof or Wait failed. | Check the exact VK, proof, finalized transaction statement and child exit. |
 | 84 | `zk-cycle-bound-exceeded` | The exact verifier call exceeded its declared cycle budget. | Check the exact child artifact and the profile's 250,000,000-cycle ceiling. |
 | 85 | `open-handle-invalid` | A compatible-open handle selection failed its structural, membership or selected-dependency check. | Check the 656-byte selection witness, the expected authorization root and the selected CellDep. |
-| 86 | `since-constraints-unsupported` | CKB since/epoch maturity constraints are deferred; the helper aborts with this code instead of accepting. | Remove the `require_maturity`/`require_time`/`require_epoch_*` call until real CKB since verification ships. |
-| 87 | `occupied-capacity-unsupported` | The compile-visible occupied-capacity floor is deferred; the helper aborts with this code instead of returning zero. | Remove the `occupied_capacity` floor call until the deferred bound ships. |
+| 86 | `since-constraints-unsupported` | The legacy require_maturity/time/epoch helpers are deferred; they abort instead of accepting. | Use typed InputView.since reads and checked temporal comparisons bound to the selected input; these do not enable the legacy helpers. |
+| 87 | `occupied-capacity-unsupported` | The compile-visible occupied-capacity floor is deferred; the helper aborts with this code instead of returning zero. | Use `ckb::cell_occupied_capacity` for an actual Cell read; this does not implement the legacy compile-visible floor. |
+
+The earlier alpha.2 development checkpoint emitted error 88 for bare named
+`spawn`. That helper is retired: current source rejects with compiler diagnostic
+E1021 before metadata or artifact generation. Code 88 is not reused.
 
 ## Stability
 

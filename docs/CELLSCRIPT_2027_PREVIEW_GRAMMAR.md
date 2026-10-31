@@ -15,7 +15,7 @@ is not the final authoring grammar or a required intermediate language.
 This document is the source contract for the bounded native syntax introduced
 by `cellscript-source-semantics-2027-preview4`, recorded under
 `cellscript-source-semantics-2027-authoring1`, and retained by
-`cellscript-source-semantics-2027-0.30-v1`. It records what the native parser
+`cellscript-source-semantics-2027-0.33-effect-facts-v1`. It records what the native parser
 accepts now so parser, formatter, lowering, metadata, LSP, editor tooling,
 examples, and tests can agree while the broader 1.0 design remains under
 review.
@@ -40,7 +40,7 @@ entry = "src/main.cell"
 Edition 2026 remains the stable default semantic epoch. Edition 2026 rejects
 the native `type_script` and `lock_script` surfaces. An Edition 2027 package
 uses a separately routed frontend and records
-`cellscript-source-semantics-2027-0.30-v1` in its resolved compatibility
+`cellscript-source-semantics-2027-0.33-effect-facts-v1` in its resolved compatibility
 profile. Ordinary `action`/`lock` modules now use the separately routed familiar
 authoring grammar described in the [edition policy](CELLSCRIPT_EDITION_POLICY.md);
 this native-container reference does not restrict that surface.
@@ -70,18 +70,16 @@ type_script TokenTransfer on type_group<Token> {
             enforce token.amount > 0
         }
 
-        effects {
-            replace token -> next {
-                data {
-                    owner = same
-                    amount = same
-                }
-                identity = same
-                type_script = same
-                lock_script = exact_hash(recipient)
-                capacity = same
-                cardinality = one_to_one
+        replace token -> next {
+            data {
+                owner = same
+                amount = same
             }
+            identity = same
+            type_script = same
+            lock_script = exact_hash(recipient)
+            capacity = same
+            cardinality = one_to_one
         }
     }
 }
@@ -101,20 +99,18 @@ audit settlement_policy {
     expected_evidence = external_policy(recipient)
 }
 
-effects {
-    pool value_flow {
-        inputs { left, right }
-        outputs { merged }
-        data {
-            owner { merged = recipient }
-            amount = conserve
-        }
-        identity = pooled
-        type_script = same
-        lock_script { merged = exact_hash(recipient) }
-        capacity = builder_computed
-        cardinality = declared
+pool value_flow {
+    inputs { left, right }
+    outputs { merged }
+    data {
+        owner { merged = recipient }
+        amount = conserve
     }
+    identity = pooled
+    type_script = same
+    lock_script { merged = exact_hash(recipient) }
+    capacity = builder_computed
+    cardinality = declared
 }
 ```
 
@@ -178,7 +174,7 @@ type-script          = "type_script", identifier,
                        "{", type-entry, "}" ;
 
 type-entry           = "entry", identifier, "(", type-port-list?, ")",
-                       "{", verify-block, audit-declaration*, effects-block, "}" ;
+                       "{", verify-block, audit-declaration*, disposition+, "}" ;
 
 type-port-list       = type-port, (",", type-port)*, ","? ;
 type-port            = input-port | output-port | witness-port ;
@@ -206,7 +202,6 @@ audit-declaration    = "audit", identifier, "{",
                        "expected_evidence", "=", "external_policy",
                        "(", expression, ")", separator?, "}" ;
 
-effects-block        = "effects", "{", disposition+, "}" ;
 disposition          = replacement | pool | retirement | fresh-output ;
 replacement          = "replace", identifier, "->", identifier, "{",
                          data-plan,
@@ -284,7 +279,7 @@ rules:
   every schema field and fixed envelope clause appears exactly once in
   canonical order; `exact_hash(...)` accepts the nominal `ScriptHash` domain;
   the native preview also retains `Address` and `Hash` inputs for compatibility; and
-  `effects` is final and non-empty;
+  the disposition sequence is final and non-empty;
 - a `pool` has non-empty, unique, explicitly named input and output sets; at
   least one unsigned numeric schema field uses `= conserve`, which generates
   an overflow-checked `u128` sum-equality over the declared roles; every other
@@ -414,7 +409,7 @@ The preview rejects, with source-linked diagnostics:
   containers, or a declaration after the container;
 - a Lock Script without exactly one Cell-backed `protected` role at
   `group_input[0]`, with an implicit or unsupported port source, or with an
-  `effects` block;
+  entry body;
 - mixing native containers with legacy `action` or `lock` entries;
 - ambiguous legacy `consume` or `consume_each` under Edition 2027; and
 - implicit-source parameters in the Edition 2027 legacy compatibility subset.

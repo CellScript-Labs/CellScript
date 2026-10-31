@@ -31,7 +31,7 @@ identity changes with the code bytes and continues to use
 
 ## Receipt chain
 
-`cellscript-deployment-line-receipt-v1` records:
+`cellscript-deployment-line-receipt-v3` records:
 
 - a canonical package compatibility line (`name@major`, or `name@0.minor`);
 - a stable line ID, role, selected entry, network, complete Script, baseline

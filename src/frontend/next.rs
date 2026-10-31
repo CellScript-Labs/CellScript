@@ -1,11 +1,11 @@
 use super::*;
 use crate::ast::{
-    ActionDef, ActionOutput, BinaryExpr, BinaryOp, CastExpr, CreateExpr, CreateUniqueExpr, DestroyExpr, DestructionPolicy,
-    EffectClass, Expr, FieldAccessExpr, IdentityPolicy, Item, LockDef, NextAudit, NextAuditEvidence, NextDisposition,
-    NextEntrySurface, NextFreshOutput, NextLockSurface, NextPool, NextPoolField, NextPoolFieldTreatment, NextReplacement,
-    NextRetirement, Param, ParamSource, RequireExpr, Stmt, Type, Visibility,
+    ActionDef, ActionOutput, BinaryExpr, BinaryOp, CastExpr, CreateExpr, CreateUniqueExpr, DestroyExpr, DestructionPolicy, Expr,
+    FieldAccessExpr, IdentityPolicy, Item, LockDef, NextAudit, NextAuditEvidence, NextDisposition, NextEntrySurface, NextFreshOutput,
+    NextLockSurface, NextPool, NextPoolField, NextPoolFieldTreatment, NextReplacement, NextRetirement, Param, ParamSource,
+    RequireExpr, Stmt, Type, Visibility,
 };
-use crate::error::Span;
+use crate::error::{SourceDiagnosticCode, Span};
 use crate::lexer::token::{Token, TokenKind};
 use std::collections::BTreeSet;
 
@@ -277,8 +277,8 @@ impl<'a> Cursor<'a> {
         let (verify, mut body) = self.parse_verify()?;
         self.skip_newlines();
         let audits = self.parse_audits()?;
-        let (dispositions, effects) = self.parse_effects(&outputs)?;
-        body.extend(effects);
+        let (dispositions, transitions) = self.parse_dispositions(&outputs)?;
+        body.extend(transitions);
         self.skip_newlines();
         let entry_end = self.expect_kind(TokenKind::RBrace)?.span;
         self.skip_newlines();
@@ -292,8 +292,6 @@ impl<'a> Cursor<'a> {
             outputs,
             state_edges: Vec::new(),
             body,
-            effect: EffectClass::Pure,
-            effect_declared: false,
             scheduler_hint: None,
             next_surface: Some(NextEntrySurface { container_name, trigger_type, verify, audits, dispositions }),
             doc_comment: None,
@@ -593,14 +591,16 @@ impl<'a> Cursor<'a> {
         Ok(audits)
     }
 
-    fn parse_effects(&mut self, outputs: &[ActionOutput]) -> Result<(Vec<NextDisposition>, Vec<Stmt>)> {
-        self.expect_word("effects")?;
-        self.skip_newlines();
-        self.expect_kind(TokenKind::LBrace)?;
-        self.skip_newlines();
+    fn parse_dispositions(&mut self, outputs: &[ActionOutput]) -> Result<(Vec<NextDisposition>, Vec<Stmt>)> {
         let mut dispositions = Vec::new();
         let mut body = Vec::new();
         while !self.at_kind(&TokenKind::RBrace) {
+            if self.current().is_some_and(|token| token_is_word(token, "effects")) {
+                return Err(SourceDiagnosticCode::RemovedNativeEffectsBlock.error(
+                    "the native effects block was removed; write replace, pool, retire, or fresh directly in the entry body",
+                    self.span(),
+                ));
+            }
             if self.current().is_some_and(|token| token_is_word(token, "replace")) {
                 let replacement = self.parse_replacement()?;
                 let span = replacement.span;
@@ -625,7 +625,7 @@ impl<'a> Cursor<'a> {
                 dispositions.push(NextDisposition::Replace(replacement));
             } else if self.current().is_some_and(|token| token_is_word(token, "pool")) {
                 let pool = self.parse_pool(outputs)?;
-                body.extend(lower_pool_body(&pool));
+                body.extend(lower_pool_body(&pool)?);
                 dispositions.push(NextDisposition::Pool(pool));
             } else if self.current().is_some_and(|token| token_is_word(token, "retire")) {
                 let retirement = self.parse_retirement()?;
@@ -658,14 +658,13 @@ impl<'a> Cursor<'a> {
                 body.push(Stmt::Expr(expression));
                 dispositions.push(NextDisposition::Fresh(fresh));
             } else {
-                return Err(CompileError::new("effects expects an explicit replace, pool, retire, or fresh disposition", self.span()));
+                return Err(CompileError::new("entry expects an explicit replace, pool, retire, or fresh disposition", self.span()));
             }
             self.consume_statement_separator();
         }
         if dispositions.is_empty() {
-            return Err(CompileError::new("effects must contain at least one exhaustive disposition", self.span()));
+            return Err(CompileError::new("entry must contain at least one exhaustive disposition", self.span()));
         }
-        self.expect_kind(TokenKind::RBrace)?;
         Ok((dispositions, body))
     }
 
@@ -742,6 +741,7 @@ impl<'a> Cursor<'a> {
         self.skip_newlines();
         let mut data_fields = Vec::new();
         while !self.at_kind(&TokenKind::RBrace) {
+            let span = self.span();
             let field = self.parse_name("pool data field")?;
             let treatment = if self.at_kind(&TokenKind::Eq) {
                 self.advance();
@@ -770,7 +770,7 @@ impl<'a> Cursor<'a> {
                 self.consume_statement_separator();
                 NextPoolFieldTreatment::Set(assignments)
             };
-            data_fields.push(NextPoolField { field, treatment });
+            data_fields.push(NextPoolField { span, field, treatment });
         }
         self.expect_kind(TokenKind::RBrace)?;
         self.consume_statement_separator();
@@ -820,7 +820,7 @@ impl<'a> Cursor<'a> {
         self.expect_kind(TokenKind::RBrace)?;
         self.consume_statement_separator();
         if names.is_empty() {
-            return Err(CompileError::new(format!("{context} block must not be empty"), self.span()));
+            return Err(SourceDiagnosticCode::PoolRoles.error(format!("{context} block must not be empty"), self.span()));
         }
         Ok(names)
     }
@@ -1004,12 +1004,34 @@ impl<'a> Cursor<'a> {
     }
 }
 
-fn lower_pool_body(pool: &NextPool) -> Vec<Stmt> {
+fn validate_pool_assignments(pool: &NextPool) -> Result<()> {
+    if pool.inputs.is_empty() || pool.outputs.is_empty() {
+        return Err(SourceDiagnosticCode::PoolRoles.error("pool requires nonempty input and output roles", pool.span));
+    }
+    for field in &pool.data_fields {
+        if let NextPoolFieldTreatment::Set(assignments) = &field.treatment
+            && !assignments.iter().map(|(output, _)| output).eq(pool.outputs.iter())
+        {
+            return Err(SourceDiagnosticCode::PoolAssignments.error(
+                format!(
+                    "pool field '{}' must assign every pool output exactly once in declared order: {}",
+                    field.field,
+                    pool.outputs.join(", ")
+                ),
+                field.span,
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn lower_pool_body(pool: &NextPool) -> Result<Vec<Stmt>> {
+    validate_pool_assignments(pool)?;
     let mut body = Vec::new();
     for field in &pool.data_fields {
         if matches!(field.treatment, NextPoolFieldTreatment::Conserve) {
-            let left = sum_pool_field(&pool.inputs, &field.field, pool.span);
-            let right = sum_pool_field(&pool.outputs, &field.field, pool.span);
+            let left = sum_pool_field(&pool.inputs, &field.field, pool.span)?;
+            let right = sum_pool_field(&pool.outputs, &field.field, pool.span)?;
             body.push(Stmt::Expr(Expr::Require(RequireExpr {
                 condition: Box::new(Expr::Binary(BinaryExpr {
                     op: BinaryOp::Eq,
@@ -1033,11 +1055,14 @@ fn lower_pool_body(pool: &NextPool) -> Vec<Stmt> {
                         .iter()
                         .find(|(candidate, _)| candidate == output)
                         .map(|(_, expression)| expression.clone())
-                        .expect("validated pool field output assignment"),
+                        .ok_or_else(|| {
+                            SourceDiagnosticCode::PoolAssignments
+                                .error(format!("pool field '{}' has no assignment for output '{output}'", field.field), field.span)
+                        })?,
                 };
-                (field.field.clone(), value)
+                Ok((field.field.clone(), value))
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
         let lock =
             pool.output_locks.iter().find(|(candidate, _)| candidate == output).map(|(_, expression)| Box::new(expression.clone()));
         body.push(Stmt::Expr(Expr::Create(CreateExpr {
@@ -1051,15 +1076,15 @@ fn lower_pool_body(pool: &NextPool) -> Vec<Stmt> {
     body.extend(pool.inputs.iter().map(|input| {
         Stmt::Expr(Expr::Consume(crate::ast::ConsumeExpr { expr: Box::new(Expr::Identifier(input.clone())), span: pool.span }))
     }));
-    body
+    Ok(body)
 }
 
-fn sum_pool_field(bindings: &[String], field: &str, span: Span) -> Expr {
+fn sum_pool_field(bindings: &[String], field: &str, span: Span) -> Result<Expr> {
     bindings
         .iter()
         .map(|binding| Expr::Cast(CastExpr { expr: Box::new(pool_field(binding, field, span)), ty: Type::U128, span }))
         .reduce(|left, right| Expr::Binary(BinaryExpr { op: BinaryOp::Add, left: Box::new(left), right: Box::new(right), span }))
-        .expect("validated non-empty pool role set")
+        .ok_or_else(|| SourceDiagnosticCode::PoolRoles.error("pool requires nonempty input and output roles", span))
 }
 
 fn pool_field(binding: &str, field: &str, span: Span) -> Expr {
@@ -1174,22 +1199,7 @@ fn validate_surface(
                         pool.span,
                     ));
                 }
-                for field in &pool.data_fields {
-                    if let NextPoolFieldTreatment::Set(assignments) = &field.treatment {
-                        let assigned = assignments.iter().map(|(output, _)| output.as_str()).collect::<Vec<_>>();
-                        let expected = pool.outputs.iter().map(String::as_str).collect::<Vec<_>>();
-                        if assigned != expected {
-                            return Err(CompileError::new(
-                                format!(
-                                    "pool field '{}' must assign every pool output exactly once in declared order: {}",
-                                    field.field,
-                                    pool.outputs.join(", ")
-                                ),
-                                pool.span,
-                            ));
-                        }
-                    }
-                }
+                validate_pool_assignments(pool)?;
                 let locked = pool.output_locks.iter().map(|(output, _)| output.as_str()).collect::<Vec<_>>();
                 let expected = pool.outputs.iter().map(String::as_str).collect::<Vec<_>>();
                 if locked != expected {
@@ -1236,14 +1246,17 @@ fn validate_surface(
     }
     if disposed_inputs != inputs || produced_outputs != output_names {
         return Err(CompileError::new(
-            "effects must exhaustively dispose every type-group input and account for every type-group output",
+            "entry dispositions must exhaustively dispose every type-group input and account for every type-group output",
             span,
         ));
     }
     let declared_output_order = outputs.iter().map(|output| output.name.as_str()).collect::<Vec<_>>();
     if produced_output_order != declared_output_order {
         return Err(CompileError::new(
-            format!("effects must account for outputs in declared group_output order: {}", declared_output_order.join(", ")),
+            format!(
+                "entry dispositions must account for outputs in declared group_output order: {}",
+                declared_output_order.join(", ")
+            ),
             span,
         ));
     }

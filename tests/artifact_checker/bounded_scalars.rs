@@ -13,7 +13,6 @@ fn erase_markers(fixture: &mut Fixture) {
 fn bounded_scalar_arithmetic_binds_cell_fields_and_named_nested_helpers() {
     let cell = r#"module scalar_cell_view
 resource Token has store { amount: u64 }
-#[effect(ReadOnly)]
 fn adjusted(before: InputView<Token>, delta: u64) -> u64 {
     let value = before.data.amount
     if delta == 0 { return value }

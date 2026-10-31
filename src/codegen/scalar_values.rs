@@ -34,9 +34,9 @@ pub(super) fn return_operand(block: &IrBlock, value: &IrOperand) -> bool {
 fn bounded_type(ty: &IrType) -> bool {
     match ty {
         IrType::Ref(inner) | IrType::MutRef(inner) => bounded_type(inner),
+        IrType::Nested(_) => true,
         IrType::Named(name) => {
-            crate::nested_values::is_nested_name(name)
-                || ["InputView<", "OutputView<", "CellDataView<", "ExactCellSelection<"].iter().any(|prefix| name.starts_with(prefix))
+            ["InputView<", "OutputView<", "CellDataView<", "ExactCellSelection<"].iter().any(|prefix| name.starts_with(prefix))
         }
         _ => false,
     }

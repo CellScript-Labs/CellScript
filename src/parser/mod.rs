@@ -38,7 +38,6 @@ pub struct Parser<'a> {
 struct PendingAttrs {
     type_id: Option<TypeIdentity>,
     capabilities: Option<Vec<Capability>>,
-    effect: Option<EffectClass>,
     scheduler_hint: Option<SchedulerHint>,
 }
 
@@ -436,45 +435,16 @@ impl<'a> Parser<'a> {
                     attrs.type_id = Some(TypeIdentity { value, span });
                 }
                 "effect" => {
-                    let mut has_mutating = false;
-                    let mut has_creating = false;
-                    let mut has_destroying = false;
-                    let mut has_read_only = false;
-                    while !self.check(&TokenKind::RParen) && !self.check(&TokenKind::Eof) {
-                        let effect_name = self.parse_name()?;
-                        match effect_name.as_str() {
-                            "Pure" | "pure" => {}
-                            "ReadOnly" | "readonly" | "read_only" => has_read_only = true,
-                            "Mutating" | "mutating" => has_mutating = true,
-                            "Creating" | "creating" => has_creating = true,
-                            "Destroying" | "destroying" => has_destroying = true,
-                            _ => return Err(CompileError::new("expected effect class", self.current().span)),
-                        }
-
-                        if self.check(&TokenKind::Comma) {
-                            self.advance();
-                            self.skip_newlines();
-                        } else {
-                            break;
-                        }
-                    }
-
-                    attrs.effect = Some(if has_mutating || (has_creating && has_destroying) {
-                        EffectClass::Mutating
-                    } else if has_creating {
-                        EffectClass::Creating
-                    } else if has_destroying {
-                        EffectClass::Destroying
-                    } else if has_read_only {
-                        EffectClass::ReadOnly
-                    } else {
-                        EffectClass::Pure
-                    });
+                    return Err(crate::error::SourceDiagnosticCode::RemovedEffectDeclaration.error(
+                        "effect declarations have been removed; remove #[effect(...)] and review the inferred public contract",
+                        self.current().span,
+                    ));
                 }
                 "scheduler_hint" => {
                     let mut parallelizable = true;
                     let mut estimated_cycles = 1000;
                     while !self.check(&TokenKind::RParen) && !self.check(&TokenKind::Eof) {
+                        let hint_span = self.current().span;
                         let hint_name = self.parse_name()?;
                         match hint_name.as_str() {
                             "parallel" => parallelizable = true,
@@ -491,7 +461,12 @@ impl<'a> Parser<'a> {
                                     _ => return Err(CompileError::new("expected integer estimated_cycles", self.current().span)),
                                 };
                             }
-                            _ => {}
+                            _ => {
+                                return Err(crate::error::SourceDiagnosticCode::UnknownSchedulerHint.error(
+                                    format!("unknown scheduler hint '{hint_name}'; use parallel, sequential, or estimated_cycles = <u64 integer literal>"),
+                                    hint_span,
+                                ));
+                            }
                         }
 
                         if self.check(&TokenKind::Comma) {
@@ -622,14 +597,14 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Action => {
                 self.reject_type_id_attr(&attrs)?;
-                Ok(Item::Action(self.parse_action(attrs.effect, attrs.scheduler_hint)?))
+                Ok(Item::Action(self.parse_action(attrs.scheduler_hint)?))
             }
             TokenKind::Fn => {
                 self.reject_type_id_attr(&attrs)?;
                 if attrs.capabilities.is_some() || attrs.scheduler_hint.is_some() {
-                    return Err(CompileError::new("fn definitions only accept the #[effect(...)] attribute", self.current().span));
+                    return Err(CompileError::new("fn definitions do not accept attributes", self.current().span));
                 }
-                Ok(Item::Function(self.parse_fn(attrs.effect)?))
+                Ok(Item::Function(self.parse_fn()?))
             }
             TokenKind::Lock => {
                 self.reject_type_id_attr(&attrs)?;
@@ -701,7 +676,7 @@ impl<'a> Parser<'a> {
     }
 
     fn reject_all_attrs(&self, item_kind: &str, attrs: &PendingAttrs) -> Result<()> {
-        if attrs.type_id.is_some() || attrs.capabilities.is_some() || attrs.effect.is_some() || attrs.scheduler_hint.is_some() {
+        if attrs.type_id.is_some() || attrs.capabilities.is_some() || attrs.scheduler_hint.is_some() {
             Err(CompileError::new(format!("attributes cannot be applied to {} definitions", item_kind), self.current().span))
         } else {
             Ok(())
@@ -1943,7 +1918,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_action(&mut self, effect: Option<EffectClass>, scheduler_hint: Option<SchedulerHint>) -> Result<ActionDef> {
+    fn parse_action(&mut self, scheduler_hint: Option<SchedulerHint>) -> Result<ActionDef> {
         let start_span = self.current().span;
         self.expect(TokenKind::Action)?;
 
@@ -1961,7 +1936,6 @@ impl<'a> Parser<'a> {
         let (state_edges, body) = self.parse_action_body()?;
 
         let end_span = self.current().span;
-        let effect_declared = effect.is_some();
 
         Ok(ActionDef {
             name,
@@ -1970,8 +1944,6 @@ impl<'a> Parser<'a> {
             outputs,
             state_edges,
             body,
-            effect: effect.unwrap_or(EffectClass::Pure),
-            effect_declared,
             scheduler_hint,
             next_surface: None,
             doc_comment: None,
@@ -2158,7 +2130,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_fn(&mut self, effect: Option<EffectClass>) -> Result<FnDef> {
+    fn parse_fn(&mut self) -> Result<FnDef> {
         let start_span = self.current().span;
         self.expect(TokenKind::Fn)?;
 
@@ -2180,8 +2152,6 @@ impl<'a> Parser<'a> {
             params,
             return_type,
             body,
-            effect: effect.unwrap_or(EffectClass::Pure),
-            effect_declared: effect.is_some(),
             doc_comment: None,
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
         })
@@ -3294,12 +3264,13 @@ impl<'a> Parser<'a> {
                 let args = self.parse_args()?;
                 expr = Expr::Call(CallExpr { func: Box::new(expr), type_args, args, span: self.current().span });
             } else if self.check(&TokenKind::LParen) {
-                let exact_zk_origin = matches!(&expr, Expr::Identifier(name) if name == "zk::require_valid");
+                let exact_call_origin =
+                    matches!(&expr, Expr::Identifier(name) if matches!(name.as_str(), "zk::require_valid" | "spawn"));
                 let args = self.parse_args()?;
-                // Exact ZK statement provenance belongs to the source call,
-                // not the following token. Preserve existing span identities
-                // for unrelated, already-versioned callable surfaces.
-                let span = if exact_zk_origin {
+                // Exact ZK provenance and bare-spawn source rejection belong
+                // to the call, not the following token. Preserve other
+                // already-versioned callable span identities.
+                let span = if exact_call_origin {
                     Span::new(start_span.start, self.previous_non_newline().span.end, start_span.line, start_span.column)
                 } else {
                     self.current().span
@@ -4700,22 +4671,12 @@ action mint(amount: u64) -> token: Token {
     }
 
     #[test]
-    fn parses_function_effect_attribute() {
-        let input = r#"
-module test
-
-#[effect(ReadOnly)]
-fn inspect(value: &u64) -> u64 {
-    return *value
-}
-"#;
-        let tokens = lex(input).unwrap();
-        let module = parse(&tokens).unwrap();
-        let Item::Function(function) = &module.items[0] else {
-            panic!("expected function");
-        };
-        assert!(function.effect_declared);
-        assert_eq!(function.effect, EffectClass::ReadOnly);
+    fn rejects_retired_effect_attributes() {
+        for effect in ["Pure", "ReadOnly", "Creating", "Destroying", "Mutating"] {
+            let source = format!("module test\n#[effect({effect})]\nfn inspect(value: u64) -> u64 {{ return value }}");
+            let error = parse(&lex(&source).unwrap()).unwrap_err();
+            assert!(error.message.contains("effect declarations have been removed"));
+        }
     }
 
     #[test]

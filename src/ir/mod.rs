@@ -2,11 +2,17 @@ use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
 use crate::resolve::{FunctionDef, ModuleResolver, TypeDef};
 use crate::runtime_errors::CellScriptRuntimeError;
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 mod bindings;
+mod builtins;
+mod fixed_layout;
+pub(crate) use fixed_layout::{checked_fixed_size, fixed_layout_width, validate_fixed_layout};
 mod generic_contract;
+mod nested;
 pub use generic_contract::{IrGenericContract, IrGenericDeclaration, IrGenericKind, IrGenericParameter, IrGenericValueParameter};
+pub use nested::NestedViewType;
 pub mod allocated;
 mod optimize;
 use allocated::IrAllocatedValue;
@@ -73,25 +79,18 @@ pub(crate) fn is_ckb_sighash_all_result(func: &str, ty: &IrType) -> bool {
     func == "__ckb_sighash_all_zero_lock" && matches!(ty, IrType::Named(name) if name == CKB_SIGHASH_ALL_DIGEST_TYPE)
 }
 
-pub(crate) const CKB_WITNESS_OWNER_RAW: u64 = 0;
-pub(crate) const CKB_WITNESS_OWNER_LOCK: u64 = 1;
-pub(crate) const CKB_WITNESS_OWNER_ENTRY: u64 = 2;
-pub(crate) const CKB_WITNESS_OWNER_OUTPUT_TYPE: u64 = 3;
+pub(crate) const CKB_WITNESS_OWNER_RAW: u64 = cellscript_artifact_checker::view_types::WitnessBytesOwner::Raw.tag();
+pub(crate) const CKB_WITNESS_OWNER_LOCK: u64 = cellscript_artifact_checker::view_types::WitnessBytesOwner::Lock.tag();
+pub(crate) const CKB_WITNESS_OWNER_ENTRY: u64 = cellscript_artifact_checker::view_types::WitnessBytesOwner::Entry.tag();
+pub(crate) const CKB_WITNESS_OWNER_OUTPUT_TYPE: u64 = cellscript_artifact_checker::view_types::WitnessBytesOwner::OutputType.tag();
 
 pub(crate) fn witness_bytes_view_parts(ty: &IrType) -> Option<(&str, u64, u64)> {
     let IrType::Named(name) = ty else {
         return None;
     };
-    let payload = name.strip_prefix("WitnessBytesView<")?.strip_suffix('>')?;
-    let (owner, maximum) = payload.split_once(',')?;
-    let owner_tag = match owner {
-        "raw" => CKB_WITNESS_OWNER_RAW,
-        "lock" => CKB_WITNESS_OWNER_LOCK,
-        "entry" => CKB_WITNESS_OWNER_ENTRY,
-        "output_type" => CKB_WITNESS_OWNER_OUTPUT_TYPE,
-        _ => return None,
-    };
-    Some((owner, owner_tag, maximum.parse().ok()?))
+    use cellscript_artifact_checker::view_types::{parse_witness_bytes_view_type, WitnessViewSyntax};
+    let view = parse_witness_bytes_view_type(name, WitnessViewSyntax::ExactArguments)?;
+    Some((view.owner.as_str(), view.owner.tag(), view.maximum))
 }
 
 #[derive(Debug, Clone)]
@@ -107,6 +106,8 @@ pub struct IrModule {
     /// Source ownership survives entry pruning and imported helper merging.
     /// None records an ambiguous lowered name; it cannot supply open admission.
     pub source_type_origins: BTreeMap<String, Option<IrSourceTypeOrigin>>,
+    /// Resolved source spelling to unique lowered callable; never serialized.
+    pub source_callable_targets: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,7 +120,7 @@ pub struct IrSourceTypeOrigin {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum IrEntrySelection {
     #[default]
-    Legacy,
+    Implicit,
     Action(String),
     Lock(String),
     Artifact(crate::artifact::ArtifactDeclaration),
@@ -196,7 +197,7 @@ impl IrModule {
                 });
             }
             IrEntrySelection::Artifact(_) => return None,
-            IrEntrySelection::Legacy => {}
+            IrEntrySelection::Implicit => {}
         }
         let actions = || {
             self.items.iter().filter_map(|item| match item {
@@ -219,7 +220,7 @@ impl IrModule {
 
     pub(crate) fn validate_entry_selection(&self) -> Result<()> {
         let (kind, name) = match &self.entry_selection {
-            IrEntrySelection::Legacy => return Ok(()),
+            IrEntrySelection::Implicit => return Ok(()),
             IrEntrySelection::Action(name) => ("action", name),
             IrEntrySelection::Lock(name) => ("lock", name),
             IrEntrySelection::Artifact(declaration) => return policy::validate_artifact_selection(self, declaration),
@@ -288,7 +289,7 @@ pub enum IrItem {
     TypeDef(IrTypeDef),
     Invariant(IrInvariant),
     Action(IrAction),
-    PureFn(IrPureFn),
+    Function(IrFunction),
     Lock(IrLock),
 }
 
@@ -459,6 +460,7 @@ pub enum IrType {
     Array(Box<IrType>, usize),
     Tuple(Vec<IrType>),
     Named(String),
+    Nested(NestedViewType),
     Ref(Box<IrType>),
     MutRef(Box<IrType>),
 }
@@ -483,26 +485,25 @@ pub struct IrAction {
     pub state_transition_edges: Vec<IrStateTransitionEdge>,
     pub protocol_role_candidates: Vec<IrProtocolRoleCandidate>,
     pub body: IrBody,
-    pub effect_class: EffectClass,
+    pub effects: EffectFacts,
     pub scheduler_hints: SchedulerHints,
 }
 
-/// IR pure helper function
+/// Ordinary source function with inferred external-operation facts.
 #[derive(Debug, Clone)]
-pub struct IrPureFn {
+pub struct IrFunction {
     pub name: String,
     pub params: Vec<IrParam>,
     pub return_type: Option<IrType>,
     pub body: IrBody,
-    pub declared_effect_class: Option<EffectClass>,
-    pub inferred_effect_class: EffectClass,
-    pub effect_class: EffectClass,
+    pub effects: EffectFacts,
 }
 
 /// IR Lock
 #[derive(Debug, Clone)]
 pub struct IrLock {
     pub name: String,
+    pub effects: EffectFacts,
     pub params: Vec<IrParam>,
     pub audit_claims: Vec<IrAuditClaim>,
     pub body: IrBody,
@@ -715,14 +716,12 @@ pub enum IrDeferredRuntimeFeature {
 
 impl IrDeferredRuntimeFeature {
     pub fn from_helper(helper: &str) -> Option<Self> {
-        match helper {
-            "__ckb_sighash_all" => Some(Self::CkbSighashAll),
-            "__ckb_require_maturity" | "__ckb_require_time" | "__ckb_require_epoch_after" | "__ckb_require_epoch_relative" => {
-                Some(Self::CkbSinceConstraints)
-            }
-            "__ckb_occupied_capacity" => Some(Self::CkbOccupiedCapacityFloor),
-            _ => None,
-        }
+        use cellscript_artifact_checker::runtime_contract::{DeferredFeature, RuntimeHelper};
+        Some(match RuntimeHelper::from_symbol(helper)?.deferred()? {
+            DeferredFeature::CkbSighashAll => Self::CkbSighashAll,
+            DeferredFeature::CkbSinceConstraints => Self::CkbSinceConstraints,
+            DeferredFeature::CkbOccupiedCapacityFloor => Self::CkbOccupiedCapacityFloor,
+        })
     }
 
     pub fn from_source_name(name: &str) -> Option<Self> {
@@ -746,10 +745,6 @@ impl IrDeferredRuntimeFeature {
             Self::CkbSinceConstraints => CellScriptRuntimeError::SinceConstraintsUnsupported,
             Self::CkbOccupiedCapacityFloor => CellScriptRuntimeError::OccupiedCapacityUnsupported,
         }
-    }
-
-    pub fn effect(self) -> String {
-        format!("deferred-runtime-fail-closed:{}:{}", self.runtime_error().code(), self.feature())
     }
 }
 
@@ -1084,14 +1079,7 @@ pub enum IrTerminator {
     Branch { cond: IrOperand, then_block: BlockId, else_block: BlockId },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EffectClass {
-    Pure,
-    ReadOnly,
-    Mutating,
-    Creating,
-    Destroying,
-}
+pub use cellscript_artifact_checker::effect_facts::EffectFacts;
 
 #[derive(Debug, Clone)]
 pub struct SchedulerHints {
@@ -1106,45 +1094,10 @@ impl Default for SchedulerHints {
     }
 }
 
-#[derive(Default)]
-struct EffectFootprint {
-    has_read_ref: bool,
-    has_consume: bool,
-    has_create: bool,
-}
-
-fn is_read_only_runtime_call(call: &CallExpr) -> bool {
-    match call.func.as_ref() {
-        Expr::Identifier(name) => {
-            name.starts_with("env::")
-                || name.starts_with("ckb::")
-                || name.starts_with("source::")
-                || name.starts_with("dao::")
-                || name.starts_with("xudt::")
-                || name.starts_with("witness::")
-                || name.starts_with("script::require_")
-                || matches!(
-                    name.as_str(),
-                    "spawn"
-                        | "pipe"
-                        | "pipe_write"
-                        | "pipe_read"
-                        | "wait"
-                        | "process_id"
-                        | "inherited_fd"
-                        | "close"
-                        | "require_maturity"
-                        | "require_time"
-                        | "require_epoch_after"
-                        | "require_epoch_relative"
-                )
-        }
-        Expr::FieldAccess(field) => field.field == "type_hash",
-        _ => false,
-    }
-}
-
-pub struct IrGenerator {
+pub struct IrGenerator<'a> {
+    nested_resolver: Option<&'a ModuleResolver>,
+    nested_source_records: HashMap<String, StructDef>,
+    nested_descriptions: crate::nested_values::Descriptions,
     cell_role_catalogs: HashMap<String, CellRolesDef>,
     collection_pools: HashMap<String, CollectionsDef>,
     module: IrModule,
@@ -1182,8 +1135,6 @@ pub struct IrGenerator {
     enum_variants: HashMap<String, HashMap<String, u64>>,
     enum_definitions: HashMap<String, EnumDef>,
     constants: HashMap<String, (Expr, IrType)>,
-    function_effects: HashMap<String, EffectClass>,
-    external_function_effects: HashMap<String, EffectClass>,
     function_param_types: HashMap<String, Vec<IrType>>,
     external_function_param_types: HashMap<String, Vec<IrType>>,
     function_return_types: HashMap<String, Option<IrType>>,
@@ -1195,7 +1146,7 @@ pub struct IrGenerator {
     enforced_claims: Vec<IrEnforcedClaim>,
     zk_origins: Vec<cellscript_artifact_checker::zk_profile::ZkSourceOrigin>,
     loop_targets: Vec<LoopTarget>,
-    errors: Vec<CompileError>,
+    errors: RefCell<Vec<CompileError>>,
 }
 
 #[derive(Clone)]
@@ -1385,27 +1336,30 @@ struct IrImportContext {
     flow_states: HashMap<String, Vec<String>>,
     type_validity: HashMap<String, Vec<IrValidityPredicate>>,
     enum_definitions: HashMap<String, EnumDef>,
-    external_function_effects: HashMap<String, EffectClass>,
     external_function_param_types: HashMap<String, Vec<IrType>>,
     external_function_return_types: HashMap<String, Option<IrType>>,
     call_target_labels: HashMap<String, String>,
 }
 
-impl IrGenerator {
+impl<'scope> IrGenerator<'scope> {
     pub fn new(module_name: String) -> Self {
         Self {
+            nested_resolver: None,
+            nested_source_records: HashMap::new(),
+            nested_descriptions: Default::default(),
             cell_role_catalogs: HashMap::new(),
             collection_pools: HashMap::new(),
             module: IrModule {
                 name: module_name,
                 items: Vec::new(),
-                entry_selection: IrEntrySelection::Legacy,
+                entry_selection: IrEntrySelection::Implicit,
                 external_type_defs: Vec::new(),
                 external_callable_abis: Vec::new(),
                 enum_fixed_sizes: HashMap::new(),
                 enum_layouts: HashMap::new(),
                 generic_contracts: BTreeMap::new(),
                 source_type_origins: BTreeMap::new(),
+                source_callable_targets: BTreeMap::new(),
             },
             var_counter: 0,
             mutable_local_ids: HashSet::new(),
@@ -1437,8 +1391,6 @@ impl IrGenerator {
             enum_variants: HashMap::new(),
             enum_definitions: HashMap::new(),
             constants: HashMap::new(),
-            function_effects: HashMap::new(),
-            external_function_effects: HashMap::new(),
             function_param_types: HashMap::new(),
             external_function_param_types: HashMap::new(),
             function_return_types: HashMap::new(),
@@ -1450,7 +1402,7 @@ impl IrGenerator {
             enforced_claims: Vec::new(),
             zk_origins: Vec::new(),
             loop_targets: Vec::new(),
-            errors: Vec::new(),
+            errors: RefCell::new(Vec::new()),
         }
     }
 
@@ -1460,7 +1412,7 @@ impl IrGenerator {
         generator
     }
 
-    fn with_import_context(module_name: String, context: IrImportContext) -> Self {
+    fn with_import_context(module_name: String, context: IrImportContext, resolver: &'scope ModuleResolver) -> Self {
         let IrImportContext {
             type_fields,
             type_field_order,
@@ -1469,12 +1421,12 @@ impl IrGenerator {
             flow_states,
             type_validity,
             enum_definitions,
-            external_function_effects,
             external_function_param_types,
             external_function_return_types,
             call_target_labels,
         } = context;
         let mut generator = Self::with_type_fields(module_name, type_fields);
+        generator.nested_resolver = Some(resolver);
         generator.type_field_order = type_field_order;
         generator.type_kinds.extend(type_kinds);
         generator.receipt_claim_outputs.extend(receipt_claim_outputs);
@@ -1488,9 +1440,9 @@ impl IrGenerator {
             );
             generator.enum_definitions.insert(name, definition);
         }
-        generator.external_function_effects = external_function_effects;
         generator.external_function_param_types = external_function_param_types;
         generator.external_function_return_types = external_function_return_types;
+        generator.module.source_callable_targets = call_target_labels.iter().map(|(a, b)| (a.clone(), b.clone())).collect();
         generator.call_target_labels = call_target_labels;
         generator
     }
@@ -1500,7 +1452,31 @@ impl IrGenerator {
             .map_err(|errors| errors.into_iter().next().unwrap_or_else(|| CompileError::without_span("IR lowering failed")))
     }
 
-    pub fn generate_diagnostics(mut self, ast: &Module) -> std::result::Result<IrModule, Vec<CompileError>> {
+    pub fn generate_diagnostics(self, ast: &Module) -> std::result::Result<IrModule, Vec<CompileError>> {
+        let mut ir = self.lower_diagnostics(ast)?;
+        crate::effects::populate(&mut ir).map_err(|error| vec![error])?;
+        Ok(ir)
+    }
+
+    pub(crate) fn lower_diagnostics(mut self, ast: &Module) -> std::result::Result<IrModule, Vec<CompileError>> {
+        self.prepare_nested_types(ast);
+        self.type_fields = self
+            .type_fields
+            .iter()
+            .map(|(name, fields)| {
+                (name.clone(), fields.iter().map(|(field, ty)| (field.clone(), self.resolve_projection_type(ty))).collect())
+            })
+            .collect();
+        self.external_function_param_types = self
+            .external_function_param_types
+            .iter()
+            .map(|(name, params)| (name.clone(), params.iter().map(|ty| self.resolve_projection_type(ty)).collect()))
+            .collect();
+        self.external_function_return_types = self
+            .external_function_return_types
+            .iter()
+            .map(|(name, ty)| (name.clone(), ty.as_ref().map(|ty| self.resolve_projection_type(ty))))
+            .collect();
         self.collection_pools = ast
             .items
             .iter()
@@ -1529,7 +1505,7 @@ impl IrGenerator {
                 self.type_field_order.insert(name.clone(), fields.iter().map(|field| field.name.clone()).collect());
             }
             if let Item::Const(c) = item {
-                self.constants.insert(c.name.clone(), (c.value.clone(), Self::convert_type(&c.ty)));
+                self.constants.insert(c.name.clone(), (c.value.clone(), self.convert_type(&c.ty)));
             }
             match item {
                 Item::Resource(r) => {
@@ -1540,7 +1516,7 @@ impl IrGenerator {
                     self.type_identities.insert(r.name.clone(), Self::lower_identity_policy(&r.identity));
                     self.type_fields.insert(
                         r.name.clone(),
-                        r.fields.iter().map(|field| (field.name.clone(), Self::convert_type(&field.ty))).collect(),
+                        r.fields.iter().map(|field| (field.name.clone(), self.convert_type(&field.ty))).collect(),
                     );
                     self.type_validity.insert(
                         r.name.clone(),
@@ -1555,7 +1531,7 @@ impl IrGenerator {
                     self.type_identities.insert(s.name.clone(), Self::lower_identity_policy(&s.identity));
                     self.type_fields.insert(
                         s.name.clone(),
-                        s.fields.iter().map(|field| (field.name.clone(), Self::convert_type(&field.ty))).collect(),
+                        s.fields.iter().map(|field| (field.name.clone(), self.convert_type(&field.ty))).collect(),
                     );
                     self.type_validity.insert(
                         s.name.clone(),
@@ -1568,10 +1544,10 @@ impl IrGenerator {
                         self.type_capacity_floors.insert(r.name.clone(), floor.shannons);
                     }
                     self.type_identities.insert(r.name.clone(), Self::lower_identity_policy(&r.identity));
-                    self.receipt_claim_outputs.insert(r.name.clone(), r.claim_output.as_ref().map(Self::convert_type));
+                    self.receipt_claim_outputs.insert(r.name.clone(), r.claim_output.as_ref().map(|ty| self.convert_type(ty)));
                     self.type_fields.insert(
                         r.name.clone(),
-                        r.fields.iter().map(|field| (field.name.clone(), Self::convert_type(&field.ty))).collect(),
+                        r.fields.iter().map(|field| (field.name.clone(), self.convert_type(&field.ty))).collect(),
                     );
                     self.type_validity.insert(
                         r.name.clone(),
@@ -1586,7 +1562,7 @@ impl IrGenerator {
                     self.type_identities.insert(s.name.clone(), IrIdentityPolicy::None);
                     self.type_fields.insert(
                         s.name.clone(),
-                        s.fields.iter().map(|field| (field.name.clone(), Self::convert_type(&field.ty))).collect(),
+                        s.fields.iter().map(|field| (field.name.clone(), self.convert_type(&field.ty))).collect(),
                     );
                     self.type_validity.insert(
                         s.name.clone(),
@@ -1601,23 +1577,23 @@ impl IrGenerator {
                     );
                 }
                 Item::Action(action) => {
-                    let params = action.params.iter().map(|param| ast_type_to_ir(&param.ty)).collect::<Vec<_>>();
-                    let return_type = action.return_type.as_ref().map(ast_type_to_ir);
+                    let params = action.params.iter().map(|param| self.convert_type(&param.ty)).collect::<Vec<_>>();
+                    let return_type = action.return_type.as_ref().map(|ty| self.convert_type(ty));
                     self.function_param_types.insert(action.name.clone(), params.clone());
                     self.function_param_types.insert(format!("{}::{}", self.module.name, action.name), params);
                     self.function_return_types.insert(action.name.clone(), return_type.clone());
                     self.function_return_types.insert(format!("{}::{}", self.module.name, action.name), return_type);
                 }
                 Item::Function(function) => {
-                    let params = function.params.iter().map(|param| ast_type_to_ir(&param.ty)).collect::<Vec<_>>();
-                    let return_type = function.return_type.as_ref().map(ast_type_to_ir);
+                    let params = function.params.iter().map(|param| self.convert_type(&param.ty)).collect::<Vec<_>>();
+                    let return_type = function.return_type.as_ref().map(|ty| self.convert_type(ty));
                     self.function_param_types.insert(function.name.clone(), params.clone());
                     self.function_param_types.insert(format!("{}::{}", self.module.name, function.name), params);
                     self.function_return_types.insert(function.name.clone(), return_type.clone());
                     self.function_return_types.insert(format!("{}::{}", self.module.name, function.name), return_type);
                 }
                 Item::Lock(lock) => {
-                    let params = lock.params.iter().map(|param| ast_type_to_ir(&param.ty)).collect::<Vec<_>>();
+                    let params = lock.params.iter().map(|param| self.convert_type(&param.ty)).collect::<Vec<_>>();
                     self.function_param_types.insert(lock.name.clone(), params.clone());
                     self.function_param_types.insert(format!("{}::{}", self.module.name, lock.name), params);
                     self.function_return_types.insert(lock.name.clone(), Some(IrType::Bool));
@@ -1633,7 +1609,6 @@ impl IrGenerator {
 
         self.register_enum_layouts();
         self.register_flows(&ast.items);
-        self.infer_module_function_effects(&ast.items);
 
         for item in &ast.items {
             if matches!(item, Item::Resource(_) | Item::Shared(_) | Item::Receipt(_) | Item::Struct(_) | Item::Enum(_))
@@ -1670,18 +1645,7 @@ impl IrGenerator {
                     self.module.items.push(ir_item);
                 }
                 Item::Function(f) => {
-                    let inferred_effect = self.analyze_body_effect_class(&f.body);
-                    let declared_effect = self.convert_effect_class(f.effect);
-                    if f.effect_declared && !self.effect_covers(declared_effect, inferred_effect) {
-                        self.record_error(
-                            format!(
-                                "declared effect {:?} is too weak for function '{}'; inferred effect is {:?}",
-                                declared_effect, f.name, inferred_effect
-                            ),
-                            f.span,
-                        );
-                    }
-                    let ir_item = IrItem::PureFn(self.gen_function(f));
+                    let ir_item = IrItem::Function(self.gen_function(f));
                     self.module.items.push(ir_item);
                 }
                 Item::Lock(l) => {
@@ -1705,13 +1669,13 @@ impl IrGenerator {
                     self.module.generic_contracts.insert(name.clone(), contract);
                 }
                 Ok(None) => {}
-                Err(error) => self.errors.push(error),
+                Err(error) => self.errors.borrow_mut().push(error),
             }
         }
-        if self.errors.is_empty() {
+        if self.errors.borrow().is_empty() {
             Ok(self.module)
         } else {
-            Err(self.errors)
+            Err(self.errors.into_inner())
         }
     }
 
@@ -1869,7 +1833,7 @@ impl IrGenerator {
             fields: self.layout_fields(&receipt.fields),
             capabilities: receipt.capabilities.clone(),
             value_abilities: Vec::new(),
-            claim_output: receipt.claim_output.as_ref().map(Self::convert_type),
+            claim_output: receipt.claim_output.as_ref().map(|ty| self.convert_type(ty)),
             flow_states: self.flow_states.get(&receipt.name).cloned(),
             flow_state_field: self.flow_state_fields.get(&receipt.name).cloned(),
             flow_rules: self.flow_rules.get(&receipt.name).cloned().unwrap_or_default(),
@@ -1938,57 +1902,7 @@ impl IrGenerator {
         }
     }
 
-    fn infer_module_function_effects(&mut self, items: &[Item]) {
-        for item in items {
-            match item {
-                Item::Action(action) => {
-                    self.function_effects.insert(action.name.clone(), EffectClass::Pure);
-                    self.function_effects.insert(format!("{}::{}", self.module.name, action.name), EffectClass::Pure);
-                }
-                Item::Function(function) => {
-                    self.function_effects.insert(function.name.clone(), EffectClass::Pure);
-                    self.function_effects.insert(format!("{}::{}", self.module.name, function.name), EffectClass::Pure);
-                }
-                _ => {}
-            }
-        }
-
-        for _ in 0..items.len().saturating_add(1) {
-            let mut changed = false;
-            for item in items {
-                match item {
-                    Item::Action(action) => {
-                        let inferred = self.analyze_effect_class(action);
-                        let declared = self.convert_effect_class(action.effect);
-                        let effective =
-                            if action.effect_declared && self.effect_covers(declared, inferred) { declared } else { inferred };
-                        if self.function_effects.get(&action.name).copied() != Some(effective) {
-                            self.function_effects.insert(action.name.clone(), effective);
-                            self.function_effects.insert(format!("{}::{}", self.module.name, action.name), effective);
-                            changed = true;
-                        }
-                    }
-                    Item::Function(function) => {
-                        let inferred = self.analyze_body_effect_class(&function.body);
-                        let declared = self.convert_effect_class(function.effect);
-                        let effective =
-                            if function.effect_declared && self.effect_covers(declared, inferred) { declared } else { inferred };
-                        if self.function_effects.get(&function.name).copied() != Some(effective) {
-                            self.function_effects.insert(function.name.clone(), effective);
-                            self.function_effects.insert(format!("{}::{}", self.module.name, function.name), effective);
-                            changed = true;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-    }
-
-    fn gen_function(&mut self, function: &FnDef) -> IrPureFn {
+    fn gen_function(&mut self, function: &FnDef) -> IrFunction {
         self.var_counter = 0;
         self.block_counter = 0;
         self.aggregate_fields.clear();
@@ -1998,17 +1912,12 @@ impl IrGenerator {
         self.mutated_field_transitions.clear();
         self.transition_param_ids.clear();
         self.transition_coverable_value_ids.clear();
-        let return_type = function.return_type.as_ref().map(Self::convert_type);
+        let return_type = function.return_type.as_ref().map(|ty| self.convert_type(ty));
         let (params, mut body) =
             self.lower_signature_and_body(&function.params, &[], &function.body, return_type.clone(), &HashSet::new());
         body.cell_bindings = bindings::resolve(&params, &body, bindings::BindingContext::Helper, &self.type_kinds);
-        let inferred_effect_class = self.analyze_body_effect_class(&function.body);
-        let declared_effect_class = function.effect_declared.then(|| self.convert_effect_class(function.effect));
-        let effect_class = declared_effect_class
-            .filter(|declared| self.effect_covers(*declared, inferred_effect_class))
-            .unwrap_or(inferred_effect_class);
-
-        IrPureFn { name: function.name.clone(), params, return_type, body, declared_effect_class, inferred_effect_class, effect_class }
+        let effects = EffectFacts::empty();
+        IrFunction { name: function.name.clone(), params, return_type, body, effects }
     }
 
     fn layout_fields(&self, fields: &[Field]) -> Vec<IrField> {
@@ -2016,7 +1925,7 @@ impl IrGenerator {
         fields
             .iter()
             .map(|field| {
-                let ty = Self::convert_type(&field.ty);
+                let ty = self.convert_type(&field.ty);
                 let fixed_size = self.fixed_encoded_size(&ty);
                 let offset = next_offset.unwrap_or(0);
                 next_offset = next_offset.and_then(|current| fixed_size.and_then(|size| current.checked_add(size)));
@@ -2072,7 +1981,7 @@ impl IrGenerator {
             let mut next_offset = 1usize;
             let mut fields = Vec::with_capacity(variant.fields.len());
             for (index, field_ty) in variant.fields.iter().enumerate() {
-                let ir_ty = Self::convert_type(field_ty);
+                let ir_ty = self.convert_type(field_ty);
                 let (width, linear) = self.enum_payload_runtime_layout(&ir_ty, layouts, visiting)?;
                 fields.push(IrEnumFieldLayout { index, ty: ir_ty, offset: next_offset, width, linear });
                 next_offset = next_offset.checked_add(width)?;
@@ -2142,7 +2051,7 @@ impl IrGenerator {
                 visiting.remove(base_name);
                 result
             }
-            IrType::Ref(_) | IrType::MutRef(_) => None,
+            IrType::Nested(_) | IrType::Ref(_) | IrType::MutRef(_) => None,
         }
     }
 
@@ -2188,7 +2097,7 @@ impl IrGenerator {
                 seen.remove(base_name);
                 size
             }
-            IrType::Ref(_) | IrType::MutRef(_) => None,
+            IrType::Nested(_) | IrType::Ref(_) | IrType::MutRef(_) => None,
         }
     }
 
@@ -2203,7 +2112,7 @@ impl IrGenerator {
         self.transition_param_ids.clear();
         self.transition_coverable_value_ids.clear();
         let core_input_bindings = action_core_input_binding_names(action);
-        let return_type = action.return_type.as_ref().map(Self::convert_type);
+        let return_type = action.return_type.as_ref().map(|ty| self.convert_type(ty));
         let (params, mut body) =
             self.lower_signature_and_body(&action.params, &action.outputs, &action.body, return_type.clone(), &core_input_bindings);
         let context = if action.next_surface.is_some() {
@@ -2213,23 +2122,7 @@ impl IrGenerator {
         };
         body.cell_bindings = bindings::resolve(&params, &body, context, &self.type_kinds);
 
-        let mut effect_class = self.analyze_effect_class(action);
-        if params.iter().any(|param| param.is_read_ref) && effect_class == EffectClass::Pure {
-            effect_class = EffectClass::ReadOnly;
-        }
-        if params.iter().any(|param| self.param_mutates_shared_state(param)) {
-            effect_class = EffectClass::Mutating;
-        }
-        let declared_effect_class = self.convert_effect_class(action.effect);
-        if action.effect_declared && !self.effect_covers(declared_effect_class, effect_class) {
-            self.record_error(
-                format!(
-                    "declared effect {:?} is too weak for action '{}'; inferred effect is {:?}",
-                    declared_effect_class, action.name, effect_class
-                ),
-                action.span,
-            );
-        }
+        let effects = EffectFacts::empty();
         let touches_shared = self.infer_touches_shared(&params, &body);
         let estimated_cycles = self.estimate_cycles(&body);
 
@@ -2246,7 +2139,7 @@ impl IrGenerator {
             state_transition_edges: self.action_state_transition_edges(action),
             protocol_role_candidates: self.action_protocol_role_candidates(action),
             body,
-            effect_class: if action.effect_declared { declared_effect_class } else { effect_class },
+            effects,
             scheduler_hints: action
                 .scheduler_hint
                 .as_ref()
@@ -2583,283 +2476,15 @@ impl IrGenerator {
 
         IrLock {
             name: lock.name.clone(),
+            effects: EffectFacts::empty(),
             params,
             audit_claims: lock.next_surface.as_ref().map_or_else(Vec::new, |surface| Self::lower_audit_claims(&surface.audits)),
             body,
         }
     }
 
-    fn convert_type(ty: &Type) -> IrType {
-        match ty {
-            Type::U8 => IrType::U8,
-            Type::U16 => IrType::U16,
-            Type::U32 => IrType::U32,
-            Type::I32 => IrType::I32,
-            Type::U64 => IrType::U64,
-            Type::U128 => IrType::U128,
-            Type::Bool => IrType::Bool,
-            Type::Unit => IrType::Unit,
-            Type::Address => IrType::Address,
-            Type::Hash => IrType::Hash,
-            Type::Array(elem, size) => IrType::Array(Box::new(Self::convert_type(elem)), *size),
-            Type::Tuple(types) => IrType::Tuple(types.iter().map(Self::convert_type).collect()),
-            Type::Named(name) => IrType::Named(name.clone()),
-            Type::Ref(inner) => IrType::Ref(Box::new(Self::convert_type(inner))),
-            Type::MutRef(inner) => IrType::MutRef(Box::new(Self::convert_type(inner))),
-        }
-    }
-
-    fn analyze_effect_class(&self, action: &ActionDef) -> EffectClass {
-        if !action_core_input_binding_names(action).is_empty() {
-            return EffectClass::Mutating;
-        }
-        self.analyze_body_effect_class(&action.body)
-    }
-
-    fn analyze_body_effect_class(&self, body: &[Stmt]) -> EffectClass {
-        let mut footprint = EffectFootprint::default();
-
-        for stmt in body {
-            self.check_stmt_effects(stmt, &mut footprint);
-        }
-
-        match (footprint.has_consume, footprint.has_create, footprint.has_read_ref) {
-            (true, true, _) => EffectClass::Mutating,
-            (true, false, _) => EffectClass::Destroying,
-            (false, true, _) => EffectClass::Creating,
-            (false, false, true) => EffectClass::ReadOnly,
-            (false, false, false) => EffectClass::Pure,
-        }
-    }
-
-    fn effect_covers(&self, declared: EffectClass, inferred: EffectClass) -> bool {
-        effect_class_covers(declared, inferred)
-    }
-
-    fn check_stmt_effects(&self, stmt: &Stmt, footprint: &mut EffectFootprint) {
-        match stmt {
-            Stmt::Expr(expr) | Stmt::Let(LetStmt { value: expr, .. }) => {
-                self.check_expr_effects(expr, footprint);
-            }
-            Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
-                self.check_expr_effects(expr, footprint);
-            }
-            Stmt::If(if_stmt) => {
-                self.check_expr_effects(&if_stmt.condition, footprint);
-                for stmt in &if_stmt.then_branch {
-                    self.check_stmt_effects(stmt, footprint);
-                }
-                if let Some(ref else_branch) = if_stmt.else_branch {
-                    for stmt in else_branch {
-                        self.check_stmt_effects(stmt, footprint);
-                    }
-                }
-            }
-            Stmt::For(for_stmt) => {
-                self.check_expr_effects(&for_stmt.iterable, footprint);
-                for stmt in &for_stmt.body {
-                    self.check_stmt_effects(stmt, footprint);
-                }
-            }
-            Stmt::While(while_stmt) => {
-                self.check_expr_effects(&while_stmt.condition, footprint);
-                for stmt in &while_stmt.body {
-                    self.check_stmt_effects(stmt, footprint);
-                }
-            }
-            Stmt::Borrow(borrow_stmt) => {
-                for stmt in &borrow_stmt.body {
-                    self.check_stmt_effects(stmt, footprint);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn check_expr_effects(&self, expr: &Expr, footprint: &mut EffectFootprint) {
-        match expr {
-            Expr::Consume(consume) => {
-                footprint.has_consume = true;
-                self.check_expr_effects(&consume.expr, footprint);
-            }
-            Expr::Create(create) => {
-                footprint.has_create = true;
-                for (_, value) in &create.fields {
-                    self.check_expr_effects(value, footprint);
-                }
-                if let Some(lock) = &create.lock {
-                    self.check_expr_effects(lock, footprint);
-                }
-            }
-            Expr::Destroy(destroy) => {
-                footprint.has_consume = true;
-                self.check_expr_effects(&destroy.expr, footprint);
-            }
-            Expr::Claim(claim) => {
-                self.apply_effect_to_footprint(EffectClass::Mutating, footprint);
-                self.check_expr_effects(&claim.receipt, footprint);
-            }
-            Expr::Settle(settle) => {
-                self.apply_effect_to_footprint(EffectClass::Mutating, footprint);
-                self.check_expr_effects(&settle.expr, footprint);
-            }
-            Expr::CreateUnique(create) => {
-                self.apply_effect_to_footprint(EffectClass::Creating, footprint);
-                for (_, value) in &create.fields {
-                    self.check_expr_effects(value, footprint);
-                }
-                if let Some(lock) = &create.lock {
-                    self.check_expr_effects(lock, footprint);
-                }
-            }
-            Expr::ReplaceUnique(replace) => {
-                self.apply_effect_to_footprint(EffectClass::Mutating, footprint);
-                self.check_expr_effects(&replace.expr, footprint);
-                for (_, value) in &replace.fields {
-                    self.check_expr_effects(value, footprint);
-                }
-            }
-            Expr::ReadRef(_) => {
-                footprint.has_read_ref = true;
-            }
-            Expr::Assert(assert_expr) => {
-                self.check_expr_effects(&assert_expr.condition, footprint);
-            }
-            Expr::Require(require_expr) => {
-                self.check_expr_effects(&require_expr.condition, footprint);
-                if let Some(message) = &require_expr.message {
-                    self.check_expr_effects(message, footprint);
-                }
-            }
-            Expr::RequireBlock(require_block) => {
-                for expr in &require_block.expressions {
-                    self.check_expr_effects(expr, footprint);
-                }
-            }
-            Expr::Preserve(_) => {
-                // preserve is pure sugar; desugared requires carry no side effects beyond verification
-            }
-            Expr::ReplaceRelation(relation) => {
-                footprint.has_consume = true;
-                footprint.has_create = true;
-                if let ReplaceLockTreatment::Exact(lock) | ReplaceLockTreatment::ExactHash(lock) = &relation.lock {
-                    self.check_expr_effects(lock, footprint);
-                }
-                match &relation.data {
-                    ReplaceDataTreatment::Fields(treatments) => {
-                        for treatment in treatments {
-                            if let ReplaceFieldTreatment::Assign(_, value) = treatment {
-                                self.check_expr_effects(value, footprint);
-                            }
-                        }
-                    }
-                    ReplaceDataTreatment::SameExcept(assigned) => {
-                        for (_, value) in assigned {
-                            self.check_expr_effects(value, footprint);
-                        }
-                    }
-                }
-            }
-            Expr::StdlibCall(call) => {
-                let qualified = format!("std::{}::{}", call.namespace, call.name);
-                match qualified.as_str() {
-                    "std::lifecycle::transfer" | "std::receipt::claim" | "std::lifecycle::settle" => {
-                        self.apply_effect_to_footprint(EffectClass::Mutating, footprint);
-                    }
-                    _ => {
-                        // constraint patterns are verification-only
-                    }
-                }
-                for arg in &call.args {
-                    self.check_expr_effects(arg, footprint);
-                }
-            }
-            Expr::Assign(assign) => {
-                self.check_expr_effects(&assign.target, footprint);
-                self.check_expr_effects(&assign.value, footprint);
-            }
-            Expr::Binary(bin) => {
-                self.check_expr_effects(&bin.left, footprint);
-                self.check_expr_effects(&bin.right, footprint);
-            }
-            Expr::Unary(unary) => {
-                self.check_expr_effects(&unary.expr, footprint);
-            }
-            Expr::Call(call) => {
-                if is_read_only_runtime_call(call) {
-                    self.apply_effect_to_footprint(EffectClass::ReadOnly, footprint);
-                }
-                if let Expr::Identifier(name) = call.func.as_ref() {
-                    if name == "__cellscript_consume_each" {
-                        self.apply_effect_to_footprint(EffectClass::Mutating, footprint);
-                    } else if name == "__cellscript_create_each" {
-                        self.apply_effect_to_footprint(EffectClass::Creating, footprint);
-                    } else if let Some(effect) = self.function_effects.get(name).copied() {
-                        self.apply_effect_to_footprint(effect, footprint);
-                    } else if let Some(effect) = self.external_function_effects.get(name).copied() {
-                        self.apply_effect_to_footprint(effect, footprint);
-                    }
-                }
-                for arg in &call.args {
-                    self.check_expr_effects(arg, footprint);
-                }
-            }
-            Expr::FieldAccess(field) => {
-                self.check_expr_effects(&field.expr, footprint);
-            }
-            Expr::Index(index) => {
-                self.check_expr_effects(&index.expr, footprint);
-                self.check_expr_effects(&index.index, footprint);
-            }
-            Expr::If(if_expr) => {
-                self.check_expr_effects(&if_expr.condition, footprint);
-                self.check_expr_effects(&if_expr.then_branch, footprint);
-                self.check_expr_effects(&if_expr.else_branch, footprint);
-            }
-            Expr::Cast(cast) => {
-                self.check_expr_effects(&cast.expr, footprint);
-            }
-            Expr::Range(range) => {
-                self.check_expr_effects(&range.start, footprint);
-                self.check_expr_effects(&range.end, footprint);
-            }
-            Expr::StructInit(init) => {
-                for (_, value) in &init.fields {
-                    self.check_expr_effects(value, footprint);
-                }
-            }
-            Expr::Match(match_expr) => {
-                self.check_expr_effects(&match_expr.expr, footprint);
-                for arm in &match_expr.arms {
-                    self.check_expr_effects(&arm.value, footprint);
-                }
-            }
-            Expr::Block(stmts) => {
-                for stmt in stmts {
-                    self.check_stmt_effects(stmt, footprint);
-                }
-            }
-            Expr::Tuple(elems) | Expr::Array(elems) => {
-                for elem in elems {
-                    self.check_expr_effects(elem, footprint);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn apply_effect_to_footprint(&self, effect: EffectClass, footprint: &mut EffectFootprint) {
-        apply_effect_to_footprint(effect, footprint);
-    }
-
-    fn convert_effect_class(&self, effect: crate::ast::EffectClass) -> EffectClass {
-        match effect {
-            crate::ast::EffectClass::Pure => EffectClass::Pure,
-            crate::ast::EffectClass::ReadOnly => EffectClass::ReadOnly,
-            crate::ast::EffectClass::Mutating => EffectClass::Mutating,
-            crate::ast::EffectClass::Creating => EffectClass::Creating,
-            crate::ast::EffectClass::Destroying => EffectClass::Destroying,
-        }
+    fn convert_type(&self, ty: &Type) -> IrType {
+        self.resolve_projection_type(&ast_type_to_ir(ty))
     }
 
     fn lower_signature_and_body(
@@ -2879,11 +2504,11 @@ impl IrGenerator {
         let mut ir_params = params
             .iter()
             .map(|param| {
-                let binding = self.new_var(param.name.clone(), Self::convert_type(&param.ty));
+                let binding = self.new_var(param.name.clone(), self.convert_type(&param.ty));
                 vars.insert(param.name.clone(), binding.clone());
                 IrParam {
                     name: param.name.clone(),
-                    ty: Self::convert_type(&param.ty),
+                    ty: self.convert_type(&param.ty),
                     is_mut: param.is_mut,
                     is_ref: param.is_ref,
                     is_read_ref: param.is_read_ref,
@@ -2893,11 +2518,11 @@ impl IrGenerator {
             })
             .collect::<Vec<_>>();
         for output in outputs {
-            let binding = self.new_var(output.name.clone(), Self::convert_type(&output.ty));
+            let binding = self.new_var(output.name.clone(), self.convert_type(&output.ty));
             vars.insert(output.name.clone(), binding.clone());
             ir_params.push(IrParam {
                 name: output.name.clone(),
-                ty: Self::convert_type(&output.ty),
+                ty: self.convert_type(&output.ty),
                 is_mut: false,
                 is_ref: false,
                 is_read_ref: false,
@@ -3360,13 +2985,6 @@ impl IrGenerator {
         (self.type_kinds.get(type_name) == Some(&IrTypeKind::Shared)).then_some(type_name)
     }
 
-    fn param_mutates_shared_state(&self, param: &IrParam) -> bool {
-        if self.param_shared_type_name(param).is_none() {
-            return false;
-        }
-        param.is_mut || matches!(param.ty, IrType::MutRef(_))
-    }
-
     fn collect_shared_type_hashes_from_type(&self, ty: &IrType, hashes: &mut Vec<[u8; 32]>) {
         match ty {
             IrType::Named(name) if self.type_kinds.get(name) == Some(&IrTypeKind::Shared) => {
@@ -3440,7 +3058,7 @@ impl IrGenerator {
                     && self.transition_expr_is_coverable_u64(&let_stmt.value, vars);
                 let lowered = match &let_stmt.ty {
                     Some(declared_ty) => {
-                        self.lower_expr_with_expected_type(&let_stmt.value, &Self::convert_type(declared_ty), current, blocks, vars)
+                        self.lower_expr_with_expected_type(&let_stmt.value, &self.convert_type(declared_ty), current, blocks, vars)
                     }
                     None => self.lower_expr(&let_stmt.value, current, blocks, vars),
                 };
@@ -3454,7 +3072,7 @@ impl IrGenerator {
                 }
                 let block = self.block_mut(blocks, active);
                 if let (BindingPattern::Name(name), Some(declared_ty)) = (&let_stmt.pattern, &let_stmt.ty) {
-                    let declared_ty = Self::convert_type(declared_ty);
+                    let declared_ty = self.convert_type(declared_ty);
                     let var = if let_stmt.is_mut {
                         let owned = self.materialize_owned_operand(name, lowered.operand, block);
                         if owned.ty == declared_ty {
@@ -3814,16 +3432,22 @@ impl IrGenerator {
                 LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) }
             }
             Expr::Call(call) => {
-                if let Some(lowered) = self.lower_allocated_call(call, current, blocks, vars) {
-                    return lowered;
-                }
-                if let Expr::Identifier(path) = call.func.as_ref()
-                    && let Some(lowered) = self.try_lower_enum_constructor_path(path, &call.args, current, blocks, vars, call.span)
-                {
-                    return lowered;
-                }
-                if let Some(lowered) = self.try_lower_builtin_call(call, current, blocks, vars) {
-                    return lowered;
+                let source_binding = match call.func.as_ref() {
+                    Expr::Identifier(name) => self.call_param_types(name, &self.lower_call_target_name(name)).is_some(),
+                    _ => false,
+                };
+                if !source_binding {
+                    if let Some(lowered) = self.lower_allocated_call(call, current, blocks, vars) {
+                        return lowered;
+                    }
+                    if let Expr::Identifier(path) = call.func.as_ref()
+                        && let Some(lowered) = self.try_lower_enum_constructor_path(path, &call.args, current, blocks, vars, call.span)
+                    {
+                        return lowered;
+                    }
+                    if let Some(lowered) = self.try_lower_builtin_call(call, current, blocks, vars) {
+                        return lowered;
+                    }
                 }
                 let func = match call.func.as_ref() {
                     Expr::Identifier(name) => self.lower_call_target_name(name),
@@ -4733,7 +4357,7 @@ impl IrGenerator {
         vars: &mut HashMap<String, IrVar>,
     ) -> LoweredExpr {
         if let Expr::Integer(value) = cast.expr.as_ref() {
-            let target = Self::convert_type(&cast.ty);
+            let target = self.convert_type(&cast.ty);
             if let Some(operand) = self.integer_operand_for_expected_type(*value, &target, self.block_mut(blocks, current)) {
                 return LoweredExpr { operand, current: Some(current) };
             }
@@ -4744,7 +4368,7 @@ impl IrGenerator {
             return lowered;
         };
         let source_ty = self.operand_type(&lowered.operand);
-        let target_ty = Self::convert_type(&cast.ty);
+        let target_ty = self.convert_type(&cast.ty);
         // Widening must retain the target type in typed IR even when both
         // values fit one register. u128 additionally changes representation
         // from a scalar to two stored limbs. Neither conversion needs a
@@ -6193,12 +5817,15 @@ impl IrGenerator {
         // Evaluate initializers in source order above, then serialize in the
         // declared layout order. Sorting by byte offset loses zero-width ties.
         let Some(order) = self.type_field_order.get(&init.ty) else {
-            self.errors.push(CompileError::without_span(format!("struct '{}' lacks its declaration field order", init.ty)));
+            self.errors
+                .borrow_mut()
+                .push(CompileError::without_span(format!("struct '{}' lacks its declaration field order", init.ty)));
             return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
         };
         let tuple_operands = order.iter().filter_map(|name| field_operands.remove(name)).collect::<Vec<_>>();
         if tuple_operands.len() != order.len() || !field_operands.is_empty() {
             self.errors
+                .borrow_mut()
                 .push(CompileError::without_span(format!("struct '{}' initializer fields differ from its declaration", init.ty)));
             return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
         }
@@ -6460,7 +6087,11 @@ impl IrGenerator {
             Expr::Binary(binary) if matches!(binary.op, BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div) => {
                 self.transition_expr_is_coverable_u64(&binary.left, vars) && self.transition_expr_is_coverable_u64(&binary.right, vars)
             }
-            Expr::Call(call) if call.args.len() == 2 && call_target_is_min(call.func.as_ref()) => {
+            Expr::Call(call)
+                if call.args.len() == 2
+                    && call_target_is_min(call.func.as_ref())
+                    && matches!(call.func.as_ref(), Expr::Identifier(name) if self.call_param_types(name, &self.lower_call_target_name(name)).is_none()) =>
+            {
                 call.args.iter().all(|arg| self.transition_expr_is_coverable_u64(arg, vars))
             }
             _ => false,
@@ -6946,1846 +6577,6 @@ impl IrGenerator {
             Expr::Call(call) if matches!(call.func.as_ref(), Expr::Identifier(name) if name == crate::cell_selection::SELECT) => {
                 Some(crate::cell_selection::selection_type(&crate::cell_selection::resolve_call(call, &self.cell_role_catalogs).ok()?))
             }
-            _ => None,
-        }
-    }
-
-    fn try_lower_builtin_call(
-        &mut self,
-        call: &CallExpr,
-        current: BlockId,
-        blocks: &mut Vec<IrBlock>,
-        vars: &mut HashMap<String, IrVar>,
-    ) -> Option<LoweredExpr> {
-        if let Expr::FieldAccess(method) = call.func.as_ref()
-            && let Some(read) = crate::cell_selection::method(&method.field)
-            && self.selection_receiver_type(&method.expr, vars).is_some()
-        {
-            let lowered = self.lower_expr(&method.expr, current, blocks, vars);
-            let mut active = lowered.current?;
-            let selection = lowered.operand;
-            let IrType::Named(owner) = self.operand_type(&selection) else { return None };
-            let contract = crate::cell_selection::parse_selection_type(&owner)?;
-            let role = contract.selected?;
-            let index = if read.indexed() {
-                let lowered = self.lower_expr(call.args.first()?, active, blocks, vars);
-                active = lowered.current?;
-                Some(lowered.operand)
-            } else {
-                None
-            };
-            let ty = if read.indexed() { IrType::Named(read.result_type(&contract.schemas[role as usize])) } else { IrType::U64 };
-            let dest = self.new_var("selected_role_read", ty);
-            self.block_mut(blocks, active).instructions.push(IrInstruction::ReadExactCellRole {
-                dest: dest.clone(),
-                selection,
-                role,
-                read,
-                index,
-            });
-            return Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) });
-        }
-        match call.func.as_ref() {
-            Expr::Identifier(name) => match name.as_str() {
-                "ckb::verify_cell_roles" | "ckb::select_cell_roles" => {
-                    let mut result = IrOperand::Const(IrConst::Unit);
-                    match crate::cell_selection::resolve_call(call, &self.cell_role_catalogs) {
-                        Ok(mut contract) => {
-                            if contract.roles.iter().any(|role| self.type_fields.get(&role.type_name).is_some_and(|fields|
-                                fields.values().any(|ty| matches!(ty, IrType::Named(name) if matches!(crate::nested_values::parsed(name), Some(crate::nested_values::NestedType::Values(_))))))) {
-                                contract.profile = crate::cell_selection::BOUNDED_PROFILE.into();
-                            }
-                            let dest = (name == crate::cell_selection::SELECT).then(|| {
-                                self.new_var("exact_selection", IrType::Named(crate::cell_selection::selection_type(&contract)))
-                            });
-                            if let Some(dest) = &dest {
-                                result = IrOperand::Var(dest.clone());
-                            }
-                            self.block_mut(blocks, current).instructions.push(IrInstruction::VerifyExactCellRoles { dest, contract })
-                        }
-                        Err(error) => self.errors.push(error),
-                    }
-                    Some(LoweredExpr { operand: result, current: Some(current) })
-                }
-                name if crate::cell_selection::read(name).is_some() => {
-                    let read = crate::cell_selection::read(name)?;
-                    let Expr::Integer(role) = call.args.get(1)? else { return None };
-                    let role = u32::try_from(*role).ok()?;
-                    let lowered = self.lower_expr(call.args.first()?, current, blocks, vars);
-                    let mut active = lowered.current?;
-                    let selection = lowered.operand;
-                    let index = if read.indexed() {
-                        let lowered = self.lower_expr(call.args.get(2)?, active, blocks, vars);
-                        active = lowered.current?;
-                        Some(lowered.operand)
-                    } else {
-                        None
-                    };
-                    let Type::Named(element) = call.type_args.first()? else { return None };
-                    let ty = if read.indexed() { IrType::Named(read.result_type(element)) } else { IrType::U64 };
-                    let dest = self.new_var("selected_role_read", ty);
-                    self.block_mut(blocks, active).instructions.push(IrInstruction::ReadExactCellRole {
-                        dest: dest.clone(),
-                        selection,
-                        role,
-                        read,
-                        index,
-                    });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
-                }
-                "__cellscript_consume_each" => {
-                    if let Some(lowered) = self.lower_bounded_consume_each(call, current, blocks, vars) {
-                        return Some(lowered);
-                    }
-                    self.block_mut(blocks, current).instructions.push(IrInstruction::Call {
-                        dest: None,
-                        func: BOUNDED_CONSUME_EACH_FAIL_CLOSED_HELPER.to_string(),
-                        args: Vec::new(),
-                    });
-                    Some(LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: Some(current) })
-                }
-                "__cellscript_create_each" => {
-                    if let Some(lowered) = self.lower_bounded_create_each(call, current, blocks, vars) {
-                        return Some(lowered);
-                    }
-                    self.block_mut(blocks, current).instructions.push(IrInstruction::Call {
-                        dest: None,
-                        func: BOUNDED_CREATE_EACH_FAIL_CLOSED_HELPER.to_string(),
-                        args: Vec::new(),
-                    });
-                    Some(LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: Some(current) })
-                }
-                "Address::zero" if call.args.is_empty() => {
-                    Some(LoweredExpr { operand: IrOperand::Const(IrConst::Address([0; 32])), current: Some(current) })
-                }
-                "Hash::zero" if call.args.is_empty() => {
-                    Some(LoweredExpr { operand: IrOperand::Const(IrConst::Hash([0; 32])), current: Some(current) })
-                }
-                "Hash::from_bytes" | "VerificationKeyCommitment::from_bytes" if call.args.len() == 1 => {
-                    Some(self.lower_hash_from_bytes(&call.args[0], current, blocks, vars, call.span))
-                }
-                "Hash::from_sighash_all" if call.args.len() == 1 => {
-                    let lowered = self.lower_expr(&call.args[0], current, blocks, vars);
-                    let active = lowered.current?;
-                    let dest = self.new_var("sighash_as_hash", IrType::Hash);
-                    self.block_mut(blocks, active).instructions.push(IrInstruction::Move { dest: dest.clone(), src: lowered.operand });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
-                }
-                "script::hash_type_data" if call.args.is_empty() => {
-                    Some(LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) })
-                }
-                "script::hash_type_type" if call.args.is_empty() => {
-                    Some(LoweredExpr { operand: IrOperand::Const(IrConst::U64(1)), current: Some(current) })
-                }
-                "script::hash_type_data1" if call.args.is_empty() => {
-                    Some(LoweredExpr { operand: IrOperand::Const(IrConst::U64(2)), current: Some(current) })
-                }
-                "script::hash_type_data2" if call.args.is_empty() => {
-                    Some(LoweredExpr { operand: IrOperand::Const(IrConst::U64(4)), current: Some(current) })
-                }
-                "script::args_empty" if call.args.is_empty() => Some(self.lower_script_args_empty(current, blocks)),
-                "script::args" if call.args.len() == 1 => Some(self.lower_script_args(&call.args[0], current, blocks, vars)),
-                "script::new" if call.args.len() == 3 => Some(self.lower_script_value(call, current, blocks, vars)),
-                "script::hash" if call.args.len() == 1 => Some(self.lower_script_hash(call, current, blocks, vars)),
-                "script::require_cell_lock_matches" if call.args.len() == 2 => {
-                    Some(self.lower_script_match_requirement(call, true, current, blocks, vars))
-                }
-                "script::require_cell_type_matches" if call.args.len() == 2 => {
-                    Some(self.lower_script_match_requirement(call, false, current, blocks, vars))
-                }
-                "env::current_timepoint" if call.args.is_empty() => {
-                    let dest = self.new_var("current_timepoint", IrType::U64);
-                    self.block_mut(blocks, current).instructions.push(IrInstruction::Call {
-                        dest: Some(dest.clone()),
-                        func: "__env_current_timepoint".to_string(),
-                        args: Vec::new(),
-                    });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(current) })
-                }
-                "env::current_timepoint" if call.args.is_empty() => {
-                    let dest = self.new_var("current_timepoint", IrType::U64);
-                    self.block_mut(blocks, current).instructions.push(IrInstruction::Call {
-                        dest: Some(dest.clone()),
-                        func: "__env_current_timepoint".to_string(),
-                        args: Vec::new(),
-                    });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(current) })
-                }
-                "env::sighash_all" if call.args.len() == 1 => {
-                    self.lower_simple_runtime_call("__ckb_sighash_all", "sighash_all", IrType::Hash, &call.args, current, blocks, vars)
-                }
-                "env::sighash_all_zero_lock" if call.args.len() == 4 => self.lower_simple_runtime_call(
-                    "__ckb_sighash_all_zero_lock",
-                    "sighash_all_zero_lock",
-                    IrType::Named(CKB_SIGHASH_ALL_DIGEST_TYPE.to_string()),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::header_epoch_number" if call.args.is_empty() => {
-                    let dest = self.new_var("ckb_header_epoch_number", IrType::U64);
-                    self.block_mut(blocks, current).instructions.push(IrInstruction::Call {
-                        dest: Some(dest.clone()),
-                        func: "__ckb_header_epoch_number".to_string(),
-                        args: Vec::new(),
-                    });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(current) })
-                }
-                "ckb::header_epoch_start_block_number" if call.args.is_empty() => {
-                    let dest = self.new_var("ckb_header_epoch_start_block_number", IrType::U64);
-                    self.block_mut(blocks, current).instructions.push(IrInstruction::Call {
-                        dest: Some(dest.clone()),
-                        func: "__ckb_header_epoch_start_block_number".to_string(),
-                        args: Vec::new(),
-                    });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(current) })
-                }
-                "ckb::header_epoch_length" if call.args.is_empty() => {
-                    let dest = self.new_var("ckb_header_epoch_length", IrType::U64);
-                    self.block_mut(blocks, current).instructions.push(IrInstruction::Call {
-                        dest: Some(dest.clone()),
-                        func: "__ckb_header_epoch_length".to_string(),
-                        args: Vec::new(),
-                    });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(current) })
-                }
-                "ckb::input_since" | "ckb::input_since_raw" if call.args.is_empty() => {
-                    let dest = self.new_var("ckb_input_since", IrType::U64);
-                    self.block_mut(blocks, current).instructions.push(IrInstruction::Call {
-                        dest: Some(dest.clone()),
-                        func: "__ckb_input_since".to_string(),
-                        args: Vec::new(),
-                    });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(current) })
-                }
-                "ckb::since_epoch_absolute" if call.args.len() == 3 => self.lower_simple_runtime_call(
-                    "__ckb_since_epoch_absolute",
-                    "ckb_since_epoch_absolute",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::since_epoch_relative" if call.args.len() == 3 => self.lower_simple_runtime_call(
-                    "__ckb_since_epoch_relative",
-                    "ckb_since_epoch_relative",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::since_absolute_epoch" if call.args.len() == 3 => self.lower_simple_runtime_call(
-                    "__ckb_since_epoch_absolute",
-                    "ckb_since_absolute_epoch",
-                    IrType::Named("AbsoluteEpochSince".to_string()),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::since_relative_epoch" if call.args.len() == 3 => self.lower_simple_runtime_call(
-                    "__ckb_since_epoch_relative",
-                    "ckb_since_relative_epoch",
-                    IrType::Named("RelativeEpochSince".to_string()),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::since_absolute_block" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_since_block_absolute",
-                    "ckb_since_absolute_block",
-                    IrType::Named("AbsoluteBlockSince".to_string()),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::since_relative_block" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_since_block_relative",
-                    "ckb_since_relative_block",
-                    IrType::Named("RelativeBlockSince".to_string()),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::since_absolute_timestamp" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_since_timestamp_absolute",
-                    "ckb_since_absolute_timestamp",
-                    IrType::Named("AbsoluteTimestampSince".to_string()),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::since_relative_timestamp" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_since_timestamp_relative",
-                    "ckb_since_relative_timestamp",
-                    IrType::Named("RelativeTimestampSince".to_string()),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::since_decode" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_since_decode",
-                    "ckb_since_decode",
-                    IrType::Named("DecodedSince".to_string()),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::since_from_raw_checked" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_since_from_raw_checked",
-                    "ckb_since_from_raw_checked",
-                    IrType::Named("DecodedSince".to_string()),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::since_as_absolute_block" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_since_as_absolute_block",
-                    "ckb_since_as_absolute_block",
-                    IrType::Named("AbsoluteBlockSince".to_string()),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::since_as_relative_block" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_since_as_relative_block",
-                    "ckb_since_as_relative_block",
-                    IrType::Named("RelativeBlockSince".to_string()),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::since_as_absolute_epoch" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_since_as_absolute_epoch",
-                    "ckb_since_as_absolute_epoch",
-                    IrType::Named("AbsoluteEpochSince".to_string()),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::since_as_relative_epoch" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_since_as_relative_epoch",
-                    "ckb_since_as_relative_epoch",
-                    IrType::Named("RelativeEpochSince".to_string()),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::since_as_absolute_timestamp" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_since_as_absolute_timestamp",
-                    "ckb_since_as_absolute_timestamp",
-                    IrType::Named("AbsoluteTimestampSince".to_string()),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::since_as_relative_timestamp" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_since_as_relative_timestamp",
-                    "ckb_since_as_relative_timestamp",
-                    IrType::Named("RelativeTimestampSince".to_string()),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::since_is_relative" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_since_is_relative",
-                    "ckb_since_is_relative",
-                    IrType::Bool,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::since_is_disabled" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_since_is_disabled",
-                    "ckb_since_is_disabled",
-                    IrType::Bool,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::since_metric" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_since_metric",
-                    "ckb_since_metric",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::since_value" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_since_value",
-                    "ckb_since_value",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::epoch_duration" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_epoch_duration",
-                    "ckb_epoch_duration",
-                    IrType::Named("EpochDuration".to_string()),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::epoch_add" if call.args.len() == 2 => self.lower_simple_runtime_call(
-                    "__ckb_epoch_add",
-                    "ckb_epoch_add",
-                    IrType::Named("EpochNumber".to_string()),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::epoch_sub" if call.args.len() == 2 => self.lower_simple_runtime_call(
-                    "__ckb_epoch_sub",
-                    "ckb_epoch_sub",
-                    IrType::Named("EpochNumber".to_string()),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::since_to_raw"
-                | "ckb::epoch_number_to_u64"
-                | "ckb::epoch_duration_to_u64"
-                | "ckb::block_number_to_u64"
-                | "ckb::epoch_length_to_u64"
-                | "ckb::timestamp_millis_to_u64"
-                    if call.args.len() == 1 =>
-                {
-                    let helper = match name.as_str() {
-                        "ckb::since_to_raw" => "__ckb_since_to_raw",
-                        "ckb::epoch_number_to_u64" => "__ckb_epoch_number_to_u64",
-                        "ckb::epoch_duration_to_u64" => "__ckb_epoch_duration_to_u64",
-                        "ckb::block_number_to_u64" => "__ckb_block_number_to_u64",
-                        "ckb::epoch_length_to_u64" => "__ckb_epoch_length_to_u64",
-                        _ => "__ckb_timestamp_millis_to_u64",
-                    };
-                    self.lower_simple_runtime_call(helper, "ckb_temporal_raw", IrType::U64, &call.args, current, blocks, vars)
-                }
-                "ckb::current_role" if call.args.is_empty() => {
-                    let role = if self.lowering_lock_entry { 1 } else { 2 };
-                    Some(LoweredExpr { operand: IrOperand::Const(IrConst::U64(role)), current: Some(current) })
-                }
-                "ckb::current_script_hash" if call.args.is_empty() => self.lower_simple_runtime_call(
-                    "__ckb_current_script_hash",
-                    "ckb_current_script_hash",
-                    IrType::Hash,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::script_hash" if call.args.len() == 1 => {
-                    self.lower_transparent_view_wrapper(call, CKB_SCRIPT_HASH_TYPE, current, blocks, vars)
-                }
-                "ckb::cell_capacity" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_cell_capacity",
-                    "ckb_cell_capacity",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::cell_occupied_capacity" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_cell_occupied_capacity",
-                    "ckb_cell_occupied_capacity",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::cell_unoccupied_capacity" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_cell_unoccupied_capacity",
-                    "ckb_cell_unoccupied_capacity",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::cell_output_index" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_cell_output_index",
-                    "ckb_cell_output_index",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::input_out_point_index" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_input_out_point_index",
-                    "ckb_input_out_point_index",
-                    IrType::U32,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::input_out_point_tx_hash_low" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_input_out_point_tx_hash_low",
-                    "ckb_input_out_point_tx_hash_low",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::input_out_point_tx_hash" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_input_out_point_tx_hash",
-                    "ckb_input_out_point_tx_hash",
-                    IrType::Hash,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::hash_data_packed" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_hash_data_packed",
-                    "ckb_hash_data_packed",
-                    IrType::Hash,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::hash_sha256" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_hash_sha256",
-                    "ckb_hash_sha256",
-                    IrType::Hash,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::hash_sha256d" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_hash_sha256d",
-                    "ckb_hash_sha256d",
-                    IrType::Hash,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::hash_sha256_pair" if call.args.len() == 2 => self.lower_simple_runtime_call(
-                    "__ckb_hash_sha256_pair",
-                    "ckb_hash_sha256_pair",
-                    IrType::Hash,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::hash_sha256d_pair" if call.args.len() == 2 => self.lower_simple_runtime_call(
-                    "__ckb_hash_sha256d_pair",
-                    "ckb_hash_sha256d_pair",
-                    IrType::Hash,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::require_sha256d_merkle_root" if call.args.len() == 5 => {
-                    self.lower_void_runtime_call("__ckb_require_sha256d_merkle_root", &call.args, current, blocks, vars)
-                }
-                "zk::require_valid" if call.args.len() == 8 => {
-                    let mut active = current;
-                    let mut lowered = Vec::new();
-                    let Expr::String(policy) = &call.args[0] else { return None };
-                    self.zk_origins.push(cellscript_artifact_checker::zk_profile::ZkSourceOrigin {
-                        policy: policy.clone(),
-                        start: call.span.start,
-                        end: call.span.end,
-                        line: call.span.line,
-                        column: call.span.column,
-                        fields: cellscript_artifact_checker::zk_profile::statement_origins(),
-                    });
-                    lowered.push(IrOperand::Const(IrConst::Array(policy.bytes().map(IrConst::U8).collect())));
-                    for arg in &call.args[1..] {
-                        let value = self.lower_expr(arg, active, blocks, vars);
-                        active = value.current?;
-                        lowered.push(value.operand);
-                    }
-                    if lowered[4..].iter().any(|value| !matches!(value, IrOperand::Const(IrConst::Hash(_)))) {
-                        self.record_error("ZK handle, VK, domain and action identities must be compile-time Hash literals", call.span);
-                    }
-                    self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
-                        dest: None,
-                        func: "__ckb_require_cell_dep_exact_verifier_handle".to_string(),
-                        args: vec![lowered[2].clone(), lowered[3].clone(), lowered[4].clone()],
-                    });
-                    self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
-                        dest: None,
-                        func: crate::zk_contract::REQUIRE_HELPER.to_string(),
-                        args: vec![
-                            lowered[0].clone(),
-                            lowered[1].clone(),
-                            lowered[2].clone(),
-                            lowered[4].clone(),
-                            lowered[5].clone(),
-                            lowered[6].clone(),
-                            lowered[7].clone(),
-                        ],
-                    });
-                    Some(LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: Some(active) })
-                }
-                "verifier::btc::bip340::require_signature" if call.args.len() == 3 => {
-                    self.lower_void_runtime_call("__novaseal_bip340_require_signature", &call.args, current, blocks, vars)
-                }
-                "verifier::btc::bip340::require_signature_from_cell_dep" if call.args.len() == 4 => self.lower_void_runtime_call(
-                    "__novaseal_bip340_require_signature_from_cell_dep",
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::cell_lock_hash_low" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_cell_lock_hash_low",
-                    "ckb_cell_lock_hash_low",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::cell_type_hash_low" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_cell_type_hash_low",
-                    "ckb_cell_type_hash_low",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::cell_lock_hash" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_cell_lock_hash",
-                    "ckb_cell_lock_hash",
-                    IrType::Hash,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::cell_type_hash" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_cell_type_hash",
-                    "ckb_cell_type_hash",
-                    IrType::Hash,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::cell_data_hash_field" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_cell_data_hash_field",
-                    "cell_data_hash_field",
-                    IrType::Hash,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::raw_transaction_hash_without_cell_deps" if call.args.is_empty() => self.lower_simple_runtime_call(
-                    "__ckb_raw_transaction_hash_without_cell_deps",
-                    "raw_transaction_hash_without_cell_deps",
-                    IrType::Hash,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::transaction_hash" if call.args.is_empty() => self.lower_simple_runtime_call(
-                    "__ckb_transaction_hash",
-                    "transaction_hash",
-                    IrType::Hash,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::transaction_u32_le" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_transaction_u32_le",
-                    "transaction_u32_le",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "witness::bytes32" if call.args.len() == 2 => self.lower_simple_runtime_call(
-                    "__ckb_witness_bytes32",
-                    "witness_bytes32",
-                    IrType::Array(Box::new(IrType::U8), 32),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::transaction_blake2b_gather" if call.args.len() == 4 => self.lower_simple_runtime_call(
-                    "__ckb_transaction_blake2b_gather",
-                    "transaction_blake2b_gather",
-                    IrType::Hash,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "witness::blake2b_select_chunks" if call.args.len() == 6 => self.lower_simple_runtime_call(
-                    "__ckb_witness_blake2b_select_chunks",
-                    "witness_blake2b_select_chunks",
-                    IrType::Hash,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::cell_data_blake2b_span" | "witness::blake2b_span" if call.args.len() == 3 => {
-                    let (helper, result_name) = if name == "ckb::cell_data_blake2b_span" {
-                        ("__ckb_cell_data_blake2b_span", "cell_data_blake2b_span")
-                    } else {
-                        ("__ckb_witness_blake2b_span", "witness_blake2b_span")
-                    };
-                    self.lower_simple_runtime_call(helper, result_name, IrType::Hash, &call.args, current, blocks, vars)
-                }
-                "ckb::cell_data_bytes32" if call.args.len() == 2 => self.lower_simple_runtime_call(
-                    "__ckb_cell_data_bytes32",
-                    "ckb_cell_data_bytes32",
-                    IrType::Array(Box::new(IrType::U8), 32),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::cell_lock_code_hash" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_cell_lock_code_hash",
-                    "ckb_cell_lock_code_hash",
-                    IrType::Hash,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::cell_type_code_hash" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_cell_type_code_hash",
-                    "ckb_cell_type_code_hash",
-                    IrType::Hash,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::cell_lock_hash_type" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_cell_lock_hash_type",
-                    "ckb_cell_lock_hash_type",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::cell_type_hash_type" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_cell_type_hash_type",
-                    "ckb_cell_type_hash_type",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::cell_lock_args_empty" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_cell_lock_args_empty",
-                    "ckb_cell_lock_args_empty",
-                    IrType::Bool,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::cell_type_args_empty" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_cell_type_args_empty",
-                    "ckb_cell_type_args_empty",
-                    IrType::Bool,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::cell_lock_args32" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_cell_lock_args32",
-                    "ckb_cell_lock_args32",
-                    IrType::Array(Box::new(IrType::U8), 32),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::cell_type_args32" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_cell_type_args32",
-                    "ckb_cell_type_args32",
-                    IrType::Array(Box::new(IrType::U8), 32),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::require_cell_lock_hash" if call.args.len() == 2 => {
-                    self.lower_void_runtime_call("__ckb_require_cell_lock_hash", &call.args, current, blocks, vars)
-                }
-                "ckb::require_cell_type_hash" if call.args.len() == 2 => {
-                    self.lower_void_runtime_call("__ckb_require_cell_type_hash", &call.args, current, blocks, vars)
-                }
-                "ckb::require_cell_lock_exact_handle" if call.args.len() == 3 => self.lower_exact_script_handle_requirement(
-                    "__ckb_require_cell_lock_exact_handle",
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                    call.span,
-                ),
-                "ckb::require_cell_type_exact_handle" if call.args.len() == 3 => self.lower_exact_script_handle_requirement(
-                    "__ckb_require_cell_type_exact_handle",
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                    call.span,
-                ),
-                "ckb::require_cell_dep_exact_verifier_handle" if call.args.len() == 3 => self.lower_exact_script_handle_requirement(
-                    "__ckb_require_cell_dep_exact_verifier_handle",
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                    call.span,
-                ),
-                "ckb::require_cell_dep_open_script_handle" if call.args.len() == 3 => self.lower_open_handle_requirement(
-                    "__ckb_require_cell_dep_open_script_handle",
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                    call.span,
-                ),
-                "ckb::require_cell_dep_open_script_handle_from_args" if call.args.len() == 2 => self
-                    .lower_open_handle_from_args_requirement(
-                        "__ckb_require_cell_dep_open_script_handle_from_args",
-                        &call.args,
-                        current,
-                        blocks,
-                        vars,
-                        call.span,
-                    ),
-                "ckb::require_instance_script_participant_from_args" if call.args.len() == 3 => self
-                    .lower_open_handle_from_args_requirement(
-                        "__ckb_require_instance_script_participant_from_args",
-                        &call.args,
-                        current,
-                        blocks,
-                        vars,
-                        call.span,
-                    ),
-                "ckb::require_open_script_participant_from_args" if call.args.len() == 3 => self
-                    .lower_open_handle_from_args_requirement(
-                        "__ckb_require_open_script_participant_from_args",
-                        &call.args,
-                        current,
-                        blocks,
-                        vars,
-                        call.span,
-                    ),
-                "ckb::require_cell_dep_open_verifier_handle_from_args" if call.args.len() == 2 => self
-                    .lower_open_handle_from_args_requirement(
-                        "__ckb_require_cell_dep_open_verifier_handle_from_args",
-                        &call.args,
-                        current,
-                        blocks,
-                        vars,
-                        call.span,
-                    ),
-                "ckb::require_cell_dep_open_verifier_handle" if call.args.len() == 3 => self.lower_open_handle_requirement(
-                    "__ckb_require_cell_dep_open_verifier_handle",
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                    call.span,
-                ),
-                "ckb::require_cell_lock_deployment_line_handle" if call.args.len() == 5 => self
-                    .lower_deployment_line_handle_requirement(
-                        "__ckb_require_cell_lock_deployment_line_handle",
-                        &call.args,
-                        current,
-                        blocks,
-                        vars,
-                        call.span,
-                    ),
-                "ckb::require_cell_type_deployment_line_handle" if call.args.len() == 5 => self
-                    .lower_deployment_line_handle_requirement(
-                        "__ckb_require_cell_type_deployment_line_handle",
-                        &call.args,
-                        current,
-                        blocks,
-                        vars,
-                        call.span,
-                    ),
-                "ckb::require_cell_dep_deployment_line_verifier_handle" if call.args.len() == 4 => self
-                    .lower_deployment_line_handle_requirement(
-                        "__ckb_require_cell_dep_deployment_line_verifier_handle",
-                        &call.args,
-                        current,
-                        blocks,
-                        vars,
-                        call.span,
-                    ),
-                "ckb::require_cell_data_hash" if call.args.len() == 2 => {
-                    self.lower_void_runtime_call("__ckb_require_cell_data_hash", &call.args, current, blocks, vars)
-                }
-                "ckb::require_bounded_cell_dep_data_hash" if call.args.len() == 2 => {
-                    self.lower_void_runtime_call("__ckb_require_bounded_cell_dep_data_hash", &call.args, current, blocks, vars)
-                }
-                "ckb::require_current_script_args_empty" if call.args.is_empty() => {
-                    self.lower_void_runtime_call("__ckb_require_current_script_args_empty", &call.args, current, blocks, vars)
-                }
-                "ckb::require_cell_lock_args_empty" if call.args.len() == 1 => {
-                    self.lower_void_runtime_call("__ckb_require_cell_lock_args_empty", &call.args, current, blocks, vars)
-                }
-                "ckb::require_cell_type_args_empty" if call.args.len() == 1 => {
-                    self.lower_void_runtime_call("__ckb_require_cell_type_args_empty", &call.args, current, blocks, vars)
-                }
-                "ckb::require_cell_lock_args32" if call.args.len() == 2 => {
-                    self.lower_void_runtime_call("__ckb_require_cell_lock_args32", &call.args, current, blocks, vars)
-                }
-                "ckb::require_cell_type_args32" if call.args.len() == 2 => {
-                    self.lower_void_runtime_call("__ckb_require_cell_type_args32", &call.args, current, blocks, vars)
-                }
-                "ckb::require_cell_lock_args_prefix32" if call.args.len() == 2 => {
-                    self.lower_void_runtime_call("__ckb_require_cell_lock_args_prefix32", &call.args, current, blocks, vars)
-                }
-                "ckb::require_cell_type_args_prefix32" if call.args.len() == 2 => {
-                    self.lower_void_runtime_call("__ckb_require_cell_type_args_prefix32", &call.args, current, blocks, vars)
-                }
-                "ckb::require_cell_lock_args_suffix32" if call.args.len() == 2 => {
-                    self.lower_void_runtime_call("__ckb_require_cell_lock_args_suffix32", &call.args, current, blocks, vars)
-                }
-                "ckb::require_cell_type_args_suffix32" if call.args.len() == 2 => {
-                    self.lower_void_runtime_call("__ckb_require_cell_type_args_suffix32", &call.args, current, blocks, vars)
-                }
-                "ckb::require_cell_lock_script_hash_type" if call.args.len() == 3 => {
-                    self.lower_void_runtime_call("__ckb_require_cell_lock_script_hash_type", &call.args, current, blocks, vars)
-                }
-                "ckb::require_cell_type_script_hash_type" if call.args.len() == 3 => {
-                    self.lower_void_runtime_call("__ckb_require_cell_type_script_hash_type", &call.args, current, blocks, vars)
-                }
-                "ckb::require_input_out_point_tx_hash" if call.args.len() == 2 => {
-                    self.lower_void_runtime_call("__ckb_require_input_out_point_tx_hash", &call.args, current, blocks, vars)
-                }
-                "ckb::require_input_out_point" if call.args.len() == 3 => {
-                    self.lower_void_runtime_call("__ckb_require_input_out_point", &call.args, current, blocks, vars)
-                }
-                "ckb::require_metapoint_relative" if call.args.len() == 3 => {
-                    self.lower_void_runtime_call("__ckb_require_metapoint_relative", &call.args, current, blocks, vars)
-                }
-                "ckb::require_lock_type_metapoint_pairs" if call.args.len() == 2 => {
-                    self.lower_void_runtime_call("__ckb_require_lock_type_metapoint_pairs", &call.args, current, blocks, vars)
-                }
-                "ckb::require_type_lock_metapoint_pairs" if call.args.len() == 2 => {
-                    self.lower_void_runtime_call("__ckb_require_type_lock_metapoint_pairs", &call.args, current, blocks, vars)
-                }
-                "ckb::require_lock_type_metapoint_pairs_from_i32_data" if call.args.len() == 2 => self.lower_void_runtime_call(
-                    "__ckb_require_lock_type_metapoint_pairs_from_i32_data",
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::require_type_lock_metapoint_pairs_from_i32_data" if call.args.len() == 2 => self.lower_void_runtime_call(
-                    "__ckb_require_type_lock_metapoint_pairs_from_i32_data",
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::require_lock_type_metapoint_pairs_from_i32_data_filtered" if call.args.len() == 4 => self
-                    .lower_void_runtime_call(
-                        "__ckb_require_lock_type_metapoint_pairs_from_i32_data_filtered",
-                        &call.args,
-                        current,
-                        blocks,
-                        vars,
-                    ),
-                "ckb::require_type_lock_metapoint_pairs_from_i32_data_filtered" if call.args.len() == 4 => self
-                    .lower_void_runtime_call(
-                        "__ckb_require_type_lock_metapoint_pairs_from_i32_data_filtered",
-                        &call.args,
-                        current,
-                        blocks,
-                        vars,
-                    ),
-                "ckb::require_lock_match_master_out_point_pairs_from_data" if call.args.len() == 5 => self.lower_void_runtime_call(
-                    "__ckb_require_lock_match_master_out_point_pairs_from_data",
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::exec_cell_dep_u8_args" if call.args.len() == 6 => {
-                    self.lower_void_runtime_call("__ckb_exec_cell_dep_u8_args", &call.args, current, blocks, vars)
-                }
-                "ckb::trusted_exec_cell_dep_u8_args" if call.args.len() == 7 => self.lower_trusted_external_call(
-                    "exec",
-                    "__ckb_exec_cell_dep_u8_args",
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                    call.span,
-                ),
-                "ckb::exec_cell_dep_hex4" if call.args.len() == 6 => {
-                    self.lower_void_runtime_call("__ckb_exec_cell_dep_hex4", &call.args, current, blocks, vars)
-                }
-                "ckb::trusted_exec_cell_dep_hex4" if call.args.len() == 7 => {
-                    self.lower_trusted_external_call("exec", "__ckb_exec_cell_dep_hex4", &call.args, current, blocks, vars, call.span)
-                }
-                "ckb::spawn_wait_cell_dep_hex4" if call.args.len() == 6 => {
-                    self.lower_void_runtime_call("__ckb_spawn_wait_cell_dep_hex4", &call.args, current, blocks, vars)
-                }
-                "ckb::trusted_spawn_wait_cell_dep_hex4" if call.args.len() == 7 => self.lower_trusted_external_call(
-                    "spawn-wait",
-                    "__ckb_spawn_wait_cell_dep_hex4",
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                    call.span,
-                ),
-                "ckb::cell_count" | "ckb::cell_has_type" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    if name == "ckb::cell_count" { "__ckb_cell_count" } else { "__ckb_cell_has_type" },
-                    if name == "ckb::cell_count" { "ckb_cell_count" } else { "ckb_cell_has_type" },
-                    if name == "ckb::cell_count" { IrType::U64 } else { IrType::Bool },
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::cell_lock_size" | "ckb::cell_type_size" | "ckb::input_since_at" if call.args.len() == 1 => {
-                    let (helper, result) = match name.as_str() {
-                        "ckb::cell_lock_size" => ("__ckb_cell_lock_size", "cell_lock_size"),
-                        "ckb::cell_type_size" => ("__ckb_cell_type_size", "cell_type_size"),
-                        _ => ("__ckb_input_since_at", "input_since_at"),
-                    };
-                    self.lower_simple_runtime_call(helper, result, IrType::U64, &call.args, current, blocks, vars)
-                }
-                "ckb::cell_lock_u8" | "ckb::cell_type_u8" if call.args.len() == 2 => {
-                    let (helper, result) = if name == "ckb::cell_lock_u8" {
-                        ("__ckb_cell_lock_u8", "cell_lock_u8")
-                    } else {
-                        ("__ckb_cell_type_u8", "cell_type_u8")
-                    };
-                    self.lower_simple_runtime_call(helper, result, IrType::U64, &call.args, current, blocks, vars)
-                }
-                "ckb::cell_data_size" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_cell_data_size",
-                    "ckb_cell_data_size",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::cell_data_u8" if call.args.len() == 2 => self.lower_simple_runtime_call(
-                    "__ckb_cell_data_u8",
-                    "ckb_cell_data_u8",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::cell_data_u32_le" if call.args.len() == 2 => self.lower_simple_runtime_call(
-                    "__ckb_cell_data_u32_le",
-                    "ckb_cell_data_u32_le",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::cell_data_u64_le" if call.args.len() == 2 => self.lower_simple_runtime_call(
-                    "__ckb_cell_data_u64_le",
-                    "ckb_cell_data_u64_le",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::input" | "ckb::group_input" if call.args.len() == 1 && call.type_args.len() == 1 => {
-                    let type_name = inline_ir_type_repr(&ast_type_to_ir(&call.type_args[0])).unwrap_or_else(|| "unknown".to_string());
-                    self.lower_simple_runtime_call(
-                        if name == "ckb::input" { "__ckb_source_input" } else { "__ckb_source_group_input" },
-                        if name == "ckb::input" { "typed_input_view" } else { "typed_group_input_view" },
-                        IrType::Named(format!("InputView<{type_name}>")),
-                        &call.args,
-                        current,
-                        blocks,
-                        vars,
-                    )
-                }
-                "ckb::output" | "ckb::group_output" if call.args.len() == 1 && call.type_args.len() == 1 => {
-                    let type_name = inline_ir_type_repr(&ast_type_to_ir(&call.type_args[0])).unwrap_or_else(|| "unknown".to_string());
-                    self.lower_simple_runtime_call(
-                        if name == "ckb::output" { "__ckb_source_output" } else { "__ckb_source_group_output" },
-                        if name == "ckb::output" { "typed_output_view" } else { "typed_group_output_view" },
-                        IrType::Named(format!("OutputView<{type_name}>")),
-                        &call.args,
-                        current,
-                        blocks,
-                        vars,
-                    )
-                }
-                "ckb::cell_dep" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_source_cell_dep",
-                    "typed_cell_dep_view",
-                    IrType::Named("CellDepView".to_string()),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::header_dep" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_source_header_dep",
-                    "typed_header_dep_view",
-                    IrType::Named("HeaderDepView".to_string()),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "witness::args" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_source_input",
-                    "typed_witness_args_view",
-                    IrType::Named("WitnessArgsView".to_string()),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "witness::bounded_raw" | "witness::bounded_lock" | "witness::bounded_entry" | "witness::bounded_output_type"
-                    if call.args.len() == 2 =>
-                {
-                    self.lower_bounded_witness_view(name.as_str(), call, current, blocks, vars)
-                }
-                "ckb::input_out_point" if call.args.len() == 1 => {
-                    self.lower_transparent_view_wrapper(call, CKB_INPUT_OUT_POINT_REF_TYPE, current, blocks, vars)
-                }
-                "ckb::lock_script" if call.args.len() == 1 => {
-                    self.lower_transparent_view_wrapper(call, CKB_LOCK_SCRIPT_REF_TYPE, current, blocks, vars)
-                }
-                "ckb::type_script" if call.args.len() == 1 => {
-                    self.lower_transparent_view_wrapper(call, CKB_TYPE_SCRIPT_REF_TYPE, current, blocks, vars)
-                }
-                "source::input" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_source_input",
-                    "source_input",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "source::output" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_source_output",
-                    "source_output",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "source::cell_dep" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_source_cell_dep",
-                    "source_cell_dep",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "source::header_dep" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_source_header_dep",
-                    "source_header_dep",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "source::group_input" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_source_group_input",
-                    "source_group_input",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "source::group_output" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_source_group_output",
-                    "source_group_output",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "witness::count" if call.args.is_empty() => self.lower_simple_runtime_call(
-                    "__ckb_witness_count",
-                    "witness_count",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "witness::byte" | "witness::u32_le" | "witness::u64_le" if call.args.len() == 2 => {
-                    self.lower_witness_scalar_read(name.as_str(), call, current, blocks, vars)
-                }
-                "witness::blake2b" if call.args.len() == 1 => self.lower_bounded_witness_blake2b(call, current, blocks, vars),
-                "witness::lock_exact32" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_witness_lock_exact32",
-                    "witness_lock_exact32",
-                    IrType::Array(Box::new(IrType::U8), 32),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "witness::input_type_exact32" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_witness_input_type_exact32",
-                    "witness_input_type_exact32",
-                    IrType::Array(Box::new(IrType::U8), 32),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "witness::output_type_exact32" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_witness_output_type_exact32",
-                    "witness_output_type_exact32",
-                    IrType::Array(Box::new(IrType::U8), 32),
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "witness::size" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_witness_size",
-                    "witness_size",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "ckb::require_witness_size_at_least" if call.args.len() == 2 => {
-                    self.lower_void_runtime_call("__ckb_require_witness_size_at_least", &call.args, current, blocks, vars)
-                }
-                "dao::accumulated_rate" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__dao_accumulated_rate",
-                    "dao_accumulated_rate",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "dao::input_accumulated_rate" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__dao_input_accumulated_rate",
-                    "dao_input_accumulated_rate",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "dao::is_deposit_data" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__dao_is_deposit_data",
-                    "dao_is_deposit_data",
-                    IrType::Bool,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "dao::is_withdrawal_request_data" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__dao_is_withdrawal_request_data",
-                    "dao_is_withdrawal_request_data",
-                    IrType::Bool,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "dao::has_dao_type" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__dao_has_dao_type",
-                    "dao_has_dao_type",
-                    IrType::Bool,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "dao::require_header_dep_for_input" if call.args.len() == 2 => {
-                    self.lower_void_runtime_call("__dao_require_header_dep_for_input", &call.args, current, blocks, vars)
-                }
-                "dao::require_input_since_at_least" if call.args.len() == 2 => {
-                    self.lower_void_runtime_call("__dao_require_input_since_at_least", &call.args, current, blocks, vars)
-                }
-                "dao::require_input_relative_epoch_since_at_least" if call.args.len() == 4 => self.lower_void_runtime_call(
-                    "__dao_require_input_relative_epoch_since_at_least",
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "xudt::amount_low" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__xudt_amount_low",
-                    "xudt_amount_low",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "xudt::amount_high" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__xudt_amount_high",
-                    "xudt_amount_high",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "xudt::owner_mode_input_type_hash" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__xudt_owner_mode_input_type_hash",
-                    "xudt_owner_mode_input_type_hash",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "xudt::require_owner_mode_input_type" if call.args.len() == 2 => {
-                    self.lower_void_runtime_call("__xudt_require_owner_mode_input_type", &call.args, current, blocks, vars)
-                }
-                "xudt::require_owner_mode_type_args" if call.args.len() == 3 => {
-                    self.lower_void_runtime_call("__xudt_require_owner_mode_type_args", &call.args, current, blocks, vars)
-                }
-                "xudt::require_owner_mode_type_args_current_script" if call.args.len() == 2 => self.lower_void_runtime_call(
-                    "__xudt_require_owner_mode_type_args_current_script",
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "xudt::require_group_amount_conserved" if call.args.is_empty() => {
-                    self.lower_void_runtime_call("__xudt_require_group_amount_conserved", &call.args, current, blocks, vars)
-                }
-                "xudt::require_group_amount_minted" if call.args.len() == 1 => {
-                    self.lower_void_runtime_call("__xudt_require_group_amount_minted", &call.args, current, blocks, vars)
-                }
-                "xudt::require_group_amount_burned" if call.args.len() == 1 => {
-                    self.lower_void_runtime_call("__xudt_require_group_amount_burned", &call.args, current, blocks, vars)
-                }
-                "c256::require_product_lte" if call.args.len() == 4 => {
-                    self.lower_void_runtime_call("__c256_require_u128_product_lte", &call.args, current, blocks, vars)
-                }
-                "c256::require_product_eq" if call.args.len() == 4 => {
-                    self.lower_void_runtime_call("__c256_require_u128_product_eq", &call.args, current, blocks, vars)
-                }
-                "c256::require_sum2_products_lte" if call.args.len() == 8 => {
-                    self.lower_void_runtime_call("__c256_require_u128_sum2_products_lte", &call.args, current, blocks, vars)
-                }
-                "c256::require_sum2_products_eq" if call.args.len() == 8 => {
-                    self.lower_void_runtime_call("__c256_require_u128_sum2_products_eq", &call.args, current, blocks, vars)
-                }
-                "spawn" if call.args.len() == 1 => {
-                    let dest = self.new_var("spawn_result", IrType::U64);
-                    let target = match &call.args[0] {
-                        Expr::String(value) => IrOperand::Const(IrConst::U64(stable_u64_tag(value))),
-                        Expr::Identifier(name) => match self.constants.get(name) {
-                            Some((Expr::String(value), _)) => IrOperand::Const(IrConst::U64(stable_u64_tag(value))),
-                            _ => {
-                                let lowered = self.lower_expr(&call.args[0], current, blocks, vars);
-                                let active = lowered.current?;
-                                self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
-                                    dest: Some(dest.clone()),
-                                    func: "__ckb_spawn".to_string(),
-                                    args: vec![lowered.operand],
-                                });
-                                return Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) });
-                            }
-                        },
-                        other => {
-                            let lowered = self.lower_expr(other, current, blocks, vars);
-                            let active = lowered.current?;
-                            self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
-                                dest: Some(dest.clone()),
-                                func: "__ckb_spawn".to_string(),
-                                args: vec![lowered.operand],
-                            });
-                            return Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) });
-                        }
-                    };
-                    self.block_mut(blocks, current).instructions.push(IrInstruction::Call {
-                        dest: Some(dest.clone()),
-                        func: "__ckb_spawn".to_string(),
-                        args: vec![target],
-                    });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(current) })
-                }
-                "pipe" if call.args.is_empty() => {
-                    let dest = self.new_var("pipe_pair", IrType::Tuple(vec![IrType::U64, IrType::U64]));
-                    self.block_mut(blocks, current).instructions.push(IrInstruction::Call {
-                        dest: Some(dest.clone()),
-                        func: "__ckb_pipe".to_string(),
-                        args: Vec::new(),
-                    });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(current) })
-                }
-                "wait" if call.args.is_empty() => {
-                    self.lower_simple_runtime_call("__ckb_wait", "wait_result", IrType::U64, &call.args, current, blocks, vars)
-                }
-                "process_id" if call.args.is_empty() => {
-                    self.lower_simple_runtime_call("__ckb_process_id", "process_id", IrType::U64, &call.args, current, blocks, vars)
-                }
-                "pipe_write" if call.args.len() == 2 => self.lower_simple_runtime_call(
-                    "__ckb_pipe_write",
-                    "pipe_write_result",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "pipe_read" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_pipe_read",
-                    "pipe_read_result",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "inherited_fd" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_inherited_fd",
-                    "inherited_fd",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "close" if call.args.len() == 1 => {
-                    self.lower_simple_runtime_call("__ckb_close", "close_result", IrType::U64, &call.args, current, blocks, vars)
-                }
-                "require_maturity" if call.args.len() == 1 => {
-                    self.lower_void_runtime_call("__ckb_require_maturity", &call.args, current, blocks, vars)
-                }
-                "require_time" if call.args.len() == 1 => {
-                    self.lower_void_runtime_call("__ckb_require_time", &call.args, current, blocks, vars)
-                }
-                "require_epoch_after" if call.args.len() == 3 => {
-                    self.lower_void_runtime_call("__ckb_require_epoch_after", &call.args, current, blocks, vars)
-                }
-                "require_epoch_relative" if call.args.len() == 3 => {
-                    self.lower_void_runtime_call("__ckb_require_epoch_relative", &call.args, current, blocks, vars)
-                }
-                "occupied_capacity" if call.args.len() == 1 => {
-                    let dest = self.new_var("occupied_capacity", IrType::U64);
-                    let tag = match &call.args[0] {
-                        Expr::String(value) => stable_u64_tag(value),
-                        _ => 0,
-                    };
-                    self.block_mut(blocks, current).instructions.push(IrInstruction::Call {
-                        dest: Some(dest.clone()),
-                        func: "__ckb_occupied_capacity".to_string(),
-                        args: vec![IrOperand::Const(IrConst::U64(tag))],
-                    });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(current) })
-                }
-                "hash_chain" if call.args.len() == 1 => {
-                    self.lower_simple_runtime_call("__ckb_hash_chain", "hash_chain", IrType::Hash, &call.args, current, blocks, vars)
-                }
-                "hash_pair" if call.args.len() == 2 => {
-                    self.lower_simple_runtime_call("__ckb_hash_pair", "hash_pair", IrType::Hash, &call.args, current, blocks, vars)
-                }
-                "hash_blake2b" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_hash_blake2b",
-                    "hash_blake2b",
-                    IrType::Hash,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                "hash_blake2b_packed" if call.args.len() == 1 => self.lower_simple_runtime_call(
-                    "__ckb_hash_blake2b_packed",
-                    "hash_blake2b_packed",
-                    IrType::Hash,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
-                name if name == crate::commitment_contract::COMMIT_FUNCTION && call.args.len() == 1 => {
-                    let lowered = self.lower_expr(&call.args[0], current, blocks, vars);
-                    let active = lowered.current?;
-                    let inner = ir_type_display(&self.operand_type(&lowered.operand));
-                    let dest = self.new_var("commitment", IrType::Named(crate::commitment_contract::commitment_type(&inner)));
-                    self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
-                        dest: Some(dest.clone()),
-                        func: "__ckb_hash_blake2b_packed".to_string(),
-                        args: vec![lowered.operand],
-                    });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
-                }
-                name if name == crate::commitment_contract::OPEN_FUNCTION && call.args.len() == 2 => {
-                    let expected = self.lower_expr(&call.args[0], current, blocks, vars);
-                    let active = expected.current?;
-                    let opening = self.lower_expr(&call.args[1], active, blocks, vars);
-                    let active = opening.current?;
-                    let inner = match self.operand_type(&opening.operand) {
-                        IrType::Named(name) => crate::commitment_contract::opening_inner_type(&name)
-                            .map(parse_inline_ir_type_repr)
-                            .unwrap_or(IrType::Unit),
-                        _ => IrType::Unit,
-                    };
-                    let dest = self.new_var("opened_value", inner);
-                    self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
-                        dest: Some(dest.clone()),
-                        func: "__ckb_commitment_open".to_string(),
-                        args: vec![expected.operand, opening.operand],
-                    });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
-                }
-                "Vec::new" if call.args.is_empty() => Some(self.lower_vec_constructor_expr(call, "Vec", current, blocks, vars)),
-                "Vec::with_capacity" if call.args.len() == 1 => {
-                    Some(self.lower_vec_constructor_expr(call, "Vec", current, blocks, vars))
-                }
-                _ => None,
-            },
-            Expr::FieldAccess(field) => match field.field.as_str() {
-                "len" if call.args.is_empty() => {
-                    let lowered = self.lower_expr(&field.expr, current, blocks, vars);
-                    let active = lowered.current?;
-                    if let IrOperand::Var(var) = &lowered.operand
-                        && let Some(elements) = self.aggregate_elements.get(&var.id)
-                    {
-                        return Some(LoweredExpr {
-                            operand: IrOperand::Const(IrConst::U64(elements.len() as u64)),
-                            current: Some(active),
-                        });
-                    }
-                    let dest = self.new_var("len_tmp", IrType::U64);
-                    self.block_mut(blocks, active)
-                        .instructions
-                        .push(IrInstruction::Length { dest: dest.clone(), operand: lowered.operand });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
-                }
-                "is_empty" if call.args.is_empty() => {
-                    let lowered = self.lower_expr(&field.expr, current, blocks, vars);
-                    let active = lowered.current?;
-                    if let IrOperand::Var(var) = &lowered.operand
-                        && let Some(elements) = self.aggregate_elements.get(&var.id)
-                    {
-                        return Some(LoweredExpr {
-                            operand: IrOperand::Const(IrConst::Bool(elements.is_empty())),
-                            current: Some(active),
-                        });
-                    }
-                    let len_dest = self.new_var("is_empty_len_tmp", IrType::U64);
-                    let dest = self.new_var("is_empty_tmp", IrType::Bool);
-                    let block = self.block_mut(blocks, active);
-                    block.instructions.push(IrInstruction::Length { dest: len_dest.clone(), operand: lowered.operand });
-                    block.instructions.push(IrInstruction::Binary {
-                        dest: dest.clone(),
-                        op: BinaryOp::Eq,
-                        left: IrOperand::Var(len_dest),
-                        right: IrOperand::Const(IrConst::U64(0)),
-                    });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
-                }
-                "capacity" if call.args.is_empty() => {
-                    let lowered_collection = self.lower_expr(&field.expr, current, blocks, vars);
-                    let active = lowered_collection.current?;
-                    let dest = self.new_var("capacity_tmp", IrType::U64);
-                    self.block_mut(blocks, active)
-                        .instructions
-                        .push(IrInstruction::CollectionCapacity { dest: dest.clone(), collection: lowered_collection.operand });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
-                }
-                "first" if call.args.is_empty() => {
-                    let lowered_collection = self.lower_expr(&field.expr, current, blocks, vars);
-                    let active = lowered_collection.current?;
-                    let item_ty = collection_item_ir_type(&self.operand_type(&lowered_collection.operand)).unwrap_or(IrType::U64);
-                    let dest = self.new_var("first_tmp", item_ty);
-                    self.block_mut(blocks, active).instructions.push(IrInstruction::Index {
-                        dest: dest.clone(),
-                        arr: lowered_collection.operand,
-                        idx: IrOperand::Const(IrConst::U64(0)),
-                    });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
-                }
-                "last" if call.args.is_empty() => {
-                    let lowered_collection = self.lower_expr(&field.expr, current, blocks, vars);
-                    let active = lowered_collection.current?;
-                    let item_ty = collection_item_ir_type(&self.operand_type(&lowered_collection.operand)).unwrap_or(IrType::U64);
-                    let len_dest = self.new_var("last_len_tmp", IrType::U64);
-                    let index_dest = self.new_var("last_index_tmp", IrType::U64);
-                    let dest = self.new_var("last_tmp", item_ty);
-                    let block = self.block_mut(blocks, active);
-                    block
-                        .instructions
-                        .push(IrInstruction::Length { dest: len_dest.clone(), operand: lowered_collection.operand.clone() });
-                    block.instructions.push(IrInstruction::Binary {
-                        dest: index_dest.clone(),
-                        op: BinaryOp::Sub,
-                        left: IrOperand::Var(len_dest),
-                        right: IrOperand::Const(IrConst::U64(1)),
-                    });
-                    block.instructions.push(IrInstruction::Index {
-                        dest: dest.clone(),
-                        arr: lowered_collection.operand,
-                        idx: IrOperand::Var(index_dest),
-                    });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
-                }
-                "type_hash" if call.args.is_empty() => {
-                    let lowered = self.lower_expr(&field.expr, current, blocks, vars);
-                    let active = lowered.current?;
-                    let dest = self.new_var("type_hash_tmp", IrType::Hash);
-                    self.block_mut(blocks, active)
-                        .instructions
-                        .push(IrInstruction::TypeHash { dest: dest.clone(), operand: lowered.operand });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
-                }
-                "push" if call.args.len() == 1 => {
-                    let lowered_collection = self.lower_expr(&field.expr, current, blocks, vars);
-                    let active = lowered_collection.current?;
-                    let lowered_value = self.lower_expr(&call.args[0], active, blocks, vars);
-                    let active = lowered_value.current?;
-                    let collection_operand = lowered_collection.operand;
-                    if let (Expr::Identifier(receiver_name), IrOperand::Var(collection_var)) =
-                        (field.expr.as_ref(), &collection_operand)
-                        && matches!(&collection_var.ty, IrType::Named(name) if name == "Vec")
-                        && let (Some(item_ty), Some(receiver_var)) =
-                            (inline_ir_type_repr(&self.operand_type(&lowered_value.operand)), vars.get_mut(receiver_name))
-                        && receiver_var.id == collection_var.id
-                    {
-                        receiver_var.ty = IrType::Named(format!("Vec<{}>", item_ty));
-                    }
-                    let block = self.block_mut(blocks, active);
-                    block.instructions.push(IrInstruction::CollectionPush {
-                        collection: collection_operand.clone(),
-                        value: lowered_value.operand.clone(),
-                    });
-                    if let IrOperand::Var(collection_var) = &collection_operand
-                        && let Some((root_id, field_name)) = self.schema_field_roots.get(&collection_var.id).cloned()
-                    {
-                        self.mutated_fields.entry(root_id).or_default().insert(field_name.clone());
-                        self.mutated_field_transitions.entry(root_id).or_default().insert(
-                            field_name.clone(),
-                            MutateFieldTransition {
-                                field: field_name,
-                                op: MutateTransitionOp::Append,
-                                operand: lowered_value.operand,
-                            },
-                        );
-                    }
-                    Some(LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) })
-                }
-                "clear" if call.args.is_empty() => {
-                    let lowered_collection = self.lower_expr(&field.expr, current, blocks, vars);
-                    let active = lowered_collection.current?;
-                    self.block_mut(blocks, active)
-                        .instructions
-                        .push(IrInstruction::CollectionClear { collection: lowered_collection.operand });
-                    Some(LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) })
-                }
-                "reverse" if call.args.is_empty() => {
-                    let lowered_collection = self.lower_expr(&field.expr, current, blocks, vars);
-                    let active = lowered_collection.current?;
-                    self.block_mut(blocks, active)
-                        .instructions
-                        .push(IrInstruction::CollectionReverse { collection: lowered_collection.operand });
-                    Some(LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) })
-                }
-                "truncate" if call.args.len() == 1 => {
-                    let lowered_collection = self.lower_expr(&field.expr, current, blocks, vars);
-                    let active = lowered_collection.current?;
-                    let lowered_len = self.lower_expr(&call.args[0], active, blocks, vars);
-                    let active = lowered_len.current?;
-                    self.block_mut(blocks, active)
-                        .instructions
-                        .push(IrInstruction::CollectionTruncate { collection: lowered_collection.operand, len: lowered_len.operand });
-                    Some(LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) })
-                }
-                "swap" if call.args.len() == 2 => {
-                    let lowered_collection = self.lower_expr(&field.expr, current, blocks, vars);
-                    let active = lowered_collection.current?;
-                    let lowered_left = self.lower_expr(&call.args[0], active, blocks, vars);
-                    let active = lowered_left.current?;
-                    let lowered_right = self.lower_expr(&call.args[1], active, blocks, vars);
-                    let active = lowered_right.current?;
-                    self.block_mut(blocks, active).instructions.push(IrInstruction::CollectionSwap {
-                        collection: lowered_collection.operand,
-                        left: lowered_left.operand,
-                        right: lowered_right.operand,
-                    });
-                    Some(LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) })
-                }
-                "contains" if call.args.len() == 1 => {
-                    let lowered_collection = self.lower_expr(&field.expr, current, blocks, vars);
-                    let active = lowered_collection.current?;
-                    let lowered_value = self.lower_expr(&call.args[0], active, blocks, vars);
-                    let active = lowered_value.current?;
-                    let collection_operand = lowered_collection.operand;
-                    if let (Expr::Identifier(receiver_name), IrOperand::Var(collection_var)) =
-                        (field.expr.as_ref(), &collection_operand)
-                        && matches!(&collection_var.ty, IrType::Named(name) if name == "Vec")
-                        && let (Some(item_ty), Some(receiver_var)) =
-                            (inline_ir_type_repr(&self.operand_type(&lowered_value.operand)), vars.get_mut(receiver_name))
-                        && receiver_var.id == collection_var.id
-                    {
-                        receiver_var.ty = IrType::Named(format!("Vec<{}>", item_ty));
-                    }
-                    let dest = self.new_var("contains_tmp", IrType::Bool);
-                    self.block_mut(blocks, active).instructions.push(IrInstruction::CollectionContains {
-                        dest: dest.clone(),
-                        collection: collection_operand,
-                        value: lowered_value.operand,
-                    });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
-                }
-                "remove" if call.args.len() == 1 => {
-                    let lowered_collection = self.lower_expr(&field.expr, current, blocks, vars);
-                    let active = lowered_collection.current?;
-                    let lowered_index = self.lower_expr(&call.args[0], active, blocks, vars);
-                    let active = lowered_index.current?;
-                    let item_ty = collection_item_ir_type(&self.operand_type(&lowered_collection.operand)).unwrap_or(IrType::U64);
-                    let dest = self.new_var("remove_tmp", item_ty);
-                    self.block_mut(blocks, active).instructions.push(IrInstruction::CollectionRemove {
-                        dest: dest.clone(),
-                        collection: lowered_collection.operand,
-                        index: lowered_index.operand,
-                    });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
-                }
-                "pop" if call.args.is_empty() => {
-                    let lowered_collection = self.lower_expr(&field.expr, current, blocks, vars);
-                    let active = lowered_collection.current?;
-                    let item_ty = collection_item_ir_type(&self.operand_type(&lowered_collection.operand)).unwrap_or(IrType::U64);
-                    let dest = self.new_var("pop_tmp", item_ty);
-                    self.block_mut(blocks, active)
-                        .instructions
-                        .push(IrInstruction::CollectionPop { dest: dest.clone(), collection: lowered_collection.operand });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
-                }
-                "insert" if call.args.len() == 2 => {
-                    let lowered_collection = self.lower_expr(&field.expr, current, blocks, vars);
-                    let active = lowered_collection.current?;
-                    let lowered_index = self.lower_expr(&call.args[0], active, blocks, vars);
-                    let active = lowered_index.current?;
-                    let lowered_value = self.lower_expr(&call.args[1], active, blocks, vars);
-                    let active = lowered_value.current?;
-                    let collection_operand = lowered_collection.operand;
-                    if let (Expr::Identifier(receiver_name), IrOperand::Var(collection_var)) =
-                        (field.expr.as_ref(), &collection_operand)
-                        && matches!(&collection_var.ty, IrType::Named(name) if name == "Vec")
-                        && let (Some(item_ty), Some(receiver_var)) =
-                            (inline_ir_type_repr(&self.operand_type(&lowered_value.operand)), vars.get_mut(receiver_name))
-                        && receiver_var.id == collection_var.id
-                    {
-                        receiver_var.ty = IrType::Named(format!("Vec<{}>", item_ty));
-                    }
-                    self.block_mut(blocks, active).instructions.push(IrInstruction::CollectionInsert {
-                        collection: collection_operand,
-                        index: lowered_index.operand,
-                        value: lowered_value.operand,
-                    });
-                    Some(LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) })
-                }
-                "set" if call.args.len() == 2 => {
-                    let lowered_collection = self.lower_expr(&field.expr, current, blocks, vars);
-                    let active = lowered_collection.current?;
-                    let lowered_index = self.lower_expr(&call.args[0], active, blocks, vars);
-                    let active = lowered_index.current?;
-                    let lowered_value = self.lower_expr(&call.args[1], active, blocks, vars);
-                    let active = lowered_value.current?;
-                    let collection_operand = lowered_collection.operand;
-                    if let (Expr::Identifier(receiver_name), IrOperand::Var(collection_var)) =
-                        (field.expr.as_ref(), &collection_operand)
-                        && matches!(&collection_var.ty, IrType::Named(name) if name == "Vec")
-                        && let (Some(item_ty), Some(receiver_var)) =
-                            (inline_ir_type_repr(&self.operand_type(&lowered_value.operand)), vars.get_mut(receiver_name))
-                        && receiver_var.id == collection_var.id
-                    {
-                        receiver_var.ty = IrType::Named(format!("Vec<{}>", item_ty));
-                    }
-                    self.block_mut(blocks, active).instructions.push(IrInstruction::CollectionSet {
-                        collection: collection_operand,
-                        index: lowered_index.operand,
-                        value: lowered_value.operand,
-                    });
-                    Some(LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) })
-                }
-                "extend_from_slice" if call.args.len() == 1 => {
-                    let lowered_collection = self.lower_expr(&field.expr, current, blocks, vars);
-                    let active = lowered_collection.current?;
-                    let lowered_slice = self.lower_expr(&call.args[0], active, blocks, vars);
-                    let active = lowered_slice.current?;
-                    let collection_operand = lowered_collection.operand;
-                    if let (Expr::Identifier(receiver_name), IrOperand::Var(collection_var)) =
-                        (field.expr.as_ref(), &collection_operand)
-                        && matches!(&collection_var.ty, IrType::Named(name) if name == "Vec")
-                        && let (IrType::Array(inner, _), Some(receiver_var)) =
-                            (self.operand_type(&lowered_slice.operand), vars.get_mut(receiver_name))
-                        && receiver_var.id == collection_var.id
-                        && let Some(item_ty) = inline_ir_type_repr(inner.as_ref())
-                    {
-                        receiver_var.ty = IrType::Named(format!("Vec<{}>", item_ty));
-                    }
-                    let block = self.block_mut(blocks, active);
-                    block
-                        .instructions
-                        .push(IrInstruction::CollectionExtend { collection: collection_operand, slice: lowered_slice.operand });
-                    Some(LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) })
-                }
-                _ => None,
-            },
             _ => None,
         }
     }
@@ -9659,8 +7450,8 @@ impl IrGenerator {
         None
     }
 
-    fn record_error(&mut self, message: impl Into<String>, span: Span) {
-        self.errors.push(CompileError::new(message, span));
+    fn record_error(&self, message: impl Into<String>, span: Span) {
+        self.errors.borrow_mut().push(CompileError::new(message, span));
     }
 
     fn lower_constant(&mut self, name: &str, span: Span) -> Option<IrOperand> {
@@ -9791,16 +7582,8 @@ impl IrGenerator {
                 return self.type_fields.get(schema)?.get(field).cloned();
             }
         }
-        if let IrType::Named(name) = ty
-            && let Some(crate::nested_values::NestedType::RecordView { element, max_payload_bytes }) =
-                crate::nested_values::parsed(name)
-        {
-            let field_ty = self.type_fields.get(&element)?.get(field)?.clone();
-            return Some(if matches!(&field_ty, IrType::Named(name) if crate::nested_values::is_bytes_element(name)) {
-                IrType::Named(crate::nested_values::bytes_view_type(max_payload_bytes))
-            } else {
-                field_ty
-            });
+        if let IrType::Nested(view) = ty {
+            return view.field_type(field);
         }
         match ty {
             IrType::Tuple(items) => field.parse::<usize>().ok().and_then(|index| items.get(index)).cloned(),
@@ -9832,12 +7615,8 @@ impl IrGenerator {
     }
 
     fn index_result_type_from_ir_type(&self, ty: &IrType) -> Option<IrType> {
-        if let IrType::Named(name) = ty {
-            match crate::nested_values::parsed(name) {
-                Some(crate::nested_values::NestedType::Values(values)) => return Some(IrType::Named(values.item_type())),
-                Some(crate::nested_values::NestedType::BytesView { .. }) => return Some(IrType::U8),
-                _ => {}
-            }
+        if let IrType::Nested(view) = ty {
+            return view.index_type();
         }
         match ty {
             IrType::Array(inner, _) => Some((**inner).clone()),
@@ -9973,6 +7752,7 @@ fn inline_ir_type_repr(ty: &IrType) -> Option<String> {
         IrType::Address => Some("Address".to_string()),
         IrType::Hash => Some("Hash".to_string()),
         IrType::Named(name) => Some(name.clone()),
+        IrType::Nested(view) => Some(view.canonical_text()),
         IrType::Unit | IrType::Array(_, _) | IrType::Tuple(_) | IrType::Ref(_) | IrType::MutRef(_) => None,
     }
 }
@@ -9992,6 +7772,7 @@ fn ir_type_display(ty: &IrType) -> String {
         IrType::Array(inner, len) => format!("[{}; {}]", ir_type_display(inner), len),
         IrType::Tuple(items) => format!("({})", items.iter().map(ir_type_display).collect::<Vec<_>>().join(", ")),
         IrType::Named(name) => name.clone(),
+        IrType::Nested(view) => view.canonical_text(),
         IrType::Ref(inner) => format!("&{}", ir_type_display(inner)),
         IrType::MutRef(inner) => format!("&mut {}", ir_type_display(inner)),
     }
@@ -10233,28 +8014,6 @@ fn ir_validity_predicates_with_constants(
         predicate.dependencies = dependencies.into_iter().collect();
     }
     predicates
-}
-
-fn replace_relation_inner_exprs(relation: &ReplaceRelation) -> Vec<&Expr> {
-    let mut inner = Vec::new();
-    if let ReplaceLockTreatment::Exact(lock) | ReplaceLockTreatment::ExactHash(lock) = &relation.lock {
-        inner.push(lock.as_ref());
-    }
-    match &relation.data {
-        ReplaceDataTreatment::Fields(treatments) => {
-            for treatment in treatments {
-                if let ReplaceFieldTreatment::Assign(_, value) = treatment {
-                    inner.push(value);
-                }
-            }
-        }
-        ReplaceDataTreatment::SameExcept(assigned) => {
-            for (_, value) in assigned {
-                inner.push(value);
-            }
-        }
-    }
-    inner
 }
 
 fn collect_validity_constant_dependencies(expr: &Expr, constants: &HashSet<&str>, dependencies: &mut BTreeSet<String>) {
@@ -10565,6 +8324,16 @@ pub fn generate_with_resolver_diagnostics(
     resolver: &ModuleResolver,
     module_name: &str,
 ) -> std::result::Result<IrModule, Vec<CompileError>> {
+    let mut ir = lower_with_resolver_diagnostics(ast, resolver, module_name)?;
+    crate::effects::populate(&mut ir).map_err(|error| vec![error])?;
+    Ok(ir)
+}
+
+pub(crate) fn lower_with_resolver_diagnostics(
+    ast: &Module,
+    resolver: &ModuleResolver,
+    module_name: &str,
+) -> std::result::Result<IrModule, Vec<CompileError>> {
     generate_with_resolver_diagnostics_inner(ast, resolver, module_name, true)
 }
 
@@ -10583,7 +8352,6 @@ fn generate_with_resolver_inner(
 
 #[derive(Default)]
 struct ExternalCallableContext {
-    function_effects: HashMap<String, EffectClass>,
     function_param_types: HashMap<String, Vec<IrType>>,
     function_return_types: HashMap<String, Option<IrType>>,
     target_labels: HashMap<String, String>,
@@ -10653,15 +8421,8 @@ fn generate_with_resolver_diagnostics_inner(
                 }
             }
             if let Some((owner_module, function)) = resolver.resolve_function_with_module(module_name, &local_name) {
-                register_external_callable_context(
-                    module_name,
-                    &owner_module,
-                    &local_name,
-                    &function,
-                    resolver,
-                    Some(&local_name),
-                    &mut external_callables,
-                );
+                register_external_callable_context(module_name, &owner_module, &local_name, &function, &mut external_callables)
+                    .map_err(|error| vec![error])?;
             }
         }
     }
@@ -10689,27 +8450,19 @@ fn generate_with_resolver_diagnostics_inner(
     }
     for call_name in call_names {
         if let Some((owner_module, function)) = resolver.resolve_function_with_module(module_name, &call_name) {
-            register_external_callable_context(
-                module_name,
-                &owner_module,
-                &call_name,
-                &function,
-                resolver,
-                None,
-                &mut external_callables,
-            );
+            register_external_callable_context(module_name, &owner_module, &call_name, &function, &mut external_callables)
+                .map_err(|error| vec![error])?;
         }
     }
 
     let ExternalCallableContext {
-        function_effects: external_function_effects,
         function_param_types: external_function_param_types,
         function_return_types: external_function_return_types,
         target_labels: call_target_labels,
-        abis: external_callable_abis,
+        abis: mut external_callable_abis,
         names: _,
     } = external_callables;
-    let generator = IrGenerator::with_import_context(
+    let mut generator = IrGenerator::with_import_context(
         ast.name.clone(),
         IrImportContext {
             type_fields,
@@ -10722,13 +8475,25 @@ fn generate_with_resolver_diagnostics_inner(
             flow_states,
             type_validity: imported_type_validity,
             enum_definitions: external_enum_definitions,
-            external_function_effects,
             external_function_param_types,
             external_function_return_types,
             call_target_labels,
         },
+        resolver,
     );
-    let mut ir = generator.generate_diagnostics(ast)?;
+    generator.prepare_nested_types(ast);
+    for definition in &mut external_type_defs {
+        for field in &mut definition.fields {
+            field.ty = generator.resolve_projection_type(&field.ty);
+        }
+    }
+    for abi in &mut external_callable_abis {
+        for param in &mut abi.params {
+            param.ty = generator.resolve_projection_type(&param.ty);
+            param.binding.ty = param.ty.clone();
+        }
+    }
+    let mut ir = generator.lower_diagnostics(ast)?;
     ir.generic_contracts.extend(imported_generic_contracts);
     ir.source_type_origins.extend(source_type_origins);
     ir.external_type_defs = external_type_defs;
@@ -10742,7 +8507,6 @@ fn generate_with_resolver_diagnostics_inner(
 fn append_external_callable_bodies(ir: &mut IrModule, ast: &Module, resolver: &ModuleResolver, module_name: &str) -> Result<()> {
     let mut known_callables = ir_callable_names(ir);
     let mut imported_callables = HashSet::new();
-    let entry_call_labels = imported_callable_label_overrides(ast, resolver, module_name);
     let mut pending = collect_call_names(ast)
         .into_iter()
         .map(|call_name| PendingExternalCall { lookup_module: module_name.to_string(), call_name })
@@ -10763,14 +8527,7 @@ fn append_external_callable_bodies(ir: &mut IrModule, ast: &Module, resolver: &M
             continue;
         };
         let symbol = function_def_name(&function).to_string();
-        let label = if pending_call.lookup_module == module_name {
-            entry_call_labels
-                .get(&pending_call.call_name)
-                .cloned()
-                .unwrap_or_else(|| callable_label_for(module_name, &owner_module, &symbol))
-        } else {
-            callable_label_for(module_name, &owner_module, &symbol)
-        };
+        let label = callable_label_for(module_name, &owner_module, &symbol);
         if known_callables.contains(&label) {
             continue;
         }
@@ -10800,11 +8557,15 @@ fn append_external_callable_bodies(ir: &mut IrModule, ast: &Module, resolver: &M
         for (name, layout) in external_ir.enum_layouts {
             ir.enum_layouts.entry(name).or_insert(layout);
         }
+        // The dependency's IR calls have already been lowered. Recover their
+        // resolved source bindings from its index rather than trying to parse
+        // an assembly label as a source path. Aliases index one definition.
+        let call_sources = external_ir.source_callable_targets.into_iter().map(|(source, label)| (label, source)).collect();
 
         if let Some(mut item) =
             external_ir.items.into_iter().find(|item| ir_item_callable_name(item).is_some_and(|name| name == symbol))
         {
-            rewrite_external_callable_item_calls(&mut item, &owner_module, module_name, resolver, &mut pending);
+            rewrite_external_callable_item_calls(&mut item, &owner_module, module_name, resolver, &call_sources, &mut pending);
             rename_ir_item_callable(&mut item, label.clone());
             if known_callables.insert(label) {
                 ir.items.push(item);
@@ -10815,57 +8576,20 @@ fn append_external_callable_bodies(ir: &mut IrModule, ast: &Module, resolver: &M
     Ok(())
 }
 
-fn imported_callable_label_overrides(ast: &Module, resolver: &ModuleResolver, module_name: &str) -> HashMap<String, String> {
-    let mut labels = HashMap::new();
-    for item in &ast.items {
-        let Item::Use(use_stmt) = item else {
-            continue;
-        };
-        for import in &use_stmt.imports {
-            let local_name = import.alias.clone().unwrap_or_else(|| import.name.clone());
-            let Some((owner_module, function)) = resolver.resolve_function_with_module(module_name, &local_name) else {
-                continue;
-            };
-            let symbol = function_def_name(&function);
-            let full_path = format!("{}::{}", owner_module, symbol);
-            let label = labels.get(&full_path).cloned().unwrap_or_else(|| {
-                if owner_module == module_name {
-                    symbol.to_string()
-                } else {
-                    local_name.clone()
-                }
-            });
-            labels.insert(local_name, label.clone());
-            labels.entry(full_path).or_insert(label);
-        }
-    }
-    labels
-}
-
 fn register_external_callable_context(
     consumer_module: &str,
     owner_module: &str,
     source_name: &str,
     function: &FunctionDef,
-    resolver: &ModuleResolver,
-    preferred_label: Option<&str>,
     context: &mut ExternalCallableContext,
-) {
+) -> Result<()> {
     let symbol = function_def_name(function);
     let full_path = format!("{}::{}", owner_module, symbol);
-    let label = context
-        .target_labels
-        .get(&full_path)
-        .or_else(|| context.target_labels.get(source_name))
-        .cloned()
-        .or_else(|| preferred_label.map(str::to_string))
-        .unwrap_or_else(|| callable_label_for(consumer_module, owner_module, symbol));
-    let effect = function_def_transitive_effect_class(resolver, owner_module, function, &mut HashSet::new());
+    let label = callable_label_for(consumer_module, owner_module, symbol);
     let params = function_def_param_types_ir(function);
     let return_type = function_def_return_type(function);
 
     for key in [source_name.to_string(), full_path.clone(), label.clone()] {
-        context.function_effects.insert(key.clone(), effect);
         context.function_param_types.insert(key.clone(), params.clone());
         context.function_return_types.insert(key, return_type.clone());
     }
@@ -10874,18 +8598,20 @@ fn register_external_callable_context(
     if owner_module != consumer_module {
         push_external_callable_abi(&mut context.abis, &mut context.names, label, function);
     }
+    Ok(())
 }
 
 fn callable_label_for(consumer_module: &str, owner_module: &str, symbol: &str) -> String {
     if owner_module == consumer_module {
         symbol.to_string()
     } else {
-        format!("__cellscript_ext_{}__{}", sanitize_callable_label_part(owner_module), sanitize_callable_label_part(symbol))
+        // Hex preserves the complete defining module, including separators and
+        // Unicode. The first dot after the hex component separates the exact
+        // source symbol. Source identifiers cannot contain dots, so this label
+        // namespace also cannot collide with an ordinary source declaration.
+        // Keep the symbol intact for existing structured mono-name consumers.
+        format!("__cellscript.ext.{}.{}", hex::encode(owner_module.as_bytes()), symbol)
     }
-}
-
-fn sanitize_callable_label_part(value: &str) -> String {
-    value.chars().map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' }).collect::<String>()
 }
 
 fn function_def_name(function: &FunctionDef) -> &str {
@@ -10909,7 +8635,7 @@ fn ir_callable_names(ir: &IrModule) -> HashSet<String> {
 fn ir_item_callable_name(item: &IrItem) -> Option<&str> {
     match item {
         IrItem::Action(action) => Some(&action.name),
-        IrItem::PureFn(function) => Some(&function.name),
+        IrItem::Function(function) => Some(&function.name),
         IrItem::Lock(lock) => Some(&lock.name),
         IrItem::TypeDef(_) | IrItem::Invariant(_) => None,
     }
@@ -10950,7 +8676,7 @@ fn merge_external_callable_abis(ir: &mut IrModule, external_ir: &IrModule) {
 fn rename_ir_item_callable(item: &mut IrItem, label: String) {
     match item {
         IrItem::Action(action) => action.name = label,
-        IrItem::PureFn(function) => function.name = label,
+        IrItem::Function(function) => function.name = label,
         IrItem::Lock(lock) => lock.name = label,
         IrItem::TypeDef(_) | IrItem::Invariant(_) => {}
     }
@@ -10961,12 +8687,17 @@ fn rewrite_external_callable_item_calls(
     owner_module: &str,
     entry_module: &str,
     resolver: &ModuleResolver,
+    call_sources: &HashMap<String, String>,
     pending: &mut Vec<PendingExternalCall>,
 ) {
     match item {
-        IrItem::Action(action) => rewrite_external_body_calls(&mut action.body, owner_module, entry_module, resolver, pending),
-        IrItem::PureFn(function) => rewrite_external_body_calls(&mut function.body, owner_module, entry_module, resolver, pending),
-        IrItem::Lock(lock) => rewrite_external_body_calls(&mut lock.body, owner_module, entry_module, resolver, pending),
+        IrItem::Action(action) => {
+            rewrite_external_body_calls(&mut action.body, owner_module, entry_module, resolver, call_sources, pending)
+        }
+        IrItem::Function(function) => {
+            rewrite_external_body_calls(&mut function.body, owner_module, entry_module, resolver, call_sources, pending)
+        }
+        IrItem::Lock(lock) => rewrite_external_body_calls(&mut lock.body, owner_module, entry_module, resolver, call_sources, pending),
         IrItem::TypeDef(_) | IrItem::Invariant(_) => {}
     }
 }
@@ -10976,19 +8707,21 @@ fn rewrite_external_body_calls(
     owner_module: &str,
     entry_module: &str,
     resolver: &ModuleResolver,
+    call_sources: &HashMap<String, String>,
     pending: &mut Vec<PendingExternalCall>,
 ) {
     for block in &mut body.blocks {
         for instruction in &mut block.instructions {
             if let IrInstruction::Call { func, .. } = instruction {
                 let original = func.clone();
-                let Some((callee_module, function)) = resolver.resolve_function_with_module(owner_module, &original) else {
+                let source_name = call_sources.get(&original).unwrap_or(&original);
+                let Some((callee_module, function)) = resolver.resolve_function_with_module(owner_module, source_name) else {
                     continue;
                 };
                 let symbol = function_def_name(&function).to_string();
                 *func = callable_label_for(entry_module, &callee_module, &symbol);
                 if callee_module != entry_module {
-                    pending.push(PendingExternalCall { lookup_module: owner_module.to_string(), call_name: original });
+                    pending.push(PendingExternalCall { lookup_module: owner_module.to_string(), call_name: source_name.clone() });
                 }
             }
         }
@@ -11181,222 +8914,6 @@ fn collect_bounded_collection_ops_from_expr(expr: &Expr, params: &[Param], ops: 
     });
 }
 
-fn collect_call_names_from_stmts(stmts: &[Stmt], names: &mut HashSet<String>) {
-    for stmt in stmts {
-        collect_call_names_from_stmt(stmt, names);
-    }
-}
-
-fn collect_call_names_from_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
-    match stmt {
-        Stmt::Expr(expr) | Stmt::Let(LetStmt { value: expr, .. }) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
-            collect_call_names_from_expr(expr, names);
-        }
-        Stmt::If(if_stmt) => {
-            collect_call_names_from_expr(&if_stmt.condition, names);
-            collect_call_names_from_stmts(&if_stmt.then_branch, names);
-            if let Some(else_branch) = &if_stmt.else_branch {
-                collect_call_names_from_stmts(else_branch, names);
-            }
-        }
-        Stmt::For(for_stmt) => {
-            collect_call_names_from_expr(&for_stmt.iterable, names);
-            collect_call_names_from_stmts(&for_stmt.body, names);
-        }
-        Stmt::While(while_stmt) => {
-            collect_call_names_from_expr(&while_stmt.condition, names);
-            collect_call_names_from_stmts(&while_stmt.body, names);
-        }
-        Stmt::Borrow(borrow_stmt) => collect_call_names_from_stmts(&borrow_stmt.body, names),
-        Stmt::Return(ReturnStmt { value: None, .. }) => {}
-        Stmt::Break(_) | Stmt::Continue(_) => {}
-    }
-}
-
-fn collect_call_names_from_expr(expr: &Expr, names: &mut HashSet<String>) {
-    match expr {
-        Expr::ReplaceRelation(relation) => {
-            for value in replace_relation_inner_exprs(relation) {
-                collect_call_names_from_expr(value, names);
-            }
-        }
-        Expr::Call(call) => {
-            if let Expr::Identifier(name) = call.func.as_ref() {
-                names.insert(name.clone());
-            }
-            collect_call_names_from_expr(&call.func, names);
-            for arg in &call.args {
-                collect_call_names_from_expr(arg, names);
-            }
-        }
-        Expr::Assign(assign) => {
-            collect_call_names_from_expr(&assign.target, names);
-            collect_call_names_from_expr(&assign.value, names);
-        }
-        Expr::Binary(binary) => {
-            collect_call_names_from_expr(&binary.left, names);
-            collect_call_names_from_expr(&binary.right, names);
-        }
-        Expr::Unary(unary) => collect_call_names_from_expr(&unary.expr, names),
-        Expr::FieldAccess(field) => collect_call_names_from_expr(&field.expr, names),
-        Expr::Index(index) => {
-            collect_call_names_from_expr(&index.expr, names);
-            collect_call_names_from_expr(&index.index, names);
-        }
-        Expr::Create(create) => {
-            for (_, value) in &create.fields {
-                collect_call_names_from_expr(value, names);
-            }
-            if let Some(lock) = &create.lock {
-                collect_call_names_from_expr(lock, names);
-            }
-        }
-        Expr::Consume(consume) => collect_call_names_from_expr(&consume.expr, names),
-        Expr::Destroy(destroy) => collect_call_names_from_expr(&destroy.expr, names),
-        Expr::Claim(claim) => collect_call_names_from_expr(&claim.receipt, names),
-        Expr::Settle(settle) => collect_call_names_from_expr(&settle.expr, names),
-        Expr::CreateUnique(cu) => {
-            for (_, value) in &cu.fields {
-                collect_call_names_from_expr(value, names);
-            }
-            if let Some(lock) = &cu.lock {
-                collect_call_names_from_expr(lock, names);
-            }
-        }
-        Expr::ReplaceUnique(ru) => {
-            collect_call_names_from_expr(&ru.expr, names);
-            for (_, value) in &ru.fields {
-                collect_call_names_from_expr(value, names);
-            }
-        }
-        Expr::Assert(assert_expr) => {
-            collect_call_names_from_expr(&assert_expr.condition, names);
-        }
-        Expr::Require(require_expr) => {
-            collect_call_names_from_expr(&require_expr.condition, names);
-            if let Some(message) = &require_expr.message {
-                collect_call_names_from_expr(message, names);
-            }
-        }
-        Expr::RequireBlock(require_block) => {
-            for expr in &require_block.expressions {
-                collect_call_names_from_expr(expr, names);
-            }
-        }
-        Expr::Preserve(_) => {}
-        Expr::Block(stmts) => collect_call_names_from_stmts(stmts, names),
-        Expr::Tuple(items) | Expr::Array(items) => {
-            for item in items {
-                collect_call_names_from_expr(item, names);
-            }
-        }
-        Expr::If(if_expr) => {
-            collect_call_names_from_expr(&if_expr.condition, names);
-            collect_call_names_from_expr(&if_expr.then_branch, names);
-            collect_call_names_from_expr(&if_expr.else_branch, names);
-        }
-        Expr::Cast(cast) => collect_call_names_from_expr(&cast.expr, names),
-        Expr::Range(range) => {
-            collect_call_names_from_expr(&range.start, names);
-            collect_call_names_from_expr(&range.end, names);
-        }
-        Expr::StructInit(init) => {
-            for (_, value) in &init.fields {
-                collect_call_names_from_expr(value, names);
-            }
-        }
-        Expr::Match(match_expr) => {
-            collect_call_names_from_expr(&match_expr.expr, names);
-            for arm in &match_expr.arms {
-                collect_call_names_from_expr(&arm.value, names);
-            }
-        }
-        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::ReadRef(_) => {}
-        Expr::StdlibCall(call) => {
-            for arg in &call.args {
-                collect_call_names_from_expr(arg, names);
-            }
-        }
-    }
-}
-
-fn function_def_transitive_effect_class(
-    resolver: &ModuleResolver,
-    owner_module: &str,
-    function: &FunctionDef,
-    visiting: &mut HashSet<String>,
-) -> EffectClass {
-    let key = format!("{}::{}", owner_module, function_def_name(function));
-    let direct = function_def_inferred_effect_class(function);
-    if !visiting.insert(key.clone()) {
-        return direct;
-    }
-
-    let mut footprint = EffectFootprint::default();
-    apply_effect_to_footprint(direct, &mut footprint);
-    let mut call_names = HashSet::new();
-    collect_call_names_from_stmts(function_def_body(function), &mut call_names);
-    for call_name in call_names {
-        let Some((callee_module, callee)) = resolver.resolve_function_with_module(owner_module, &call_name) else {
-            continue;
-        };
-        let effect = function_def_transitive_effect_class(resolver, &callee_module, &callee, visiting);
-        apply_effect_to_footprint(effect, &mut footprint);
-    }
-    visiting.remove(&key);
-
-    let inferred = effect_from_footprint(&footprint);
-    function_def_declared_effect_class(function).filter(|declared| effect_class_covers(*declared, inferred)).unwrap_or(inferred)
-}
-
-fn function_def_inferred_effect_class(function: &FunctionDef) -> EffectClass {
-    match function {
-        FunctionDef::Action(action) => infer_action_effect_without_call_graph(action),
-        FunctionDef::Function(function) => infer_fn_effect_without_call_graph(function),
-        FunctionDef::Lock(_) => EffectClass::ReadOnly,
-    }
-}
-
-fn function_def_declared_effect_class(function: &FunctionDef) -> Option<EffectClass> {
-    match function {
-        FunctionDef::Action(action) => action.effect_declared.then(|| ast_effect_to_ir(action.effect)),
-        FunctionDef::Function(function) => function.effect_declared.then(|| ast_effect_to_ir(function.effect)),
-        FunctionDef::Lock(_) => None,
-    }
-}
-
-fn function_def_body(function: &FunctionDef) -> &[Stmt] {
-    match function {
-        FunctionDef::Action(action) => &action.body,
-        FunctionDef::Function(function) => &function.body,
-        FunctionDef::Lock(lock) => &lock.body,
-    }
-}
-
-fn apply_effect_to_footprint(effect: EffectClass, footprint: &mut EffectFootprint) {
-    match effect {
-        EffectClass::Pure => {}
-        EffectClass::ReadOnly => footprint.has_read_ref = true,
-        EffectClass::Creating => footprint.has_create = true,
-        EffectClass::Destroying => footprint.has_consume = true,
-        EffectClass::Mutating => {
-            footprint.has_consume = true;
-            footprint.has_create = true;
-        }
-    }
-}
-
-fn effect_class_covers(declared: EffectClass, inferred: EffectClass) -> bool {
-    matches!(
-        (declared, inferred),
-        (EffectClass::Pure, EffectClass::Pure)
-            | (EffectClass::ReadOnly, EffectClass::Pure | EffectClass::ReadOnly)
-            | (EffectClass::Creating, EffectClass::Pure | EffectClass::ReadOnly | EffectClass::Creating)
-            | (EffectClass::Destroying, EffectClass::Pure | EffectClass::ReadOnly | EffectClass::Destroying)
-            | (EffectClass::Mutating, _)
-    )
-}
-
 fn function_def_return_type(function: &FunctionDef) -> Option<IrType> {
     match function {
         FunctionDef::Action(action) => action.return_type.as_ref().map(ast_type_to_ir),
@@ -11422,221 +8939,6 @@ pub(crate) fn ast_type_to_ir(ty: &Type) -> IrType {
         Type::Named(name) => IrType::Named(name.clone()),
         Type::Ref(inner) => IrType::Ref(Box::new(ast_type_to_ir(inner))),
         Type::MutRef(inner) => IrType::MutRef(Box::new(ast_type_to_ir(inner))),
-    }
-}
-
-fn infer_action_effect_without_call_graph(action: &ActionDef) -> EffectClass {
-    if !action_core_input_binding_names(action).is_empty() {
-        return EffectClass::Mutating;
-    }
-    let mut footprint = EffectFootprint::default();
-    for stmt in &action.body {
-        collect_ast_stmt_effects(stmt, &mut footprint);
-    }
-    effect_from_footprint(&footprint)
-}
-
-fn infer_fn_effect_without_call_graph(function: &FnDef) -> EffectClass {
-    let mut footprint = EffectFootprint::default();
-    for stmt in &function.body {
-        collect_ast_stmt_effects(stmt, &mut footprint);
-    }
-    effect_from_footprint(&footprint)
-}
-
-fn collect_ast_stmt_effects(stmt: &Stmt, footprint: &mut EffectFootprint) {
-    match stmt {
-        Stmt::Expr(expr) | Stmt::Let(LetStmt { value: expr, .. }) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
-            collect_ast_expr_effects(expr, footprint);
-        }
-        Stmt::If(if_stmt) => {
-            collect_ast_expr_effects(&if_stmt.condition, footprint);
-            for stmt in &if_stmt.then_branch {
-                collect_ast_stmt_effects(stmt, footprint);
-            }
-            if let Some(else_branch) = &if_stmt.else_branch {
-                for stmt in else_branch {
-                    collect_ast_stmt_effects(stmt, footprint);
-                }
-            }
-        }
-        Stmt::For(for_stmt) => {
-            collect_ast_expr_effects(&for_stmt.iterable, footprint);
-            for stmt in &for_stmt.body {
-                collect_ast_stmt_effects(stmt, footprint);
-            }
-        }
-        Stmt::While(while_stmt) => {
-            collect_ast_expr_effects(&while_stmt.condition, footprint);
-            for stmt in &while_stmt.body {
-                collect_ast_stmt_effects(stmt, footprint);
-            }
-        }
-        Stmt::Borrow(borrow_stmt) => {
-            for stmt in &borrow_stmt.body {
-                collect_ast_stmt_effects(stmt, footprint);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn collect_ast_expr_effects(expr: &Expr, footprint: &mut EffectFootprint) {
-    match expr {
-        Expr::ReplaceRelation(relation) => {
-            footprint.has_consume = true;
-            footprint.has_create = true;
-            for value in replace_relation_inner_exprs(relation) {
-                collect_ast_expr_effects(value, footprint);
-            }
-        }
-        Expr::Consume(consume) => {
-            footprint.has_consume = true;
-            collect_ast_expr_effects(&consume.expr, footprint);
-        }
-        Expr::Create(create) => {
-            footprint.has_create = true;
-            for (_, value) in &create.fields {
-                collect_ast_expr_effects(value, footprint);
-            }
-            if let Some(lock) = &create.lock {
-                collect_ast_expr_effects(lock, footprint);
-            }
-        }
-        Expr::Destroy(destroy) => {
-            footprint.has_consume = true;
-            collect_ast_expr_effects(&destroy.expr, footprint);
-        }
-        Expr::Claim(claim) => {
-            apply_effect_to_footprint(EffectClass::Mutating, footprint);
-            collect_ast_expr_effects(&claim.receipt, footprint);
-        }
-        Expr::Settle(settle) => {
-            apply_effect_to_footprint(EffectClass::Mutating, footprint);
-            collect_ast_expr_effects(&settle.expr, footprint);
-        }
-        Expr::CreateUnique(create) => {
-            apply_effect_to_footprint(EffectClass::Creating, footprint);
-            for (_, value) in &create.fields {
-                collect_ast_expr_effects(value, footprint);
-            }
-            if let Some(lock) = &create.lock {
-                collect_ast_expr_effects(lock, footprint);
-            }
-        }
-        Expr::ReplaceUnique(replace) => {
-            apply_effect_to_footprint(EffectClass::Mutating, footprint);
-            collect_ast_expr_effects(&replace.expr, footprint);
-            for (_, value) in &replace.fields {
-                collect_ast_expr_effects(value, footprint);
-            }
-        }
-        Expr::ReadRef(_) => footprint.has_read_ref = true,
-        Expr::Assert(assert_expr) => {
-            collect_ast_expr_effects(&assert_expr.condition, footprint);
-        }
-        Expr::Require(require_expr) => {
-            collect_ast_expr_effects(&require_expr.condition, footprint);
-            if let Some(message) = &require_expr.message {
-                collect_ast_expr_effects(message, footprint);
-            }
-        }
-        Expr::RequireBlock(require_block) => {
-            for expr in &require_block.expressions {
-                collect_ast_expr_effects(expr, footprint);
-            }
-        }
-        Expr::Preserve(_) => {}
-        Expr::Assign(assign) => {
-            collect_ast_expr_effects(&assign.target, footprint);
-            collect_ast_expr_effects(&assign.value, footprint);
-        }
-        Expr::Binary(binary) => {
-            collect_ast_expr_effects(&binary.left, footprint);
-            collect_ast_expr_effects(&binary.right, footprint);
-        }
-        Expr::Unary(unary) => collect_ast_expr_effects(&unary.expr, footprint),
-        Expr::Call(call) => {
-            if is_read_only_runtime_call(call) {
-                footprint.has_read_ref = true;
-            }
-            if let Expr::Identifier(name) = call.func.as_ref() {
-                match name.as_str() {
-                    "__cellscript_consume_each" => apply_effect_to_footprint(EffectClass::Mutating, footprint),
-                    "__cellscript_create_each" => apply_effect_to_footprint(EffectClass::Creating, footprint),
-                    _ => {}
-                }
-            }
-            for arg in &call.args {
-                collect_ast_expr_effects(arg, footprint);
-            }
-        }
-        Expr::FieldAccess(field) => collect_ast_expr_effects(&field.expr, footprint),
-        Expr::Index(index) => {
-            collect_ast_expr_effects(&index.expr, footprint);
-            collect_ast_expr_effects(&index.index, footprint);
-        }
-        Expr::If(if_expr) => {
-            collect_ast_expr_effects(&if_expr.condition, footprint);
-            collect_ast_expr_effects(&if_expr.then_branch, footprint);
-            collect_ast_expr_effects(&if_expr.else_branch, footprint);
-        }
-        Expr::Cast(cast) => collect_ast_expr_effects(&cast.expr, footprint),
-        Expr::Range(range) => {
-            collect_ast_expr_effects(&range.start, footprint);
-            collect_ast_expr_effects(&range.end, footprint);
-        }
-        Expr::StructInit(init) => {
-            for (_, value) in &init.fields {
-                collect_ast_expr_effects(value, footprint);
-            }
-        }
-        Expr::Match(match_expr) => {
-            collect_ast_expr_effects(&match_expr.expr, footprint);
-            for arm in &match_expr.arms {
-                collect_ast_expr_effects(&arm.value, footprint);
-            }
-        }
-        Expr::StdlibCall(call) => {
-            let qualified = format!("std::{}::{}", call.namespace, call.name);
-            if matches!(qualified.as_str(), "std::lifecycle::transfer" | "std::receipt::claim" | "std::lifecycle::settle") {
-                apply_effect_to_footprint(EffectClass::Mutating, footprint);
-            }
-            for arg in &call.args {
-                collect_ast_expr_effects(arg, footprint);
-            }
-        }
-        Expr::Block(stmts) => {
-            for stmt in stmts {
-                collect_ast_stmt_effects(stmt, footprint);
-            }
-        }
-        Expr::Tuple(items) | Expr::Array(items) => {
-            for item in items {
-                collect_ast_expr_effects(item, footprint);
-            }
-        }
-        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) => {}
-    }
-}
-
-fn effect_from_footprint(footprint: &EffectFootprint) -> EffectClass {
-    match (footprint.has_consume, footprint.has_create, footprint.has_read_ref) {
-        (true, true, _) => EffectClass::Mutating,
-        (true, false, _) => EffectClass::Destroying,
-        (false, true, _) => EffectClass::Creating,
-        (false, false, true) => EffectClass::ReadOnly,
-        (false, false, false) => EffectClass::Pure,
-    }
-}
-
-fn ast_effect_to_ir(effect: crate::ast::EffectClass) -> EffectClass {
-    match effect {
-        crate::ast::EffectClass::Pure => EffectClass::Pure,
-        crate::ast::EffectClass::ReadOnly => EffectClass::ReadOnly,
-        crate::ast::EffectClass::Mutating => EffectClass::Mutating,
-        crate::ast::EffectClass::Creating => EffectClass::Creating,
-        crate::ast::EffectClass::Destroying => EffectClass::Destroying,
     }
 }
 
@@ -11810,7 +9112,7 @@ fn fixed_encoded_size_for_resolver_ir_type(
             seen.remove(base_name);
             size
         }
-        IrType::Ref(_) | IrType::MutRef(_) => None,
+        IrType::Nested(_) | IrType::Ref(_) | IrType::MutRef(_) => None,
     }
 }
 
@@ -11855,247 +9157,6 @@ fn ast_type_to_ir_type(ty: &Type) -> IrType {
         Type::Named(name) => IrType::Named(name.clone()),
         Type::Ref(inner) => IrType::Ref(Box::new(ast_type_to_ir_type(inner))),
         Type::MutRef(inner) => IrType::MutRef(Box::new(ast_type_to_ir_type(inner))),
-    }
-}
-
-fn action_core_input_binding_names(action: &ActionDef) -> HashSet<String> {
-    action_inferred_lineage_bindings(action).keys().cloned().collect()
-}
-
-fn action_inferred_lineage_bindings(action: &ActionDef) -> HashMap<String, String> {
-    let mut bindings = HashMap::new();
-    let consumed = action_consumed_bindings(action);
-    for state_edge in &action.state_edges {
-        if consumed.contains(&state_edge.path.base) {
-            continue;
-        }
-        bindings.entry(state_edge.path.base.clone()).or_insert_with(|| state_edge.to_path.base.clone());
-    }
-
-    let mut outputs_by_type: HashMap<String, Vec<String>> = HashMap::new();
-    for (name, type_name) in action_output_binding_types(action) {
-        if bindings.values().any(|bound_output| bound_output == &name) {
-            continue;
-        }
-        outputs_by_type.entry(type_name).or_default().push(name);
-    }
-
-    let mut inputs_by_type: HashMap<String, Vec<String>> = HashMap::new();
-    for param in &action.params {
-        if consumed.contains(&param.name) || bindings.contains_key(&param.name) {
-            continue;
-        }
-        let Some(type_name) = ast_named_cell_type_name(&param.ty) else {
-            continue;
-        };
-        if param.source != ParamSource::Default && param.source != ParamSource::Input {
-            continue;
-        }
-        if param.is_ref || param.is_mut || param.is_read_ref {
-            continue;
-        }
-        inputs_by_type.entry(type_name.to_string()).or_default().push(param.name.clone());
-    }
-
-    for (type_name, inputs) in inputs_by_type {
-        let Some(outputs) = outputs_by_type.get(&type_name) else {
-            continue;
-        };
-        if inputs.len() == 1 && outputs.len() == 1 {
-            bindings.insert(inputs[0].clone(), outputs[0].clone());
-        }
-    }
-
-    bindings
-}
-
-fn action_output_binding_types(action: &ActionDef) -> HashMap<String, String> {
-    let mut bindings = HashMap::new();
-    for output in &action.outputs {
-        if let Some(type_name) = ast_named_cell_type_name(&output.ty) {
-            bindings.insert(output.name.clone(), type_name.to_string());
-        }
-    }
-    bindings
-}
-
-fn ast_named_cell_type_name(ty: &Type) -> Option<&str> {
-    match ty {
-        Type::Named(name) => Some(name.split('<').next().unwrap_or(name.as_str())),
-        _ => None,
-    }
-}
-
-fn action_consumed_bindings(action: &ActionDef) -> HashSet<String> {
-    let mut bindings = HashSet::new();
-    collect_consumed_bindings_from_stmts(&action.body, &mut bindings);
-    bindings
-}
-
-fn collect_consumed_bindings_from_stmts(stmts: &[Stmt], bindings: &mut HashSet<String>) {
-    for stmt in stmts {
-        match stmt {
-            Stmt::Let(let_stmt) => collect_consumed_bindings_from_expr(&let_stmt.value, bindings),
-            Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
-                collect_consumed_bindings_from_expr(expr, bindings)
-            }
-            Stmt::Return(ReturnStmt { value: None, .. }) => {}
-            Stmt::Break(_) | Stmt::Continue(_) => {}
-            Stmt::If(if_stmt) => {
-                collect_consumed_bindings_from_expr(&if_stmt.condition, bindings);
-                collect_consumed_bindings_from_stmts(&if_stmt.then_branch, bindings);
-                if let Some(else_branch) = &if_stmt.else_branch {
-                    collect_consumed_bindings_from_stmts(else_branch, bindings);
-                }
-            }
-            Stmt::For(for_stmt) => {
-                collect_consumed_bindings_from_expr(&for_stmt.iterable, bindings);
-                collect_consumed_bindings_from_stmts(&for_stmt.body, bindings);
-            }
-            Stmt::While(while_stmt) => {
-                collect_consumed_bindings_from_expr(&while_stmt.condition, bindings);
-                collect_consumed_bindings_from_stmts(&while_stmt.body, bindings);
-            }
-            Stmt::Borrow(borrow_stmt) => collect_consumed_bindings_from_stmts(&borrow_stmt.body, bindings),
-        }
-    }
-}
-
-fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<String>) {
-    match expr {
-        Expr::ReplaceRelation(relation) => {
-            bindings.insert(relation.before.clone());
-        }
-        Expr::Consume(consume) => {
-            if let Expr::Identifier(name) = consume.expr.as_ref() {
-                bindings.insert(name.clone());
-            }
-            collect_consumed_bindings_from_expr(&consume.expr, bindings);
-        }
-        Expr::Assign(assign) => {
-            collect_consumed_bindings_from_expr(&assign.target, bindings);
-            collect_consumed_bindings_from_expr(&assign.value, bindings);
-        }
-        Expr::Binary(binary) => {
-            collect_consumed_bindings_from_expr(&binary.left, bindings);
-            collect_consumed_bindings_from_expr(&binary.right, bindings);
-        }
-        Expr::Unary(unary) => collect_consumed_bindings_from_expr(&unary.expr, bindings),
-        Expr::Call(call) => {
-            collect_consumed_bindings_from_expr(&call.func, bindings);
-            for arg in &call.args {
-                collect_consumed_bindings_from_expr(arg, bindings);
-            }
-        }
-        Expr::FieldAccess(field) => collect_consumed_bindings_from_expr(&field.expr, bindings),
-        Expr::Index(index) => {
-            collect_consumed_bindings_from_expr(&index.expr, bindings);
-            collect_consumed_bindings_from_expr(&index.index, bindings);
-        }
-        Expr::Create(create) => {
-            for (_, value) in &create.fields {
-                collect_consumed_bindings_from_expr(value, bindings);
-            }
-            if let Some(lock) = &create.lock {
-                collect_consumed_bindings_from_expr(lock, bindings);
-            }
-        }
-        Expr::Destroy(destroy) => {
-            if let Expr::Identifier(name) = destroy.expr.as_ref() {
-                bindings.insert(name.clone());
-            }
-            collect_consumed_bindings_from_expr(&destroy.expr, bindings);
-        }
-        Expr::Claim(claim) => {
-            if let Expr::Identifier(name) = claim.receipt.as_ref() {
-                bindings.insert(name.clone());
-            }
-            collect_consumed_bindings_from_expr(&claim.receipt, bindings);
-        }
-        Expr::Settle(settle) => {
-            if let Expr::Identifier(name) = settle.expr.as_ref() {
-                bindings.insert(name.clone());
-            }
-            collect_consumed_bindings_from_expr(&settle.expr, bindings);
-        }
-        Expr::CreateUnique(create) => {
-            for (_, value) in &create.fields {
-                collect_consumed_bindings_from_expr(value, bindings);
-            }
-            if let Some(lock) = &create.lock {
-                collect_consumed_bindings_from_expr(lock, bindings);
-            }
-        }
-        Expr::ReplaceUnique(replace) => {
-            if let Expr::Identifier(name) = replace.expr.as_ref() {
-                bindings.insert(name.clone());
-            }
-            collect_consumed_bindings_from_expr(&replace.expr, bindings);
-            for (_, value) in &replace.fields {
-                collect_consumed_bindings_from_expr(value, bindings);
-            }
-        }
-        Expr::ReadRef(_) => {}
-        Expr::Assert(assert_expr) => {
-            collect_consumed_bindings_from_expr(&assert_expr.condition, bindings);
-            collect_consumed_bindings_from_expr(&assert_expr.message, bindings);
-        }
-        Expr::Require(require_expr) => {
-            collect_consumed_bindings_from_expr(&require_expr.condition, bindings);
-            if let Some(message) = &require_expr.message {
-                collect_consumed_bindings_from_expr(message, bindings);
-            }
-        }
-        Expr::RequireBlock(require_block) => {
-            for expr in &require_block.expressions {
-                collect_consumed_bindings_from_expr(expr, bindings);
-            }
-        }
-        Expr::Preserve(_) => {}
-        Expr::Block(stmts) => collect_consumed_bindings_from_stmts(stmts, bindings),
-        Expr::Tuple(items) | Expr::Array(items) => {
-            for item in items {
-                collect_consumed_bindings_from_expr(item, bindings);
-            }
-        }
-        Expr::If(if_expr) => {
-            collect_consumed_bindings_from_expr(&if_expr.condition, bindings);
-            collect_consumed_bindings_from_expr(&if_expr.then_branch, bindings);
-            collect_consumed_bindings_from_expr(&if_expr.else_branch, bindings);
-        }
-        Expr::Cast(cast) => collect_consumed_bindings_from_expr(&cast.expr, bindings),
-        Expr::Range(range) => {
-            collect_consumed_bindings_from_expr(&range.start, bindings);
-            collect_consumed_bindings_from_expr(&range.end, bindings);
-        }
-        Expr::StructInit(init) => {
-            for (_, value) in &init.fields {
-                collect_consumed_bindings_from_expr(value, bindings);
-            }
-        }
-        Expr::Match(match_expr) => {
-            collect_consumed_bindings_from_expr(&match_expr.expr, bindings);
-            for arm in &match_expr.arms {
-                collect_consumed_bindings_from_expr(&arm.value, bindings);
-            }
-        }
-        Expr::StdlibCall(call) => {
-            if let Some(name) = stdlib_lifecycle_consumed_binding(call) {
-                bindings.insert(name);
-            }
-        }
-        Expr::Identifier(_) | Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) => {}
-    }
-}
-
-fn stdlib_lifecycle_consumed_binding(call: &StdlibCallExpr) -> Option<String> {
-    let qualified = format!("std::{}::{}", call.namespace, call.name);
-    match qualified.as_str() {
-        "std::lifecycle::transfer" | "std::receipt::claim" | "std::lifecycle::settle" => match call.args.first() {
-            Some(Expr::Identifier(name)) => Some(name.clone()),
-            _ => None,
-        },
-        _ => None,
     }
 }
 
@@ -12151,6 +9212,84 @@ fn stable_u64_tag(value: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deferred_runtime_payloads_pair_with_the_closed_helper_inventory() {
+        use cellscript_artifact_checker::runtime_contract::{
+            KnownRuntimeFailure, RuntimeAvailability, RuntimeHelper, RuntimeReturnAbi,
+        };
+        use std::collections::{BTreeMap, BTreeSet};
+
+        let expected: BTreeMap<_, BTreeSet<_>> = [
+            ("ckb-sighash-all-deferred", ["__ckb_sighash_all"].into_iter().collect()),
+            (
+                "ckb-since-constraints-deferred",
+                ["__ckb_require_maturity", "__ckb_require_time", "__ckb_require_epoch_after", "__ckb_require_epoch_relative"]
+                    .into_iter()
+                    .collect(),
+            ),
+            ("ckb-occupied-capacity-deferred", ["__ckb_occupied_capacity"].into_iter().collect()),
+        ]
+        .into_iter()
+        .collect();
+        let mut actual = BTreeMap::<_, BTreeSet<_>>::new();
+        let mut fails = BTreeSet::new();
+        for &helper in RuntimeHelper::ALL {
+            let compiler = IrDeferredRuntimeFeature::from_helper(helper.symbol());
+            match helper.availability() {
+                RuntimeAvailability::Deferred(checker) => {
+                    let compiler = compiler.expect("every registered deferred helper needs compiler classification");
+                    assert_eq!(compiler.feature(), checker.feature(), "{} feature drift", helper.symbol());
+                    let failure = checker.failure();
+                    assert_eq!(compiler.runtime_error().code(), failure.code, "{} error-code drift", helper.symbol());
+                    assert_eq!(compiler.runtime_error().name(), failure.name, "{} error-name drift", helper.symbol());
+                    assert_eq!(helper.failure(), Some(failure));
+                    assert_eq!(helper.return_abi(), RuntimeReturnAbi::NoReturn);
+                    actual.entry(checker.feature()).or_default().insert(helper.symbol());
+                }
+                RuntimeAvailability::Fails(KnownRuntimeFailure::CollectionRuntimeUnsupported) => {
+                    assert_eq!(compiler, None, "known failure is not a deferred feature");
+                    assert_eq!(helper.deferred(), None);
+                    let failure = helper.failure().unwrap();
+                    assert_eq!(failure.code, CellScriptRuntimeError::CollectionRuntimeUnsupported.code());
+                    assert_eq!(failure.name, CellScriptRuntimeError::CollectionRuntimeUnsupported.name());
+                    assert_eq!(helper.return_abi(), RuntimeReturnAbi::NoReturn);
+                    fails.insert(helper.symbol());
+                }
+                RuntimeAvailability::Implemented => {
+                    assert_eq!(compiler, None);
+                    assert_eq!(helper.deferred(), None);
+                    assert_eq!(helper.failure(), None);
+                }
+            }
+        }
+        assert_eq!(actual, expected, "the three-family/six-helper deferred surface changed");
+        assert_eq!(fails, BTreeSet::from([BOUNDED_CONSUME_EACH_FAIL_CLOSED_HELPER, BOUNDED_CREATE_EACH_FAIL_CLOSED_HELPER]));
+        assert_eq!(
+            IrDeferredRuntimeFeature::from_helper("__ckb_spawn"),
+            None,
+            "retired bare spawn must not re-enter deferred inventory"
+        );
+    }
+
+    #[test]
+    fn witness_view_ir_syntax_matches_vectors_without_importing_admission_limits() {
+        let vectors: serde_json::Value =
+            serde_json::from_str(cellscript_artifact_checker::view_types::WITNESS_BYTES_VIEW_CONFORMANCE_VECTORS).unwrap();
+        for vector in vectors["cases"].as_array().unwrap() {
+            let ty = IrType::Named(vector["input"].as_str().unwrap().into());
+            let parsed = witness_bytes_view_parts(&ty);
+            assert_eq!(parsed.is_some(), vector["exact"].as_bool().unwrap(), "{ty:?}");
+            if let Some((owner, tag, maximum)) = parsed {
+                assert_eq!(owner, vector["owner"].as_str().unwrap());
+                assert_eq!(tag, vector["tag"].as_u64().unwrap());
+                assert_eq!(maximum, vector["maximum"].as_u64().unwrap());
+            }
+        }
+        assert_eq!(witness_bytes_view_parts(&IrType::U64), None);
+        assert_eq!(witness_bytes_view_parts(&IrType::Named("WitnessBytesView<raw,65537>".into())), Some(("raw", 0, 65537)));
+    }
+
     use crate::lexer::lex;
     use crate::parser::parse;
 
@@ -12177,7 +9316,7 @@ fn build() -> Pair { Pair { right: right(), left: left() } }
             .items
             .iter()
             .find_map(|item| match item {
-                IrItem::PureFn(function) if function.name == "build" => Some(function),
+                IrItem::Function(function) if function.name == "build" => Some(function),
                 _ => None,
             })
             .unwrap();
@@ -12524,7 +9663,6 @@ module bridge
 
 use dep::{issue}
 
-#[effect(Pure)]
 fn hidden_issue(amount: u64) -> u64 {
     return issue(amount)
 }
@@ -12548,17 +9686,17 @@ action run(amount: u64) -> u64 {
         resolver.register_module(bridge).unwrap();
         resolver.register_module(consumer.clone()).unwrap();
 
-        let error = generate_with_resolver(&consumer, &resolver, "consumer").unwrap_err();
-        assert!(
-            error.message.contains("declared effect Pure is too weak for function 'hidden_issue'")
-                && error.message.contains("inferred effect is Mutating"),
-            "unexpected error: {}",
-            error.message
-        );
+        let ir = generate_with_resolver(&consumer, &resolver, "consumer").unwrap();
+        assert!(ir
+            .items
+            .iter()
+            .any(|item| matches!(item, IrItem::Action(action) if action.name == "run" && action.effects.lifecycle_ops().iter().copied().collect::<std::collections::BTreeSet<_>>() == std::collections::BTreeSet::from([cellscript_artifact_checker::effect_facts::LifecycleOperation::Create, cellscript_artifact_checker::effect_facts::LifecycleOperation::Consume, cellscript_artifact_checker::effect_facts::LifecycleOperation::Destroy]))));
+        let helper = ir.source_callable_targets.get("hidden_issue").unwrap();
+        assert!(ir.items.iter().any(|item| matches!(item, IrItem::Function(function) if &function.name == helper && function.effects.lifecycle_ops().iter().copied().collect::<std::collections::BTreeSet<_>>() == std::collections::BTreeSet::from([cellscript_artifact_checker::effect_facts::LifecycleOperation::Create, cellscript_artifact_checker::effect_facts::LifecycleOperation::Consume, cellscript_artifact_checker::effect_facts::LifecycleOperation::Destroy]))));
     }
 
     #[test]
-    fn unique_lifecycle_operations_cannot_hide_behind_pure_effects() {
+    fn unique_lifecycle_operations_infer_creation_without_declarations() {
         let source = r#"
 module test
 
@@ -12568,7 +9706,6 @@ resource Token has store, create
     id: u64
 }
 
-#[effect(Pure)]
 action issue(id: u64) -> Token {
     verification
         create_unique<Token>(identity = field(id)) { id: id }
@@ -12577,23 +9714,11 @@ action issue(id: u64) -> Token {
         let ast = parse(&lex(source).unwrap()).unwrap();
         crate::types::check(&ast).unwrap();
         crate::flow::check(&ast).unwrap();
-        let action = ast
+        let ir = generate(&ast).unwrap();
+        assert!(ir
             .items
             .iter()
-            .find_map(|item| match item {
-                Item::Action(action) if action.name == "issue" => Some(action),
-                _ => None,
-            })
-            .expect("issue action");
-
-        assert_eq!(infer_action_effect_without_call_graph(action), EffectClass::Creating);
-        let error = generate(&ast).unwrap_err();
-        assert!(
-            error.message.contains("declared effect Pure is too weak for action 'issue'")
-                && error.message.contains("inferred effect is Creating"),
-            "unexpected error: {}",
-            error.message
-        );
+            .any(|item| matches!(item, IrItem::Action(action) if action.name == "issue" && action.effects.lifecycle_ops() == EffectFacts::lifecycle(cellscript_artifact_checker::effect_facts::LifecycleOperation::Create).lifecycle_ops())));
     }
 
     #[test]
@@ -12622,6 +9747,6 @@ fn make() -> Limit { Limit::Some(7) }
         let ir = generate_with_resolver(&consumer, &resolver, "consumer").unwrap();
         let layout = ir.enum_layouts.get("Limit").expect("imported enum layout");
         assert_eq!(layout.encoded_size, 9);
-        assert!(ir.items.iter().any(|item| matches!(item, IrItem::PureFn(function) if function.body.blocks.iter().any(|block| block.instructions.iter().any(|instruction| matches!(instruction, IrInstruction::EnumConstruct { enum_name, variant, .. } if enum_name == "Limit" && variant == "Some"))))));
+        assert!(ir.items.iter().any(|item| matches!(item, IrItem::Function(function) if function.body.blocks.iter().any(|block| block.instructions.iter().any(|instruction| matches!(instruction, IrInstruction::EnumConstruct { enum_name, variant, .. } if enum_name == "Limit" && variant == "Some"))))));
     }
 }

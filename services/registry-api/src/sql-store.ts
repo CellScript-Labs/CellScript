@@ -6,6 +6,7 @@ import {
   AUTHORISATION_SESSION_TERMINAL_RETENTION_HOURS,
   deriveRegistryEntryStatus,
   packageVersionRequiresReproduction,
+  rejectedSnapshotPurgeReason,
   type AuditEventInput,
   type AuditEventRecord,
   type AuthorisationSessionCompletionInput,
@@ -26,6 +27,7 @@ import {
   type PublishAdmissionInput,
   type ReservedNamespaceRecord,
   type RegistryStore,
+  type RejectedSnapshotPurge,
   type SnapshotRecord,
   type ScriptInterfaceCandidate,
   type ScriptInterfaceLookup,
@@ -813,12 +815,21 @@ export class SqlRegistryStore implements RegistryStore {
 
   async recordSnapshot(input: SnapshotRecord): Promise<void> {
     await this.withClient(async (client) => {
-      await client.query(
+      const admitted = await client.query(
         `insert into source_snapshots(snapshot_hash, r2_key, source_hash, size_bytes, content_type)
          values ($1, $2, $3, $4, $5)
-         on conflict (snapshot_hash) do nothing`,
+         on conflict (snapshot_hash) do update set snapshot_hash = excluded.snapshot_hash
+         where source_snapshots.hidden_at is null and source_snapshots.r2_key = excluded.r2_key
+         returning snapshot_hash`,
         [input.snapshot_hash, input.r2_key, input.source_hash, input.size_bytes, input.content_type],
       );
+      if (!admitted.rowCount) {
+        const existing = await client.query("select hidden_at from source_snapshots where snapshot_hash = $1", [input.snapshot_hash]);
+        if (existing.rows[0]?.hidden_at) {
+          throw new ApiError(409, "verification_snapshot_purged", "rejected source snapshot has been purged");
+        }
+        throw new ApiError(409, "snapshot_namespace_conflict", "snapshot content is already admitted under a different namespace object key");
+      }
     });
   }
 
@@ -826,9 +837,104 @@ export class SqlRegistryStore implements RegistryStore {
     return (await this.getSnapshots([snapshotHash])).get(snapshotHash) ?? null;
   }
 
-  async deleteSnapshot(snapshotHash: string): Promise<void> {
-    await this.withClient(async (client) => {
-      await client.query("delete from source_snapshots where snapshot_hash = $1", [snapshotHash]);
+  async purgeRejectedSnapshot(input: RejectedSnapshotPurge): Promise<boolean> {
+    if (input.retryable) return false;
+    return this.withClient(async (client) => {
+      // Transaction-scoped locks support transaction-pooling deployments. The
+      // first transaction makes logical removal durable before external I/O.
+      const candidate = await client.query(
+        `select pv.snapshot_hash from verification_jobs j
+         join package_versions pv using (namespace, name, version) where j.id = $1`,
+        [input.job_id],
+      );
+      const snapshotHash = candidate.rows[0]?.snapshot_hash;
+      if (typeof snapshotHash !== "string") return false;
+      const lock = `verification-rejected-purge:${snapshotHash}`;
+      const pendingReason = rejectedSnapshotPurgeReason(input);
+      let objectKey: string;
+      await client.query("begin");
+      try {
+        await client.query("set local synchronous_commit = on");
+        await client.query("select pg_advisory_xact_lock(hashtext($1))", [lock]);
+        // Retry takes this job lock too. Snapshot admission and reference
+        // changes serialize through the snapshot and package-version rows.
+        const locked = await client.query(
+          `select j.namespace, j.name, j.version, pv.snapshot_hash from verification_jobs j
+           join package_versions pv using (namespace, name, version)
+           where j.id = $1 and j.status = 'dead_letter' and j.evidence_hash is null
+             and j.attempt_count = $2 and j.last_error_code = $3 for update of j`,
+          [input.job_id, input.attempt_count, input.error_code],
+        );
+        const job = locked.rows[0];
+        if (!job || job.snapshot_hash !== snapshotHash) { await client.query("commit"); return false; }
+        const snapshots = await client.query(
+          `select ss.snapshot_hash, ss.r2_key, ss.hidden_at, ss.hidden_reason
+           from source_snapshots ss join package_versions pv using (snapshot_hash)
+           where pv.namespace = $1 and pv.name = $2 and pv.version = $3 for update of ss`,
+          [job.namespace, job.name, job.version],
+        );
+        const snapshot = snapshots.rows[0];
+        if (!snapshot || snapshot.snapshot_hash !== snapshotHash
+          || (snapshot.hidden_at && snapshot.hidden_reason !== pendingReason)) {
+          await client.query("commit"); return false;
+        }
+        const releases = await client.query(
+          `select pv.namespace, pv.name, pv.version, pv.verification_status, j.status as job_status, j.evidence_hash
+           from package_versions pv left join verification_jobs j using (namespace, name, version)
+           where pv.snapshot_hash = $1 for update of pv`, [snapshotHash],
+        );
+        const current = releases.rows.find((row) => row.namespace === job.namespace && row.name === job.name && row.version === job.version);
+        if (!current || !["pending", "rejected"].includes(current.verification_status)) {
+          await client.query("commit"); return false;
+        }
+        const protectedReference = releases.rows.some((row) => row !== current
+          && (row.verification_status !== "rejected" || (row.job_status && row.job_status !== "dead_letter") || row.evidence_hash));
+        await client.query(
+          `update package_versions set verification_status = 'rejected'
+           where namespace = $1 and name = $2 and version = $3`,
+          [job.namespace, job.name, job.version],
+        );
+        if (protectedReference) { await client.query("commit"); return false; }
+        await client.query(
+          `update source_snapshots set hidden_at = coalesce(hidden_at, now()), hidden_reason = $2
+           where snapshot_hash = $1`, [snapshotHash, pendingReason],
+        );
+        await client.query(
+          `update package_versions set source_purged_at = coalesce(source_purged_at, now())
+           where snapshot_hash = $1`, [snapshotHash],
+        );
+        objectKey = String(snapshot.r2_key);
+        // Do not start irreversible I/O unless COMMIT is acknowledged. A
+        // failed/unknown COMMIT is never compensated by unhiding the row.
+        await client.query("commit");
+      } catch (error) {
+        await client.query("rollback").catch(() => {});
+        throw error;
+      }
+      // Serialize cleanup in a new transaction. Its rollback cannot undo the
+      // durable tombstone, even if deletion succeeded before an error arrived.
+      await client.query("begin");
+      try {
+        await client.query("select pg_advisory_xact_lock(hashtext($1))", [lock]);
+        const pending = await client.query(
+          `select r2_key from source_snapshots
+           where snapshot_hash = $1 and hidden_at is not null and hidden_reason = $2 for update`,
+          [snapshotHash, pendingReason],
+        );
+        if (pending.rows[0]?.r2_key !== objectKey) { await client.query("commit"); return false; }
+        await input.delete_object(objectKey);
+        const completed = await client.query(
+          `update source_snapshots set hidden_reason = 'verification_rejected'
+           where snapshot_hash = $1 and hidden_at is not null and hidden_reason = $2`,
+          [snapshotHash, pendingReason],
+        );
+        if (completed.rowCount !== 1) throw new Error("snapshot purge tombstone changed during object deletion");
+        await client.query("commit");
+        return true;
+      } catch (error) {
+        await client.query("rollback").catch(() => {});
+        throw error;
+      }
     });
   }
 
@@ -1005,7 +1111,9 @@ export class SqlRegistryStore implements RegistryStore {
   async recordPackageVersion(input: PackageVersionRecord): Promise<PackageVersionRecord> {
     await this.withClient(async (client) => {
       const result = await client.query(
-        `insert into package_versions(
+        `with snapshot as (
+           select snapshot_hash from source_snapshots where snapshot_hash = $17 and hidden_at is null for share
+         ) insert into package_versions(
            namespace, name, version, status, artifact, verification_status, deployment_status, availability_status,
            source_hash, manifest_hash,
            edition, compatibility_profile_hash,
@@ -1013,8 +1121,8 @@ export class SqlRegistryStore implements RegistryStore {
            snapshot_hash, direct_url,
            registry_environment, chain_network, expires_at, purge_after
          )
-         values ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17, $18,
-                 $19, $20, $21, $22)
+         select $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17, $18,
+                $19, $20, $21::timestamptz, $22::timestamptz from snapshot
          on conflict (namespace, name, version) do nothing
          returning namespace`,
         [
@@ -1043,6 +1151,10 @@ export class SqlRegistryStore implements RegistryStore {
         ],
       );
       if (result.rowCount !== 1) {
+        const source = await client.query("select hidden_at from source_snapshots where snapshot_hash = $1", [input.snapshot_hash]);
+        if (source.rows[0]?.hidden_at) {
+          throw new ApiError(409, "verification_snapshot_purged", "rejected source snapshot has been purged");
+        }
         throw new ApiError(409, "artifact_release_exists", "artifact release already exists and cannot be overwritten");
       }
     });
@@ -1094,11 +1206,14 @@ export class SqlRegistryStore implements RegistryStore {
         // key must not silently bind this release to another tenant's
         // object lifecycle.
         const admittedSnapshot = await client.query(
-          `select r2_key from source_snapshots where snapshot_hash = $1`,
+          `select r2_key, hidden_at from source_snapshots where snapshot_hash = $1 for update`,
           [input.snapshot.snapshot_hash],
         );
         if (admittedSnapshot.rows[0]?.r2_key !== input.snapshot.r2_key) {
           throw new ApiError(409, "snapshot_namespace_conflict", "snapshot content is already admitted under a different namespace object key");
+        }
+        if (admittedSnapshot.rows[0]?.hidden_at) {
+          throw new ApiError(409, "verification_snapshot_purged", "rejected source snapshot has been purged");
         }
         const insertedVersion = await client.query(
           `insert into package_versions(
@@ -2330,6 +2445,15 @@ export class SqlRegistryStore implements RegistryStore {
           const exists = await client.query("select status from verification_jobs where id = $1", [input.job_id]);
           if (!exists.rows[0]) throw new ApiError(404, "verification_job_not_found", "verification job was not found");
           throw new ApiError(409, "verification_job_not_dead_letter", "only dead-letter verification jobs can be retried manually");
+        }
+        const source = await client.query(
+          `select ss.hidden_at from source_snapshots ss
+           join package_versions pv using (snapshot_hash)
+           where pv.namespace = $1 and pv.name = $2 and pv.version = $3 for share of ss`,
+          [row.namespace, row.name, row.version],
+        );
+        if (!source.rows[0] || source.rows[0].hidden_at) {
+          throw new ApiError(409, "verification_snapshot_purged", "purged rejected uploads cannot be retried; publish a corrected release");
         }
         await client.query(
           `insert into audit_events(request_id, event_type, namespace, name, version, data)

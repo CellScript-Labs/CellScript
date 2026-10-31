@@ -342,7 +342,7 @@ fn fixed_policy_receipt_recomputes_complete_finite_fields_from_actual_inputs() {
             let checked = fixed_policy_receipt(&fixture, vec![1, 2, 3]).unwrap();
             checked.check_unchanged_inputs(bytes.each_ref().map(Vec::as_slice), &raw, 0, &script).unwrap();
             let record: Value = serde_json::from_slice(&checked.canonical_bytes().unwrap()).unwrap();
-            assert_eq!(record["schema"], "cellscript-fixed-policy-interface-receipt-v1");
+            assert_eq!(record["schema"], "cellscript-fixed-policy-interface-receipt-v3");
             assert_eq!(record["declared_interface"], fixture.metadata["public_interface"]);
             assert_eq!(
                 record["entry_contract"],
@@ -362,7 +362,7 @@ fn fixed_policy_receipt_recomputes_complete_finite_fields_from_actual_inputs() {
             assert!(!checked.artifact_report().semantic_equivalence_claimed);
             assert_eq!(checked.artifact_report().chain_evidence, cellscript_artifact_checker::EvidenceState::NotProvided);
             assert_eq!(checked.artifact_report().ckb_vm_evidence, cellscript_artifact_checker::EvidenceState::NotExecuted);
-            let mut material = b"cellscript-fixed-policy-interface-receipt-id-v1\0".to_vec();
+            let mut material = b"cellscript-fixed-policy-interface-receipt-id-v3\0".to_vec();
             material.extend_from_slice(&checked.canonical_bytes().unwrap());
             assert_eq!(checked.identity(), code_origin_hex(&cellscript_artifact_checker::ckb_blake2b256(&material)));
             assert_eq!(checked.identity(), fixed_policy_receipt(&fixture, vec![1, 2, 3]).unwrap().identity());
@@ -1692,7 +1692,7 @@ impl Fixture {
     }
 
     fn rebind_interface_identity(&mut self) {
-        let canonical = cellscript::package::registry::canonical_json_value(&self.metadata["public_interface"]);
+        let canonical = cellscript::canonical_json::canonical_json_value(&self.metadata["public_interface"]);
         let hash = cellscript_artifact_checker::hex_encode(&cellscript_artifact_checker::ckb_blake2b256(
             &serde_json::to_vec(&canonical).unwrap(),
         ));
@@ -1898,12 +1898,11 @@ fn interface_inspection_rejects_unknown_fields_after_all_outer_hashes_are_reboun
             changed.metadata["public_interface"]["unrecognized"] = true.into();
         }
         changed.rebind_interface_identity();
-        // Existing artifact binding accepts this otherwise consistent record.
-        // The new projection must reject losing the unknown declaration field.
-        changed.check().unwrap();
+        // Both current artifact binding and interface inspection reject losing
+        // a declaration field, even when every outer digest is rebound.
+        assert_eq!(changed.check().unwrap_err().code, CheckerRejectionCode::V2410MetadataBindingMismatch);
         let error = inspect(&changed).unwrap_err();
         assert_eq!(error.code, CheckerRejectionCode::V2410MetadataBindingMismatch);
-        assert!(error.message.contains("discard unknown fields"));
     }
 }
 
@@ -1959,7 +1958,7 @@ fn interface_layout_cannot_be_forged_by_rebinding_its_inner_and_outer_hashes() {
             _ => unreachable!(),
         }
         let layout = serde_json::json!([ty["kind"], ty["fields"], ty["variants"]]);
-        let canonical = cellscript::package::registry::canonical_json_value(&layout);
+        let canonical = cellscript::canonical_json::canonical_json_value(&layout);
         ty["layout_identity"] = cellscript_artifact_checker::hex_encode(&cellscript_artifact_checker::ckb_blake2b256(
             &serde_json::to_vec(&canonical).unwrap(),
         ))
@@ -2446,7 +2445,7 @@ fn nominal_catalog_rejects_rebound_scopes_shapes_and_public_omissions() {
                     ty["variants"] = serde_json::json!([]);
                     ty["value_abilities"] = serde_json::json!([]);
                     let layout = serde_json::json!(["struct", [], []]);
-                    let canonical = cellscript::package::registry::canonical_json_value(&layout);
+                    let canonical = cellscript::canonical_json::canonical_json_value(&layout);
                     ty["layout_identity"] = cellscript_artifact_checker::hex_encode(&cellscript_artifact_checker::ckb_blake2b256(
                         &serde_json::to_vec(&canonical).unwrap(),
                     ))
@@ -2465,7 +2464,7 @@ fn nominal_catalog_rejects_rebound_scopes_shapes_and_public_omissions() {
                 let callables = changed.metadata["public_interface"]["callables"].as_array().unwrap();
                 let builder =
                     callables.iter().map(|callable| (&callable["identity"], &callable["builder_contract_hash"])).collect::<Vec<_>>();
-                let canonical = cellscript::package::registry::canonical_json_value(&serde_json::to_value(builder).unwrap());
+                let canonical = cellscript::canonical_json::canonical_json_value(&serde_json::to_value(builder).unwrap());
                 changed.metadata["public_interface"]["builder_contract_hash"] = cellscript_artifact_checker::hex_encode(
                     &cellscript_artifact_checker::ckb_blake2b256(&serde_json::to_vec(&canonical).unwrap()),
                 )
@@ -2580,7 +2579,7 @@ fn universal_abilities_reject_weakened_parameter_minima_without_any_concrete_ins
             .unwrap();
         pair["fields"][0]["type"] = "Pair<T>".into();
         let layout = serde_json::json!([pair["kind"], pair["fields"], pair["variants"]]);
-        let canonical = cellscript::package::registry::canonical_json_value(&layout);
+        let canonical = cellscript::canonical_json::canonical_json_value(&layout);
         pair["layout_identity"] = cellscript_artifact_checker::hex_encode(&cellscript_artifact_checker::ckb_blake2b256(
             &serde_json::to_vec(&canonical).unwrap(),
         ))
@@ -2716,7 +2715,7 @@ fn instantiated_interface_templates_reject_rebound_layout_and_signature_substitu
                 callable["params"][0]["type"] = serde_json::json!(if mutation == "parameter" { "BlockNumber" } else { "u64" });
                 // Generic templates have no source-name entry in the execution
                 // metadata; recompute their declaration builder digest as well.
-                let canonical = cellscript::package::registry::canonical_json_value(&callable["params"]);
+                let canonical = cellscript::canonical_json::canonical_json_value(&callable["params"]);
                 callable["builder_contract_hash"] = cellscript_artifact_checker::hex_encode(
                     &cellscript_artifact_checker::ckb_blake2b256(&serde_json::to_vec(&canonical).unwrap()),
                 )
@@ -2728,7 +2727,7 @@ fn instantiated_interface_templates_reject_rebound_layout_and_signature_substitu
                 .iter()
                 .map(|entry| serde_json::json!([entry["identity"], entry["builder_contract_hash"]]))
                 .collect::<Vec<_>>();
-            let canonical = cellscript::package::registry::canonical_json_value(&serde_json::json!(contracts));
+            let canonical = cellscript::canonical_json::canonical_json_value(&serde_json::json!(contracts));
             changed.metadata["public_interface"]["builder_contract_hash"] = cellscript_artifact_checker::hex_encode(
                 &cellscript_artifact_checker::ckb_blake2b256(&serde_json::to_vec(&canonical).unwrap()),
             )
@@ -2752,7 +2751,7 @@ fn instantiated_interface_templates_reject_rebound_layout_and_signature_substitu
                 _ => unreachable!(),
             }
             let canonical =
-                cellscript::package::registry::canonical_json_value(&serde_json::json!([ty["kind"], ty["fields"], ty["variants"]]));
+                cellscript::canonical_json::canonical_json_value(&serde_json::json!([ty["kind"], ty["fields"], ty["variants"]]));
             ty["layout_identity"] = cellscript_artifact_checker::hex_encode(&cellscript_artifact_checker::ckb_blake2b256(
                 &serde_json::to_vec(&canonical).unwrap(),
             ))
@@ -2836,7 +2835,7 @@ fn interface_variant_cardinality_cannot_be_forged_by_rebinding_layout_hashes() {
             _ => unreachable!(),
         }
         let layout = serde_json::json!([ty["kind"], ty["fields"], ty["variants"]]);
-        let canonical = cellscript::package::registry::canonical_json_value(&layout);
+        let canonical = cellscript::canonical_json::canonical_json_value(&layout);
         ty["layout_identity"] = cellscript_artifact_checker::hex_encode(&cellscript_artifact_checker::ckb_blake2b256(
             &serde_json::to_vec(&canonical).unwrap(),
         ))
@@ -2881,7 +2880,7 @@ fn interface_nested_type_arguments_cannot_be_forged_by_rebinding_layout_hashes()
             ty["variants"][1]["fields"][0] = serde_json::json!("Pair<Hash>");
         }
         let layout = serde_json::json!([ty["kind"], ty["fields"], ty["variants"]]);
-        let canonical = cellscript::package::registry::canonical_json_value(&layout);
+        let canonical = cellscript::canonical_json::canonical_json_value(&layout);
         ty["layout_identity"] = cellscript_artifact_checker::hex_encode(&cellscript_artifact_checker::ckb_blake2b256(
             &serde_json::to_vec(&canonical).unwrap(),
         ))

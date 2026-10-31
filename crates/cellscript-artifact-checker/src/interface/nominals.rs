@@ -224,7 +224,8 @@ pub(crate) fn verify_catalog(record: &TypedSemanticRecord) -> Result<(), Checker
             || callable.outputs.len() > 64
             || callable.type_parameters.len() > 8
             || !matches!(callable.kind.as_str(), "action" | "function" | "lock")
-            || !matches!(callable.declared_effect.as_str(), "Pure" | "ReadOnly" | "Mutating" | "Creating" | "Destroying")
+            || callable.effects.as_ref().is_some_and(|facts| facts.validate().is_err())
+            || callable.type_parameters.is_empty() != callable.effects.is_some()
             || (callable.kind != "action" && !callable.outputs.is_empty())
             || (callable.kind != "function" && !callable.type_parameters.is_empty())
         {
@@ -358,7 +359,7 @@ pub(super) fn check_public(interface: &PackageInterface, record: &TypedSemanticR
             || source.params != callable.params
             || source.outputs != callable.outputs
             || source.return_type != callable.return_type
-            || source.declared_effect != callable.effect
+            || source.effects != callable.effects
         {
             return Err(mismatch("public callable differs from its retained declaration contract"));
         }

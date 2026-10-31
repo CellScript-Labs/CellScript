@@ -180,7 +180,6 @@ fn optimizer_pruned_helpers_keep_declarations_without_inventing_execution() {
         let next = project(BASE, opt);
         let wire: serde_json::Value = serde_json::from_slice(&next.canonical_bytes().unwrap()).unwrap();
         for key in [
-            "callable:projection::unused",
             "callable:projection::identity",
             "nominal:projection::Envelope",
             "nominal:projection::Box",
@@ -190,7 +189,22 @@ fn optimizer_pruned_helpers_keep_declarations_without_inventing_execution() {
         }
         if let Some(helper) = wire["contracts"].get("effective:projection::unused") {
             assert_eq!(helper["dispatch"]["kind"], "retained-helper");
+            assert_eq!(
+                wire["contracts"]["callable:projection::unused"]["effects"],
+                serde_json::json!({
+                    "context_reads": [], "lifecycle_ops": [], "process_ops": []
+                })
+            );
+        } else {
+            assert!(wire["contracts"]["callable:projection::unused"]["effects"].is_null());
         }
+        assert_eq!(
+            baseline["contracts"]["callable:projection::unused"]["params"],
+            wire["contracts"]["callable:projection::unused"]["params"]
+        );
+        // A generic declaration has no universal checked effect proof merely
+        // because one concrete instance happened to be retained.
+        assert!(wire["contracts"]["callable:projection::identity"]["effects"].is_null());
     }
     let optimized = project(BASE, cellscript::CompilerDiagnostics::default());
     let wire: serde_json::Value = serde_json::from_slice(&optimized.canonical_bytes().unwrap()).unwrap();
@@ -200,17 +214,29 @@ fn optimizer_pruned_helpers_keep_declarations_without_inventing_execution() {
 #[test]
 fn inferred_effects_may_only_become_more_restrictive() {
     for opt in [cellscript::CompilerDiagnostics::default(), cellscript::CompilerDiagnostics::without_optimizations()] {
-        let pure = project("module effects\npublic action verify() { verification require true }", opt);
+        let local = project("module effects\npublic action verify() { verification require true }", opt);
         let read = project("module effects\npublic action verify() { verification let amount = ckb::cell_capacity(source::input(0)) require amount > 0 }", opt);
-        let pure_wire: serde_json::Value = serde_json::from_slice(&pure.canonical_bytes().unwrap()).unwrap();
+        let local_wire: serde_json::Value = serde_json::from_slice(&local.canonical_bytes().unwrap()).unwrap();
         let read_wire: serde_json::Value = serde_json::from_slice(&read.canonical_bytes().unwrap()).unwrap();
-        assert_eq!(pure_wire["contracts"]["callable:effects::verify"], read_wire["contracts"]["callable:effects::verify"]);
-        assert_eq!(pure_wire["contracts"]["effective:effects::verify"]["effect"], "Pure");
-        assert_eq!(read_wire["contracts"]["effective:effects::verify"]["effect"], "ReadOnly");
+        assert_eq!(
+            local_wire["contracts"]["callable:effects::verify"]["effects"],
+            serde_json::json!({
+                "context_reads": [], "lifecycle_ops": [], "process_ops": []
+            })
+        );
+        assert_eq!(
+            read_wire["contracts"]["callable:effects::verify"]["effects"],
+            serde_json::json!({
+                "context_reads": [{"source": {"kind": "input"}, "access": "capacity"}],
+                "lifecycle_ops": [], "process_ops": []
+            })
+        );
+        assert!(local_wire["contracts"]["effective:effects::verify"].get("effects").is_none());
+        assert!(read_wire["contracts"]["effective:effects::verify"].get("effects").is_none());
         // A candidate doing strictly less than the required effect still
         // honors the baseline's bound; the reverse direction rejects.
-        read.check_required_contracts(&pure).unwrap();
-        assert!(pure.check_required_contracts(&read).is_err());
+        read.check_required_contracts(&local).unwrap();
+        assert!(local.check_required_contracts(&read).is_err());
     }
 }
 

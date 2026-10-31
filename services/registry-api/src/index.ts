@@ -4129,15 +4129,15 @@ async function appendFailureAuditEvent(
   // Unauthenticated callers can generate failures at network speed; one
   // audit row per rejection is an unbounded storage write. Auth failures
   // stay auditable but rate-bounded per source.
-  if (eventType === "auth.failure") {
-    const ipHash = await requestIpHash(request);
-    const quotaKey = ipHash ? `auth-failure-audit:${ipHash}` : "auth-failure-audit:unknown";
-    const allowed = await store.tryConsumeQuota(quotaKey, "auth_failure_audit", 20, 60 * 60);
-    if (!allowed) {
-      return;
-    }
-  }
   try {
+    if (eventType === "auth.failure") {
+      const ipHash = await requestIpHash(request);
+      const quotaKey = ipHash ? `auth-failure-audit:${ipHash}` : "auth-failure-audit:unknown";
+      const allowed = await store.tryConsumeQuota(quotaKey, "auth_failure_audit", 20, 60 * 60);
+      if (!allowed) {
+        return;
+      }
+    }
     const url = new URL(request.url);
     const ipHash = await requestIpHash(request);
     const userAgent = request.headers.get("user-agent") ?? undefined;

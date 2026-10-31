@@ -70,7 +70,7 @@ pub(crate) fn bind_artifact_policy(module: &mut IrModule, declaration: &Artifact
         .items
         .iter()
         .filter_map(|item| match item {
-            IrItem::PureFn(helper) => Some((helper.name.as_str(), helper)),
+            IrItem::Function(helper) => Some((helper.name.as_str(), helper)),
             _ => None,
         })
         .collect::<BTreeMap<_, _>>();
@@ -328,7 +328,7 @@ fn validate_common_call_depth<'a>(
     body: &'a IrBody,
     owner: &'a str,
     actions: &BTreeMap<&str, &'a IrAction>,
-    helpers: &BTreeMap<&str, &'a IrPureFn>,
+    helpers: &BTreeMap<&str, &'a IrFunction>,
     active: &mut BTreeSet<&'a str>,
     suffix_depths: &mut BTreeMap<&'a str, usize>,
 ) -> Result<usize> {
@@ -372,7 +372,7 @@ fn validate_calls<'a>(
     owner: &str,
     allow_unretained: bool,
     actions: &BTreeMap<&'a str, &'a IrAction>,
-    helpers: &BTreeMap<&'a str, &'a IrPureFn>,
+    helpers: &BTreeMap<&'a str, &'a IrFunction>,
     cell_types: &BTreeSet<&str>,
     module: &IrModule,
     visited: &mut BTreeSet<String>,
@@ -449,7 +449,7 @@ fn validate_bounded_signature(name: &str, params: &[IrParam], return_type: Optio
 fn validate_bounded_body(
     name: &str,
     body: &IrBody,
-    helpers: &BTreeMap<&str, &IrPureFn>,
+    helpers: &BTreeMap<&str, &IrFunction>,
     actions: &BTreeMap<&str, &IrAction>,
 ) -> Result<()> {
     if has_lifecycle(body) || !body.cell_bindings.is_empty() || !body.bounded_collection_ops.is_empty() {
@@ -688,7 +688,7 @@ action common_graph() {
                 .items
                 .iter()
                 .find_map(|item| match item {
-                    IrItem::PureFn(helper) if helper.name == callee => Some(&helper.body),
+                    IrItem::Function(helper) if helper.name == callee => Some(&helper.body),
                     IrItem::Action(action) if action.name == callee => Some(&action.body),
                     _ => None,
                 })
@@ -765,7 +765,7 @@ action common_graph() {
             .items
             .iter()
             .find_map(|item| match item {
-                IrItem::PureFn(helper) if helper.name == "unit" => Some(helper.clone()),
+                IrItem::Function(helper) if helper.name == "unit" => Some(helper.clone()),
                 _ => None,
             })
             .unwrap();
@@ -776,7 +776,7 @@ action common_graph() {
             if let Some(next) = next {
                 helper.body.blocks[0].instructions.push(IrInstruction::Call { dest: None, func: next, args: Vec::new() });
             }
-            module.items.push(IrItem::PureFn(helper));
+            module.items.push(IrItem::Function(helper));
         }
         format!("{prefix}1")
     }
@@ -840,7 +840,7 @@ action common_graph() {
                 .items
                 .iter_mut()
                 .find_map(|item| match item {
-                    IrItem::PureFn(helper) if helper.name == "checked" => Some(helper),
+                    IrItem::Function(helper) if helper.name == "checked" => Some(helper),
                     _ => None,
                 })
                 .unwrap();

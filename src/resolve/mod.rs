@@ -263,6 +263,12 @@ impl ModuleResolver {
     }
 
     pub fn resolve_type(&self, module: &str, name: &str) -> Option<TypeDef> {
+        self.resolve_type_with_module(module, name).map(|(_, definition)| definition)
+    }
+
+    /// Preserve the defining owner while localizing field spellings for the
+    /// requester. A local import alias is not a declaration identity.
+    pub(crate) fn resolve_type_with_module(&self, module: &str, name: &str) -> Option<(String, TypeDef)> {
         if let Some((target_module, symbol)) = name.rsplit_once("::") {
             if !self.symbol_accessible(module, target_module, symbol) {
                 return None;
@@ -271,12 +277,12 @@ impl ModuleResolver {
                 .symbol_tables
                 .get(target_module)
                 .and_then(|table| table.types.get(symbol).cloned())
-                .map(|ty| self.localize_type_def(module, target_module, ty));
+                .map(|ty| (target_module.to_string(), self.localize_type_def(module, target_module, ty)));
         }
 
         if let Some(table) = self.symbol_tables.get(module) {
             if let Some(ty) = table.types.get(name) {
-                return Some(ty.clone());
+                return Some((module.to_string(), ty.clone()));
             }
 
             if let Some(full_path) = table.imported.get(name)
@@ -289,7 +295,7 @@ impl ModuleResolver {
                     .symbol_tables
                     .get(target_module)
                     .and_then(|target_table| target_table.types.get(symbol).cloned())
-                    .map(|ty| self.localize_type_def(module, target_module, ty));
+                    .map(|ty| (target_module.to_string(), self.localize_type_def(module, target_module, ty)));
             }
         }
 
@@ -703,8 +709,6 @@ mod tests {
                         outputs: Vec::new(),
                         state_edges: Vec::new(),
                         body: vec![Stmt::Return(ReturnStmt { value: Some(Expr::Integer(0)), span: Span::default() })],
-                        effect: EffectClass::Pure,
-                        effect_declared: false,
                         scheduler_hint: None,
                         next_surface: None,
                         doc_comment: None,

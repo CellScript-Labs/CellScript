@@ -255,9 +255,17 @@
       "status": "bounded"
     },
     {
+      "conditions": "Resolved immutable nested values and derived views with admitted record layouts; decoding and lifetime evidence remain mandatory.",
+      "fail_closed_features": [],
+      "id": "type:Nested",
+      "layer": "type",
+      "production_policy": "accepted only when the shape classifier reports no fail-closed feature",
+      "status": "bounded"
+    },
+    {
       "conditions": "Resolved helper callable.",
       "fail_closed_features": [],
-      "id": "ir-item:pure-fn",
+      "id": "ir-item:function",
       "layer": "ir-item",
       "production_policy": "accepted only when the shape classifier reports no fail-closed feature",
       "status": "bounded"
@@ -559,7 +567,7 @@
       "status": "bounded"
     },
     {
-      "conditions": "Canonical transaction sighash construction is deferred. Audit artifacts unconditionally exit with runtime error 66 when called, including discarded results and helper calls.",
+      "conditions": "The generic env::sighash_all contract is deferred and unconditionally aborts with runtime error 66. The separately bounded env::sighash_all_zero_lock signing-message domain remains executable.",
       "fail_closed_features": [
         "ckb-sighash-all-deferred"
       ],
@@ -569,7 +577,7 @@
       "status": "reserved"
     },
     {
-      "conditions": "CKB since/epoch maturity constraints are deferred. Artifacts unconditionally exit with runtime error 86 when require_maturity, require_time, require_epoch_after, or require_epoch_relative runs, including discarded results and helper calls.",
+      "conditions": "Legacy require_maturity, require_time, require_epoch_after and require_epoch_relative unconditionally abort with runtime error 86. Typed InputView.since reads, checked decoding and temporal comparisons remain executable.",
       "fail_closed_features": [
         "ckb-since-constraints-deferred"
       ],
@@ -579,7 +587,7 @@
       "status": "reserved"
     },
     {
-      "conditions": "The compile-visible occupied-capacity floor is deferred. Artifacts unconditionally exit with runtime error 87 when occupied_capacity runs, including discarded results and helper calls.",
+      "conditions": "The legacy compile-visible occupied_capacity floor unconditionally aborts with runtime error 87. The separate ckb::cell_occupied_capacity reads actual Cell occupied capacity; witnesses do not contribute to occupied capacity.",
       "fail_closed_features": [
         "ckb-occupied-capacity-deferred"
       ],
@@ -587,6 +595,14 @@
       "layer": "artifact-policy",
       "production_policy": "rejected by production policy",
       "status": "reserved"
+    },
+    {
+      "conditions": "Bare named spawn has no child binding or argument/descriptor transport. Use a manifest-bound CellDep spawn API with checked transport. Resolved user functions named spawn remain ordinary calls.",
+      "fail_closed_features": [],
+      "id": "source:bare-spawn",
+      "layer": "source",
+      "production_policy": "rejected by semantic checking (E1021)",
+      "status": "rejected"
     },
     {
       "conditions": "Explicit Input or CellDep read-only Cell view.",

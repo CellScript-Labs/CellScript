@@ -47,7 +47,7 @@ impl IrAllocatedValue {
     }
 }
 
-impl IrGenerator {
+impl IrGenerator<'_> {
     pub(super) fn lower_allocated_for(
         &mut self,
         stmt: &ForStmt,

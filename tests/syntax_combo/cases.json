@@ -161,8 +161,8 @@
     {
       "id": "SCA-BUG-0.22-BORROW-EFFECT-COMPAT",
       "min_mode": "quick",
-      "name": "borrowed linear views may reach only Pure or ReadOnly helpers with dedicated &T parameters",
-      "release_boundary": "borrow calls are checked against authenticated callable effects and explicit read-only reference parameters",
+      "name": "borrowed linear views require observation-only helpers with dedicated &T parameters",
+      "release_boundary": "borrow calls are checked against authenticated callable effect facts and explicit read-only reference parameters",
       "required_cases": [
         "seed-explicit-borrow",
         "seed-explicit-borrow-effect-reject"

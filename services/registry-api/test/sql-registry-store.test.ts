@@ -5,6 +5,7 @@ import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { SqlRegistryStore } from "../src/sql-store";
+import { preparePostgresExtensions } from "./postgres-fixture";
 import {
   AUTH_ACTION,
   AUTH_PROTOCOL,
@@ -30,6 +31,7 @@ describePostgres("SqlRegistryStore PostgreSQL contract", () => {
   beforeAll(async () => {
     admin = new Client({ connectionString: databaseUrl! });
     await admin.connect();
+    await preparePostgresExtensions(admin);
     await admin.query(`create schema ${schema}`);
     scopedConnectionString = schemaConnectionString(databaseUrl!, schema);
   });

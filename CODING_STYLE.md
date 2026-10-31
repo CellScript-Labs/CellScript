@@ -102,9 +102,9 @@ implicit backend contracts more implicit.
   internal lowering helpers must be accepted and correctly encoded by the
   internal assembler.
 - The current Tier 1 real instruction forms are `add`, `addi`, `sub`, `and`,
-  `andi`, `or`, `xor`, `mul`, `div`, `divu`, `rem`, `remu`, `slt`, `sltu`,
+  `andi`, `or`, `xor`, `mul`, `mulhu`, `div`, `divu`, `rem`, `remu`, `slt`, `sltu`,
   `xori`, `ld`, `lbu`, `sb`, `sh`, `sw`, `sd`, `sll`, `srl`, `sra`, `slli`,
-  `srli`, `srai`, `beq`, `bne`, `blt`, `bge`, `bltu`, `bgeu`, `ret`, and
+  `srli`, `srai`, `rori`, `roriw`, `beq`, `bne`, `blt`, `bge`, `bltu`, `bgeu`, `ret`, and
   `ecall`.
 - Treat pseudo-instructions and aliases as explicit API. `li`, `la`, `call`,
   `j`, `mv`, `seqz`, `snez`, `neg`, `sgt`, `sgtu`, `bgt`, `bgez`, `beqz`, and
@@ -159,6 +159,20 @@ implicit backend contracts more implicit.
   checker, IR, optimizer, assembler, and code generator. Production
   dependencies may provide only bounded parsing, versioned schema, canonical
   hashing, stable diagnostics, and minimal ELF utilities.
+- Shared compiler/checker code may define closed wire vocabulary, canonical
+  syntax and immutable constants. Keep source/resolver interpretation, fact
+  reconstruction traversals, machine evidence and admission decisions independent.
+  A shared descriptor is a trusted description, not proof that a helper body
+  satisfies it. Document this trust boundary and test hostile machine mutations.
+- WitnessBytesView syntax belongs to the checker-owned bounded grammar and
+  shared conformance vectors. Callers select explicit whitespace syntax and
+  independently enforce source/extent/ownership rules. Do not introduce private
+  copies of the parser in compiler or checker consumers; source policy enforces
+  this boundary. Source rendering and wire/identity rendering have different
+  contracts and must not be merged by spelling alone.
+- Extract validation modules by preserved responsibility and dependencies.
+  Pure moves preserve function bodies and validation order; keep semantic changes
+  in a separate reviewed step. File length is not a module ownership rule.
 - Checker traversal must be preceded by byte/count budgets. Unknown schemas or
   fields, malformed ranges, path escape, mismatched identities, and budget
   exhaustion fail closed with one stable `V24xx` rejection code and bounded

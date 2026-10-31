@@ -14,15 +14,13 @@ type_script TokenPolicy on type_group<Token> {
         output after: Token from group_output[0],
     ) {
         verify { enforce before.amount == 7 }
-        effects {
-            replace before -> after {
-                data { amount = same }
-                identity = same
-                type_script = same
-                lock_script = exact_hash(recipient)
-                capacity = same
-                cardinality = one_to_one
-            }
+        replace before -> after {
+            data { amount = same }
+            identity = same
+            type_script = same
+            lock_script = exact_hash(recipient)
+            capacity = same
+            cardinality = one_to_one
         }
     }
 }

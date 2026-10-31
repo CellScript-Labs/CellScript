@@ -35,7 +35,6 @@ cell_roles Settlement {
     }
 }
 
-#[effect(ReadOnly)]
 fn full_fill(before: InputView<Order>, after: OutputView<Order>) -> bool {
     if before.data.id > 9223372036854775807 { return false }
     if before.data.settled != 0 { return false }
@@ -51,7 +50,6 @@ fn full_fill(before: InputView<Order>, after: OutputView<Order>) -> bool {
     return after.capacity >= ckb::cell_occupied_capacity(after)
 }
 
-#[effect(ReadOnly)]
 fn transfer_leg(before: InputView<Balance>, after: OutputView<Balance>, owner: Hash, amount: u64, debit: bool) -> bool {
     if before.data.id != after.data.id { return false }
     if before.data.owner != owner || after.data.owner != owner { return false }

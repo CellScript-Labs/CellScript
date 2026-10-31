@@ -73,7 +73,7 @@ pub(crate) fn build(module: &ir::IrModule, metadata: &CompileMetadata) -> TypedS
         .map(|definition| {
             let nested_cell = matches!(definition.kind, ir::IrTypeKind::Resource | ir::IrTypeKind::Shared | ir::IrTypeKind::Receipt)
                 && definition.fields.iter().any(|field| {
-                    matches!(crate::nested_values::parsed(&render_type(&field.ty)), Some(crate::nested_values::NestedType::Values(_)))
+                    matches!(crate::nested_values::ir_type(&field.ty), Some(crate::nested_values::NestedType::Values(_)))
                 });
             let mut fields = definition
                 .fields
@@ -196,17 +196,17 @@ pub(crate) fn build(module: &ir::IrModule, metadata: &CompileMetadata) -> TypedS
                 &action.name,
                 &action.params,
                 action.return_type.as_ref(),
-                &format!("{:?}", action.effect_class),
+                &action.effects,
                 &action.body,
                 &signatures,
                 proof_ids(metadata, "action", &action.name),
             )),
-            ir::IrItem::PureFn(function) => Some(build_entry(
+            ir::IrItem::Function(function) => Some(build_entry(
                 "helper",
                 &function.name,
                 &function.params,
                 function.return_type.as_ref(),
-                &format!("{:?}", function.effect_class),
+                &function.effects,
                 &function.body,
                 &signatures,
                 proof_ids(metadata, "helper", &function.name),
@@ -216,7 +216,7 @@ pub(crate) fn build(module: &ir::IrModule, metadata: &CompileMetadata) -> TypedS
                 &lock.name,
                 &lock.params,
                 Some(&IrType::Bool),
-                "lock-predicate",
+                &lock.effects,
                 &lock.body,
                 &signatures,
                 proof_ids(metadata, "lock", &lock.name),
@@ -335,7 +335,7 @@ fn build_semantic_foundation(
             ir::IrItem::Lock(entry) => {
                 ("lock", entry.name.as_str(), entry.params.as_slice(), &entry.body, &[] as &[ir::IrSourceDisposition])
             }
-            ir::IrItem::PureFn(entry) => {
+            ir::IrItem::Function(entry) => {
                 ("helper", entry.name.as_str(), entry.params.as_slice(), &entry.body, &[] as &[ir::IrSourceDisposition])
             }
             ir::IrItem::TypeDef(_) | ir::IrItem::Invariant(_) => continue,
@@ -474,7 +474,7 @@ fn build_provenance_graph(
             let (kind, name, params, body) = match item {
                 ir::IrItem::Action(action) => ("action", &action.name, &action.params, &action.body),
                 ir::IrItem::Lock(lock) => ("lock", &lock.name, &lock.params, &lock.body),
-                ir::IrItem::PureFn(function) => ("helper", &function.name, &function.params, &function.body),
+                ir::IrItem::Function(function) => ("helper", &function.name, &function.params, &function.body),
                 ir::IrItem::TypeDef(_) | ir::IrItem::Invariant(_) => return None,
             };
             Some((format!("{kind}:{name}"), crate::codegen::entry_param_abi_sources(params, body, &cell_types, &module.enum_layouts)))
@@ -1381,7 +1381,7 @@ fn build_claims(
         let (kind, name, body, audit_claims) = match item {
             ir::IrItem::Action(entry) => ("action", entry.name.as_str(), &entry.body, entry.audit_claims.as_slice()),
             ir::IrItem::Lock(entry) => ("lock", entry.name.as_str(), &entry.body, entry.audit_claims.as_slice()),
-            ir::IrItem::PureFn(entry) => ("helper", entry.name.as_str(), &entry.body, &[] as &[ir::IrAuditClaim]),
+            ir::IrItem::Function(entry) => ("helper", entry.name.as_str(), &entry.body, &[] as &[ir::IrAuditClaim]),
             ir::IrItem::TypeDef(_) | ir::IrItem::Invariant(_) => continue,
         };
         let entry_id = format!("{kind}:{name}");
@@ -1484,7 +1484,6 @@ fn bounded_cell_maximum(ty: &str) -> Option<usize> {
 struct CallableSignature {
     params: Vec<String>,
     return_type: String,
-    effect: String,
     contract: String,
 }
 
@@ -1498,18 +1497,16 @@ fn callable_signatures(module: &ir::IrModule) -> BTreeMap<String, CallableSignat
                     CallableSignature {
                         params: action.params.iter().map(|param| render_type(&param.ty)).collect(),
                         return_type: action.return_type.as_ref().map(render_type).unwrap_or_else(|| "unit".to_string()),
-                        effect: format!("{:?}", action.effect_class),
                         contract: "typed-local".to_string(),
                     },
                 );
             }
-            ir::IrItem::PureFn(function) => {
+            ir::IrItem::Function(function) => {
                 signatures.insert(
                     function.name.clone(),
                     CallableSignature {
                         params: function.params.iter().map(|param| render_type(&param.ty)).collect(),
                         return_type: function.return_type.as_ref().map(render_type).unwrap_or_else(|| "unit".to_string()),
-                        effect: format!("{:?}", function.effect_class),
                         contract: "typed-local".to_string(),
                     },
                 );
@@ -1520,7 +1517,6 @@ fn callable_signatures(module: &ir::IrModule) -> BTreeMap<String, CallableSignat
                     CallableSignature {
                         params: lock.params.iter().map(|param| render_type(&param.ty)).collect(),
                         return_type: "bool".to_string(),
-                        effect: "lock-predicate".to_string(),
                         contract: "typed-local".to_string(),
                     },
                 );
@@ -1536,7 +1532,7 @@ fn build_entry(
     name: &str,
     params: &[ir::IrParam],
     return_type: Option<&IrType>,
-    effect: &str,
+    effects: &ir::EffectFacts,
     body: &ir::IrBody,
     signatures: &BTreeMap<String, CallableSignature>,
     obligations: Vec<String>,
@@ -1708,7 +1704,7 @@ fn build_entry(
         params: typed_params,
         cell_bindings,
         return_type: return_type.map(render_type).unwrap_or_else(|| "unit".to_string()),
-        effect: effect.to_string(),
+        effects: effects.clone(),
         entry_block: body.blocks.first().and_then(|block| u32::try_from(block.id.0).ok()).unwrap_or(0),
         locals: typed_locals,
         blocks,
@@ -1918,8 +1914,6 @@ fn operation(
             let signature = signatures.get(func).cloned().unwrap_or_else(|| CallableSignature {
                 params: args.iter().map(operand_type).collect(),
                 return_type: dest.as_ref().map(|dest| render_type(&dest.ty)).unwrap_or_else(|| "unit".to_string()),
-                effect: crate::ir::IrDeferredRuntimeFeature::from_helper(func)
-                    .map_or_else(|| "runtime-contract".to_string(), |deferred| deferred.effect()),
                 contract: "versioned-runtime-helper".to_string(),
             });
             (
@@ -1931,8 +1925,9 @@ fn operation(
                     target: func.clone(),
                     params: signature.params,
                     return_type: signature.return_type,
-                    effect: signature.effect,
                     contract: signature.contract,
+                    runtime_failure: cellscript_artifact_checker::runtime_contract::RuntimeHelper::from_symbol(func)
+                        .and_then(|helper| helper.failure()),
                 }),
             )
         }
@@ -2204,6 +2199,7 @@ pub(crate) fn render_type(ty: &IrType) -> String {
         IrType::Array(inner, size) => format!("[{}; {}]", render_type(inner), size),
         IrType::Tuple(items) => format!("({})", items.iter().map(render_type).collect::<Vec<_>>().join(", ")),
         IrType::Named(name) => name.clone(),
+        IrType::Nested(view) => view.canonical_text(),
         IrType::Ref(inner) => format!("&{}", render_type(inner)),
         IrType::MutRef(inner) => format!("&mut {}", render_type(inner)),
     }

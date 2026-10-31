@@ -211,6 +211,7 @@ struct RootCandidate {
     old_content: String,
     old: Lockfile,
     candidate: Lockfile,
+    environments: Vec<Option<String>>,
 }
 
 #[derive(Debug)]
@@ -264,7 +265,8 @@ pub fn create_upgrade_plan(input: &Path, options: &UpgradeOptions) -> Result<Upg
         let old = Lockfile::read_from_root(&root)?.ok_or_else(|| CompileError::without_span("Cell.lock disappeared"))?;
         let (candidate, matched) = resolve_candidate_lock(&root, &manifest, &old, options)?;
         selection_matched |= matched;
-        candidates.push(RootCandidate { member, root, lock_path, old_content, old, candidate });
+        let environments = resolution_environments(&manifest, options);
+        candidates.push(RootCandidate { member, root, lock_path, old_content, old, candidate, environments });
     }
     if !selection_matched {
         return Err(CompileError::without_span(format!(
@@ -281,10 +283,9 @@ pub fn create_upgrade_plan(input: &Path, options: &UpgradeOptions) -> Result<Upg
     let mut diagnostics = Vec::new();
     let mut required_acknowledgements = BTreeSet::new();
     let mut migration_artifacts = BTreeSet::new();
-    let environments = impact_environments(&candidates, options);
     for candidate in &mut candidates {
         let mut primary_build = None;
-        let root_environments = environments.get(&candidate.member).cloned().unwrap_or_else(|| vec![None]);
+        let root_environments = candidate.environments.clone();
         for environment in root_environments {
             let resolution = resolution_options(options, environment.clone());
             let old_build_unit = inspection_build_unit(&candidate.root, &candidate.old, &resolution).ok();
@@ -1422,16 +1423,6 @@ fn resolution_environments(manifest: &PackageManifest, options: &UpgradeOptions)
     environments
 }
 
-fn impact_environments(candidates: &[RootCandidate], options: &UpgradeOptions) -> BTreeMap<String, Vec<Option<String>>> {
-    candidates
-        .iter()
-        .map(|candidate| {
-            let manifest = PackageManager::new(&candidate.root).read_manifest().expect("candidate manifest already validated");
-            (candidate.member.clone(), resolution_environments(&manifest, options))
-        })
-        .collect()
-}
-
 fn lockfile_package_info(root: &Path, manifest: &PackageManifest) -> Result<LockfilePackageInfo> {
     Ok(LockfilePackageInfo {
         edition: manifest.package.edition,
@@ -1685,6 +1676,9 @@ mod tests {
     #[test]
     fn interface_dimensions_keep_layout_builder_and_profile_breaks_separate() {
         let mut old = crate::interface::PackageInterface {
+            schema: crate::interface::INTERFACE_SCHEMA.into(),
+            version: crate::interface::INTERFACE_SCHEMA_VERSION,
+            edition: "2026".into(),
             module: "demo".to_string(),
             module_identity: "demo".to_string(),
             builder_contract_hash: "builder-old".to_string(),
